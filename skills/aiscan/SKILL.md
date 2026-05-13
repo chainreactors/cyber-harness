@@ -27,10 +27,9 @@ Operating rules:
 1. Keep top-level aiscan flags separate from scanner flags. `aiscan -p` is the natural language prompt; inside scanner commands, `-p` keeps the scanner's native meaning, such as gogo ports or zombie password.
 2. Prefer pseudo-commands over raw external scanner binaries so output is captured and bounded by the agent runtime.
 3. Use non-interactive output. Avoid progress bars, terminal UI, and unbounded streaming unless a scanner integration explicitly supports safe streaming.
-4. Read each command result before deciding the next command. Do not chain aggressive follow-up checks without evidence.
-5. Use conservative thread counts and timeouts for localhost, fragile services, or narrow verification.
-6. Record important evidence in files when the user asks for a report or reproduction.
-7. Use `scan --verify=high` when the user asks to reproduce or validate risky findings. It enables `agent_verify`, which only handles high-priority findings by default.
+4. Use conservative thread counts and timeouts for localhost, fragile services, or narrow verification.
+5. Record important evidence in files when the user asks for a report or reproduction.
+6. Use `scan --verify=high` when the user asks to reproduce or validate risky findings. It enables `agent_verify`, which only handles high-priority findings by default.
 
 Useful command forms:
 
