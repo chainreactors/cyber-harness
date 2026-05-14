@@ -64,6 +64,8 @@ require (
 	github.com/go-dedup/text v0.0.0-20170907015346-8bb1b95e3cb7 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.6 // indirect
 	github.com/go-redis/redis v6.15.9+incompatible // indirect
+	github.com/go-rod/rod v0.116.2 // indirect
+	github.com/go-rod/stealth v0.4.9 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/goccy/go-yaml v1.11.3 // indirect
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
@@ -117,6 +119,11 @@ require (
 	github.com/xinsnake/go-http-digest-auth-client v0.6.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d // indirect
+	github.com/ysmood/fetchup v0.2.3 // indirect
+	github.com/ysmood/goob v0.4.0 // indirect
+	github.com/ysmood/got v0.40.0 // indirect
+	github.com/ysmood/gson v0.7.3 // indirect
+	github.com/ysmood/leakless v0.9.0 // indirect
 	github.com/yuin/goldmark v1.7.4 // indirect
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect
 	go.mongodb.org/mongo-driver v1.12.0 // indirect
