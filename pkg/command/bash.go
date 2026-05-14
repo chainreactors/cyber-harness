@@ -1,4 +1,4 @@
-package tool
+package command
 
 import (
 	"bytes"
@@ -21,26 +21,20 @@ const (
 	backgroundStartupOutputLimit = 8 * 1024
 )
 
-type CommandInterceptor interface {
-	Has(name string) bool
-	Execute(ctx context.Context, cmdLine string) (string, error)
-	Names() []string
-}
-
 type BashTool struct {
-	interceptor CommandInterceptor
+	registry    *CommandRegistry
 	workDir     string
 	timeout     int
 	bgMu        sync.Mutex
 	bgProcesses map[int]*exec.Cmd
 }
 
-func NewBashTool(workDir string, timeout int, interceptor CommandInterceptor) *BashTool {
+func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTool {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
 	return &BashTool{
-		interceptor: interceptor,
+		registry:    registry,
 		workDir:     workDir,
 		timeout:     timeout,
 		bgProcesses: make(map[int]*exec.Cmd),
@@ -51,8 +45,8 @@ func (t *BashTool) Name() string { return "bash" }
 
 func (t *BashTool) Description() string {
 	desc := "Execute a shell command and return its output."
-	if t.interceptor != nil {
-		names := t.interceptor.Names()
+	if t.registry != nil {
+		names := t.registry.Names()
 		if len(names) > 0 {
 			desc += " IMPORTANT: This tool also handles pseudo-commands (" + strings.Join(names, ", ") + "). Pass them as the command parameter — e.g. {\"command\": \"scan -i 10.0.0.1 --mode quick\"}. These are NOT system binaries; they only work through this bash tool."
 		}
@@ -111,10 +105,10 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (string, error
 		return "", fmt.Errorf("empty command")
 	}
 
-	if t.interceptor != nil {
+	if t.registry != nil {
 		firstToken := firstCommandToken(cmdLine)
-		if firstToken != "" && t.interceptor.Has(firstToken) {
-			return t.executeIntercepted(ctx, cmdLine)
+		if firstToken != "" && t.registry.Has(firstToken) {
+			return t.registry.Execute(ctx, cmdLine)
 		}
 	}
 
@@ -123,10 +117,6 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (string, error
 	}
 
 	return t.execShell(ctx, cmdLine)
-}
-
-func (t *BashTool) executeIntercepted(ctx context.Context, cmdLine string) (string, error) {
-	return t.interceptor.Execute(ctx, cmdLine)
 }
 
 func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error) {

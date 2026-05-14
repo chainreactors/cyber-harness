@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
 	acpclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -63,7 +63,7 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 		runner := New(Config{
 			Client:           workerClients[i],
 			Provider:         providers[i],
-			Tools:            tool.NewToolRegistry(),
+			Tools:            command.NewRegistry(),
 			SystemPrompt:     "test loop agent",
 			Model:            "test-model",
 			NodeName:         workerNodes[i].Name,
@@ -150,7 +150,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		runner := New(Config{
 			Client:           client,
 			Provider:         providers[i],
-			Tools:            tool.NewToolRegistry(),
+			Tools:            command.NewRegistry(),
 			SystemPrompt:     "test loop agent",
 			Model:            "test-model",
 			NodeName:         providers[i].name,
@@ -216,7 +216,7 @@ func TestLoopAnnouncesNodeProfile(t *testing.T) {
 	runner := New(Config{
 		Client:           client,
 		Provider:         &taskProvider{name: "worker-profile"},
-		Tools:            tool.NewToolRegistry(),
+		Tools:            command.NewRegistry(),
 		SystemPrompt:     "test loop agent",
 		Model:            "test-model",
 		NodeName:         "worker-profile",
@@ -318,7 +318,7 @@ func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
 	runner := New(Config{
 		Client:                worker,
 		Provider:              llm,
-		Tools:                 tool.NewToolRegistry(),
+		Tools:                 command.NewRegistry(),
 		SystemPrompt:          "test loop agent",
 		Model:                 "test-model",
 		NodeName:              "heartbeat-worker",

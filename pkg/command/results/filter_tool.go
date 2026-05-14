@@ -1,97 +1,12 @@
 package results
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/parsers"
 )
-
-type FilterResultsTool struct{}
-
-func (t *FilterResultsTool) Name() string        { return "filter_results" }
-func (t *FilterResultsTool) Description() string {
-	return "Filter JSON-lines scanner output by field criteria. Run a scanner with -j flag first to get JSON, then pass the output here with filter conditions."
-}
-
-func (t *FilterResultsTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        "filter_results",
-			Description: t.Description(),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"scanner": map[string]any{
-						"type":        "string",
-						"enum":        []string{"gogo", "spray", "zombie"},
-						"description": "Which scanner produced the output",
-					},
-					"data": map[string]any{
-						"type":        "string",
-						"description": "JSON-lines output from the scanner",
-					},
-					"filter": map[string]any{
-						"type":        "object",
-						"description": "Key-value pairs for filtering. Keys are field names (ip, port, protocol, status, url, host, title, framework, service, etc.), values are match strings.",
-						"additionalProperties": map[string]any{
-							"type": "string",
-						},
-					},
-					"operator": map[string]any{
-						"type":        "string",
-						"enum":        []string{"contains", "equals", "not_contains", "not_equals"},
-						"description": "Match operator for all filter values. Default: contains",
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": "Maximum results to return. Default: 50",
-					},
-				},
-				"required": []string{"scanner", "data", "filter"},
-			},
-		},
-	}
-}
-
-func (t *FilterResultsTool) Execute(_ context.Context, arguments string) (string, error) {
-	var args struct {
-		Scanner  string            `json:"scanner"`
-		Data     string            `json:"data"`
-		Filter   map[string]string `json:"filter"`
-		Operator string            `json:"operator"`
-		Limit    int               `json:"limit"`
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-	if args.Operator == "" {
-		args.Operator = "contains"
-	}
-	if args.Limit <= 0 {
-		args.Limit = 50
-	}
-
-	lines := splitJSONLines(args.Data)
-	if len(lines) == 0 {
-		return "No results to filter.", nil
-	}
-
-	switch args.Scanner {
-	case "gogo":
-		return filterGogoResults(lines, args.Filter, args.Operator, args.Limit)
-	case "spray":
-		return filterSprayResults(lines, args.Filter, args.Operator, args.Limit)
-	case "zombie":
-		return filterZombieResults(lines, args.Filter, args.Operator, args.Limit)
-	default:
-		return "", fmt.Errorf("unsupported scanner: %s", args.Scanner)
-	}
-}
 
 func filterGogoResults(lines []string, filter map[string]string, operator string, limit int) (string, error) {
 	gogoOp := toGogoOperator(operator)

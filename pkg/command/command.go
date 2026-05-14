@@ -7,6 +7,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+
+	"github.com/chainreactors/aiscan/pkg/provider"
 )
 
 type PseudoCommand interface {
@@ -20,18 +22,73 @@ type StreamingCommand interface {
 	ExecuteStreaming(ctx context.Context, args []string, stream io.Writer) (string, error)
 }
 
+type AgentTool interface {
+	Name() string
+	Description() string
+	Definition() provider.ToolDefinition
+	Execute(ctx context.Context, arguments string) (string, error)
+}
+
 type CommandRegistry struct {
 	mu     sync.RWMutex
 	items  map[string]PseudoCommand
 	order  []string
 	groups map[string][]string
+
+	tools      map[string]AgentTool
+	toolOrder  []string
 }
 
 func NewRegistry() *CommandRegistry {
 	return &CommandRegistry{
 		items:  make(map[string]PseudoCommand),
 		groups: make(map[string][]string),
+		tools:  make(map[string]AgentTool),
 	}
+}
+
+func (r *CommandRegistry) RegisterTool(t AgentTool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	name := t.Name()
+	if _, exists := r.tools[name]; !exists {
+		r.toolOrder = append(r.toolOrder, name)
+	}
+	r.tools[name] = t
+}
+
+func (r *CommandRegistry) Tools() []AgentTool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]AgentTool, 0, len(r.toolOrder))
+	for _, name := range r.toolOrder {
+		result = append(result, r.tools[name])
+	}
+	return result
+}
+
+func (r *CommandRegistry) GetTool(name string) (AgentTool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tools[name]
+	return t, ok
+}
+
+func (r *CommandRegistry) ToolDefinitions() []provider.ToolDefinition {
+	tools := r.Tools()
+	defs := make([]provider.ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		defs = append(defs, t.Definition())
+	}
+	return defs
+}
+
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (string, error) {
+	t, ok := r.GetTool(name)
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+	return t.Execute(ctx, arguments)
 }
 
 func (r *CommandRegistry) Register(cmd PseudoCommand, group string) {

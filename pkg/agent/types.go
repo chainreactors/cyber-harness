@@ -5,7 +5,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 )
 
 const maxResultSize = 50 * 1024
@@ -98,7 +98,7 @@ type Option func(*Config)
 type Context struct {
 	SystemPrompt string
 	Messages     []provider.ChatMessage
-	Tools        *tool.ToolRegistry
+	Tools        *command.CommandRegistry
 }
 
 type Result struct {
@@ -113,7 +113,7 @@ type Result struct {
 type State struct {
 	SystemPrompt     string
 	Messages         []provider.ChatMessage
-	Tools            *tool.ToolRegistry
+	Tools            *command.CommandRegistry
 	IsRunning        bool
 	StreamingMessage *provider.ChatMessage
 	PendingToolCalls map[string]struct{}

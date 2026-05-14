@@ -13,7 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
 	acpclient "github.com/chainreactors/ioa/client"
 )
@@ -21,7 +21,7 @@ import (
 type Config struct {
 	Client       acpclient.StreamAPI
 	Provider     provider.Provider
-	Tools        *tool.ToolRegistry
+	Tools        *command.CommandRegistry
 	SystemPrompt string
 	Model        string
 	Stream       bool
@@ -71,7 +71,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("agent provider is required")
 	}
 	if r.cfg.Tools == nil {
-		r.cfg.Tools = tool.NewToolRegistry()
+		r.cfg.Tools = command.NewRegistry()
 	}
 	if r.cfg.Client.NodeID() == "" {
 		node, err := r.cfg.Client.RegisterNode(ctx, r.cfg.NodeName, map[string]any{"client": "aiscan-loop"})

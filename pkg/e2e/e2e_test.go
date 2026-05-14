@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/scanner"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -31,7 +31,7 @@ func TestScannerSubcommandsThroughBash(t *testing.T) {
 		reg.Register(commands[name])
 	}
 
-	bash := tool.NewBashTool(t.TempDir(), 5, reg)
+	bash := command.NewBashTool(t.TempDir(), 5, reg)
 	tests := []struct {
 		name string
 		cmd  string
@@ -85,8 +85,8 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	reg.Register(newRecordingCommand("zombie"))
 	reg.Register(newRecordingCommand("neutron"))
 
-	tools := tool.NewToolRegistry()
-	tools.Register(tool.NewBashTool(t.TempDir(), 5, reg))
+	tools := command.NewRegistry()
+	tools.Register(command.NewBashTool(t.TempDir(), 5, reg))
 
 	llm := &scriptedProvider{
 		responses: []*provider.ChatCompletionResponse{
@@ -141,12 +141,12 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 
 func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 	reg := scanner.NewScannerRegistry()
-	tools := tool.NewToolRegistry()
+	tools := command.NewRegistry()
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
-	tools.Register(tool.NewReadTool(t.TempDir(), store))
+	tools.Register(command.NewReadTool(t.TempDir(), store))
 
 	llm := &scriptedProvider{
 		responses: []*provider.ChatCompletionResponse{

@@ -54,7 +54,7 @@ func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logge
 	}
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:       application.Tools,
+		Tools:       application.Commands,
 		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
@@ -85,7 +85,7 @@ func runAgentOneShotMode(ctx context.Context, option *Option, logger telemetry.L
 	output := newAgentOutput(option)
 	output.Start("task", displayTask)
 
-	result, err := agent.RunWithEvents(ctx, task, application.Tools, output.HandleEvent,
+	result, err := agent.RunWithEvents(ctx, task, application.Commands, output.HandleEvent,
 		agent.WithProvider(application.Provider),
 		agent.WithSystemPrompt(runtime.systemPrompt),
 		agent.WithModel(option.Model),
@@ -201,7 +201,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	}
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:       application.Tools,
+		Tools:       application.Commands,
 		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
@@ -213,7 +213,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	runner := loop.New(loop.Config{
 		Client:            streamClient,
 		Provider:          application.Provider,
-		Tools:             application.Tools,
+		Tools:             application.Commands,
 		SystemPrompt:      systemPrompt,
 		Model:             option.Model,
 		Stream:            true,

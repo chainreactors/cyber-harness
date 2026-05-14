@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -317,7 +317,7 @@ func TestAgentConsolePromptCommandRunsAgent(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 	llm := &fakeConsoleProvider{}
-	session := agent.New(llm, tool.NewToolRegistry())
+	session := agent.New(llm, command.NewRegistry())
 	repl := newAgentConsole(context.Background(), &Option{}, &app.App{Skills: store}, session)
 
 	if err := repl.executeArgs(context.Background(), []string{agentPromptCommandName, "hello"}); err != nil {

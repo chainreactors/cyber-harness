@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
 	acpclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -61,7 +61,7 @@ func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
 	runner := New(Config{
 		Client:           worker,
 		Provider:         llmProvider,
-		Tools:            tool.NewToolRegistry(),
+		Tools:            command.NewRegistry(),
 		SystemPrompt:     "You are a concise test worker. When asked to reply, answer with exactly: loop",
 		Model:            model,
 		Stream:           false,

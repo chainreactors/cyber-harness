@@ -11,7 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	cmdpkg "github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -20,10 +20,7 @@ func runScannerAgentMode(ctx context.Context, option *Option, application *app.A
 		return fmt.Errorf("--ai requires a configured LLM provider")
 	}
 
-	toolReg := application.Tools
-	if toolReg == nil {
-		toolReg = tool.NewToolRegistry()
-	}
+	cmdReg := application.Commands
 
 	command := scannerArgs[0]
 	intent, err := resolveScannerAIIntent(option, application.Skills, command)
@@ -33,7 +30,7 @@ func runScannerAgentMode(ctx context.Context, option *Option, application *app.A
 	prompt := buildScannerAgentTaskPrompt(scannerArgs, intent)
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:            toolReg,
+		Tools:            cmdReg,
 		ScannerDocs:      application.Commands.UsageDocs(),
 		Skills:           application.Skills.Skills,
 		ScannerAgentMode: true,
@@ -44,7 +41,7 @@ func runScannerAgentMode(ctx context.Context, option *Option, application *app.A
 	output := newAgentOutput(option)
 	output.Start("scanner", strings.Join(scannerArgs, " "))
 
-	result, err := agent.RunWithEvents(ctx, prompt, toolReg, output.HandleEvent,
+	result, err := agent.RunWithEvents(ctx, prompt, cmdReg, output.HandleEvent,
 		agent.WithProvider(application.Provider),
 		agent.WithSystemPrompt(systemPrompt),
 		agent.WithModel(option.Model),
@@ -84,7 +81,7 @@ func runScannerAIProcess(ctx context.Context, option *Option, application *app.A
 	processCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	return agent.Run(processCtx, buildScannerAIProcessPrompt(command, scannerArgs[1:], intent, output), tool.NewToolRegistry(),
+	return agent.Run(processCtx, buildScannerAIProcessPrompt(command, scannerArgs[1:], intent, output), cmdpkg.NewRegistry(),
 		agent.WithProvider(application.Provider),
 		agent.WithModel(option.Model),
 		agent.WithMaxTokens(1600),

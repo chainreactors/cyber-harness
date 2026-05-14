@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
 )
 
 type PromptConfig struct {
-	Tools            *tool.ToolRegistry
+	Tools            *command.CommandRegistry
 	ScannerDocs      string
 	CustomPreamble   string
 	Skills           []skills.Skill
@@ -23,7 +23,7 @@ func BuildSystemPrompt(cfg *PromptConfig) string {
 	}
 	tools := cfg.Tools
 	if tools == nil {
-		tools = tool.NewToolRegistry()
+		tools = command.NewRegistry()
 	}
 
 	var sb strings.Builder
@@ -44,7 +44,7 @@ You can use parse_results and filter_results pseudo-commands via bash for struct
 	}
 
 	sb.WriteString("## Available Tools\n\n")
-	for _, t := range tools.All() {
+	for _, t := range tools.Tools() {
 		sb.WriteString(fmt.Sprintf("### %s\n%s\n\n", t.Name(), t.Description()))
 	}
 
@@ -120,11 +120,11 @@ When you need to move data off a target, use these methods in order of preferenc
 	return sb.String()
 }
 
-func hasVisionTool(tools *tool.ToolRegistry) bool {
+func hasVisionTool(tools *command.CommandRegistry) bool {
 	if tools == nil {
 		return false
 	}
-	_, ok := tools.Get("vision")
+	_, ok := tools.GetTool("vision")
 	return ok
 }
 

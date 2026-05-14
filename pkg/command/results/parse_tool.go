@@ -1,84 +1,15 @@
 package results
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/parsers"
 	"github.com/chainreactors/utils"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
-
-type ParseResultsTool struct{}
-
-func (t *ParseResultsTool) Name() string        { return "parse_results" }
-func (t *ParseResultsTool) Description() string {
-	return "Parse JSON-lines scanner output into structured analysis. Run a scanner with -j flag first (e.g. 'gogo -j -i ...') to get JSON, then pass the output here."
-}
-
-func (t *ParseResultsTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        "parse_results",
-			Description: t.Description(),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"scanner": map[string]any{
-						"type":        "string",
-						"enum":        []string{"gogo", "spray", "zombie"},
-						"description": "Which scanner produced the output",
-					},
-					"data": map[string]any{
-						"type":        "string",
-						"description": "JSON-lines output from the scanner",
-					},
-					"analysis": map[string]any{
-						"type":        "string",
-						"enum":        []string{"summary", "targets", "stats", "all"},
-						"description": "What analysis to return. summary: counts and key metrics. targets: derived follow-up targets. stats: field distributions. all: everything.",
-					},
-				},
-				"required": []string{"scanner", "data"},
-			},
-		},
-	}
-}
-
-func (t *ParseResultsTool) Execute(_ context.Context, arguments string) (string, error) {
-	var args struct {
-		Scanner  string `json:"scanner"`
-		Data     string `json:"data"`
-		Analysis string `json:"analysis"`
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-	if args.Analysis == "" {
-		args.Analysis = "all"
-	}
-
-	lines := splitJSONLines(args.Data)
-	if len(lines) == 0 {
-		return "No results to parse.", nil
-	}
-
-	switch args.Scanner {
-	case "gogo":
-		return parseGogoResults(lines, args.Analysis)
-	case "spray":
-		return parseSprayResults(lines, args.Analysis)
-	case "zombie":
-		return parseZombieResults(lines, args.Analysis)
-	default:
-		return "", fmt.Errorf("unsupported scanner: %s", args.Scanner)
-	}
-}
 
 func parseGogoResults(lines []string, analysis string) (string, error) {
 	var results []*parsers.GOGOResult
