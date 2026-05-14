@@ -13,14 +13,13 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/tools"
 	"github.com/chainreactors/aiscan/pkg/command"
+	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/skills"
 )
 
 func TestScannerSubcommandsThroughBash(t *testing.T) {
-	reg := scanner.NewScannerRegistry()
+	reg := command.NewRegistry()
 	commands := map[string]*recordingCommand{
 		"gogo":    newRecordingCommand("gogo"),
 		"spray":   newRecordingCommand("spray"),
@@ -28,7 +27,7 @@ func TestScannerSubcommandsThroughBash(t *testing.T) {
 		"neutron": newRecordingCommand("neutron"),
 	}
 	for _, name := range []string{"gogo", "spray", "zombie", "neutron"} {
-		reg.Register(commands[name])
+		reg.Register(commands[name], "scanner")
 	}
 
 	bash := command.NewBashTool(t.TempDir(), 5, reg)
@@ -76,17 +75,17 @@ func TestScannerSubcommandsThroughBash(t *testing.T) {
 }
 
 func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
-	reg := scanner.NewScannerRegistry()
+	reg := command.NewRegistry()
 	scan := newRecordingCommand("scan")
 	scan.output = "[scan] completed: inputs=1 open=1 web=1 weakpass=0 vulns=1 errors=0\n[vuln] http://127.0.0.1 template=test-cve severity=high"
-	reg.Register(scan)
-	reg.Register(newRecordingCommand("gogo"))
-	reg.Register(newRecordingCommand("spray"))
-	reg.Register(newRecordingCommand("zombie"))
-	reg.Register(newRecordingCommand("neutron"))
+	reg.Register(scan, "scanner")
+	reg.Register(newRecordingCommand("gogo"), "scanner")
+	reg.Register(newRecordingCommand("spray"), "scanner")
+	reg.Register(newRecordingCommand("zombie"), "scanner")
+	reg.Register(newRecordingCommand("neutron"), "scanner")
 
 	tools := command.NewRegistry()
-	tools.Register(command.NewBashTool(t.TempDir(), 5, reg))
+	tools.RegisterTool(command.NewBashTool(t.TempDir(), 5, reg))
 
 	llm := &scriptedProvider{
 		responses: []*provider.ChatCompletionResponse{
@@ -140,13 +139,13 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 }
 
 func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
-	reg := scanner.NewScannerRegistry()
+	reg := command.NewRegistry()
 	tools := command.NewRegistry()
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
-	tools.Register(command.NewReadTool(t.TempDir(), store))
+	tools.RegisterTool(command.NewReadTool(t.TempDir(), store))
 
 	llm := &scriptedProvider{
 		responses: []*provider.ChatCompletionResponse{
