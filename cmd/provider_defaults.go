@@ -4,7 +4,7 @@ import "github.com/chainreactors/aiscan/pkg/provider"
 
 var (
 	DefaultProvider = "deepseek"
-	DefaultBaseURL  = "https://api.deepseek.com/v1"
+	DefaultBaseURL  = ""
 	DefaultAPIKey   = ""
 	DefaultModel    = "deepseek-v4-pro"
 	DefaultProxy    = ""

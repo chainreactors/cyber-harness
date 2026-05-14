@@ -80,7 +80,6 @@ llm:
   provider: deepseek
   model: deepseek-chat
   base_url: https://api.deepseek.com/v1
-  vision: true
 vision:
   enabled: true
   provider: openrouter
@@ -119,10 +118,7 @@ acp:
 		}
 	}
 	if !opt.Vision {
-		t.Error("Vision: got false, want true")
-	}
-	if !opt.VisionEnabled {
-		t.Error("VisionEnabled: got false, want true")
+		t.Error("Vision: got false, want true (from vision.enabled)")
 	}
 	visionChecks := []struct{ field, got, want string }{
 		{"VisionProvider", opt.VisionProvider, "openrouter"},
@@ -198,7 +194,7 @@ func TestAppConfigUsesIndependentVisionProvider(t *testing.T) {
 }
 
 func TestAppConfigVisionCanFallbackToMainProvider(t *testing.T) {
-	option := Option{LLMOptions: LLMOptions{Vision: true}}
+	option := Option{VisionOptions: VisionOptions{Vision: true}}
 
 	cfg := appConfig(&option, runtimeFeatures{ProviderEnabled: true, ToolsEnabled: true}, nil)
 	if !cfg.Tools.VisionEnabled {
@@ -473,7 +469,7 @@ cyberhub:
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	// Simulate CLI: only --llm-provider set
+	// Simulate CLI: only --provider set
 	option := Option{}
 	option.Provider = "cli-provider"
 

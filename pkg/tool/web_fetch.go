@@ -63,10 +63,6 @@ func (t *WebFetchTool) Definition() provider.ToolDefinition {
 						"type":        "string",
 						"description": "The URL to fetch content from. Must be a valid HTTP/HTTPS URL.",
 					},
-					"extract": map[string]any{
-						"type":        "string",
-						"description": "Optional: what to extract from the page (e.g., 'CVE details', 'version numbers', 'exploit code'). When provided, only relevant sections are kept.",
-					},
 				},
 				"required": []string{"url"},
 			},
@@ -76,8 +72,7 @@ func (t *WebFetchTool) Definition() provider.ToolDefinition {
 
 func (t *WebFetchTool) Execute(ctx context.Context, arguments string) (string, error) {
 	var args struct {
-		URL     string `json:"url"`
-		Extract string `json:"extract"`
+		URL string `json:"url"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -139,7 +134,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, arguments string) (string, e
 	// Truncate if too long
 	if len(content) > maxMarkdownLength {
 		content = content[:maxMarkdownLength] +
-			fmt.Sprintf("\n\n[Content truncated: showing %d of %d characters. Use extract parameter to focus on specific content.]",
+			fmt.Sprintf("\n\n[Content truncated: showing %d of %d characters]",
 				maxMarkdownLength, len(string(body)))
 	}
 

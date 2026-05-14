@@ -72,7 +72,7 @@ func providerConfig(option *Option) provider.ProviderConfig {
 }
 
 func visionEnabled(option *Option) bool {
-	return option.Vision || option.VisionEnabled || visionHasProviderConfig(option)
+	return option.Vision || visionHasProviderConfig(option)
 }
 
 func visionHasProviderConfig(option *Option) bool {
@@ -123,7 +123,7 @@ func applyDefaults(option *Option) {
 	option.ACPNodeName = resolveString(option.ACPNodeName, DefaultACPNodeName)
 	option.Space = resolveSpace(option.Space)
 	if option.Model == "" {
-		option.Model = resolveString(DefaultModel, "gpt-4o")
+		option.Model = resolveString(DefaultModel, "deepseek-v4-pro")
 	}
 }
 

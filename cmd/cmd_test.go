@@ -35,10 +35,10 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 		"scan",
 		"-i", "127.0.0.1",
 		"--verify=high",
-		"--llm-api-key", "KEY",
-		"--llm-model=deepseek-v4-pro",
-		"--llm-base-url", "https://api.deepseek.com",
-		"--llm-vision",
+		"--api-key", "KEY",
+		"--model=deepseek-v4-pro",
+		"--base-url", "https://api.deepseek.com",
+		"--vision",
 		"--vision-base-url", "https://openrouter.ai/api/v1",
 		"--vision-api-key", "VISION_KEY",
 		"--vision-model", "qwen/qwen3.6-flash",
@@ -55,8 +55,11 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
 	opt := parsed.Option
-	if opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" || !opt.Vision {
+	if opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
+	}
+	if !opt.Vision {
+		t.Fatalf("vision not enabled")
 	}
 	if opt.VisionBaseURL != "https://openrouter.ai/api/v1" || opt.VisionAPIKey != "VISION_KEY" || opt.VisionModel != "qwen/qwen3.6-flash" {
 		t.Fatalf("vision options = %#v", opt.VisionOptions)
@@ -66,7 +69,7 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	}
 }
 
-func TestParseCLIAgentAcceptsBareLLMAliases(t *testing.T) {
+func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"agent",
 		"--base-url", "https://api.deepseek.com",
@@ -89,7 +92,7 @@ func TestParseCLIAgentAcceptsBareLLMAliases(t *testing.T) {
 	}
 }
 
-func TestParseCLIScanExtractsBareLLMAliases(t *testing.T) {
+func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"scan",
 		"-i", "127.0.0.1",
@@ -175,13 +178,13 @@ func TestParseCLIScannerRootArgsAfterPassthroughCommand(t *testing.T) {
 
 func TestParseCLIPassthroughScannerExtractsAIIntentArgs(t *testing.T) {
 	parsed, err := parseCLI([]string{
-		"--llm-api-key", "KEY",
+		"--api-key", "KEY",
 		"--prompt", "review focus fingerprints",
 		"--skill", "scan",
 		"gogo",
 		"-i", "127.0.0.1",
 		"--ai",
-		"--llm-model", "deepseek-v4-pro",
+		"--model", "deepseek-v4-pro",
 		"--skill=aiscan",
 	})
 	if err != nil {
@@ -233,7 +236,7 @@ func TestParseCLIAgentLoopFlag(t *testing.T) {
 		"-s", "aiscan",
 		"--space", "case-1",
 		"--heartbeat", "5",
-		"--llm-model", "gpt-4o",
+		"--model", "gpt-4o",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)

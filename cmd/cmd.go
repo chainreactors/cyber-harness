@@ -28,22 +28,16 @@ type Option struct {
 }
 
 type LLMOptions struct {
-	Provider      string `long:"llm-provider" config:"provider" description:"LLM provider name (openai, deepseek, openrouter, ollama, etc.)"`
-	BaseURL       string `long:"llm-base-url" config:"base_url" description:"LLM API base URL"`
-	APIKey        string `long:"llm-api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
-	Model         string `long:"llm-model" config:"model" description:"LLM model name"`
-	Proxy         string `long:"llm-proxy" config:"proxy" description:"HTTP proxy for LLM API"`
-	Vision        bool   `long:"llm-vision" config:"vision" description:"Enable the vision tool for OpenAI-compatible multimodal models"`
-	ProviderAlias string `long:"provider" description:"Alias for --llm-provider"`
-	BaseURLAlias  string `long:"base-url" description:"Alias for --llm-base-url"`
-	APIKeyAlias   string `long:"api-key" description:"Alias for --llm-api-key"`
-	ModelAlias    string `long:"model" description:"Alias for --llm-model"`
-	ProxyAlias    string `long:"proxy" description:"Alias for --llm-proxy"`
-	AI            bool   `long:"ai" description:"Use the configured LLM to process direct scanner output with the relevant tool skill"`
+	Provider string `long:"provider" config:"provider" description:"LLM provider name (openai, deepseek, openrouter, ollama, etc.)"`
+	BaseURL  string `long:"base-url" config:"base_url" description:"LLM API base URL"`
+	APIKey   string `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
+	Model    string `long:"model" config:"model" description:"LLM model name"`
+	Proxy    string `long:"proxy" config:"proxy" description:"HTTP proxy for LLM API"`
+	AI       bool   `long:"ai" description:"Use the configured LLM to process direct scanner output with the relevant tool skill"`
 }
 
 type VisionOptions struct {
-	VisionEnabled  bool   `long:"vision" config:"enabled" description:"Enable the vision tool"`
+	Vision         bool   `long:"vision" config:"enabled" description:"Enable the vision tool (uses main LLM provider unless --vision-* overrides are set)"`
 	VisionProvider string `long:"vision-provider" config:"provider" description:"Vision provider name (openai, openrouter, ollama, etc.)"`
 	VisionBaseURL  string `long:"vision-base-url" config:"base_url" description:"Vision API base URL"`
 	VisionAPIKey   string `long:"vision-api-key" config:"api_key" description:"Vision API key"`
@@ -225,7 +219,6 @@ func parseCLI(args []string) (parsedCLI, error) {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
 				option := cli.Option
-				normalizeLLMAliases(&option)
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: runModeScanner, ScannerArgs: scannerArgs}, nil
@@ -237,7 +230,6 @@ func parseCLI(args []string) (parsedCLI, error) {
 	}
 
 	option := cli.Option
-	normalizeLLMAliases(&option)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: runModeNoCommand}, nil
 	}
@@ -282,7 +274,6 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}
 
 	option := cli.Option
-	normalizeLLMAliases(&option)
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: runModeNoCommand}, nil
@@ -306,9 +297,6 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.APIKey = resolveString(manual.APIKey, option.APIKey)
 	option.Model = resolveString(manual.Model, option.Model)
 	option.Proxy = resolveString(manual.Proxy, option.Proxy)
-	if manual.Vision {
-		option.Vision = true
-	}
 	mergeVisionOptions(option, &manual)
 	if manual.AI {
 		option.AI = true
@@ -324,14 +312,6 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	if len(manual.Skills) > 0 {
 		option.Skills = append(option.Skills, manual.Skills...)
 	}
-}
-
-func normalizeLLMAliases(option *Option) {
-	option.Provider = resolveString(option.Provider, option.ProviderAlias)
-	option.BaseURL = resolveString(option.BaseURL, option.BaseURLAlias)
-	option.APIKey = resolveString(option.APIKey, option.APIKeyAlias)
-	option.Model = resolveString(option.Model, option.ModelAlias)
-	option.Proxy = resolveString(option.Proxy, option.ProxyAlias)
 }
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
@@ -357,9 +337,9 @@ Commands:
 
 Examples:
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
-  aiscan agent --llm-provider deepseek --llm-model deepseek-chat -p "enumerate services" -i 10.0.0.0/24
-  aiscan agent --llm-provider ollama --llm-model llama3 --llm-base-url http://localhost:11434/v1 -p "check this host" -i http://target.com
-  aiscan scan -i 127.0.0.1 --mode quick --verify=high --llm-api-key KEY --llm-model gpt-4o
+  aiscan agent --provider deepseek --model deepseek-chat -p "enumerate services" -i 10.0.0.0/24
+  aiscan agent --provider ollama --model llama3 --base-url http://localhost:11434/v1 -p "check this host" -i http://target.com
+  aiscan scan -i 127.0.0.1 --mode quick --verify=high --api-key KEY --model gpt-4o
   aiscan scan -i 192.168.1.0/24 --mode full
   aiscan acp serve
   aiscan acp spaces --acp-url http://127.0.0.1:8765
@@ -441,23 +421,16 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--prompt"}, arity: 1, apply: func(o *Option, v string) { o.Prompt = v }},
 	{names: []string{"--task-file"}, arity: 1, apply: func(o *Option, v string) { o.TaskFile = v }},
 	{names: []string{"--skill"}, arity: 1, apply: func(o *Option, v string) { o.Skills = append(o.Skills, v) }},
-	{names: []string{"--llm-provider", "--provider"}, arity: 1, apply: func(o *Option, v string) { o.Provider = v }},
-	{names: []string{"--llm-base-url", "--base-url"}, arity: 1, apply: func(o *Option, v string) { o.BaseURL = v }},
-	{names: []string{"--llm-api-key", "--api-key"}, arity: 1, apply: func(o *Option, v string) { o.APIKey = v }},
-	{names: []string{"--llm-model", "--model"}, arity: 1, apply: func(o *Option, v string) { o.Model = v }},
-	{names: []string{"--llm-proxy", "--proxy"}, arity: 1, apply: func(o *Option, v string) { o.Proxy = v }},
-	{names: []string{"--llm-vision"}, arity: 0, apply: func(o *Option, v string) {
+	{names: []string{"--provider"}, arity: 1, apply: func(o *Option, v string) { o.Provider = v }},
+	{names: []string{"--base-url"}, arity: 1, apply: func(o *Option, v string) { o.BaseURL = v }},
+	{names: []string{"--api-key"}, arity: 1, apply: func(o *Option, v string) { o.APIKey = v }},
+	{names: []string{"--model"}, arity: 1, apply: func(o *Option, v string) { o.Model = v }},
+	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.Proxy = v }},
+	{names: []string{"--vision"}, arity: 0, apply: func(o *Option, v string) {
 		if v != "" {
 			o.Vision = truthyFlagValue(v)
 		} else {
 			o.Vision = true
-		}
-	}},
-	{names: []string{"--vision"}, arity: 0, apply: func(o *Option, v string) {
-		if v != "" {
-			o.VisionEnabled = truthyFlagValue(v)
-		} else {
-			o.VisionEnabled = true
 		}
 	}},
 	{names: []string{"--vision-provider"}, arity: 1, apply: func(o *Option, v string) { o.VisionProvider = v }},
