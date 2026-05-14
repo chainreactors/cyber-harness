@@ -8,10 +8,10 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/engines"
 	"github.com/chainreactors/aiscan/pkg/tools/resources"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 	acpclient "github.com/chainreactors/ioa/client"
 )
@@ -93,7 +93,25 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	app.Engines = initEngines(ctx, cfg.Scanner, logger)
-	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, cfg.Tools, app.Provider, app.ProviderConfig.Model, app.Skills, logger)
+
+	// Resolve vision provider config for the vision pseudo-command.
+	var visionCfg *provider.ProviderConfig
+	if cfg.Tools.Enabled && cfg.Tools.VisionEnabled && cfg.Vision.Enabled {
+		resolved, err := provider.Resolve(&cfg.Vision.Config)
+		if err != nil {
+			if !cfg.Vision.Optional {
+				return nil, fmt.Errorf("vision provider: %w", err)
+			}
+			logger.Debugf("vision provider not configured: %s", err)
+		} else {
+			app.VisionConfig = *resolved
+			visionCfg = &app.VisionConfig
+		}
+	} else if cfg.Tools.Enabled && cfg.Tools.VisionEnabled && app.Provider != nil {
+		visionCfg = &app.ProviderConfig
+	}
+
+	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, cfg.Tools, app.Provider, app.ProviderConfig.Model, app.Skills, visionCfg, logger)
 
 	if cfg.ACP != nil {
 		if err := app.InitACP(ctx, *cfg.ACP); err != nil {
@@ -112,6 +130,11 @@ func (a *App) Close() {
 	if a.Commands != nil {
 		for _, t := range a.Commands.Tools() {
 			if closer, ok := t.(interface{ Close() }); ok {
+				closer.Close()
+			}
+		}
+		for _, cmd := range a.Commands.All() {
+			if closer, ok := cmd.(interface{ Close() }); ok {
 				closer.Close()
 			}
 		}
@@ -147,7 +170,7 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 	return engineSet
 }
 
-func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, logger telemetry.Logger) *command.CommandRegistry {
+func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, visionCfg *provider.ProviderConfig, logger telemetry.Logger) *command.CommandRegistry {
 	cmdReg := command.NewRegistry()
 
 	workDir, _ := os.Getwd()
@@ -169,13 +192,14 @@ func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg 
 	scanOpts = append(scanOpts, scan.WithLogger(logger))
 
 	deps := &command.Deps{
-		WorkDir:     workDir,
-		BashTimeout: toolCfg.BashTimeout,
-		SkillStore:  skillStore,
-		EngineSet:   engineSet,
-		ScanOpts:    scanOpts,
-		Logger:      logger,
-		Model:       model,
+		WorkDir:      workDir,
+		BashTimeout:  toolCfg.BashTimeout,
+		SkillStore:   skillStore,
+		EngineSet:    engineSet,
+		VisionConfig: visionCfg,
+		ScanOpts:     scanOpts,
+		Logger:       logger,
+		Model:        model,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources

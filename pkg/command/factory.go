@@ -12,15 +12,16 @@ type Deps struct {
 	BashTimeout int
 	SkillStore  any
 
-	EngineSet any
-	Resources any
-	ACPClient any
-	Provider  any
-	Model     string
-	ScanOpts  []any
-	Logger    any
-	NodeName  string
-	NodeMeta  map[string]any
+	EngineSet    any
+	Resources    any
+	ACPClient    any
+	Provider     any
+	VisionConfig any // *provider.ProviderConfig for vision-capable LLM
+	Model        string
+	ScanOpts     []any
+	Logger       any
+	NodeName     string
+	NodeMeta     map[string]any
 }
 
 var (

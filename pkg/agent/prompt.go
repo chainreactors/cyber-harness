@@ -124,7 +124,9 @@ func hasVisionTool(tools *command.CommandRegistry) bool {
 	if tools == nil {
 		return false
 	}
+	if tools.Has("vision") {
+		return true
+	}
 	_, ok := tools.GetTool("vision")
 	return ok
 }
-
