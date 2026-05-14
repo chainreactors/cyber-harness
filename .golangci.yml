@@ -1,0 +1,72 @@
+run:
+  timeout: 5m
+  build-tags:
+    - generated_templates
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - gosimple
+    - ineffassign
+    - unused
+    - typecheck
+    - gosec
+    - bodyclose
+    - misspell
+    - durationcheck
+    - nilerr
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+  staticcheck:
+    checks:
+      - "all"
+      - "-ST1000"
+      - "-ST1003"
+      - "-ST1005"
+      - "-ST1016"
+      - "-QF1001"
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+    exclude-functions:
+      - io.Close
+      - (*os/exec.Cmd).Process.Kill
+      - (*os.File).Close
+      - (io.Closer).Close
+  gosec:
+    excludes:
+      - G104
+      - G304
+      - G204
+      - G301
+      - G302
+    confidence: medium
+  misspell:
+    locale: US
+
+issues:
+  exclude-dirs:
+    - vendor
+    - templates
+  exclude-files:
+    - "template\\.go$"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    - path: pkg/command/bash\.go
+      linters:
+        - errcheck
+      text: "Error return value of.*Kill|Signal|Close"
+  max-issues-per-linter: 0
+  max-same-issues: 0

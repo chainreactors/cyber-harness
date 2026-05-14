@@ -17,8 +17,168 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Fast gates (independent, no deps) ──────────────────────────
+
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          args: --timeout=5m
+
+  tidy:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check go mod tidy
+        run: |
+          cp go.mod go.mod.orig
+          cp go.sum go.sum.orig
+          go mod tidy
+          if ! diff -q go.mod go.mod.orig >/dev/null 2>&1; then
+            echo "::error::go.mod is not tidy. Run 'go mod tidy' and commit the result."
+            diff go.mod.orig go.mod || true
+            exit 1
+          fi
+          if ! diff -q go.sum go.sum.orig >/dev/null 2>&1; then
+            echo "::error::go.sum is not tidy. Run 'go mod tidy' and commit the result."
+            diff go.sum.orig go.sum | head -30 || true
+            exit 1
+          fi
+
+  # ── Unit tests (depends on tidy) ──────────────────────────────
+
+  test:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run unit tests with coverage
+        run: |
+          go test -race -count=1 -timeout 5m \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            ./...
+
+      - name: Display coverage summary
+        if: always()
+        run: |
+          if [ -f coverage.out ]; then
+            echo "### Total coverage"
+            go tool cover -func=coverage.out | tail -1
+            echo ""
+            echo "### Per-package coverage (top 20)"
+            go tool cover -func=coverage.out | grep -E '^[a-z]' | sort -t$'\t' -k3 -rn | head -20
+          fi
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 14
+
+  # ── Generated templates tests (depends on tidy) ───────────────
+
+  generated-test:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run go generate for templates
+        run: go generate ./pkg/tools/resources/...
+
+      - name: Verify generated file has build tag
+        run: |
+          if ! head -5 pkg/tools/resources/template.go | grep -q 'generated_templates'; then
+            echo "::error::Generated template.go missing //go:build generated_templates tag"
+            exit 1
+          fi
+
+      - name: Run generated_templates tests
+        run: |
+          go test -race -count=1 -timeout 5m \
+            -tags generated_templates \
+            ./pkg/tools/resources/...
+
+  # ── E2E tests (depends on test) ───────────────────────────────
+
+  e2e:
+    runs-on: ubuntu-22.04
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run e2e tests
+        run: |
+          go test -race -count=1 -timeout 10m \
+            -tags e2e \
+            -v \
+            ./pkg/e2e/
+
+  # ── Build (depends on test) ───────────────────────────────────
+
   build:
     runs-on: ubuntu-22.04
+    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -4,7 +4,7 @@ project_name: aiscan
 
 before:
   hooks:
-    - go generate ./pkg/scanner/resources
+    - go generate ./pkg/tools/resources
 
 builds:
   - id: aiscan
