@@ -3,227 +3,117 @@ package ioa
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"io"
-	"sync"
+	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	acpclient "github.com/chainreactors/ioa/client"
-	"github.com/chainreactors/ioa"
 )
 
-type toolBase struct {
-	client   acpclient.API
-	opts     acpclient.ToolOptions
-	mu       sync.Mutex
+func NewCommands(client acpclient.API, nodeName string, meta map[string]any) []command.PseudoCommand {
+	var cmds []command.PseudoCommand
+	for _, t := range acpclient.NewTools(client, acpclient.ToolOptions{NodeName: nodeName, NodeMeta: meta}) {
+		cmds = append(cmds, &toolAdapter{tool: t})
+	}
+	return cmds
 }
 
-func (b *toolBase) ensureNode(ctx context.Context) error {
-	if b.client.NodeID() != "" {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.client.NodeID() != "" {
-		return nil
-	}
-	name := b.opts.NodeName
-	if name == "" {
-		name = "ioa-agent"
-	}
-	meta := b.opts.NodeMeta
-	if meta == nil {
-		meta = map[string]interface{}{}
-	}
-	_, err := b.client.RegisterNode(ctx, name, meta)
-	return err
+type toolAdapter struct {
+	tool acpclient.Tool
 }
 
-func encodeResult(value interface{}) (string, error) {
-	data, err := json.MarshalIndent(value, "", "  ")
+func (a *toolAdapter) Name() string { return a.tool.Name() }
+
+func (a *toolAdapter) Usage() string {
+	def := a.tool.Definition()
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s - %s\n", def.Function.Name, a.tool.Description()))
+
+	params := def.Function.Parameters
+	props, _ := params["properties"].(map[string]interface{})
+	reqRaw, _ := params["required"].([]interface{})
+	required := make([]string, 0, len(reqRaw))
+	for _, r := range reqRaw {
+		if s, ok := r.(string); ok {
+			required = append(required, s)
+		}
+	}
+	requiredSet := make(map[string]bool, len(required))
+	for _, r := range required {
+		requiredSet[r] = true
+	}
+
+	if len(props) > 0 {
+		sb.WriteString("\nUsage:\n")
+		sb.WriteString(fmt.Sprintf("  %s", def.Function.Name))
+		for name := range props {
+			if requiredSet[name] {
+				sb.WriteString(fmt.Sprintf(" --%s <value>", name))
+			} else {
+				sb.WriteString(fmt.Sprintf(" [--%s <value>]", name))
+			}
+		}
+		sb.WriteString("\n\nOptions:\n")
+		for name, schema := range props {
+			desc := ""
+			if m, ok := schema.(map[string]interface{}); ok {
+				desc, _ = m["description"].(string)
+			}
+			marker := ""
+			if requiredSet[name] {
+				marker = " (required)"
+			}
+			sb.WriteString(fmt.Sprintf("  --%-16s %s%s\n", name, desc, marker))
+		}
+	}
+	return sb.String()
+}
+
+func (a *toolAdapter) Execute(ctx context.Context, args []string) (string, error) {
+	jsonArgs, err := argsToJSON(args)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w\n\n%s", a.tool.Name(), err, a.Usage())
+	}
+	return a.tool.Execute(ctx, jsonArgs)
+}
+
+func argsToJSON(args []string) (string, error) {
+	m := make(map[string]interface{})
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "--") {
+			continue
+		}
+		key := strings.TrimPrefix(arg, "--")
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+			m[key] = true
+			continue
+		}
+		i++
+		val := args[i]
+		if val == "true" {
+			m[key] = true
+		} else if val == "false" {
+			m[key] = false
+		} else if n, err := parseInt(val); err == nil {
+			m[key] = n
+		} else if json.Valid([]byte(val)) && (val[0] == '{' || val[0] == '[') {
+			var v interface{}
+			json.Unmarshal([]byte(val), &v)
+			m[key] = v
+		} else {
+			m[key] = val
+		}
+	}
+	data, err := json.Marshal(m)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-func NewCommands(client acpclient.API, nodeName string, meta map[string]any) []command.PseudoCommand {
-	base := &toolBase{
-		client: client,
-		opts:   acpclient.ToolOptions{NodeName: nodeName, NodeMeta: meta},
-	}
-	return []command.PseudoCommand{
-		&SpaceCommand{base: base},
-		&SendCommand{base: base},
-		&ReadCommand{base: base},
-	}
-}
-
-// SpaceCommand creates or joins an IOA collaboration space.
-type SpaceCommand struct {
-	base *toolBase
-}
-
-func (c *SpaceCommand) Name() string { return "ioa_space" }
-
-func (c *SpaceCommand) Usage() string {
-	return `ioa_space - Create or join an IOA message space for collaboration
-
-Usage:
-  ioa_space --name <space_name> --description <desc>
-
-Options:
-  --name         Space name (required)
-  --description  Your role or intent in this space (required)`
-}
-
-func (c *SpaceCommand) Execute(ctx context.Context, args []string) (string, error) {
-	fs := flag.NewFlagSet("ioa_space", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	name := fs.String("name", "", "")
-	desc := fs.String("description", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", fmt.Errorf("ioa_space: %w\n\n%s", err, c.Usage())
-	}
-	if *name == "" || *desc == "" {
-		return "", fmt.Errorf("ioa_space: --name and --description are required\n\n%s", c.Usage())
-	}
-	if err := c.base.ensureNode(ctx); err != nil {
-		return "", err
-	}
-	info, err := c.base.client.Space(ctx, *name, *desc)
-	if err != nil {
-		return "", err
-	}
-	allMessages, err := c.base.client.Read(ctx, info.ID, ioa.ReadOptions{All: true})
-	if err != nil {
-		return encodeResult(info)
-	}
-	var startMessages []ioa.Message
-	for _, m := range allMessages {
-		if len(m.Refs.Messages) == 0 && len(m.Refs.Nodes) == 0 {
-			startMessages = append(startMessages, m)
-		}
-	}
-	return encodeResult(struct {
-		ioa.SpaceInfo
-		StartMessages []ioa.Message `json:"start_messages"`
-	}{SpaceInfo: info, StartMessages: startMessages})
-}
-
-// SendCommand sends a structured message to an IOA space.
-type SendCommand struct {
-	base *toolBase
-}
-
-func (c *SendCommand) Name() string { return "ioa_send" }
-
-func (c *SendCommand) Usage() string {
-	return `ioa_send - Send a structured IOA message to a space
-
-Usage:
-  ioa_send --space_id <id> --content <json> [--refs <json>] [--content_schema <json>]
-
-Options:
-  --space_id        IOA space id (required)
-  --content         Structured message content as JSON (required)
-  --refs            Optional references JSON: {"messages":["id"],"nodes":["id"]}
-  --content_schema  Optional JSON Schema to set on the space`
-}
-
-func (c *SendCommand) Execute(ctx context.Context, args []string) (string, error) {
-	fs := flag.NewFlagSet("ioa_send", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	spaceID := fs.String("space_id", "", "")
-	contentStr := fs.String("content", "", "")
-	refsStr := fs.String("refs", "", "")
-	schemaStr := fs.String("content_schema", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", fmt.Errorf("ioa_send: %w\n\n%s", err, c.Usage())
-	}
-	if *spaceID == "" || *contentStr == "" {
-		return "", fmt.Errorf("ioa_send: --space_id and --content are required\n\n%s", c.Usage())
-	}
-	if err := c.base.ensureNode(ctx); err != nil {
-		return "", err
-	}
-
-	var content map[string]interface{}
-	if err := json.Unmarshal([]byte(*contentStr), &content); err != nil {
-		return "", fmt.Errorf("ioa_send: invalid --content JSON: %w", err)
-	}
-
-	msg := ioa.SendMessage{Content: content}
-	if *refsStr != "" {
-		var refs ioa.Ref
-		if err := json.Unmarshal([]byte(*refsStr), &refs); err != nil {
-			return "", fmt.Errorf("ioa_send: invalid --refs JSON: %w", err)
-		}
-		msg.Refs = &refs
-	}
-	if *schemaStr != "" {
-		var schema map[string]interface{}
-		if err := json.Unmarshal([]byte(*schemaStr), &schema); err != nil {
-			return "", fmt.Errorf("ioa_send: invalid --content_schema JSON: %w", err)
-		}
-		msg.ContentSchema = schema
-	}
-
-	message, err := c.base.client.Send(ctx, *spaceID, msg)
-	if err != nil {
-		return "", err
-	}
-	return encodeResult(message)
-}
-
-// ReadCommand reads messages from an IOA space.
-type ReadCommand struct {
-	base *toolBase
-}
-
-func (c *ReadCommand) Name() string { return "ioa_read" }
-
-func (c *ReadCommand) Usage() string {
-	return `ioa_read - Read IOA messages from a space
-
-Usage:
-  ioa_read --space_id <id> [--message_id <id>] [--after <id>] [--limit N] [--all]
-
-Options:
-  --space_id    IOA space id (required)
-  --message_id  Optional message id to read its ancestor/descendant context
-  --after       Optional message id cursor
-  --limit       Maximum number of messages (default: 0 = no limit)
-  --all         Read all messages instead of only messages addressed to this node`
-}
-
-func (c *ReadCommand) Execute(ctx context.Context, args []string) (string, error) {
-	fs := flag.NewFlagSet("ioa_read", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	spaceID := fs.String("space_id", "", "")
-	messageID := fs.String("message_id", "", "")
-	after := fs.String("after", "", "")
-	limit := fs.Int("limit", 0, "")
-	all := fs.Bool("all", false, "")
-	if err := fs.Parse(args); err != nil {
-		return "", fmt.Errorf("ioa_read: %w\n\n%s", err, c.Usage())
-	}
-	if *spaceID == "" {
-		return "", fmt.Errorf("ioa_read: --space_id is required\n\n%s", c.Usage())
-	}
-	if err := c.base.ensureNode(ctx); err != nil {
-		return "", err
-	}
-
-	messages, err := c.base.client.Read(ctx, *spaceID, ioa.ReadOptions{
-		MessageID: *messageID,
-		After:     *after,
-		Limit:     *limit,
-		All:       *all,
-	})
-	if err != nil {
-		return "", err
-	}
-	return encodeResult(messages)
+func parseInt(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }
