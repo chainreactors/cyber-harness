@@ -8,10 +8,10 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 )
 
-func Run(ctx context.Context, prompt string, tools *tool.ToolRegistry, opts ...Option) (string, error) {
+func Run(ctx context.Context, prompt string, tools *command.CommandRegistry, opts ...Option) (string, error) {
 	result, err := RunWithEvents(ctx, prompt, tools, nil, opts...)
 	if err != nil {
 		return "", err
@@ -19,7 +19,7 @@ func Run(ctx context.Context, prompt string, tools *tool.ToolRegistry, opts ...O
 	return result.Output, nil
 }
 
-func RunWithEvents(ctx context.Context, prompt string, tools *tool.ToolRegistry, emit EventHandler, opts ...Option) (*Result, error) {
+func RunWithEvents(ctx context.Context, prompt string, tools *command.CommandRegistry, emit EventHandler, opts ...Option) (*Result, error) {
 	allOpts := make([]Option, 0, len(opts)+1)
 	allOpts = append(allOpts, opts...)
 	if emit != nil {
@@ -39,7 +39,7 @@ func runLoop(ctx context.Context, prompts []provider.ChatMessage, agentCtx Conte
 		return nil, fmt.Errorf("agent provider is nil")
 	}
 	if agentCtx.Tools == nil {
-		agentCtx.Tools = tool.NewToolRegistry()
+		agentCtx.Tools = command.NewRegistry()
 	}
 	if agentCtx.SystemPrompt == "" {
 		agentCtx.SystemPrompt = cfg.SystemPrompt
@@ -102,7 +102,7 @@ func runLoop(ctx context.Context, prompts []provider.ChatMessage, agentCtx Conte
 		reqMessages := requestMessages(agentCtx.SystemPrompt, transcript.messages, cfg.TransformContext)
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistantMsg, usage, err := requestWithRetry(ctx, cfg, reqMessages, agentCtx.Tools.Definitions(), turn)
+		assistantMsg, usage, err := requestWithRetry(ctx, cfg, reqMessages, agentCtx.Tools.ToolDefinitions(), turn)
 		if usage != nil {
 			totalUsage.PromptTokens += usage.PromptTokens
 			totalUsage.CompletionTokens += usage.CompletionTokens
@@ -287,7 +287,7 @@ type toolExecution struct {
 func runToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.ChatMessage, tc provider.ToolCall, cfg Config) toolExecution {
 	execution := beforeToolCall(ctx, agentCtx, assistantMsg, tc, cfg)
 	if execution.result == "" && !execution.isError {
-		result, execErr := agentCtx.Tools.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+		result, execErr := agentCtx.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments)
 		execution.result = result
 		execution.err = execErr
 		execution.isError = execErr != nil

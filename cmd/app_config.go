@@ -27,6 +27,10 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			Config:   providerConfig(option),
 			Optional: features.ProviderOptional,
 		},
+		Vision: app.ProviderConfig{
+			Enabled: visionHasProviderConfig(option),
+			Config:  visionProviderConfig(option),
+		},
 		Scanner: app.ScannerConfig{
 			CyberhubURL:         option.CyberhubURL,
 			CyberhubKey:         option.CyberhubKey,
@@ -36,8 +40,9 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			VerifyTimeout:       defaultInt(DefaultVerifyTimeout, 120),
 		},
 		Tools: app.ToolConfig{
-			Enabled:     features.ToolsEnabled,
-			BashTimeout: 300,
+			Enabled:       features.ToolsEnabled,
+			BashTimeout:   300,
+			VisionEnabled: visionEnabled(option),
 		},
 		Logger: logger,
 	}
@@ -66,6 +71,41 @@ func providerConfig(option *Option) provider.ProviderConfig {
 	return cfg
 }
 
+func visionEnabled(option *Option) bool {
+	return option.Vision || visionHasProviderConfig(option)
+}
+
+func visionHasProviderConfig(option *Option) bool {
+	return option.VisionProvider != "" ||
+		option.VisionBaseURL != "" ||
+		option.VisionAPIKey != "" ||
+		option.VisionModel != "" ||
+		option.VisionProxy != ""
+}
+
+func visionProviderConfig(option *Option) provider.ProviderConfig {
+	cfg := provider.ProviderConfig{}
+	if option.VisionProvider != "" {
+		cfg.Provider = option.VisionProvider
+	} else if inferred := inferProviderFromBaseURL(option.VisionBaseURL); inferred != "" {
+		cfg.Provider = inferred
+	}
+	if option.VisionBaseURL != "" {
+		cfg.BaseURL = option.VisionBaseURL
+	}
+	if option.VisionAPIKey != "" {
+		cfg.APIKey = option.VisionAPIKey
+	}
+	if option.VisionModel != "" {
+		cfg.Model = option.VisionModel
+	}
+	if option.VisionProxy != "" {
+		cfg.Proxy = option.VisionProxy
+	}
+	cfg.Timeout = 120
+	return cfg
+}
+
 func applyResolvedProviderOptions(option *Option, cfg provider.ProviderConfig) {
 	option.Provider = cfg.Provider
 	option.BaseURL = cfg.BaseURL
@@ -83,7 +123,7 @@ func applyDefaults(option *Option) {
 	option.ACPNodeName = resolveString(option.ACPNodeName, DefaultACPNodeName)
 	option.Space = resolveSpace(option.Space)
 	if option.Model == "" {
-		option.Model = resolveString(DefaultModel, "gpt-4o")
+		option.Model = resolveString(DefaultModel, "deepseek-v4-pro")
 	}
 }
 

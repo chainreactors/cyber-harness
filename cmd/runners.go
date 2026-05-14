@@ -54,8 +54,8 @@ func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logge
 	}
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:       application.Tools,
-		ScannerDocs: application.Scanner.UsageDocs(),
+		Tools:       application.Commands,
+		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
 	logger.Debugf("system prompt length: %d chars", len(systemPrompt))
@@ -85,7 +85,7 @@ func runAgentOneShotMode(ctx context.Context, option *Option, logger telemetry.L
 	output := newAgentOutput(option)
 	output.Start("task", displayTask)
 
-	result, err := agent.RunWithEvents(ctx, task, application.Tools, output.HandleEvent,
+	result, err := agent.RunWithEvents(ctx, task, application.Commands, output.HandleEvent,
 		agent.WithProvider(application.Provider),
 		agent.WithSystemPrompt(runtime.systemPrompt),
 		agent.WithModel(option.Model),
@@ -127,7 +127,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 	defer application.Close()
 	applyResolvedProviderOptions(option, application.ProviderConfig)
 
-	if !application.Scanner.Has(scannerArgs[0]) {
+	if !application.Commands.Has(scannerArgs[0]) {
 		return fmt.Errorf("unknown subcommand: %s", scannerArgs[0])
 	}
 	if option.AI && scannerArgs[0] != "scan" {
@@ -140,7 +140,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 	if shouldStreamScannerOutput(scannerArgs) {
 		stream = os.Stdout
 	}
-	out, err := application.Scanner.ExecuteArgsStreaming(ctx, scannerArgs, stream)
+	out, err := application.Commands.ExecuteArgsStreaming(ctx, scannerArgs, stream)
 	if err != nil {
 		return err
 	}
@@ -201,8 +201,8 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	}
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:       application.Tools,
-		ScannerDocs: application.Scanner.UsageDocs(),
+		Tools:       application.Commands,
+		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
 
@@ -213,7 +213,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	runner := loop.New(loop.Config{
 		Client:            streamClient,
 		Provider:          application.Provider,
-		Tools:             application.Tools,
+		Tools:             application.Commands,
 		SystemPrompt:      systemPrompt,
 		Model:             option.Model,
 		Stream:            true,

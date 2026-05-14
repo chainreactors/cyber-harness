@@ -3,10 +3,10 @@ package cmd
 import "github.com/chainreactors/aiscan/pkg/provider"
 
 var (
-	DefaultProvider = "openai"
+	DefaultProvider = "deepseek"
 	DefaultBaseURL  = ""
 	DefaultAPIKey   = ""
-	DefaultModel    = "gpt-4o"
+	DefaultModel    = "deepseek-v4-pro"
 	DefaultProxy    = ""
 
 	DefaultCyberhubURL  = ""

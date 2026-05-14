@@ -19,6 +19,15 @@ llm:
   # 访问 LLM API 的 HTTP proxy
   proxy: ""
 
+# Vision 配置
+vision:
+  enabled: false
+  provider: ""
+  base_url: ""
+  api_key: ""
+  model: ""
+  proxy: ""
+
 # Cyberhub 资源服务
 cyberhub:
   url: ""

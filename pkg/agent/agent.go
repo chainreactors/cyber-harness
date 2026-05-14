@@ -6,12 +6,12 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/tool"
+	"github.com/chainreactors/aiscan/pkg/command"
 )
 
 type Agent struct {
 	provider provider.Provider
-	tools    *tool.ToolRegistry
+	tools    *command.CommandRegistry
 	config   Config
 	emit     EventHandler
 
@@ -23,11 +23,11 @@ type Agent struct {
 	running   bool
 }
 
-func New(p provider.Provider, tools *tool.ToolRegistry, opts ...Option) *Agent {
+func New(p provider.Provider, tools *command.CommandRegistry, opts ...Option) *Agent {
 	cfg := newConfig(opts...)
 	cfg.Provider = p
 	if tools == nil {
-		tools = tool.NewToolRegistry()
+		tools = command.NewRegistry()
 	}
 	return &Agent{
 		provider: p,

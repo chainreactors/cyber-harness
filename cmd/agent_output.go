@@ -228,17 +228,6 @@ func summarizeToolArguments(name, arguments string) string {
 			prefixedArg("message ", stringArg(args, "message_id")),
 			prefixedArg("after ", stringArg(args, "after")),
 		), agentStatusPreviewLimit)
-	case "parse_results":
-		return compactAgentLine(joinAgentSummaryParts(
-			stringArg(args, "scanner"),
-			stringArg(args, "analysis"),
-		), agentStatusPreviewLimit)
-	case "filter_results":
-		return compactAgentLine(joinAgentSummaryParts(
-			stringArg(args, "scanner"),
-			stringArg(args, "operator"),
-			prefixedArg("limit ", stringArg(args, "limit")),
-		), agentStatusPreviewLimit)
 	default:
 		return compactAgentLine(firstNonEmptyArg(args, "target", "url", "input", "path", "name"), agentStatusPreviewLimit)
 	}

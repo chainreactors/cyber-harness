@@ -44,7 +44,7 @@ func runInteractiveAgentMode(ctx context.Context, option *Option, logger telemet
 		return err
 	}
 
-	session := agent.New(application.Provider, application.Tools,
+	session := agent.New(application.Provider, application.Commands,
 		agent.WithSystemPrompt(runtime.systemPrompt),
 		agent.WithModel(option.Model),
 		agent.WithStream(false),

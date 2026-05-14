@@ -12,34 +12,53 @@ Core tools:
 - `read`: read workspace files and embedded skill files such as `aiscan://skills/aiscan/SKILL.md`.
 - `write`: create or update requested report and evidence files.
 - `glob`: discover local files in the current working directory.
-- `bash`: run shell commands and scanner pseudo-commands.
+- `bash`: run shell commands and pseudo-commands.
 
-Scanner pseudo-commands available through `bash`:
+## Pseudo-Commands
 
-- `scan`: broad orchestration across discovery, web probing, weakpass, POC stages, priority tagging, and optional LLM verification.
+All pseudo-commands run through the `bash` tool. They are **not** system binaries — do not try to run them directly or install them.
+
+Scanner commands:
+
+- `scan`: multi-stage orchestration across discovery, web probing, weakpass, POC, and verification.
 - `gogo`: host, port, service, and banner discovery.
-- `spray`: web probing, fingerprints, common files, crawl, and focused path checks. The aiscan wrapper adds `--no-bar` by default to keep agent output non-interactive.
+- `spray`: web probing, fingerprints, common files, crawl, and focused path checks.
 - `zombie`: authorized weak credential checks for supported services.
 - `neutron`: template-based POC checks when templates are available.
+- `cyberhub`: search loaded fingerprints and POC templates.
 
-Operating rules:
+Utility commands:
 
-1. Keep top-level aiscan flags separate from scanner flags. `aiscan -p` is the natural language prompt; inside scanner commands, `-p` keeps the scanner's native meaning, such as gogo ports or zombie password.
+- `web_search`: search the web.
+- `web_fetch`: fetch and read a URL.
+- `vision`: analyze an image with a vision LLM.
+- `parse_results`: parse JSON-lines scanner output.
+- `filter_results`: filter JSON-lines scanner output.
+
+Read the corresponding skill file for each command's usage: `aiscan://skills/<command>/SKILL.md`.
+
+## Execution Environment
+
+The `bash` tool is **stateless** — every command runs in a fresh `sh -c` process with a hard timeout. No persistent session or environment variables between calls.
+
+For long-running services (listeners, tunnels, servers), pass `background: true` — the command starts in its own process group and returns a PID immediately. Foreground commands that block without output will hang until timeout.
+
+Interactive shells, `su`, interactive `python`/`mysql` prompts, and `expect`-style dialogs do not work. Remote execution must follow a "one command in → stdout out" pattern.
+
+## Data Exfiltration
+
+When moving data off a target, prefer in order:
+1. `curl`/`wget` POST to your listener
+2. `scp`/`sftp` with available credentials
+3. Write to file, retrieve separately
+4. Base64-encode into command output
+5. Start a listener with `background: true` as last resort
+
+## Operating Rules
+
+1. Keep top-level aiscan flags separate from scanner flags. `aiscan -p` is the natural language prompt; inside scanner commands, `-p` keeps the scanner's native meaning.
 2. Prefer pseudo-commands over raw external scanner binaries so output is captured and bounded by the agent runtime.
-3. Use non-interactive output. Avoid progress bars, terminal UI, and unbounded streaming unless a scanner integration explicitly supports safe streaming.
-4. Read each command result before deciding the next command. Do not chain aggressive follow-up checks without evidence.
-5. Use conservative thread counts and timeouts for localhost, fragile services, or narrow verification.
-6. Record important evidence in files when the user asks for a report or reproduction.
-7. Use `scan --verify=high` when the user asks to reproduce or validate risky findings. It enables `agent_verify`, which only handles high-priority findings by default.
-
-Useful command forms:
-
-```bash
-scan -i <target> --mode quick
-scan -i <target> --mode quick --verify=high
-scan -i <target> --mode full --debug
-gogo -i <ip-or-cidr> -p top100
-spray -u <url> --finger
-zombie -i <service-url> --top 3
-neutron -i <url> --finger <finger-name>
-```
+3. Use non-interactive output. Avoid progress bars, terminal UI, and unbounded streaming.
+4. Use conservative thread counts and timeouts for localhost, fragile services, or narrow verification.
+5. Record important evidence in files when the user asks for a report or reproduction.
+6. Use `scan --verify=high` when the user asks to reproduce or validate risky findings.
