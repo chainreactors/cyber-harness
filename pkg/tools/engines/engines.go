@@ -3,7 +3,7 @@ package engines
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/resources"
+	"github.com/chainreactors/aiscan/pkg/tools/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"

@@ -1,13 +1,13 @@
-package scanner
+package tools
 
 import (
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/scanner/engines"
-	gogocmd "github.com/chainreactors/aiscan/pkg/scanner/gogo"
-	neutroncmd "github.com/chainreactors/aiscan/pkg/scanner/neutron"
-	"github.com/chainreactors/aiscan/pkg/scanner/scan"
-	spraycmd "github.com/chainreactors/aiscan/pkg/scanner/spray"
-	zombiecmd "github.com/chainreactors/aiscan/pkg/scanner/zombie"
+	"github.com/chainreactors/aiscan/pkg/tools/engines"
+	gogocmd "github.com/chainreactors/aiscan/pkg/tools/gogo"
+	neutroncmd "github.com/chainreactors/aiscan/pkg/tools/neutron"
+	"github.com/chainreactors/aiscan/pkg/tools/scan"
+	spraycmd "github.com/chainreactors/aiscan/pkg/tools/spray"
+	zombiecmd "github.com/chainreactors/aiscan/pkg/tools/zombie"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 

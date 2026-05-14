@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/resources"
+	"github.com/chainreactors/aiscan/pkg/tools/resources"
 	"github.com/chainreactors/aiscan/pkg/util"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"

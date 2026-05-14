@@ -1,19 +1,19 @@
-package cyberhub
+package ioa
 
 import (
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/scanner/resources"
+	acpclient "github.com/chainreactors/ioa/client"
 )
 
 func init() {
 	command.RegisterFactory(command.Factory{
-		Group: "cyberhub",
+		Group: "ioa",
 		Build: func(deps *command.Deps) []command.PseudoCommand {
-			res, _ := deps.Resources.(*resources.Set)
-			if res == nil {
+			client, _ := deps.ACPClient.(acpclient.API)
+			if client == nil {
 				return nil
 			}
-			return []command.PseudoCommand{New(res)}
+			return NewCommands(client, deps.NodeName, deps.NodeMeta)
 		},
 	})
 }

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/engines"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	goflags "github.com/jessevdk/go-flags"
 )

@@ -3,7 +3,7 @@ package scan
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/engines"
 )
 
 func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profile) []capability {

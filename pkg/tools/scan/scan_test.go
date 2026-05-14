@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/engines"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"

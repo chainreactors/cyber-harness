@@ -1,10 +1,10 @@
-package scanner
+package tools
 
 import (
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/engines"
-	"github.com/chainreactors/aiscan/pkg/scanner/resources"
+	"github.com/chainreactors/aiscan/pkg/tools/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/resources"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"

@@ -1,4 +1,4 @@
-package scanner
+package tools
 
 import (
 	"reflect"

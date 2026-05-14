@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	cyberhubcmd "github.com/chainreactors/aiscan/pkg/scanner/cyberhub"
-	"github.com/chainreactors/aiscan/pkg/scanner/scan"
+	cyberhubcmd "github.com/chainreactors/aiscan/pkg/tools/cyberhub"
+	"github.com/chainreactors/aiscan/pkg/tools/scan"
 )
 
 func isScannerHelpRequest(args []string) bool {

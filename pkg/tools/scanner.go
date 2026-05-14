@@ -1,4 +1,4 @@
-package scanner
+package tools
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/scanner/scan"
+	"github.com/chainreactors/aiscan/pkg/tools/scan"
 )
 
 type PseudoCommand interface {
