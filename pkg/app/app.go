@@ -114,7 +114,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	if cfg.Tools.Enabled {
-		app.Tools = initToolRegistry(cfg.Tools, app.Skills, app.Commands, app.Engines, visionCfg)
+		app.Tools = initToolRegistry(cfg.Tools, app.Skills, app.Commands, visionCfg)
 	}
 
 	if cfg.ACP != nil {
@@ -206,7 +206,7 @@ func initCommandRegistry(engineSet *engines.Set, cfg ScannerConfig, llmProvider 
 	return cmdReg
 }
 
-func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, cmdReg *command.CommandRegistry, engineSet *engines.Set, providerCfg *provider.ProviderConfig) *tool.ToolRegistry {
+func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, cmdReg *command.CommandRegistry, providerCfg *provider.ProviderConfig) *tool.ToolRegistry {
 	workDir, _ := os.Getwd()
 	timeout := cfg.BashTimeout
 	if timeout <= 0 {
@@ -219,9 +219,6 @@ func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, cmdReg *command.
 	toolReg.Register(tool.NewBashTool(workDir, timeout, cmdReg))
 	toolReg.Register(tool.NewWebSearchTool())
 	toolReg.Register(tool.NewWebFetchTool())
-	if engineSet != nil && engineSet.Resources != nil {
-		toolReg.Register(tool.NewCyberhubSearchTool(engineSet.Resources))
-	}
 	if cfg.VisionEnabled && providerCfg != nil && providerCfg.BaseURL != "" {
 		toolReg.Register(tool.NewVisionTool(providerCfg))
 	}
