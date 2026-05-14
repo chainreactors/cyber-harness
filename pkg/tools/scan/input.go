@@ -1,21 +1,22 @@
 package scan
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 
+	"github.com/chainreactors/parsers"
+	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
+	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 
 const inputSource = "input"
 
-func buildSeedEvents(rawInputs []string, sink eventSink) []event {
-	return targetEvents(inputSource, buildSeedTargets(rawInputs, sink))
-}
-
-func buildSeedTargets(rawInputs []string, sink eventSink) []target {
+func buildSeedEvents(rawInputs []string, onError func(string)) []event {
 	var targets []target
 	for _, raw := range rawInputs {
 		raw = strings.TrimSpace(raw)
@@ -24,14 +25,14 @@ func buildSeedTargets(rawInputs []string, sink eventSink) []target {
 		}
 		parsed := seedTargetsFromInput(raw)
 		if len(parsed) == 0 {
-			if sink != nil {
-				sink.Observe(pipelineEvent{Action: pipelineEventAccept, Event: errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw))})
+			if onError != nil {
+				onError(raw)
 			}
 			continue
 		}
 		targets = append(targets, parsed...)
 	}
-	return targets
+	return targetEvents(inputSource, targets)
 }
 
 func seedTargetsFromInput(raw string) []target {
@@ -55,7 +56,7 @@ func seedTargetsFromInput(raw string) []target {
 	if host, port, ok := utils.SplitHostPort(raw); ok {
 		return seedTargetsFromHostPort(host, port, raw)
 	}
-	return seedTargetsFromHost(raw, raw)
+	return []target{newScanTarget(raw, raw, "")}
 }
 
 func targetEvents(source string, targets []target) []event {
@@ -103,17 +104,90 @@ func seedTargetsFromURL(raw string, parsed *url.URL) []target {
 	return targets
 }
 
-func seedTargetsFromHost(raw, host string) []target {
-	return []target{newScanTarget(raw, host, "")}
-}
-
 func seedTargetsFromHostPort(host, port, raw string) []target {
 	targets := []target{newScanTarget(raw, host, port)}
 	if utils.IsWebPort(port) {
-		targets = append(targets, newWebTarget(raw, webURLFromHostPort(host, port), ""))
+		targets = append(targets, newWebTarget(raw, utils.URLFromHostPort(webSchemeFromPort(port), host, port), ""))
 	}
 	if target, ok := zombieTargetFromHostPort(host, port, ""); ok {
 		targets = append(targets, newWeakpassTarget(raw, target))
 	}
 	return targets
+}
+
+func readInputs(inputs []string, listFile string) ([]string, error) {
+	var out []string
+	for _, input := range inputs {
+		input = strings.TrimSpace(input)
+		if input != "" {
+			out = append(out, input)
+		}
+	}
+	if listFile == "" {
+		return out, nil
+	}
+
+	f, err := os.Open(listFile)
+	if err != nil {
+		return nil, fmt.Errorf("open input list: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, scanner.Err()
+}
+
+func zombieTargetFromParsedURL(parsed *url.URL, serviceOverride string) (sdkzombie.Target, bool) {
+	if parsed == nil || parsed.Hostname() == "" {
+		return sdkzombie.Target{}, false
+	}
+	target := sdkzombie.Target{
+		IP:      parsed.Hostname(),
+		Port:    parsed.Port(),
+		Scheme:  parsed.Scheme,
+		Service: parsed.Scheme,
+	}
+	if service, ok := parsers.ZombieServiceFromName(parsed.Scheme); ok {
+		target.Service = service
+	}
+	if parsed.User != nil {
+		target.Username = parsed.User.Username()
+		target.Password, _ = parsed.User.Password()
+	}
+	return normalizeZombieTarget(target, serviceOverride)
+}
+
+func zombieTargetFromHostPort(host, port, serviceOverride string) (sdkzombie.Target, bool) {
+	service := zombiepkg.GetDefault(port)
+	return normalizeZombieTarget(sdkzombie.Target{
+		IP:      strings.TrimSpace(host),
+		Port:    strings.TrimSpace(port),
+		Service: service,
+		Scheme:  service,
+	}, serviceOverride)
+}
+
+func normalizeZombieTarget(target sdkzombie.Target, serviceOverride string) (sdkzombie.Target, bool) {
+	if serviceOverride != "" {
+		service := strings.ToLower(serviceOverride)
+		if mapped, ok := parsers.ZombieServiceFromName(service); ok {
+			service = mapped
+		}
+		target.Service = service
+		target.Scheme = target.Service
+	}
+	if target.Port == "" && target.Service != "" {
+		target.Port = zombiepkg.Services.DefaultPort(target.Service)
+	}
+	if target.Service == "" || target.Service == "unknown" {
+		return sdkzombie.Target{}, false
+	}
+	return target, true
 }

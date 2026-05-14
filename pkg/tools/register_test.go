@@ -3,8 +3,8 @@ package tools
 import (
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/tools/engines"
-	"github.com/chainreactors/aiscan/pkg/tools/resources"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/resources"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"
@@ -13,7 +13,7 @@ import (
 
 func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
 	reg := NewScannerRegistry()
-	engineSet := &engines.Set{
+	engineSet := &engine.Set{
 		Gogo:  gogo.NewEngine(nil),
 		Spray: spray.NewEngine(nil),
 	}
@@ -33,7 +33,7 @@ func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
 
 func TestRegisterAllRegistersCyberhubWhenResourcesAvailable(t *testing.T) {
 	reg := NewScannerRegistry()
-	engineSet := &engines.Set{
+	engineSet := &engine.Set{
 		Resources: &resources.Set{
 			FingersConfig: sdkfingers.NewConfig().WithFingers(fingerslib.Fingers{{Name: "nginx", Protocol: "http"}}),
 		},

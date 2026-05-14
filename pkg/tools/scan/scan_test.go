@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/tools/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
@@ -25,8 +26,21 @@ import (
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 )
 
+func newTestPipeline(ctx context.Context, caps []pipeline.Capability, coll *collector, debug bool) *pipeline.Pipeline {
+	observe, debugFn := wrapObserve(coll, debug)
+	return pipeline.New(ctx, pipeline.Config{
+		Capabilities: caps,
+		Observe:      observe,
+		Debug:        debugFn,
+	})
+}
+
+func testSeeds(events ...event) []pipeline.Event {
+	return seedsToEvents(events)
+}
+
 func TestScanRunsWithOnlySprayStage(t *testing.T) {
-	cmd := New(&engines.Set{Spray: spray.NewEngine(nil)})
+	cmd := New(&engine.Set{Spray: spray.NewEngine(nil)})
 	out, err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -67,7 +81,7 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 }
 
 func TestScanAcceptsBroadPOCFlag(t *testing.T) {
-	cmd := New(&engines.Set{Spray: spray.NewEngine(nil)})
+	cmd := New(&engine.Set{Spray: spray.NewEngine(nil)})
 	out, err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "full", "--broad-poc", "--timeout", "1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -167,7 +181,7 @@ func TestScanOptionsResolveWebStrategyFlags(t *testing.T) {
 
 func TestScanWarnsWhenDiscoveryFlagsCannotAffectGogoCapability(t *testing.T) {
 	var logBuf bytes.Buffer
-	cmd := New(&engines.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
+	cmd := New(&engine.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
 	profile := profile{Capabilities: capabilitySet(capGogoPortscan)}
 	caps := cmd.buildCapabilities(flags{}, scanOptions{Discovery: discoveryOptions{Ports: "top100", Explicit: true}}, profile)
 	if len(caps) != 0 {
@@ -180,7 +194,7 @@ func TestScanWarnsWhenDiscoveryFlagsCannotAffectGogoCapability(t *testing.T) {
 
 func TestScanWarnsWhenCredentialFlagsCannotAffectWeakpassCapability(t *testing.T) {
 	var logBuf bytes.Buffer
-	cmd := New(&engines.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
+	cmd := New(&engine.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
 	profile := profile{Capabilities: capabilitySet(capZombieWeakpass)}
 	caps := cmd.buildCapabilities(flags{}, scanOptions{Credentials: credentialOptions{Users: []string{"root"}}}, profile)
 	if len(caps) != 0 {
@@ -193,7 +207,7 @@ func TestScanWarnsWhenCredentialFlagsCannotAffectWeakpassCapability(t *testing.T
 
 func TestScanWarnsWhenWebFlagsCannotAffectSprayCapability(t *testing.T) {
 	var logBuf bytes.Buffer
-	cmd := New(&engines.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
+	cmd := New(&engine.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
 	profile := profile{Capabilities: capabilitySet(capSprayCommon)}
 	caps := cmd.buildCapabilities(flags{}, scanOptions{Web: webOptions{Dictionaries: []string{"paths.txt"}}}, profile)
 	if len(caps) != 0 {
@@ -205,7 +219,7 @@ func TestScanWarnsWhenWebFlagsCannotAffectSprayCapability(t *testing.T) {
 }
 
 func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
-	var got sprayCheckOptions
+	var got engine.SprayCheckOptions
 	web := webOptions{
 		Dictionaries: []string{"paths.txt"},
 		Rules:        []string{"rules.txt"},
@@ -213,8 +227,8 @@ func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
 		DefaultDict:  true,
 		Advance:      true,
 	}
-	cmd := &Command{engines: &engines.Set{Capacity: distributeCapacity(1000)}}
-	cap := sprayCapability(cmd, flags{SprayThreads: 7, Timeout: 9}, web, capSprayCommon, sprayCheckOptions{CommonPlugin: true}, func(_ context.Context, f flags, gotWeb webOptions, input target, source string, opts sprayCheckOptions, emit emitFunc) {
+	cmd := &Command{engines: &engine.Set{Capacity: distributeCapacity(1000)}}
+	cap := sprayCapability(cmd, flags{SprayThreads: 7, Timeout: 9}, web, capSprayCommon, engine.SprayCheckOptions{CommonPlugin: true}, func(_ context.Context, f flags, gotWeb webOptions, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
 		target, ok := input.(webTarget)
 		if !ok {
 			t.Fatalf("input = %#v, want webTarget", input)
@@ -232,8 +246,10 @@ func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
 	})
 
 	var emitted []event
-	cap.Run(context.Background(), targetEvent("test", "raw", newWebTarget("raw", "http://127.0.0.1", "")), func(event event) {
-		emitted = append(emitted, event)
+	cap.Run(context.Background(), targetEvent("test", "raw", newWebTarget("raw", "http://127.0.0.1", "")), func(pe pipeline.Event) {
+		if e, ok := pe.(event); ok {
+			emitted = append(emitted, e)
+		}
 	})
 
 	if !reflect.DeepEqual(got.Dictionaries, web.Dictionaries) || !reflect.DeepEqual(got.Rules, web.Rules) {
@@ -256,7 +272,7 @@ func TestApplyWebStrategyOptionsEnablesReconAndPreservesCapabilityDefaults(t *te
 		Rules:        []string{"rules.txt"},
 		Word:         "admin",
 	}
-	opts := applyWebStrategyOptions(flags{SprayThreads: 7, Timeout: 9}, web, sprayCheckOptions{DefaultDict: true, BakPlugin: true})
+	opts := applyWebStrategyOptions(flags{SprayThreads: 7, Timeout: 9}, web, engine.SprayCheckOptions{DefaultDict: true, BakPlugin: true})
 	if !opts.ReconPlugin || !opts.DefaultDict || !opts.BakPlugin {
 		t.Fatalf("spray options should preserve capability defaults and enable recon: %#v", opts)
 	}
@@ -272,7 +288,7 @@ func TestApplyWebStrategyOptionsEnablesReconAndPreservesCapabilityDefaults(t *te
 }
 
 func TestScanBuildCapabilitiesUsesCapacityDrivenWorkers(t *testing.T) {
-	cmd := New(&engines.Set{
+	cmd := New(&engine.Set{
 		Gogo:  sdkgogo.NewEngine(nil),
 		Spray: spray.NewEngine(nil),
 	})
@@ -315,7 +331,7 @@ func TestScanBuildCapabilitiesUsesCapacityDrivenWorkers(t *testing.T) {
 }
 
 func TestScanBuildCapabilitiesAdaptsToHighThread(t *testing.T) {
-	cmd := New(&engines.Set{
+	cmd := New(&engine.Set{
 		Gogo:  sdkgogo.NewEngine(nil),
 		Spray: spray.NewEngine(nil),
 	})
@@ -343,7 +359,7 @@ func TestScanBuildCapabilitiesAdaptsToHighThread(t *testing.T) {
 }
 
 func TestScanBuildCapabilitiesLowThreadCapsPerInvocation(t *testing.T) {
-	cmd := New(&engines.Set{
+	cmd := New(&engine.Set{
 		Gogo:  sdkgogo.NewEngine(nil),
 		Spray: spray.NewEngine(nil),
 	})
@@ -483,7 +499,7 @@ func TestScanBuildSeedTargetsFromBatchInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := countTargetKinds(buildSeedTargets(tt.inputs, nil))
+			got := countEventTargetKinds(buildSeedEvents(tt.inputs, nil))
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("seed target counts = %#v, want %#v", got, tt.want)
 			}
@@ -539,7 +555,7 @@ func TestScanTargetConstructorsNormalizeFields(t *testing.T) {
 }
 
 func TestPOCCapabilitySkipsUnfingerprintedTargetsByDefault(t *testing.T) {
-	cmd := New(&engines.Set{})
+	cmd := New(&engine.Set{})
 	var events []event
 	cmd.runPOCCapability(context.Background(), flags{}, newPOCTarget("", "http://127.0.0.1", nil), func(event event) {
 		events = append(events, event)
@@ -554,7 +570,7 @@ func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
 	engine := newScanTestNeutronEngine(t, scanTestTemplate("nginx-poc", "nginx"))
 	index := association.NewFingerPOCIndex()
 	index.BuildFromTemplates(engine.Get())
-	cmd := New(&engines.Set{Neutron: engine, Index: index})
+	cmd := New(&engine.Set{Neutron: engine, Index: index})
 
 	var events []event
 	cmd.runPOCCapability(context.Background(), flags{}, newPOCTarget("", "http://127.0.0.1", []string{"unknown"}), func(event event) {
@@ -567,12 +583,12 @@ func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
 }
 
 func TestSelectNeutronTemplatesRequiresFingerUnlessBroad(t *testing.T) {
-	selected, filtered := selectNeutronTemplates(nil, nil, neutronExecuteOptions{})
+	selected, filtered := engine.SelectNeutronTemplates(nil, nil, engine.NeutronExecuteOptions{})
 	if len(selected) != 0 || !filtered {
 		t.Fatalf("default selection = %#v filtered=%v, want empty filtered selection", selected, filtered)
 	}
 
-	selected, filtered = selectNeutronTemplates(nil, nil, neutronExecuteOptions{Broad: true})
+	selected, filtered = engine.SelectNeutronTemplates(nil, nil, engine.NeutronExecuteOptions{Broad: true})
 	if len(selected) != 0 || filtered {
 		t.Fatalf("broad selection = %#v filtered=%v, want unfiltered selection", selected, filtered)
 	}
@@ -584,7 +600,7 @@ func TestScanDerivesTargetsFromResults(t *testing.T) {
 	result.Protocol = "http"
 
 	var events []event
-	deriveServiceResult(profile, capGogoPortscan, serviceResult{Result: result}, func(event event) {
+	deriveServiceResult(profile, capGogoPortscan, result, func(event event) {
 		events = append(events, event)
 	})
 
@@ -597,32 +613,27 @@ func TestScanDerivesTargetsFromResults(t *testing.T) {
 }
 
 func TestScanPipelineDoesNotDispatchFindingOrError(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
+	coll := newCollector([]string{"seed"}, nil, false, false)
 	var runs int
-	capabilities := []capability{
-		{
-			Name:   "web",
-			Accept: acceptsTarget(targetWeb),
-			Worker: 1,
-			Run: func(context.Context, event, emitFunc) {
-				runs++
-			},
-		},
+	capabilities := []pipeline.Capability{
+		wrapCapability("web", acceptsTarget(targetWeb), 1, func(_ context.Context, _ event, _ func(event)) {
+			runs++
+		}),
 	}
-	pipeline := newPipeline(context.Background(), capabilities, projector, false)
-	pipeline.Run([]event{
+	p := newTestPipeline(context.Background(), capabilities, coll, false)
+	p.Run(testSeeds(
 		findingEvent("test", fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"nginx"}}),
 		errorEventOf("test", "boom"),
-	})
+	))
 
 	if runs != 0 {
 		t.Fatalf("capability runs = %d, want 0", runs)
 	}
-	if len(projector.data.fingerprints) != 1 {
-		t.Fatalf("fingerprints = %d, want 1", len(projector.data.fingerprints))
+	if len(coll.fingerprints) != 1 {
+		t.Fatalf("fingerprints = %d, want 1", len(coll.fingerprints))
 	}
-	if len(projector.data.errors) != 1 {
-		t.Fatalf("errors = %d, want 1", len(projector.data.errors))
+	if len(coll.errors) != 1 {
+		t.Fatalf("errors = %d, want 1", len(coll.errors))
 	}
 }
 
@@ -639,42 +650,37 @@ func TestFindingPriorityDefaults(t *testing.T) {
 }
 
 func TestScanPipelineDispatchesHighPriorityFindingToAgentVerifier(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
+	coll := newCollector([]string{"seed"}, nil, false, false)
 	var runs int
-	capabilities := []capability{
-		{
-			Name:   capAgentVerify,
-			Worker: 1,
-			Accept: func(e event) bool {
-				return e.Kind == eventFinding && e.Finding != nil && e.Finding.Kind() != findingVerification && e.Finding.Priority().atLeast(priorityHigh)
-			},
-			Run: func(_ context.Context, e event, emit emitFunc) {
-				runs++
-				emit(findingEvent(capAgentVerify, verificationFinding{
-					OriginalKey:      e.Finding.Key(),
-					OriginalKind:     e.Finding.Kind(),
-					OriginalPriority: e.Finding.Priority(),
-					Status:           verificationConfirmed,
-					Target:           findingTarget(e.Finding),
-					Summary:          "confirmed by test",
-				}))
-			},
-		},
+	capabilities := []pipeline.Capability{
+		wrapCapability(capAgentVerify, func(e event) bool {
+			return e.Kind == eventFinding && e.Finding != nil && e.Finding.Kind() != findingVerification && e.Finding.Priority().atLeast(priorityHigh)
+		}, 1, func(_ context.Context, e event, emit func(event)) {
+			runs++
+			emit(findingEvent(capAgentVerify, verificationFinding{
+				OriginalKey:      e.Finding.Key(),
+				OriginalKind:     e.Finding.Kind(),
+				OriginalPriority: e.Finding.Priority(),
+				Status:           verificationConfirmed,
+				Target:           findingTarget(e.Finding),
+				Summary:          "confirmed by test",
+			}))
+		}),
 	}
-	pipeline := newPipeline(context.Background(), capabilities, projector, false)
-	pipeline.Run([]event{
+	p := newTestPipeline(context.Background(), capabilities, coll, false)
+	p.Run(testSeeds(
 		findingEvent("test", fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"nginx"}}),
 		findingEvent("test", vulnFinding{Message: "[vuln] http://127.0.0.1 test high"}),
-	})
+	))
 
 	if runs != 1 {
 		t.Fatalf("verifier runs = %d, want 1", runs)
 	}
-	if len(projector.data.verifications) != 1 {
-		t.Fatalf("verifications = %d, want 1", len(projector.data.verifications))
+	if len(coll.verifications) != 1 {
+		t.Fatalf("verifications = %d, want 1", len(coll.verifications))
 	}
-	if projector.data.verifications[0].Finding.Status != verificationConfirmed {
-		t.Fatalf("verification status = %s, want %s", projector.data.verifications[0].Finding.Status, verificationConfirmed)
+	if coll.verifications[0].Finding.Status != verificationConfirmed {
+		t.Fatalf("verification status = %s, want %s", coll.verifications[0].Finding.Status, verificationConfirmed)
 	}
 }
 
@@ -687,22 +693,22 @@ func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 		}
 		return "status: confirmed\nsummary: direct evidence supports the vulnerability\nevidence: template matched", nil
 	}
-	cmd := New(&engines.Set{}, WithVerifyFunc(verifyFn), WithVerificationConfig(VerificationConfig{Model: "test-model"}))
+	cmd := New(&engine.Set{}, WithVerifyFunc(verifyFn), WithVerificationConfig(VerificationConfig{Model: "test-model"}))
 	flags := flags{Verify: "high", VerifyTimeout: 5}
 	cap, ok := cmd.agentVerifyCapability(flags)
 	if !ok {
 		t.Fatal("agent verifier capability was not built")
 	}
-	projector := newProjector([]string{"seed"}, projectorOptions{})
-	pipeline := newPipeline(context.Background(), []capability{cap}, projector, false)
-	pipeline.Run([]event{
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
+	p.Run(testSeeds(
 		findingEvent(capNeutronPOC, vulnFinding{Message: "[vuln] http://127.0.0.1 test high"}),
-	})
+	))
 
-	if len(projector.data.verifications) != 1 {
-		t.Fatalf("verifications = %d, want 1", len(projector.data.verifications))
+	if len(coll.verifications) != 1 {
+		t.Fatalf("verifications = %d, want 1", len(coll.verifications))
 	}
-	got := projector.data.verifications[0].Finding
+	got := coll.verifications[0].Finding
 	if got.Status != verificationConfirmed {
 		t.Fatalf("status = %s, want %s", got.Status, verificationConfirmed)
 	}
@@ -715,65 +721,55 @@ func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 }
 
 func TestScanPipelineFanoutAndDedup(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
+	coll := newCollector([]string{"seed"}, nil, false, false)
 	var mu sync.Mutex
 	seen := make([]string, 0)
 
-	capabilities := []capability{
-		{
-			Name:   "service-to-web",
-			Accept: acceptsTarget(targetService),
-			Worker: 1,
-			Run: func(_ context.Context, e event, emit emitFunc) {
-				mu.Lock()
-				seen = append(seen, "service-to-web")
-				mu.Unlock()
-				service, ok := e.Target.(serviceTarget)
-				if !ok || service.Result == nil {
-					return
-				}
-				emit(targetEvent("test", "", newWebTarget("", service.Result.GetBaseURL(), "")))
-			},
-		},
-		{
-			Name:   "web-to-finger",
-			Accept: acceptsTarget(targetWeb),
-			Worker: 1,
-			Run: func(_ context.Context, e event, emit emitFunc) {
-				mu.Lock()
-				seen = append(seen, "web-to-finger")
-				mu.Unlock()
-				web, ok := e.Target.(webTarget)
-				if !ok {
-					return
-				}
-				emit(findingEvent("test", fingerprintFinding{Target: web.URL, Fingers: []string{"nginx"}}))
-			},
-		},
+	capabilities := []pipeline.Capability{
+		wrapCapability("service-to-web", acceptsTarget(targetService), 1, func(_ context.Context, e event, emit func(event)) {
+			mu.Lock()
+			seen = append(seen, "service-to-web")
+			mu.Unlock()
+			service, ok := e.Target.(serviceTarget)
+			if !ok || service.Result == nil {
+				return
+			}
+			emit(targetEvent("test", "", newWebTarget("", service.Result.GetBaseURL(), "")))
+		}),
+		wrapCapability("web-to-finger", acceptsTarget(targetWeb), 1, func(_ context.Context, e event, emit func(event)) {
+			mu.Lock()
+			seen = append(seen, "web-to-finger")
+			mu.Unlock()
+			web, ok := e.Target.(webTarget)
+			if !ok {
+				return
+			}
+			emit(findingEvent("test", fingerprintFinding{Target: web.URL, Fingers: []string{"nginx"}}))
+		}),
 	}
 
-	pipeline := newPipeline(context.Background(), capabilities, projector, false)
+	p := newTestPipeline(context.Background(), capabilities, coll, false)
 	result := parsers.NewGOGOResult("127.0.0.1", "80")
 	result.Protocol = "http"
 	service := targetEvent("test", "", newServiceTarget("", result))
-	pipeline.Run([]event{service, service})
+	p.Run(testSeeds(service, service))
 
 	mu.Lock()
 	defer mu.Unlock()
 	if !reflect.DeepEqual(seen, []string{"service-to-web", "web-to-finger"}) {
 		t.Fatalf("seen capability runs = %#v", seen)
 	}
-	if len(projector.data.webEndpoints) != 1 {
-		t.Fatalf("web endpoints = %d, want 1", len(projector.data.webEndpoints))
+	if len(coll.webEndpoints) != 1 {
+		t.Fatalf("web endpoints = %d, want 1", len(coll.webEndpoints))
 	}
-	if len(projector.data.fingerprints) != 1 {
-		t.Fatalf("fingerprints = %d, want 1", len(projector.data.fingerprints))
+	if len(coll.fingerprints) != 1 {
+		t.Fatalf("fingerprints = %d, want 1", len(coll.fingerprints))
 	}
-	if len(projector.data.gogoResults) != 1 {
-		t.Fatalf("gogo results = %d, want 1", len(projector.data.gogoResults))
+	if len(coll.gogoResults) != 1 {
+		t.Fatalf("gogo results = %d, want 1", len(coll.gogoResults))
 	}
-	if len(projector.data.trace) != 0 {
-		t.Fatalf("trace entries = %d, want 0 without debug", len(projector.data.trace))
+	if len(coll.trace) != 0 {
+		t.Fatalf("trace entries = %d, want 0 without debug", len(coll.trace))
 	}
 }
 
@@ -821,11 +817,11 @@ func scanTestTemplate(id string, fingers ...string) *templates.Template {
 	}
 }
 
-func countTargetKinds(targets []target) map[targetKind]int {
+func countEventTargetKinds(events []event) map[targetKind]int {
 	counts := make(map[targetKind]int)
-	for _, target := range targets {
-		if target != nil {
-			counts[target.Kind()]++
+	for _, e := range events {
+		if e.Kind == eventTarget && e.Target != nil {
+			counts[e.Target.Kind()]++
 		}
 	}
 	return counts
@@ -841,23 +837,18 @@ func hasTargetKind(events []event, kind targetKind) bool {
 }
 
 func TestScanPipelineDebugTrace(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{Debug: true})
-	capabilities := []capability{
-		{
-			Name:   "noop",
-			Accept: acceptsTarget(targetWeb),
-			Worker: 1,
-			Run:    func(context.Context, event, emitFunc) {},
-		},
+	coll := newCollector([]string{"seed"}, nil, false, true)
+	capabilities := []pipeline.Capability{
+		wrapCapability("noop", acceptsTarget(targetWeb), 1, func(context.Context, event, func(event)) {}),
 	}
-	pipeline := newPipeline(context.Background(), capabilities, projector, true)
-	pipeline.Run([]event{targetEvent("test", "", newWebTarget("", "http://127.0.0.1", ""))})
+	p := newTestPipeline(context.Background(), capabilities, coll, true)
+	p.Run(testSeeds(targetEvent("test", "", newWebTarget("", "http://127.0.0.1", ""))))
 
-	if len(projector.data.trace) == 0 {
+	if len(coll.trace) == 0 {
 		t.Fatal("expected debug trace entries")
 	}
-	if !strings.Contains(strings.Join(projector.data.trace, "\n"), "dispatch") {
-		t.Fatalf("trace missing dispatch entry: %#v", projector.data.trace)
+	if !strings.Contains(strings.Join(coll.trace, "\n"), "dispatch") {
+		t.Fatalf("trace missing dispatch entry: %#v", coll.trace)
 	}
 }
 
@@ -867,22 +858,17 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 	done := make(chan struct{})
 	var once sync.Once
 
-	projector := newProjector([]string{"seed"}, projectorOptions{})
-	capabilities := []capability{
-		{
-			Name:   "wait",
-			Accept: acceptsTarget(targetWeb),
-			Worker: 1,
-			Run: func(ctx context.Context, _ event, _ emitFunc) {
-				once.Do(func() { close(started) })
-				<-ctx.Done()
-			},
-		},
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	capabilities := []pipeline.Capability{
+		wrapCapability("wait", acceptsTarget(targetWeb), 1, func(ctx context.Context, _ event, _ func(event)) {
+			once.Do(func() { close(started) })
+			<-ctx.Done()
+		}),
 	}
-	pipeline := newPipeline(ctx, capabilities, projector, false)
+	p := newTestPipeline(ctx, capabilities, coll, false)
 
 	go func() {
-		pipeline.Run([]event{targetEvent("test", "", newWebTarget("", "http://127.0.0.1", ""))})
+		p.Run(testSeeds(targetEvent("test", "", newWebTarget("", "http://127.0.0.1", ""))))
 		close(done)
 	}()
 
@@ -900,16 +886,16 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 }
 
 func TestScanSummaryJSONLines(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:   true,
 		UrlString: "http://127.0.0.1:80",
 		Status:    401,
 		Distance:  1,
 	}))})
 
-	out, err := projector.JSONLines()
+	out, err := coll.JSONLines()
 	if err != nil {
 		t.Fatalf("JSONLines() error = %v", err)
 	}
@@ -966,8 +952,8 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			projector := newProjector([]string{"seed"}, projectorOptions{Stream: &buf})
-			projector.Observe(pipelineEvent{
+			coll := newCollector([]string{"seed"}, &buf, false, false)
+			coll.Observe(pipelineEvent{
 				Action: pipelineEventAccept,
 				Event:  targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", tc.result)),
 			})
@@ -975,14 +961,11 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 			if got := buf.String(); got != "" {
 				t.Fatalf("stream output = %q, want empty", got)
 			}
-			if len(projector.data.sprayResults) != 0 {
-				t.Fatalf("spray results = %d, want 0", len(projector.data.sprayResults))
+			if len(coll.sprayResults) != 0 {
+				t.Fatalf("spray results = %d, want 0", len(coll.sprayResults))
 			}
 			var derived []event
-			deriveWebProbeResult(profile{AllowBroadPOC: true}, webProbeResult{
-				Source: "spray_check",
-				Result: tc.result,
-			}, func(event event) {
+			deriveWebProbeResult(profile{AllowBroadPOC: true}, "spray_check", tc.result, "", func(event event) {
 				derived = append(derived, event)
 			})
 			if len(derived) != 0 {
@@ -994,12 +977,12 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 
 func TestScanStreamsAcceptedResults(t *testing.T) {
 	var buf bytes.Buffer
-	projector := newProjector([]string{"seed"}, projectorOptions{Stream: &buf, StreamColor: true})
+	coll := newCollector([]string{"seed"}, &buf, true, false)
 	result := parsers.NewGOGOResult("127.0.0.1", "80")
 	result.Protocol = "http"
 	result.Status = "200"
 
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	raw := buf.String()
 	if !hasANSI(raw) {
@@ -1016,8 +999,8 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 
 func TestScanColorizesWebProbeFields(t *testing.T) {
 	var buf bytes.Buffer
-	projector := newProjector([]string{"seed"}, projectorOptions{Stream: &buf, StreamColor: true})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_backup", "", newWebProbeTarget("", "spray_backup", "", &parsers.SprayResult{
+	coll := newCollector([]string{"seed"}, &buf, true, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_backup", "", newWebProbeTarget("", "spray_backup", "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:32768/test.war",
 		Source:     parsers.BakSource,
@@ -1053,12 +1036,12 @@ func TestScanColorizesWebProbeFields(t *testing.T) {
 
 func TestScanStreamsWithoutColor(t *testing.T) {
 	var buf bytes.Buffer
-	projector := newProjector([]string{"seed"}, projectorOptions{Stream: &buf})
+	coll := newCollector([]string{"seed"}, &buf, false, false)
 	result := parsers.NewGOGOResult("127.0.0.1", "80")
 	result.Protocol = "http"
 	result.Status = "200"
 
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	out := buf.String()
 	if hasANSI(out) {
@@ -1074,14 +1057,14 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	projector := newProjector([]string{"seed"}, projectorOptions{Stream: writer})
+	coll := newCollector([]string{"seed"}, writer, false, false)
 	result := parsers.NewGOGOResult("127.0.0.1", "80")
 	result.Protocol = "http"
 	result.Status = "200"
 
 	observeDone := make(chan struct{})
 	go func() {
-		projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+		coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 		close(observeDone)
 	}()
 
@@ -1093,7 +1076,7 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 
 	jsonDone := make(chan struct{})
 	go func() {
-		if _, err := projector.JSONLines(); err != nil {
+		if _, err := coll.JSONLines(); err != nil {
 			t.Errorf("JSONLines() error = %v", err)
 		}
 		close(jsonDone)
@@ -1114,8 +1097,8 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 }
 
 func TestScanPlainTextStripsANSI(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:80",
 		Source:     parsers.CheckSource,
@@ -1123,9 +1106,9 @@ func TestScanPlainTextStripsANSI(t *testing.T) {
 		BodyLength: 12,
 		Distance:   1,
 	}))})
-	projector.Finish()
+	coll.Finish()
 
-	out := projector.PlainText()
+	out := coll.PlainText()
 	if hasANSI(out) {
 		t.Fatalf("plain text output contains ANSI: %q", out)
 	}
@@ -1138,7 +1121,7 @@ func TestScanPlainTextStripsANSI(t *testing.T) {
 }
 
 func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
-	cmd := New(&engines.Set{Spray: spray.NewEngine(nil)})
+	cmd := New(&engine.Set{Spray: spray.NewEngine(nil)})
 	file := filepath.Join(t.TempDir(), "scan.txt")
 	var stream bytes.Buffer
 
@@ -1188,16 +1171,16 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 }
 
 func TestScanReportMarkdown(t *testing.T) {
-	projector := newProjector([]string{"seed"}, projectorOptions{})
-	projector.Observe(pipelineEvent{Action: pipelineEventCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:   true,
 		UrlString: "http://127.0.0.1:80",
 		Status:    200,
 		Distance:  1,
 	}))})
-	projector.Observe(pipelineEvent{Action: pipelineEventAccept, Event: findingEvent(capAgentVerify, verificationFinding{
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: findingEvent(capAgentVerify, verificationFinding{
 		OriginalKey:      "vuln|1",
 		OriginalKind:     findingVuln,
 		OriginalPriority: priorityHigh,
@@ -1205,9 +1188,9 @@ func TestScanReportMarkdown(t *testing.T) {
 		Target:           "http://127.0.0.1",
 		Summary:          "confirmed by test",
 	})})
-	projector.Finish()
+	coll.Finish()
 
-	report := projector.ReportMarkdown()
+	report := coll.ReportMarkdown()
 	if hasANSI(report) {
 		t.Fatalf("report contains ANSI: %q", report)
 	}

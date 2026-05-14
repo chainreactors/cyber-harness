@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 	"github.com/chainreactors/parsers"
 )
 
-func (c *Command) agentVerifyCapability(flags flags) (capability, bool) {
+func (c *Command) agentVerifyCapability(flags flags) (pipeline.Capability, bool) {
 	minPriority, err := parsePriority(flags.Verify)
 	if err != nil {
 		minPriority = priorityHigh
@@ -18,31 +19,34 @@ func (c *Command) agentVerifyCapability(flags flags) (capability, bool) {
 	if workers <= 0 {
 		workers = 3
 	}
-	return capability{
-		Name:   capAgentVerify,
-		Worker: workers,
-		Accept: func(e event) bool {
-			if e.Kind != eventFinding || e.Finding == nil {
-				return false
-			}
-			if e.Finding.Kind() == findingVerification {
-				return false
-			}
-			return e.Finding.Priority().atLeast(minPriority)
-		},
-		RunKey: func(e event) string {
-			if e.Finding == nil {
-				return ""
-			}
-			return capAgentVerify + "|" + string(e.Finding.Kind()) + "|" + e.Finding.Key()
-		},
-		Run: func(ctx context.Context, e event, emit emitFunc) {
+	accept := func(e event) bool {
+		if e.Kind != eventFinding || e.Finding == nil {
+			return false
+		}
+		if e.Finding.Kind() == findingVerification {
+			return false
+		}
+		return e.Finding.Priority().atLeast(minPriority)
+	}
+	cap := wrapCapability(
+		capAgentVerify,
+		accept,
+		workers,
+		func(ctx context.Context, e event, emit func(event)) {
 			c.runAgentVerifyCapability(ctx, flags, e, emit)
 		},
-	}, true
+	)
+	cap.RunKey = func(pe pipeline.Event) string {
+		e, ok := pe.(event)
+		if !ok || e.Finding == nil {
+			return ""
+		}
+		return capAgentVerify + "|" + string(e.Finding.Kind()) + "|" + e.Finding.Key()
+	}
+	return cap, true
 }
 
-func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, event event, emit emitFunc) {
+func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, event event, emit func(event)) {
 	if c.verifyFunc == nil {
 		emit(findingEvent(capAgentVerify, verificationFinding{
 			OriginalKey:      findingKey(event.Finding),
@@ -69,7 +73,7 @@ func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, eve
 	prompt := buildVerificationPrompt(event)
 	systemPrompt := strings.TrimSpace(c.verification.SystemPrompt)
 	if systemPrompt == "" {
-		systemPrompt = defaultVerificationSystemPrompt()
+		systemPrompt = defaultVerifySystemPrompt
 	}
 
 	result, err := c.verifyFunc(verifyCtx, prompt, systemPrompt, model, 1200)
@@ -156,9 +160,7 @@ evidence: Fingerprint detection only; no vulnerability evidence provided.`,
 	)
 }
 
-func defaultVerificationSystemPrompt() string {
-	return `You are aiscan's verification reviewer. Validate only the supplied scanner finding and evidence. Do not invent external facts, do not request tools, and do not perform additional scanning. Mark confirmed only when the evidence directly supports the risk.`
-}
+const defaultVerifySystemPrompt = `You are aiscan's verification reviewer. Validate only the supplied scanner finding and evidence. Do not invent external facts, do not request tools, and do not perform additional scanning. Mark confirmed only when the evidence directly supports the risk.`
 
 func parseVerificationOutput(output string) (verificationStatus, string, string) {
 	output = strings.TrimSpace(output)

@@ -7,13 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chainreactors/aiscan/pkg/tools/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	goflags "github.com/jessevdk/go-flags"
 )
 
 type Command struct {
-	engines      *engines.Set
+	engines      *engine.Set
 	verification VerificationConfig
 	verifyFunc   VerifyFunc
 	logger       telemetry.Logger
@@ -49,8 +50,8 @@ type flags struct {
 	VerifyTimeout   int      `long:"verify-timeout" description:"Timeout in seconds per verification" default:"120"`
 }
 
-func New(engines *engines.Set, opts ...Option) *Command {
-	cmd := &Command{engines: engines, logger: telemetry.NopLogger()}
+func New(engineSet *engine.Set, opts ...Option) *Command {
+	cmd := &Command{engines: engineSet, logger: telemetry.NopLogger()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cmd)
@@ -157,36 +158,39 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		stream = nil
 	}
 
-	projector := newProjector(rawInputs, projectorOptions{
-		Debug:       flags.Debug,
-		Stream:      stream,
-		StreamColor: stream != nil && !flags.NoColor,
+	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, flags.Debug)
+	seeds := buildSeedEvents(rawInputs, func(raw string) {
+		coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw))})
 	})
-	seeds := buildSeedEvents(rawInputs, projector)
 	if len(seeds) == 0 {
 		return "", fmt.Errorf("scan: no valid inputs")
 	}
 
 	capabilities := c.buildCapabilities(flags, options, profile)
-	pipeline := newPipeline(ctx, capabilities, projector, flags.Debug)
-	pipeline.Run(seeds)
-	projector.Finish()
+	observe, debugFn := wrapObserve(coll, flags.Debug)
+	p := pipeline.New(ctx, pipeline.Config{
+		Capabilities: capabilities,
+		Observe:      observe,
+		Debug:        debugFn,
+	})
+	p.Run(seedsToEvents(seeds))
+	coll.Finish()
 
 	var out string
 	if flags.JSON {
-		out, err = projector.JSONLines()
+		out, err = coll.JSONLines()
 		if err != nil {
 			return "", fmt.Errorf("scan json output: %w", err)
 		}
 	} else if flags.Report {
-		out = projector.ReportMarkdown()
+		out = coll.ReportMarkdown()
 	} else {
-		out = projector.String()
+		out = coll.String()
 	}
 	if flags.OutputFile != "" {
 		fileOut := out
 		if !flags.JSON && !flags.Report {
-			fileOut = projector.PlainText()
+			fileOut = coll.PlainText()
 		}
 		if err := writeOutputFile(flags.OutputFile, fileOut); err != nil {
 			return "", err

@@ -8,9 +8,9 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tools/engines"
-	"github.com/chainreactors/aiscan/pkg/tools/resources"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/skills"
 	acpclient "github.com/chainreactors/ioa/client"
@@ -61,7 +61,7 @@ type App struct {
 	ProviderConfig   provider.ProviderConfig
 	VisionConfig     provider.ProviderConfig
 	Commands         *command.CommandRegistry
-	Engines          *engines.Set
+	Engines          *engine.Set
 	Skills           *skills.Store
 	SkillDiagnostics []skills.Diagnostic
 	ACPClient        acpclient.API
@@ -157,8 +157,8 @@ func initProvider(cfg provider.ProviderConfig, logger telemetry.Logger) (provide
 	return llmProvider, resolved, nil
 }
 
-func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger) *engines.Set {
-	engineSet, err := engines.InitWithOptions(ctx, resources.Options{
+func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger) *engine.Set {
+	engineSet, err := engine.InitWithOptions(ctx, resources.Options{
 		CyberhubURL: cfg.CyberhubURL,
 		APIKey:      cfg.CyberhubKey,
 		Mode:        cfg.CyberhubMode,
@@ -170,7 +170,7 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 	return engineSet
 }
 
-func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, visionCfg *provider.ProviderConfig, logger telemetry.Logger) *command.CommandRegistry {
+func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, visionCfg *provider.ProviderConfig, logger telemetry.Logger) *command.CommandRegistry {
 	cmdReg := command.NewRegistry()
 
 	workDir, _ := os.Getwd()

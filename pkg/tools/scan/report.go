@@ -11,7 +11,7 @@ import (
 	"github.com/chainreactors/parsers"
 )
 
-func formatSummary(d *scanData) string {
+func formatSummary(d *collector) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	stats := d.statsSnapshotLocked()
@@ -44,7 +44,7 @@ func formatSummary(d *scanData) string {
 	return sb.String()
 }
 
-func formatMarkdown(d *scanData) string {
+func formatMarkdown(d *collector) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	stats := d.statsSnapshotLocked()
@@ -156,7 +156,7 @@ func formatMarkdown(d *scanData) string {
 	return sb.String()
 }
 
-func formatJSONLines(d *scanData) (string, error) {
+func formatJSONLines(d *collector) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -180,7 +180,7 @@ func formatJSONLines(d *scanData) (string, error) {
 	return sb.String(), nil
 }
 
-func formatPlainText(d *scanData, fileLines []string) string {
+func formatPlainText(d *collector, fileLines []string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -193,7 +193,7 @@ func formatPlainText(d *scanData, fileLines []string) string {
 	return sb.String()
 }
 
-func summaryLine(d *scanData, stats statsSnapshot) string {
+func summaryLine(d *collector, stats statsSnapshot) string {
 	return fmt.Sprintf("[scan] completed %d %d %d %d %d %d %d %d %d %s\n",
 		stats.Inputs,
 		len(d.gogoResults),
@@ -226,7 +226,7 @@ func formatTraceEvent(event pipelineEvent) string {
 		parts = append(parts, event.Capability)
 	}
 	parts = append(parts, string(event.Event.label()))
-	if key := event.Event.key(); key != "" {
+	if key := event.Event.Key(); key != "" {
 		parts = append(parts, strconv.Quote(key))
 	}
 	if event.Event.Source != "" {
@@ -271,11 +271,43 @@ func formatTraceEvent(event pipelineEvent) string {
 }
 
 func writeMarkdownEventLine(sb *strings.Builder, event event) {
-	line := formatEventLine(event, outputOptions{})
+	line := formatEventLine(event, false)
 	if line == "" {
 		return
 	}
 	sb.WriteString("- ")
 	sb.WriteString(line)
 	sb.WriteString("\n")
+}
+
+func metricLine(name string, values map[string]int) string {
+	return fmt.Sprintf("[scan] metrics %s %s\n", name, joinCounts(values))
+}
+
+func sortedMapKeys(values map[string]int) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func joinCounts(values map[string]int) string {
+	keys := sortedMapKeys(values)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key, fmt.Sprintf("%d", values[key]))
+	}
+	return strings.Join(parts, " ")
+}
+
+func writeCountTable(sb *strings.Builder, label string, values map[string]int) {
+	sb.WriteString(fmt.Sprintf("| %s | Count |\n", label))
+	sb.WriteString("| --- | ---: |\n")
+	for _, key := range sortedMapKeys(values) {
+		sb.WriteString(fmt.Sprintf("| %s | %d |\n", key, values[key]))
+	}
 }

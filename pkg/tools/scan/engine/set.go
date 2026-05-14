@@ -1,9 +1,9 @@
-package engines
+package engine
 
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/pkg/tools/resources"
+	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"

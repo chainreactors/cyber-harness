@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	cyberhubcmd "github.com/chainreactors/aiscan/pkg/tools/cyberhub"
-	"github.com/chainreactors/aiscan/pkg/tools/engines"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	gogocmd "github.com/chainreactors/aiscan/pkg/tools/gogo"
 	neutroncmd "github.com/chainreactors/aiscan/pkg/tools/neutron"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -13,16 +13,16 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
-func RegisterAll(reg *ScannerRegistry, engineSet *engines.Set, opts ...scan.Option) error {
+func RegisterAll(reg *ScannerRegistry, engineSet *engine.Set, opts ...scan.Option) error {
 	return RegisterAllWithLogger(reg, engineSet, telemetry.NopLogger(), opts...)
 }
 
-func RegisterAllWithLogger(reg *ScannerRegistry, engineSet *engines.Set, logger telemetry.Logger, opts ...scan.Option) error {
+func RegisterAllWithLogger(reg *ScannerRegistry, engineSet *engine.Set, logger telemetry.Logger, opts ...scan.Option) error {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
 	if engineSet == nil {
-		engineSet = &engines.Set{}
+		engineSet = &engine.Set{}
 	}
 	if engineSet.Resources != nil {
 		reg.Register(cyberhubcmd.New(engineSet.Resources))

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 )
 
 func TestCleanupGogoTempFilesRemovesSockLock(t *testing.T) {
@@ -21,12 +23,12 @@ func TestCleanupGogoTempFilesRemovesSockLock(t *testing.T) {
 		}
 	}()
 
-	filename := filepath.Join(dir, gogoTempLogFile)
+	filename := filepath.Join(dir, engine.GogoTempLogFile)
 	if err := os.WriteFile(filename, []byte("temp"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	cleanupGogoTempFiles()
+	engine.CleanupGogoTempFiles()
 
 	if _, err := os.Stat(filename); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be removed, stat error = %v", filename, err)
@@ -48,5 +50,5 @@ func TestCleanupGogoTempFilesIgnoresMissingFile(t *testing.T) {
 		}
 	}()
 
-	cleanupGogoTempFiles()
+	engine.CleanupGogoTempFiles()
 }

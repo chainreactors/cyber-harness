@@ -2,7 +2,7 @@ package cyberhub
 
 import (
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/tools/resources"
+	"github.com/chainreactors/aiscan/pkg/resources"
 )
 
 func init() {
