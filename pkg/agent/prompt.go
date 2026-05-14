@@ -34,7 +34,7 @@ func BuildSystemPrompt(cfg *PromptConfig) string {
 	} else if cfg.ScannerAgentMode {
 		sb.WriteString(fmt.Sprintf(`You are aiscan's %s analysis agent. Execute the requested scanner command using the bash tool, analyze the results, and provide findings.
 
-You can use parse_results and filter_results tools for structured analysis of JSON scanner output — run scanners with -j flag to get JSON when you need structured data. Without a specific user intent, follow the %s skill guidelines to decide what analysis to perform.
+You can use parse_results and filter_results pseudo-commands via bash for structured analysis of JSON scanner output — run scanners with -j flag to get JSON when you need structured data. Without a specific user intent, follow the %s skill guidelines to decide what analysis to perform.
 
 `, cfg.ScannerName, cfg.ScannerName))
 	} else {
@@ -48,38 +48,21 @@ You can use parse_results and filter_results tools for structured analysis of JS
 		sb.WriteString(fmt.Sprintf("### %s\n%s\n\n", t.Name(), t.Description()))
 	}
 
-	if hasIOATools(tools) {
-		sb.WriteString(`## IOA Collaboration
-
-IOA tools provide shared message spaces for coordination with other nodes:
-- Use ioa_space to create or join a collaboration space and capture the returned space id.
-- Use ioa_send to publish structured findings, questions, or task updates.
-- Use ioa_read to read messages addressed to this node, or pass all=true when full space context is needed.
-
-`)
-	}
-
 	if cfg.ScannerDocs != "" {
-		sb.WriteString("## Scanner Commands (IMPORTANT: use the bash tool)\n\n")
-		sb.WriteString(`Scanner commands (scan, gogo, spray, zombie, neutron, cyberhub) are NOT system binaries — they are built into the bash tool.
+		sb.WriteString("## Pseudo-Commands (IMPORTANT: use the bash tool)\n\n")
+		sb.WriteString(`Pseudo-commands are NOT system binaries — they are built into the bash tool.
 
-**How to use them:** Call the bash tool and put the scanner command as the "command" parameter. The bash tool will intercept and execute it internally.
+**How to use them:** Call the bash tool and put the pseudo-command as the "command" parameter. The bash tool will intercept and execute it internally.
 
 **Correct example:**
 Tool call: bash
 Arguments: {"command": "scan -i 192.168.1.0/24 --mode quick"}
 
-**More examples:**
-- {"command": "gogo -i 10.0.0.0/24 -p top100"}
-- {"command": "spray -u http://target.com --finger"}
-- {"command": "zombie -i ssh://root@10.0.0.1:22 --top 3"}
-- {"command": "neutron -i http://target.com --finger apache"}
-
 **WRONG (do NOT do these):**
-- Do NOT call "scan" as a standalone tool — it does not exist as a separate tool.
-- Do NOT run "scan" as a shell command — it is not installed on the system.
+- Do NOT call pseudo-commands as standalone tools — they do not exist as separate tools.
+- Do NOT run them as shell commands — they are not installed on the system.
 
-Available scanner commands and their flags:
+Available pseudo-commands and their flags:
 
 `)
 		sb.WriteString(cfg.ScannerDocs)
@@ -103,7 +86,7 @@ The vision tool requires a local file path. If you need to analyze a remote imag
 		sb.WriteString(`## Scanner Agent Constraints
 
 - Execute the scanner command provided in the task via the bash tool.
-- For structured data processing, re-run the scanner with ` + "`-j`" + ` flag and use ` + "`parse_results`" + `/` + "`filter_results`" + ` tools.
+- For structured data processing, re-run the scanner with ` + "`-j`" + ` flag and use ` + "`parse_results`" + `/` + "`filter_results`" + ` pseudo-commands via bash.
 - Use conservative thread counts and timeouts.
 - When done, stop calling tools and provide your findings.
 `)
@@ -145,18 +128,3 @@ func hasVisionTool(tools *tool.ToolRegistry) bool {
 	return ok
 }
 
-func hasIOATools(tools *tool.ToolRegistry) bool {
-	if tools == nil {
-		return false
-	}
-	if _, ok := tools.Get("ioa_space"); ok {
-		return true
-	}
-	if _, ok := tools.Get("ioa_send"); ok {
-		return true
-	}
-	if _, ok := tools.Get("ioa_read"); ok {
-		return true
-	}
-	return false
-}

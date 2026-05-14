@@ -24,6 +24,7 @@ const (
 type CommandInterceptor interface {
 	Has(name string) bool
 	Execute(ctx context.Context, cmdLine string) (string, error)
+	Names() []string
 }
 
 type BashTool struct {
@@ -51,7 +52,10 @@ func (t *BashTool) Name() string { return "bash" }
 func (t *BashTool) Description() string {
 	desc := "Execute a shell command and return its output."
 	if t.interceptor != nil {
-		desc += " IMPORTANT: This tool also handles scanner commands (scan, gogo, spray, zombie, neutron, cyberhub). Pass them as the command parameter — e.g. {\"command\": \"scan -i 10.0.0.1 --mode quick\"}. These are NOT system binaries; they only work through this bash tool."
+		names := t.interceptor.Names()
+		if len(names) > 0 {
+			desc += " IMPORTANT: This tool also handles pseudo-commands (" + strings.Join(names, ", ") + "). Pass them as the command parameter — e.g. {\"command\": \"scan -i 10.0.0.1 --mode quick\"}. These are NOT system binaries; they only work through this bash tool."
+		}
 	}
 	return desc
 }
@@ -80,7 +84,7 @@ func (t *BashTool) Definition() provider.ToolDefinition {
 				"properties": map[string]any{
 					"command": map[string]any{
 						"type":        "string",
-						"description": "The command to execute. For shell commands: any valid sh command. For scanner commands: pass the scanner command directly here (e.g. 'scan -i 192.168.1.0/24 --mode quick', 'gogo -i 10.0.0.0/24 -p top100', 'spray -u http://target --finger'). Scanner commands (scan, gogo, spray, zombie, neutron, cyberhub) are built into this tool — do NOT try to run them as standalone tools or system binaries.",
+						"description": "The command to execute. For shell commands: any valid sh command. For pseudo-commands: pass them directly here (e.g. 'scan -i 192.168.1.0/24 --mode quick', 'gogo -i 10.0.0.0/24 -p top100', 'spray -u http://target --finger'). Pseudo-commands are built into this tool — do NOT try to run them as standalone tools or system binaries.",
 					},
 					"background": map[string]any{
 						"type":        "boolean",

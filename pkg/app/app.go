@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/scanner"
 	"github.com/chainreactors/aiscan/pkg/scanner/engines"
 	"github.com/chainreactors/aiscan/pkg/scanner/resources"
 	"github.com/chainreactors/aiscan/pkg/scanner/scan"
@@ -61,7 +61,7 @@ type App struct {
 	Provider         provider.Provider
 	ProviderConfig   provider.ProviderConfig
 	VisionConfig     provider.ProviderConfig
-	Scanner          *scanner.ScannerRegistry
+	Commands         *command.CommandRegistry
 	Engines          *engines.Set
 	Tools            *tool.ToolRegistry
 	Skills           *skills.Store
@@ -94,7 +94,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 
-	app.Scanner, app.Engines = initScannerRegistry(ctx, cfg.Scanner, app.Provider, app.ProviderConfig.Model, logger)
+	app.Engines = initEngines(ctx, cfg.Scanner, logger)
+	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, app.Provider, app.ProviderConfig.Model, logger)
 
 	var visionCfg *provider.ProviderConfig
 	if cfg.Tools.Enabled && cfg.Tools.VisionEnabled && cfg.Vision.Enabled {
@@ -113,7 +114,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	if cfg.Tools.Enabled {
-		app.Tools = initToolRegistry(cfg.Tools, app.Skills, app.Scanner, app.Engines, visionCfg)
+		app.Tools = initToolRegistry(cfg.Tools, app.Skills, app.Commands, app.Engines, visionCfg)
 	}
 
 	if cfg.ACP != nil {
@@ -155,8 +156,7 @@ func initProvider(cfg provider.ProviderConfig, logger telemetry.Logger) (provide
 	return llmProvider, resolved, nil
 }
 
-func initScannerRegistry(ctx context.Context, cfg ScannerConfig, llmProvider provider.Provider, model string, logger telemetry.Logger) (*scanner.ScannerRegistry, *engines.Set) {
-	scannerReg := scanner.NewScannerRegistry()
+func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger) *engines.Set {
 	engineSet, err := engines.InitWithOptions(ctx, resources.Options{
 		CyberhubURL: cfg.CyberhubURL,
 		APIKey:      cfg.CyberhubKey,
@@ -164,12 +164,18 @@ func initScannerRegistry(ctx context.Context, cfg ScannerConfig, llmProvider pro
 	}, logger)
 	if err != nil {
 		logger.Warnf("scanner engines init error=%q action=continue_without_scanners", err)
-		return scannerReg, nil
+		return nil
 	}
-	var opts []scan.Option
+	return engineSet
+}
+
+func initCommandRegistry(engineSet *engines.Set, cfg ScannerConfig, llmProvider provider.Provider, model string, logger telemetry.Logger) *command.CommandRegistry {
+	cmdReg := command.NewRegistry()
+
+	var scanOpts []any
 	if cfg.VerificationEnabled && llmProvider != nil {
 		p := llmProvider
-		opts = append(opts, scan.WithVerifyFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+		scanOpts = append(scanOpts, scan.WithVerifyFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
 			return agent.Run(ctx, prompt, tool.NewToolRegistry(),
 				agent.WithProvider(p),
 				agent.WithModel(model),
@@ -178,14 +184,29 @@ func initScannerRegistry(ctx context.Context, cfg ScannerConfig, llmProvider pro
 				agent.WithLogger(telemetry.NopLogger()),
 			)
 		}))
-		opts = append(opts, scan.WithVerificationConfig(scanVerificationConfig(cfg, model)))
+		scanOpts = append(scanOpts, scan.WithVerificationConfig(scanVerificationConfig(cfg, model)))
 	}
-	opts = append(opts, scan.WithLogger(logger))
-	scanner.RegisterAllWithLogger(scannerReg, engineSet, logger, opts...)
-	return scannerReg, engineSet
+	scanOpts = append(scanOpts, scan.WithLogger(logger))
+
+	deps := &command.Deps{
+		EngineSet: engineSet,
+		ScanOpts:  scanOpts,
+		Logger:    logger,
+		Model:     model,
+	}
+	if engineSet != nil {
+		deps.Resources = engineSet.Resources
+	}
+
+	for _, gc := range command.BuildAll(deps) {
+		cmdReg.Register(gc.Cmd, gc.Group)
+	}
+
+	logger.Infof("commands=%s", fmt.Sprintf("%v", cmdReg.Names()))
+	return cmdReg
 }
 
-func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, scannerReg *scanner.ScannerRegistry, engineSet *engines.Set, providerCfg *provider.ProviderConfig) *tool.ToolRegistry {
+func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, cmdReg *command.CommandRegistry, engineSet *engines.Set, providerCfg *provider.ProviderConfig) *tool.ToolRegistry {
 	workDir, _ := os.Getwd()
 	timeout := cfg.BashTimeout
 	if timeout <= 0 {
@@ -195,7 +216,7 @@ func initToolRegistry(cfg ToolConfig, skillStore *skills.Store, scannerReg *scan
 	toolReg.Register(tool.NewReadTool(workDir, skillStore))
 	toolReg.Register(tool.NewWriteTool(workDir))
 	toolReg.Register(tool.NewGlobTool(workDir))
-	toolReg.Register(tool.NewBashTool(workDir, timeout, scannerReg))
+	toolReg.Register(tool.NewBashTool(workDir, timeout, cmdReg))
 	toolReg.Register(tool.NewWebSearchTool())
 	toolReg.Register(tool.NewWebFetchTool())
 	if engineSet != nil && engineSet.Resources != nil {
@@ -216,12 +237,17 @@ func (a *App) InitACP(ctx context.Context, cfg ACPConfig) error {
 	if streamClient, ok := client.(acpclient.StreamAPI); ok {
 		a.ACPStreamClient = streamClient
 	}
-	if cfg.RegisterTools && a.Tools != nil {
-		for _, t := range acpclient.NewTools(client, acpclient.ToolOptions{NodeName: cfg.NodeName, NodeMeta: cfg.NodeMeta}) {
-			a.Tools.Register(t)
+	if cfg.RegisterTools && a.Commands != nil {
+		deps := &command.Deps{
+			ACPClient: client,
+			NodeName:  cfg.NodeName,
+			NodeMeta:  cfg.NodeMeta,
+		}
+		for _, cmd := range command.BuildGroup("ioa", deps) {
+			a.Commands.Register(cmd, "ioa")
 		}
 	}
-	if cfg.AutoRegister && client.NodeID() == "" {
+	if cfg.AutoRegister && client != nil && client.NodeID() == "" {
 		_, err := client.RegisterNode(ctx, cfg.NodeName, cfg.NodeMeta)
 		if err != nil {
 			return err

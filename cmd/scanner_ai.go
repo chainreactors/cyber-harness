@@ -12,7 +12,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tool"
-	"github.com/chainreactors/aiscan/pkg/tool/results"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -25,9 +24,6 @@ func runScannerAgentMode(ctx context.Context, option *Option, application *app.A
 	if toolReg == nil {
 		toolReg = tool.NewToolRegistry()
 	}
-	for _, t := range results.NewTools() {
-		toolReg.Register(t)
-	}
 
 	command := scannerArgs[0]
 	intent, err := resolveScannerAIIntent(option, application.Skills, command)
@@ -38,7 +34,7 @@ func runScannerAgentMode(ctx context.Context, option *Option, application *app.A
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
 		Tools:            toolReg,
-		ScannerDocs:      application.Scanner.UsageDocs(),
+		ScannerDocs:      application.Commands.UsageDocs(),
 		Skills:           application.Skills.Skills,
 		ScannerAgentMode: true,
 		ScannerName:      command,

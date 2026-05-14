@@ -55,7 +55,7 @@ func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logge
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
 		Tools:       application.Tools,
-		ScannerDocs: application.Scanner.UsageDocs(),
+		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
 	logger.Debugf("system prompt length: %d chars", len(systemPrompt))
@@ -127,7 +127,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 	defer application.Close()
 	applyResolvedProviderOptions(option, application.ProviderConfig)
 
-	if !application.Scanner.Has(scannerArgs[0]) {
+	if !application.Commands.Has(scannerArgs[0]) {
 		return fmt.Errorf("unknown subcommand: %s", scannerArgs[0])
 	}
 	if option.AI && scannerArgs[0] != "scan" {
@@ -140,7 +140,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 	if shouldStreamScannerOutput(scannerArgs) {
 		stream = os.Stdout
 	}
-	out, err := application.Scanner.ExecuteArgsStreaming(ctx, scannerArgs, stream)
+	out, err := application.Commands.ExecuteArgsStreaming(ctx, scannerArgs, stream)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
 		Tools:       application.Tools,
-		ScannerDocs: application.Scanner.UsageDocs(),
+		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
 	})
 
