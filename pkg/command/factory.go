@@ -4,10 +4,14 @@ import "sync"
 
 type Factory struct {
 	Group string
-	Build func(deps *Deps) []PseudoCommand
+	Build func(deps *Deps, reg *CommandRegistry)
 }
 
 type Deps struct {
+	WorkDir     string
+	BashTimeout int
+	SkillStore  any
+
 	EngineSet any
 	Resources any
 	ACPClient any
@@ -30,39 +34,27 @@ func RegisterFactory(f Factory) {
 	factories = append(factories, f)
 }
 
-type GroupedCommand struct {
-	Cmd   PseudoCommand
-	Group string
-}
-
-func BuildAll(deps *Deps) []GroupedCommand {
+func BuildAll(deps *Deps, reg *CommandRegistry) {
 	factoryMu.Lock()
 	snapshot := make([]Factory, len(factories))
 	copy(snapshot, factories)
 	factoryMu.Unlock()
 
-	var result []GroupedCommand
 	for _, f := range snapshot {
-		cmds := f.Build(deps)
-		for _, cmd := range cmds {
-			result = append(result, GroupedCommand{Cmd: cmd, Group: f.Group})
-		}
+		f.Build(deps, reg)
 	}
-	return result
 }
 
-func BuildGroup(group string, deps *Deps) []PseudoCommand {
+func BuildGroup(group string, deps *Deps, reg *CommandRegistry) {
 	factoryMu.Lock()
 	snapshot := make([]Factory, len(factories))
 	copy(snapshot, factories)
 	factoryMu.Unlock()
 
-	var result []PseudoCommand
 	for _, f := range snapshot {
 		if f.Group != group {
 			continue
 		}
-		result = append(result, f.Build(deps)...)
+		f.Build(deps, reg)
 	}
-	return result
 }

@@ -8,12 +8,14 @@ import (
 func init() {
 	command.RegisterFactory(command.Factory{
 		Group: "ioa",
-		Build: func(deps *command.Deps) []command.PseudoCommand {
+		Build: func(deps *command.Deps, reg *command.CommandRegistry) {
 			client, _ := deps.ACPClient.(acpclient.API)
 			if client == nil {
-				return nil
+				return
 			}
-			return NewCommands(client, deps.NodeName, deps.NodeMeta)
+			for _, cmd := range NewCommands(client, deps.NodeName, deps.NodeMeta) {
+				reg.Register(cmd, "ioa")
+			}
 		},
 	})
 }

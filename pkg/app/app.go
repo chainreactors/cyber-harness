@@ -150,6 +150,8 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, logger telemetry.Logger) *command.CommandRegistry {
 	cmdReg := command.NewRegistry()
 
+	workDir, _ := os.Getwd()
+
 	var scanOpts []any
 	if scanCfg.VerificationEnabled && llmProvider != nil {
 		p := llmProvider
@@ -167,28 +169,19 @@ func initCommandRegistry(engineSet *engines.Set, scanCfg ScannerConfig, toolCfg 
 	scanOpts = append(scanOpts, scan.WithLogger(logger))
 
 	deps := &command.Deps{
-		EngineSet: engineSet,
-		ScanOpts:  scanOpts,
-		Logger:    logger,
-		Model:     model,
+		WorkDir:     workDir,
+		BashTimeout: toolCfg.BashTimeout,
+		SkillStore:  skillStore,
+		EngineSet:   engineSet,
+		ScanOpts:    scanOpts,
+		Logger:      logger,
+		Model:       model,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources
 	}
 
-	for _, gc := range command.BuildAll(deps) {
-		cmdReg.Register(gc.Cmd, gc.Group)
-	}
-
-	workDir, _ := os.Getwd()
-	timeout := toolCfg.BashTimeout
-	if timeout <= 0 {
-		timeout = 300
-	}
-	cmdReg.RegisterTool(command.NewReadTool(workDir, skillStore))
-	cmdReg.RegisterTool(command.NewWriteTool(workDir))
-	cmdReg.RegisterTool(command.NewGlobTool(workDir))
-	cmdReg.RegisterTool(command.NewBashTool(workDir, timeout, cmdReg))
+	command.BuildAll(deps, cmdReg)
 
 	logger.Infof("commands=%s", fmt.Sprintf("%v", cmdReg.Names()))
 	return cmdReg
@@ -209,9 +202,7 @@ func (a *App) InitACP(ctx context.Context, cfg ACPConfig) error {
 			NodeName:  cfg.NodeName,
 			NodeMeta:  cfg.NodeMeta,
 		}
-		for _, cmd := range command.BuildGroup("ioa", deps) {
-			a.Commands.Register(cmd, "ioa")
-		}
+		command.BuildGroup("ioa", deps, a.Commands)
 	}
 	if cfg.AutoRegister && client != nil && client.NodeID() == "" {
 		_, err := client.RegisterNode(ctx, cfg.NodeName, cfg.NodeMeta)
