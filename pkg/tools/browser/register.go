@@ -1,3 +1,5 @@
+//go:build browser
+
 package browser
 
 import "github.com/chainreactors/aiscan/pkg/command"

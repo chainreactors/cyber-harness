@@ -1,3 +1,5 @@
+//go:build browser
+
 package browser
 
 import (

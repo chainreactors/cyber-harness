@@ -1,7 +1,6 @@
 run:
   timeout: 5m
-  build-tags:
-    - generated_templates
+  build-tags: []
   modules-download-mode: readonly
 
 linters:

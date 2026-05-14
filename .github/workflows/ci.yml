@@ -134,20 +134,12 @@ jobs:
           cache: true
 
       - name: Run go generate for templates
-        run: go generate ./pkg/tools/resources/...
+        run: go generate ./pkg/resources/...
 
-      - name: Verify generated file has build tag
-        run: |
-          if ! head -5 pkg/tools/resources/template.go | grep -q 'generated_templates'; then
-            echo "::error::Generated template.go missing //go:build generated_templates tag"
-            exit 1
-          fi
-
-      - name: Run generated_templates tests
+      - name: Run resources tests
         run: |
           go test -race -count=1 -timeout 5m \
-            -tags generated_templates \
-            ./pkg/tools/resources/...
+            ./pkg/resources/...
 
   # ── E2E tests (depends on test) ───────────────────────────────
 
