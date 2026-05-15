@@ -96,8 +96,8 @@ Options:
       --verify      LLM verification mode: off, low, medium, high, critical (default: off)
       --verify-timeout  Timeout seconds per verification (default: 120)
 Profiles:
-  quick: gogo -p all -v, spray check/finger/common/crawl/bak/active with recon, weakpass, fingerprint-based POC
-  full: quick plus gogo -p - and spray_brute default dictionary
+  quick: gogo -p all -e -v, spray check/finger/common/crawl(depth=1)/bak/active with recon, weakpass, fingerprint-based POC
+  full: quick plus gogo -p -, crawl depth=2, and spray_brute default dictionary
 Flow:
   input targets -> capability queues -> emitted events -> downstream capabilities
 Examples:

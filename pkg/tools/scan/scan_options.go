@@ -9,6 +9,7 @@ const (
 	scanQuickDefaultPorts = "all"
 	scanFullDefaultPorts  = "-"
 	scanGogoVersionLevel  = 1
+	scanGogoExploitMode   = "auto"
 )
 
 type scanOptions struct {
@@ -22,6 +23,7 @@ type discoveryOptions struct {
 	Threads  int
 	Timeout  int
 	Version  int
+	Exploit  string
 	Explicit bool
 }
 
@@ -53,6 +55,7 @@ func resolveScanOptions(flags flags) scanOptions {
 			Threads:  flags.Threads,
 			Timeout:  flags.Timeout,
 			Version:  scanGogoVersionLevel,
+			Exploit:  scanGogoExploitMode,
 			Explicit: explicitDiscovery,
 		},
 		Web: webOptions{

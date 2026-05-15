@@ -60,6 +60,9 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 			t.Fatalf("quick profile missing %s", name)
 		}
 	}
+	if quick.CrawlDepth != 1 {
+		t.Fatalf("quick crawl depth = %d, want 1", quick.CrawlDepth)
+	}
 	for _, name := range []string{capSprayBrute} {
 		if quick.Enabled(name) {
 			t.Fatalf("quick profile should not enable %s", name)
@@ -74,6 +77,9 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 		if !full.Enabled(name) {
 			t.Fatalf("full profile missing %s", name)
 		}
+	}
+	if full.CrawlDepth != 2 {
+		t.Fatalf("full crawl depth = %d, want 2", full.CrawlDepth)
 	}
 	if full.AllowBroadPOC {
 		t.Fatal("full profile should not run broad POC checks without --broad-poc")
@@ -115,12 +121,12 @@ func TestScanOptionsResolveCredentialFlags(t *testing.T) {
 
 func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 	opts := resolveScanOptions(flags{Mode: scanModeQuick})
-	if opts.Discovery.Ports != scanQuickDefaultPorts || opts.Discovery.Version != scanGogoVersionLevel || opts.hasDiscoveryOverrides() {
+	if opts.Discovery.Ports != scanQuickDefaultPorts || opts.Discovery.Version != scanGogoVersionLevel || opts.Discovery.Exploit != scanGogoExploitMode || opts.hasDiscoveryOverrides() {
 		t.Fatalf("quick discovery defaults = %#v", opts.Discovery)
 	}
 
 	opts = resolveScanOptions(flags{Mode: scanModeFull})
-	if opts.Discovery.Ports != scanFullDefaultPorts || opts.Discovery.Version != scanGogoVersionLevel || opts.hasDiscoveryOverrides() {
+	if opts.Discovery.Ports != scanFullDefaultPorts || opts.Discovery.Version != scanGogoVersionLevel || opts.Discovery.Exploit != scanGogoExploitMode || opts.hasDiscoveryOverrides() {
 		t.Fatalf("full discovery defaults = %#v", opts.Discovery)
 	}
 

@@ -18,6 +18,7 @@ type GogoScanOptions struct {
 	Threads      int
 	Timeout      int
 	VersionLevel int
+	Exploit      string
 }
 
 func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanOptions) (<-chan *parsers.GOGOResult, error) {
@@ -25,18 +26,11 @@ func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanO
 		return nil, fmt.Errorf("gogo engine is not available")
 	}
 	CleanupGogoTempFiles()
-	runOpt := *gogopkg.DefaultRunnerOption
-	if opts.Timeout > 0 {
-		runOpt.Delay = opts.Timeout
-		runOpt.HttpsDelay = opts.Timeout
-	}
-	if opts.VersionLevel > 0 {
-		runOpt.VersionLevel = opts.VersionLevel
-	}
+	runOpt := buildGogoRunnerOption(opts)
 	gogoCtx := gogo.NewContext().
 		WithContext(ctx).
 		SetThreads(opts.Threads).
-		SetOption(&runOpt)
+		SetOption(runOpt)
 	resultCh, err := engine.ScanStream(gogoCtx, opts.Target, opts.Ports)
 	if err != nil {
 		CleanupGogoTempFiles()
@@ -56,6 +50,21 @@ func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanO
 		}
 	}()
 	return out, nil
+}
+
+func buildGogoRunnerOption(opts GogoScanOptions) *gogopkg.RunnerOption {
+	runOpt := *gogopkg.DefaultRunnerOption
+	if opts.Timeout > 0 {
+		runOpt.Delay = opts.Timeout
+		runOpt.HttpsDelay = opts.Timeout
+	}
+	if opts.VersionLevel > 0 {
+		runOpt.VersionLevel = opts.VersionLevel
+	}
+	if opts.Exploit != "" {
+		runOpt.Exploit = opts.Exploit
+	}
+	return &runOpt
 }
 
 func CleanupGogoTempFiles() {

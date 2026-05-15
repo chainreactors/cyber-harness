@@ -27,6 +27,7 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 		Threads:      discovery.Threads,
 		Timeout:      discovery.Timeout,
 		VersionLevel: discovery.Version,
+		Exploit:      discovery.Exploit,
 	})
 	if err != nil {
 		emitError(emit, capGogoPortscan, "gogo %s: %v", target.Target, err)
