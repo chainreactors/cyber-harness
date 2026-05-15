@@ -10,7 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/loop"
+	"github.com/chainreactors/aiscan/pkg/swarm"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -209,24 +209,46 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	if streamClient == nil {
 		return fmt.Errorf("loop requires streaming IOA client")
 	}
-	runner := loop.New(loop.Config{
-		Client:            streamClient,
-		Provider:          application.Provider,
-		Tools:             application.Commands,
-		SystemPrompt:      systemPrompt,
-		Model:             option.Model,
-		Stream:            true,
-		NodeName:          defaultIOANodeName(option),
-		SpaceName:         option.Space,
-		SpaceDescription:  "aiscan loop worker",
-		PollInterval:      2 * time.Second,
-		HeartbeatInterval: time.Duration(option.Heartbeat) * time.Minute,
-		Prompt:            rawPrompt,
-		Intent:            intent,
-		Skills:            option.Skills,
-		Logger:            logger,
+
+	taskHandler := func(ctx context.Context, task swarm.Task) (string, error) {
+		return agent.Run(ctx, task.Content, application.Commands,
+			agent.WithProvider(application.Provider),
+			agent.WithSystemPrompt(systemPrompt),
+			agent.WithModel(option.Model),
+			agent.WithStream(true),
+			agent.WithLogger(logger),
+		)
+	}
+
+	var heartbeatFunc swarm.HeartbeatFunc
+	if option.Heartbeat > 0 {
+		heartbeatFunc = func(ctx context.Context, prompt string) (string, error) {
+			return agent.Run(ctx, prompt, application.Commands,
+				agent.WithProvider(application.Provider),
+				agent.WithSystemPrompt(systemPrompt),
+				agent.WithModel(option.Model),
+				agent.WithStream(true),
+				agent.WithLogger(logger),
+			)
+		}
+	}
+
+	node := swarm.NewNode(swarm.NodeConfig{
+		Client:                streamClient,
+		NodeName:              defaultIOANodeName(option),
+		SpaceName:             option.Space,
+		SpaceDescription:      "aiscan loop worker",
+		PollInterval:          2 * time.Second,
+		HeartbeatInterval:     time.Duration(option.Heartbeat) * time.Minute,
+		HeartbeatContextLimit: 50,
+		Prompt:                rawPrompt,
+		Intent:                intent,
+		Skills:                option.Skills,
+		OnTask:                taskHandler,
+		OnHeartbeat:           heartbeatFunc,
+		Logger:                logger,
 	})
-	return runner.Run(ctx)
+	return node.Run(ctx)
 }
 
 func runIOAServe(ctx context.Context, option *Option, logger telemetry.Logger) error {

@@ -1,33 +1,17 @@
-// Package protocol defines L2 application-layer message patterns on top of IOA.
-//
-// Swarm is a distributed agent coordination protocol. A coordinator
-// (Human/Claude) and N heterogeneous agents share a single IOA Space
-// (the "swarm"). Messages carry natural-language content with optional
-// structured targets. IOA refs handle all routing and threading:
-//
-//   - Root message (no refs.messages) = task/instruction
-//   - Reply (refs.messages=[task_id]) = report/response
-//   - refs.nodes = routing (directed or broadcast)
-package protocol
+package swarm
 
-import "encoding/json"
+import (
+	"encoding/json"
 
-// SwarmMessage is the single schema for all messages in a Swarm Space.
-// Semantics come from IOA refs and sender, not from message fields:
-//
-//   - Coordinator sends root message with targets + content → task
-//   - Agent sends reply referencing a task → report
-//   - Meta carries sender self-description (IP, capabilities, network)
-//
-// All fields except Content are optional.
+	"github.com/chainreactors/ioa"
+)
+
 type SwarmMessage struct {
 	Content string         `json:"content"`
 	Targets []string       `json:"targets,omitempty"`
 	Meta    map[string]any `json:"meta,omitempty"`
 }
 
-// SwarmSchema returns the JSON Schema for SwarmMessage, suitable for
-// IOA content_schema validation on the Space.
 func SwarmSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -44,7 +28,6 @@ func SwarmSchema() map[string]any {
 	}
 }
 
-// ParseSwarm attempts to parse a raw IOA content map into a SwarmMessage.
 func ParseSwarm(content map[string]any) (SwarmMessage, bool) {
 	c, ok := content["content"].(string)
 	if !ok || c == "" {
@@ -62,8 +45,6 @@ func ParseSwarm(content map[string]any) (SwarmMessage, bool) {
 	return msg, true
 }
 
-// ParseLegacyTask converts the old {"type":"task","task":"..."} format
-// into a SwarmMessage for backward compatibility.
 func ParseLegacyTask(content map[string]any) (SwarmMessage, bool) {
 	if task, ok := content["task"].(string); ok && task != "" {
 		return SwarmMessage{Content: task}, true
@@ -72,4 +53,27 @@ func ParseLegacyTask(content map[string]any) (SwarmMessage, bool) {
 		return SwarmMessage{Content: prompt}, true
 	}
 	return SwarmMessage{}, false
+}
+
+func swarmContent(msg SwarmMessage) map[string]any {
+	m := map[string]any{"content": msg.Content}
+	if len(msg.Targets) > 0 {
+		m["targets"] = msg.Targets
+	}
+	if len(msg.Meta) > 0 {
+		m["meta"] = msg.Meta
+	}
+	return m
+}
+
+func swarmFromIOA(msg ioa.Message) (SwarmMessage, bool) {
+	if sm, ok := ParseSwarm(msg.Content); ok {
+		return sm, true
+	}
+	return ParseLegacyTask(msg.Content)
+}
+
+func isProfileMessage(msg SwarmMessage) bool {
+	kind, _ := msg.Meta["kind"].(string)
+	return kind == "node_profile"
 }

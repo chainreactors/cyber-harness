@@ -1,4 +1,4 @@
-package loop
+package swarm
 
 import (
 	"context"
@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
 	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
-func TestRealLLMLoopRepliesThroughIOA(t *testing.T) {
+func TestRealLLMSwarmNodeRepliesThroughIOA(t *testing.T) {
 	if os.Getenv("AISCAN_REAL_LLM") != "1" {
 		t.Skip("set AISCAN_REAL_LLM=1 to run real LLM integration test")
 	}
@@ -52,19 +51,17 @@ func TestRealLLMLoopRepliesThroughIOA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	worker, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	runner := New(Config{
+
+	systemPrompt := "You are a concise test worker. When asked to reply, answer with exactly: loop"
+	node := NewNode(NodeConfig{
 		Client:           worker,
-		Provider:         llmProvider,
-		Tools:            command.NewRegistry(),
-		SystemPrompt:     "You are a concise test worker. When asked to reply, answer with exactly: loop",
-		Model:            model,
-		Stream:           false,
 		NodeName:         "real-llm-worker",
 		SpaceName:        "default",
 		SpaceDescription: "real llm worker",
@@ -72,9 +69,25 @@ func TestRealLLMLoopRepliesThroughIOA(t *testing.T) {
 		Prompt:           "reply loop to hello",
 		Intent:           "reply loop to hello",
 		Network:          map[string]any{"test": "real-llm"},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			resp, err := llmProvider.ChatCompletion(ctx, &provider.ChatCompletionRequest{
+				Model: model,
+				Messages: []provider.ChatMessage{
+					{Role: "system", Content: strPtr(systemPrompt)},
+					{Role: "user", Content: strPtr(task.Content)},
+				},
+			})
+			if err != nil {
+				return "", err
+			}
+			if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != nil {
+				return *resp.Choices[0].Message.Content, nil
+			}
+			return "", nil
+		},
 	})
 	go func() {
-		_ = runner.Run(runCtx)
+		_ = node.Run(runCtx)
 	}()
 
 	controller, err := ioaclient.NewClient(server.URL, "")
@@ -117,3 +130,5 @@ func TestRealLLMLoopRepliesThroughIOA(t *testing.T) {
 		}
 	}
 }
+
+func strPtr(s string) *string { return &s }

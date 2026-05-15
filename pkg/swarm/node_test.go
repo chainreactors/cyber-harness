@@ -1,4 +1,4 @@
-package loop
+package swarm
 
 import (
 	"context"
@@ -9,15 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/protocol"
-	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/ioa"
 	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
-func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
+func TestThreeSwarmNodesCollaborate(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -29,8 +26,7 @@ func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerNode, err := controller.RegisterNode(ctx, "controller", nil)
-	if err != nil {
+	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
 		t.Fatal(err)
 	}
 	space, err := controller.Space(ctx, "case-e2e", "manual task sender")
@@ -40,7 +36,7 @@ func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 
 	workerClients := make([]*ioaclient.Client, 3)
 	workerNodes := make([]ioa.Node, 3)
-	providers := make([]*taskProvider, 3)
+	handlers := make([]*taskRecorder, 3)
 	for i := 0; i < 3; i++ {
 		client, err := ioaclient.NewClient(server.URL, "")
 		if err != nil {
@@ -55,30 +51,30 @@ func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 		}
 		workerClients[i] = client
 		workerNodes[i] = node
-		providers[i] = &taskProvider{name: node.Name}
+		handlers[i] = &taskRecorder{name: node.Name}
 	}
 
 	runCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
 	for i := 0; i < 3; i++ {
-		runner := New(Config{
+		h := handlers[i]
+		node := NewNode(NodeConfig{
 			Client:           workerClients[i],
-			Provider:         providers[i],
-			Tools:            command.NewRegistry(),
-			SystemPrompt:     "test loop agent",
-			Model:            "test-model",
 			NodeName:         workerNodes[i].Name,
 			SpaceName:        "case-e2e",
 			SpaceDescription: "worker",
 			PollInterval:     100 * time.Millisecond,
 			Network:          map[string]any{"test": true},
+			OnTask: func(ctx context.Context, task Task) (string, error) {
+				h.record(task.Content)
+				return fmt.Sprintf("%s completed %s", h.name, task.Content), nil
+			},
 		})
 		go func() {
-			_ = runner.Run(runCtx)
+			_ = node.Run(runCtx)
 		}()
 	}
 
-	// Send tasks using SwarmMessage format
 	for i, node := range workerNodes {
 		_, err := controller.Send(ctx, space.ID, ioa.SendMessage{
 			Content: map[string]any{
@@ -100,15 +96,9 @@ func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 		reports := countReports(all)
 		accepts := countAccepts(all)
 		if reports == 3 && accepts == 3 {
-			for i, p := range providers {
-				if got := p.tasks(); len(got) != 1 || got[0] != fmt.Sprintf("task-%d", i+1) {
-					t.Fatalf("provider %d tasks = %#v", i+1, got)
-				}
-			}
-			for _, msg := range all {
-				c, _ := msg.Content["content"].(string)
-				if msg.Sender == controllerNode.ID && strings.Contains(c, "completed task-") {
-					t.Fatal("controller should not send result messages")
+			for i, h := range handlers {
+				if got := h.tasks(); len(got) != 1 || got[0] != fmt.Sprintf("task-%d", i+1) {
+					t.Fatalf("handler %d tasks = %#v", i+1, got)
 				}
 			}
 			return
@@ -122,7 +112,7 @@ func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 	}
 }
 
-func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
+func TestThreeSwarmNodesReplyToBroadcastHello(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -142,7 +132,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	providers := make([]*taskProvider, 3)
+	handlers := make([]*taskRecorder, 3)
 	runCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
 	for i := 0; i < 3; i++ {
@@ -150,23 +140,24 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		providers[i] = &taskProvider{name: fmt.Sprintf("worker-%d", i+1), reply: "loop"}
-		runner := New(Config{
+		handlers[i] = &taskRecorder{name: fmt.Sprintf("worker-%d", i+1)}
+		h := handlers[i]
+		node := NewNode(NodeConfig{
 			Client:           client,
-			Provider:         providers[i],
-			Tools:            command.NewRegistry(),
-			SystemPrompt:     "test loop agent",
-			Model:            "test-model",
-			NodeName:         providers[i].name,
+			NodeName:         h.name,
 			SpaceName:        "default",
 			SpaceDescription: "worker",
 			PollInterval:     100 * time.Millisecond,
 			Intent:           "reply loop to hello",
 			Skills:           []string{"aiscan"},
 			Network:          map[string]any{"cidr": "127.0.0.0/8"},
+			OnTask: func(ctx context.Context, task Task) (string, error) {
+				h.record(task.Content)
+				return "loop", nil
+			},
 		})
 		go func() {
-			_ = runner.Run(runCtx)
+			_ = node.Run(runCtx)
 		}()
 	}
 
@@ -188,9 +179,9 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		replies := countRepliesWithContent(related, hello.ID, "loop")
 		accepts := countAccepts(related)
 		if replies == 3 && accepts == 3 {
-			for i, p := range providers {
-				if got := p.tasks(); len(got) != 1 || got[0] != "hello" {
-					t.Fatalf("provider %d tasks = %#v", i+1, got)
+			for i, h := range handlers {
+				if got := h.tasks(); len(got) != 1 || got[0] != "hello" {
+					t.Fatalf("handler %d tasks = %#v", i+1, got)
 				}
 			}
 			return
@@ -204,7 +195,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 	}
 }
 
-func TestLoopAnnouncesSwarmProfile(t *testing.T) {
+func TestNodeAnnouncesSwarmProfile(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -218,12 +209,8 @@ func TestLoopAnnouncesSwarmProfile(t *testing.T) {
 	}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	runner := New(Config{
+	node := NewNode(NodeConfig{
 		Client:           client,
-		Provider:         &taskProvider{name: "worker-profile"},
-		Tools:            command.NewRegistry(),
-		SystemPrompt:     "test loop agent",
-		Model:            "test-model",
 		NodeName:         "worker-profile",
 		SpaceName:        "default",
 		SpaceDescription: "profile worker",
@@ -234,9 +221,12 @@ func TestLoopAnnouncesSwarmProfile(t *testing.T) {
 		Network: map[string]any{
 			"hostname": "test-host",
 		},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			return "ok", nil
+		},
 	})
 	go func() {
-		_ = runner.Run(runCtx)
+		_ = node.Run(runCtx)
 	}()
 
 	controller, err := ioaclient.NewClient(server.URL, "")
@@ -278,6 +268,12 @@ func TestLoopAnnouncesSwarmProfile(t *testing.T) {
 			if !ok || len(caps) != 2 {
 				t.Fatalf("meta capabilities = %#v", meta["capabilities"])
 			}
+			if node.RootMessageID() == "" {
+				t.Fatal("RootMessageID() should be non-empty after announceProfile")
+			}
+			if node.RootMessageID() != profile.ID {
+				t.Fatalf("RootMessageID() = %q, want %q", node.RootMessageID(), profile.ID)
+			}
 			return
 		}
 		select {
@@ -289,7 +285,7 @@ func TestLoopAnnouncesSwarmProfile(t *testing.T) {
 	}
 }
 
-func TestLoopHeartbeatRunsAgent(t *testing.T) {
+func TestNodeHeartbeatRunsHandler(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -321,15 +317,11 @@ func TestLoopHeartbeatRunsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	llm := &taskProvider{name: "heartbeat-worker", reply: "heartbeat done"}
+	rec := &taskRecorder{name: "heartbeat-worker"}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	runner := New(Config{
+	node := NewNode(NodeConfig{
 		Client:                worker,
-		Provider:              llm,
-		Tools:                 command.NewRegistry(),
-		SystemPrompt:          "test loop agent",
-		Model:                 "test-model",
 		NodeName:              "heartbeat-worker",
 		SpaceName:             "heartbeat-case",
 		SpaceDescription:      "worker",
@@ -338,9 +330,16 @@ func TestLoopHeartbeatRunsAgent(t *testing.T) {
 		HeartbeatContextLimit: 20,
 		Prompt:                "watch the case",
 		Network:               map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			return "ok", nil
+		},
+		OnHeartbeat: func(ctx context.Context, prompt string) (string, error) {
+			rec.record(prompt)
+			return "heartbeat done", nil
+		},
 	})
 	go func() {
-		_ = runner.Run(runCtx)
+		_ = node.Run(runCtx)
 	}()
 
 	deadline := time.After(5 * time.Second)
@@ -354,9 +353,9 @@ func TestLoopHeartbeatRunsAgent(t *testing.T) {
 			if c != "heartbeat done" {
 				continue
 			}
-			tasks := llm.tasks()
+			tasks := rec.tasks()
 			if len(tasks) == 0 {
-				t.Fatal("provider did not receive heartbeat prompt")
+				t.Fatal("handler did not receive heartbeat prompt")
 			}
 			prompt := tasks[len(tasks)-1]
 			for _, want := range []string{"Swarm heartbeat", space.ID, note.ID, "existing context", "watch the case"} {
@@ -375,15 +374,187 @@ func TestLoopHeartbeatRunsAgent(t *testing.T) {
 	}
 }
 
+func TestNodeAcceptsTaskByRootMessageRef(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &taskRecorder{name: "root-msg-worker"}
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	node := NewNode(NodeConfig{
+		Client:           worker,
+		NodeName:         "root-msg-worker",
+		SpaceName:        "root-msg-test",
+		SpaceDescription: "worker",
+		PollInterval:     100 * time.Millisecond,
+		Network:          map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			rec.record(task.Content)
+			return "done: " + task.Content, nil
+		},
+	})
+	go func() {
+		_ = node.Run(runCtx)
+	}()
+
+	// Wait for the node to register and announce its profile
+	var rootMsgID string
+	deadline := time.After(5 * time.Second)
+	for rootMsgID == "" {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for node to announce profile")
+		default:
+			time.Sleep(50 * time.Millisecond)
+			rootMsgID = node.RootMessageID()
+		}
+	}
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "root-msg-test", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send task by ref'ing the root message (no refs.nodes)
+	_, err = controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{
+			"content": "task via root message ref",
+		},
+		Refs: &ioa.Ref{Messages: []string{rootMsgID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.After(5 * time.Second)
+	for {
+		all, err := controller.Read(ctx, space.ID, ioa.ReadOptions{All: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, msg := range all {
+			c, _ := msg.Content["content"].(string)
+			if strings.Contains(c, "done: task via root message ref") {
+				got := rec.tasks()
+				if len(got) != 1 || got[0] != "task via root message ref" {
+					t.Fatalf("handler tasks = %#v", got)
+				}
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for root-message-ref task completion; messages=%d", len(all))
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+func TestNodeRejectsTaskForOtherRootMessage(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &taskRecorder{name: "reject-worker"}
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	node := NewNode(NodeConfig{
+		Client:           worker,
+		NodeName:         "reject-worker",
+		SpaceName:        "reject-test",
+		SpaceDescription: "worker",
+		PollInterval:     100 * time.Millisecond,
+		Network:          map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			rec.record(task.Content)
+			return "should not happen", nil
+		},
+	})
+	go func() {
+		_ = node.Run(runCtx)
+	}()
+
+	// Wait for node to be ready
+	deadline := time.After(5 * time.Second)
+	for node.RootMessageID() == "" {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for node to announce profile")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerNode, err := controller.RegisterNode(ctx, "controller", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "reject-test", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a decoy message directed at the controller (not a broadcast)
+	decoy, err := controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "decoy root"},
+		Refs:    &ioa.Ref{Nodes: []string{controllerNode.ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send task ref'ing the decoy message (not this node's root message)
+	_, err = controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{
+			"content": "task for other node",
+		},
+		Refs: &ioa.Ref{Messages: []string{decoy.ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait a bit and verify the task was NOT processed
+	time.Sleep(500 * time.Millisecond)
+	if got := rec.tasks(); len(got) != 0 {
+		t.Fatalf("node should not have processed task for other root message, but got: %#v", got)
+	}
+}
+
 func TestSwarmFromIOAParsesNewAndLegacy(t *testing.T) {
-	// New format: content field
 	msg := ioa.Message{Content: map[string]any{"content": "scan this"}}
 	sm, ok := swarmFromIOA(msg)
 	if !ok || sm.Content != "scan this" {
 		t.Fatalf("swarmFromIOA(new) = %#v, %v", sm, ok)
 	}
 
-	// New format with targets + meta
 	msg = ioa.Message{Content: map[string]any{
 		"content": "full scan",
 		"targets": []any{"10.0.0.0/24"},
@@ -394,21 +565,18 @@ func TestSwarmFromIOAParsesNewAndLegacy(t *testing.T) {
 		t.Fatalf("swarmFromIOA(new+targets+meta) = %#v, %v", sm, ok)
 	}
 
-	// Legacy format: task field
 	msg = ioa.Message{Content: map[string]any{"task": "legacy task"}}
 	sm, ok = swarmFromIOA(msg)
 	if !ok || sm.Content != "legacy task" {
 		t.Fatalf("swarmFromIOA(legacy task) = %#v, %v", sm, ok)
 	}
 
-	// Legacy format: prompt field
 	msg = ioa.Message{Content: map[string]any{"prompt": "legacy prompt"}}
 	sm, ok = swarmFromIOA(msg)
 	if !ok || sm.Content != "legacy prompt" {
 		t.Fatalf("swarmFromIOA(legacy prompt) = %#v, %v", sm, ok)
 	}
 
-	// Non-parseable: no content/task/prompt
 	msg = ioa.Message{Content: map[string]any{"type": "note", "text": "hello"}}
 	_, ok = swarmFromIOA(msg)
 	if ok {
@@ -416,49 +584,88 @@ func TestSwarmFromIOAParsesNewAndLegacy(t *testing.T) {
 	}
 }
 
+func TestSwarmContentRoundTrip(t *testing.T) {
+	msg := SwarmMessage{
+		Content: "scan these targets",
+		Targets: []string{"10.0.0.0/24", "192.168.1.0/24"},
+		Meta:    map[string]any{"ip": "10.0.0.5", "hostname": "scanner-1"},
+	}
+	raw := swarmContent(msg)
+	parsed, ok := ParseSwarm(raw)
+	if !ok {
+		t.Fatal("ParseSwarm failed on round-trip")
+	}
+	if parsed.Content != msg.Content {
+		t.Fatalf("content = %q, want %q", parsed.Content, msg.Content)
+	}
+	if len(parsed.Targets) != 2 {
+		t.Fatalf("targets = %v, want 2 items", parsed.Targets)
+	}
+	if parsed.Meta["ip"] != "10.0.0.5" {
+		t.Fatalf("meta.ip = %v, want 10.0.0.5", parsed.Meta["ip"])
+	}
+}
+
+func TestIsTaskForNode(t *testing.T) {
+	nodeID := "node-1"
+	rootMsgID := "root-msg-1"
+
+	// Broadcast: no refs
+	msg := ioa.Message{Refs: ioa.Ref{}}
+	if !isTaskForNode(msg, nodeID, rootMsgID) {
+		t.Fatal("broadcast should be accepted")
+	}
+
+	// Node-directed: refs.nodes contains nodeID
+	msg = ioa.Message{Refs: ioa.Ref{Nodes: []string{nodeID}}}
+	if !isTaskForNode(msg, nodeID, rootMsgID) {
+		t.Fatal("node-directed should be accepted")
+	}
+
+	// Node-directed: refs.nodes does NOT contain nodeID
+	msg = ioa.Message{Refs: ioa.Ref{Nodes: []string{"other-node"}}}
+	if isTaskForNode(msg, nodeID, rootMsgID) {
+		t.Fatal("node-directed to other node should be rejected")
+	}
+
+	// Root-message-directed: refs.messages contains rootMsgID
+	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{rootMsgID}}}
+	if !isTaskForNode(msg, nodeID, rootMsgID) {
+		t.Fatal("root-message-directed should be accepted")
+	}
+
+	// Root-message-directed: refs.messages does NOT contain rootMsgID
+	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{"other-root"}}}
+	if isTaskForNode(msg, nodeID, rootMsgID) {
+		t.Fatal("root-message-directed to other root should be rejected")
+	}
+
+	// Empty rootMsgID: refs.messages should be rejected
+	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{"any-msg"}}}
+	if isTaskForNode(msg, nodeID, "") {
+		t.Fatal("should reject refs.messages when rootMsgID is empty")
+	}
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
-type taskProvider struct {
-	name  string
-	reply string
+type taskRecorder struct {
+	name string
 
-	mu    sync.Mutex
-	seen  []string
-	calls int
+	mu   sync.Mutex
+	seen []string
 }
 
-func (p *taskProvider) Name() string { return p.name }
-
-func (p *taskProvider) ChatCompletion(_ context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.calls++
-	task := lastUserContent(req.Messages)
-	p.seen = append(p.seen, task)
-	reply := p.reply
-	if reply == "" {
-		reply = fmt.Sprintf("%s completed %s", p.name, task)
-	}
-	return &provider.ChatCompletionResponse{
-		Choices: []provider.Choice{{
-			Message: provider.NewTextMessage("assistant", reply),
-		}},
-	}, nil
+func (r *taskRecorder) record(task string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, task)
 }
 
-func (p *taskProvider) tasks() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]string(nil), p.seen...)
-}
-
-func lastUserContent(messages []provider.ChatMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" && messages[i].Content != nil {
-			return *messages[i].Content
-		}
-	}
-	return ""
+func (r *taskRecorder) tasks() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.seen...)
 }
 
 func findAnnounce(messages []ioa.Message) *ioa.Message {
@@ -511,27 +718,4 @@ func containsRef(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// Verify protocol.SwarmMessage round-trips correctly
-func TestSwarmContentRoundTrip(t *testing.T) {
-	msg := protocol.SwarmMessage{
-		Content: "scan these targets",
-		Targets: []string{"10.0.0.0/24", "192.168.1.0/24"},
-		Meta:    map[string]any{"ip": "10.0.0.5", "hostname": "scanner-1"},
-	}
-	raw := swarmContent(msg)
-	parsed, ok := protocol.ParseSwarm(raw)
-	if !ok {
-		t.Fatal("ParseSwarm failed on round-trip")
-	}
-	if parsed.Content != msg.Content {
-		t.Fatalf("content = %q, want %q", parsed.Content, msg.Content)
-	}
-	if len(parsed.Targets) != 2 {
-		t.Fatalf("targets = %v, want 2 items", parsed.Targets)
-	}
-	if parsed.Meta["ip"] != "10.0.0.5" {
-		t.Fatalf("meta.ip = %v, want 10.0.0.5", parsed.Meta["ip"])
-	}
 }
