@@ -23,7 +23,7 @@ type Option struct {
 	VisionOptions  `group:"Vision Options" config:"vision"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
-	ACPOptions     `group:"ACP Options" config:"acp"`
+	IOAOptions     `group:"IOA Options" config:"ioa"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 }
 
@@ -56,18 +56,18 @@ type AgentOptions struct {
 	Inputs    []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
 	Skills    []string `short:"s" long:"skill" description:"Embedded skill to apply. Can specify multiple"`
 	TaskFile  string   `long:"task-file" description:"File containing task description"`
-	Loop      bool     `long:"loop" description:"Run as an ACP loop worker instead of local agent mode"`
-	Heartbeat int      `long:"heartbeat" description:"Run an ACP heartbeat agent turn every N minutes in agent --loop (0 disables)" default:"0"`
+	Loop      bool     `long:"loop" description:"Run as an IOA loop worker instead of local agent mode"`
+	Heartbeat int      `long:"heartbeat" description:"Run an IOA heartbeat agent turn every N minutes in agent --loop (0 disables)" default:"0"`
 	Timeout   int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
 }
 
-type ACPOptions struct {
-	ACPURL      string `long:"acp-url" config:"url" description:"IOA server URL for agent tools"`
-	ACPNodeID   string `long:"acp-node-id" description:"Existing IOA node id for agent tools"`
-	ACPNodeName string `long:"acp-node-name" config:"node_name" description:"IOA node name when auto-registering"`
-	ACPDB       string `long:"acp-db" config:"db" description:"IOA SQLite database path for 'aiscan acp serve'" default:"./ioa.db"`
+type IOAOptions struct {
+	IOAURL      string `long:"ioa-url" config:"url" description:"IOA server URL for agent tools"`
+	IOANodeID   string `long:"ioa-node-id" description:"Existing IOA node id for agent tools"`
+	IOANodeName string `long:"ioa-node-name" config:"node_name" description:"IOA node name when auto-registering"`
+	IOADB       string `long:"ioa-db" config:"db" description:"IOA SQLite database path for 'aiscan ioa serve'" default:"./ioa.db"`
 	Space       string `long:"space" config:"space" description:"IOA space name for 'aiscan agent --loop'" default:"default"`
-	ACPJSON     bool   `long:"json" description:"Output IOA query results in JSON format"`
+	IOAJSON     bool   `long:"json" description:"Output IOA query results in JSON format"`
 }
 
 type MiscOptions struct {
@@ -82,7 +82,7 @@ type MiscOptions struct {
 type cliOptions struct {
 	Option
 	Agent    struct{}   `command:"agent" description:"Run the LLM agent"`
-	ACP      acpCommand `command:"acp" description:"ACP server commands"`
+	IOA      ioaCommand `command:"ioa" description:"IOA server commands"`
 	Scan     struct{}   `command:"scan" description:"Run the scan pipeline"`
 	Cyberhub struct{}   `command:"cyberhub" description:"Search Cyberhub fingerprints and POCs"`
 	Gogo     struct{}   `command:"gogo" description:"Run gogo scanner"`
@@ -91,28 +91,28 @@ type cliOptions struct {
 	Neutron  struct{}   `command:"neutron" description:"Run neutron POC scanner"`
 }
 
-type acpCommand struct {
-	Serve    struct{}       `command:"serve" description:"Run the ACP HTTP server"`
-	Spaces   struct{}       `command:"spaces" description:"List all ACP spaces"`
-	Messages acpMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context  acpContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes    acpNodesCmd    `command:"nodes" description:"List nodes"`
+type ioaCommand struct {
+	Serve    struct{}       `command:"serve" description:"Run the IOA HTTP server"`
+	Spaces   struct{}       `command:"spaces" description:"List all IOA spaces"`
+	Messages ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
+	Context  ioaContextCmd  `command:"context" description:"View message thread/context"`
+	Nodes    ioaNodesCmd    `command:"nodes" description:"List nodes"`
 }
 
-type acpMessagesCmd struct {
+type ioaMessagesCmd struct {
 	Positional struct {
 		Space string `positional-arg-name:"space"`
 	} `positional-args:"yes" required:"yes"`
 }
 
-type acpContextCmd struct {
+type ioaContextCmd struct {
 	Positional struct {
 		Space     string `positional-arg-name:"space"`
 		MessageID string `positional-arg-name:"message-id"`
 	} `positional-args:"yes" required:"yes"`
 }
 
-type acpNodesCmd struct {
+type ioaNodesCmd struct {
 	Positional struct {
 		Space string `positional-arg-name:"space"`
 	} `positional-args:"yes"`
@@ -122,16 +122,16 @@ type runMode string
 
 const (
 	runModeAgent       runMode = "agent"
-	runModeACPServe    runMode = "acp serve"
-	runModeACPSpaces   runMode = "acp spaces"
-	runModeACPMessages runMode = "acp messages"
-	runModeACPContext  runMode = "acp context"
-	runModeACPNodes    runMode = "acp nodes"
+	runModeIOAServe    runMode = "ioa serve"
+	runModeIOASpaces   runMode = "ioa spaces"
+	runModeIOAMessages runMode = "ioa messages"
+	runModeIOAContext  runMode = "ioa context"
+	runModeIOANodes    runMode = "ioa nodes"
 	runModeScanner     runMode = "scanner"
 	runModeNoCommand   runMode = ""
 )
 
-type acpClientArgs struct {
+type ioaClientArgs struct {
 	Space     string
 	MessageID string
 }
@@ -140,7 +140,7 @@ type parsedCLI struct {
 	Option      Option
 	Mode        runMode
 	ScannerArgs []string
-	ACPArgs     acpClientArgs
+	IOAArgs     ioaClientArgs
 	Help        bool
 }
 
@@ -168,7 +168,7 @@ func AiScan() {
 		return
 	}
 	if parsed.Mode == runModeNoCommand {
-		fmt.Fprintln(os.Stderr, "error: missing subcommand: use agent, acp serve, scan, cyberhub, gogo, spray, zombie, or neutron")
+		fmt.Fprintln(os.Stderr, "error: missing subcommand: use agent, ioa serve, scan, cyberhub, gogo, spray, zombie, or neutron")
 		os.Exit(1)
 	}
 
@@ -189,14 +189,14 @@ func AiScan() {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
 		}
-	case runModeACPServe:
-		if err := runACPServe(ctx, &option, logger); err != nil {
-			logger.Errorf("acp server failed: %s", err)
+	case runModeIOAServe:
+		if err := runIOAServe(ctx, &option, logger); err != nil {
+			logger.Errorf("ioa server failed: %s", err)
 			os.Exit(1)
 		}
-	case runModeACPSpaces, runModeACPMessages, runModeACPContext, runModeACPNodes:
-		if err := runACPClientCommand(ctx, parsed.Mode, &option, parsed.ACPArgs, logger); err != nil {
-			logger.Errorf("acp command failed: %s", err)
+	case runModeIOASpaces, runModeIOAMessages, runModeIOAContext, runModeIOANodes:
+		if err := runIOAClientCommand(ctx, parsed.Mode, &option, parsed.IOAArgs, logger); err != nil {
+			logger.Errorf("ioa command failed: %s", err)
 			os.Exit(1)
 		}
 	case runModeScanner:
@@ -250,8 +250,8 @@ func parseCLI(args []string) (parsedCLI, error) {
 		return parsedCLI{Option: option, Mode: mode, ScannerArgs: scannerArgs}, nil
 	}
 
-	acpArgs := extractACPArgs(&cli, mode)
-	return parsedCLI{Option: option, Mode: mode, ACPArgs: acpArgs}, nil
+	ioaArgs := extractIOAArgs(&cli, mode)
+	return parsedCLI{Option: option, Mode: mode, IOAArgs: ioaArgs}, nil
 }
 
 func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsedCLI, error) {
@@ -323,11 +323,11 @@ aiscan - Agentic Security Scanner powered by LLM
 
 Commands:
   agent          Run the LLM agent
-  acp serve      Run the ACP HTTP server
-  acp spaces     List all ACP spaces
-  acp messages   List start messages in a space
-  acp context    View message thread/context
-  acp nodes      List nodes
+  ioa serve      Run the IOA HTTP server
+  ioa spaces     List all IOA spaces
+  ioa messages   List start messages in a space
+  ioa context    View message thread/context
+  ioa nodes      List nodes
   scan           Run the scan pipeline
   cyberhub       Search Cyberhub fingerprints and POCs
   gogo           Run gogo scanner
@@ -341,9 +341,9 @@ Examples:
   aiscan agent --provider ollama --model llama3 --base-url http://localhost:11434/v1 -p "check this host" -i http://target.com
   aiscan scan -i 127.0.0.1 --mode quick --verify=high --api-key KEY --model gpt-4o
   aiscan scan -i 192.168.1.0/24 --mode full
-  aiscan acp serve
-  aiscan acp spaces --acp-url http://127.0.0.1:8765
-  aiscan acp messages default --acp-url http://127.0.0.1:8765
+  aiscan ioa serve
+  aiscan ioa spaces --ioa-url http://127.0.0.1:8765
+  aiscan ioa messages default --ioa-url http://127.0.0.1:8765
   aiscan agent --loop -p "localhost web scanner" -s aiscan --space case-1
   aiscan agent --loop --heartbeat 5 --space case-1 -p "coordinate next scan steps"`
 	return parser
@@ -479,44 +479,44 @@ func selectedMode(parser *goflags.Parser) runMode {
 	if active == nil {
 		return runModeNoCommand
 	}
-	if active.Name == "acp" && active.Active != nil {
+	if active.Name == "ioa" && active.Active != nil {
 		switch active.Active.Name {
 		case "serve":
-			return runModeACPServe
+			return runModeIOAServe
 		case "spaces":
-			return runModeACPSpaces
+			return runModeIOASpaces
 		case "messages":
-			return runModeACPMessages
+			return runModeIOAMessages
 		case "context":
-			return runModeACPContext
+			return runModeIOAContext
 		case "nodes":
-			return runModeACPNodes
+			return runModeIOANodes
 		}
 	}
 	switch active.Name {
 	case "agent":
 		return runModeAgent
 	case "serve":
-		return runModeACPServe
+		return runModeIOAServe
 	case "scan", "cyberhub", "gogo", "spray", "zombie", "neutron":
 		return runModeScanner
 	}
 	return runModeNoCommand
 }
 
-func extractACPArgs(cli *cliOptions, mode runMode) acpClientArgs {
+func extractIOAArgs(cli *cliOptions, mode runMode) ioaClientArgs {
 	switch mode {
-	case runModeACPMessages:
-		return acpClientArgs{Space: cli.ACP.Messages.Positional.Space}
-	case runModeACPContext:
-		return acpClientArgs{
-			Space:     cli.ACP.Context.Positional.Space,
-			MessageID: cli.ACP.Context.Positional.MessageID,
+	case runModeIOAMessages:
+		return ioaClientArgs{Space: cli.IOA.Messages.Positional.Space}
+	case runModeIOAContext:
+		return ioaClientArgs{
+			Space:     cli.IOA.Context.Positional.Space,
+			MessageID: cli.IOA.Context.Positional.MessageID,
 		}
-	case runModeACPNodes:
-		return acpClientArgs{Space: cli.ACP.Nodes.Positional.Space}
+	case runModeIOANodes:
+		return ioaClientArgs{Space: cli.IOA.Nodes.Positional.Space}
 	}
-	return acpClientArgs{}
+	return ioaClientArgs{}
 }
 
 func selectedScanner(parser *goflags.Parser) string {

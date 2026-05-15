@@ -490,7 +490,7 @@ func binaryCacheEntrySize(result *fetchResult) int {
 func formatRedirectMessage(redir *redirectInfo) string {
 	statusText := http.StatusText(redir.statusCode)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("REDIRECT DETECTED: The URL redirects to a different host.\n\n"))
+	sb.WriteString("REDIRECT DETECTED: The URL redirects to a different host.\n\n")
 	sb.WriteString(fmt.Sprintf("Original URL: %s\n", redir.originalURL))
 	sb.WriteString(fmt.Sprintf("Redirect URL: %s\n", redir.redirectURL))
 	sb.WriteString(fmt.Sprintf("Status: %d %s\n\n", redir.statusCode, statusText))

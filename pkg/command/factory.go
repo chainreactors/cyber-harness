@@ -14,7 +14,7 @@ type Deps struct {
 
 	EngineSet    any
 	Resources    any
-	ACPClient    any
+	IOAClient    any
 	Provider     any
 	VisionConfig any // *provider.ProviderConfig for vision-capable LLM
 	Model        string

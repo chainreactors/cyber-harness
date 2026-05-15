@@ -118,9 +118,9 @@ func applyDefaults(option *Option) {
 	option.CyberhubURL = resolveString(option.CyberhubURL, DefaultCyberhubURL)
 	option.CyberhubKey = resolveString(option.CyberhubKey, DefaultCyberhubKey)
 	option.CyberhubMode = resolveString(resolveString(option.CyberhubMode, DefaultCyberhubMode), "merge")
-	option.ACPURL = resolveString(option.ACPURL, DefaultACPURL)
-	option.ACPNodeID = resolveString(option.ACPNodeID, DefaultACPNodeID)
-	option.ACPNodeName = resolveString(option.ACPNodeName, DefaultACPNodeName)
+	option.IOAURL = resolveString(option.IOAURL, DefaultIOAURL)
+	option.IOANodeID = resolveString(option.IOANodeID, DefaultIOANodeID)
+	option.IOANodeName = resolveString(option.IOANodeName, DefaultIOANodeName)
 	option.Space = resolveSpace(option.Space)
 	if option.Model == "" {
 		option.Model = resolveString(DefaultModel, "deepseek-v4-pro")
@@ -193,9 +193,9 @@ func resolveSpace(space string) string {
 	return "default"
 }
 
-func defaultACPNodeName(option *Option) string {
-	if option.ACPNodeName != "" {
-		return option.ACPNodeName
+func defaultIOANodeName(option *Option) string {
+	if option.IOANodeName != "" {
+		return option.IOANodeName
 	}
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err == nil {

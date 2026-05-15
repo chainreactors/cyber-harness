@@ -7,19 +7,19 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/command"
-	acpclient "github.com/chainreactors/ioa/client"
+	ioaclient "github.com/chainreactors/ioa/client"
 )
 
-func NewCommands(client acpclient.API, nodeName string, meta map[string]any) []command.PseudoCommand {
+func NewCommands(client ioaclient.API, nodeName string, meta map[string]any) []command.PseudoCommand {
 	var cmds []command.PseudoCommand
-	for _, t := range acpclient.NewTools(client, acpclient.ToolOptions{NodeName: nodeName, NodeMeta: meta}) {
+	for _, t := range ioaclient.NewTools(client, ioaclient.ToolOptions{NodeName: nodeName, NodeMeta: meta}) {
 		cmds = append(cmds, &toolAdapter{tool: t})
 	}
 	return cmds
 }
 
 type toolAdapter struct {
-	tool acpclient.Tool
+	tool ioaclient.Tool
 }
 
 func (a *toolAdapter) Name() string { return a.tool.Name() }
@@ -99,7 +99,9 @@ func argsToJSON(args []string) (string, error) {
 			m[key] = n
 		} else if json.Valid([]byte(val)) && (val[0] == '{' || val[0] == '[') {
 			var v interface{}
-			json.Unmarshal([]byte(val), &v)
+			if err := json.Unmarshal([]byte(val), &v); err != nil {
+				return "", fmt.Errorf("parse %s JSON: %w", key, err)
+			}
 			m[key] = v
 		} else {
 			m[key] = val

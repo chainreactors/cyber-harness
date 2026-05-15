@@ -10,10 +10,10 @@ import (
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/skills"
-	acpclient "github.com/chainreactors/ioa/client"
+	ioaclient "github.com/chainreactors/ioa/client"
 )
 
 type Config struct {
@@ -21,7 +21,7 @@ type Config struct {
 	Vision   ProviderConfig
 	Scanner  ScannerConfig
 	Tools    ToolConfig
-	ACP      *ACPConfig
+	IOA      *IOAConfig
 	Logger   telemetry.Logger
 }
 
@@ -47,7 +47,7 @@ type ToolConfig struct {
 	VisionEnabled bool
 }
 
-type ACPConfig struct {
+type IOAConfig struct {
 	URL           string
 	NodeID        string
 	NodeName      string
@@ -64,8 +64,8 @@ type App struct {
 	Engines          *engine.Set
 	Skills           *skills.Store
 	SkillDiagnostics []skills.Diagnostic
-	ACPClient        acpclient.API
-	ACPStreamClient  acpclient.StreamAPI
+	IOAClient        ioaclient.API
+	IOAStreamClient  ioaclient.StreamAPI
 }
 
 func New(ctx context.Context, cfg Config) (*App, error) {
@@ -113,8 +113,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, cfg.Tools, app.Provider, app.ProviderConfig.Model, app.Skills, visionCfg, logger)
 
-	if cfg.ACP != nil {
-		if err := app.InitACP(ctx, *cfg.ACP); err != nil {
+	if cfg.IOA != nil {
+		if err := app.InitIOA(ctx, *cfg.IOA); err != nil {
 			app.Close()
 			return nil, err
 		}
@@ -211,18 +211,18 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 	return cmdReg
 }
 
-func (a *App) InitACP(ctx context.Context, cfg ACPConfig) error {
-	client, err := newACPClient(cfg)
+func (a *App) InitIOA(ctx context.Context, cfg IOAConfig) error {
+	client, err := newIOAClient(cfg)
 	if err != nil {
 		return err
 	}
-	a.ACPClient = client
-	if streamClient, ok := client.(acpclient.StreamAPI); ok {
-		a.ACPStreamClient = streamClient
+	a.IOAClient = client
+	if streamClient, ok := client.(ioaclient.StreamAPI); ok {
+		a.IOAStreamClient = streamClient
 	}
 	if cfg.RegisterTools && a.Commands != nil {
 		deps := &command.Deps{
-			ACPClient: client,
+			IOAClient: client,
 			NodeName:  cfg.NodeName,
 			NodeMeta:  cfg.NodeMeta,
 		}
@@ -237,11 +237,11 @@ func (a *App) InitACP(ctx context.Context, cfg ACPConfig) error {
 	return nil
 }
 
-func newACPClient(cfg ACPConfig) (acpclient.API, error) {
+func newIOAClient(cfg IOAConfig) (ioaclient.API, error) {
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	return acpclient.NewClient(cfg.URL, cfg.NodeID)
+	return ioaclient.NewClient(cfg.URL, cfg.NodeID)
 }
 
 func scanVerificationConfig(cfg ScannerConfig, model string) scan.VerificationConfig {

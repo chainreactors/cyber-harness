@@ -110,10 +110,12 @@ func parseArgs(args []string, usage string) (query string, num int, err error) {
 			if i+1 >= len(args) {
 				return "", 0, fmt.Errorf("web_search: --num requires a value")
 			}
+			// #nosec G602 -- i+1 is checked immediately above.
+			value := args[i+1]
 			i++
-			n, parseErr := strconv.Atoi(args[i])
+			n, parseErr := strconv.Atoi(value)
 			if parseErr != nil {
-				return "", 0, fmt.Errorf("web_search: invalid --num value: %s", args[i])
+				return "", 0, fmt.Errorf("web_search: invalid --num value: %s", value)
 			}
 			num = n
 		default:

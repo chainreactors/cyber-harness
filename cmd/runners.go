@@ -8,13 +8,12 @@ import (
 	"strings"
 	"time"
 
-	acpclient "github.com/chainreactors/ioa/client"
-	ioaserver "github.com/chainreactors/ioa/server"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/loop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
+	ioaserver "github.com/chainreactors/ioa/server"
 )
 
 func runAgentMode(ctx context.Context, option *Option, logger telemetry.Logger) error {
@@ -48,9 +47,9 @@ func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logge
 		logger.Warnf("skill %s: %s", diagnostic.Path, diagnostic.Message)
 	}
 
-	if err := registerACPTools(ctx, application, option); err != nil {
+	if err := registerIOATools(ctx, application, option); err != nil {
 		application.Close()
-		return nil, fmt.Errorf("init acp tools: %w", err)
+		return nil, fmt.Errorf("init ioa tools: %w", err)
 	}
 
 	systemPrompt := agent.BuildSystemPrompt(&agent.PromptConfig{
@@ -163,9 +162,9 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	if option.Heartbeat < 0 {
 		return fmt.Errorf("--heartbeat must be greater than or equal to 0")
 	}
-	acpURL := option.ACPURL
-	if acpURL == "" {
-		acpURL = "http://127.0.0.1:8765"
+	ioaURL := option.IOAURL
+	if ioaURL == "" {
+		ioaURL = "http://127.0.0.1:8765"
 	}
 	cfg := appConfig(option, runtimeFeatures{
 		ProviderEnabled:     true,
@@ -173,10 +172,10 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		VerificationEnabled: true,
 		VerifyMinPriority:   "high",
 	}, logger)
-	cfg.ACP = &app.ACPConfig{
-		URL:           acpURL,
-		NodeID:        option.ACPNodeID,
-		NodeName:      option.ACPNodeName,
+	cfg.IOA = &app.IOAConfig{
+		URL:           ioaURL,
+		NodeID:        option.IOANodeID,
+		NodeName:      option.IOANodeName,
 		RegisterTools: true,
 		AutoRegister:  false,
 	}
@@ -206,9 +205,9 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		Skills:      application.Skills.Skills,
 	})
 
-	streamClient, ok := application.ACPStreamClient.(acpclient.StreamAPI)
-	if !ok || streamClient == nil {
-		return fmt.Errorf("loop requires streaming ACP client")
+	streamClient := application.IOAStreamClient
+	if streamClient == nil {
+		return fmt.Errorf("loop requires streaming IOA client")
 	}
 	runner := loop.New(loop.Config{
 		Client:            streamClient,
@@ -217,7 +216,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		SystemPrompt:      systemPrompt,
 		Model:             option.Model,
 		Stream:            true,
-		NodeName:          defaultACPNodeName(option),
+		NodeName:          defaultIOANodeName(option),
 		SpaceName:         option.Space,
 		SpaceDescription:  "aiscan loop worker",
 		PollInterval:      2 * time.Second,
@@ -230,29 +229,29 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	return runner.Run(ctx)
 }
 
-func runACPServe(ctx context.Context, option *Option, logger telemetry.Logger) error {
+func runIOAServe(ctx context.Context, option *Option, logger telemetry.Logger) error {
 	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{
-		URL:    option.ACPURL,
-		DB:     option.ACPDB,
+		URL:    option.IOAURL,
+		DB:     option.IOADB,
 		Logger: logger,
 	})
 }
 
-func registerACPTools(ctx context.Context, application *app.App, option *Option) error {
-	acpURL := option.ACPURL
-	if acpURL == "" {
+func registerIOATools(ctx context.Context, application *app.App, option *Option) error {
+	ioaURL := option.IOAURL
+	if ioaURL == "" {
 		return nil
 	}
-	cfg := app.ACPConfig{
-		URL:           acpURL,
-		NodeID:        option.ACPNodeID,
-		NodeName:      option.ACPNodeName,
+	cfg := app.IOAConfig{
+		URL:           ioaURL,
+		NodeID:        option.IOANodeID,
+		NodeName:      option.IOANodeName,
 		RegisterTools: true,
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan"},
 	}
 	if cfg.NodeName == "" {
-		cfg.NodeName = defaultACPNodeName(option)
+		cfg.NodeName = defaultIOANodeName(option)
 	}
-	return application.InitACP(ctx, cfg)
+	return application.InitIOA(ctx, cfg)
 }

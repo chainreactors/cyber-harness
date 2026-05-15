@@ -11,15 +11,16 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/command"
+	"github.com/chainreactors/aiscan/pkg/protocol"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
-	acpclient "github.com/chainreactors/ioa/client"
+	ioaclient "github.com/chainreactors/ioa/client"
 )
 
 type Config struct {
-	Client       acpclient.StreamAPI
+	Client       ioaclient.StreamAPI
 	Provider     provider.Provider
 	Tools        *command.CommandRegistry
 	SystemPrompt string
@@ -65,7 +66,7 @@ func New(cfg Config) *Runner {
 
 func (r *Runner) Run(ctx context.Context) error {
 	if r.cfg.Client == nil {
-		return fmt.Errorf("acp client is required")
+		return fmt.Errorf("ioa client is required")
 	}
 	if r.cfg.Provider == nil {
 		return fmt.Errorf("agent provider is required")
@@ -78,7 +79,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		r.cfg.Logger.Infof("acp node=%s name=%q status=registered", node.ID, node.Name)
+		r.cfg.Logger.Infof("ioa node=%s name=%q status=registered", node.ID, node.Name)
 	}
 	if strings.TrimSpace(r.cfg.SpaceName) == "" {
 		return fmt.Errorf("loop space name is required")
@@ -93,8 +94,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := r.catchUp(ctx, space.ID); err != nil {
-		return err
+	if r.cfg.HeartbeatInterval > 0 {
+		if err := r.markExisting(ctx, space.ID); err != nil {
+			return err
+		}
+		if err := r.runHeartbeat(ctx, space); err != nil {
+			r.cfg.Logger.Warnf("loop heartbeat failed: %s", err)
+		}
+	} else {
+		if err := r.catchUp(ctx, space.ID); err != nil {
+			return err
+		}
 	}
 
 	messages, errs, cancel, err := r.cfg.Client.Subscribe(ctx, space.ID)
@@ -139,28 +149,62 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) announceProfile(ctx context.Context, space ioa.SpaceInfo) error {
-	content := map[string]any{
-		"type":        "node_profile",
-		"node_id":     r.cfg.Client.NodeID(),
-		"node_name":   r.cfg.NodeName,
-		"space_id":    space.ID,
-		"space_name":  space.Name,
-		"description": r.cfg.SpaceDescription,
-		"prompt":      strings.TrimSpace(r.cfg.Prompt),
-		"intent":      strings.TrimSpace(r.cfg.Intent),
-		"skills":      cleanStrings(r.cfg.Skills),
-		"network":     r.networkProfile(),
-		"created_at":  time.Now().UTC().Format(time.RFC3339),
+	parts := []string{fmt.Sprintf("Node %s (%s) joined the swarm.", r.cfg.NodeName, r.cfg.Client.NodeID())}
+	if intent := strings.TrimSpace(r.cfg.Intent); intent != "" {
+		parts = append(parts, "Intent: "+intent)
 	}
-	_, err := r.cfg.Client.Send(ctx, space.ID, ioa.SendMessage{Content: content})
+	if skills := cleanStrings(r.cfg.Skills); len(skills) > 0 {
+		parts = append(parts, "Skills: "+strings.Join(skills, ", "))
+	}
+	msg := protocol.SwarmMessage{
+		Content: strings.Join(parts, "\n"),
+		Meta:    r.buildMeta(),
+	}
+	_, err := r.cfg.Client.Send(ctx, space.ID, ioa.SendMessage{Content: swarmContent(msg)})
 	return err
 }
 
-func (r *Runner) networkProfile() map[string]any {
-	if r.cfg.Network != nil {
-		return r.cfg.Network
+func (r *Runner) buildMeta() map[string]any {
+	meta := map[string]any{
+		"kind":      "node_profile",
+		"node_name": r.cfg.NodeName,
 	}
-	return localNetworkProfile()
+	if r.cfg.Network != nil {
+		for k, v := range r.cfg.Network {
+			meta[k] = v
+		}
+	} else {
+		hostname, _ := os.Hostname()
+		meta["hostname"] = hostname
+		if addrs := localAddresses(); len(addrs) > 0 {
+			meta["addresses"] = addrs
+		}
+	}
+	if skills := cleanStrings(r.cfg.Skills); len(skills) > 0 {
+		meta["capabilities"] = skills
+	}
+	return meta
+}
+
+func localAddresses() []string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var result []string
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			result = append(result, addr.String())
+		}
+	}
+	return result
 }
 
 func (r *Runner) catchUp(ctx context.Context, spaceID string) error {
@@ -176,53 +220,39 @@ func (r *Runner) catchUp(ctx context.Context, spaceID string) error {
 	return nil
 }
 
+func (r *Runner) markExisting(ctx context.Context, spaceID string) error {
+	messages, err := r.cfg.Client.Read(ctx, spaceID, ioa.ReadOptions{All: true})
+	if err != nil {
+		return err
+	}
+	for _, msg := range messages {
+		r.markProcessed(msg.ID)
+	}
+	return nil
+}
+
 func (r *Runner) runHeartbeat(ctx context.Context, space ioa.SpaceInfo) error {
 	messages, err := r.cfg.Client.Read(ctx, space.ID, ioa.ReadOptions{All: true, Limit: r.cfg.HeartbeatContextLimit})
 	if err != nil {
 		return err
 	}
 	r.cfg.Logger.Importantf("loop heartbeat=running space=%s", space.ID)
-	started, err := r.cfg.Client.Send(ctx, space.ID, ioa.SendMessage{
-		Content: map[string]any{
-			"type":             "heartbeat",
-			"status":           "started",
-			"node_id":          r.cfg.Client.NodeID(),
-			"node_name":        r.cfg.NodeName,
-			"space_id":         space.ID,
-			"space_name":       space.Name,
-			"interval_seconds": int(r.cfg.HeartbeatInterval.Seconds()),
-			"created_at":       time.Now().UTC().Format(time.RFC3339),
-		},
-	})
-	if err != nil {
-		return err
-	}
 
-	task := r.heartbeatPrompt(space, messages)
-	result, runErr := agent.Run(ctx, task, r.cfg.Tools,
+	prompt := r.heartbeatPrompt(space, messages)
+	result, runErr := agent.Run(ctx, prompt, r.cfg.Tools,
 		agent.WithProvider(r.cfg.Provider),
 		agent.WithSystemPrompt(r.cfg.SystemPrompt),
 		agent.WithModel(r.cfg.Model),
 		agent.WithStream(r.cfg.Stream),
 		agent.WithLogger(r.cfg.Logger),
 	)
-	content := map[string]any{
-		"type":         "heartbeat_result",
-		"status":       "done",
-		"output":       result,
-		"node_id":      r.cfg.Client.NodeID(),
-		"node_name":    r.cfg.NodeName,
-		"space_id":     space.ID,
-		"space_name":   space.Name,
-		"completed_at": time.Now().UTC().Format(time.RFC3339),
-	}
+
+	report := protocol.SwarmMessage{Content: result}
 	if runErr != nil {
-		content["status"] = "error"
-		content["error"] = runErr.Error()
+		report.Content = fmt.Sprintf("Heartbeat error: %s", runErr.Error())
 	}
 	_, sendErr := r.cfg.Client.Send(ctx, space.ID, ioa.SendMessage{
-		Content: content,
-		Refs:    &ioa.Ref{Messages: []string{started.ID}},
+		Content: swarmContent(report),
 	})
 	if runErr != nil {
 		return runErr
@@ -245,7 +275,7 @@ func (r *Runner) heartbeatPrompt(space ioa.SpaceInfo, messages []ioa.Message) st
 	if intent == "" {
 		intent = "No explicit worker intent was configured."
 	}
-	return fmt.Sprintf(`This is an IOA heartbeat turn for an aiscan loop worker.
+	return fmt.Sprintf(`This is a Swarm heartbeat turn.
 
 Space:
 - id: %s
@@ -257,20 +287,23 @@ This node:
 - intent: %s
 - skills: %s
 
-Review the recent IOA context below and decide the next useful step.
-Use IOA tools when you need to read more context, send coordination messages, or assign tasks to other nodes.
-If this worker should act now, use the available local tools directly in this heartbeat turn.
+Review the recent messages below and decide the next useful step.
+If this worker should act now, use the available local tools directly.
 If no action is needed, say that briefly and do not repeat completed work.
-Do not send heartbeat, status, result, or node_profile messages as new tasks.
-When creating IOA tasks for other nodes, use content like {"type":"task","task":"..."} and target refs.nodes when a specific node should handle it.
 
-Recent IOA messages, oldest to newest:
+When sending tasks to other nodes, use content like {"content":"...", "targets":["..."]} and set refs.nodes to target a specific node.
+When reporting results, set refs.messages to reference the original task message.
+
+Recent messages (oldest to newest):
 %s`, space.ID, space.Name, r.cfg.Client.NodeID(), r.cfg.NodeName, intent, strings.Join(cleanStrings(r.cfg.Skills), ", "), string(contextJSON))
 }
 
 func (r *Runner) handleMessage(ctx context.Context, spaceID string, msg ioa.Message) error {
-	task, ok := taskFromMessage(msg)
+	sm, ok := swarmFromIOA(msg)
 	if !ok {
+		return nil
+	}
+	if isProfileMessage(sm) {
 		return nil
 	}
 	if msg.Sender == r.cfg.Client.NodeID() {
@@ -284,41 +317,32 @@ func (r *Runner) handleMessage(ctx context.Context, spaceID string, msg ioa.Mess
 	}
 	r.cfg.Logger.Importantf("loop task=received message=%s", msg.ID)
 
-	started, err := r.cfg.Client.Send(ctx, spaceID, ioa.SendMessage{
-		Content: map[string]any{
-			"type":    "status",
-			"status":  "started",
-			"task":    task,
-			"node_id": r.cfg.Client.NodeID(),
-		},
-		Refs: &ioa.Ref{Messages: []string{msg.ID}},
+	// Report: running
+	running := protocol.SwarmMessage{Content: fmt.Sprintf("Accepted task. Executing: %s", truncate(sm.Content, 100))}
+	_, err := r.cfg.Client.Send(ctx, spaceID, ioa.SendMessage{
+		Content: swarmContent(running),
+		Refs:    &ioa.Ref{Messages: []string{msg.ID}},
 	})
 	if err != nil {
 		return err
 	}
 
-	result, runErr := agent.Run(ctx, task, r.cfg.Tools,
+	result, runErr := agent.Run(ctx, sm.Content, r.cfg.Tools,
 		agent.WithProvider(r.cfg.Provider),
 		agent.WithSystemPrompt(r.cfg.SystemPrompt),
 		agent.WithModel(r.cfg.Model),
 		agent.WithStream(r.cfg.Stream),
 		agent.WithLogger(r.cfg.Logger),
 	)
-	content := map[string]any{
-		"type":    "result",
-		"task":    task,
-		"output":  result,
-		"node_id": r.cfg.Client.NodeID(),
-	}
+
+	// Report: done or error
+	report := protocol.SwarmMessage{Content: result}
 	if runErr != nil {
-		content["error"] = runErr.Error()
-		content["status"] = "error"
-	} else {
-		content["status"] = "done"
+		report.Content = fmt.Sprintf("Error: %s\n\nPartial output:\n%s", runErr.Error(), result)
 	}
 	_, sendErr := r.cfg.Client.Send(ctx, spaceID, ioa.SendMessage{
-		Content: content,
-		Refs:    &ioa.Ref{Messages: []string{msg.ID, started.ID}},
+		Content: swarmContent(report),
+		Refs:    &ioa.Ref{Messages: []string{msg.ID}},
 	})
 	if runErr != nil {
 		return runErr
@@ -341,22 +365,36 @@ func isTaskForNode(msg ioa.Message, nodeID string) bool {
 	return slices.Contains(msg.Refs.Nodes, nodeID)
 }
 
-func taskFromMessage(msg ioa.Message) (string, bool) {
-	if typ, ok := msg.Content["type"].(string); ok && typ != "" && typ != "task" {
-		return "", false
+// swarmFromIOA tries to parse an IOA message as a SwarmMessage (new format),
+// falling back to the legacy {"type":"task","task":"..."} format.
+func swarmFromIOA(msg ioa.Message) (protocol.SwarmMessage, bool) {
+	if sm, ok := protocol.ParseSwarm(msg.Content); ok {
+		return sm, true
 	}
-	if value, ok := msg.Content["task"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value), true
+	return protocol.ParseLegacyTask(msg.Content)
+}
+
+func swarmContent(msg protocol.SwarmMessage) map[string]any {
+	m := map[string]any{"content": msg.Content}
+	if len(msg.Targets) > 0 {
+		m["targets"] = msg.Targets
 	}
-	if value, ok := msg.Content["prompt"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value), true
+	if len(msg.Meta) > 0 {
+		m["meta"] = msg.Meta
 	}
-	if typ, _ := msg.Content["type"].(string); typ == "task" {
-		if value, ok := msg.Content["content"].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value), true
-		}
+	return m
+}
+
+func isProfileMessage(msg protocol.SwarmMessage) bool {
+	kind, _ := msg.Meta["kind"].(string)
+	return kind == "node_profile"
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return "", false
+	return s[:n] + "..."
 }
 
 func heartbeatC(ticker *time.Ticker) <-chan time.Time {
@@ -381,38 +419,4 @@ func cleanStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
-}
-
-func localNetworkProfile() map[string]any {
-	hostname, _ := os.Hostname()
-	profile := map[string]any{
-		"hostname":   hostname,
-		"interfaces": []map[string]any{},
-	}
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		profile["error"] = err.Error()
-		return profile
-	}
-	items := make([]map[string]any, 0, len(interfaces))
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		addresses := make([]string, 0, len(addrs))
-		for _, addr := range addrs {
-			addresses = append(addresses, addr.String())
-		}
-		items = append(items, map[string]any{
-			"name":      iface.Name,
-			"flags":     iface.Flags.String(),
-			"addresses": addresses,
-		})
-	}
-	profile["interfaces"] = items
-	return profile
 }

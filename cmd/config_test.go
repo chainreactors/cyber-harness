@@ -91,8 +91,8 @@ cyberhub:
   url: http://hub:9000
   key: testkey
   mode: override
-acp:
-  url: http://acp:8765
+ioa:
+  url: http://ioa:8765
   space: case-1
 `)
 
@@ -109,7 +109,7 @@ acp:
 		{"CyberhubURL", opt.CyberhubURL, "http://hub:9000"},
 		{"CyberhubKey", opt.CyberhubKey, "testkey"},
 		{"CyberhubMode", opt.CyberhubMode, "override"},
-		{"ACPURL", opt.ACPURL, "http://acp:8765"},
+		{"IOAURL", opt.IOAURL, "http://ioa:8765"},
 		{"Space", opt.Space, "case-1"},
 	}
 	for _, c := range checks {

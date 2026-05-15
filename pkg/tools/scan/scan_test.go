@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
@@ -567,10 +567,10 @@ func TestPOCCapabilitySkipsUnfingerprintedTargetsByDefault(t *testing.T) {
 }
 
 func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
-	engine := newScanTestNeutronEngine(t, scanTestTemplate("nginx-poc", "nginx"))
+	neutronEngine := newScanTestNeutronEngine(t, scanTestTemplate("nginx-poc", "nginx"))
 	index := association.NewFingerPOCIndex()
-	index.BuildFromTemplates(engine.Get())
-	cmd := New(&engine.Set{Neutron: engine, Index: index})
+	index.BuildFromTemplates(neutronEngine.Get())
+	cmd := New(&engine.Set{Neutron: neutronEngine, Index: index})
 
 	var events []event
 	cmd.runPOCCapability(context.Background(), flags{}, newPOCTarget("", "http://127.0.0.1", []string{"unknown"}), func(event event) {
@@ -1200,4 +1200,3 @@ func TestScanReportMarkdown(t *testing.T) {
 		}
 	}
 }
-

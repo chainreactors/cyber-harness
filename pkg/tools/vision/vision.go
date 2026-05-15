@@ -171,8 +171,10 @@ func parseArgs(args []string, usage string) (imagePath, prompt string, err error
 			if i+1 >= len(args) {
 				return "", "", fmt.Errorf("vision: --prompt requires a value")
 			}
+			// #nosec G602 -- i+1 is checked immediately above.
+			value := args[i+1]
 			i++
-			prompt = args[i]
+			prompt = value
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return "", "", fmt.Errorf("vision: unknown flag: %s", args[i])

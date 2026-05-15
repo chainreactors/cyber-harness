@@ -7,41 +7,41 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/chainreactors/ioa"
-	acpclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/ioa"
+	ioaclient "github.com/chainreactors/ioa/client"
 )
 
-func runACPClientCommand(ctx context.Context, mode runMode, option *Option, args acpClientArgs, logger telemetry.Logger) error {
-	acpURL := option.ACPURL
-	if acpURL == "" {
-		acpURL = "http://127.0.0.1:8765"
+func runIOAClientCommand(ctx context.Context, mode runMode, option *Option, args ioaClientArgs, logger telemetry.Logger) error {
+	ioaURL := option.IOAURL
+	if ioaURL == "" {
+		ioaURL = "http://127.0.0.1:8765"
 	}
-	client, err := acpclient.NewClient(acpURL, "")
+	client, err := ioaclient.NewClient(ioaURL, "")
 	if err != nil {
 		return fmt.Errorf("connect to IOA server: %w", err)
 	}
 
 	switch mode {
-	case runModeACPSpaces:
-		return runACPSpaces(ctx, client, option)
-	case runModeACPMessages:
-		return runACPMessages(ctx, client, option, args)
-	case runModeACPContext:
-		return runACPContext(ctx, client, option, args)
-	case runModeACPNodes:
-		return runACPNodes(ctx, client, option, args)
+	case runModeIOASpaces:
+		return runIOASpaces(ctx, client, option)
+	case runModeIOAMessages:
+		return runIOAMessages(ctx, client, option, args)
+	case runModeIOAContext:
+		return runIOAContext(ctx, client, option, args)
+	case runModeIOANodes:
+		return runIOANodes(ctx, client, option, args)
 	default:
-		return fmt.Errorf("unknown acp mode: %s", mode)
+		return fmt.Errorf("unknown ioa mode: %s", mode)
 	}
 }
 
-func runACPSpaces(ctx context.Context, client *acpclient.Client, option *Option) error {
+func runIOASpaces(ctx context.Context, client *ioaclient.Client, option *Option) error {
 	spaces, err := client.ListSpaces(ctx)
 	if err != nil {
 		return err
 	}
-	if option.ACPJSON {
+	if option.IOAJSON {
 		return writeJSONOutput(spaces)
 	}
 	if len(spaces) == 0 {
@@ -56,7 +56,7 @@ func runACPSpaces(ctx context.Context, client *acpclient.Client, option *Option)
 	return w.Flush()
 }
 
-func runACPMessages(ctx context.Context, client *acpclient.Client, option *Option, args acpClientArgs) error {
+func runIOAMessages(ctx context.Context, client *ioaclient.Client, option *Option, args ioaClientArgs) error {
 	space, err := client.ResolveSpace(ctx, args.Space)
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func runACPMessages(ctx context.Context, client *acpclient.Client, option *Optio
 	if err != nil {
 		return err
 	}
-	if option.ACPJSON {
+	if option.IOAJSON {
 		return writeJSONOutput(messages)
 	}
 	if len(messages) == 0 {
@@ -80,7 +80,7 @@ func runACPMessages(ctx context.Context, client *acpclient.Client, option *Optio
 	return w.Flush()
 }
 
-func runACPContext(ctx context.Context, client *acpclient.Client, option *Option, args acpClientArgs) error {
+func runIOAContext(ctx context.Context, client *ioaclient.Client, option *Option, args ioaClientArgs) error {
 	space, err := client.ResolveSpace(ctx, args.Space)
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func runACPContext(ctx context.Context, client *acpclient.Client, option *Option
 	if err != nil {
 		return err
 	}
-	if option.ACPJSON {
+	if option.IOAJSON {
 		return writeJSONOutput(messages)
 	}
 	if len(messages) == 0 {
@@ -106,13 +106,13 @@ func runACPContext(ctx context.Context, client *acpclient.Client, option *Option
 	return nil
 }
 
-func runACPNodes(ctx context.Context, client *acpclient.Client, option *Option, args acpClientArgs) error {
+func runIOANodes(ctx context.Context, client *ioaclient.Client, option *Option, args ioaClientArgs) error {
 	if args.Space != "" {
 		space, err := client.ResolveSpace(ctx, args.Space)
 		if err != nil {
 			return err
 		}
-		if option.ACPJSON {
+		if option.IOAJSON {
 			return writeJSONOutput(space.Nodes)
 		}
 		if len(space.Nodes) == 0 {
@@ -131,7 +131,7 @@ func runACPNodes(ctx context.Context, client *acpclient.Client, option *Option, 
 	if err != nil {
 		return err
 	}
-	if option.ACPJSON {
+	if option.IOAJSON {
 		return writeJSONOutput(nodes)
 	}
 	if len(nodes) == 0 {

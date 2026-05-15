@@ -62,7 +62,7 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	}
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := p.client.Do(httpReq) //nolint:bodyclose // closed by the stream reader goroutine, or on non-2xx below.
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
@@ -111,6 +111,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	}
 
+	//nolint:bodyclose // The stream response body is closed by the reader goroutine, or on non-2xx below.
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)

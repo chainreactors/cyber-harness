@@ -4,7 +4,7 @@ project_name: aiscan
 
 before:
   hooks:
-    - go generate ./pkg/tools/resources
+    - go generate ./pkg/resources
 
 builds:
   - id: aiscan
@@ -37,9 +37,9 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: acp
-    main: ./cmd/acp
-    binary: "acp"
+  - id: ioa
+    main: ./cmd/ioa
+    binary: "ioa"
     env:
       - CGO_ENABLED=0
     goos:
@@ -78,9 +78,9 @@ archives:
     formats:
       - binary
 
-  - id: acp
-    builds: [acp]
-    name_template: "acp_{{ .Os }}_{{ .Arch }}"
+  - id: ioa
+    builds: [ioa]
+    name_template: "ioa_{{ .Os }}_{{ .Arch }}"
     formats:
       - binary
 

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	acpclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	skillpkg "github.com/chainreactors/aiscan/skills"
+	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/reeflective/console"
 	"github.com/spf13/cobra"
 )
@@ -157,7 +157,7 @@ func (r *agentConsole) rootCommand() *cobra.Command {
 		r.continueCommand(),
 		r.exitCommand(),
 	)
-	root.AddCommand(r.acpCommands()...)
+	root.AddCommand(r.ioaCommands()...)
 	root.AddCommand(r.skillCommands()...)
 	return root
 }
@@ -296,26 +296,26 @@ func (r *agentConsole) ensureOutput() *agentOutput {
 	return r.output
 }
 
-func (r *agentConsole) acpClient() (*acpclient.Client, error) {
-	acpURL := r.option.ACPURL
-	if acpURL == "" {
-		return nil, fmt.Errorf("ACP not configured: use --acp-url")
+func (r *agentConsole) ioaClient() (*ioaclient.Client, error) {
+	ioaURL := r.option.IOAURL
+	if ioaURL == "" {
+		return nil, fmt.Errorf("IOA not configured: use --ioa-url")
 	}
-	return acpclient.NewClient(acpURL, "")
+	return ioaclient.NewClient(ioaURL, "")
 }
 
-func (r *agentConsole) acpCommands() []*cobra.Command {
+func (r *agentConsole) ioaCommands() []*cobra.Command {
 	return []*cobra.Command{
 		{
 			Use:   "/spaces",
-			Short: "List all ACP spaces",
+			Short: "List all IOA spaces",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				client, err := r.acpClient()
+				client, err := r.ioaClient()
 				if err != nil {
 					return err
 				}
-				return runACPSpaces(cmd.Context(), client, r.option)
+				return runIOASpaces(cmd.Context(), client, r.option)
 			},
 		},
 		{
@@ -323,11 +323,11 @@ func (r *agentConsole) acpCommands() []*cobra.Command {
 			Short: "List start messages in a space",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client, err := r.acpClient()
+				client, err := r.ioaClient()
 				if err != nil {
 					return err
 				}
-				return runACPMessages(cmd.Context(), client, r.option, acpClientArgs{Space: args[0]})
+				return runIOAMessages(cmd.Context(), client, r.option, ioaClientArgs{Space: args[0]})
 			},
 		},
 		{
@@ -335,11 +335,11 @@ func (r *agentConsole) acpCommands() []*cobra.Command {
 			Short: "View message thread/context",
 			Args:  cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client, err := r.acpClient()
+				client, err := r.ioaClient()
 				if err != nil {
 					return err
 				}
-				return runACPContext(cmd.Context(), client, r.option, acpClientArgs{Space: args[0], MessageID: args[1]})
+				return runIOAContext(cmd.Context(), client, r.option, ioaClientArgs{Space: args[0], MessageID: args[1]})
 			},
 		},
 		{
@@ -347,21 +347,21 @@ func (r *agentConsole) acpCommands() []*cobra.Command {
 			Short: "List nodes (optionally scoped to a space)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client, err := r.acpClient()
+				client, err := r.ioaClient()
 				if err != nil {
 					return err
 				}
-				var a acpClientArgs
+				var a ioaClientArgs
 				if len(args) > 0 {
 					a.Space = args[0]
 				}
-				return runACPNodes(cmd.Context(), client, r.option, a)
+				return runIOANodes(cmd.Context(), client, r.option, a)
 			},
 		},
 	}
 }
 
-var acpConsoleCommands = map[string]bool{
+var ioaConsoleCommands = map[string]bool{
 	"/spaces": true, "/messages": true, "/context": true, "/nodes": true,
 }
 
@@ -377,11 +377,9 @@ func agentConsoleArgsForLine(line string) ([]string, error) {
 	if !ok {
 		return []string{text}, nil
 	}
-	if acpConsoleCommands[command] {
+	if ioaConsoleCommands[command] {
 		result := []string{command}
-		for _, field := range strings.Fields(rest) {
-			result = append(result, field)
-		}
+		result = append(result, strings.Fields(rest)...)
 		return result, nil
 	}
 	return []string{command, strings.TrimSpace(rest)}, nil

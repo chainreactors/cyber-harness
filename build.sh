@@ -9,7 +9,7 @@
 #   ./build.sh --config prod.yaml               # 使用指定配置文件
 #   ./build.sh --llm-model deepseek-chat        # CLI 覆盖配置文件中的值
 #   ./build.sh --embed                          # 嵌入扫描资源（不加 emptytemplates/noembed tag）
-#   ./build.sh --acp                            # 同时编译 acp server 二进制
+#   ./build.sh --ioa                            # 同时编译 ioa server 二进制
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ EXTRA_TAGS=""
 OUTPUT_DIR="dist"
 GENERATE_ONLY=false
 EMBED_RESOURCES=false
-BUILD_ACP=false
+BUILD_IOA=false
 QUICK_TARGET=""
 
 # CLI 覆盖（优先级高于 config.yaml）
@@ -33,9 +33,9 @@ OPT_PROXY=""
 OPT_CYBERHUB_URL=""
 OPT_CYBERHUB_KEY=""
 OPT_CYBERHUB_MODE=""
-OPT_ACP_URL=""
-OPT_ACP_NODE_NAME=""
-OPT_ACP_SPACE=""
+OPT_IOA_URL=""
+OPT_IOA_NODE_NAME=""
+OPT_IOA_SPACE=""
 OPT_VERIFY=""
 OPT_VERIFY_TIMEOUT=""
 
@@ -52,6 +52,7 @@ yaml_val() {
         /^  ${key}:/{
             s/^  ${key}:[[:space:]]*//
             s/[[:space:]]#.*$//
+            s/\r$//
             s/^\"//; s/\"$//
             s/^'//; s/'$//
             /^$/d
@@ -70,7 +71,7 @@ while [[ $# -gt 0 ]]; do
         --output)           OUTPUT_DIR="$2"; shift 2 ;;
         -g|--ldflags)       GENERATE_ONLY=true; shift ;;
         --embed)            EMBED_RESOURCES=true; shift ;;
-        --acp)              BUILD_ACP=true; shift ;;
+        --ioa)              BUILD_IOA=true; shift ;;
         --llm-provider)     OPT_PROVIDER="$2"; shift 2 ;;
         --llm-base-url)     OPT_BASE_URL="$2"; shift 2 ;;
         --llm-api-key)      OPT_API_KEY="$2"; shift 2 ;;
@@ -79,9 +80,9 @@ while [[ $# -gt 0 ]]; do
         --cyberhub-url)     OPT_CYBERHUB_URL="$2"; shift 2 ;;
         --cyberhub-key)     OPT_CYBERHUB_KEY="$2"; shift 2 ;;
         --cyberhub-mode)    OPT_CYBERHUB_MODE="$2"; shift 2 ;;
-        --acp-url)          OPT_ACP_URL="$2"; shift 2 ;;
-        --acp-node-name)    OPT_ACP_NODE_NAME="$2"; shift 2 ;;
-        --space)            OPT_ACP_SPACE="$2"; shift 2 ;;
+        --ioa-url)          OPT_IOA_URL="$2"; shift 2 ;;
+        --ioa-node-name)    OPT_IOA_NODE_NAME="$2"; shift 2 ;;
+        --space)            OPT_IOA_SPACE="$2"; shift 2 ;;
         --verify)           OPT_VERIFY="$2"; shift 2 ;;
         --verify-timeout)   OPT_VERIFY_TIMEOUT="$2"; shift 2 ;;
         -h|--help)
@@ -99,7 +100,7 @@ aiscan 构建脚本
   --tags TAGS           额外 build tags，逗号分隔
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
-  --acp                 同时编译 acp server 二进制
+  --ioa                 同时编译 ioa server 二进制
 
 LLM 覆盖（优先级高于 config.yaml）:
   --llm-provider NAME
@@ -113,9 +114,9 @@ Cyberhub 覆盖:
   --cyberhub-key KEY
   --cyberhub-mode MODE
 
-ACP 覆盖:
-  --acp-url URL
-  --acp-node-name NAME
+IOA 覆盖:
+  --ioa-url URL
+  --ioa-node-name NAME
   --space NAME
 
 扫描覆盖:
@@ -130,7 +131,7 @@ ACP 覆盖:
   ./build.sh --llm-provider deepseek --llm-model deepseek-chat
   ./build.sh --embed                            # 嵌入资源的完整构建
   ./build.sh -g                                 # 打印 ldflags（用于自定义构建命令）
-  ./build.sh --acp -o linux/amd64               # 同时编译 acp server
+  ./build.sh --ioa -o linux/amd64               # 同时编译 ioa server
 HELP
             exit 0
             ;;
@@ -159,9 +160,9 @@ CFG_CYBERHUB_URL=$(resolve "$OPT_CYBERHUB_URL" "$(yaml_val "$CONFIG_FILE" cyberh
 CFG_CYBERHUB_KEY=$(resolve "$OPT_CYBERHUB_KEY" "$(yaml_val "$CONFIG_FILE" cyberhub key)")
 CFG_CYBERHUB_MODE=$(resolve "$OPT_CYBERHUB_MODE" "$(yaml_val "$CONFIG_FILE" cyberhub mode)")
 
-CFG_ACP_URL=$(resolve "$OPT_ACP_URL" "$(yaml_val "$CONFIG_FILE" acp url)")
-CFG_ACP_NODE_NAME=$(resolve "$OPT_ACP_NODE_NAME" "$(yaml_val "$CONFIG_FILE" acp node_name)")
-CFG_ACP_SPACE=$(resolve "$OPT_ACP_SPACE" "$(yaml_val "$CONFIG_FILE" acp space)")
+CFG_IOA_URL=$(resolve "$OPT_IOA_URL" "$(yaml_val "$CONFIG_FILE" ioa url)")
+CFG_IOA_NODE_NAME=$(resolve "$OPT_IOA_NODE_NAME" "$(yaml_val "$CONFIG_FILE" ioa node_name)")
+CFG_IOA_SPACE=$(resolve "$OPT_IOA_SPACE" "$(yaml_val "$CONFIG_FILE" ioa space)")
 
 CFG_VERIFY=$(resolve "$OPT_VERIFY" "$(yaml_val "$CONFIG_FILE" scan verify)")
 CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" scan verify_timeout)")
@@ -197,9 +198,9 @@ add_ldflag DefaultProxy        "$CFG_PROXY"
 add_ldflag DefaultCyberhubURL  "$CFG_CYBERHUB_URL"
 add_ldflag DefaultCyberhubKey  "$CFG_CYBERHUB_KEY"
 add_ldflag DefaultCyberhubMode "$CFG_CYBERHUB_MODE"
-add_ldflag DefaultACPURL       "$CFG_ACP_URL"
-add_ldflag DefaultACPNodeName  "$CFG_ACP_NODE_NAME"
-add_ldflag DefaultSpace        "$CFG_ACP_SPACE"
+add_ldflag DefaultIOAURL       "$CFG_IOA_URL"
+add_ldflag DefaultIOANodeName  "$CFG_IOA_NODE_NAME"
+add_ldflag DefaultSpace        "$CFG_IOA_SPACE"
 add_ldflag DefaultVerify       "$CFG_VERIFY"
 add_ldflag DefaultVerifyTimeout "$CFG_VERIFY_TIMEOUT"
 
@@ -218,7 +219,7 @@ echo "=== aiscan build ==="
 [ -n "$CFG_MODEL" ]        && echo "model:    $CFG_MODEL"
 [ -n "$CFG_BASE_URL" ]     && echo "base_url: $CFG_BASE_URL"
 [ -n "$CFG_CYBERHUB_URL" ] && echo "cyberhub: $CFG_CYBERHUB_URL"
-[ -n "$CFG_ACP_URL" ]      && echo "acp:      $CFG_ACP_URL"
+[ -n "$CFG_IOA_URL" ]      && echo "ioa:      $CFG_IOA_URL"
 [ -n "$CFG_VERIFY" ]       && echo "verify:   $CFG_VERIFY"
 
 # ─── Build tags ──────────────────────────────────────────────────
@@ -236,7 +237,7 @@ echo "tags:     $TAGS"
 
 if [ "$EMBED_RESOURCES" = true ]; then
     echo "生成嵌入资源..."
-    go generate ./pkg/scanner/resources
+    go generate ./pkg/resources
 fi
 
 # ─── 目标平台 ────────────────────────────────────────────────────
@@ -273,12 +274,12 @@ for target in "${TARGETS[@]}"; do
     build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/aiscan aiscan
 done
 
-if [ "$BUILD_ACP" = true ]; then
+if [ "$BUILD_IOA" = true ]; then
     echo ""
-    echo "编译 acp..."
+    echo "编译 ioa..."
     for target in "${TARGETS[@]}"; do
         IFS='/' read -ra PARTS <<< "$target"
-        build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/acp acp
+        build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/ioa ioa
     done
 fi
 
@@ -287,4 +288,4 @@ fi
 echo ""
 echo "构建完成:"
 ls -lh "$OUTPUT_DIR"/aiscan_* 2>/dev/null || true
-[ "$BUILD_ACP" = true ] && ls -lh "$OUTPUT_DIR"/acp_* 2>/dev/null || true
+[ "$BUILD_IOA" = true ] && ls -lh "$OUTPUT_DIR"/ioa_* 2>/dev/null || true

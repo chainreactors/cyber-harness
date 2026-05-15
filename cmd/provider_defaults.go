@@ -16,9 +16,9 @@ var (
 	DefaultVerify        = "auto"
 	DefaultVerifyTimeout = ""
 
-	DefaultACPURL      = ""
-	DefaultACPNodeID   = ""
-	DefaultACPNodeName = ""
+	DefaultIOAURL      = ""
+	DefaultIOANodeID   = ""
+	DefaultIOANodeName = ""
 	DefaultSpace       = ""
 )
 

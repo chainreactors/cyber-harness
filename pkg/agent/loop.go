@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/command"
 )
 
 func Run(ctx context.Context, prompt string, tools *command.CommandRegistry, opts ...Option) (string, error) {
@@ -46,7 +46,7 @@ func runLoop(ctx context.Context, prompts []provider.ChatMessage, agentCtx Conte
 	}
 
 	transcript := newTranscript(agentCtx.Messages, len(prompts)+4)
-	turn := 1
+	turn := 0
 
 	emitFn := cfg.Emit
 	if err := emit(ctx, emitFn, Event{Type: EventAgentStart}); err != nil {
@@ -224,7 +224,6 @@ func emitMessage(ctx context.Context, emitFn EventHandler, turn int, msg provide
 	}
 	return emit(ctx, emitFn, Event{Type: EventMessageEnd, Turn: turn, Message: msg})
 }
-
 
 type toolBatchResult struct {
 	messages  []provider.ChatMessage

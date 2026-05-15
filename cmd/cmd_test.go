@@ -8,9 +8,9 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -328,22 +328,22 @@ func TestAgentConsolePromptCommandRunsAgent(t *testing.T) {
 	}
 }
 
-func TestParseCLIACPServeCommandUsesURL(t *testing.T) {
+func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 	parsed, err := parseCLI([]string{
-		"acp",
+		"ioa",
 		"serve",
-		"--acp-url", "http://127.0.0.1:9999",
-		"--acp-db", "./test.db",
+		"--ioa-url", "http://127.0.0.1:9999",
+		"--ioa-db", "./test.db",
 		"--timeout", "10",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
-	if parsed.Mode != runModeACPServe {
-		t.Fatalf("mode = %s, want %s", parsed.Mode, runModeACPServe)
+	if parsed.Mode != runModeIOAServe {
+		t.Fatalf("mode = %s, want %s", parsed.Mode, runModeIOAServe)
 	}
 	opt := parsed.Option
-	if opt.ACPURL != "http://127.0.0.1:9999" || opt.ACPDB != "./test.db" || opt.Timeout != 10 {
+	if opt.IOAURL != "http://127.0.0.1:9999" || opt.IOADB != "./test.db" || opt.Timeout != 10 {
 		t.Fatalf("option = %#v", opt)
 	}
 }
@@ -389,9 +389,9 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		DefaultCyberhubKey = "HUBKEY"
 		DefaultCyberhubMode = "override"
 		DefaultVerifyTimeout = "77"
-		DefaultACPURL = "http://acp:8765"
-		DefaultACPNodeID = "node-1"
-		DefaultACPNodeName = "worker-1"
+		DefaultIOAURL = "http://ioa:8765"
+		DefaultIOANodeID = "node-1"
+		DefaultIOANodeName = "worker-1"
 		DefaultSpace = "case-1"
 
 		opt := &Option{}
@@ -411,8 +411,8 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		if !cfg.Provider.Enabled || !cfg.Provider.Optional {
 			t.Fatalf("provider config = %#v", cfg.Provider)
 		}
-		if opt.ACPURL != DefaultACPURL || opt.ACPNodeID != DefaultACPNodeID || opt.ACPNodeName != DefaultACPNodeName || opt.Space != DefaultSpace {
-			t.Fatal("compiled ACP defaults were not resolved")
+		if opt.IOAURL != DefaultIOAURL || opt.IOANodeID != DefaultIOANodeID || opt.IOANodeName != DefaultIOANodeName || opt.Space != DefaultSpace {
+			t.Fatal("compiled IOA defaults were not resolved")
 		}
 	})
 }
@@ -429,9 +429,9 @@ func withDefaults(t *testing.T, fn func()) {
 	savedCyberhubMode := DefaultCyberhubMode
 	savedVerify := DefaultVerify
 	savedVerifyTimeout := DefaultVerifyTimeout
-	savedACPURL := DefaultACPURL
-	savedACPNodeID := DefaultACPNodeID
-	savedACPNodeName := DefaultACPNodeName
+	savedIOAURL := DefaultIOAURL
+	savedIOANodeID := DefaultIOANodeID
+	savedIOANodeName := DefaultIOANodeName
 	savedSpace := DefaultSpace
 	t.Cleanup(func() {
 		DefaultProvider = savedProvider
@@ -444,9 +444,9 @@ func withDefaults(t *testing.T, fn func()) {
 		DefaultCyberhubMode = savedCyberhubMode
 		DefaultVerify = savedVerify
 		DefaultVerifyTimeout = savedVerifyTimeout
-		DefaultACPURL = savedACPURL
-		DefaultACPNodeID = savedACPNodeID
-		DefaultACPNodeName = savedACPNodeName
+		DefaultIOAURL = savedIOAURL
+		DefaultIOANodeID = savedIOANodeID
+		DefaultIOANodeName = savedIOANodeName
 		DefaultSpace = savedSpace
 	})
 	fn()

@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/command"
+	"github.com/chainreactors/aiscan/pkg/protocol"
+	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/ioa"
-	acpclient "github.com/chainreactors/ioa/client"
+	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
-func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
+func TestThreeLoopClientsCollaborateThroughIOA(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -24,7 +25,7 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	controller, err := acpclient.NewClient(server.URL, "")
+	controller, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +38,11 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workerClients := make([]*acpclient.Client, 3)
+	workerClients := make([]*ioaclient.Client, 3)
 	workerNodes := make([]ioa.Node, 3)
 	providers := make([]*taskProvider, 3)
 	for i := 0; i < 3; i++ {
-		client, err := acpclient.NewClient(server.URL, "")
+		client, err := ioaclient.NewClient(server.URL, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,11 +78,11 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 		}()
 	}
 
+	// Send tasks using SwarmMessage format
 	for i, node := range workerNodes {
 		_, err := controller.Send(ctx, space.ID, ioa.SendMessage{
 			Content: map[string]any{
-				"type": "task",
-				"task": fmt.Sprintf("task-%d", i+1),
+				"content": fmt.Sprintf("task-%d", i+1),
 			},
 			Refs: &ioa.Ref{Nodes: []string{node.ID}},
 		})
@@ -96,14 +97,17 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if countResults(all) == 3 && countStatus(all, "started") == 3 {
+		reports := countReports(all)
+		accepts := countAccepts(all)
+		if reports == 3 && accepts == 3 {
 			for i, p := range providers {
 				if got := p.tasks(); len(got) != 1 || got[0] != fmt.Sprintf("task-%d", i+1) {
 					t.Fatalf("provider %d tasks = %#v", i+1, got)
 				}
 			}
 			for _, msg := range all {
-				if msg.Sender == controllerNode.ID && msg.Content["type"] == "result" {
+				c, _ := msg.Content["content"].(string)
+				if msg.Sender == controllerNode.ID && strings.Contains(c, "completed task-") {
 					t.Fatal("controller should not send result messages")
 				}
 			}
@@ -111,7 +115,7 @@ func TestThreeLoopClientsCollaborateThroughACP(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for collaboration; messages=%#v", all)
+			t.Fatalf("timed out waiting for collaboration; reports=%d accepts=%d messages=%d", reports, accepts, len(all))
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -126,7 +130,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	controller, err := acpclient.NewClient(server.URL, "")
+	controller, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +146,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 	runCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
 	for i := 0; i < 3; i++ {
-		client, err := acpclient.NewClient(server.URL, "")
+		client, err := ioaclient.NewClient(server.URL, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -168,8 +172,7 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 
 	hello, err := controller.Send(ctx, space.ID, ioa.SendMessage{
 		Content: map[string]any{
-			"type": "task",
-			"task": "hello",
+			"content": "hello",
 		},
 	})
 	if err != nil {
@@ -182,7 +185,9 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if countHelloResults(related, hello.ID) == 3 && countStatus(related, "started") == 3 {
+		replies := countRepliesWithContent(related, hello.ID, "loop")
+		accepts := countAccepts(related)
+		if replies == 3 && accepts == 3 {
 			for i, p := range providers {
 				if got := p.tasks(); len(got) != 1 || got[0] != "hello" {
 					t.Fatalf("provider %d tasks = %#v", i+1, got)
@@ -192,14 +197,14 @@ func TestThreeLoopClientsReplyToBroadcastHello(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for hello replies; messages=%#v", related)
+			t.Fatalf("timed out waiting for hello replies; replies=%d accepts=%d messages=%d", replies, accepts, len(related))
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
 }
 
-func TestLoopAnnouncesNodeProfile(t *testing.T) {
+func TestLoopAnnouncesSwarmProfile(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -207,7 +212,7 @@ func TestLoopAnnouncesNodeProfile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client, err := acpclient.NewClient(server.URL, "")
+	client, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,25 +232,23 @@ func TestLoopAnnouncesNodeProfile(t *testing.T) {
 		Prompt:           "scan localhost",
 		Skills:           []string{"aiscan", "scan"},
 		Network: map[string]any{
-			"hostname":   "test-host",
-			"interfaces": []string{"lo"},
+			"hostname": "test-host",
 		},
 	})
 	go func() {
 		_ = runner.Run(runCtx)
 	}()
 
-	controller, err := acpclient.NewClient(server.URL, "")
+	controller, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
 		t.Fatal(err)
 	}
-	var space ioa.SpaceInfo
 	deadline := time.After(5 * time.Second)
 	for {
-		space, err = controller.Space(ctx, "default", "controller")
+		space, err := controller.Space(ctx, "default", "controller")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,33 +256,40 @@ func TestLoopAnnouncesNodeProfile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if profile := findProfile(messages); profile != nil {
+		if profile := findAnnounce(messages); profile != nil {
 			if len(profile.Refs.Messages) != 0 || len(profile.Refs.Nodes) != 0 {
 				t.Fatalf("profile refs = %#v, want empty", profile.Refs)
 			}
-			if profile.Content["type"] != "node_profile" || profile.Content["intent"] != "scan localhost" || profile.Content["prompt"] != "scan localhost" {
-				t.Fatalf("unexpected profile content: %#v", profile.Content)
+			content, _ := profile.Content["content"].(string)
+			if !strings.Contains(content, "joined the swarm") {
+				t.Fatalf("announce content missing 'joined the swarm': %q", content)
 			}
-			skills, ok := profile.Content["skills"].([]any)
-			if !ok || len(skills) != 2 || skills[0] != "aiscan" || skills[1] != "scan" {
-				t.Fatalf("profile skills = %#v", profile.Content["skills"])
+			if !strings.Contains(content, "scan localhost") {
+				t.Fatalf("announce content missing intent: %q", content)
 			}
-			network, ok := profile.Content["network"].(map[string]any)
-			if !ok || network["hostname"] != "test-host" {
-				t.Fatalf("profile network = %#v", profile.Content["network"])
+			meta, ok := profile.Content["meta"].(map[string]any)
+			if !ok {
+				t.Fatalf("announce missing meta: %#v", profile.Content)
+			}
+			if meta["hostname"] != "test-host" {
+				t.Fatalf("meta hostname = %v, want test-host", meta["hostname"])
+			}
+			caps, ok := meta["capabilities"].([]any)
+			if !ok || len(caps) != 2 {
+				t.Fatalf("meta capabilities = %#v", meta["capabilities"])
 			}
 			return
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for node profile; messages=%#v", messages)
+			t.Fatalf("timed out waiting for announce; messages=%d", len(messages))
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
 }
 
-func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
+func TestLoopHeartbeatRunsAgent(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -287,7 +297,7 @@ func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	controller, err := acpclient.NewClient(server.URL, "")
+	controller, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,15 +310,14 @@ func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
 	}
 	note, err := controller.Send(ctx, space.ID, ioa.SendMessage{
 		Content: map[string]any{
-			"type": "note",
-			"text": "existing context",
+			"content": "existing context note",
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	worker, err := acpclient.NewClient(server.URL, "")
+	worker, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,22 +350,16 @@ func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, msg := range all {
-			if msg.Content["type"] != "heartbeat_result" || msg.Content["status"] != "done" {
+			c, _ := msg.Content["content"].(string)
+			if c != "heartbeat done" {
 				continue
-			}
-			output, _ := msg.Content["output"].(string)
-			if output != "heartbeat done" {
-				t.Fatalf("heartbeat output = %q", output)
-			}
-			if len(msg.Refs.Messages) != 1 || !hasMessageWithType(all, msg.Refs.Messages[0], "heartbeat") {
-				t.Fatalf("heartbeat result refs = %#v; messages=%#v", msg.Refs, all)
 			}
 			tasks := llm.tasks()
 			if len(tasks) == 0 {
 				t.Fatal("provider did not receive heartbeat prompt")
 			}
 			prompt := tasks[len(tasks)-1]
-			for _, want := range []string{"IOA heartbeat", space.ID, note.ID, "existing context", "watch the case"} {
+			for _, want := range []string{"Swarm heartbeat", space.ID, note.ID, "existing context", "watch the case"} {
 				if !strings.Contains(prompt, want) {
 					t.Fatalf("heartbeat prompt missing %q:\n%s", want, prompt)
 				}
@@ -365,38 +368,55 @@ func TestLoopHeartbeatRunsAgentWithACPContext(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for heartbeat; messages=%#v", all)
+			t.Fatalf("timed out waiting for heartbeat; messages=%d", len(all))
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
 }
 
-func TestTaskFromMessageIgnoresTypedNonTasks(t *testing.T) {
-	if task, ok := taskFromMessage(ioa.Message{Content: map[string]any{
-		"type":   "node_profile",
-		"prompt": "worker intent",
-	}}); ok || task != "" {
-		t.Fatalf("taskFromMessage() = %q, %v; want no task", task, ok)
+func TestSwarmFromIOAParsesNewAndLegacy(t *testing.T) {
+	// New format: content field
+	msg := ioa.Message{Content: map[string]any{"content": "scan this"}}
+	sm, ok := swarmFromIOA(msg)
+	if !ok || sm.Content != "scan this" {
+		t.Fatalf("swarmFromIOA(new) = %#v, %v", sm, ok)
 	}
-	if task, ok := taskFromMessage(ioa.Message{Content: map[string]any{
-		"type": "heartbeat",
-		"task": "not a task",
-	}}); ok || task != "" {
-		t.Fatalf("taskFromMessage() = %q, %v; want no task", task, ok)
+
+	// New format with targets + meta
+	msg = ioa.Message{Content: map[string]any{
+		"content": "full scan",
+		"targets": []any{"10.0.0.0/24"},
+		"meta":    map[string]any{"ip": "10.0.0.5"},
+	}}
+	sm, ok = swarmFromIOA(msg)
+	if !ok || sm.Content != "full scan" || len(sm.Targets) != 1 || sm.Meta["ip"] != "10.0.0.5" {
+		t.Fatalf("swarmFromIOA(new+targets+meta) = %#v, %v", sm, ok)
 	}
-	if task, ok := taskFromMessage(ioa.Message{Content: map[string]any{
-		"prompt": "legacy prompt",
-	}}); !ok || task != "legacy prompt" {
-		t.Fatalf("taskFromMessage() = %q, %v; want legacy prompt", task, ok)
+
+	// Legacy format: task field
+	msg = ioa.Message{Content: map[string]any{"task": "legacy task"}}
+	sm, ok = swarmFromIOA(msg)
+	if !ok || sm.Content != "legacy task" {
+		t.Fatalf("swarmFromIOA(legacy task) = %#v, %v", sm, ok)
 	}
-	if task, ok := taskFromMessage(ioa.Message{Content: map[string]any{
-		"type":    "task",
-		"content": "typed task",
-	}}); !ok || task != "typed task" {
-		t.Fatalf("taskFromMessage() = %q, %v; want typed task", task, ok)
+
+	// Legacy format: prompt field
+	msg = ioa.Message{Content: map[string]any{"prompt": "legacy prompt"}}
+	sm, ok = swarmFromIOA(msg)
+	if !ok || sm.Content != "legacy prompt" {
+		t.Fatalf("swarmFromIOA(legacy prompt) = %#v, %v", sm, ok)
+	}
+
+	// Non-parseable: no content/task/prompt
+	msg = ioa.Message{Content: map[string]any{"type": "note", "text": "hello"}}
+	_, ok = swarmFromIOA(msg)
+	if ok {
+		t.Fatal("swarmFromIOA should reject messages without content/task/prompt")
 	}
 }
+
+// ── Helpers ─────────────────────────────────────────────────────────
 
 type taskProvider struct {
 	name  string
@@ -405,15 +425,6 @@ type taskProvider struct {
 	mu    sync.Mutex
 	seen  []string
 	calls int
-}
-
-func findProfile(messages []ioa.Message) *ioa.Message {
-	for i := range messages {
-		if messages[i].Content["type"] == "node_profile" {
-			return &messages[i]
-		}
-	}
-	return nil
 }
 
 func (p *taskProvider) Name() string { return p.name }
@@ -450,36 +461,43 @@ func lastUserContent(messages []provider.ChatMessage) string {
 	return ""
 }
 
-func countResults(messages []ioa.Message) int {
+func findAnnounce(messages []ioa.Message) *ioa.Message {
+	for i := range messages {
+		c, _ := messages[i].Content["content"].(string)
+		if strings.Contains(c, "joined the swarm") {
+			return &messages[i]
+		}
+	}
+	return nil
+}
+
+func countReports(messages []ioa.Message) int {
 	count := 0
 	for _, msg := range messages {
-		if msg.Content["type"] == "result" && msg.Content["status"] == "done" {
-			output, _ := msg.Content["output"].(string)
-			if strings.Contains(output, "completed task-") {
-				count++
-			}
+		c, _ := msg.Content["content"].(string)
+		if strings.Contains(c, "completed task-") && len(msg.Refs.Messages) > 0 {
+			count++
 		}
 	}
 	return count
 }
 
-func countHelloResults(messages []ioa.Message, helloID string) int {
+func countAccepts(messages []ioa.Message) int {
 	count := 0
 	for _, msg := range messages {
-		if msg.Content["type"] == "result" && msg.Content["status"] == "done" && containsRef(msg.Refs.Messages, helloID) {
-			output, _ := msg.Content["output"].(string)
-			if output == "loop" {
-				count++
-			}
+		c, _ := msg.Content["content"].(string)
+		if strings.Contains(c, "Accepted task") {
+			count++
 		}
 	}
 	return count
 }
 
-func countStatus(messages []ioa.Message, status string) int {
+func countRepliesWithContent(messages []ioa.Message, parentID, want string) int {
 	count := 0
 	for _, msg := range messages {
-		if msg.Content["type"] == "status" && msg.Content["status"] == status {
+		c, _ := msg.Content["content"].(string)
+		if c == want && containsRef(msg.Refs.Messages, parentID) {
 			count++
 		}
 	}
@@ -495,11 +513,25 @@ func containsRef(values []string, want string) bool {
 	return false
 }
 
-func hasMessageWithType(messages []ioa.Message, id, typ string) bool {
-	for _, msg := range messages {
-		if msg.ID == id && msg.Content["type"] == typ {
-			return true
-		}
+// Verify protocol.SwarmMessage round-trips correctly
+func TestSwarmContentRoundTrip(t *testing.T) {
+	msg := protocol.SwarmMessage{
+		Content: "scan these targets",
+		Targets: []string{"10.0.0.0/24", "192.168.1.0/24"},
+		Meta:    map[string]any{"ip": "10.0.0.5", "hostname": "scanner-1"},
 	}
-	return false
+	raw := swarmContent(msg)
+	parsed, ok := protocol.ParseSwarm(raw)
+	if !ok {
+		t.Fatal("ParseSwarm failed on round-trip")
+	}
+	if parsed.Content != msg.Content {
+		t.Fatalf("content = %q, want %q", parsed.Content, msg.Content)
+	}
+	if len(parsed.Targets) != 2 {
+		t.Fatalf("targets = %v, want 2 items", parsed.Targets)
+	}
+	if parsed.Meta["ip"] != "10.0.0.5" {
+		t.Fatalf("meta.ip = %v, want 10.0.0.5", parsed.Meta["ip"])
+	}
 }

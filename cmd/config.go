@@ -88,13 +88,13 @@ func mergeOption(dst, src *Option) {
 	dst.CyberhubURL = resolveString(dst.CyberhubURL, src.CyberhubURL)
 	dst.CyberhubKey = resolveString(dst.CyberhubKey, src.CyberhubKey)
 	dst.CyberhubMode = resolveString(dst.CyberhubMode, src.CyberhubMode)
-	dst.ACPURL = resolveString(dst.ACPURL, src.ACPURL)
-	dst.ACPNodeName = resolveString(dst.ACPNodeName, src.ACPNodeName)
+	dst.IOAURL = resolveString(dst.IOAURL, src.IOAURL)
+	dst.IOANodeName = resolveString(dst.IOANodeName, src.IOANodeName)
 	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {
 		dst.Space = src.Space
 	}
-	if (dst.ACPDB == "" || dst.ACPDB == "./ioa.db") && src.ACPDB != "" {
-		dst.ACPDB = src.ACPDB
+	if (dst.IOADB == "" || dst.IOADB == "./ioa.db") && src.IOADB != "" {
+		dst.IOADB = src.IOADB
 	}
 }
 
@@ -152,8 +152,8 @@ cyberhub:
   # merge 或 override
   mode: ""
 
-# ACP 协作
-acp:
+# IOA 协作
+ioa:
   url: ""
   db: ""
   node_name: ""

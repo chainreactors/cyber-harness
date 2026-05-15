@@ -35,8 +35,8 @@ cyberhub:
   # merge 或 override
   mode: ""
 
-# ACP 协作
-acp:
+# IOA 协作
+ioa:
   url: ""
   db: ""
   node_name: ""

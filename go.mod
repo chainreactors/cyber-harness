@@ -14,11 +14,14 @@ require (
 	github.com/chainreactors/utils v0.0.0-20260507101628-fd69d955ae21
 	github.com/chainreactors/zombie v1.2.3-0.20260509062300-b10f008fb8a5
 	github.com/charmbracelet/glamour v0.8.0
+	github.com/go-rod/rod v0.116.2
+	github.com/go-rod/stealth v0.4.9
 	github.com/gookit/config/v2 v2.2.5
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/muesli/termenv v0.16.0
 	github.com/reeflective/console v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.9.1
+	github.com/ysmood/gson v0.7.3
 	golang.org/x/term v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 	sigs.k8s.io/yaml v1.4.0
@@ -64,8 +67,6 @@ require (
 	github.com/go-dedup/text v0.0.0-20170907015346-8bb1b95e3cb7 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.6 // indirect
 	github.com/go-redis/redis v6.15.9+incompatible // indirect
-	github.com/go-rod/rod v0.116.2 // indirect
-	github.com/go-rod/stealth v0.4.9 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/goccy/go-yaml v1.11.3 // indirect
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
@@ -122,7 +123,6 @@ require (
 	github.com/ysmood/fetchup v0.2.3 // indirect
 	github.com/ysmood/goob v0.4.0 // indirect
 	github.com/ysmood/got v0.40.0 // indirect
-	github.com/ysmood/gson v0.7.3 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
 	github.com/yuin/goldmark v1.7.4 // indirect
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect

@@ -1,6 +1,7 @@
 package vision
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,7 +140,7 @@ func TestReadImageFileReadsSmallFile(t *testing.T) {
 
 func TestExecuteWithoutProviderReturnsError(t *testing.T) {
 	cmd := New(nil)
-	_, err := cmd.Execute(nil, []string{"test.png", "describe"})
+	_, err := cmd.Execute(context.Background(), []string{"test.png", "describe"})
 	if err == nil {
 		t.Fatal("expected error without provider")
 	}

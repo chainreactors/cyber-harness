@@ -140,18 +140,22 @@ func FormatForPrompt(skills []Skill) string {
 	for _, skill := range visible {
 		sb.WriteString("  <skill>\n")
 		sb.WriteString("    <name>")
-		xml.EscapeText(&sb, []byte(skill.Name))
+		appendEscapedXML(&sb, skill.Name)
 		sb.WriteString("</name>\n")
 		sb.WriteString("    <description>")
-		xml.EscapeText(&sb, []byte(skill.Description))
+		appendEscapedXML(&sb, skill.Description)
 		sb.WriteString("</description>\n")
 		sb.WriteString("    <location>")
-		xml.EscapeText(&sb, []byte(skill.Location))
+		appendEscapedXML(&sb, skill.Location)
 		sb.WriteString("</location>\n")
 		sb.WriteString("  </skill>\n")
 	}
 	sb.WriteString("</available_skills>\n")
 	return sb.String()
+}
+
+func appendEscapedXML(sb *strings.Builder, value string) {
+	_ = xml.EscapeText(sb, []byte(value))
 }
 
 func FormatInvocation(skill Skill, args string) string {

@@ -11,11 +11,11 @@ import (
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/ioa"
-	acpclient "github.com/chainreactors/ioa/client"
+	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
-func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
+func TestRealLLMLoopRepliesThroughIOA(t *testing.T) {
 	if os.Getenv("AISCAN_REAL_LLM") != "1" {
 		t.Skip("set AISCAN_REAL_LLM=1 to run real LLM integration test")
 	}
@@ -52,7 +52,7 @@ func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := acpclient.NewClient(server.URL, "")
+	worker, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
 		_ = runner.Run(runCtx)
 	}()
 
-	controller, err := acpclient.NewClient(server.URL, "")
+	controller, err := ioaclient.NewClient(server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,7 @@ func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
 	}
 	hello, err := controller.Send(ctx, space.ID, ioa.SendMessage{
 		Content: map[string]any{
-			"type": "task",
-			"task": "Reply with exactly one word: loop",
+			"content": "Reply with exactly one word: loop",
 		},
 	})
 	if err != nil {
@@ -105,17 +104,14 @@ func TestRealLLMLoopRepliesThroughACP(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, msg := range related {
-			if msg.Content["type"] != "result" || msg.Content["status"] != "done" {
-				continue
-			}
-			output, _ := msg.Content["output"].(string)
-			if strings.Contains(strings.ToLower(output), "loop") && containsRef(msg.Refs.Messages, hello.ID) {
+			c, _ := msg.Content["content"].(string)
+			if strings.Contains(strings.ToLower(c), "loop") && containsRef(msg.Refs.Messages, hello.ID) {
 				return
 			}
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for real LLM loop reply; messages=%#v", related)
+			t.Fatalf("timed out waiting for real LLM loop reply; messages=%d", len(related))
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}

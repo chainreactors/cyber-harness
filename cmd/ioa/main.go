@@ -7,6 +7,6 @@ import (
 )
 
 func main() {
-	os.Args = append([]string{os.Args[0], "acp"}, os.Args[1:]...)
+	os.Args = append([]string{os.Args[0], "ioa"}, os.Args[1:]...)
 	cmd.AiScan()
 }
