@@ -44,6 +44,13 @@ type TaskHandler func(ctx context.Context, task Task) (string, error)
 
 type HeartbeatFunc func(ctx context.Context, prompt string) (string, error)
 
+type CronTask struct {
+	Name         string
+	Interval     time.Duration
+	Prompt       string
+	ContextLimit int
+}
+
 type NodeConfig struct {
 	Client            ioaclient.StreamAPI
 	NodeName          string
@@ -67,6 +74,9 @@ type Node struct {
 	rootMessageID string
 	spaceID       string
 	spaceName     string
+	crons         *cronManager
+	cronCh        chan CronTask
+	runCtx        context.Context
 }
 
 func NewNode(cfg NodeConfig) *Node {
@@ -85,7 +95,33 @@ func NewNode(cfg NodeConfig) *Node {
 	if cfg.Logger == nil {
 		cfg.Logger = NopLogger()
 	}
-	return &Node{cfg: cfg, processed: make(map[string]struct{})}
+	n := &Node{
+		cfg:       cfg,
+		processed: make(map[string]struct{}),
+		cronCh:    make(chan CronTask, 4),
+	}
+	n.crons = newCronManager(n.cronCh, n.runCron)
+	return n
+}
+
+func (n *Node) AddCron(task CronTask) error {
+	if task.ContextLimit <= 0 {
+		task.ContextLimit = n.cfg.HeartbeatContextLimit
+	}
+	if n.runCtx == nil {
+		return fmt.Errorf("node not running")
+	}
+	n.cfg.Logger.Importantf("swarm cron=%s interval=%s created", task.Name, task.Interval)
+	return n.crons.Add(n.runCtx, task)
+}
+
+func (n *Node) RemoveCron(name string) error {
+	n.cfg.Logger.Importantf("swarm cron=%s deleted", name)
+	return n.crons.Remove(name)
+}
+
+func (n *Node) ListCrons() []CronTask {
+	return n.crons.List()
 }
 
 func (n *Node) RootMessageID() string { return n.rootMessageID }
@@ -121,15 +157,22 @@ func (n *Node) Run(ctx context.Context) error {
 		return err
 	}
 
-	if n.cfg.HeartbeatInterval > 0 {
+	n.runCtx = ctx
+
+	if n.cfg.HeartbeatInterval > 0 && n.cfg.OnHeartbeat != nil {
 		if err := n.markExisting(ctx); err != nil {
 			return err
 		}
-		if n.cfg.OnHeartbeat != nil {
-			if err := n.runHeartbeat(ctx); err != nil {
-				n.cfg.Logger.Warnf("swarm heartbeat failed: %s", err)
-			}
+		heartbeat := CronTask{
+			Name:         "heartbeat",
+			Interval:     n.cfg.HeartbeatInterval,
+			Prompt:       n.cfg.Prompt,
+			ContextLimit: n.cfg.HeartbeatContextLimit,
 		}
+		if err := n.runCron(ctx, heartbeat); err != nil {
+			n.cfg.Logger.Warnf("swarm heartbeat init failed: %s", err)
+		}
+		_ = n.crons.Add(ctx, heartbeat)
 	} else {
 		if err := n.catchUp(ctx); err != nil {
 			return err
@@ -144,12 +187,7 @@ func (n *Node) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(n.cfg.PollInterval)
 	defer ticker.Stop()
-	var heartbeat *time.Ticker
-	if n.cfg.HeartbeatInterval > 0 {
-		heartbeat = time.NewTicker(n.cfg.HeartbeatInterval)
-		defer heartbeat.Stop()
-		n.cfg.Logger.Importantf("swarm heartbeat=enabled interval=%s context_limit=%d", n.cfg.HeartbeatInterval, n.cfg.HeartbeatContextLimit)
-	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -169,10 +207,10 @@ func (n *Node) Run(ctx context.Context) error {
 			if err := n.catchUp(ctx); err != nil {
 				n.cfg.Logger.Warnf("swarm catch-up failed: %s", err)
 			}
-		case <-heartbeatC(heartbeat):
+		case cron := <-n.cronCh:
 			if n.cfg.OnHeartbeat != nil {
-				if err := n.runHeartbeat(ctx); err != nil {
-					n.cfg.Logger.Warnf("swarm heartbeat failed: %s", err)
+				if err := n.runCron(ctx, cron); err != nil {
+					n.cfg.Logger.Warnf("swarm cron=%s failed: %s", cron.Name, err)
 				}
 			}
 		}
@@ -246,19 +284,19 @@ func (n *Node) markExisting(ctx context.Context) error {
 	return nil
 }
 
-func (n *Node) runHeartbeat(ctx context.Context) error {
-	messages, err := n.cfg.Client.Read(ctx, n.spaceID, ioa.ReadOptions{All: true, Limit: n.cfg.HeartbeatContextLimit})
+func (n *Node) runCron(ctx context.Context, cron CronTask) error {
+	messages, err := n.cfg.Client.Read(ctx, n.spaceID, ioa.ReadOptions{All: true, Limit: cron.ContextLimit})
 	if err != nil {
 		return err
 	}
-	n.cfg.Logger.Importantf("swarm heartbeat=running space=%s", n.spaceID)
+	n.cfg.Logger.Importantf("swarm cron=%s running space=%s", cron.Name, n.spaceID)
 
-	prompt := n.heartbeatPrompt(messages)
+	prompt := n.cronPrompt(cron, messages)
 	result, runErr := n.cfg.OnHeartbeat(ctx, prompt)
 
 	report := SwarmMessage{Content: result}
 	if runErr != nil {
-		report.Content = fmt.Sprintf("Heartbeat error: %s", runErr.Error())
+		report.Content = fmt.Sprintf("Cron %s error: %s", cron.Name, runErr.Error())
 	}
 	_, sendErr := n.cfg.Client.Send(ctx, n.spaceID, ioa.SendMessage{
 		Content: swarmContent(report),
@@ -267,17 +305,20 @@ func (n *Node) runHeartbeat(ctx context.Context) error {
 		return runErr
 	}
 	if sendErr == nil {
-		n.cfg.Logger.Importantf("swarm heartbeat=completed space=%s", n.spaceID)
+		n.cfg.Logger.Importantf("swarm cron=%s completed space=%s", cron.Name, n.spaceID)
 	}
 	return sendErr
 }
 
-func (n *Node) heartbeatPrompt(messages []ioa.Message) string {
+func (n *Node) cronPrompt(cron CronTask, messages []ioa.Message) string {
 	contextJSON, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
 		contextJSON = []byte("[]")
 	}
-	intent := strings.TrimSpace(n.cfg.Prompt)
+	intent := strings.TrimSpace(cron.Prompt)
+	if intent == "" {
+		intent = strings.TrimSpace(n.cfg.Prompt)
+	}
 	if intent == "" {
 		intent = strings.TrimSpace(n.cfg.Intent)
 	}
@@ -285,6 +326,8 @@ func (n *Node) heartbeatPrompt(messages []ioa.Message) string {
 		intent = "No explicit worker intent was configured."
 	}
 	return fmt.Sprintf(`This is a Swarm heartbeat turn.
+
+Cron task: %s (every %s)
 
 Space:
 - id: %s
@@ -304,7 +347,7 @@ When sending tasks to other nodes, use content like {"content":"...", "targets":
 When reporting results, set refs.messages to reference the original task message.
 
 Recent messages (oldest to newest):
-%s`, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), string(contextJSON))
+%s`, cron.Name, cron.Interval, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), string(contextJSON))
 }
 
 func (n *Node) handleMessage(ctx context.Context, msg ioa.Message) error {
@@ -403,13 +446,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
-}
-
-func heartbeatC(ticker *time.Ticker) <-chan time.Time {
-	if ticker == nil {
-		return nil
-	}
-	return ticker.C
 }
 
 func cleanStrings(values []string) []string {

@@ -374,6 +374,114 @@ func TestNodeHeartbeatRunsHandler(t *testing.T) {
 	}
 }
 
+func TestNodeDynamicCrons(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "cron-test", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "initial context"},
+	})
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &taskRecorder{name: "cron-worker"}
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	node := NewNode(NodeConfig{
+		Client:                worker,
+		NodeName:              "cron-worker",
+		SpaceName:             "cron-test",
+		SpaceDescription:      "worker",
+		PollInterval:          100 * time.Millisecond,
+		HeartbeatContextLimit: 50,
+		Network:               map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			return "ok", nil
+		},
+		OnHeartbeat: func(ctx context.Context, prompt string) (string, error) {
+			rec.record(prompt)
+			if strings.Contains(prompt, "fast-check") {
+				return "fast done", nil
+			}
+			return "slow done", nil
+		},
+	})
+	go func() {
+		_ = node.Run(runCtx)
+	}()
+
+	// Wait for node to be ready then add crons dynamically
+	waitFor(t, 3*time.Second, "node ready", func() bool {
+		return node.RootMessageID() != ""
+	})
+	if err := node.AddCron(CronTask{Name: "fast-check", Interval: 50 * time.Millisecond, Prompt: "fast check task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := node.AddCron(CronTask{Name: "slow-report", Interval: 80 * time.Millisecond, Prompt: "slow report task"}); err != nil {
+		t.Fatal(err)
+	}
+	if crons := node.ListCrons(); len(crons) != 2 {
+		t.Fatalf("expected 2 crons, got %d", len(crons))
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		prompts := rec.tasks()
+		hasFast := false
+		hasSlow := false
+		for _, p := range prompts {
+			if strings.Contains(p, "fast check task") && strings.Contains(p, "fast-check") {
+				hasFast = true
+			}
+			if strings.Contains(p, "slow report task") && strings.Contains(p, "slow-report") {
+				hasSlow = true
+			}
+		}
+		if hasFast && hasSlow {
+			// Verify both cron names appear in space messages
+			all, _ := controller.Read(ctx, space.ID, ioa.ReadOptions{All: true})
+			fastCount := 0
+			slowCount := 0
+			for _, msg := range all {
+				c, _ := msg.Content["content"].(string)
+				if c == "fast done" {
+					fastCount++
+				}
+				if c == "slow done" {
+					slowCount++
+				}
+			}
+			if fastCount == 0 || slowCount == 0 {
+				t.Fatalf("expected both cron results in space; fast=%d slow=%d", fastCount, slowCount)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for both crons; prompts=%d", len(prompts))
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
 func TestNodeAcceptsTaskByRootMessageRef(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
