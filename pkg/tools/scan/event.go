@@ -2,9 +2,12 @@ package scan
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/chainreactors/parsers"
+	sdkkit "github.com/chainreactors/sdk/pkg"
 )
 
 type eventKind string
@@ -13,7 +16,10 @@ const (
 	eventTarget  eventKind = "target"
 	eventFinding eventKind = "finding"
 	eventError   eventKind = "error"
+	eventStats   eventKind = "stats"
 )
+
+var statsEventSeq uint64
 
 type event struct {
 	Kind    eventKind
@@ -22,6 +28,7 @@ type event struct {
 	Target  target
 	Finding finding
 	Error   errorEvent
+	Stats   sdkkit.Stats
 }
 
 func targetEvent(source, raw string, target target) event {
@@ -39,6 +46,11 @@ func errorEventOf(source, message string) event {
 	return event{Kind: eventError, Source: source, Error: errorEvent{Message: message}}
 }
 
+func statsEvent(source string, stats sdkkit.Stats) event {
+	seq := atomic.AddUint64(&statsEventSeq, 1)
+	return event{Kind: eventStats, Source: source, Raw: strconv.FormatUint(seq, 10), Stats: stats}
+}
+
 func (e event) Key() string {
 	switch e.Kind {
 	case eventTarget:
@@ -53,6 +65,11 @@ func (e event) Key() string {
 		return fmt.Sprintf("%s|%s", e.Finding.Kind(), e.Finding.Key())
 	case eventError:
 		return string(eventError) + "|" + e.Error.Message
+	case eventStats:
+		if e.Raw == "" {
+			return ""
+		}
+		return string(eventStats) + "|" + e.Raw
 	default:
 		return ""
 	}
@@ -70,6 +87,8 @@ func (e event) label() string {
 		}
 	case eventError:
 		return string(eventError)
+	case eventStats:
+		return string(eventStats)
 	}
 	return string(e.Kind)
 }
@@ -141,20 +160,45 @@ func (p priority) rank() int {
 }
 
 func reportableSprayResult(result *parsers.SprayResult) bool {
-	return result != nil && result.IsValid && strings.TrimSpace(result.ErrString) == ""
+	if result == nil || !result.IsValid || result.IsFuzzy || strings.TrimSpace(result.ErrString) != "" {
+		return false
+	}
+	switch result.Source {
+	case parsers.InitIndexSource, parsers.InitRandomSource:
+		return false
+	default:
+		return true
+	}
+}
+
+func reportableSprayResultForCapability(result *parsers.SprayResult, capability string) bool {
+	if !reportableSprayResult(result) {
+		return false
+	}
+	return capability == capSprayCheck || result.Source != parsers.CheckSource
+}
+
+func reportableVerificationFinding(finding verificationFinding) bool {
+	return finding.Status == verificationConfirmed && (finding.Target != "" || finding.Summary != "" || finding.Evidence != "")
 }
 
 type fingerprintFinding struct {
 	Target  string
 	Fingers []string
+	Focus   bool
 }
 
 func (f fingerprintFinding) Kind() findingKind { return findingFingerprint }
 
-func (f fingerprintFinding) Priority() priority { return priorityLow }
+func (f fingerprintFinding) Priority() priority {
+	if f.Focus {
+		return priorityHigh
+	}
+	return priorityLow
+}
 
 func (f fingerprintFinding) Key() string {
-	return strings.ToLower(f.Target) + "|" + strings.Join(parsers.NormalizeNames(f.Fingers), ",")
+	return strings.ToLower(f.Target) + "|" + strings.Join(parsers.NormalizeNames(f.Fingers), ",") + fmt.Sprintf("|focus=%t", f.Focus)
 }
 
 type weakpassFinding struct {
@@ -179,14 +223,19 @@ func (f weakpassFinding) Key() string {
 }
 
 type vulnFinding struct {
-	Message string
+	Target string
+	Output string
 }
 
 func (f vulnFinding) Kind() findingKind { return findingVuln }
 
 func (f vulnFinding) Priority() priority { return priorityHigh }
 
-func (f vulnFinding) Key() string { return f.Message }
+func (f vulnFinding) Key() string { return f.String() }
+
+func (f vulnFinding) String() string {
+	return strings.TrimSpace(f.Output)
+}
 
 type verificationStatus string
 

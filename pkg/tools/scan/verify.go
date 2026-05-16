@@ -48,14 +48,7 @@ func (c *Command) agentVerifyCapability(flags flags) (pipeline.Capability, bool)
 
 func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, event event, emit func(event)) {
 	if c.verifyFunc == nil {
-		emit(findingEvent(capAgentVerify, verificationFinding{
-			OriginalKey:      findingKey(event.Finding),
-			OriginalKind:     findingKindOf(event.Finding),
-			OriginalPriority: findingPriority(event.Finding),
-			Status:           verificationFailed,
-			Target:           findingTarget(event.Finding),
-			Summary:          "AI verification skipped: provider is not configured",
-		}))
+		c.logger.Debugf("scan capability=%s status=skipped reason=provider_unconfigured finding=%s key=%q", capAgentVerify, findingKindOf(event.Finding), findingKey(event.Finding))
 		return
 	}
 
@@ -78,15 +71,7 @@ func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, eve
 
 	result, err := c.verifyFunc(verifyCtx, prompt, systemPrompt, model, 1200)
 	if err != nil {
-		c.logger.Warnf("scan %s failed %q", capAgentVerify, err)
-		emit(findingEvent(capAgentVerify, verificationFinding{
-			OriginalKey:      findingKey(event.Finding),
-			OriginalKind:     findingKindOf(event.Finding),
-			OriginalPriority: findingPriority(event.Finding),
-			Status:           verificationFailed,
-			Target:           findingTarget(event.Finding),
-			Summary:          err.Error(),
-		}))
+		c.logger.Debugf("scan capability=%s status=failed finding=%s key=%q error=%q", capAgentVerify, findingKindOf(event.Finding), findingKey(event.Finding), err)
 		return
 	}
 
@@ -97,15 +82,16 @@ func (c *Command) runAgentVerifyCapability(ctx context.Context, flags flags, eve
 		if len(rawPreview) > 200 {
 			rawPreview = rawPreview[:200]
 		}
-		c.logger.Warnf("scan %s parse unclear, retrying once (raw=%q)", capAgentVerify, rawPreview)
+		c.logger.Debugf("scan capability=%s status=parse_unclear action=retry raw=%q", capAgentVerify, rawPreview)
 		retryPrompt := prompt + "\n\nPlease follow the exact output format with status:/summary:/evidence: lines."
 		retryResult, retryErr := c.verifyFunc(verifyCtx, retryPrompt, systemPrompt, model, 1200)
 		if retryErr == nil {
 			status, summary, evidence = parseVerificationOutput(retryResult)
 		}
 	}
-	if status == verificationInconclusive {
-		c.logger.Warnf("scan %s inconclusive for %s %s", capAgentVerify, findingKindOf(event.Finding), findingKey(event.Finding))
+	if status != verificationConfirmed {
+		c.logger.Debugf("scan capability=%s status=%s finding=%s key=%q target=%q summary=%q evidence=%q", capAgentVerify, status, findingKindOf(event.Finding), findingKey(event.Finding), findingTarget(event.Finding), summary, evidence)
+		return
 	}
 
 	emit(findingEvent(capAgentVerify, verificationFinding{
@@ -134,7 +120,7 @@ Finding:
 Return only this plain text format:
 status: confirmed|not_confirmed|inconclusive
 summary: one concise sentence
-evidence: short evidence from the provided finding or why it is insufficient
+evidence: short evidence from the provided finding or why it is insufficient; for focus fingerprints, include historical-vulnerability relevance or safe validation guidance when possible
 
 Examples:
 
@@ -146,7 +132,7 @@ summary: Log4j RCE (CVE-2021-44228) confirmed by matched POC template with criti
 evidence: Neutron template matched CVE-2021-44228 on target, severity=critical.
 
 Example 2 (not_confirmed):
-Finding: source=spray_finger kind=fingerprint priority=low target=10.0.0.2 evidence=fingerprint jquery
+Finding: source=spray_check kind=fingerprint priority=low target=10.0.0.2 evidence=fingerprint jquery
 Response:
 status: not_confirmed
 summary: jQuery fingerprint alone does not indicate a security risk without a specific CVE.
@@ -160,7 +146,7 @@ evidence: Fingerprint detection only; no vulnerability evidence provided.`,
 	)
 }
 
-const defaultVerifySystemPrompt = `You are aiscan's verification reviewer. Validate only the supplied scanner finding and evidence. Do not invent external facts, do not request tools, and do not perform additional scanning. Mark confirmed only when the evidence directly supports the risk.`
+const defaultVerifySystemPrompt = `You are aiscan's verification reviewer. Validate only the supplied scanner finding and evidence. Do not invent external facts, do not request tools, and do not perform additional scanning. Mark confirmed only when the evidence directly supports the risk. For focus fingerprints, assess likely historical-vulnerability relevance and suggest safe non-destructive validation, but do not mark confirmed from fingerprint evidence alone.`
 
 func parseVerificationOutput(output string) (verificationStatus, string, string) {
 	output = strings.TrimSpace(output)
@@ -234,7 +220,7 @@ func findingTarget(finding finding) string {
 			return f.Result.URI()
 		}
 	case vulnFinding:
-		return vulnTarget(f.Message)
+		return f.Target
 	case verificationFinding:
 		return f.Target
 	}
@@ -244,25 +230,19 @@ func findingTarget(finding finding) string {
 func findingEvidence(finding finding) string {
 	switch f := finding.(type) {
 	case fingerprintFinding:
-		return strings.TrimSpace("fingerprint " + strings.Join(parsers.NormalizeNames(f.Fingers), ","))
+		prefix := "fingerprint "
+		if f.Focus {
+			prefix = "focus fingerprint "
+		}
+		return strings.TrimSpace(prefix + strings.Join(parsers.NormalizeNames(f.Fingers), ","))
 	case weakpassFinding:
 		if f.Result != nil {
-			return strings.Join(weakpassFields(f.Result), " ")
+			return f.Result.OutputLine()
 		}
 	case vulnFinding:
-		return f.Message
+		return f.String()
 	case verificationFinding:
 		return f.Summary
-	}
-	return ""
-}
-
-func vulnTarget(message string) string {
-	fields := strings.Fields(message)
-	for i, field := range fields {
-		if field == "[vuln]" && i+1 < len(fields) {
-			return fields[i+1]
-		}
 	}
 	return ""
 }

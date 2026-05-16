@@ -1,12 +1,9 @@
 package scan
 
 import (
-	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/chainreactors/parsers"
 )
 
@@ -19,7 +16,6 @@ const (
 	ansiRed    = "\x1b[31m"
 	ansiBold   = "\x1b[1m"
 )
-
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
@@ -54,7 +50,6 @@ func formatEventLine(event event, color bool) string {
 	if source == "" || source == "input" {
 		source = "scan"
 	}
-	prefix := colorize(color, ansiDim, "["+source+"]")
 
 	switch event.Kind {
 	case eventTarget:
@@ -63,70 +58,102 @@ func formatEventLine(event event, color bool) string {
 			if target.Result == nil {
 				return ""
 			}
-			return sanitizeOutputLine(fmt.Sprintf("%s %s", prefix, formatServiceResult(target.Result, color)), color)
+			prefix := outputPrefix(gogoResultSource(source, target.Result), ansiDim, color)
+			return formatOutputLine(prefix, target.Result.OutputLine(), color)
 		case webTarget:
 			if target.URL == "" {
 				return ""
 			}
-			parts := []string{prefix, colorize(color, ansiBold+ansiGreen, target.URL)}
-			if target.HostHeader != "" {
-				parts = append(parts, colorize(color, ansiDim, "("+target.HostHeader+")"))
-			}
-			return sanitizeOutputLine(strings.Join(parts, " "), color)
+			prefix := outputPrefix(outputScope(source, "web"), ansiDim, color)
+			return formatOutputLine(prefix, parsers.JoinOutput(target.URL, target.HostHeader), color)
 		case webProbeTarget:
-			if !reportableSprayResult(target.Result) {
+			if !reportableSprayResultForCapability(target.Result, target.Capability) {
 				return ""
 			}
-			return sanitizeOutputLine(fmt.Sprintf("%s %s", prefix, formatSprayResult(target.Result, color)), color)
+			prefix := outputPrefix(sprayProbeSource(source, target.Result), ansiDim, color)
+			return formatOutputLine(prefix, target.Result.OutputLine(), color)
 		}
 	case eventFinding:
 		switch finding := event.Finding.(type) {
 		case fingerprintFinding:
 			names := parsers.NormalizeNames(finding.Fingers)
-			if len(names) == 0 {
+			if len(names) == 0 || !finding.Focus {
 				return ""
 			}
-			return formatPriorityLine(prefix, finding.Priority(), "fingerprint", finding.Target, []string{
-				colorize(color, ansiCyan, strings.Join(names, ",")),
-			}, color)
+			prefix := outputPrefix(outputScope(source, "focus"), colorForPriority(finding.Priority()), color)
+			return formatOutputLine(prefix, parsers.JoinOutput(finding.Target, parsers.NamesOutput(names)), color)
 		case weakpassFinding:
 			if finding.Result == nil {
 				return ""
 			}
-			return formatPriorityLine(prefix, finding.Priority(), "weakpass", finding.Result.URI(), weakpassFields(finding.Result), color)
+			prefix := outputPrefix(source, colorForPriority(finding.Priority()), color)
+			return formatOutputLine(prefix, finding.Result.OutputLine(), color)
 		case vulnFinding:
-			if finding.Message == "" {
+			if finding.String() == "" {
 				return ""
 			}
-			return formatPriorityLine(prefix, finding.Priority(), "vuln", vulnTarget(finding.Message), []string{
-				util.FormatValue(finding.Message),
-			}, color)
+			prefix := outputPrefix(source, colorForPriority(finding.Priority()), color)
+			return formatOutputLine(prefix, finding.String(), color)
 		case verificationFinding:
-			return formatPriorityLine(prefix, finding.Priority(), "verify", finding.Target, verificationFields(finding), color)
+			if !reportableVerificationFinding(finding) {
+				return ""
+			}
+			prefix := outputPrefix(source, colorForVerificationStatus(finding.Status), color)
+			return formatOutputLine(prefix, verificationOutput(finding), color)
 		}
 	case eventError:
 		if event.Error.Message == "" {
 			return ""
 		}
-		return sanitizeOutputLine(fmt.Sprintf("%s %s %s", prefix, colorize(color, ansiRed, "error"), util.FormatValue(event.Error.Message)), color)
+		prefix := outputPrefix(outputScope(source, "error"), ansiRed, color)
+		return formatOutputLine(prefix, parsers.JoinOutput(event.Error.Message), color)
 	}
 	return ""
 }
 
-func formatPriorityLine(prefix string, priority priority, label, target string, fields []string, color bool) string {
-	priorityText := strings.ToUpper(string(priority))
-	if priorityText == "" {
-		priorityText = "INFO"
+func outputPrefix(source, code string, color bool) string {
+	return colorize(color, code, "["+source+"]")
+}
+
+func outputScope(source string, scopes ...string) string {
+	source = strings.Trim(strings.ReplaceAll(source, ":", "."), ".")
+	if source == "" {
+		source = "scan"
 	}
+	for _, scope := range scopes {
+		scope = strings.Trim(scope, ". ")
+		if scope == "" {
+			continue
+		}
+		source += "." + scope
+	}
+	return source
+}
+
+func gogoResultSource(source string, result *parsers.GOGOResult) string {
+	if result != nil && result.IsHttp() {
+		return outputScope(source, "web")
+	}
+	return outputScope(source, "port")
+}
+
+func sprayProbeSource(source string, result *parsers.SprayResult) string {
+	if result == nil {
+		return outputScope(source)
+	}
+	name := result.Source.Name()
+	if name == "" || name == "unknown" {
+		return outputScope(source)
+	}
+	return outputScope(source, name)
+}
+
+func formatOutputLine(prefix, output string, color bool) string {
+	output = strings.TrimSpace(output)
 	parts := []string{prefix}
-	if target != "" {
-		parts = append(parts, colorize(color, ansiBold+ansiGreen, target))
+	if output != "" {
+		parts = append(parts, output)
 	}
-	parts = append(parts,
-		colorize(color, colorForPriority(priority), label),
-		colorize(color, colorForPriority(priority), strings.ToLower(priorityText)),
-	)
-	parts = append(parts, fields...)
 	return sanitizeOutputLine(strings.Join(parts, " "), color)
 }
 
@@ -138,137 +165,23 @@ func sanitizeOutputLine(line string, color bool) string {
 	return line
 }
 
-func formatServiceResult(result *parsers.GOGOResult, color bool) string {
-	target := result.GetTarget()
-	if result.IsHttp() {
-		target = result.GetBaseURL()
-	}
-	parts := []string{
-		colorize(color, ansiBold+ansiGreen, target),
-	}
-	if result.Timing > 0 {
-		parts = append(parts, colorize(color, ansiYellow, fmt.Sprintf("%dms", result.Timing)))
-	}
-	parts = appendNonEmptyColoredValue(parts, result.Protocol, ansiDim, color)
-	parts = appendNonEmptyColoredValue(parts, result.Status, colorForStatus(result.Status), color)
-	parts = appendNonEmptyColoredValue(parts, result.Midware, ansiCyan, color)
-	parts = appendNonEmptyColoredValue(parts, result.Host, ansiDim, color)
-	parts = appendNonEmptyColoredValue(parts, result.Title, ansiGreen, color)
-	if frameworks := strings.Trim(result.Frameworks.String(), "|"); frameworks != "" {
-		parts = append(parts, colorize(color, colorForFrameworks(result.Frameworks.IsFocus()), util.FormatValue(frameworks)))
-	}
-	if vulns := strings.TrimSpace(result.Vulns.String()); vulns != "" {
-		parts = append(parts, colorize(color, ansiRed, util.FormatValue(vulns)))
-	}
-	if extract := strings.TrimSpace(result.GetExtractStat()); extract != "" {
-		parts = append(parts, colorize(color, ansiCyan, util.FormatValue(extract)))
-	}
-	return strings.Join(parts, " ")
-}
-
-func formatSprayResult(result *parsers.SprayResult, color bool) string {
-	parts := []string{
-		colorize(color, ansiCyan, result.Source.Name()),
-	}
-	if result.Status > 0 {
-		status := strconv.Itoa(result.Status)
-		parts = append(parts, colorize(color, colorForStatus(status), status))
-	}
-	parts = append(parts, colorize(color, ansiYellow, strconv.Itoa(result.BodyLength)))
-	if result.ExceedLength {
-		parts = append(parts, colorize(color, ansiRed, "exceed"))
-	}
-	if result.Spended > 0 {
-		parts = append(parts, colorize(color, ansiYellow, fmt.Sprintf("%dms", result.Spended)))
-	}
-	parts = append(parts, colorize(color, ansiBold+ansiGreen, result.UrlString))
-	if result.Host != "" {
-		parts = append(parts, colorize(color, ansiDim, "("+result.Host+")"))
-	}
-	if result.RedirectURL != "" {
-		parts = append(parts, colorize(color, ansiCyan, "->"), colorize(color, ansiCyan, result.RedirectURL))
-	}
-	parts = appendNonEmptyColoredValue(parts, result.Title, ansiGreen, color)
-	if result.Distance != 0 {
-		parts = append(parts, colorize(color, ansiGreen, strconv.Itoa(int(result.Distance))))
-	}
-	parts = appendNonEmptyColoredValue(parts, result.Reason, ansiYellow, color)
-	if frameworks := strings.TrimSpace(result.Get("frame")); frameworks != "" {
-		parts = append(parts, colorize(color, colorForFrameworks(result.Frameworks.IsFocus()), strings.TrimSpace(frameworks)))
-	}
-	if extracts := strings.TrimSpace(result.Extracteds.String()); extracts != "" {
-		parts = append(parts, colorize(color, ansiCyan, util.FormatValue(extracts)))
-	}
-	return strings.Join(parts, " ")
-}
-
-func colorForStatus(status string) string {
-	status = strings.TrimSpace(status)
-	if status == "" {
-		return ansiDim
-	}
-	code, err := strconv.Atoi(status)
-	if err != nil {
-		if strings.EqualFold(status, "open") || strings.EqualFold(status, "tcp") {
-			return ansiGreen
-		}
-		return ansiDim
-	}
-	switch {
-	case code >= 200 && code < 300:
+func colorForVerificationStatus(status verificationStatus) string {
+	switch status {
+	case verificationConfirmed:
 		return ansiGreen
-	case code >= 300 && code < 400:
-		return ansiCyan
-	case code >= 400 && code < 500:
-		return ansiYellow
-	case code >= 500:
+	case verificationNotConfirmed, verificationFailed:
 		return ansiRed
 	default:
-		return ansiDim
+		return ansiYellow
 	}
 }
 
-func colorForFrameworks(hasFocus bool) string {
-	if hasFocus {
-		return ansiBold + ansiRed
-	}
-	return ansiCyan
-}
-
-func weakpassFields(result *parsers.ZombieResult) []string {
-	fields := make([]string, 0, 4)
-	fields = appendNonEmptyValue(fields, result.Username)
-	fields = appendNonEmptyValue(fields, result.Password)
-	fields = appendNonEmptyValue(fields, result.Service)
-	fields = appendNonEmptyValue(fields, result.Mod.String())
-	return fields
-}
-
-func verificationFields(finding verificationFinding) []string {
-	parts := []string{util.FormatValue(string(finding.Status))}
-	if finding.OriginalPriority != "" {
-		parts = append(parts, util.FormatValue(string(finding.OriginalPriority)))
-	}
-	if finding.OriginalKind != "" {
-		parts = append(parts, util.FormatValue(string(finding.OriginalKind)))
-	}
-	parts = appendNonEmptyValue(parts, finding.Summary)
-	parts = appendNonEmptyValue(parts, finding.Evidence)
-	return parts
-}
-
-func appendNonEmptyValue(parts []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return parts
-	}
-	return append(parts, util.FormatValue(value))
-}
-
-func appendNonEmptyColoredValue(parts []string, value, code string, color bool) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return parts
-	}
-	return append(parts, colorize(color, code, util.FormatValue(value)))
+func verificationOutput(finding verificationFinding) string {
+	return parsers.JoinOutput(
+		finding.Target,
+		string(finding.OriginalKind),
+		string(finding.Status),
+		finding.Summary,
+		finding.Evidence,
+	)
 }

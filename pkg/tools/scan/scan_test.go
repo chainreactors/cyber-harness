@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,12 +17,14 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
+	"github.com/chainreactors/fingers/common"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/parsers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
+	sdkkit "github.com/chainreactors/sdk/pkg"
 	"github.com/chainreactors/sdk/pkg/association"
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
@@ -45,7 +49,7 @@ func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(out, "[scan] completed") {
+	if !strings.Contains(out, "[scan.summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
 }
@@ -55,7 +59,7 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("quick profile error = %v", err)
 	}
-	for _, name := range []string{capGogoPortscan, capSprayCheck, capSprayFinger, capCoreWeb, capSprayCommon, capSprayBackup, capSprayActive, capSprayCrawl, capZombieWeakpass, capNeutronPOC} {
+	for _, name := range []string{capGogoPortscan, capSprayCheck, capCoreWeb, capSprayCrawl, capZombieWeakpass, capNeutronPOC} {
 		if !quick.Enabled(name) {
 			t.Fatalf("quick profile missing %s", name)
 		}
@@ -63,7 +67,7 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 	if quick.CrawlDepth != 1 {
 		t.Fatalf("quick crawl depth = %d, want 1", quick.CrawlDepth)
 	}
-	for _, name := range []string{capSprayBrute} {
+	for _, name := range []string{capSprayPlugins, capSprayBrute} {
 		if quick.Enabled(name) {
 			t.Fatalf("quick profile should not enable %s", name)
 		}
@@ -73,7 +77,7 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("full profile error = %v", err)
 	}
-	for _, name := range []string{capGogoPortscan, capSprayCheck, capSprayFinger, capCoreWeb, capSprayCommon, capSprayBackup, capSprayActive, capSprayCrawl, capSprayBrute, capZombieWeakpass, capNeutronPOC} {
+	for _, name := range []string{capGogoPortscan, capSprayCheck, capCoreWeb, capSprayPlugins, capSprayCrawl, capSprayBrute, capZombieWeakpass, capNeutronPOC} {
 		if !full.Enabled(name) {
 			t.Fatalf("full profile missing %s", name)
 		}
@@ -92,7 +96,7 @@ func TestScanAcceptsBroadPOCFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(out, "[scan] completed") {
+	if !strings.Contains(out, "[scan.summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
 }
@@ -193,7 +197,7 @@ func TestScanWarnsWhenDiscoveryFlagsCannotAffectGogoCapability(t *testing.T) {
 	if len(caps) != 0 {
 		t.Fatalf("capabilities = %d, want 0 without gogo engine", len(caps))
 	}
-	if !strings.Contains(logBuf.String(), "port ignored unavailable") {
+	if !strings.Contains(logBuf.String(), "option=port status=ignored reason=engine_unavailable") {
 		t.Fatalf("warning log missing discovery ignore message: %q", logBuf.String())
 	}
 }
@@ -206,7 +210,7 @@ func TestScanWarnsWhenCredentialFlagsCannotAffectWeakpassCapability(t *testing.T
 	if len(caps) != 0 {
 		t.Fatalf("capabilities = %d, want 0 without zombie engine", len(caps))
 	}
-	if !strings.Contains(logBuf.String(), "user,pwd ignored unavailable") {
+	if !strings.Contains(logBuf.String(), "option=user,pwd status=ignored reason=engine_unavailable") {
 		t.Fatalf("warning log missing credential ignore message: %q", logBuf.String())
 	}
 }
@@ -214,12 +218,12 @@ func TestScanWarnsWhenCredentialFlagsCannotAffectWeakpassCapability(t *testing.T
 func TestScanWarnsWhenWebFlagsCannotAffectSprayCapability(t *testing.T) {
 	var logBuf bytes.Buffer
 	cmd := New(&engine.Set{}, WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})))
-	profile := profile{Capabilities: capabilitySet(capSprayCommon)}
+	profile := profile{Capabilities: capabilitySet(capSprayPlugins)}
 	caps := cmd.buildCapabilities(flags{}, scanOptions{Web: webOptions{Dictionaries: []string{"paths.txt"}}}, profile)
 	if len(caps) != 0 {
 		t.Fatalf("capabilities = %d, want 0 without spray engine", len(caps))
 	}
-	if !strings.Contains(logBuf.String(), "dict,rule,word,default-dict,advance ignored unavailable") {
+	if !strings.Contains(logBuf.String(), "option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable") {
 		t.Fatalf("warning log missing web ignore message: %q", logBuf.String())
 	}
 }
@@ -234,7 +238,7 @@ func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
 		Advance:      true,
 	}
 	cmd := &Command{engines: &engine.Set{Capacity: distributeCapacity(1000)}}
-	cap := sprayCapability(cmd, flags{SprayThreads: 7, Timeout: 9}, web, capSprayCommon, engine.SprayCheckOptions{CommonPlugin: true}, func(_ context.Context, f flags, gotWeb webOptions, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
+	cap := sprayCapability(cmd, flags{SprayThreads: 7, Timeout: 9}, web, capSprayPlugins, engine.SprayCheckOptions{CommonPlugin: true, BakPlugin: true, ActivePlugin: true, Finger: true}, func(_ context.Context, f flags, gotWeb webOptions, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
 		target, ok := input.(webTarget)
 		if !ok {
 			t.Fatalf("input = %#v, want webTarget", input)
@@ -264,11 +268,14 @@ func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
 	if got.Word != web.Word || !got.DefaultDict || !got.Advance {
 		t.Fatalf("spray web strategy options = %#v", got)
 	}
-	if got.Threads != 7 || got.Timeout != 9 || !got.CommonPlugin {
+	if got.Threads != 7 || got.Timeout != 9 || !got.CommonPlugin || !got.BakPlugin || !got.ActivePlugin || !got.Finger {
 		t.Fatalf("spray base options = %#v", got)
 	}
 	if len(emitted) != 1 || emitted[0].Target == nil {
 		t.Fatalf("emitted = %#v, want one target event", emitted)
+	}
+	if emitted[0].Source != capSprayPlugins {
+		t.Fatalf("emitted source = %q, want %q", emitted[0].Source, capSprayPlugins)
 	}
 }
 
@@ -301,10 +308,7 @@ func TestScanBuildCapabilitiesUsesCapacityDrivenWorkers(t *testing.T) {
 	profile := profile{Capabilities: capabilitySet(
 		capGogoPortscan,
 		capSprayCheck,
-		capSprayFinger,
-		capSprayCommon,
-		capSprayBackup,
-		capSprayActive,
+		capSprayPlugins,
 		capSprayCrawl,
 		capSprayBrute,
 	)}
@@ -322,10 +326,7 @@ func TestScanBuildCapabilitiesUsesCapacityDrivenWorkers(t *testing.T) {
 	want := map[string]int{
 		capGogoPortscan: 1,
 		capSprayCheck:   5,
-		capSprayFinger:  5,
-		capSprayCommon:  5,
-		capSprayBackup:  5,
-		capSprayActive:  5,
+		capSprayPlugins: 5,
 		capSprayCrawl:   5,
 		capSprayBrute:   5,
 	}
@@ -398,12 +399,12 @@ func TestScanSeedTargetsFromInputs(t *testing.T) {
 		{
 			name:  "url",
 			input: "http://example.com",
-			kinds: []targetKind{targetWeb, targetWeakpass},
+			kinds: []targetKind{targetWeb},
 		},
 		{
 			name:  "hostport web",
 			input: "127.0.0.1:8080",
-			kinds: []targetKind{targetScan, targetWeb, targetWeakpass},
+			kinds: []targetKind{targetScan, targetWeb},
 		},
 		{
 			name:  "cidr",
@@ -488,8 +489,7 @@ func TestScanBuildSeedTargetsFromBatchInputs(t *testing.T) {
 			name:   "urllist",
 			inputs: []string{"http://127.0.0.1:8080", "https://example.com"},
 			want: map[targetKind]int{
-				targetWeb:      2,
-				targetWeakpass: 2,
+				targetWeb: 2,
 			},
 		},
 		{
@@ -498,7 +498,7 @@ func TestScanBuildSeedTargetsFromBatchInputs(t *testing.T) {
 			want: map[targetKind]int{
 				targetScan:     3,
 				targetWeb:      2,
-				targetWeakpass: 3,
+				targetWeakpass: 1,
 			},
 		},
 	}
@@ -510,6 +510,94 @@ func TestScanBuildSeedTargetsFromBatchInputs(t *testing.T) {
 				t.Fatalf("seed target counts = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestHTTPBasicAuthCapabilityEmitsWeakpassOnlyForBasicChallenge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/basic":
+			w.Header().Set("WWW-Authenticate", `Basic realm="test"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/bearer":
+			w.Header().Set("WWW-Authenticate", `Bearer realm="test"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	cmd := New(&engine.Set{})
+	run := func(rawURL string, status int) []event {
+		var events []event
+		cmd.runHTTPBasicAuthCapability(context.Background(), flags{Timeout: 1}, newWebProbeTarget("", capSprayCheck, "", &parsers.SprayResult{
+			IsValid:   true,
+			UrlString: rawURL,
+			Status:    status,
+		}), func(event event) {
+			events = append(events, event)
+		})
+		return events
+	}
+
+	events := run(server.URL+"/basic", http.StatusUnauthorized)
+	if len(events) != 1 || !hasTargetKind(events, targetWeakpass) {
+		t.Fatalf("basic auth events = %#v, want one weakpass target", events)
+	}
+	target, ok := events[0].Target.(weakpassTarget)
+	if !ok {
+		t.Fatalf("target = %T, want weakpassTarget", events[0].Target)
+	}
+	if target.Target.Service != "http" || target.Target.Param["path"] != "basic" {
+		t.Fatalf("weakpass target = %#v, want http basic path", target.Target)
+	}
+
+	if events := run(server.URL+"/bearer", http.StatusUnauthorized); len(events) != 0 {
+		t.Fatalf("bearer auth events = %#v, want none", events)
+	}
+	if events := run(server.URL+"/basic", http.StatusOK); len(events) != 0 {
+		t.Fatalf("non-401 probe events = %#v, want none", events)
+	}
+}
+
+func TestHasBasicAuthChallenge(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+		want   bool
+	}{
+		{name: "basic", values: []string{`Basic realm="test"`}, want: true},
+		{name: "multiple challenges", values: []string{`Digest realm="test", Basic realm="fallback"`}, want: true},
+		{name: "bearer", values: []string{`Bearer realm="test"`}, want: false},
+		{name: "empty", values: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasBasicAuthChallenge(tt.values); got != tt.want {
+				t.Fatalf("hasBasicAuthChallenge(%#v) = %v, want %v", tt.values, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestZombieTargetFromGogoSkipsHTTPService(t *testing.T) {
+	result := parsers.NewGOGOResult("127.0.0.1", "22")
+	result.Protocol = "http"
+	if target, ok := zombieTargetFromGogo(result); ok {
+		t.Fatalf("zombieTargetFromGogo(http on ssh port) = %#v, want none", target)
+	}
+
+	var events []event
+	deriveServiceResult(profile{}, capGogoPortscan, result, func(event event) {
+		events = append(events, event)
+	})
+	if hasTargetKind(events, targetWeakpass) {
+		t.Fatalf("derived HTTP service events include weakpass target: %#v", events)
+	}
+	if !hasTargetKind(events, targetWeb) {
+		t.Fatalf("derived HTTP service events missing web target: %#v", events)
 	}
 }
 
@@ -647,11 +735,38 @@ func TestFindingPriorityDefaults(t *testing.T) {
 	if got := (fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"nginx"}}).Priority(); got != priorityLow {
 		t.Fatalf("fingerprint priority = %s, want %s", got, priorityLow)
 	}
+	if got := (fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"struts2"}, Focus: true}).Priority(); got != priorityHigh {
+		t.Fatalf("focus fingerprint priority = %s, want %s", got, priorityHigh)
+	}
 	if got := (weakpassFinding{Result: &parsers.ZombieResult{IP: "127.0.0.1", Port: "22", Service: "ssh"}}).Priority(); got != priorityHigh {
 		t.Fatalf("weakpass priority = %s, want %s", got, priorityHigh)
 	}
-	if got := (vulnFinding{Message: "[vuln] http://127.0.0.1 test high"}).Priority(); got != priorityHigh {
+	if got := (vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}).Priority(); got != priorityHigh {
 		t.Fatalf("vuln priority = %s, want %s", got, priorityHigh)
+	}
+}
+
+func TestFocusFingerprintIsDerivedAsHighPriority(t *testing.T) {
+	frame := common.NewFramework("struts2", common.FrameFromFingers)
+	frame.IsFocus = true
+	result := parsers.NewGOGOResult("127.0.0.1", "8080")
+	result.Protocol = "http"
+	result.Frameworks = common.Frameworks{"struts2": frame}
+
+	var events []event
+	deriveServiceResult(profile{}, capGogoPortscan, result, func(event event) {
+		events = append(events, event)
+	})
+
+	var got fingerprintFinding
+	for _, event := range events {
+		if finding, ok := event.Finding.(fingerprintFinding); ok {
+			got = finding
+			break
+		}
+	}
+	if !got.Focus || got.Priority() != priorityHigh {
+		t.Fatalf("focus fingerprint = %#v, want high priority focus", got)
 	}
 }
 
@@ -676,7 +791,7 @@ func TestScanPipelineDispatchesHighPriorityFindingToAgentVerifier(t *testing.T) 
 	p := newTestPipeline(context.Background(), capabilities, coll, false)
 	p.Run(testSeeds(
 		findingEvent("test", fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"nginx"}}),
-		findingEvent("test", vulnFinding{Message: "[vuln] http://127.0.0.1 test high"}),
+		findingEvent("test", vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}),
 	))
 
 	if runs != 1 {
@@ -687,6 +802,31 @@ func TestScanPipelineDispatchesHighPriorityFindingToAgentVerifier(t *testing.T) 
 	}
 	if coll.verifications[0].Finding.Status != verificationConfirmed {
 		t.Fatalf("verification status = %s, want %s", coll.verifications[0].Finding.Status, verificationConfirmed)
+	}
+}
+
+func TestAgentVerifyCapabilityAcceptsFocusFingerprint(t *testing.T) {
+	var promptSeen string
+	verifyFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+		promptSeen = prompt
+		return "status: not_confirmed\nsummary: focus fingerprint requires vulnerability-specific evidence\nevidence: safe validation should check exact version and exposed endpoints", nil
+	}
+	cmd := New(&engine.Set{}, WithVerifyFunc(verifyFn), WithVerificationConfig(VerificationConfig{Model: "test-model"}))
+	cap, ok := cmd.agentVerifyCapability(flags{Verify: "high", VerifyTimeout: 5})
+	if !ok {
+		t.Fatal("agent verifier capability was not built")
+	}
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
+	p.Run(testSeeds(
+		findingEvent(capSprayCheck, fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"struts2"}, Focus: true}),
+	))
+
+	if len(coll.verifications) != 0 {
+		t.Fatalf("verifications = %d, want 0 for not_confirmed", len(coll.verifications))
+	}
+	if !strings.Contains(promptSeen, "focus fingerprint struts2") {
+		t.Fatalf("verification prompt missing focus evidence: %q", promptSeen)
 	}
 }
 
@@ -708,7 +848,7 @@ func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
 	p.Run(testSeeds(
-		findingEvent(capNeutronPOC, vulnFinding{Message: "[vuln] http://127.0.0.1 test high"}),
+		findingEvent(capNeutronPOC, vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}),
 	))
 
 	if len(coll.verifications) != 1 {
@@ -723,6 +863,33 @@ func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("verify calls = %d, want 1", calls)
+	}
+}
+
+func TestAgentVerifyCapabilitySuppressesUnconfirmedOutput(t *testing.T) {
+	finding := verificationFinding{
+		OriginalKey:      "fingerprint|1",
+		OriginalKind:     findingFingerprint,
+		OriginalPriority: priorityHigh,
+		Status:           verificationNotConfirmed,
+		Target:           "https://open.kingdee.com/k3cloud",
+		Summary:          "fingerprint only",
+		Evidence:         "historical vulnerabilities exist but no exploit evidence",
+	}
+	if reportableVerificationFinding(finding) {
+		t.Fatal("not_confirmed verification should not be reportable")
+	}
+	if line := formatEventLine(findingEvent(capAgentVerify, finding), false); line != "" {
+		t.Fatalf("not_confirmed verification line = %q, want empty", line)
+	}
+
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: findingEvent(capAgentVerify, finding)})
+	if len(coll.verifications) != 0 {
+		t.Fatalf("verifications = %d, want 0", len(coll.verifications))
+	}
+	if out := coll.ReportMarkdown(); strings.Contains(out, "fingerprint only") {
+		t.Fatalf("markdown report included unconfirmed verification:\n%s", out)
 	}
 }
 
@@ -953,6 +1120,37 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 				Reason:     "compare failed",
 			},
 		},
+		{
+			name: "index baseline",
+			result: &parsers.SprayResult{
+				IsValid:    true,
+				UrlString:  "http://127.0.0.1:32768/",
+				Source:     parsers.InitIndexSource,
+				Status:     200,
+				BodyLength: 128,
+			},
+		},
+		{
+			name: "random baseline",
+			result: &parsers.SprayResult{
+				IsValid:    true,
+				UrlString:  "http://127.0.0.1:32768/__random__",
+				Source:     parsers.InitRandomSource,
+				Status:     404,
+				BodyLength: 64,
+			},
+		},
+		{
+			name: "fuzzy baseline",
+			result: &parsers.SprayResult{
+				IsValid:    true,
+				IsFuzzy:    true,
+				UrlString:  "http://127.0.0.1:32768/orders.log.old",
+				Source:     parsers.AppendSource,
+				Status:     401,
+				BodyLength: 64,
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -981,6 +1179,36 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 	}
 }
 
+func TestScanSkipsInternalPluginCheckBaseline(t *testing.T) {
+	result := &parsers.SprayResult{
+		IsValid:    true,
+		UrlString:  "http://127.0.0.1:8081",
+		Source:     parsers.CheckSource,
+		Status:     500,
+		BodyLength: 114,
+		Title:      "json data",
+	}
+	event := targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", result))
+	if line := formatEventLine(event, false); line != "" {
+		t.Fatalf("plugin check baseline line = %q, want empty", line)
+	}
+
+	var buf bytes.Buffer
+	coll := newCollector([]string{"seed"}, &buf, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: event})
+	if got := buf.String(); got != "" {
+		t.Fatalf("stream output = %q, want empty", got)
+	}
+	if len(coll.sprayResults) != 0 {
+		t.Fatalf("spray results = %d, want 0", len(coll.sprayResults))
+	}
+
+	checkEvent := targetEvent(capSprayCheck, "", newWebProbeTarget("", capSprayCheck, "", result))
+	if line := formatEventLine(checkEvent, false); !strings.Contains(line, "[spray_check.check] http://127.0.0.1:8081 500 114") {
+		t.Fatalf("primary spray_check line = %q, want source suffix in prefix", line)
+	}
+}
+
 func TestScanStreamsAcceptedResults(t *testing.T) {
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, true, false)
@@ -995,7 +1223,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 		t.Fatalf("colored stream output missing ANSI: %q", raw)
 	}
 	out := stripANSI(raw)
-	if !strings.Contains(out, "[gogo_portscan] http://127.0.0.1:80") {
+	if !strings.Contains(out, "[gogo_portscan.web] http://127.0.0.1:80 200 http") {
 		t.Fatalf("stream output = %q", out)
 	}
 	if strings.Contains(out, "##") {
@@ -1003,10 +1231,10 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 	}
 }
 
-func TestScanColorizesWebProbeFields(t *testing.T) {
+func TestScanColorizesWebProbePrefixOnly(t *testing.T) {
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, true, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_backup", "", newWebProbeTarget("", "spray_backup", "", &parsers.SprayResult{
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:32768/test.war",
 		Source:     parsers.BakSource,
@@ -1018,25 +1246,86 @@ func TestScanColorizesWebProbeFields(t *testing.T) {
 
 	raw := buf.String()
 	for _, want := range []string{
-		ansiBold + ansiGreen + "http://127.0.0.1:32768/test.war" + ansiReset,
-		ansiCyan + "bak" + ansiReset,
-		ansiYellow + "401" + ansiReset,
-		ansiYellow + "64" + ansiReset,
-		ansiYellow + "26ms" + ansiReset,
-		ansiGreen + `"json data"` + ansiReset,
+		ansiDim + "[spray_plugins.bak]" + ansiReset,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("colored output missing %q in %q", want, raw)
 		}
 	}
+	if strings.Contains(raw, ansiYellow+"401") || strings.Contains(raw, ansiGreen+`"json data"`) {
+		t.Fatalf("scan output should not parse and color parser fields: %q", raw)
+	}
 	out := stripANSI(raw)
-	if !strings.Contains(out, `bak 401 64 26ms http://127.0.0.1:32768/test.war "json data"`) {
+	if !strings.Contains(out, `[spray_plugins.bak] http://127.0.0.1:32768/test.war 401 64 26ms "json data"`) {
 		t.Fatalf("plain colored output shape changed: %q", out)
 	}
-	for _, polluted := range []string{"type=", "probe=", "status=", "length=", "time=", "title="} {
-		if strings.Contains(out, polluted) {
-			t.Fatalf("plain colored output contains key/value pollution %q: %q", polluted, out)
+}
+
+func TestScanUnifiesFrameworkOutput(t *testing.T) {
+	frameworks := common.Frameworks{
+		"nginx":   common.NewFramework("nginx", common.FrameFromFingers),
+		"struts2": common.NewFramework("struts2", common.FrameFromFingers),
+	}
+	gogoResult := parsers.NewGOGOResult("127.0.0.1", "8080")
+	gogoResult.Protocol = "http"
+	gogoResult.Status = "200"
+	gogoResult.Frameworks = frameworks
+
+	sprayResult := &parsers.SprayResult{
+		IsValid:    true,
+		UrlString:  "http://127.0.0.1:8080",
+		Source:     parsers.CheckSource,
+		Status:     200,
+		BodyLength: 12,
+		Frameworks: frameworks,
+	}
+
+	lines := []string{
+		formatEventLine(targetEvent(capGogoPortscan, "", newServiceTarget("", gogoResult)), false),
+		formatEventLine(targetEvent(capSprayCheck, "", newWebProbeTarget("", capSprayCheck, "", sprayResult)), false),
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, "[nginx,struts2]") {
+			t.Fatalf("framework output is not unified: %q", line)
 		}
+		for _, polluted := range []string{"fp=", "frameworks=", "||", "[nginx] [struts2]"} {
+			if strings.Contains(line, polluted) {
+				t.Fatalf("framework output contains old style %q: %q", polluted, line)
+			}
+		}
+	}
+}
+
+func TestScanFindingPriorityUsesFocusOutputOnly(t *testing.T) {
+	plain := formatEventLine(findingEvent(capSprayCheck, fingerprintFinding{
+		Target:  "http://127.0.0.1",
+		Fingers: []string{"nginx"},
+	}), false)
+	if plain != "" {
+		t.Fatalf("plain non-focus fingerprint output = %q, want empty", plain)
+	}
+	plainFocus := formatEventLine(findingEvent(capSprayCheck, fingerprintFinding{
+		Target:  "http://127.0.0.1",
+		Fingers: []string{"struts2"},
+		Focus:   true,
+	}), false)
+	if strings.Contains(plain, " low ") || strings.Contains(plain, " high ") {
+		t.Fatalf("plain finding output should not print priority text: %q", plain)
+	}
+	if !strings.Contains(plainFocus, "[spray_check.focus] http://127.0.0.1 [struts2]") {
+		t.Fatalf("plain focus output shape changed: %q", plainFocus)
+	}
+
+	colored := formatEventLine(findingEvent(capSprayCheck, fingerprintFinding{
+		Target:  "http://127.0.0.1",
+		Fingers: []string{"struts2"},
+		Focus:   true,
+	}), true)
+	if strings.Contains(stripANSI(colored), " high ") {
+		t.Fatalf("colored finding output should not print priority text: %q", colored)
+	}
+	if !strings.Contains(colored, ansiRed+"[spray_check.focus]"+ansiReset) {
+		t.Fatalf("colored finding output should encode high priority in color: %q", colored)
 	}
 }
 
@@ -1053,8 +1342,64 @@ func TestScanStreamsWithoutColor(t *testing.T) {
 	if hasANSI(out) {
 		t.Fatalf("uncolored stream output contains ANSI: %q", out)
 	}
-	if !strings.Contains(out, "[gogo_portscan] http://127.0.0.1:80") {
+	if !strings.Contains(out, "[gogo_portscan.web] http://127.0.0.1:80 200 http") {
 		t.Fatalf("stream output = %q", out)
+	}
+}
+
+func TestScanSummaryUsesStructuredFields(t *testing.T) {
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	result := parsers.NewGOGOResult("127.0.0.1", "80")
+	result.Protocol = "http"
+	result.Status = "200"
+
+	coll.Observe(pipelineEvent{Action: pipelineEventCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Finish()
+
+	out := coll.String()
+	for _, want := range []string{
+		"[scan.summary] completed inputs 1 services 1 web 0 probes 0 fingerprints 0 weakpass 0 vulns 0 verified 0 errors 0 tasks 0 requests 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestScanSummaryAggregatesEngineStats(t *testing.T) {
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: statsEvent(capGogoPortscan, sdkkit.Stats{
+		Engine:   "gogo",
+		Task:     "scan",
+		Targets:  2,
+		Tasks:    4,
+		Requests: 4,
+		Results:  1,
+		Duration: 10 * time.Millisecond,
+	})})
+	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: statsEvent(capSprayCheck, sdkkit.Stats{
+		Engine:   "spray",
+		Task:     "check",
+		Targets:  1,
+		Tasks:    3,
+		Requests: 5,
+		Results:  2,
+		Errors:   1,
+		Duration: 20 * time.Millisecond,
+	})})
+	coll.Finish()
+
+	out := coll.String()
+	if !strings.Contains(out, "tasks 7 requests 9") {
+		t.Fatalf("summary missing aggregated stats:\n%s", out)
+	}
+
+	report := coll.ReportMarkdown()
+	for _, want := range []string{"| Tasks | 7 |", "| Requests | 9 |", "| gogo_portscan | gogo | scan | 2 | 4 | 4 | 1 | 0 | 10ms |", "| spray_check | spray | check | 1 | 3 | 5 | 2 | 1 | 20ms |"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("report missing %q:\n%s", want, report)
+		}
 	}
 }
 
@@ -1118,11 +1463,8 @@ func TestScanPlainTextStripsANSI(t *testing.T) {
 	if hasANSI(out) {
 		t.Fatalf("plain text output contains ANSI: %q", out)
 	}
-	if !strings.Contains(out, "check 200 12 http://127.0.0.1:80 1") {
+	if !strings.Contains(out, "[spray_check.check] http://127.0.0.1:80 200 12 sim:1") {
 		t.Fatalf("plain text output missing parser content: %q", out)
-	}
-	if strings.Contains(out, "sim=") || strings.Contains(out, "status=") || strings.Contains(out, "length=") {
-		t.Fatalf("plain text output contains key/value pollution: %q", out)
 	}
 }
 
@@ -1143,13 +1485,13 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	if hasANSI(fileOut) {
 		t.Fatalf("file output contains ANSI: %q", fileOut)
 	}
-	if !strings.Contains(fileOut, "[scan] completed") {
+	if !strings.Contains(fileOut, "[scan.summary] completed") {
 		t.Fatalf("file output missing summary: %q", fileOut)
 	}
-	if !strings.Contains(out, "[scan] completed") {
+	if !strings.Contains(stripANSI(out), "[scan.summary] completed") {
 		t.Fatalf("stdout output missing summary: %q", out)
 	}
-	if strings.Contains(out, "[scan] web ") {
+	if strings.Contains(out, "[scan.web] ") {
 		t.Fatalf("stdout output should not repeat streamed events: %q", out)
 	}
 	if !strings.Contains(stripANSI(stream.String()), "http://127.0.0.1:1") {

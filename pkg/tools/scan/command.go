@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -25,22 +25,22 @@ type flags struct {
 	ListFile        string   `short:"l" long:"list" description:"File containing input targets, one per line"`
 	Mode            string   `long:"mode" description:"Scan profile: quick or full" default:"quick"`
 	Thread          int      `long:"thread" description:"Total concurrency budget distributed across engines" default:"1000"`
-	Debug           bool     `long:"debug" description:"Print event pipeline trace to stderr"`
+	Debug           bool     `long:"debug" description:"Enable scan trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
 	Report          bool     `long:"report" description:"Output a concise final markdown report"`
 	OutputFile      string   `short:"f" long:"file" description:"Write output to file without ANSI colors"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
 	Port            string   `long:"port" description:"Ports for discovery scanning; overrides --ports when set"`
-	Threads         int // derived from Thread; not a CLI flag
-	Timeout         int `long:"timeout" description:"Per-probe timeout in seconds" default:"5"`
-	SprayThreads    int // derived from Thread; not a CLI flag
+	Threads         int      // derived from Thread; not a CLI flag
+	Timeout         int      `long:"timeout" description:"Per-probe timeout in seconds" default:"5"`
+	SprayThreads    int      // derived from Thread; not a CLI flag
 	Dictionaries    []string `long:"dict" description:"Dictionary file for spray word-based discovery. Can specify multiple."`
 	Rules           []string `long:"rule" description:"Rule file for spray word mutation. Can specify multiple."`
 	Word            string   `long:"word" description:"Spray word-generation DSL"`
 	DefaultDict     bool     `long:"default-dict" description:"Use spray default dictionary for word-based discovery"`
 	Advance         bool     `long:"advance" description:"Enable spray advance plugin behavior for enabled web capabilities"`
-	ZombieThreads   int // derived from Thread; not a CLI flag
+	ZombieThreads   int      // derived from Thread; not a CLI flag
 	ZombieTop       int      `long:"zombie-top" description:"Use top N default weakpass words"`
 	Users           []string `long:"user" description:"Weakpass usernames. Can specify multiple."`
 	Passwords       []string `long:"pwd" description:"Weakpass passwords. Can specify multiple."`
@@ -75,7 +75,7 @@ Inputs:
 Options:
       --mode        Scan profile: quick or full (default: quick)
       --thread      Total concurrency budget (default: 1000); auto-distributed across engines
-      --debug       Print event pipeline trace to stderr
+      --debug       Enable scan trace and underlying scanner debug logs
   -j, --json        Output raw gogo and spray results as JSON Lines
       --report      Output a concise final markdown report
   -f, --file        Write output to file without ANSI colors
@@ -96,10 +96,13 @@ Options:
       --verify      LLM verification mode: off, low, medium, high, critical (default: off)
       --verify-timeout  Timeout seconds per verification (default: 120)
 Profiles:
-  quick: gogo -p all -e -v, spray check/finger/common/crawl(depth=1)/bak/active with recon, weakpass, fingerprint-based POC
-  full: quick plus gogo -p -, crawl depth=2, and spray_brute default dictionary
+  quick: gogo -p all -e -v, spray check(with finger)/crawl(depth=1) with recon, weakpass (HTTP only after Basic auth challenge), fingerprint-based POC
+  full: quick plus gogo -p -, crawl depth=2, spray_plugins(common,bak,active), and spray_brute default dictionary
 Flow:
   input targets -> capability queues -> emitted events -> downstream capabilities
+Output:
+  event format: [source.scope] compact-evidence...
+  summary format: [scan.summary] completed inputs N services N web N probes N fingerprints N weakpass N vulns N verified N errors N tasks N requests N duration
 Examples:
   scan -i 192.168.1.0/24 --mode quick
   scan -i http://target.com --mode full --debug
@@ -129,6 +132,11 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			return c.Usage() + "\n", nil
 		}
 		return "", fmt.Errorf("scan: %w", err)
+	}
+	if flags.Debug {
+		restoreDebug := telemetry.ActivateDebug(c.logger)
+		defer restoreDebug()
+		c.logger.Debugf("scan debug enabled")
 	}
 	c.applyVerificationDefaults(&flags, args)
 
@@ -185,7 +193,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	} else if flags.Report {
 		out = coll.ReportMarkdown()
 	} else {
-		out = coll.String()
+		out = coll.TerminalString(stream != nil && !flags.NoColor)
 	}
 	if flags.OutputFile != "" {
 		fileOut := out

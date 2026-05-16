@@ -9,6 +9,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/chainreactors/parsers"
+	sdkkit "github.com/chainreactors/sdk/pkg"
 	"github.com/chainreactors/utils"
 )
 
@@ -22,6 +23,7 @@ type fingerprint struct {
 	Target string
 	Name   string
 	Source string
+	Focus  bool
 }
 
 type sprayObservation struct {
@@ -44,12 +46,12 @@ type collector struct {
 	sprayResults   []sprayObservation
 	fingerprints   []fingerprint
 	zombieResults  []*parsers.ZombieResult
-	neutronMatches []string
+	neutronMatches []vulnFinding
 	verifications  []verificationResult
 	errors         []string
 	trace          []string
 	seenWeb        map[string]struct{}
-	seenFinger     map[string]struct{}
+	seenFinger     map[string]int
 	stream         io.Writer
 	streamColor    bool
 	fileLines      []string
@@ -61,7 +63,7 @@ func newCollector(inputs []string, stream io.Writer, streamColor, debug bool) *c
 		debug:       debug,
 		stats:       newStatsCollector(len(inputs)),
 		seenWeb:     make(map[string]struct{}),
-		seenFinger:  make(map[string]struct{}),
+		seenFinger:  make(map[string]int),
 		stream:      stream,
 		streamColor: streamColor,
 		fileLines:   make([]string, 0),
@@ -133,7 +135,7 @@ func (c *collector) recordTargetEvent(event event) {
 			c.gogoResults = append(c.gogoResults, target.Result)
 		}
 	case webProbeTarget:
-		if reportableSprayResult(target.Result) {
+		if reportableSprayResultForCapability(target.Result, target.Capability) {
 			source := target.Capability
 			if source == "" {
 				source = event.Source
@@ -151,14 +153,19 @@ func (c *collector) recordFindingEvent(event event) {
 	case fingerprintFinding:
 		for _, name := range parsers.NormalizeNames(finding.Fingers) {
 			key := strings.ToLower(finding.Target) + "|" + strings.ToLower(name)
-			if _, ok := c.seenFinger[key]; ok {
+			if index, ok := c.seenFinger[key]; ok {
+				if finding.Focus && index >= 0 && index < len(c.fingerprints) && !c.fingerprints[index].Focus {
+					c.fingerprints[index].Focus = true
+					c.fingerprints[index].Source = event.Source
+				}
 				continue
 			}
-			c.seenFinger[key] = struct{}{}
+			c.seenFinger[key] = len(c.fingerprints)
 			c.fingerprints = append(c.fingerprints, fingerprint{
 				Target: finding.Target,
 				Name:   name,
 				Source: event.Source,
+				Focus:  finding.Focus,
 			})
 		}
 	case weakpassFinding:
@@ -166,11 +173,11 @@ func (c *collector) recordFindingEvent(event event) {
 			c.zombieResults = append(c.zombieResults, finding.Result)
 		}
 	case vulnFinding:
-		if finding.Message != "" {
-			c.neutronMatches = append(c.neutronMatches, finding.Message)
+		if finding.String() != "" {
+			c.neutronMatches = append(c.neutronMatches, finding)
 		}
 	case verificationFinding:
-		if finding.Status != "" || finding.Summary != "" {
+		if reportableVerificationFinding(finding) {
 			c.verifications = append(c.verifications, verificationResult{
 				Finding: finding,
 				Source:  event.Source,
@@ -197,7 +204,11 @@ func (c *collector) statsSnapshotLocked() statsSnapshot {
 }
 
 func (c *collector) String() string {
-	return formatSummary(c)
+	return formatSummary(c, false)
+}
+
+func (c *collector) TerminalString(color bool) string {
+	return formatSummary(c, color)
 }
 
 func (c *collector) ReportMarkdown() string {
@@ -224,6 +235,9 @@ type statsSnapshot struct {
 	CapabilityOutput  map[string]int
 	SprayByCapability map[string]int
 	ErrorsBySource    map[string]int
+	EngineStats       map[string]sdkkit.Stats
+	Tasks             int64
+	Requests          int64
 }
 
 type statsCollector struct {
@@ -240,6 +254,7 @@ func newStatsCollector(inputs int) *statsCollector {
 			CapabilityOutput:  make(map[string]int),
 			SprayByCapability: make(map[string]int),
 			ErrorsBySource:    make(map[string]int),
+			EngineStats:       make(map[string]sdkkit.Stats),
 		},
 	}
 }
@@ -247,11 +262,15 @@ func newStatsCollector(inputs int) *statsCollector {
 func (s *statsCollector) Observe(event pipelineEvent) {
 	switch event.Action {
 	case pipelineEventAccept:
+		if event.Event.Kind == eventStats {
+			s.recordEngineStats(event.Event.Source, event.Event.Stats)
+			return
+		}
 		s.summary.Accepted[event.Event.label()]++
 		if event.Event.Kind == eventError && event.Event.Error.Message != "" {
 			s.summary.ErrorsBySource[event.Event.Source]++
 		}
-		if target, ok := event.Event.Target.(webProbeTarget); ok && reportableSprayResult(target.Result) {
+		if target, ok := event.Event.Target.(webProbeTarget); ok && reportableSprayResultForCapability(target.Result, target.Capability) {
 			source := target.Capability
 			if source == "" {
 				source = event.Event.Source
@@ -267,6 +286,36 @@ func (s *statsCollector) Observe(event pipelineEvent) {
 	}
 }
 
+func (s *statsCollector) recordEngineStats(source string, stats sdkkit.Stats) {
+	if stats.Engine == "" && stats.Task == "" {
+		return
+	}
+	s.summary.Tasks += stats.Tasks
+	s.summary.Requests += stats.Requests
+
+	key := source
+	if key == "" {
+		key = stats.Engine
+	}
+	if key == "" {
+		key = stats.Task
+	}
+	current := s.summary.EngineStats[key]
+	if current.Engine == "" {
+		current.Engine = stats.Engine
+	}
+	if current.Task == "" {
+		current.Task = stats.Task
+	}
+	current.Targets += stats.Targets
+	current.Tasks += stats.Tasks
+	current.Requests += stats.Requests
+	current.Results += stats.Results
+	current.Errors += stats.Errors
+	current.Duration += stats.Duration
+	s.summary.EngineStats[key] = current
+}
+
 func (s *statsCollector) Finish() {
 	s.summary.FinishedAt = time.Now()
 }
@@ -278,6 +327,7 @@ func (s *statsCollector) Snapshot() statsSnapshot {
 	out.CapabilityOutput = util.CloneMap(out.CapabilityOutput)
 	out.SprayByCapability = util.CloneMap(out.SprayByCapability)
 	out.ErrorsBySource = util.CloneMap(out.ErrorsBySource)
+	out.EngineStats = util.CloneMap(out.EngineStats)
 	return out
 }
 

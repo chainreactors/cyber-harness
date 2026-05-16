@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/chainreactors/parsers"
@@ -152,6 +153,18 @@ func (t weakpassTarget) Key() string {
 	key := strings.ToLower(target.Service) + "://" + strings.ToLower(target.Address())
 	if target.Username != "" || target.Password != "" {
 		key += "|" + target.Username + "|" + target.Password
+	}
+	if len(target.Param) > 0 {
+		keys := make([]string, 0, len(target.Param))
+		for k, v := range target.Param {
+			if k != "" && v != "" {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			key += "|" + strings.ToLower(k) + "=" + target.Param[k]
+		}
 	}
 	return key
 }

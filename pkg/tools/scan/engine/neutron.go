@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -17,11 +19,17 @@ type NeutronExecuteOptions struct {
 	Fingers      []string
 	MaxPerFinger int
 	Broad        bool
+	Debug        bool
 }
 
 func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *association.FingerPOCIndex, opts NeutronExecuteOptions) (<-chan *neutron.ExecuteResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("neutron engine is not available")
+	}
+	if opts.Debug {
+		common.NeutronLog = telemetry.EnableLogsDebug()
+	} else {
+		common.NeutronLog = telemetry.GlobalLogs()
 	}
 	task := neutron.NewExecuteTask(opts.Target)
 	selected, filtered := SelectNeutronTemplates(eng, index, opts)

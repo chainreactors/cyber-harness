@@ -7,6 +7,7 @@ func TestBuildGogoRunnerOptionAppliesVersionAndExploit(t *testing.T) {
 		Timeout:      7,
 		VersionLevel: 1,
 		Exploit:      "auto",
+		Debug:        true,
 	})
 
 	if opt.VersionLevel != 1 {
@@ -17,5 +18,8 @@ func TestBuildGogoRunnerOptionAppliesVersionAndExploit(t *testing.T) {
 	}
 	if opt.Delay != 7 || opt.HttpsDelay != 7 {
 		t.Fatalf("delay = %d/%d, want 7/7", opt.Delay, opt.HttpsDelay)
+	}
+	if !opt.Debug {
+		t.Fatal("debug = false, want true")
 	}
 }

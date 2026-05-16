@@ -12,6 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/swarm"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/skills"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
@@ -119,7 +120,13 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 			return nil
 		}
 	}
-	application, err := app.New(ctx, appConfig(option, features, logger))
+	scannerLogger := logger
+	if !directScannerDebugEnabled(option, scannerArgs) {
+		scannerLogger = telemetry.ErrorOnlyLogger(logger)
+		restoreLogs := telemetry.SuppressGlobalNonErrors()
+		defer restoreLogs()
+	}
+	application, err := app.New(ctx, appConfig(option, features, scannerLogger))
 	if err != nil {
 		return fmt.Errorf("init app: %w", err)
 	}
@@ -128,6 +135,9 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 
 	if !application.Commands.Has(scannerArgs[0]) {
 		return fmt.Errorf("unknown subcommand: %s", scannerArgs[0])
+	}
+	if option.Debug && scannerCommandSupportsDebug(scannerArgs[0]) && !toolargs.BoolFlagEnabled(scannerArgs[1:], "--debug") {
+		scannerArgs = append(scannerArgs, "--debug")
 	}
 	if option.AI && scannerArgs[0] != "scan" {
 		return runScannerAgentMode(ctx, option, application, scannerArgs, logger)
@@ -156,6 +166,25 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 		}
 	}
 	return nil
+}
+
+func directScannerDebugEnabled(option *Option, scannerArgs []string) bool {
+	if option != nil && option.Debug {
+		return true
+	}
+	if len(scannerArgs) == 0 || !scannerCommandSupportsDebug(scannerArgs[0]) {
+		return false
+	}
+	return toolargs.BoolFlagEnabled(scannerArgs[1:], "--debug")
+}
+
+func scannerCommandSupportsDebug(name string) bool {
+	switch name {
+	case "scan", "gogo", "spray", "zombie", "neutron":
+		return true
+	default:
+		return false
+	}
 }
 
 func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error {
@@ -220,17 +249,14 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		)
 	}
 
-	var heartbeatFunc swarm.HeartbeatFunc
-	if option.Heartbeat > 0 {
-		heartbeatFunc = func(ctx context.Context, prompt string) (string, error) {
-			return agent.Run(ctx, prompt, application.Commands,
-				agent.WithProvider(application.Provider),
-				agent.WithSystemPrompt(systemPrompt),
-				agent.WithModel(option.Model),
-				agent.WithStream(true),
-				agent.WithLogger(logger),
-			)
-		}
+	heartbeatFunc := func(ctx context.Context, prompt string) (string, error) {
+		return agent.Run(ctx, prompt, application.Commands,
+			agent.WithProvider(application.Provider),
+			agent.WithSystemPrompt(systemPrompt),
+			agent.WithModel(option.Model),
+			agent.WithStream(true),
+			agent.WithLogger(logger),
+		)
 	}
 
 	node := swarm.NewNode(swarm.NodeConfig{
@@ -248,6 +274,9 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		OnHeartbeat:           heartbeatFunc,
 		Logger:                logger,
 	})
+
+	application.Commands.RegisterTool(swarm.CronCommand(node))
+
 	return node.Run(ctx)
 }
 

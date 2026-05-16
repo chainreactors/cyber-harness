@@ -17,7 +17,7 @@ import (
 func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	registry := command.NewRegistry()
 	scan := newScannerRecording("scan")
-	scan.output = "[scan] completed: inputs=1 open=1 web=1 weakpass=0 vulns=1 errors=0\n[vuln] http://127.0.0.1 template=test-cve severity=high"
+	scan.output = "[scan.summary] completed inputs 1 services 1 web 1 probes 1 fp 0 weakpass 0 vulns 1 verified 0 errors 0 1s\n[neutron_poc] http://127.0.0.1 \"template=test-cve severity=high\""
 	registry.Register(scan, "")
 	registry.Register(newScannerRecording("gogo"), "")
 	registry.Register(newScannerRecording("spray"), "")
@@ -73,7 +73,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	if len(requests[0].Tools) != 1 || requests[0].Tools[0].Function.Name != "bash" {
 		t.Fatalf("first provider request tools = %#v", requests[0].Tools)
 	}
-	if !hasToolMessage(requests[1].Messages, "call-1", "[scan] completed") {
+	if !hasToolMessage(requests[1].Messages, "call-1", "[scan.summary] completed") {
 		t.Fatalf("second provider request did not include scan tool result: %#v", requests[1].Messages)
 	}
 }

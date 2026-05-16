@@ -2,13 +2,13 @@ package tools
 
 import (
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	gogocmd "github.com/chainreactors/aiscan/pkg/tools/gogo"
 	neutroncmd "github.com/chainreactors/aiscan/pkg/tools/neutron"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	spraycmd "github.com/chainreactors/aiscan/pkg/tools/spray"
 	zombiecmd "github.com/chainreactors/aiscan/pkg/tools/zombie"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 func init() {
@@ -35,13 +35,13 @@ func init() {
 				reg.Register(scan.New(es, scanOpts...), "scanner")
 			}
 			if es.Gogo != nil {
-				reg.Register(gogocmd.New(es.Gogo), "scanner")
+				reg.Register(gogocmd.New(es.Gogo).WithLogger(logger), "scanner")
 			}
 			if es.Spray != nil {
-				reg.Register(spraycmd.New(es.Spray), "scanner")
+				reg.Register(spraycmd.New(es.Spray).WithLogger(logger), "scanner")
 			}
 			if es.Zombie != nil {
-				reg.Register(zombiecmd.New(es.Zombie), "scanner")
+				reg.Register(zombiecmd.New(es.Zombie).WithLogger(logger), "scanner")
 			}
 			if es.Neutron != nil {
 				reg.Register(neutroncmd.New(es.Neutron, es.Index).WithLogger(logger), "scanner")

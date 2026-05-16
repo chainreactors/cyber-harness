@@ -99,7 +99,9 @@ func seedTargetsFromURL(raw string, parsed *url.URL) []target {
 		targets = append(targets, newWebTarget(raw, raw, ""))
 	}
 	if target, ok := zombieTargetFromParsedURL(parsed, ""); ok {
-		targets = append(targets, newWeakpassTarget(raw, target))
+		if !isGenericWebZombieService(target.Service) {
+			targets = append(targets, newWeakpassTarget(raw, target))
+		}
 	}
 	return targets
 }
@@ -108,9 +110,12 @@ func seedTargetsFromHostPort(host, port, raw string) []target {
 	targets := []target{newScanTarget(raw, host, port)}
 	if utils.IsWebPort(port) {
 		targets = append(targets, newWebTarget(raw, utils.URLFromHostPort(webSchemeFromPort(port), host, port), ""))
+		return targets
 	}
 	if target, ok := zombieTargetFromHostPort(host, port, ""); ok {
-		targets = append(targets, newWeakpassTarget(raw, target))
+		if !isGenericWebZombieService(target.Service) {
+			targets = append(targets, newWeakpassTarget(raw, target))
+		}
 	}
 	return targets
 }
@@ -190,4 +195,13 @@ func normalizeZombieTarget(target sdkzombie.Target, serviceOverride string) (sdk
 		return sdkzombie.Target{}, false
 	}
 	return target, true
+}
+
+func isGenericWebZombieService(service string) bool {
+	switch strings.ToLower(strings.TrimSpace(service)) {
+	case "http", "https", "get", "post":
+		return true
+	default:
+		return false
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/skills"
 	goflags "github.com/jessevdk/go-flags"
 )
@@ -176,7 +177,7 @@ func AiScan() {
 		fmt.Fprintf(os.Stderr, "loaded config: %s\n", cfgPath)
 	}
 	applyDefaults(&option)
-	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: os.Stderr})
+	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: os.Stderr, Color: !option.NoColor})
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
 	defer cancel()
@@ -283,6 +284,9 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	scannerArgs, err := applyScannerCommandArgs(scannerName, scannerRest, &option)
 	if err != nil {
 		return parsedCLI{}, err
+	}
+	if toolargs.BoolFlagEnabled(scannerArgs, "--debug") {
+		option.Debug = true
 	}
 	return parsedCLI{
 		Option:      option,

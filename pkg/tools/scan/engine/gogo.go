@@ -8,6 +8,7 @@ import (
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/parsers"
 	"github.com/chainreactors/sdk/gogo"
+	sdkkit "github.com/chainreactors/sdk/pkg"
 )
 
 const GogoTempLogFile = ".sock.lock"
@@ -19,10 +20,12 @@ type GogoScanOptions struct {
 	Timeout      int
 	VersionLevel int
 	Exploit      string
+	Debug        bool
+	OnStats      func(sdkkit.Stats)
 }
 
-func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanOptions) (<-chan *parsers.GOGOResult, error) {
-	if engine == nil {
+func GogoScanStream(ctx context.Context, eng *gogo.GogoEngine, opts GogoScanOptions) (<-chan *parsers.GOGOResult, error) {
+	if eng == nil {
 		return nil, fmt.Errorf("gogo engine is not available")
 	}
 	CleanupGogoTempFiles()
@@ -30,8 +33,9 @@ func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanO
 	gogoCtx := gogo.NewContext().
 		WithContext(ctx).
 		SetThreads(opts.Threads).
-		SetOption(runOpt)
-	resultCh, err := engine.ScanStream(gogoCtx, opts.Target, opts.Ports)
+		SetOption(runOpt).
+		SetStatsHandler(opts.OnStats)
+	resultCh, err := eng.Execute(gogoCtx, gogo.NewScanTask(opts.Target, opts.Ports))
 	if err != nil {
 		CleanupGogoTempFiles()
 		return nil, err
@@ -42,8 +46,15 @@ func GogoScanStream(ctx context.Context, engine *gogo.GogoEngine, opts GogoScanO
 		defer CleanupGogoTempFiles()
 		defer close(out)
 		for result := range resultCh {
+			if result == nil || !result.Success() {
+				continue
+			}
+			gogoResult, ok := result.Data().(*parsers.GOGOResult)
+			if !ok || gogoResult == nil {
+				continue
+			}
 			select {
-			case out <- result:
+			case out <- gogoResult:
 			case <-ctx.Done():
 				return
 			}
@@ -64,6 +75,7 @@ func buildGogoRunnerOption(opts GogoScanOptions) *gogopkg.RunnerOption {
 	if opts.Exploit != "" {
 		runOpt.Exploit = opts.Exploit
 	}
+	runOpt.Debug = opts.Debug
 	return &runOpt
 }
 

@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/logs"
 )
 
 type fakeConsoleProvider struct {
@@ -66,6 +70,65 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	}
 	if opt.CyberhubURL != "http://hub:8080" || opt.CyberhubKey != "HUBKEY" {
 		t.Fatalf("scanner options = %#v", opt.ScannerOptions)
+	}
+}
+
+func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
+	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--debug"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if !parsed.Option.Debug {
+		t.Fatal("scanner --debug should enable global debug")
+	}
+	wantArgs := []string{"scan", "-i", "127.0.0.1", "--debug"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
+	oldGlobal := logs.Log
+	defer func() { logs.Log = oldGlobal }()
+
+	var logBuf bytes.Buffer
+	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: &logBuf})
+	stdout, err := captureStdoutForTest(t, func() error {
+		return runDirectScannerMode(context.Background(), &Option{
+			MiscOptions: MiscOptions{NoColor: true},
+		}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
+	})
+	if err != nil {
+		t.Fatalf("runDirectScannerMode() error = %v", err)
+	}
+	combined := stdout + logBuf.String()
+	for _, unwanted := range []string{"provider init", "engine=fingers", "commands=", "resources type="} {
+		if strings.Contains(combined, unwanted) {
+			t.Fatalf("normal scanner output leaked init log %q:\nstdout:\n%s\nlogs:\n%s", unwanted, stdout, logBuf.String())
+		}
+	}
+	if !strings.Contains(stdout, "[scan.summary] completed") {
+		t.Fatalf("stdout missing scan summary: %q", stdout)
+	}
+}
+
+func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
+	oldGlobal := logs.Log
+	defer func() { logs.Log = oldGlobal }()
+
+	var logBuf bytes.Buffer
+	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
+	stdout, err := captureStdoutForTest(t, func() error {
+		return runDirectScannerMode(context.Background(), &Option{
+			MiscOptions: MiscOptions{Debug: true, NoColor: true},
+		}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
+	})
+	if err != nil {
+		t.Fatalf("runDirectScannerMode() error = %v", err)
+	}
+	logText := logBuf.String()
+	if !strings.Contains(logText, "engine=fingers status=ready") || !strings.Contains(logText, "commands=") {
+		t.Fatalf("debug scanner logs missing init detail:\nstdout:\n%s\nlogs:\n%s", stdout, logText)
 	}
 }
 
@@ -450,4 +513,36 @@ func withDefaults(t *testing.T, fn func()) {
 		DefaultSpace = savedSpace
 	})
 	fn()
+}
+
+func captureStdoutForTest(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = writer
+	defer func() { os.Stdout = oldStdout }()
+
+	readCh := make(chan []byte, 1)
+	readErrCh := make(chan error, 1)
+	go func() {
+		data, readErr := io.ReadAll(reader)
+		readCh <- data
+		readErrCh <- readErr
+	}()
+
+	runErr := fn()
+	closeErr := writer.Close()
+	data := <-readCh
+	readErr := <-readErrCh
+	_ = reader.Close()
+	if readErr != nil {
+		t.Fatalf("read captured stdout: %v", readErr)
+	}
+	if runErr == nil {
+		runErr = closeErr
+	}
+	return string(data), runErr
 }

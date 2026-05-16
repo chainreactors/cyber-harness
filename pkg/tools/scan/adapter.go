@@ -2,10 +2,10 @@ package scan
 
 import (
 	"context"
-	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/parsers"
+	sdkkit "github.com/chainreactors/sdk/pkg"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
@@ -20,7 +20,7 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 	if target.Ports != "" {
 		ports = target.Ports
 	}
-	c.logger.Infof("scan %s %s %s", capGogoPortscan, target.Target, ports)
+	c.logger.Infof("scan capability=%s target=%s ports=%s", capGogoPortscan, target.Target, ports)
 	resultCh, err := engine.GogoScanStream(ctx, c.engines.Gogo, engine.GogoScanOptions{
 		Target:       target.Target,
 		Ports:        ports,
@@ -28,6 +28,10 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 		Timeout:      discovery.Timeout,
 		VersionLevel: discovery.Version,
 		Exploit:      discovery.Exploit,
+		Debug:        discovery.Debug,
+		OnStats: func(stats sdkkit.Stats) {
+			emit(statsEvent(capGogoPortscan, stats))
+		},
 	})
 	if err != nil {
 		emitError(emit, capGogoPortscan, "gogo %s: %v", target.Target, err)
@@ -53,6 +57,9 @@ func (c *Command) runSprayCapability(ctx context.Context, flags flags, web webOp
 	opts = applyWebStrategyOptions(flags, web, opts)
 	opts.URLs = []string{target.URL}
 	opts.Host = target.HostHeader
+	opts.OnStats = func(stats sdkkit.Stats) {
+		emit(statsEvent(source, stats))
+	}
 
 	resultCh, err := engine.SprayCheckStream(ctx, c.engines.Spray, opts)
 	if err != nil {
@@ -63,7 +70,7 @@ func (c *Command) runSprayCapability(ctx context.Context, flags flags, web webOp
 		if ctx.Err() != nil {
 			return
 		}
-		if !reportableSprayResult(result) {
+		if !reportableSprayResultForCapability(result, source) {
 			continue
 		}
 		emit(targetEvent(source, target.Raw, newWebProbeTarget(target.Raw, source, target.HostHeader, result)))
@@ -79,12 +86,13 @@ func applyWebStrategyOptions(flags flags, web webOptions, opts engine.SprayCheck
 	opts.ReconPlugin = true
 	opts.Threads = flags.SprayThreads
 	opts.Timeout = flags.Timeout
+	opts.Debug = flags.Debug
 	return opts
 }
 
 func runWebResultAnalysisCapability(_ context.Context, profile profile, input target, emit func(event)) {
 	target, ok := input.(webProbeTarget)
-	if !ok || !reportableSprayResult(target.Result) {
+	if !ok || !reportableSprayResultForCapability(target.Result, target.Capability) {
 		return
 	}
 	deriveWebProbeResult(profile, target.Capability, target.Result, target.HostHeader, emit)
@@ -103,6 +111,10 @@ func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, creden
 		Top:       flags.ZombieTop,
 		Users:     credentials.Users,
 		Passwords: credentials.Passwords,
+		Debug:     flags.Debug,
+		OnStats: func(stats sdkkit.Stats) {
+			emit(statsEvent(capZombieWeakpass, stats))
+		},
 	})
 	if err != nil {
 		emitError(emit, capZombieWeakpass, "zombie %s: %v", target.Target.Address(), err)
@@ -133,6 +145,7 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 		Fingers:      fingers,
 		MaxPerFinger: flags.MaxNeutronPerFP,
 		Broad:        flags.BroadPOC,
+		Debug:        flags.Debug,
 	})
 	if err == engine.ErrNoNeutronTemplates {
 		return
@@ -157,12 +170,9 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 			severity = tmpl.Info.Severity
 			name = tmpl.Info.Name
 		}
-		fields := []string{"[vuln]", target.Target}
-		fields = appendNonEmptyValue(fields, templateID)
-		fields = appendNonEmptyValue(fields, severity)
-		fields = appendNonEmptyValue(fields, name)
 		emit(findingEvent(capNeutronPOC, vulnFinding{
-			Message: strings.Join(fields, " "),
+			Target: target.Target,
+			Output: parsers.JoinOutput(target.Target, templateID, severity, name),
 		}))
 	}
 }
@@ -182,7 +192,7 @@ func deriveServiceResult(profile profile, source string, result *parsers.GOGORes
 		emit(targetEvent(source, "", newWebTarget("", target, "")))
 	}
 	if len(fingers) > 0 {
-		emit(findingEvent(source, fingerprintFinding{Target: target, Fingers: fingers}))
+		emit(findingEvent(source, fingerprintFinding{Target: target, Fingers: fingers, Focus: result.Frameworks.IsFocus()}))
 	}
 	if len(fingers) > 0 || profile.AllowBroadPOC {
 		emit(targetEvent(source, "", newPOCTarget("", target, fingers)))
@@ -192,13 +202,25 @@ func deriveServiceResult(profile profile, source string, result *parsers.GOGORes
 	}
 }
 
+func (c *Command) runHTTPBasicAuthCapability(ctx context.Context, flags flags, input target, emit func(event)) {
+	target, ok := input.(webProbeTarget)
+	if !ok || !reportableSprayResultForCapability(target.Result, target.Capability) || target.Result.Status != 401 {
+		return
+	}
+	zTarget, ok := basicAuthZombieTarget(ctx, target.Result.UrlString, target.HostHeader, flags.Timeout)
+	if !ok {
+		return
+	}
+	emit(targetEvent(capHTTPBasicAuth, target.Raw, newWeakpassTarget(target.Raw, zTarget)))
+}
+
 func deriveWebProbeResult(profile profile, source string, result *parsers.SprayResult, hostHeader string, emit func(event)) {
 	if !reportableSprayResult(result) || result.UrlString == "" {
 		return
 	}
 	fingers := parsers.FrameworkNames(result.Frameworks)
 	if len(fingers) > 0 {
-		emit(findingEvent(source, fingerprintFinding{Target: result.UrlString, Fingers: fingers}))
+		emit(findingEvent(source, fingerprintFinding{Target: result.UrlString, Fingers: fingers, Focus: result.Frameworks.IsFocus()}))
 	}
 	if result.Status > 0 && (len(fingers) > 0 || profile.AllowBroadPOC) {
 		emit(targetEvent(source, "", newPOCTarget("", result.UrlString, fingers)))
@@ -220,7 +242,7 @@ func deriveWeakpassResult(source string, result *parsers.ZombieResult, emit func
 
 func zombieTargetFromGogo(result *parsers.GOGOResult) (sdkzombie.Target, bool) {
 	service, ok := gogoZombieService(result)
-	if !ok || service == "" || service == "unknown" || utils.IsWebPort(result.Port) {
+	if !ok || service == "" || service == "unknown" || result.IsHttp() || isGenericWebZombieService(service) || utils.IsWebPort(result.Port) {
 		return sdkzombie.Target{}, false
 	}
 	return sdkzombie.Target{

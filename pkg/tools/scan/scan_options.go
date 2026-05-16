@@ -24,6 +24,7 @@ type discoveryOptions struct {
 	Timeout  int
 	Version  int
 	Exploit  string
+	Debug    bool
 	Explicit bool
 }
 
@@ -56,6 +57,7 @@ func resolveScanOptions(flags flags) scanOptions {
 			Timeout:  flags.Timeout,
 			Version:  scanGogoVersionLevel,
 			Exploit:  scanGogoExploitMode,
+			Debug:    flags.Debug,
 			Explicit: explicitDiscovery,
 		},
 		Web: webOptions{
@@ -112,11 +114,7 @@ func profileForMode(mode string) (profile, error) {
 	quickCaps := []string{
 		capGogoPortscan,
 		capSprayCheck,
-		capSprayFinger,
 		capCoreWeb,
-		capSprayCommon,
-		capSprayBackup,
-		capSprayActive,
 		capSprayCrawl,
 		capZombieWeakpass,
 		capNeutronPOC,
@@ -132,6 +130,7 @@ func profileForMode(mode string) (profile, error) {
 	case scanModeFull:
 		fullCaps := append([]string{}, quickCaps...)
 		fullCaps = append(fullCaps,
+			capSprayPlugins,
 			capSprayBrute,
 		)
 		return profile{

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -29,11 +31,17 @@ type neutronExecuteOptions struct {
 	MaxPerFinger        int
 	Concurrency         int
 	RateLimit           int
+	Debug               bool
 }
 
 func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index *association.FingerPOCIndex, opts neutronExecuteOptions) (<-chan *sdkneutron.ExecuteResult, error) {
 	if engine == nil {
 		return nil, errors.New("neutron engine is not available")
+	}
+	if opts.Debug {
+		common.NeutronLog = telemetry.EnableLogsDebug()
+	} else {
+		common.NeutronLog = telemetry.GlobalLogs()
 	}
 	selected, filtered := selectNeutronTemplates(engine, index, opts)
 	if filtered {

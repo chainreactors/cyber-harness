@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/sdk/gogo"
+	"github.com/chainreactors/sdk/spray"
 
 	// side-effect imports: register vision, webfetch, websearch factories
 	_ "github.com/chainreactors/aiscan/pkg/tools/vision"
@@ -47,6 +51,22 @@ func TestInitCommandRegistryRegistersWebToolsAlways(t *testing.T) {
 	}
 }
 
+func TestInitCommandRegistryRegistersScannerCommands(t *testing.T) {
+	logger := telemetry.NopLogger()
+	engines := &engine.Set{
+		Gogo:  gogo.NewEngine(nil),
+		Spray: spray.NewEngine(nil),
+	}
+
+	reg := initCommandRegistry(engines, ScannerConfig{}, ToolConfig{}, nil, "", nil, nil, logger)
+
+	for _, name := range []string{"scan", "gogo", "spray"} {
+		if !reg.Has(name) {
+			t.Fatalf("%s command should be registered when scanner engines are available", name)
+		}
+	}
+}
+
 func TestInitCommandRegistryRegisters4CoreTools(t *testing.T) {
 	logger := telemetry.NopLogger()
 	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "", nil, nil, logger)
@@ -82,6 +102,42 @@ func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
 			// ok — core tools
 		default:
 			t.Fatalf("pseudo-command %q should NOT be registered as an agent tool", tool.Name())
+		}
+	}
+}
+
+func TestScanVerifySystemPromptUsesFullAgentRegistry(t *testing.T) {
+	logger := telemetry.NopLogger()
+	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "test-model", nil, nil, logger)
+
+	prompt := buildScanVerifySystemPrompt(reg, nil, "")
+	for _, want := range []string{
+		"### bash",
+		"web_search",
+		"web_fetch",
+		"Do not run scanner pseudo-commands",
+		"Return only the exact status:/summary:/evidence: lines",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("scan verify system prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestScanVerifyBlocksRecursiveScannerCommands(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		blocked bool
+	}{
+		{command: "scan -i 127.0.0.1", blocked: true},
+		{command: "aiscan scan -i 127.0.0.1", blocked: true},
+		{command: "spray -u https://example.test", blocked: true},
+		{command: `web_search "kingdee k3 cloud cve"`, blocked: false},
+		{command: "web_fetch https://example.test/advisory", blocked: false},
+		{command: "echo scan", blocked: false},
+	} {
+		if got := scanVerifyBlocksCommand(tc.command); got != tc.blocked {
+			t.Fatalf("scanVerifyBlocksCommand(%q) = %v, want %v", tc.command, got, tc.blocked)
 		}
 	}
 }

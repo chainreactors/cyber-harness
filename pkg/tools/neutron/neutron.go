@@ -53,6 +53,7 @@ type neutronFlags struct {
 	AllResults        bool     `long:"all" description:"Print both matched and unmatched templates"`
 	TemplateList      bool     `long:"template-list" description:"List selected templates and exit"`
 	RestrictTemplates bool     `long:"restrict-templates" description:"Use only templates from --templates instead of merging with embedded templates"`
+	Debug             bool     `long:"debug" description:"Enable debug logging"`
 }
 
 type neutronFinding struct {
@@ -119,6 +120,7 @@ Rate and output:
       --silent       Only output matched findings.
       --all          Print matched and unmatched templates.
       --template-list  List selected templates and exit.
+      --debug        Enable debug logging.
 
 Examples:
   neutron -u http://target.com -s critical,high
@@ -136,6 +138,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 			return c.Usage() + "\n", nil
 		}
 		return "", fmt.Errorf("neutron: %w", err)
+	}
+	if flags.Debug {
+		restoreDebug := telemetry.ActivateDebug(c.logger)
+		defer restoreDebug()
+		c.logger.Debugf("neutron debug enabled")
 	}
 
 	if flags.Timeout > 0 {
@@ -179,6 +186,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		MaxPerFinger:        flags.MaxPerFinger,
 		Concurrency:         flags.Concurrency,
 		RateLimit:           flags.RateLimit,
+		Debug:               flags.Debug,
 	}
 	if err := validateNeutronSeverities(opts.Severities, opts.ExcludeSeverities); err != nil {
 		return "", err
@@ -253,6 +261,7 @@ func normalizeNucleiStyleArgs(args []string) []string {
 		"-timeout": {}, "-output": {}, "-json": {}, "-jsonl": {}, "-silent": {},
 		"-stats": {}, "-no-stats": {}, "-match-only": {}, "-all": {}, "-template-list": {},
 		"-restrict-templates": {},
+		"-debug":              {},
 		"-rl":                 {},
 		"-etags":              {},
 		"-eid":                {},
@@ -322,7 +331,6 @@ func readNeutronTargets(inputs []string, input, listFile string) ([]string, erro
 	}
 	return out, scanner.Err()
 }
-
 
 func loadNeutronTemplatePaths(paths []string) ([]*templates.Template, error) {
 	if len(paths) == 0 {

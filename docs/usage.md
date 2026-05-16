@@ -249,7 +249,7 @@ aiscan scan -l targets.txt --mode full
 ### 扫描流程
 
 ```text
-输入目标 → gogo 端口发现 → spray Web 探测/指纹/常见文件/爬取 → zombie 弱口令 → neutron POC → 可选 agent_verify
+输入目标 → gogo 端口发现 → spray Web 探测/指纹/插件探测/爬取 → zombie 弱口令 → neutron POC → 可选 agent_verify
 ```
 
 各阶段通过事件队列串联。例如 gogo 发现 HTTP 服务后，Web 目标自动进入 spray；spray 识别到指纹后，指纹用于 neutron 选择 POC；发现可以进入 AI 验证。
@@ -258,7 +258,7 @@ aiscan scan -l targets.txt --mode full
 
 | 模式 | 说明 |
 | --- | --- |
-| `quick` | **默认模式**。gogo 端口扫描（ports=all）、spray check/finger/common/backup/active/crawl（depth 1）、弱口令、基于指纹的 POC |
+| `quick` | **默认模式**。gogo 端口扫描（ports=all）、spray check（含 finger）/plugins(common,bak,active)/crawl（depth 1）、弱口令、基于指纹的 POC |
 | `full` | 在 quick 基础上增加 spray brute（默认字典探测）和更深的 crawl（depth 2） |
 
 quick 模式的 capability：
@@ -266,12 +266,9 @@ quick 模式的 capability：
 | Capability | 说明 |
 | --- | --- |
 | `gogo_portscan` | 端口扫描，默认 ports=all |
-| `spray_check` | Web 基础探测 |
-| `spray_finger` | HTTP 指纹识别 |
+| `spray_check` | Web 基础探测和 HTTP 指纹识别 |
 | `core_web` | Web 结果关联分析 |
-| `spray_common` | 常见路径/文件探测 |
-| `spray_backup` | 备份文件检测 |
-| `spray_active` | 主动 Web 检查 |
+| `spray_plugins` | 合并执行 common、bak、active 插件探测 |
 | `spray_crawl` | 网页爬取（depth 1） |
 | `zombie_weakpass` | 弱口令检测 |
 | `neutron_poc` | 基于指纹的 POC 检测 |
@@ -710,6 +707,14 @@ aiscan scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cybe
 | `--no-color` | | 禁用终端颜色 |
 
 `scan` 默认使用流式输出（边扫描边显示结果）。使用 `-j` 或 `--report` 时关闭流式输出，等待扫描完成后一次性输出。
+
+默认文本输出为单行事件流，不使用 `key=value`。结果族放在前缀中，正文只保留结果数据；gogo 与 spray 的 framework/fingerprint 都统一为同一种短 token：`[name[,name...]]`。
+
+```text
+[gogo_portscan.web] http://127.0.0.1:80 200 http "Example" [nginx]
+[spray_plugins.word] http://127.0.0.1/admin 200 532 41ms "Admin" [nginx]
+[scan.summary] completed inputs 1 services 1 web 1 probes 1 fingerprints 1 weakpass 0 vulns 0 verified 0 errors 0 tasks 0 requests 0 1.2s
+```
 
 其他 scanner（gogo、spray、zombie、neutron）的输出格式由各自参数控制。
 

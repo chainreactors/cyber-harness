@@ -58,8 +58,68 @@ func GlobalLogger(cfg LogConfig) Logger {
 	return logger
 }
 
+func GlobalLogs() *logs.Logger {
+	if logs.Log == nil {
+		logs.Log = logs.NewLogger(logs.WarnLevel)
+		logs.Log.SetOutput(os.Stderr)
+	}
+	return logs.Log
+}
+
+func EnableLogsDebug() *logs.Logger {
+	logger := GlobalLogs()
+	logger.SetLevel(logs.DebugLevel)
+	logger.SetQuiet(false)
+	return logger
+}
+
+func SuppressGlobalNonErrors() func() {
+	logger := GlobalLogs()
+	oldLevel := logger.Level
+	oldQuiet := logger.Quiet
+	logger.SetLevel(logs.ErrorLevel)
+	logger.SetQuiet(false)
+	return func() {
+		logger.SetLevel(oldLevel)
+		logger.SetQuiet(oldQuiet)
+	}
+}
+
+func ActivateDebug(logger Logger) func() {
+	oldGlobal := logs.Log
+	target := oldGlobal
+	if adapter, ok := logger.(logsLogger); ok && adapter.base != nil {
+		target = adapter.base
+	}
+	if target == nil {
+		target = GlobalLogs()
+	}
+	if oldGlobal == nil {
+		oldGlobal = target
+	}
+
+	oldLevel := target.Level
+	oldQuiet := target.Quiet
+	target.SetLevel(logs.DebugLevel)
+	target.SetQuiet(false)
+	logs.Log = target
+
+	return func() {
+		target.SetLevel(oldLevel)
+		target.SetQuiet(oldQuiet)
+		logs.Log = oldGlobal
+	}
+}
+
 func NopLogger() Logger {
 	return nopLogger{}
+}
+
+func ErrorOnlyLogger(logger Logger) Logger {
+	if logger == nil {
+		return NopLogger()
+	}
+	return errorOnlyLogger{base: logger}
 }
 
 type nopLogger struct{}
@@ -69,6 +129,18 @@ func (nopLogger) Infof(string, ...any)      {}
 func (nopLogger) Warnf(string, ...any)      {}
 func (nopLogger) Errorf(string, ...any)     {}
 func (nopLogger) Importantf(string, ...any) {}
+
+type errorOnlyLogger struct {
+	base Logger
+}
+
+func (errorOnlyLogger) Debugf(string, ...any) {}
+func (errorOnlyLogger) Infof(string, ...any)  {}
+func (errorOnlyLogger) Warnf(string, ...any)  {}
+func (l errorOnlyLogger) Errorf(format string, args ...any) {
+	l.base.Errorf(format, args...)
+}
+func (errorOnlyLogger) Importantf(string, ...any) {}
 
 func (l logsLogger) Debugf(format string, args ...any) {
 	l.base.Debugf(format, args...)

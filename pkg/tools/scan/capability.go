@@ -10,13 +10,11 @@ import (
 const (
 	capGogoPortscan   = "gogo_portscan"
 	capSprayCheck     = "spray_check"
-	capSprayFinger    = "spray_finger"
 	capCoreWeb        = "core_web"
-	capSprayCommon    = "spray_common"
-	capSprayBackup    = "spray_backup"
-	capSprayActive    = "spray_active"
+	capSprayPlugins   = "spray_plugins"
 	capSprayCrawl     = "spray_crawl"
 	capSprayBrute     = "spray_brute"
+	capHTTPBasicAuth  = "http_basic_auth"
 	capZombieWeakpass = "zombie_weakpass"
 	capNeutronPOC     = "neutron_poc"
 	capAgentVerify    = "agent_verify"
@@ -68,8 +66,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		capabilities = append(capabilities, sprayCapability(c, flags, opts.Web, name, sopts, c.runSprayCapability))
 	}
 
-	addSpray(capSprayCheck, engine.SprayCheckOptions{})
-	addSpray(capSprayFinger, engine.SprayCheckOptions{Finger: true})
+	addSpray(capSprayCheck, engine.SprayCheckOptions{Finger: true})
 
 	if profile.Enabled(capCoreWeb) {
 		capabilities = append(capabilities, wrapCapability(
@@ -82,9 +79,12 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		))
 	}
 
-	addSpray(capSprayCommon, engine.SprayCheckOptions{CommonPlugin: true})
-	addSpray(capSprayBackup, engine.SprayCheckOptions{BakPlugin: true})
-	addSpray(capSprayActive, engine.SprayCheckOptions{ActivePlugin: true, Finger: true})
+	addSpray(capSprayPlugins, engine.SprayCheckOptions{
+		CommonPlugin: true,
+		BakPlugin:    true,
+		ActivePlugin: true,
+		Finger:       true,
+	})
 
 	if profile.Enabled(capSprayCrawl) && hasSpray(c.engines) {
 		sprayBuilt = true
@@ -95,6 +95,14 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 
 	if profile.Enabled(capZombieWeakpass) && hasZombie(c.engines) {
 		weakpassBuilt = true
+		capabilities = append(capabilities, wrapCapability(
+			capHTTPBasicAuth,
+			acceptsTarget(targetWebProbe),
+			capWorkers(c.engines.Capacity.Zombie, flags.ZombieThreads),
+			func(ctx context.Context, e event, emit func(event)) {
+				c.runHTTPBasicAuthCapability(ctx, flags, e.Target, emit)
+			},
+		))
 		capabilities = append(capabilities, wrapCapability(
 			capZombieWeakpass,
 			acceptsTarget(targetWeakpass),
@@ -117,13 +125,13 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 	}
 
 	if opts.hasDiscoveryOverrides() && !gogoBuilt {
-		c.logger.Warnf("scan %s port ignored unavailable", capGogoPortscan)
+		c.logger.Warnf("scan capability=%s option=port status=ignored reason=engine_unavailable", capGogoPortscan)
 	}
 	if opts.hasWebOverrides() && !sprayBuilt {
-		c.logger.Warnf("scan web_probe dict,rule,word,default-dict,advance ignored unavailable")
+		c.logger.Warnf("scan capability=web_probe option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable")
 	}
 	if opts.hasWeakpassOverrides() && !weakpassBuilt {
-		c.logger.Warnf("scan %s user,pwd ignored unavailable", capZombieWeakpass)
+		c.logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
 	if verificationEnabled(flags.Verify) {
