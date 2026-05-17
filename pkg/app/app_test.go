@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/command"
