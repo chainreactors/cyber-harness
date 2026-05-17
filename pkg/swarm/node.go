@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chainreactors/ioa"
@@ -70,6 +71,7 @@ type NodeConfig struct {
 
 type Node struct {
 	cfg           NodeConfig
+	mu            sync.Mutex
 	processed     map[string]struct{}
 	rootMessageID string
 	spaceID       string
@@ -124,7 +126,11 @@ func (n *Node) ListCrons() []CronTask {
 	return n.crons.List()
 }
 
-func (n *Node) RootMessageID() string { return n.rootMessageID }
+func (n *Node) RootMessageID() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.rootMessageID
+}
 func (n *Node) NodeID() string        { return n.cfg.Client.NodeID() }
 func (n *Node) SpaceID() string       { return n.spaceID }
 
@@ -233,8 +239,11 @@ func (n *Node) announceProfile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	n.mu.Lock()
 	n.rootMessageID = sent.ID
-	n.cfg.Logger.Infof("swarm root_message=%s node=%s", n.rootMessageID, n.cfg.Client.NodeID())
+	rootID := n.rootMessageID
+	n.mu.Unlock()
+	n.cfg.Logger.Infof("swarm root_message=%s node=%s", rootID, n.cfg.Client.NodeID())
 	return nil
 }
 
@@ -361,7 +370,10 @@ func (n *Node) handleMessage(ctx context.Context, msg ioa.Message) error {
 	if msg.Sender == n.cfg.Client.NodeID() {
 		return nil
 	}
-	if !isTaskForNode(msg, n.cfg.Client.NodeID(), n.rootMessageID) {
+	n.mu.Lock()
+	rootID := n.rootMessageID
+	n.mu.Unlock()
+	if !isTaskForNode(msg, n.cfg.Client.NodeID(), rootID) {
 		return nil
 	}
 	if !n.markProcessed(msg.ID) {
@@ -403,6 +415,8 @@ func (n *Node) handleMessage(ctx context.Context, msg ioa.Message) error {
 }
 
 func (n *Node) markProcessed(messageID string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if _, ok := n.processed[messageID]; ok {
 		return false
 	}

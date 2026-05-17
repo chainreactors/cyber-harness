@@ -15,7 +15,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
-	"github.com/chainreactors/logs"
 )
 
 type fakeConsoleProvider struct {
@@ -88,11 +87,8 @@ func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
 }
 
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
-	oldGlobal := logs.Log
-	defer func() { logs.Log = oldGlobal }()
-
 	var logBuf bytes.Buffer
-	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: &logBuf})
+	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
 	stdout, err := captureStdoutForTest(t, func() error {
 		return runDirectScannerMode(context.Background(), &Option{
 			MiscOptions: MiscOptions{NoColor: true},
@@ -113,11 +109,8 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 }
 
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
-	oldGlobal := logs.Log
-	defer func() { logs.Log = oldGlobal }()
-
 	var logBuf bytes.Buffer
-	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
+	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
 	stdout, err := captureStdoutForTest(t, func() error {
 		return runDirectScannerMode(context.Background(), &Option{
 			MiscOptions: MiscOptions{Debug: true, NoColor: true},
