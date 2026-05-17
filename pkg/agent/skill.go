@@ -62,12 +62,11 @@ func ParseSkillResult(output string) (*SkillResult, error) {
 	output = stripFences(output)
 
 	var result SkillResult
-	if json.Unmarshal([]byte(output), &result) != nil {
-		return parseSkillFallback(output), nil
+	if json.Valid([]byte(output)) && json.Unmarshal([]byte(output), &result) == nil {
+		result.Status = normalizeSkillStatus(result.Status)
+		return &result, nil
 	}
-
-	result.Status = normalizeSkillStatus(result.Status)
-	return &result, nil
+	return parseSkillFallback(output), nil
 }
 
 func buildSkillSystemPrompt(skillBody string) string {
