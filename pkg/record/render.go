@@ -167,6 +167,14 @@ func renderMarkdown(w io.Writer, records []Record) error {
 		fmt.Fprintln(w)
 	}
 
+	if len(services) > 0 {
+		fmt.Fprintf(w, "## Services\n\n")
+		for _, d := range services {
+			fmt.Fprintf(w, "- `%s:%d` %s\n", d.Target, d.Port, d.Protocol)
+		}
+		fmt.Fprintln(w)
+	}
+
 	if len(webs) > 0 {
 		fmt.Fprintf(w, "## Web Endpoints\n\n")
 		for _, d := range webs {

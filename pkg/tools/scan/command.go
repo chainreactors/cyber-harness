@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -235,17 +233,4 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			len(coll.aiSkillResults), len(coll.errors))
 	}
 	return out, nil
-}
-
-func writeOutputFile(path, content string) error {
-	path = filepath.Clean(path)
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("scan output file: create directory: %w", err)
-		}
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("scan output file: %w", err)
-	}
-	return nil
 }

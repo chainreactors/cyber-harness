@@ -35,8 +35,8 @@ func (r *recorder) write(rec record.Record) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.file.Write(rec.Marshal())
-	r.file.Write([]byte("\n"))
+	_, _ = r.file.Write(rec.Marshal())
+	_, _ = r.file.Write([]byte("\n"))
 }
 
 func (r *recorder) ScanStart(targets []string, mode string, flags []string) {

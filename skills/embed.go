@@ -125,7 +125,7 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 	}
 	data, err := fs.ReadFile(embeddedFS, embedPath)
 	if err != nil {
-		return "", false, nil
+		return "", false, err
 	}
 	return string(data), true, nil
 }

@@ -261,7 +261,7 @@ func scanVerifyBeforeToolCall(_ context.Context, call agent.BeforeToolCallContex
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal([]byte(call.ToolCall.Function.Arguments), &args); err != nil {
-		return nil, nil
+		return nil, err
 	}
 	if !scanVerifyBlocksCommand(args.Command) {
 		return nil, nil
