@@ -52,6 +52,7 @@ type flags struct {
 	Users           []string `long:"user" description:"Weakpass usernames. Can specify multiple."`
 	Passwords       []string `long:"pwd" description:"Weakpass passwords. Can specify multiple."`
 	MaxNeutronPerFP int      `long:"max-neutron-per-finger" description:"Maximum neutron templates per fingerprint" default:"20"`
+	BroadPOC        bool     `long:"broad-poc" description:"Run POC templates even without matching fingerprints"`
 	Verify          string   `long:"verify" hidden:"true" description:"Deprecated: use --ai"`
 	VerifyTimeout   int      `long:"verify-timeout" hidden:"true" description:"Deprecated advanced compatibility option" default:"120"`
 }
