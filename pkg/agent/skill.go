@@ -62,8 +62,7 @@ func ParseSkillResult(output string) (*SkillResult, error) {
 	output = stripFences(output)
 
 	var result SkillResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		_ = err // intentional: fallback to unstructured parsing on invalid JSON
+	if json.Unmarshal([]byte(output), &result) != nil {
 		return parseSkillFallback(output), nil
 	}
 
