@@ -13,13 +13,6 @@ func findingKindOf(finding finding) findingKind {
 	return finding.Kind()
 }
 
-func findingKey(finding finding) string {
-	if finding == nil {
-		return ""
-	}
-	return finding.Key()
-}
-
 func findingPriority(finding finding) priority {
 	if finding == nil {
 		return priorityLow
@@ -70,9 +63,3 @@ func findingEvidence(finding finding) string {
 	return ""
 }
 
-func oneLine(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.ReplaceAll(value, "\r", " ")
-	value = strings.ReplaceAll(value, "\n", " ")
-	return strings.Join(strings.Fields(value), " ")
-}

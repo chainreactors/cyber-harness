@@ -120,38 +120,6 @@ func outputPrefix(source, code string, color bool) string {
 	return colorize(color, code, "["+source+"]")
 }
 
-func outputScope(source string, scopes ...string) string {
-	source = strings.Trim(strings.ReplaceAll(source, ":", "."), ".")
-	if source == "" {
-		source = "scan"
-	}
-	for _, scope := range scopes {
-		scope = strings.Trim(scope, ". ")
-		if scope == "" {
-			continue
-		}
-		source += "." + scope
-	}
-	return source
-}
-
-func gogoResultSource(source string, result *parsers.GOGOResult) string {
-	if result != nil && result.IsHttp() {
-		return outputScope(source, "web")
-	}
-	return outputScope(source, "port")
-}
-
-func sprayProbeSource(source string, result *parsers.SprayResult) string {
-	if result == nil {
-		return outputScope(source)
-	}
-	name := result.Source.Name()
-	if name == "" || name == "unknown" {
-		return outputScope(source)
-	}
-	return outputScope(source, name)
-}
 
 func formatOutputLine(prefix, output string, color bool) string {
 	output = strings.TrimSpace(output)

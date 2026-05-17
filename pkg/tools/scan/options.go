@@ -61,11 +61,3 @@ func verificationEnabled(mode string) bool {
 	return mode != "" && mode != "off"
 }
 
-func hasFlag(args []string, long string) bool {
-	for _, arg := range args {
-		if arg == long || strings.HasPrefix(arg, long+"=") {
-			return true
-		}
-	}
-	return false
-}
