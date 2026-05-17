@@ -106,21 +106,18 @@ func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
 	}
 }
 
-func TestScanVerifySystemPromptUsesFullAgentRegistry(t *testing.T) {
-	logger := telemetry.NopLogger()
-	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "test-model", nil, nil, logger)
+func TestScanAISystemPromptDefault(t *testing.T) {
+	prompt := buildScanAISystemPrompt(nil, nil, "")
+	if prompt == "" {
+		t.Fatal("expected non-empty default scan AI system prompt")
+	}
+}
 
-	prompt := buildScanVerifySystemPrompt(reg, nil, "")
-	for _, want := range []string{
-		"### bash",
-		"web_search",
-		"web_fetch",
-		"Do not run scanner pseudo-commands",
-		"Return only the exact status:/summary:/evidence: lines",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("scan verify system prompt missing %q:\n%s", want, prompt)
-		}
+func TestScanAISystemPromptCustom(t *testing.T) {
+	custom := "custom skill prompt"
+	prompt := buildScanAISystemPrompt(nil, nil, custom)
+	if prompt != custom {
+		t.Fatalf("expected custom prompt %q, got %q", custom, prompt)
 	}
 }
 
