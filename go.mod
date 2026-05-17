@@ -8,9 +8,9 @@ require (
 	github.com/chainreactors/ioa v0.0.0-20260513035847-c8c38592b651
 	github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c
 	github.com/chainreactors/neutron v0.0.0-20260416083914-f95401f2b79c
-	github.com/chainreactors/parsers v0.0.0-20260507101643-d7674bb89ba4
-	github.com/chainreactors/sdk v0.1.1-0.20260509062633-1190663288a6
-	github.com/chainreactors/spray v1.2.6-0.20260508171256-e55ab50be33e
+	github.com/chainreactors/parsers v0.0.0-20260516032912-27875cfb3372
+	github.com/chainreactors/sdk v0.1.1-0.20260516033200-1c5d96f7cfb6
+	github.com/chainreactors/spray v1.2.6-0.20260516033251-c7466ebfc406
 	github.com/chainreactors/utils v0.0.0-20260507101628-fd69d955ae21
 	github.com/chainreactors/zombie v1.2.3-0.20260509062300-b10f008fb8a5
 	github.com/charmbracelet/glamour v0.8.0
@@ -139,9 +139,6 @@ require (
 )
 
 replace (
-	github.com/chainreactors/parsers => ../parsers
-	github.com/chainreactors/sdk => ../sdk
-	github.com/chainreactors/spray => ../spray
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260422184128-e856ed004d32
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260422184128-e856ed004d32
 )
