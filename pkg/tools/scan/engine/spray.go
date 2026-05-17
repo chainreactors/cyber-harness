@@ -48,9 +48,6 @@ func SprayCheckStream(ctx context.Context, eng *spray.SprayEngine, opts SprayChe
 	if err != nil {
 		return nil, err
 	}
-	if opts.Debug {
-		telemetry.EnableLogsDebug()
-	}
 
 	out := make(chan *parsers.SprayResult)
 	go func() {

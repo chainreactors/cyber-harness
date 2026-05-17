@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -231,6 +232,10 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			len(coll.gogoResults), len(coll.webEndpoints),
 			len(coll.neutronMatches)+len(coll.zombieResults),
 			len(coll.aiSkillResults), len(coll.errors))
+	}
+	if flags.OutputFile != "" && !flags.JSON {
+		plainOut := coll.TerminalString(false)
+		_ = os.WriteFile(flags.OutputFile, []byte(plainOut), 0644)
 	}
 	return out, nil
 }

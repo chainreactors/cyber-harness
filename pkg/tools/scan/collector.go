@@ -200,7 +200,7 @@ func (c *collector) recordFindingEvent(event event) {
 			})
 		}
 	case aiSkillFinding:
-		if finding.Summary != "" || finding.Detail != "" {
+		if finding.Status == "confirmed" && (finding.Summary != "" || finding.Detail != "") {
 			c.aiSkillResults = append(c.aiSkillResults, aiSkillResult{
 				Finding: finding,
 				Source:  event.Source,

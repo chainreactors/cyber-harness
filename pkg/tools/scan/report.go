@@ -223,7 +223,6 @@ func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string
 	parts = appendCount(parts, len(d.fingerprints), "fingerprint", "fingerprints")
 	parts = appendCount(parts, len(d.zombieResults), "risk", "risks")
 	parts = appendCount(parts, len(d.neutronMatches), "vuln", "vulns")
-	parts = appendCount(parts, len(d.aiSkillResults), "ai-skill", "ai-skills")
 	parts = appendCount(parts, len(d.verifications), "verified", "verified")
 	parts = appendCount(parts, len(d.errors), "error", "errors")
 	parts = appendCount64(parts, stats.Tasks, "task", "tasks")
