@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,10 +35,9 @@ type agentRuntime struct {
 
 func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logger) (*agentRuntime, error) {
 	application, err := app.New(ctx, appConfig(option, runtimeFeatures{
-		ProviderEnabled:     true,
-		ToolsEnabled:        true,
-		VerificationEnabled: true,
-		VerifyMinPriority:   "high",
+		ProviderEnabled: true,
+		ToolsEnabled:    true,
+		AIEnabled:       true,
 	}, logger))
 	if err != nil {
 		return nil, fmt.Errorf("init app: %w", err)
@@ -106,10 +106,21 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 	if err != nil {
 		return err
 	}
+	if features.Warning != "" && !option.Quiet {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", features.Warning)
+	}
+	scanAI := option.AI || features.ScannerAI
+	if scanAI && len(scannerArgs) > 0 && scannerArgs[0] == "scan" {
+		features.ProviderEnabled = true
+		features.ProviderOptional = false
+		features.ToolsEnabled = true
+		features.AIEnabled = true
+	}
 	if option.AI {
 		features.ProviderEnabled = true
 		features.ProviderOptional = false
 		features.ToolsEnabled = true
+		features.AIEnabled = true
 	}
 	if isScannerHelpRequest(scannerArgs) {
 		if usage, ok := staticScannerUsage(scannerArgs[0]); ok {
@@ -143,21 +154,30 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 		return runScannerAgentMode(ctx, option, application, scannerArgs, logger)
 	}
 	var stream io.Writer
+	var streamCapture bytes.Buffer
 	if option.NoColor && scannerArgs[0] == "scan" && !hasScannerFlag(scannerArgs[1:], "--no-color") {
 		scannerArgs = append(scannerArgs, "--no-color")
 	}
 	if shouldStreamScannerOutput(scannerArgs) {
-		stream = os.Stdout
+		if scanAI {
+			stream = io.MultiWriter(os.Stdout, &streamCapture)
+		} else {
+			stream = os.Stdout
+		}
 	}
 	out, err := application.Commands.ExecuteArgsStreaming(ctx, scannerArgs, stream)
 	if err != nil {
 		return err
 	}
 	fmt.Print(out)
-	if option.AI {
+	if scanAI {
+		aiInput := out
+		if streamCapture.Len() > 0 {
+			aiInput = streamCapture.String() + out
+		}
 		output := newAgentOutput(option)
 		output.Start("analysis", strings.Join(scannerArgs, " "))
-		result, err := runScannerAIProcess(ctx, option, application, scannerArgs, out, logger)
+		result, err := runScannerAIProcess(ctx, option, application, scannerArgs, aiInput, logger)
 		if err != nil {
 			return err
 		}
@@ -196,10 +216,9 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		ioaURL = "http://127.0.0.1:8765"
 	}
 	cfg := appConfig(option, runtimeFeatures{
-		ProviderEnabled:     true,
-		ToolsEnabled:        true,
-		VerificationEnabled: true,
-		VerifyMinPriority:   "high",
+		ProviderEnabled: true,
+		ToolsEnabled:    true,
+		AIEnabled:       true,
 	}, logger)
 	cfg.IOA = &app.IOAConfig{
 		URL:           ioaURL,

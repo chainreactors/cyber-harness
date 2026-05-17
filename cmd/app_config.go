@@ -13,11 +13,12 @@ import (
 )
 
 type runtimeFeatures struct {
-	ProviderEnabled     bool
-	ProviderOptional    bool
-	ToolsEnabled        bool
-	VerificationEnabled bool
-	VerifyMinPriority   string
+	ProviderEnabled  bool
+	ProviderOptional bool
+	ToolsEnabled     bool
+	AIEnabled        bool
+	ScannerAI        bool
+	Warning          string
 }
 
 func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger) app.Config {
@@ -32,12 +33,11 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			Config:  visionProviderConfig(option),
 		},
 		Scanner: app.ScannerConfig{
-			CyberhubURL:         option.CyberhubURL,
-			CyberhubKey:         option.CyberhubKey,
-			CyberhubMode:        option.CyberhubMode,
-			VerificationEnabled: features.VerificationEnabled,
-			VerifyMinPriority:   verifyMinPriority(features.VerifyMinPriority),
-			VerifyTimeout:       defaultInt(DefaultVerifyTimeout, 120),
+			CyberhubURL:  option.CyberhubURL,
+			CyberhubKey:  option.CyberhubKey,
+			CyberhubMode: option.CyberhubMode,
+			AIEnabled:    features.AIEnabled,
+			AITimeout:    defaultInt(DefaultVerifyTimeout, 120),
 		},
 		Tools: app.ToolConfig{
 			Enabled:       features.ToolsEnabled,
@@ -155,15 +155,7 @@ func inferProviderFromBaseURL(baseURL string) string {
 func defaultVerifyMode() string {
 	value := strings.ToLower(strings.TrimSpace(DefaultVerify))
 	if value == "" {
-		return "auto"
-	}
-	return value
-}
-
-func verifyMinPriority(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "high"
+		return "off"
 	}
 	return value
 }

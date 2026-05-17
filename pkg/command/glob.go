@@ -12,12 +12,17 @@ import (
 
 const maxGlobResults = 500
 
-type GlobTool struct {
-	workDir string
+type VirtualGlobber interface {
+	GlobVirtual(pattern string) ([]string, bool)
 }
 
-func NewGlobTool(workDir string) *GlobTool {
-	return &GlobTool{workDir: workDir}
+type GlobTool struct {
+	workDir  string
+	globbers []VirtualGlobber
+}
+
+func NewGlobTool(workDir string, globbers ...VirtualGlobber) *GlobTool {
+	return &GlobTool{workDir: workDir, globbers: globbers}
 }
 
 func (t *GlobTool) Name() string { return "glob" }
@@ -74,6 +79,20 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (string, error
 		return "", fmt.Errorf("glob error: %w", err)
 	}
 
+	// Also search virtual/embedded files
+	searchPattern := args.Pattern
+	if args.Path != "" {
+		searchPattern = filepath.Join(args.Path, args.Pattern)
+	}
+	for _, g := range t.globbers {
+		if g == nil {
+			continue
+		}
+		if virtualMatches, ok := g.GlobVirtual(searchPattern); ok {
+			matches = mergeUnique(matches, virtualMatches)
+		}
+	}
+
 	if len(matches) == 0 {
 		return "no files matched", nil
 	}
@@ -93,4 +112,17 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (string, error
 	}
 
 	return sb.String(), nil
+}
+
+func mergeUnique(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		seen[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			a = append(a, s)
+		}
+	}
+	return a
 }

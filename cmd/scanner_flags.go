@@ -47,32 +47,50 @@ func directScannerRuntimeFeatures(rest []string) (runtimeFeatures, []string, err
 		return runtimeFeatures{}, rest, nil
 	}
 	verifyMode, explicit := scannerVerifyMode(rest[1:])
+	sniperEnabled := hasScannerFlag(rest[1:], "--sniper")
+	warning := ""
+	if explicit {
+		warning = "--verify is deprecated; use --ai"
+	}
+
+	features := runtimeFeatures{}
+
+	if sniperEnabled {
+		features.ProviderEnabled = true
+		features.ProviderOptional = false
+		features.AIEnabled = true
+	}
+
 	switch verifyMode {
 	case "auto":
-		return runtimeFeatures{
-			ProviderEnabled:     true,
-			ProviderOptional:    true,
-			VerificationEnabled: true,
-			VerifyMinPriority:   "high",
-		}, removeScannerFlag(rest, "--verify"), nil
+		features.ProviderEnabled = true
+		if !sniperEnabled {
+			features.ProviderOptional = true
+		}
+		features.AIEnabled = true
+		features.ScannerAI = explicit
+		features.Warning = warning
+		return features, removeScannerFlag(rest, "--verify"), nil
 	case "off":
-		return runtimeFeatures{}, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
+		if explicit {
+			features.Warning = warning
+			return features, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
+		}
+		return features, rest, nil
 	case "low", "medium", "high", "critical":
-		return runtimeFeatures{
-			ProviderEnabled:     true,
-			VerificationEnabled: true,
-			VerifyMinPriority:   verifyMode,
-		}, rest, nil
+		features.ProviderEnabled = true
+		if !sniperEnabled {
+			features.ProviderOptional = !explicit
+		}
+		features.AIEnabled = true
+		features.ScannerAI = explicit
+		features.Warning = warning
+		return features, rest, nil
 	default:
 		if explicit {
 			return runtimeFeatures{}, nil, fmt.Errorf("invalid --verify value %q: expected auto, off, low, medium, high, or critical", verifyMode)
 		}
-		return runtimeFeatures{
-			ProviderEnabled:     true,
-			ProviderOptional:    true,
-			VerificationEnabled: true,
-			VerifyMinPriority:   "high",
-		}, rest, nil
+		return features, rest, nil
 	}
 }
 

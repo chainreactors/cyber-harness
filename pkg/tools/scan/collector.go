@@ -36,11 +36,17 @@ type verificationResult struct {
 	Source  string
 }
 
+type aiSkillResult struct {
+	Finding aiSkillFinding
+	Source  string
+}
+
 type collector struct {
 	mu             sync.Mutex
 	inputs         []string
 	debug          bool
 	stats          *statsCollector
+	recorder       *recorder
 	webEndpoints   []webEndpoint
 	gogoResults    []*parsers.GOGOResult
 	sprayResults   []sprayObservation
@@ -48,6 +54,7 @@ type collector struct {
 	zombieResults  []*parsers.ZombieResult
 	neutronMatches []vulnFinding
 	verifications  []verificationResult
+	aiSkillResults []aiSkillResult
 	errors         []string
 	trace          []string
 	seenWeb        map[string]struct{}
@@ -129,10 +136,16 @@ func (c *collector) recordTargetEvent(event event) {
 				HostHeader: target.HostHeader,
 				Source:     event.Source,
 			})
+			if c.recorder != nil {
+				c.recorder.Web(target.URL, 0, "", nil)
+			}
 		}
 	case serviceTarget:
 		if target.Result != nil {
 			c.gogoResults = append(c.gogoResults, target.Result)
+			if c.recorder != nil {
+				c.recorder.Service(target.Result)
+			}
 		}
 	case webProbeTarget:
 		if reportableSprayResultForCapability(target.Result, target.Capability) {
@@ -144,6 +157,9 @@ func (c *collector) recordTargetEvent(event event) {
 				Result:     target.Result,
 				Capability: source,
 			})
+			if c.recorder != nil && target.Result != nil {
+				c.recorder.Web(target.Result.UrlString, target.Result.Status, target.Result.Title, parsers.FrameworkNames(target.Result.Frameworks))
+			}
 		}
 	}
 }
@@ -179,6 +195,13 @@ func (c *collector) recordFindingEvent(event event) {
 	case verificationFinding:
 		if reportableVerificationFinding(finding) {
 			c.verifications = append(c.verifications, verificationResult{
+				Finding: finding,
+				Source:  event.Source,
+			})
+		}
+	case aiSkillFinding:
+		if finding.Summary != "" || finding.Detail != "" {
+			c.aiSkillResults = append(c.aiSkillResults, aiSkillResult{
 				Finding: finding,
 				Source:  event.Source,
 			})

@@ -12,7 +12,7 @@ import (
 
 const uriPrefix = "aiscan://skills/"
 
-//go:embed */SKILL.md
+//go:embed all:*
 var embeddedFS embed.FS
 
 type Skill struct {
@@ -110,14 +110,56 @@ func (s *Store) ByLocation(location string) (Skill, bool) {
 }
 
 func (s *Store) ReadVirtual(location string) (string, bool, error) {
-	if !strings.HasPrefix(location, uriPrefix) {
+	if strings.HasPrefix(location, uriPrefix) {
+		skill, ok := s.ByLocation(location)
+		if !ok {
+			return "", true, fmt.Errorf("virtual file not found: %s", location)
+		}
+		return skill.Raw, true, nil
+	}
+
+	// Support relative paths: "skills/verify/example.md" or "verify/SKILL.md"
+	embedPath := normalizeEmbedPath(location)
+	if embedPath == "" {
 		return "", false, nil
 	}
-	skill, ok := s.ByLocation(location)
-	if !ok {
-		return "", true, fmt.Errorf("virtual file not found: %s", location)
+	data, err := fs.ReadFile(embeddedFS, embedPath)
+	if err != nil {
+		return "", false, nil
 	}
-	return skill.Raw, true, nil
+	return string(data), true, nil
+}
+
+func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
+	embedPattern := normalizeEmbedPath(pattern)
+	if embedPattern == "" {
+		return nil, false
+	}
+	matches, err := fs.Glob(embeddedFS, embedPattern)
+	if err != nil || len(matches) == 0 {
+		return nil, false
+	}
+	results := make([]string, len(matches))
+	for i, m := range matches {
+		results[i] = "skills/" + m
+	}
+	return results, true
+}
+
+func normalizeEmbedPath(location string) string {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return ""
+	}
+	location = path.Clean(location)
+	if strings.HasPrefix(location, "skills/") {
+		return strings.TrimPrefix(location, "skills/")
+	}
+	// Direct subpath like "verify/SKILL.md"
+	if !strings.HasPrefix(location, "/") && !strings.HasPrefix(location, ".") {
+		return location
+	}
+	return ""
 }
 
 func FormatForPrompt(skills []Skill) string {

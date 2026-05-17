@@ -34,7 +34,7 @@ type LLMOptions struct {
 	APIKey   string `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
 	Model    string `long:"model" config:"model" description:"LLM model name"`
 	Proxy    string `long:"proxy" config:"proxy" description:"HTTP proxy for LLM API"`
-	AI       bool   `long:"ai" description:"Use the configured LLM to process direct scanner output with the relevant tool skill"`
+	AI       bool   `long:"ai" description:"Enable all AI skills: verify findings, sniper fingerprint analysis, and summarize results"`
 }
 
 type VisionOptions struct {
@@ -74,6 +74,9 @@ type IOAOptions struct {
 type MiscOptions struct {
 	ConfigFile string `short:"c" long:"config" description:"Path to config file (default: ./config.yaml, ~/.config/aiscan/config.yaml)"`
 	InitConfig bool   `long:"init" description:"Generate default config.yaml and exit"`
+	ViewFile   string `short:"F" long:"view" description:"View a scan record JSONL file"`
+	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
+	ViewOutput string `short:"f" long:"file" description:"Write -F output to file instead of stdout"`
 	Debug      bool   `long:"debug" config:"debug" description:"Enable debug logging"`
 	Quiet      bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode"`
 	NoColor    bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
@@ -163,6 +166,13 @@ func AiScan() {
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stdout, "Config file generated: %s\n", defaultConfigName)
+		return
+	}
+	if option.ViewFile != "" {
+		if err := runViewFile(option.ViewFile, option.ViewFormat, option.ViewOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 	if parsed.Help {
@@ -323,28 +333,33 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser.SubcommandsOptional = true
 	parser.Usage = `[OPTIONS] <command>
 
-aiscan - Agentic Security Scanner powered by LLM
+aiscan - AI-assisted security scanner
 
 Commands:
-  agent          Run the LLM agent
+  scan           Scan a target, with optional AI skills (--ai, --sniper)
+  agent          Run the natural-language agent
+
+Advanced scanners:
+  gogo           Run gogo directly
+  spray          Run spray directly
+  zombie         Run zombie directly
+  neutron        Run neutron directly
+
+Infrastructure:
+  cyberhub       Search Cyberhub fingerprints and POCs
   ioa serve      Run the IOA HTTP server
   ioa spaces     List all IOA spaces
   ioa messages   List start messages in a space
   ioa context    View message thread/context
   ioa nodes      List nodes
-  scan           Run the scan pipeline
-  cyberhub       Search Cyberhub fingerprints and POCs
-  gogo           Run gogo scanner
-  spray          Run spray scanner
-  zombie         Run zombie weakpass scanner
-  neutron        Run neutron POC scanner
 
 Examples:
-  aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
-  aiscan agent --provider deepseek --model deepseek-chat -p "enumerate services" -i 10.0.0.0/24
-  aiscan agent --provider ollama --model llama3 --base-url http://localhost:11434/v1 -p "check this host" -i http://target.com
-  aiscan scan -i 127.0.0.1 --mode quick --verify=high --api-key KEY --model gpt-4o
+  aiscan scan -i 127.0.0.1
+  aiscan scan -i http://target.com --ai --model gpt-4o
+  aiscan scan -i http://target.com --sniper
   aiscan scan -i 192.168.1.0/24 --mode full
+  aiscan scan -i http://target.com --mode full --ai --report
+  aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan ioa serve
   aiscan ioa spaces --ioa-url http://127.0.0.1:8765
   aiscan ioa messages default --ioa-url http://127.0.0.1:8765

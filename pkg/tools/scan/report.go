@@ -18,6 +18,12 @@ func formatSummary(d *collector, color bool) string {
 	stats := d.statsSnapshotLocked()
 
 	var sb strings.Builder
+	if d.stream == nil {
+		for _, line := range d.fileLines {
+			sb.WriteString(sanitizeOutputLine(line, color))
+			sb.WriteString("\n")
+		}
+	}
 	sb.WriteString(formatScanSummaryLine(d, stats, color))
 
 	if len(d.trace) > 0 {
@@ -51,17 +57,18 @@ func formatMarkdown(d *collector) string {
 	sb.WriteString(fmt.Sprintf("| Weakpass findings | %d |\n", len(d.zombieResults)))
 	sb.WriteString(fmt.Sprintf("| Vulnerability findings | %d |\n", len(d.neutronMatches)))
 	sb.WriteString(fmt.Sprintf("| AI verifications | %d |\n", len(d.verifications)))
+	sb.WriteString(fmt.Sprintf("| AI skill findings | %d |\n", len(d.aiSkillResults)))
 	sb.WriteString(fmt.Sprintf("| Errors | %d |\n", len(d.errors)))
 	sb.WriteString(fmt.Sprintf("| Tasks | %d |\n", stats.Tasks))
 	sb.WriteString(fmt.Sprintf("| Requests | %d |\n", stats.Requests))
 	sb.WriteString(fmt.Sprintf("| Duration | %s |\n", stats.Duration().Round(time.Millisecond)))
 
-	if len(stats.CapabilityRuns) > 0 {
+	if d.debug && len(stats.CapabilityRuns) > 0 {
 		sb.WriteString("\n## Capability Runs\n\n")
 		writeCountTable(&sb, "Capability", stats.CapabilityRuns)
 	}
 
-	if len(stats.EngineStats) > 0 {
+	if d.debug && len(stats.EngineStats) > 0 {
 		sb.WriteString("\n## Engine Stats\n\n")
 		writeEngineStatsTable(&sb, stats.EngineStats)
 	}
@@ -88,7 +95,7 @@ func formatMarkdown(d *collector) string {
 	}
 
 	if len(d.sprayResults) > 0 {
-		sb.WriteString("\n## Web Probe Results\n\n")
+		sb.WriteString("\n## Web Evidence\n\n")
 		for _, item := range sortedCopy(d.sprayResults, func(a, b sprayObservation) bool {
 			return sprayResultSortKey(a) < sprayResultSortKey(b)
 		}) {
@@ -116,14 +123,14 @@ func formatMarkdown(d *collector) string {
 	}
 
 	if len(d.zombieResults) > 0 {
-		sb.WriteString("\n## Weakpass Findings\n\n")
+		sb.WriteString("\n## Risks\n\n")
 		for _, result := range d.zombieResults {
 			writeMarkdownEventLine(&sb, findingEvent(capZombieWeakpass, weakpassFinding{Result: result}))
 		}
 	}
 
 	if len(d.neutronMatches) > 0 {
-		sb.WriteString("\n## Vulnerability Findings\n\n")
+		sb.WriteString("\n## Vulnerabilities\n\n")
 		for _, finding := range sortedCopy(d.neutronMatches, func(a, b vulnFinding) bool {
 			return a.String() < b.String()
 		}) {
@@ -132,7 +139,7 @@ func formatMarkdown(d *collector) string {
 	}
 
 	if len(d.verifications) > 0 {
-		sb.WriteString("\n## AI Verification Results\n\n")
+		sb.WriteString("\n## AI Review\n\n")
 		for _, item := range sortedCopy(d.verifications, func(a, b verificationResult) bool {
 			left := a.Finding
 			right := b.Finding
@@ -142,10 +149,28 @@ func formatMarkdown(d *collector) string {
 		}
 	}
 
+	if len(d.aiSkillResults) > 0 {
+		sb.WriteString("\n## AI Skill Findings\n\n")
+		for _, item := range sortedCopy(d.aiSkillResults, func(a, b aiSkillResult) bool {
+			return a.Finding.Skill+"|"+a.Finding.Target < b.Finding.Skill+"|"+b.Finding.Target
+		}) {
+			writeMarkdownEventLine(&sb, findingEvent(item.Source, item.Finding))
+		}
+	}
+
 	if len(d.errors) > 0 {
 		sb.WriteString("\n## Errors\n\n")
 		for _, line := range sortedCopy(d.errors, func(a, b string) bool { return a < b }) {
 			writeMarkdownEventLine(&sb, errorEventOf("scan", line))
+		}
+	}
+
+	if d.debug && len(d.trace) > 0 {
+		sb.WriteString("\n## Trace\n\n")
+		for _, line := range d.trace {
+			sb.WriteString("- ")
+			sb.WriteString(line)
+			sb.WriteString("\n")
 		}
 	}
 
@@ -190,22 +215,38 @@ func formatPlainText(d *collector, fileLines []string) string {
 }
 
 func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string {
-	output := parsers.JoinOutput(
-		"completed",
-		"inputs", strconv.Itoa(stats.Inputs),
-		"services", strconv.Itoa(len(d.gogoResults)),
-		"web", strconv.Itoa(len(d.webEndpoints)),
-		"probes", strconv.Itoa(len(d.sprayResults)),
-		"fingerprints", strconv.Itoa(len(d.fingerprints)),
-		"weakpass", strconv.Itoa(len(d.zombieResults)),
-		"vulns", strconv.Itoa(len(d.neutronMatches)),
-		"verified", strconv.Itoa(len(d.verifications)),
-		"errors", strconv.Itoa(len(d.errors)),
-		"tasks", strconv.FormatInt(stats.Tasks, 10),
-		"requests", strconv.FormatInt(stats.Requests, 10),
-		stats.Duration().Round(time.Millisecond).String(),
-	)
-	return formatOutputLine(outputPrefix("scan.summary", ansiDim, color), output, color) + "\n"
+	parts := []string{"completed"}
+	parts = appendCount(parts, stats.Inputs, "target", "targets")
+	parts = appendCount(parts, len(d.gogoResults), "service", "services")
+	parts = appendCount(parts, len(d.webEndpoints), "web", "web")
+	parts = appendCount(parts, len(d.sprayResults), "probe", "probes")
+	parts = appendCount(parts, len(d.fingerprints), "fingerprint", "fingerprints")
+	parts = appendCount(parts, len(d.zombieResults), "risk", "risks")
+	parts = appendCount(parts, len(d.neutronMatches), "vuln", "vulns")
+	parts = appendCount(parts, len(d.aiSkillResults), "ai-skill", "ai-skills")
+	parts = appendCount(parts, len(d.verifications), "verified", "verified")
+	parts = appendCount(parts, len(d.errors), "error", "errors")
+	parts = appendCount64(parts, stats.Tasks, "task", "tasks")
+	parts = appendCount64(parts, stats.Requests, "request", "requests")
+	parts = append(parts, stats.Duration().Round(time.Millisecond).String())
+	output := strings.Join(parts, " ")
+	return formatOutputLine(outputPrefix("summary", ansiDim, color), output, color) + "\n"
+}
+
+func appendCount(parts []string, n int, singular, plural string) []string {
+	word := plural
+	if n == 1 {
+		word = singular
+	}
+	return append(parts, strconv.Itoa(n), word)
+}
+
+func appendCount64(parts []string, n int64, singular, plural string) []string {
+	word := plural
+	if n == 1 {
+		word = singular
+	}
+	return append(parts, strconv.FormatInt(n, 10), word)
 }
 
 func sortedCopy[T any](items []T, less func(a, b T) bool) []T {
@@ -269,7 +310,7 @@ func formatTraceEvent(event pipelineEvent) string {
 	if event.Event.Kind == eventError && event.Event.Error.Message != "" {
 		parts = append(parts, event.Event.Error.Message)
 	}
-	return formatOutputLine("[scan.debug]", parsers.JoinOutput(parts...), false)
+	return formatOutputLine("[trace]", parsers.JoinOutput(parts...), false)
 }
 
 func writeMarkdownEventLine(sb *strings.Builder, event event) {

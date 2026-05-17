@@ -107,7 +107,7 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 			t.Fatalf("normal scanner output leaked init log %q:\nstdout:\n%s\nlogs:\n%s", unwanted, stdout, logBuf.String())
 		}
 	}
-	if !strings.Contains(stdout, "[scan.summary] completed") {
+	if !strings.Contains(stdout, "[summary] completed") {
 		t.Fatalf("stdout missing scan summary: %q", stdout)
 	}
 }
@@ -413,12 +413,12 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 
 func TestDirectScannerRuntimeFeaturesForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
-		DefaultVerify = "auto"
+		DefaultVerify = "off"
 		features, args, err := directScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1"})
 		if err != nil {
 			t.Fatalf("directScannerRuntimeFeatures() error = %v", err)
 		}
-		if !features.ProviderEnabled || !features.ProviderOptional || !features.VerificationEnabled || features.VerifyMinPriority != "high" {
+		if features.ProviderEnabled || features.AIEnabled {
 			t.Fatalf("features = %#v", features)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1"}) {
@@ -429,8 +429,11 @@ func TestDirectScannerRuntimeFeaturesForVerifyModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("directScannerRuntimeFeatures() error = %v", err)
 		}
-		if features.ProviderEnabled || features.VerificationEnabled {
+		if features.ProviderEnabled || features.AIEnabled {
 			t.Fatalf("features = %#v", features)
+		}
+		if features.Warning == "" {
+			t.Fatalf("deprecated verify warning missing: %#v", features)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=off"}) {
 			t.Fatalf("args = %#v", args)
@@ -440,7 +443,7 @@ func TestDirectScannerRuntimeFeaturesForVerifyModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("directScannerRuntimeFeatures() error = %v", err)
 		}
-		if !features.ProviderEnabled || features.ProviderOptional || !features.VerificationEnabled || features.VerifyMinPriority != "critical" {
+		if !features.ProviderEnabled || features.ProviderOptional || !features.AIEnabled || !features.ScannerAI {
 			t.Fatalf("features = %#v", features)
 		}
 	})
@@ -460,16 +463,15 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		opt := &Option{}
 		applyDefaults(opt)
 		cfg := appConfig(opt, runtimeFeatures{
-			ProviderEnabled:     true,
-			ProviderOptional:    true,
-			VerificationEnabled: true,
-			VerifyMinPriority:   "critical",
+			ProviderEnabled:  true,
+			ProviderOptional: true,
+			AIEnabled:        true,
 		}, telemetry.NopLogger())
 		if cfg.Scanner.CyberhubURL != DefaultCyberhubURL || cfg.Scanner.CyberhubKey != DefaultCyberhubKey || cfg.Scanner.CyberhubMode != DefaultCyberhubMode {
 			t.Fatalf("scanner cyberhub config = %#v", cfg.Scanner)
 		}
-		if !cfg.Scanner.VerificationEnabled || cfg.Scanner.VerifyMinPriority != "critical" || cfg.Scanner.VerifyTimeout != 77 {
-			t.Fatalf("scanner verification config = %#v", cfg.Scanner)
+		if !cfg.Scanner.AIEnabled || cfg.Scanner.AITimeout != 77 {
+			t.Fatalf("scanner AI config = %#v", cfg.Scanner)
 		}
 		if !cfg.Provider.Enabled || !cfg.Provider.Optional {
 			t.Fatalf("provider config = %#v", cfg.Provider)

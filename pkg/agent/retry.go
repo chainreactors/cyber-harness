@@ -90,11 +90,12 @@ func requestWithRetry(ctx context.Context, cfg Config, messages []provider.ChatM
 
 func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, messages []provider.ChatMessage, tools []provider.ToolDefinition, turn int) (provider.ChatMessage, *provider.Usage, error) {
 	req := &provider.ChatCompletionRequest{
-		Model:       cfg.Model,
-		Messages:    messages,
-		Tools:       tools,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
+		Model:          cfg.Model,
+		Messages:       messages,
+		Tools:          tools,
+		MaxTokens:      cfg.MaxTokens,
+		Temperature:    cfg.Temperature,
+		ResponseFormat: cfg.ResponseFormat,
 	}
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(provider.StreamingProvider); ok {

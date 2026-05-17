@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
@@ -14,10 +15,13 @@ import (
 )
 
 type Command struct {
-	engines      *engine.Set
-	verification VerificationConfig
-	verifyFunc   VerifyFunc
-	logger       telemetry.Logger
+	engines    *engine.Set
+	aiFunc     AIFunc
+	reportFunc ReportFunc
+	aiConfig   AISkillConfig
+	skillStore SkillBodyLoader
+	recorder   *recorder
+	logger     telemetry.Logger
 }
 
 type flags struct {
@@ -25,7 +29,10 @@ type flags struct {
 	ListFile        string   `short:"l" long:"list" description:"File containing input targets, one per line"`
 	Mode            string   `long:"mode" description:"Scan profile: quick or full" default:"quick"`
 	Thread          int      `long:"thread" description:"Total concurrency budget distributed across engines" default:"1000"`
-	Debug           bool     `long:"debug" description:"Enable scan trace and underlying scanner debug logs"`
+	AI              bool     `long:"ai" description:"Enable all AI skills: verify findings and sniper fingerprint analysis"`
+	Sniper          bool     `long:"sniper" description:"Use AI to search public vulnerabilities for discovered fingerprints"`
+	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
+	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
 	Report          bool     `long:"report" description:"Output a concise final markdown report"`
 	OutputFile      string   `short:"f" long:"file" description:"Write output to file without ANSI colors"`
@@ -45,9 +52,8 @@ type flags struct {
 	Users           []string `long:"user" description:"Weakpass usernames. Can specify multiple."`
 	Passwords       []string `long:"pwd" description:"Weakpass passwords. Can specify multiple."`
 	MaxNeutronPerFP int      `long:"max-neutron-per-finger" description:"Maximum neutron templates per fingerprint" default:"20"`
-	BroadPOC        bool     `long:"broad-poc" description:"Run neutron POC checks even when no fingerprint matched"`
-	Verify          string   `long:"verify" description:"LLM verification mode: off, low, medium, high, critical" default:"off"`
-	VerifyTimeout   int      `long:"verify-timeout" description:"Timeout in seconds per verification" default:"120"`
+	Verify          string   `long:"verify" hidden:"true" description:"Deprecated: use --ai"`
+	VerifyTimeout   int      `long:"verify-timeout" hidden:"true" description:"Deprecated advanced compatibility option" default:"120"`
 }
 
 func New(engineSet *engine.Set, opts ...Option) *Command {
@@ -67,19 +73,24 @@ func (c *Command) Usage() string {
 }
 
 func Usage() string {
-	return `scan - Capability-driven automatic scan pipeline
+	return `scan - automatic security scan
 Usage: scan -i <target> [options]
 Inputs:
   -i, --input       URL, IP, IP:port, or CIDR. Can specify multiple.
   -l, --list        File containing inputs, one per line. CIDR is allowed.
 Options:
       --mode        Scan profile: quick or full (default: quick)
-      --thread      Total concurrency budget (default: 1000); auto-distributed across engines
-      --debug       Enable scan trace and underlying scanner debug logs
-  -j, --json        Output raw gogo and spray results as JSON Lines
+      --ai          Enable all AI skills: verify + sniper (requires LLM provider)
+      --sniper      Use AI to search public vulnerabilities for discovered fingerprints
       --report      Output a concise final markdown report
   -f, --file        Write output to file without ANSI colors
       --no-color    Disable ANSI colors in terminal output
+      --trace       Show internal scanner source and pipeline trace
+      --debug       Enable trace and underlying scanner debug logs
+
+Advanced:
+      --thread      Total concurrency budget (default: 1000); auto-distributed across engines
+  -j, --json        Output raw gogo and spray results as JSON Lines
       --ports       Ports for gogo scanning (default: all in quick, - in full)
       --port        Ports for discovery scanning; overrides --ports when set
       --timeout     Timeout in seconds (default: 5)
@@ -92,21 +103,21 @@ Options:
       --user        Weakpass username. Can specify multiple.
       --pwd         Weakpass password. Can specify multiple.
       --max-neutron-per-finger  Maximum neutron templates per fingerprint (default: 20)
-      --broad-poc   Run neutron POC checks even when no fingerprint matched
-      --verify      LLM verification mode: off, low, medium, high, critical (default: off)
-      --verify-timeout  Timeout seconds per verification (default: 120)
 Profiles:
-  quick: gogo -p all -e -v, spray check(with finger)/crawl(depth=1) with recon, weakpass (HTTP only after Basic auth challenge), fingerprint-based POC
-  full: quick plus gogo -p -, crawl depth=2, spray_plugins(common,bak,active), and spray_brute default dictionary
-Flow:
-  input targets -> capability queues -> emitted events -> downstream capabilities
+  quick: fast exposure discovery, web probes, HTTP Basic weakpass, and fingerprint-based POC checks
+  full: deeper ports, crawl depth=2, common backup/active web checks, and default web dictionary
+AI Skills:
+  --ai enables all AI skills automatically. Individual skills can be used standalone:
+  --sniper: search public CVEs/exploits for each fingerprint via AI agent
+  --ai (verify): validate medium/high findings with LLM reasoning
 Output:
-  event format: [source.scope] compact-evidence...
-  summary format: [scan.summary] completed inputs N services N web N probes N fingerprints N weakpass N vulns N verified N errors N tasks N requests N duration
+  default: [web], [service], [fingerprint], [risk], [vuln], [sniper], [ai], [summary]
+  --trace: also prints internal gogo/spray/zombie/neutron source and pipeline events
 Examples:
   scan -i 192.168.1.0/24 --mode quick
-  scan -i http://target.com --mode full --debug
-  scan -i 127.0.0.1 --mode quick --verify=high
+  scan -i http://target.com --ai
+  scan -i http://target.com --sniper
+  scan -i http://target.com --mode full --ai --report
   scan -i 192.168.1.0/24 --port top100
   scan -i 127.0.0.1 --mode quick -j
   scan -i 127.0.0.1 --mode quick -f 1.txt
@@ -134,18 +145,24 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		return "", fmt.Errorf("scan: %w", err)
 	}
 	if flags.Debug {
+		flags.Trace = true
 		restoreDebug := telemetry.ActivateDebug(c.logger)
 		defer restoreDebug()
 		c.logger.Debugf("scan debug enabled")
 	}
-	c.applyVerificationDefaults(&flags, args)
+	if c.aiConfig.Enable {
+		flags.AI = true
+	}
+	if flags.AI {
+		if strings.TrimSpace(flags.Verify) == "" {
+			flags.Verify = "high"
+		}
+		flags.Sniper = true
+	}
 
 	profile, err := profileForMode(flags.Mode)
 	if err != nil {
 		return "", fmt.Errorf("scan: %w", err)
-	}
-	if flags.BroadPOC {
-		profile.AllowBroadPOC = true
 	}
 	if verificationEnabled(flags.Verify) {
 		if _, err := parsePriority(flags.Verify); err != nil {
@@ -162,11 +179,23 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		return "", fmt.Errorf("scan: no input targets")
 	}
 
+	if flags.OutputFile != "" {
+		rec, recErr := newRecorder(flags.OutputFile)
+		if recErr != nil {
+			return "", fmt.Errorf("scan: open record file: %w", recErr)
+		}
+		c.recorder = rec
+		defer func() { c.recorder.Close(); c.recorder = nil }()
+		c.recorder.ScanStart(rawInputs, flags.Mode, args)
+	}
+
 	if flags.JSON || flags.Report {
 		stream = nil
 	}
 
-	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, flags.Debug)
+	trace := flags.Trace || flags.Debug
+	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
+	coll.recorder = c.recorder
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
 		coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw))})
 	})
@@ -175,7 +204,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	capabilities := c.buildCapabilities(flags, options, profile)
-	observe, debugFn := wrapObserve(coll, flags.Debug)
+	observe, debugFn := wrapObserve(coll, trace)
 	p := pipeline.New(ctx, pipeline.Config{
 		Capabilities: capabilities,
 		Observe:      observe,
@@ -190,19 +219,19 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		if err != nil {
 			return "", fmt.Errorf("scan json output: %w", err)
 		}
+	} else if flags.Report && flags.AI && c.aiFunc != nil {
+		out = c.generateAIReport(ctx, coll)
 	} else if flags.Report {
 		out = coll.ReportMarkdown()
 	} else {
 		out = coll.TerminalString(stream != nil && !flags.NoColor)
 	}
-	if flags.OutputFile != "" {
-		fileOut := out
-		if !flags.JSON && !flags.Report {
-			fileOut = coll.PlainText()
-		}
-		if err := writeOutputFile(flags.OutputFile, fileOut); err != nil {
-			return "", err
-		}
+	if c.recorder != nil {
+		stats := coll.statsSnapshotLocked()
+		c.recorder.ScanEnd(stats.Duration(), stats.Inputs,
+			len(coll.gogoResults), len(coll.webEndpoints),
+			len(coll.neutronMatches)+len(coll.zombieResults),
+			len(coll.aiSkillResults), len(coll.errors))
 	}
 	return out, nil
 }

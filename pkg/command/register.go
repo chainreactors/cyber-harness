@@ -13,14 +13,18 @@ func init() {
 				timeout = 300
 			}
 			var readers []VirtualFileReader
+			var globbers []VirtualGlobber
 			if deps.SkillStore != nil {
 				if r, ok := deps.SkillStore.(VirtualFileReader); ok {
 					readers = append(readers, r)
 				}
+				if g, ok := deps.SkillStore.(VirtualGlobber); ok {
+					globbers = append(globbers, g)
+				}
 			}
 			reg.RegisterTool(NewReadTool(workDir, readers...))
 			reg.RegisterTool(NewWriteTool(workDir))
-			reg.RegisterTool(NewGlobTool(workDir))
+			reg.RegisterTool(NewGlobTool(workDir, globbers...))
 			reg.RegisterTool(NewBashTool(workDir, timeout, reg))
 		},
 	})

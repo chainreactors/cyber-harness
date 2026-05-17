@@ -106,6 +106,7 @@ const (
 	findingWeakpass     findingKind = "weakpass-finding"
 	findingVuln         findingKind = "vuln-finding"
 	findingVerification findingKind = "verification-finding"
+	findingAISkill      findingKind = "ai-skill"
 )
 
 type errorEvent struct {
@@ -235,6 +236,30 @@ func (f vulnFinding) Key() string { return f.String() }
 
 func (f vulnFinding) String() string {
 	return strings.TrimSpace(f.Output)
+}
+
+type aiSkillFinding struct {
+	Skill        string
+	Target       string
+	Status       string
+	Summary      string
+	Detail       string
+	Remediation  string
+	OriginalKey  string
+	OriginalKind findingKind
+}
+
+func (f aiSkillFinding) Kind() findingKind { return findingAISkill }
+
+func (f aiSkillFinding) Priority() priority {
+	if f.Status == "confirmed" {
+		return priorityHigh
+	}
+	return priorityMedium
+}
+
+func (f aiSkillFinding) Key() string {
+	return f.Skill + "|" + f.Target + "|" + f.OriginalKey
 }
 
 type verificationStatus string

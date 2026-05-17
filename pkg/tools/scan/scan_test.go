@@ -49,7 +49,7 @@ func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(out, "[scan.summary] completed") {
+	if !strings.Contains(out, "[summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
 }
@@ -84,20 +84,6 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 	}
 	if full.CrawlDepth != 2 {
 		t.Fatalf("full crawl depth = %d, want 2", full.CrawlDepth)
-	}
-	if full.AllowBroadPOC {
-		t.Fatal("full profile should not run broad POC checks without --broad-poc")
-	}
-}
-
-func TestScanAcceptsBroadPOCFlag(t *testing.T) {
-	cmd := New(&engine.Set{Spray: spray.NewEngine(nil)})
-	out, err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "full", "--broad-poc", "--timeout", "1"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if !strings.Contains(out, "[scan.summary] completed") {
-		t.Fatalf("output missing summary: %q", out)
 	}
 }
 
@@ -689,9 +675,12 @@ func TestSelectNeutronTemplatesRequiresFingerUnlessBroad(t *testing.T) {
 }
 
 func TestScanDerivesTargetsFromResults(t *testing.T) {
-	profile := profile{AllowBroadPOC: true}
+	profile := profile{}
 	result := parsers.NewGOGOResult("127.0.0.1", "80")
 	result.Protocol = "http"
+	result.Frameworks = common.Frameworks{
+		"nginx": common.NewFramework("nginx", common.FrameFromFingers),
+	}
 
 	var events []event
 	deriveServiceResult(profile, capGogoPortscan, result, func(event event) {
@@ -807,56 +796,51 @@ func TestScanPipelineDispatchesHighPriorityFindingToAgentVerifier(t *testing.T) 
 
 func TestAgentVerifyCapabilityAcceptsFocusFingerprint(t *testing.T) {
 	var promptSeen string
-	verifyFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+	aiFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
 		promptSeen = prompt
-		return "status: not_confirmed\nsummary: focus fingerprint requires vulnerability-specific evidence\nevidence: safe validation should check exact version and exposed endpoints", nil
+		return `{"status":"not_confirmed","target":"http://127.0.0.1","summary":"focus fingerprint requires vulnerability-specific evidence","detail":"safe validation should check exact version"}`, nil
 	}
-	cmd := New(&engine.Set{}, WithVerifyFunc(verifyFn), WithVerificationConfig(VerificationConfig{Model: "test-model"}))
-	cap, ok := cmd.agentVerifyCapability(flags{Verify: "high", VerifyTimeout: 5})
-	if !ok {
-		t.Fatal("agent verifier capability was not built")
-	}
+	cmd := New(&engine.Set{}, WithAIFunc(aiFn), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
+	verifySkill := scanAISkills[0]
+	cap := buildAISkillCap(cmd, verifySkill)
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
 	p.Run(testSeeds(
 		findingEvent(capSprayCheck, fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"struts2"}, Focus: true}),
 	))
 
-	if len(coll.verifications) != 0 {
-		t.Fatalf("verifications = %d, want 0 for not_confirmed", len(coll.verifications))
+	if len(coll.aiSkillResults) != 0 {
+		t.Fatalf("ai skill results = %d, want 0 for not_confirmed", len(coll.aiSkillResults))
 	}
-	if !strings.Contains(promptSeen, "focus fingerprint struts2") {
-		t.Fatalf("verification prompt missing focus evidence: %q", promptSeen)
+	if !strings.Contains(promptSeen, "struts2") {
+		t.Fatalf("verification prompt missing fingerprint evidence: %q", promptSeen)
 	}
 }
 
 func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 	var calls int
-	verifyFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+	aiFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
 		calls++
 		if model != "test-model" {
 			t.Fatalf("model = %q, want test-model", model)
 		}
-		return "status: confirmed\nsummary: direct evidence supports the vulnerability\nevidence: template matched", nil
+		return `{"status":"confirmed","target":"http://127.0.0.1","summary":"direct evidence supports the vulnerability","detail":"template matched"}`, nil
 	}
-	cmd := New(&engine.Set{}, WithVerifyFunc(verifyFn), WithVerificationConfig(VerificationConfig{Model: "test-model"}))
-	flags := flags{Verify: "high", VerifyTimeout: 5}
-	cap, ok := cmd.agentVerifyCapability(flags)
-	if !ok {
-		t.Fatal("agent verifier capability was not built")
-	}
+	cmd := New(&engine.Set{}, WithAIFunc(aiFn), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
+	verifySkill := scanAISkills[0]
+	cap := buildAISkillCap(cmd, verifySkill)
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
 	p.Run(testSeeds(
 		findingEvent(capNeutronPOC, vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}),
 	))
 
-	if len(coll.verifications) != 1 {
-		t.Fatalf("verifications = %d, want 1", len(coll.verifications))
+	if len(coll.aiSkillResults) != 1 {
+		t.Fatalf("ai skill results = %d, want 1", len(coll.aiSkillResults))
 	}
-	got := coll.verifications[0].Finding
-	if got.Status != verificationConfirmed {
-		t.Fatalf("status = %s, want %s", got.Status, verificationConfirmed)
+	got := coll.aiSkillResults[0].Finding
+	if got.Status != "confirmed" {
+		t.Fatalf("status = %s, want confirmed", got.Status)
 	}
 	if got.Target != "http://127.0.0.1" {
 		t.Fatalf("target = %q, want http://127.0.0.1", got.Target)
@@ -1169,7 +1153,7 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 				t.Fatalf("spray results = %d, want 0", len(coll.sprayResults))
 			}
 			var derived []event
-			deriveWebProbeResult(profile{AllowBroadPOC: true}, "spray_check", tc.result, "", func(event event) {
+			deriveWebProbeResult(profile{}, "spray_check", tc.result, "", func(event event) {
 				derived = append(derived, event)
 			})
 			if len(derived) != 0 {
@@ -1204,8 +1188,8 @@ func TestScanSkipsInternalPluginCheckBaseline(t *testing.T) {
 	}
 
 	checkEvent := targetEvent(capSprayCheck, "", newWebProbeTarget("", capSprayCheck, "", result))
-	if line := formatEventLine(checkEvent, false); !strings.Contains(line, "[spray_check.check] http://127.0.0.1:8081 500 114") {
-		t.Fatalf("primary spray_check line = %q, want source suffix in prefix", line)
+	if line := formatEventLine(checkEvent, false); !strings.Contains(line, "[web] http://127.0.0.1:8081 500 114") {
+		t.Fatalf("primary spray_check line = %q, want user-facing web prefix", line)
 	}
 }
 
@@ -1223,7 +1207,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 		t.Fatalf("colored stream output missing ANSI: %q", raw)
 	}
 	out := stripANSI(raw)
-	if !strings.Contains(out, "[gogo_portscan.web] http://127.0.0.1:80 200 http") {
+	if !strings.Contains(out, "[web] http://127.0.0.1:80 200 http") {
 		t.Fatalf("stream output = %q", out)
 	}
 	if strings.Contains(out, "##") {
@@ -1246,7 +1230,7 @@ func TestScanColorizesWebProbePrefixOnly(t *testing.T) {
 
 	raw := buf.String()
 	for _, want := range []string{
-		ansiDim + "[spray_plugins.bak]" + ansiReset,
+		ansiGreen + "[web]" + ansiReset,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("colored output missing %q in %q", want, raw)
@@ -1256,7 +1240,7 @@ func TestScanColorizesWebProbePrefixOnly(t *testing.T) {
 		t.Fatalf("scan output should not parse and color parser fields: %q", raw)
 	}
 	out := stripANSI(raw)
-	if !strings.Contains(out, `[spray_plugins.bak] http://127.0.0.1:32768/test.war 401 64 26ms "json data"`) {
+	if !strings.Contains(out, `[web] http://127.0.0.1:32768/test.war 401 64 26ms "json data"`) {
 		t.Fatalf("plain colored output shape changed: %q", out)
 	}
 }
@@ -1312,7 +1296,7 @@ func TestScanFindingPriorityUsesFocusOutputOnly(t *testing.T) {
 	if strings.Contains(plain, " low ") || strings.Contains(plain, " high ") {
 		t.Fatalf("plain finding output should not print priority text: %q", plain)
 	}
-	if !strings.Contains(plainFocus, "[spray_check.focus] http://127.0.0.1 [struts2]") {
+	if !strings.Contains(plainFocus, "[fingerprint] http://127.0.0.1 [struts2]") {
 		t.Fatalf("plain focus output shape changed: %q", plainFocus)
 	}
 
@@ -1324,7 +1308,7 @@ func TestScanFindingPriorityUsesFocusOutputOnly(t *testing.T) {
 	if strings.Contains(stripANSI(colored), " high ") {
 		t.Fatalf("colored finding output should not print priority text: %q", colored)
 	}
-	if !strings.Contains(colored, ansiRed+"[spray_check.focus]"+ansiReset) {
+	if !strings.Contains(colored, ansiRed+"[fingerprint]"+ansiReset) {
 		t.Fatalf("colored finding output should encode high priority in color: %q", colored)
 	}
 }
@@ -1342,7 +1326,7 @@ func TestScanStreamsWithoutColor(t *testing.T) {
 	if hasANSI(out) {
 		t.Fatalf("uncolored stream output contains ANSI: %q", out)
 	}
-	if !strings.Contains(out, "[gogo_portscan.web] http://127.0.0.1:80 200 http") {
+	if !strings.Contains(out, "[web] http://127.0.0.1:80 200 http") {
 		t.Fatalf("stream output = %q", out)
 	}
 }
@@ -1359,7 +1343,7 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 
 	out := coll.String()
 	for _, want := range []string{
-		"[scan.summary] completed inputs 1 services 1 web 0 probes 0 fingerprints 0 weakpass 0 vulns 0 verified 0 errors 0 tasks 0 requests 0",
+		"[summary] completed 1 target 1 service 0 web 0 probes 0 fingerprints 0 risks 0 vulns 0 verified 0 errors 0 tasks 0 requests",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary output missing %q:\n%s", want, out)
@@ -1391,12 +1375,12 @@ func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	coll.Finish()
 
 	out := coll.String()
-	if !strings.Contains(out, "tasks 7 requests 9") {
+	if !strings.Contains(out, "7 tasks 9 requests") {
 		t.Fatalf("summary missing aggregated stats:\n%s", out)
 	}
 
 	report := coll.ReportMarkdown()
-	for _, want := range []string{"| Tasks | 7 |", "| Requests | 9 |", "| gogo_portscan | gogo | scan | 2 | 4 | 4 | 1 | 0 | 10ms |", "| spray_check | spray | check | 1 | 3 | 5 | 2 | 1 | 20ms |"} {
+	for _, want := range []string{"| Tasks | 7 |", "| Requests | 9 |"} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)
 		}
@@ -1463,7 +1447,7 @@ func TestScanPlainTextStripsANSI(t *testing.T) {
 	if hasANSI(out) {
 		t.Fatalf("plain text output contains ANSI: %q", out)
 	}
-	if !strings.Contains(out, "[spray_check.check] http://127.0.0.1:80 200 12 sim:1") {
+	if !strings.Contains(out, "[web] http://127.0.0.1:80 200 12 sim:1") {
 		t.Fatalf("plain text output missing parser content: %q", out)
 	}
 }
@@ -1485,10 +1469,10 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	if hasANSI(fileOut) {
 		t.Fatalf("file output contains ANSI: %q", fileOut)
 	}
-	if !strings.Contains(fileOut, "[scan.summary] completed") {
+	if !strings.Contains(fileOut, "[summary] completed") {
 		t.Fatalf("file output missing summary: %q", fileOut)
 	}
-	if !strings.Contains(stripANSI(out), "[scan.summary] completed") {
+	if !strings.Contains(stripANSI(out), "[summary] completed") {
 		t.Fatalf("stdout output missing summary: %q", out)
 	}
 	if strings.Contains(out, "[scan.web] ") {
@@ -1542,7 +1526,7 @@ func TestScanReportMarkdown(t *testing.T) {
 	if hasANSI(report) {
 		t.Fatalf("report contains ANSI: %q", report)
 	}
-	for _, want := range []string{"# Scan Report", "## Metrics", "## Capability Runs", "## Open Services", "## AI Verification Results", "confirmed by test", "gogo_portscan"} {
+	for _, want := range []string{"# Scan Report", "## Metrics", "## Open Services", "## AI Review", "confirmed by test"} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)
 		}

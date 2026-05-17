@@ -9,27 +9,35 @@ import (
 
 type Option func(*Command)
 
-type VerifyFunc func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error)
+type AIFunc func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error)
 
-type VerificationConfig struct {
-	Model        string
-	Enable       bool
-	MinPriority  string
-	SystemPrompt string
-	Timeout      int
-	Workers      int
+type ReportFunc func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error)
+
+type AISkillConfig struct {
+	Model   string
+	Timeout int
+	Workers int
+	Enable  bool
 }
 
-func WithVerificationConfig(config VerificationConfig) Option {
-	return func(c *Command) {
-		c.verification = config
-	}
+type SkillBodyLoader interface {
+	LoadBody(name string) string
 }
 
-func WithVerifyFunc(fn VerifyFunc) Option {
-	return func(c *Command) {
-		c.verifyFunc = fn
-	}
+func WithAIFunc(fn AIFunc) Option {
+	return func(c *Command) { c.aiFunc = fn }
+}
+
+func WithReportFunc(fn ReportFunc) Option {
+	return func(c *Command) { c.reportFunc = fn }
+}
+
+func WithAISkillConfig(cfg AISkillConfig) Option {
+	return func(c *Command) { c.aiConfig = cfg }
+}
+
+func WithSkillStore(store SkillBodyLoader) Option {
+	return func(c *Command) { c.skillStore = store }
 }
 
 func WithLogger(logger telemetry.Logger) Option {
@@ -45,22 +53,6 @@ func (c *Command) Configure(opts ...Option) {
 		if opt != nil {
 			opt(c)
 		}
-	}
-}
-
-func (c *Command) applyVerificationDefaults(flags *flags, args []string) {
-	if flags == nil {
-		return
-	}
-	if c.verification.Enable && !hasFlag(args, "--verify") {
-		minPriority := strings.TrimSpace(c.verification.MinPriority)
-		if minPriority == "" {
-			minPriority = "high"
-		}
-		flags.Verify = minPriority
-	}
-	if !hasFlag(args, "--verify-timeout") && c.verification.Timeout > 0 {
-		flags.VerifyTimeout = c.verification.Timeout
 	}
 }
 

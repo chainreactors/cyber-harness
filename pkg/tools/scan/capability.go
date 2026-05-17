@@ -18,6 +18,7 @@ const (
 	capZombieWeakpass = "zombie_weakpass"
 	capNeutronPOC     = "neutron_poc"
 	capAgentVerify    = "agent_verify"
+	capAgentSniper    = "agent_sniper"
 )
 
 func acceptsTarget(kinds ...targetKind) func(event) bool {
@@ -134,10 +135,11 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		c.logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
-	if verificationEnabled(flags.Verify) {
-		if cap, ok := c.agentVerifyCapability(flags); ok {
-			capabilities = append(capabilities, cap)
+	for _, skill := range scanAISkills {
+		if !aiSkillEnabled(skill, flags) {
+			continue
 		}
+		capabilities = append(capabilities, buildAISkillCap(c, skill))
 	}
 	return capabilities
 }

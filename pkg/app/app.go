@@ -37,13 +37,11 @@ type ProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL         string
-	CyberhubKey         string
-	CyberhubMode        string
-	VerificationEnabled bool
-	VerifyMinPriority   string
-	VerifyTimeout       int
-	VerifySystemPrompt  string
+	CyberhubURL  string
+	CyberhubKey  string
+	CyberhubMode string
+	AIEnabled    bool
+	AITimeout    int
 }
 
 type ToolConfig struct {
@@ -181,19 +179,35 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 	workDir, _ := os.Getwd()
 
 	var scanOpts []any
-	if scanCfg.VerificationEnabled && llmProvider != nil {
+	if scanCfg.AIEnabled && llmProvider != nil {
 		p := llmProvider
-		scanOpts = append(scanOpts, scan.WithVerifyFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+		scanOpts = append(scanOpts, scan.WithAIFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+			return agent.Run(ctx, prompt, command.NewRegistry(),
+				agent.WithProvider(p),
+				agent.WithModel(model),
+				agent.WithMaxTokens(maxTokens),
+				agent.WithSystemPrompt(buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt)),
+				agent.WithLogger(logger),
+			)
+		}))
+		scanOpts = append(scanOpts, scan.WithReportFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+			sysPrompt := buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt)
 			return agent.Run(ctx, prompt, cmdReg,
 				agent.WithProvider(p),
 				agent.WithModel(model),
 				agent.WithMaxTokens(maxTokens),
-				agent.WithSystemPrompt(buildScanVerifySystemPrompt(cmdReg, skillStore, systemPrompt)),
+				agent.WithSystemPrompt(sysPrompt),
 				agent.WithBeforeToolCall(scanVerifyBeforeToolCall),
 				agent.WithLogger(logger),
 			)
 		}))
-		scanOpts = append(scanOpts, scan.WithVerificationConfig(scanVerificationConfig(scanCfg, model)))
+		scanOpts = append(scanOpts, scan.WithAISkillConfig(scan.AISkillConfig{
+			Model:   model,
+			Timeout: scanCfg.AITimeout,
+			Workers: 3,
+			Enable:  true,
+		}))
+		scanOpts = append(scanOpts, scan.WithSkillStore(skillStoreAdapter{store: skillStore}))
 	}
 	scanOpts = append(scanOpts, scan.WithLogger(logger))
 
@@ -217,31 +231,26 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 	return cmdReg
 }
 
-func buildScanVerifySystemPrompt(cmdReg *command.CommandRegistry, skillStore *skills.Store, verificationPrompt string) string {
-	preamble := strings.TrimSpace(verificationPrompt)
-	if preamble == "" {
-		preamble = "You are aiscan's scan verification agent."
+func buildScanAISystemPrompt(_ *command.CommandRegistry, _ *skills.Store, skillPrompt string) string {
+	if strings.TrimSpace(skillPrompt) != "" {
+		return skillPrompt
 	}
-	preamble += `
+	return "You are aiscan's scan AI skill agent. Analyze the provided scan finding using your knowledge. Do not call any tools. Return only the requested JSON output."
+}
 
-You are running inside the scan pipeline to verify one finding. Use the existing agent tools and pseudo-commands when they help, especially web_search and web_fetch via the bash tool for historical vulnerability context. Do not run scanner pseudo-commands such as scan, gogo, spray, zombie, or neutron from this verification step. Do not perform destructive or exploitative actions.
+type skillStoreAdapter struct {
+	store *skills.Store
+}
 
-Return only the exact status:/summary:/evidence: lines requested by the user prompt. Mark status confirmed only when evidence supports the finding; otherwise return not_confirmed or inconclusive.`
-
-	var skillList []skills.Skill
-	if skillStore != nil {
-		skillList = skillStore.Skills
+func (a skillStoreAdapter) LoadBody(name string) string {
+	if a.store == nil {
+		return ""
 	}
-	scannerDocs := ""
-	if cmdReg != nil {
-		scannerDocs = cmdReg.UsageDocs()
+	skill, ok := a.store.ByName(name)
+	if !ok {
+		return ""
 	}
-	return agent.BuildSystemPrompt(&agent.PromptConfig{
-		Tools:          cmdReg,
-		ScannerDocs:    scannerDocs,
-		CustomPreamble: preamble,
-		Skills:         skillList,
-	})
+	return skill.Body
 }
 
 func scanVerifyBeforeToolCall(_ context.Context, call agent.BeforeToolCallContext) (*agent.BeforeToolCallResult, error) {
@@ -319,16 +328,3 @@ func newIOAClient(cfg IOAConfig) (ioaclient.API, error) {
 	return ioaclient.NewClient(cfg.URL, cfg.NodeID)
 }
 
-func scanVerificationConfig(cfg ScannerConfig, model string) scan.VerificationConfig {
-	timeout := cfg.VerifyTimeout
-	if timeout <= 0 {
-		timeout = 120
-	}
-	return scan.VerificationConfig{
-		Model:        model,
-		Enable:       cfg.VerificationEnabled,
-		MinPriority:  cfg.VerifyMinPriority,
-		Timeout:      timeout,
-		SystemPrompt: cfg.VerifySystemPrompt,
-	}
-}

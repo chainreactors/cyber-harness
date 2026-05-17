@@ -85,6 +85,7 @@ type Config struct {
 	Stream              bool
 	MaxRetries          int
 	TokenBudget         int
+	ResponseFormat      *provider.ResponseFormat
 	Logger              telemetry.Logger
 	TransformContext    TransformContextFunc
 	Emit                EventHandler
@@ -175,4 +176,8 @@ func WithMaxRetries(n int) Option {
 
 func WithTokenBudget(budget int) Option {
 	return func(c *Config) { c.TokenBudget = budget }
+}
+
+func WithResponseFormat(rf *provider.ResponseFormat) Option {
+	return func(c *Config) { c.ResponseFormat = rf }
 }

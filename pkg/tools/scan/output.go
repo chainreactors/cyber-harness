@@ -46,11 +46,6 @@ func colorForPriority(priority priority) string {
 }
 
 func formatEventLine(event event, color bool) string {
-	source := event.Source
-	if source == "" || source == "input" {
-		source = "scan"
-	}
-
 	switch event.Kind {
 	case eventTarget:
 		switch target := event.Target.(type) {
@@ -58,19 +53,23 @@ func formatEventLine(event event, color bool) string {
 			if target.Result == nil {
 				return ""
 			}
-			prefix := outputPrefix(gogoResultSource(source, target.Result), ansiDim, color)
+			label := "service"
+			if target.Result.IsHttp() {
+				label = "web"
+			}
+			prefix := outputPrefix(label, ansiGreen, color)
 			return formatOutputLine(prefix, target.Result.OutputLine(), color)
 		case webTarget:
 			if target.URL == "" {
 				return ""
 			}
-			prefix := outputPrefix(outputScope(source, "web"), ansiDim, color)
+			prefix := outputPrefix("web", ansiGreen, color)
 			return formatOutputLine(prefix, parsers.JoinOutput(target.URL, target.HostHeader), color)
 		case webProbeTarget:
 			if !reportableSprayResultForCapability(target.Result, target.Capability) {
 				return ""
 			}
-			prefix := outputPrefix(sprayProbeSource(source, target.Result), ansiDim, color)
+			prefix := outputPrefix("web", ansiGreen, color)
 			return formatOutputLine(prefix, target.Result.OutputLine(), color)
 		}
 	case eventFinding:
@@ -80,32 +79,38 @@ func formatEventLine(event event, color bool) string {
 			if len(names) == 0 || !finding.Focus {
 				return ""
 			}
-			prefix := outputPrefix(outputScope(source, "focus"), colorForPriority(finding.Priority()), color)
+			prefix := outputPrefix("fingerprint", colorForPriority(finding.Priority()), color)
 			return formatOutputLine(prefix, parsers.JoinOutput(finding.Target, parsers.NamesOutput(names)), color)
 		case weakpassFinding:
 			if finding.Result == nil {
 				return ""
 			}
-			prefix := outputPrefix(source, colorForPriority(finding.Priority()), color)
+			prefix := outputPrefix("risk", colorForPriority(finding.Priority()), color)
 			return formatOutputLine(prefix, finding.Result.OutputLine(), color)
 		case vulnFinding:
 			if finding.String() == "" {
 				return ""
 			}
-			prefix := outputPrefix(source, colorForPriority(finding.Priority()), color)
+			prefix := outputPrefix("vuln", colorForPriority(finding.Priority()), color)
 			return formatOutputLine(prefix, finding.String(), color)
 		case verificationFinding:
 			if !reportableVerificationFinding(finding) {
 				return ""
 			}
-			prefix := outputPrefix(source, colorForVerificationStatus(finding.Status), color)
+			prefix := outputPrefix("ai", colorForVerificationStatus(finding.Status), color)
 			return formatOutputLine(prefix, verificationOutput(finding), color)
+		case aiSkillFinding:
+			if finding.Summary == "" && finding.Detail == "" {
+				return ""
+			}
+			prefix := outputPrefix(aiSkillOutputLabel(finding.Skill), aiSkillOutputColor(finding), color)
+			return formatOutputLine(prefix, aiSkillOutput(finding), color)
 		}
 	case eventError:
 		if event.Error.Message == "" {
 			return ""
 		}
-		prefix := outputPrefix(outputScope(source, "error"), ansiRed, color)
+		prefix := outputPrefix("error", ansiRed, color)
 		return formatOutputLine(prefix, parsers.JoinOutput(event.Error.Message), color)
 	}
 	return ""
@@ -184,4 +189,38 @@ func verificationOutput(finding verificationFinding) string {
 		finding.Summary,
 		finding.Evidence,
 	)
+}
+
+func aiSkillOutputLabel(skill string) string {
+	if skill == "verify" {
+		return "ai"
+	}
+	return skill
+}
+
+func aiSkillOutputColor(finding aiSkillFinding) string {
+	switch finding.Status {
+	case "confirmed":
+		return ansiGreen
+	case "not_confirmed":
+		return ansiDim
+	case "info":
+		return ansiYellow
+	default:
+		return ansiYellow
+	}
+}
+
+func aiSkillOutput(finding aiSkillFinding) string {
+	parts := []string{finding.Target}
+	if finding.Status != "" {
+		parts = append(parts, finding.Status)
+	}
+	if finding.Summary != "" {
+		parts = append(parts, finding.Summary)
+	}
+	if finding.Detail != "" {
+		parts = append(parts, finding.Detail)
+	}
+	return parsers.JoinOutput(parts...)
 }

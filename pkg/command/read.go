@@ -95,26 +95,47 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (string, error
 }
 
 func (t *ReadTool) read(path string) (string, error) {
+	// URI-scheme virtual reads (aiscan://...) are checked first
+	if strings.Contains(path, "://") {
+		for _, reader := range t.readers {
+			if reader == nil {
+				continue
+			}
+			content, handled, err := reader.ReadVirtual(path)
+			if !handled {
+				continue
+			}
+			if err != nil {
+				return "", err
+			}
+			return content, nil
+		}
+		return "", fmt.Errorf("virtual file not found: %s", path)
+	}
+
+	// For regular paths: try local filesystem first, then embed fallback
+	resolved := t.resolvePath(path)
+	data, err := os.ReadFile(resolved)
+	if err == nil {
+		return string(data), nil
+	}
+
+	// Fallback to virtual readers (embed)
 	for _, reader := range t.readers {
 		if reader == nil {
 			continue
 		}
-		content, handled, err := reader.ReadVirtual(path)
+		content, handled, readErr := reader.ReadVirtual(path)
 		if !handled {
 			continue
 		}
-		if err != nil {
-			return "", err
+		if readErr != nil {
+			continue
 		}
 		return content, nil
 	}
 
-	resolved := t.resolvePath(path)
-	data, err := os.ReadFile(resolved)
-	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
-	}
-	return string(data), nil
+	return "", fmt.Errorf("read file: %w", err)
 }
 
 func (t *ReadTool) resolvePath(path string) string {
