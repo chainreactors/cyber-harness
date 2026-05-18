@@ -291,9 +291,12 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}
 	option.Timeout = 3600
 
-	scannerArgs, err := applyScannerCommandArgs(scannerName, scannerRest, &option)
-	if err != nil {
-		return parsedCLI{}, err
+	scannerArgs := append([]string(nil), scannerRest...)
+	if scannerName == "scan" {
+		scannerArgs, err = applyScannerCommandArgs(scannerName, scannerRest, &option)
+		if err != nil {
+			return parsedCLI{}, err
+		}
 	}
 	if toolargs.BoolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
@@ -437,9 +440,9 @@ var scannerKnownFlags = []knownFlag{
 			o.AI = true
 		}
 	}},
-	{names: []string{"--prompt"}, arity: 1, apply: func(o *Option, v string) { o.Prompt = v }},
+	{names: []string{"--prompt", "-p"}, arity: 1, apply: func(o *Option, v string) { o.Prompt = v }},
 	{names: []string{"--task-file"}, arity: 1, apply: func(o *Option, v string) { o.TaskFile = v }},
-	{names: []string{"--skill"}, arity: 1, apply: func(o *Option, v string) { o.Skills = append(o.Skills, v) }},
+	{names: []string{"--skill", "-s"}, arity: 1, apply: func(o *Option, v string) { o.Skills = append(o.Skills, v) }},
 	{names: []string{"--provider"}, arity: 1, apply: func(o *Option, v string) { o.Provider = v }},
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *Option, v string) { o.APIKey = v }},
@@ -464,6 +467,17 @@ var scannerKnownFlags = []knownFlag{
 	}},
 }
 
+var rootOnlyFlagValueArity = map[string]int{
+	"--input":  1,
+	"-i":       1,
+	"--view":   1,
+	"-F":       1,
+	"--output": 1,
+	"-o":       1,
+	"--file":   1,
+	"-f":       1,
+}
+
 var rootFlagValueArity = buildRootFlagValueArity()
 
 func buildRootFlagValueArity() map[string]int {
@@ -472,6 +486,9 @@ func buildRootFlagValueArity() map[string]int {
 		for _, name := range f.names {
 			m[name] = f.arity
 		}
+	}
+	for name, arity := range rootOnlyFlagValueArity {
+		m[name] = arity
 	}
 	return m
 }

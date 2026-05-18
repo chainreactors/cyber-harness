@@ -174,6 +174,46 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 	}
 }
 
+func TestParseCLIScanAcceptsPromptShortFlagAfterCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"scan",
+		"-i", "127.0.0.1",
+		"-p", "review focus fingerprints",
+		"--ai",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if !parsed.Option.AI {
+		t.Fatal("scan --ai should be enabled")
+	}
+	if parsed.Option.Prompt != "review focus fingerprints" {
+		t.Fatalf("prompt = %q, want %q", parsed.Option.Prompt, "review focus fingerprints")
+	}
+	wantArgs := []string{"scan", "-i", "127.0.0.1"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIRootPromptValueCanMatchScannerName(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"-p", "gogo",
+		"scan",
+		"-i", "127.0.0.1",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Prompt != "gogo" {
+		t.Fatalf("prompt = %q, want gogo", parsed.Option.Prompt)
+	}
+	wantArgs := []string{"scan", "-i", "127.0.0.1"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
 func TestParseCLICyberhubModeRootAndPassthrough(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--cyberhub-mode", "override",
@@ -194,9 +234,9 @@ func TestParseCLICyberhubModeRootAndPassthrough(t *testing.T) {
 func TestParseCLICyberhubCommandPassthrough(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--cyberhub-url", "http://hub:8080",
+		"--cyberhub-key", "HUBKEY",
 		"cyberhub",
 		"search", "poc", "spring",
-		"--cyberhub-key", "HUBKEY",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
@@ -213,12 +253,31 @@ func TestParseCLICyberhubCommandPassthrough(t *testing.T) {
 	}
 }
 
-func TestParseCLIScannerRootArgsAfterPassthroughCommand(t *testing.T) {
+func TestParseCLINonScanScannerKeepsPostRootArgsIsolated(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"gogo",
 		"-i", "127.0.0.1",
 		"--cyberhub-url", "http://hub:8080",
 		"--cyberhub-key", "HUBKEY",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "--cyberhub-url", "http://hub:8080", "--cyberhub-key", "HUBKEY"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+	if parsed.Option.CyberhubURL != "" || parsed.Option.CyberhubKey != "" {
+		t.Fatalf("scanner options = %#v", parsed.Option.ScannerOptions)
+	}
+}
+
+func TestParseCLIScannerRootArgsBeforeCommandStillApply(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"--cyberhub-url", "http://hub:8080",
+		"--cyberhub-key", "HUBKEY",
+		"gogo",
+		"-i", "127.0.0.1",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
@@ -232,16 +291,72 @@ func TestParseCLIScannerRootArgsAfterPassthroughCommand(t *testing.T) {
 	}
 }
 
+func TestParseCLIGogoKeepsPortShortFlagAfterCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"gogo",
+		"-i", "127.0.0.1",
+		"-p", "top100",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "-p", "top100"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+	if parsed.Option.Prompt != "" {
+		t.Fatalf("prompt = %q, want empty", parsed.Option.Prompt)
+	}
+}
+
+func TestParseCLINeutronKeepsConcurrencyShortFlagAfterCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"neutron",
+		"-u", "http://127.0.0.1",
+		"-c", "10",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	wantArgs := []string{"neutron", "-u", "http://127.0.0.1", "-c", "10"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+	if parsed.Option.ConfigFile != "" {
+		t.Fatalf("config file = %q, want empty", parsed.Option.ConfigFile)
+	}
+}
+
+func TestParseCLINonScanScannerDoesNotExtractPostAIFlags(t *testing.T) {
+	parsed, err := parseCLI([]string{
+		"gogo",
+		"-i", "127.0.0.1",
+		"--ai",
+		"--model", "deepseek-v4-pro",
+		"--prompt", "review focus fingerprints",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "--ai", "--model", "deepseek-v4-pro", "--prompt", "review focus fingerprints"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+	if parsed.Option.AI || parsed.Option.Model != "" || parsed.Option.Prompt != "" {
+		t.Fatalf("option = %#v", parsed.Option)
+	}
+}
+
 func TestParseCLIPassthroughScannerExtractsAIIntentArgs(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--api-key", "KEY",
 		"--prompt", "review focus fingerprints",
 		"--skill", "scan",
-		"gogo",
-		"-i", "127.0.0.1",
 		"--ai",
 		"--model", "deepseek-v4-pro",
 		"--skill=aiscan",
+		"gogo",
+		"-i", "127.0.0.1",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)

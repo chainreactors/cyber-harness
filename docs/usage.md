@@ -107,7 +107,7 @@ aiscan neutron -h
 
 ## 全局参数
 
-全局参数放在子命令之前，也可以放在 scanner 子命令之后（aiscan 会自动提取）。
+全局参数建议放在子命令之前。只有 `scan` 子命令支持在命令之后继续写全局参数并由 aiscan 自动提取；`gogo`、`spray`、`zombie`、`neutron`、`cyberhub` 后面的参数会原样交给对应 scanner，避免短参数冲突。
 
 ### LLM 参数
 
