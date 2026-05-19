@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -22,11 +23,12 @@ const (
 )
 
 type BashTool struct {
-	registry    *CommandRegistry
-	workDir     string
-	timeout     int
-	bgMu        sync.Mutex
-	bgProcesses map[int]*exec.Cmd
+	registry     *CommandRegistry
+	workDir      string
+	timeout      int
+	scannerProxy string
+	bgMu         sync.Mutex
+	bgProcesses  map[int]*exec.Cmd
 }
 
 func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTool {
@@ -39,6 +41,11 @@ func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTo
 		timeout:     timeout,
 		bgProcesses: make(map[int]*exec.Cmd),
 	}
+}
+
+func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
+	t.scannerProxy = proxy
+	return t
 }
 
 func (t *BashTool) Name() string { return "bash" }
@@ -130,6 +137,7 @@ func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error
 		cmd = exec.CommandContext(ctx, "sh", "-c", cmdLine)
 	}
 	cmd.Dir = t.workDir
+	t.applyProxyEnv(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -185,6 +193,7 @@ func (t *BashTool) execBackground(ctx context.Context, cmdLine string) (string, 
 	}
 	cmd.Dir = t.workDir
 	cmd.Stdin = nil
+	t.applyProxyEnv(cmd)
 	configureBackgroundCommand(cmd)
 	stdout := newLimitedBuffer(backgroundStartupOutputLimit)
 	stderr := newLimitedBuffer(backgroundStartupOutputLimit)
@@ -336,6 +345,22 @@ func (b *limitedBuffer) String() string {
 		output += fmt.Sprintf("\n[truncated: showing first %d bytes]", b.limit)
 	}
 	return output
+}
+
+func (t *BashTool) applyProxyEnv(cmd *exec.Cmd) {
+	if t.scannerProxy == "" {
+		return
+	}
+	env := os.Environ()
+	env = append(env,
+		"ALL_PROXY="+t.scannerProxy,
+		"all_proxy="+t.scannerProxy,
+		"HTTP_PROXY="+t.scannerProxy,
+		"http_proxy="+t.scannerProxy,
+		"HTTPS_PROXY="+t.scannerProxy,
+		"https_proxy="+t.scannerProxy,
+	)
+	cmd.Env = env
 }
 
 func firstCommandToken(input string) string {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/proxyclient"
 )
 
 const (
@@ -35,7 +36,9 @@ func New(cfg *provider.ProviderConfig) *Command {
 	transport := &http.Transport{}
 	if cfg != nil && cfg.Proxy != "" {
 		if proxyURL, err := url.Parse(cfg.Proxy); err == nil {
-			transport.Proxy = http.ProxyURL(proxyURL)
+			if dial, dialErr := proxyclient.NewClient(proxyURL); dialErr == nil {
+				transport.DialContext = dial.DialContext
+			}
 		}
 	}
 	return &Command{

@@ -20,6 +20,7 @@ type GogoScanOptions struct {
 	Timeout      int
 	VersionLevel int
 	Exploit      string
+	Proxy        string
 	Debug        bool
 	OnStats      func(sdkkit.Stats)
 }

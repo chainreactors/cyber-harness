@@ -63,6 +63,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		if !profile.Enabled(name) || !hasSpray(c.engines) {
 			return
 		}
+		sopts.Proxy = c.proxy
 		sprayBuilt = true
 		capabilities = append(capabilities, sprayCapability(c, flags, opts.Web, name, sopts, c.runSprayCapability))
 	}

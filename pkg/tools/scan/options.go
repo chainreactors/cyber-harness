@@ -40,6 +40,10 @@ func WithSkillStore(store SkillBodyLoader) Option {
 	return func(c *Command) { c.skillStore = store }
 }
 
+func WithProxy(proxy string) Option {
+	return func(c *Command) { c.proxy = proxy }
+}
+
 func WithLogger(logger telemetry.Logger) Option {
 	return func(c *Command) {
 		if logger != nil {

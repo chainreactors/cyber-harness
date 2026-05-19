@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/chainreactors/proxyclient"
 )
 
 type OpenAIProvider struct {
@@ -26,7 +28,11 @@ func NewOpenAIProvider(cfg *ProviderConfig) (*OpenAIProvider, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid proxy URL: %w", err)
 		}
-		transport.Proxy = http.ProxyURL(proxyURL)
+		dial, err := proxyclient.NewClient(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("create proxy client: %w", err)
+		}
+		transport.DialContext = dial.DialContext
 	}
 
 	client := &http.Client{

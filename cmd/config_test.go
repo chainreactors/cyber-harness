@@ -448,21 +448,21 @@ llm:
   provider: config-provider
   model: config-model
   api_key: config-key
-  proxy: config-proxy
 cyberhub:
   url: http://config-hub:9000
+  proxy: config-proxy
 `)
 
 	origProvider := DefaultProvider
 	origModel := DefaultModel
-	origProxy := DefaultProxy
+	origScannerProxy := DefaultScannerProxy
 	DefaultProvider = "build-provider"
 	DefaultModel = "build-model"
-	DefaultProxy = "build-proxy"
+	DefaultScannerProxy = "build-proxy"
 	defer func() {
 		DefaultProvider = origProvider
 		DefaultModel = origModel
-		DefaultProxy = origProxy
+		DefaultScannerProxy = origScannerProxy
 	}()
 
 	origDir, _ := os.Getwd()
@@ -482,7 +482,7 @@ cyberhub:
 		{"Provider", option.Provider, "cli-provider", "CLI > config > build"},
 		{"Model", option.Model, "config-model", "config > build (CLI empty)"},
 		{"APIKey", option.APIKey, "config-key", "config fills empty"},
-		{"Proxy", option.Proxy, "config-proxy", "config > build"},
+		{"Proxy", option.ScannerOptions.Proxy, "config-proxy", "config > build"},
 		{"CyberhubURL", option.CyberhubURL, "http://config-hub:9000", "config fills empty"},
 	}
 	for _, c := range checks {

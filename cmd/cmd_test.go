@@ -596,7 +596,7 @@ func withDefaults(t *testing.T, fn func()) {
 	savedBaseURL := DefaultBaseURL
 	savedAPIKey := DefaultAPIKey
 	savedModel := DefaultModel
-	savedProxy := DefaultProxy
+	savedScannerProxy := DefaultScannerProxy
 	savedCyberhubURL := DefaultCyberhubURL
 	savedCyberhubKey := DefaultCyberhubKey
 	savedCyberhubMode := DefaultCyberhubMode
@@ -611,7 +611,7 @@ func withDefaults(t *testing.T, fn func()) {
 		DefaultBaseURL = savedBaseURL
 		DefaultAPIKey = savedAPIKey
 		DefaultModel = savedModel
-		DefaultProxy = savedProxy
+		DefaultScannerProxy = savedScannerProxy
 		DefaultCyberhubURL = savedCyberhubURL
 		DefaultCyberhubKey = savedCyberhubKey
 		DefaultCyberhubMode = savedCyberhubMode

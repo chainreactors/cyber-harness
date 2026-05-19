@@ -15,6 +15,7 @@ import (
 type Command struct {
 	engine *spray.SprayEngine
 	logger telemetry.Logger
+	proxy  string
 }
 
 func New(engine *spray.SprayEngine) *Command {
@@ -25,6 +26,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 	if logger != nil {
 		c.logger = logger
 	}
+	return c
+}
+
+func (c *Command) WithProxy(proxy string) *Command {
+	c.proxy = proxy
 	return c
 }
 
@@ -45,6 +51,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	if c.engine != nil {
 		c.engine.InstallResourceProvider()
 	}
+	args = c.injectProxy(args)
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), spraycore.RunOptions{
 		Output: &buf,
 		BeforePrepare: func(option *spraycore.Option) error {
@@ -76,6 +83,21 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		return buf.String(), fmt.Errorf("spray: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// TestInjectProxy is exported for cross-package testing.
+func (c *Command) TestInjectProxy(args []string) []string {
+	return c.injectProxy(args)
+}
+
+func (c *Command) injectProxy(args []string) []string {
+	if c.proxy == "" {
+		return args
+	}
+	if toolargs.HasFlag(args, "--proxy") {
+		return args
+	}
+	return append(args, "--proxy", c.proxy)
 }
 
 func withDefaultNoBar(args []string) []string {

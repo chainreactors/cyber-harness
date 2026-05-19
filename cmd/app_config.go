@@ -38,6 +38,7 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			CyberhubMode: option.CyberhubMode,
 			AIEnabled:    features.AIEnabled,
 			AITimeout:    defaultInt(DefaultVerifyTimeout, 120),
+			Proxy:        option.ScannerOptions.Proxy,
 		},
 		Tools: app.ToolConfig{
 			Enabled:       features.ToolsEnabled,
@@ -64,8 +65,8 @@ func providerConfig(option *Option) provider.ProviderConfig {
 	if option.Model != "" {
 		cfg.Model = option.Model
 	}
-	if option.Proxy != "" {
-		cfg.Proxy = option.Proxy
+	if option.LLMProxy != "" {
+		cfg.Proxy = option.LLMProxy
 	}
 	cfg.Timeout = 120
 	return cfg
@@ -99,9 +100,7 @@ func visionProviderConfig(option *Option) provider.ProviderConfig {
 	if option.VisionModel != "" {
 		cfg.Model = option.VisionModel
 	}
-	if option.VisionProxy != "" {
-		cfg.Proxy = option.VisionProxy
-	}
+	cfg.Proxy = resolveString(option.VisionProxy, option.LLMProxy)
 	cfg.Timeout = 120
 	return cfg
 }
@@ -111,13 +110,13 @@ func applyResolvedProviderOptions(option *Option, cfg provider.ProviderConfig) {
 	option.BaseURL = cfg.BaseURL
 	option.APIKey = cfg.APIKey
 	option.Model = cfg.Model
-	option.Proxy = cfg.Proxy
 }
 
 func applyDefaults(option *Option) {
 	option.CyberhubURL = resolveString(option.CyberhubURL, DefaultCyberhubURL)
 	option.CyberhubKey = resolveString(option.CyberhubKey, DefaultCyberhubKey)
 	option.CyberhubMode = resolveString(resolveString(option.CyberhubMode, DefaultCyberhubMode), "merge")
+	option.ScannerOptions.Proxy = resolveString(option.ScannerOptions.Proxy, DefaultScannerProxy)
 	option.IOAURL = resolveString(option.IOAURL, DefaultIOAURL)
 	option.IOANodeID = resolveString(option.IOANodeID, DefaultIOANodeID)
 	option.IOANodeName = resolveString(option.IOANodeName, DefaultIOANodeName)

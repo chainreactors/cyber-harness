@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/util"
+	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -24,6 +27,7 @@ type Command struct {
 	engine *sdkneutron.Engine
 	index  *association.FingerPOCIndex
 	logger telemetry.Logger
+	proxy  string
 }
 
 type neutronFlags struct {
@@ -88,6 +92,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 	return c
 }
 
+func (c *Command) WithProxy(proxy string) *Command {
+	c.proxy = proxy
+	return c
+}
+
 func (c *Command) Name() string { return "neutron" }
 
 func (c *Command) Usage() string {
@@ -144,6 +153,8 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		defer restoreDebug()
 		c.logger.Debugf("neutron debug enabled")
 	}
+	restoreProxy := c.installProxy()
+	defer restoreProxy()
 
 	if flags.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -488,6 +499,31 @@ func cleanTemplateTags(tmpl *templates.Template) []string {
 		}
 	}
 	return tags
+}
+
+// TestInstallProxy is exported for cross-package testing.
+func (c *Command) TestInstallProxy() func() {
+	return c.installProxy()
+}
+
+func (c *Command) installProxy() func() {
+	if c.proxy == "" {
+		return func() {}
+	}
+	proxyURL, err := url.Parse(c.proxy)
+	if err != nil {
+		c.logger.Warnf("neutron: invalid proxy URL %q: %v", c.proxy, err)
+		return func() {}
+	}
+	prevOption := neutronhttp.DefaultOption.Proxy
+	prevTransport := neutronhttp.DefaultTransport.Proxy
+	proxyFunc := http.ProxyURL(proxyURL)
+	neutronhttp.DefaultOption.Proxy = proxyFunc
+	neutronhttp.DefaultTransport.Proxy = proxyFunc
+	return func() {
+		neutronhttp.DefaultOption.Proxy = prevOption
+		neutronhttp.DefaultTransport.Proxy = prevTransport
+	}
 }
 
 func renderTemplateList(selected []*templates.Template, jsonOutput bool) string {

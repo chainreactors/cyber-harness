@@ -108,6 +108,53 @@ func (c *recordingCommand) lastArgs() []string {
 	return append([]string(nil), c.args[len(c.args)-1]...)
 }
 
+func TestBashProxyEnvInjection(t *testing.T) {
+	proxy := "socks5://127.0.0.1:1080"
+	bash := command.NewBashTool(t.TempDir(), 5, nil).WithScannerProxy(proxy)
+
+	out, err := bash.Execute(context.Background(), bashArgs("env"))
+	if err != nil {
+		t.Fatalf("bash env: %v", err)
+	}
+
+	for _, envVar := range []string{"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
+		expected := envVar + "=" + proxy
+		if !strings.Contains(out, expected) {
+			t.Errorf("env output missing %s, got:\n%s", expected, out)
+		}
+	}
+}
+
+func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
+	bash := command.NewBashTool(t.TempDir(), 5, nil)
+
+	out, err := bash.Execute(context.Background(), bashArgs("env"))
+	if err != nil {
+		t.Fatalf("bash env: %v", err)
+	}
+
+	if strings.Contains(out, "ALL_PROXY=socks5://") {
+		t.Errorf("should not inject proxy env when proxy is empty, got:\n%s", out)
+	}
+}
+
+func TestBashPseudoCommandBypassesProxyEnv(t *testing.T) {
+	registry := command.NewRegistry()
+	cmd := newRecordingCommand("gogo")
+	registry.Register(cmd, "")
+
+	proxy := "socks5://127.0.0.1:1080"
+	bash := command.NewBashTool(t.TempDir(), 5, registry).WithScannerProxy(proxy)
+
+	out, err := bash.Execute(context.Background(), bashArgs("gogo -i 127.0.0.1"))
+	if err != nil {
+		t.Fatalf("bash gogo: %v", err)
+	}
+	if !strings.Contains(out, "[gogo] ok") {
+		t.Fatalf("expected pseudo-command output, got: %s", out)
+	}
+}
+
 func bashArgs(cmd string) string {
 	data, err := json.Marshal(map[string]string{"command": cmd})
 	if err != nil {

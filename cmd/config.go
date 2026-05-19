@@ -83,11 +83,12 @@ func mergeOption(dst, src *Option) {
 	dst.BaseURL = resolveString(dst.BaseURL, src.BaseURL)
 	dst.APIKey = resolveString(dst.APIKey, src.APIKey)
 	dst.Model = resolveString(dst.Model, src.Model)
-	dst.Proxy = resolveString(dst.Proxy, src.Proxy)
+	dst.LLMProxy = resolveString(dst.LLMProxy, src.LLMProxy)
 	mergeVisionOptions(dst, src)
 	dst.CyberhubURL = resolveString(dst.CyberhubURL, src.CyberhubURL)
 	dst.CyberhubKey = resolveString(dst.CyberhubKey, src.CyberhubKey)
 	dst.CyberhubMode = resolveString(dst.CyberhubMode, src.CyberhubMode)
+	dst.ScannerOptions.Proxy = resolveString(dst.ScannerOptions.Proxy, src.ScannerOptions.Proxy)
 	dst.IOAURL = resolveString(dst.IOAURL, src.IOAURL)
 	dst.IOANodeName = resolveString(dst.IOANodeName, src.IOANodeName)
 	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {
@@ -131,7 +132,7 @@ llm:
   api_key: ""
   # 模型名称
   model: ""
-  # 访问 LLM API 的 HTTP proxy
+  # LLM API 代理（同时作用于 vision，除非单独设置 vision.proxy）
   proxy: ""
 
 # Vision 配置
@@ -151,6 +152,8 @@ cyberhub:
   key: ""
   # merge 或 override
   mode: ""
+  # 扫描器代理（gogo, spray, zombie, neutron），如 socks5://127.0.0.1:1080
+  proxy: ""
 
 # IOA 协作
 ioa:

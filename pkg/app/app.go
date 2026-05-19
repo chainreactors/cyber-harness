@@ -42,6 +42,7 @@ type ScannerConfig struct {
 	CyberhubMode string
 	AIEnabled    bool
 	AITimeout    int
+	Proxy        string
 }
 
 type ToolConfig struct {
@@ -217,6 +218,7 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 		SkillStore:   skillStore,
 		EngineSet:    engineSet,
 		VisionConfig: visionCfg,
+		ScannerProxy: scanCfg.Proxy,
 		ScanOpts:     scanOpts,
 		Logger:       logger,
 		Model:        model,

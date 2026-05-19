@@ -7,7 +7,8 @@ var (
 	DefaultBaseURL  = ""
 	DefaultAPIKey   = ""
 	DefaultModel    = "deepseek-v4-pro"
-	DefaultProxy    = ""
+
+	DefaultScannerProxy = ""
 
 	DefaultCyberhubURL  = ""
 	DefaultCyberhubKey  = ""
@@ -28,6 +29,5 @@ func defaultProviderConfig() provider.ProviderConfig {
 		BaseURL:  DefaultBaseURL,
 		APIKey:   DefaultAPIKey,
 		Model:    DefaultModel,
-		Proxy:    DefaultProxy,
 	}
 }

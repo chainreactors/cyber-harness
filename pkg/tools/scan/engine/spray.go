@@ -29,6 +29,7 @@ type SprayCheckOptions struct {
 	CrawlDepth    int
 	Threads       int
 	Timeout       int
+	Proxy         string
 	Debug         bool
 	OnStats       func(sdkkit.Stats)
 }
@@ -94,6 +95,9 @@ func buildSprayOption(opts SprayCheckOptions) *spraycore.Option {
 	coreOpt.Debug = opts.Debug
 	if opts.Debug {
 		coreOpt.Quiet = false
+	}
+	if opts.Proxy != "" {
+		coreOpt.Proxies = []string{opts.Proxy}
 	}
 	return coreOpt
 }

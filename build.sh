@@ -154,7 +154,7 @@ CFG_PROVIDER=$(resolve "$OPT_PROVIDER" "$(yaml_val "$CONFIG_FILE" llm provider)"
 CFG_BASE_URL=$(resolve "$OPT_BASE_URL" "$(yaml_val "$CONFIG_FILE" llm base_url)")
 CFG_API_KEY=$(resolve "$OPT_API_KEY" "$(yaml_val "$CONFIG_FILE" llm api_key)")
 CFG_MODEL=$(resolve "$OPT_MODEL" "$(yaml_val "$CONFIG_FILE" llm model)")
-CFG_PROXY=$(resolve "$OPT_PROXY" "$(yaml_val "$CONFIG_FILE" llm proxy)")
+CFG_SCANNER_PROXY=$(resolve "$OPT_PROXY" "$(yaml_val "$CONFIG_FILE" cyberhub proxy)")
 
 CFG_CYBERHUB_URL=$(resolve "$OPT_CYBERHUB_URL" "$(yaml_val "$CONFIG_FILE" cyberhub url)")
 CFG_CYBERHUB_KEY=$(resolve "$OPT_CYBERHUB_KEY" "$(yaml_val "$CONFIG_FILE" cyberhub key)")
@@ -194,7 +194,7 @@ add_ldflag DefaultProvider     "$CFG_PROVIDER"
 add_ldflag DefaultBaseURL      "$CFG_BASE_URL"
 add_ldflag DefaultAPIKey       "$CFG_API_KEY"
 add_ldflag DefaultModel        "$CFG_MODEL"
-add_ldflag DefaultProxy        "$CFG_PROXY"
+add_ldflag DefaultScannerProxy  "$CFG_SCANNER_PROXY"
 add_ldflag DefaultCyberhubURL  "$CFG_CYBERHUB_URL"
 add_ldflag DefaultCyberhubKey  "$CFG_CYBERHUB_KEY"
 add_ldflag DefaultCyberhubMode "$CFG_CYBERHUB_MODE"

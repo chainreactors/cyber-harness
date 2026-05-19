@@ -33,7 +33,7 @@ type LLMOptions struct {
 	BaseURL  string `long:"base-url" config:"base_url" description:"LLM API base URL"`
 	APIKey   string `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
 	Model    string `long:"model" config:"model" description:"LLM model name"`
-	Proxy    string `long:"proxy" config:"proxy" description:"HTTP proxy for LLM API"`
+	LLMProxy string `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests (also applies to vision unless --vision-proxy is set)"`
 	AI       bool   `long:"ai" description:"Enable all AI skills: verify findings, sniper fingerprint analysis, and summarize results"`
 }
 
@@ -50,6 +50,7 @@ type ScannerOptions struct {
 	CyberhubURL  string `long:"cyberhub-url" config:"url" description:"Cyberhub server URL for loading fingers/templates"`
 	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
 	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
+	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools (gogo, spray, zombie, neutron), e.g. socks5://127.0.0.1:1080"`
 }
 
 type AgentOptions struct {
@@ -313,7 +314,7 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.BaseURL = resolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = resolveString(manual.APIKey, option.APIKey)
 	option.Model = resolveString(manual.Model, option.Model)
-	option.Proxy = resolveString(manual.Proxy, option.Proxy)
+	option.LLMProxy = resolveString(manual.LLMProxy, option.LLMProxy)
 	mergeVisionOptions(option, &manual)
 	if manual.AI {
 		option.AI = true
@@ -321,6 +322,7 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.CyberhubURL = resolveString(manual.CyberhubURL, option.CyberhubURL)
 	option.CyberhubKey = resolveString(manual.CyberhubKey, option.CyberhubKey)
 	option.CyberhubMode = resolveString(manual.CyberhubMode, option.CyberhubMode)
+	option.ScannerOptions.Proxy = resolveString(manual.ScannerOptions.Proxy, option.ScannerOptions.Proxy)
 	if manual.NoColor {
 		option.NoColor = true
 	}
@@ -447,7 +449,8 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *Option, v string) { o.APIKey = v }},
 	{names: []string{"--model"}, arity: 1, apply: func(o *Option, v string) { o.Model = v }},
-	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.Proxy = v }},
+	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.ScannerOptions.Proxy = v }},
+	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *Option, v string) { o.LLMProxy = v }},
 	{names: []string{"--vision"}, arity: 0, apply: func(o *Option, v string) {
 		if v != "" {
 			o.Vision = truthyFlagValue(v)
