@@ -3,15 +3,16 @@ module github.com/chainreactors/aiscan
 go 1.24.0
 
 require (
-	github.com/chainreactors/fingers v1.2.1-0.20260508113754-7e42ea56a879
+	github.com/chainreactors/fingers v1.2.1-0.20260520032008-600244212842
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260508165113-815356852650
 	github.com/chainreactors/ioa v0.0.0-20260513035847-c8c38592b651
 	github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c
 	github.com/chainreactors/neutron v0.0.0-20260416083914-f95401f2b79c
 	github.com/chainreactors/parsers v0.0.0-20260516032912-27875cfb3372
+	github.com/chainreactors/proxyclient v1.0.4-0.20260218115902-74a84a4535b0
 	github.com/chainreactors/sdk v0.1.1-0.20260516033200-1c5d96f7cfb6
 	github.com/chainreactors/spray v1.2.6-0.20260516033251-c7466ebfc406
-	github.com/chainreactors/utils v0.0.0-20260507101628-fd69d955ae21
+	github.com/chainreactors/utils v0.0.0-20260520013422-17d44b97430a
 	github.com/chainreactors/zombie v1.2.3-0.20260509062300-b10f008fb8a5
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/go-rod/rod v0.116.2
@@ -43,7 +44,6 @@ require (
 	github.com/carapace-sh/carapace v1.7.1 // indirect
 	github.com/carapace-sh/carapace-shlex v1.0.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
-	github.com/chainreactors/proxyclient v1.0.4-0.20260218115902-74a84a4535b0 // indirect
 	github.com/chainreactors/words v0.0.0-20241002061906-25d8893158d9 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -142,3 +142,5 @@ replace (
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260422184128-e856ed004d32
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260422184128-e856ed004d32
 )
+
+replace github.com/chainreactors/ioa => /mnt/chainreactors/internet-of-agent
