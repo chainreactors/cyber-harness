@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,12 +16,11 @@ import (
 	"github.com/chainreactors/aiscan/skills"
 )
 
-const autoBackgroundThreshold = 15 * time.Second
 
 type SubAgentConfig struct {
-	Base        agent.Config
-	ParentInbox inbox.Inbox
-	SkillStore  *skills.Store
+	ParentConfig agent.Config
+	ParentInbox  inbox.Inbox
+	SkillStore   *skills.Store
 }
 
 type subAgentInfo struct {
@@ -86,6 +86,10 @@ func (t *SubAgentTool) Definition() provider.ToolDefinition {
 						"type":        "string",
 						"description": "Message to send (action=message, requires name).",
 					},
+					"timeout": map[string]any{
+						"type":        "string",
+						"description": "Optional timeout for sync mode (e.g. '30s', '2m'). Returns error on timeout.",
+					},
 				},
 				"required": []string{"prompt"},
 			},
@@ -109,6 +113,7 @@ func (t *SubAgentTool) execute(ctx context.Context, arguments string, toolCtx *c
 		Type    string `json:"type"`
 		Name    string `json:"name"`
 		Message string `json:"message"`
+		Timeout string `json:"timeout"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("parse arguments: %w", err)
@@ -122,13 +127,13 @@ func (t *SubAgentTool) execute(ctx context.Context, arguments string, toolCtx *c
 	case "message":
 		return t.sendMessage(args.Name, args.Message)
 	case "", "create":
-		return t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, toolCtx)
+		return t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout, toolCtx)
 	default:
 		return "", fmt.Errorf("unknown action: %s", args.Action)
 	}
 }
 
-func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode string, toolCtx *command.ToolContext) (string, error) {
+func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode, timeout string, toolCtx *command.ToolContext) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
@@ -161,7 +166,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode 
 		}
 	}
 
-	cfg := t.cfg.Base
+	cfg := t.cfg.ParentConfig.DeriveChild()
 	if skill != nil {
 		prompt = skills.FormatInvocation(*skill, prompt)
 		if skill.AgentModel != "" {
@@ -171,7 +176,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode 
 
 	switch mode {
 	case "sync":
-		return t.runSync(ctx, cfg, prompt, name, typeName, toolCtx)
+		return t.runSync(ctx, cfg, prompt, name, typeName, toolCtx, timeout)
 	case "fork":
 		return t.runFork(ctx, cfg, prompt, name, typeName, toolCtx)
 	default: // async
@@ -179,42 +184,31 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode 
 	}
 }
 
-func (t *SubAgentTool) runSync(ctx context.Context, cfg agent.Config, prompt, name, typeName string, toolCtx *command.ToolContext) (string, error) {
-	resultCh := make(chan *agent.Result, 1)
-	errCh := make(chan error, 1)
-
+func (t *SubAgentTool) runSync(ctx context.Context, cfg agent.Config, prompt, name, typeName string, toolCtx *command.ToolContext, timeoutStr string) (string, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
-		r, err := cfg.Run(childCtx, prompt)
-		resultCh <- r
-		errCh <- err
-	}()
-
-	select {
-	case r := <-resultCh:
-		err := <-errCh
+	if timeoutStr != "" {
+		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
-			return fmt.Sprintf("subagent %q failed: %s", name, err), nil
+			return "", fmt.Errorf("invalid timeout %q: %w", timeoutStr, err)
 		}
-		output := ""
-		if r != nil {
-			output = r.Output
-		}
-		return fmt.Sprintf("<subagent_result name=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, typeName, output), nil
-
-	case <-time.After(autoBackgroundThreshold):
-		childIb := inbox.NewBuffered(16)
-		t.track(name, typeName, "async", cancel, childIb)
-		go func() {
-			defer t.untrack(name)
-			r := <-resultCh
-			err := <-errCh
-			t.pushCompletion(name, typeName, r, err)
-		}()
-		return fmt.Sprintf("Subagent %q auto-backgrounded (exceeded %s). Will notify on completion.", name, autoBackgroundThreshold), nil
+		childCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
+
+	r, err := cfg.Run(childCtx, prompt)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Sprintf("subagent %q timed out after %s", name, timeoutStr), nil
+		}
+		return fmt.Sprintf("subagent %q failed: %s", name, err), nil
+	}
+	output := ""
+	if r != nil {
+		output = r.Output
+	}
+	return fmt.Sprintf("<subagent_result name=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, typeName, output), nil
 }
 
 func (t *SubAgentTool) runAsync(ctx context.Context, cfg agent.Config, prompt, name, typeName string) (string, error) {
@@ -236,7 +230,7 @@ func (t *SubAgentTool) runAsync(ctx context.Context, cfg agent.Config, prompt, n
 func (t *SubAgentTool) runFork(ctx context.Context, cfg agent.Config, directive, name, typeName string, toolCtx *command.ToolContext) (string, error) {
 	var parentMessages []provider.ChatMessage
 	if toolCtx != nil {
-		parentMessages = stripPendingToolCalls(toolCtx.Messages)
+		parentMessages = truncateToLastCompleteBoundary(toolCtx.Messages)
 		if toolCtx.SystemPrompt != "" {
 			cfg.SystemPrompt = toolCtx.SystemPrompt
 		}
@@ -276,7 +270,9 @@ func (t *SubAgentTool) pushCompletion(name, typeName string, r *agent.Result, er
 	msg := inbox.NewMessage(inbox.OriginSystem, "user",
 		fmt.Sprintf("<subagent_completion name=%q type=%q status=%q>\n%s\n</subagent_completion>", name, typeName, status, content))
 	msg.Meta = map[string]any{"subagent": name, "type": typeName, "status": status}
-	t.cfg.ParentInbox.Push(msg)
+	if err := t.cfg.ParentInbox.Push(msg); err != nil {
+		t.cfg.ParentConfig.Logger.Warnf("inbox push subagent completion %s: %s", name, err)
+	}
 }
 
 func (t *SubAgentTool) sendMessage(name, message string) (string, error) {
@@ -293,8 +289,8 @@ func (t *SubAgentTool) sendMessage(name, message string) (string, error) {
 		return "", fmt.Errorf("no running subagent named %q", name)
 	}
 	msg := inbox.NewMessage(inbox.OriginUser, "user", message)
-	if !info.Inbox.Push(msg) {
-		return fmt.Sprintf("Subagent %q inbox full, message dropped.", name), nil
+	if err := info.Inbox.Push(msg); err != nil {
+		return fmt.Sprintf("Subagent %q inbox: %s, message dropped.", name, err), nil
 	}
 	return fmt.Sprintf("Message sent to subagent %q.", name), nil
 }
@@ -364,17 +360,18 @@ func (t *SubAgentTool) uniqueName(base string) string {
 	}
 }
 
-func stripPendingToolCalls(messages []provider.ChatMessage) []provider.ChatMessage {
+func truncateToLastCompleteBoundary(messages []provider.ChatMessage) []provider.ChatMessage {
 	out := append([]provider.ChatMessage(nil), messages...)
-	for len(out) > 0 {
-		last := out[len(out)-1]
-		if last.Role == "assistant" && len(last.ToolCalls) > 0 {
-			out = out[:len(out)-1]
-			continue
+	for i := len(out) - 1; i >= 0; i-- {
+		msg := out[i]
+		if msg.Role == "tool" || msg.Role == "user" {
+			return out[:i+1]
 		}
-		break
+		if msg.Role == "assistant" && len(msg.ToolCalls) == 0 {
+			return out[:i+1]
+		}
 	}
-	return out
+	return nil
 }
 
 func labelFromPrompt(prompt string) string {

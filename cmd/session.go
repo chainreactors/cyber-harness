@@ -37,21 +37,11 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 				"task_name": ev.TaskInfo.Name,
 				"exit_code": ev.TaskInfo.ExitCode,
 			}
-			ib.Push(msg)
+			if err := ib.Push(msg); err != nil {
+				cfg.Logger.Warnf("inbox push task completion: %s", err)
+			}
 		})
 	}
-
-	subAgentTool := NewSubAgentTool(SubAgentConfig{
-		Base: agent.Config{
-			Provider: cfg.Application.Provider,
-			Tools:    cfg.Application.Commands,
-			Model:    cfg.Option.Model,
-			Logger:   cfg.Logger,
-		},
-		ParentInbox: ib,
-		SkillStore:  cfg.Application.Skills,
-	})
-	cfg.Application.Commands.RegisterTool(subAgentTool)
 
 	agentCfg := agent.Config{
 		Provider: cfg.Application.Provider,
@@ -59,15 +49,23 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 		Model:    cfg.Option.Model,
 		Logger:   cfg.Logger,
 		Inbox:    ib,
-		KeepAlive: func() bool {
-			if subAgentTool.RunningCount() > 0 {
-				return true
-			}
-			if taskMgr == nil {
-				return false
-			}
-			return taskMgr.RunningCount() > 0
-		},
+	}
+
+	subAgentTool := NewSubAgentTool(SubAgentConfig{
+		ParentConfig: agentCfg,
+		ParentInbox:  ib,
+		SkillStore:   cfg.Application.Skills,
+	})
+	cfg.Application.Commands.RegisterTool(subAgentTool)
+
+	agentCfg.KeepAlive = func() bool {
+		if subAgentTool.RunningCount() > 0 {
+			return true
+		}
+		if taskMgr == nil {
+			return false
+		}
+		return taskMgr.RunningCount() > 0
 	}
 	if cfg.Events != nil {
 		agentCfg.Emit = cfg.Events.HandleEvent

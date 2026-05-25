@@ -1,6 +1,10 @@
 package provider
 
-import "github.com/chainreactors/ioa"
+import (
+	"fmt"
+
+	"github.com/chainreactors/ioa"
+)
 
 type ChatMessage struct {
 	Role             string     `json:"role"`
@@ -84,9 +88,28 @@ type Usage struct {
 }
 
 type APIError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
+	Message    string `json:"message"`
+	Type       string `json:"type"`
+	Code       string `json:"code"`
+	StatusCode int    `json:"-"`
+}
+
+func (e *APIError) Error() string {
+	if e.StatusCode > 0 {
+		return fmt.Sprintf("API error (%d): %s", e.StatusCode, e.Message)
+	}
+	if e.Type != "" {
+		return fmt.Sprintf("API error [%s]: %s", e.Type, e.Message)
+	}
+	return fmt.Sprintf("API error: %s", e.Message)
+}
+
+func (e *APIError) IsRetryable() bool {
+	switch e.StatusCode {
+	case 429, 500, 502, 503, 529:
+		return true
+	}
+	return false
 }
 
 type ChatCompletionStreamEvent struct {

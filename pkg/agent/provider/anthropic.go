@@ -104,7 +104,7 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatComplet
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 	}
 
 	result, err := parseAnthropicResponse(respBody)
@@ -113,7 +113,8 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatComplet
 	}
 
 	if result.Error != nil {
-		return nil, fmt.Errorf("API error: [%s] %s", result.Error.Type, result.Error.Message)
+		result.Error.StatusCode = resp.StatusCode
+		return nil, result.Error
 	}
 
 	return result, nil
@@ -154,7 +155,7 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 		if err != nil {
 			return nil, wrapReadError(ctx, timedOut, timeout, "read response", err)
 		}
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 	}
 
 	stallTimeout := anthropicTimeout(p.config.Timeout)

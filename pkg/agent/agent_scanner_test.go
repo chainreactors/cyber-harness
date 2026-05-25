@@ -50,10 +50,10 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 		Tools:       registry,
 		ScannerDocs: registry.UsageDocs(),
 	})
-	a := New(llm, registry,
-		WithSystemPrompt(systemPrompt),
-		WithModel("test-model"),
-	)
+	a := New(llm, registry, Config{
+		SystemPrompt: systemPrompt,
+		Model:        "test-model",
+	})
 
 	result, err := a.Prompt(context.Background(), "scan 127.0.0.1 and summarize findings")
 	if err != nil {
@@ -97,16 +97,17 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 	})
 	task := skills.ExpandCommand("/skill:scan scan 127.0.0.1", store)
 
-	result, err := Run(context.Background(), task, registry,
-		WithProvider(llm),
-		WithSystemPrompt(systemPrompt),
-		WithModel("test-model"),
-	)
+	result, err := (Config{
+		Provider:     llm,
+		Tools:        registry,
+		SystemPrompt: systemPrompt,
+		Model:        "test-model",
+	}).Run(context.Background(), task)
 	if err != nil {
 		t.Fatalf("agent.Run() error = %v", err)
 	}
-	if result != "done" {
-		t.Fatalf("result = %q", result)
+	if result.Output != "done" {
+		t.Fatalf("result = %q", result.Output)
 	}
 	requests := llm.requestsSnapshot()
 	if len(requests) != 1 {

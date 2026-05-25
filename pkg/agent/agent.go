@@ -24,8 +24,9 @@ type Agent struct {
 	running   bool
 }
 
-func New(p provider.Provider, tools *command.CommandRegistry, opts ...Option) *Agent {
-	cfg := applyOpts(Config{Provider: p, Tools: tools}, opts)
+func New(p provider.Provider, tools *command.CommandRegistry, cfg Config) *Agent {
+	cfg.Provider = p
+	cfg.Tools = tools
 	return cfg.NewAgent()
 }
 
@@ -84,12 +85,15 @@ func (a *Agent) Prompt(ctx context.Context, prompt string) (*Result, error) {
 	defer a.finishRun()
 
 	cfg := a.runtimeConfig()
+	cfg.Messages = a.messagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(8)
 	}
-	cfg.Inbox.Push(inbox.NewUserMessage(prompt))
+	if err := cfg.Inbox.Push(inbox.NewUserMessage(prompt)); err != nil {
+		return nil, fmt.Errorf("push prompt: %w", err)
+	}
 
-	result, runErr := runLoop(runCtx, a.contextSnapshotLocked(), cfg)
+	result, runErr := runLoop(runCtx, cfg)
 	a.finish(result, runErr)
 	return result, runErr
 }
@@ -106,7 +110,9 @@ func (a *Agent) Continue(ctx context.Context) (*Result, error) {
 	defer cancel()
 	defer a.finishRun()
 
-	result, runErr := runLoop(runCtx, a.contextSnapshotLocked(), a.runtimeConfig())
+	continueCfg := a.runtimeConfig()
+	continueCfg.Messages = a.messagesSnapshot()
+	result, runErr := runLoop(runCtx, continueCfg)
 	a.finish(result, runErr)
 	return result, runErr
 }
@@ -164,14 +170,10 @@ func (a *Agent) finishRun() {
 	}
 }
 
-func (a *Agent) contextSnapshotLocked() Context {
+func (a *Agent) messagesSnapshot() []provider.ChatMessage {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return Context{
-		SystemPrompt: a.state.SystemPrompt,
-		Messages:     append([]provider.ChatMessage(nil), a.state.Messages...),
-		Tools:        a.tools,
-	}
+	return append([]provider.ChatMessage(nil), a.state.Messages...)
 }
 
 func (a *Agent) runtimeConfig() Config {
@@ -219,7 +221,6 @@ func (a *Agent) applyEvent(event Event) {
 		if event.Message.Role == "assistant" {
 			a.state.StreamingMessage = nil
 		}
-		a.state.Messages = append(a.state.Messages, event.Message)
 	case EventToolExecutionStart:
 		a.state.PendingToolCalls[event.ToolCallID] = struct{}{}
 	case EventToolExecutionEnd:

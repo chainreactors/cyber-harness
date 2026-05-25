@@ -119,7 +119,7 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 	}
 
 	var result ChatCompletionResponse
@@ -128,7 +128,8 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 	}
 
 	if result.Error != nil {
-		return nil, fmt.Errorf("API error: [%s] %s", result.Error.Type, result.Error.Message)
+		result.Error.StatusCode = resp.StatusCode
+		return nil, result.Error
 	}
 
 	return &result, nil
@@ -172,7 +173,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 		if err != nil {
 			return nil, wrapReadError(ctx, timedOut, openAITimeout(p.config.Timeout), "read response", err)
 		}
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 	}
 
 	// Stall detection: if no SSE data arrives within stallTimeout, cancel

@@ -23,16 +23,17 @@ func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 		},
 	}
 
-	result, err := Run(context.Background(), "hello", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-	)
+	result, err := (Config{
+		Provider:     llm,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+	}).Run(context.Background(), "hello")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "done" {
-		t.Fatalf("result = %q, want done", result)
+	if result.Output != "done" {
+		t.Fatalf("result = %q, want done", result.Output)
 	}
 	requests := llm.requestsSnapshot()
 	if len(requests) != 1 {
@@ -105,12 +106,14 @@ func TestRunExecutesToolLoop(t *testing.T) {
 		events = append(events, event.Type)
 		return nil
 	}
-	result, err := RunWithEvents(context.Background(), "use tool", tools, emit,
-		WithProvider(llm),
-		WithModel("test"),
-	)
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Emit:     emit,
+	}).Run(context.Background(), "use tool")
 	if err != nil {
-		t.Fatalf("RunWithEvents() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Output != "final" {
 		t.Fatalf("output = %q, want final", result.Output)
@@ -151,12 +154,17 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	}
 
 	var events []EventType
-	result, err := RunWithEvents(context.Background(), "use tool", tools, func(_ context.Context, event Event) error {
-		events = append(events, event.Type)
-		return nil
-	}, WithProvider(llm), WithModel("test"))
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Emit: func(_ context.Context, event Event) error {
+			events = append(events, event.Type)
+			return nil
+		},
+	}).Run(context.Background(), "use tool")
 	if err != nil {
-		t.Fatalf("RunWithEvents() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Turns != 2 {
 		t.Fatalf("turns = %d, want 2", result.Turns)
@@ -188,7 +196,7 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 	tools := command.NewRegistry()
 	llm := &scriptedProvider{}
-	a := New(llm, tools, WithModel("test"))
+	a := New(llm, tools, Config{Model: "test"})
 
 	if _, err := a.Continue(context.Background()); err == nil || !strings.Contains(err.Error(), "no messages") {
 		t.Fatalf("Continue() error = %v, want no messages", err)
@@ -208,7 +216,7 @@ func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
 			chatResponse(provider.NewTextMessage("assistant", "second")),
 		},
 	}
-	a := New(llm, tools, WithModel("test"))
+	a := New(llm, tools, Config{Model: "test"})
 	if _, err := a.Prompt(context.Background(), "one"); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
@@ -234,7 +242,7 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 			chatResponse(provider.NewTextMessage("assistant", "next")),
 		},
 	}
-	ag := New(llm, tools, WithModel("test"), WithSystemPrompt(""))
+	ag := New(llm, tools, Config{Model: "test"})
 	ag.state.Messages = []provider.ChatMessage{provider.NewTextMessage("user", "base")}
 	result, err := ag.Prompt(context.Background(), "prompt")
 	if err != nil {
@@ -256,15 +264,15 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 			chatResponse(provider.NewTextMessage("assistant", "two")),
 		},
 	}
-	a := New(llm, tools,
-		WithModel("test"),
-		WithTransformContext(func(messages []provider.ChatMessage) []provider.ChatMessage {
+	a := New(llm, tools, Config{
+		Model: "test",
+		TransformContext: func(messages []provider.ChatMessage) []provider.ChatMessage {
 			if len(messages) <= 1 {
 				return messages
 			}
 			return messages[len(messages)-1:]
-		}),
-	)
+		},
+	})
 	if _, err := a.Prompt(context.Background(), "one"); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
@@ -283,7 +291,7 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	tools := command.NewRegistry()
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
-	a := New(llm, tools, WithModel("test"))
+	a := New(llm, tools, Config{Model: "test"})
 
 	var events []Event
 	a.Subscribe(func(_ context.Context, event Event) error {
@@ -346,16 +354,17 @@ func TestShouldStopAfterTurnStopsBeforeNextModelCall(t *testing.T) {
 	}
 
 	var sawToolResults bool
-	result, err := RunWithEvents(context.Background(), "use tool", tools, nil,
-		WithProvider(llm),
-		WithModel("test"),
-		WithShouldStopAfterTurn(func(_ context.Context, ctx ShouldStopAfterTurnContext) (bool, error) {
-			sawToolResults = len(ctx.ToolResults) == 1 && hasToolMessage(ctx.Context.Messages, "call-1", "tool output")
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		ShouldStopAfterTurn: func(_ context.Context, ctx ShouldStopAfterTurnContext) (bool, error) {
+			sawToolResults = len(ctx.ToolResults) == 1 && hasToolMessage(ctx.Messages, "call-1", "tool output")
 			return true, nil
-		}),
-	)
+		},
+	}).Run(context.Background(), "use tool")
 	if err != nil {
-		t.Fatalf("RunWithEvents() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
 	if !sawToolResults {
 		t.Fatal("shouldStopAfterTurn did not receive completed turn context")
@@ -379,14 +388,20 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		},
 	}
 	var updates int
-	result, err := RunWithEvents(context.Background(), "stream", tools, func(_ context.Context, event Event) error {
-		if event.Type == EventMessageUpdate {
-			updates++
-		}
-		return nil
-	}, WithProvider(llm), WithModel("test"), WithStream(true))
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Stream:   true,
+		Emit: func(_ context.Context, event Event) error {
+			if event.Type == EventMessageUpdate {
+				updates++
+			}
+			return nil
+		},
+	}).Run(context.Background(), "stream")
 	if err != nil {
-		t.Fatalf("RunWithEvents() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Output != "hello" {
 		t.Fatalf("output = %q, want hello", result.Output)
@@ -406,7 +421,7 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 			{Done: true},
 		},
 	}
-	a := New(llm, tools, WithModel("test"), WithStream(true))
+	a := New(llm, tools, Config{Model: "test", Stream: true})
 
 	sawStreaming := false
 	a.Subscribe(func(_ context.Context, event Event) error {
@@ -436,7 +451,7 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
 	tools := command.NewRegistry()
 	llm := &blockingProvider{started: make(chan struct{}), release: make(chan struct{})}
-	a := New(llm, tools, WithModel("test"))
+	a := New(llm, tools, Config{Model: "test"})
 
 	done := make(chan error, 1)
 	go func() {
@@ -468,7 +483,7 @@ func TestWaitForIdleIncludesAgentEndListeners(t *testing.T) {
 			chatResponse(provider.NewTextMessage("assistant", "done")),
 		},
 	}
-	a := New(llm, tools, WithModel("test"))
+	a := New(llm, tools, Config{Model: "test"})
 	releaseListener := make(chan struct{})
 	listenerStarted := make(chan struct{})
 	a.Subscribe(func(_ context.Context, event Event) error {
@@ -544,16 +559,17 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 			},
 		},
 	}
-	result, err := Run(context.Background(), "stream tool", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithStream(true),
-	)
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Stream:   true,
+	}).Run(context.Background(), "stream tool")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "final" {
-		t.Fatalf("result = %q, want final", result)
+	if result.Output != "final" {
+		t.Fatalf("result = %q, want final", result.Output)
 	}
 	if got := echo.callsSnapshot(); !reflect.DeepEqual(got, []string{`{"value":"x"}`}) {
 		t.Fatalf("tool calls = %#v", got)
@@ -582,18 +598,19 @@ func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 	rewritten := "rewritten result"
 	isError := false
 
-	result, err := RunWithEvents(context.Background(), "use tool", tools, nil,
-		WithProvider(llm),
-		WithModel("test"),
-		WithBeforeToolCall(func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
 			return &BeforeToolCallResult{Block: true, Reason: "blocked by test"}, nil
-		}),
-		WithAfterToolCall(func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
-			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Terminate: true}, nil
-		}),
-	)
+		},
+		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
+			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Flow: ToolFlowTerminate}, nil
+		},
+	}).Run(context.Background(), "use tool")
 	if err != nil {
-		t.Fatalf("RunWithEvents() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
 	if got := echo.callsSnapshot(); len(got) != 0 {
 		t.Fatalf("tool calls = %#v, want blocked", got)
@@ -795,16 +812,17 @@ func TestRetryOnTransientError(t *testing.T) {
 		},
 	}
 
-	result, err := Run(context.Background(), "hello", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithMaxRetries(2),
-	)
+	result, err := (Config{
+		Provider:   llm,
+		Tools:      tools,
+		Model:      "test",
+		MaxRetries: 2,
+	}).Run(context.Background(), "hello")
 	if err != nil {
 		t.Fatalf("Run() error = %v, want success after retry", err)
 	}
-	if result != "recovered" {
-		t.Fatalf("result = %q, want recovered", result)
+	if result.Output != "recovered" {
+		t.Fatalf("result = %q, want recovered", result.Output)
 	}
 	if callCount != 2 {
 		t.Fatalf("call count = %d, want 2", callCount)
@@ -821,11 +839,12 @@ func TestNoRetryOnAuthError(t *testing.T) {
 		},
 	}
 
-	_, err := Run(context.Background(), "hello", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithMaxRetries(3),
-	)
+	_, err := (Config{
+		Provider:   llm,
+		Tools:      tools,
+		Model:      "test",
+		MaxRetries: 3,
+	}).Run(context.Background(), "hello")
 	if err == nil {
 		t.Fatal("Run() error = nil, want auth error")
 	}
@@ -844,11 +863,12 @@ func TestRetryExhaustedReturnsLastError(t *testing.T) {
 		},
 	}
 
-	_, err := Run(context.Background(), "hello", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithMaxRetries(2),
-	)
+	_, err := (Config{
+		Provider:   llm,
+		Tools:      tools,
+		Model:      "test",
+		MaxRetries: 2,
+	}).Run(context.Background(), "hello")
 	if err == nil {
 		t.Fatal("Run() error = nil, want error after retries exhausted")
 	}
@@ -903,12 +923,18 @@ func TestTokenBudgetWarning(t *testing.T) {
 	}
 
 	var sawWarning bool
-	_, err := RunWithEvents(context.Background(), "hello", tools, func(_ context.Context, event Event) error {
-		if event.Type == EventTokenBudgetWarning {
-			sawWarning = true
-		}
-		return nil
-	}, WithProvider(llm), WithModel("test"), WithTokenBudget(1000))
+	_, err := (Config{
+		Provider:    llm,
+		Tools:       tools,
+		Model:       "test",
+		TokenBudget: 1000,
+		Emit: func(_ context.Context, event Event) error {
+			if event.Type == EventTokenBudgetWarning {
+				sawWarning = true
+			}
+			return nil
+		},
+	}).Run(context.Background(), "hello")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -944,8 +970,12 @@ func TestTokenBudgetExceeded(t *testing.T) {
 	}
 	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
 
-	result, err := RunWithEvents(context.Background(), "hello", tools, nil,
-		WithProvider(llm), WithModel("test"), WithTokenBudget(1000))
+	result, err := (Config{
+		Provider:    llm,
+		Tools:       tools,
+		Model:       "test",
+		TokenBudget: 1000,
+	}).Run(context.Background(), "hello")
 	if err == nil {
 		t.Fatal("Run() error = nil, want budget exceeded error")
 	}
@@ -958,12 +988,12 @@ func TestTokenBudgetExceeded(t *testing.T) {
 }
 
 func TestTruncateResultIncludesSize(t *testing.T) {
-	large := strings.Repeat("x", maxResultSize+100)
+	large := strings.Repeat("x", DefaultMaxResultSize+100)
 	truncated := truncateResult(large)
 	if !strings.Contains(truncated, "truncated:") {
 		t.Fatalf("truncated result missing size info: %s", truncated[len(truncated)-100:])
 	}
-	if !strings.Contains(truncated, fmt.Sprintf("%d of %d bytes", maxResultSize, len(large))) {
+	if !strings.Contains(truncated, fmt.Sprintf("%d of %d bytes", DefaultMaxResultSize, len(large))) {
 		t.Fatalf("truncated result missing byte counts: %s", truncated[len(truncated)-120:])
 	}
 }
@@ -979,8 +1009,11 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 		},
 	}
 
-	result, err := RunWithEvents(context.Background(), "hello", tools, nil,
-		WithProvider(llm), WithModel("test"))
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+	}).Run(context.Background(), "hello")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}

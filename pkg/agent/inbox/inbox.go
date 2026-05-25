@@ -2,25 +2,44 @@ package inbox
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 )
 
+var (
+	ErrInboxClosed = errors.New("inbox closed")
+	ErrInboxFull   = errors.New("inbox full")
+)
+
 type Inbox interface {
-	Push(msg Message) bool
+	Push(msg Message) error
 	Drain() []Message
 	Close()
 	Closed() bool
 	Len() int
 	Wait(ctx context.Context) bool
+	RegisterProducer(name string) *ProducerHandle
+	ActiveProducers() int
+}
+
+type ProducerHandle struct {
+	inbox *Buffered
+	name  string
+	once  sync.Once
+}
+
+func (h *ProducerHandle) Done() {
+	h.once.Do(func() { h.inbox.removeProducer(h.name) })
 }
 
 type Buffered struct {
-	mu       sync.Mutex
-	buf      []Message
-	capacity int
-	closed   bool
-	notify   chan struct{}
+	mu        sync.Mutex
+	buf       []Message
+	capacity  int
+	closed    bool
+	notify    chan struct{}
+	producers map[string]struct{}
 }
 
 func NewBuffered(capacity int) *Buffered {
@@ -28,24 +47,49 @@ func NewBuffered(capacity int) *Buffered {
 		capacity = 1
 	}
 	return &Buffered{
-		buf:      make([]Message, 0, capacity),
-		capacity: capacity,
-		notify:   make(chan struct{}),
+		buf:       make([]Message, 0, capacity),
+		capacity:  capacity,
+		notify:    make(chan struct{}),
+		producers: make(map[string]struct{}),
 	}
 }
 
-func (b *Buffered) Push(msg Message) bool {
+func (b *Buffered) Push(msg Message) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed || len(b.buf) >= b.capacity {
-		return false
+	if b.closed {
+		return ErrInboxClosed
+	}
+	if len(b.buf) >= b.capacity {
+		return ErrInboxFull
 	}
 	wasEmpty := len(b.buf) == 0
 	b.buf = append(b.buf, msg)
 	if wasEmpty {
 		b.wakeLocked()
 	}
-	return true
+	return nil
+}
+
+func (b *Buffered) RegisterProducer(name string) *ProducerHandle {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.producers[name] = struct{}{}
+	b.wakeLocked()
+	return &ProducerHandle{inbox: b, name: name}
+}
+
+func (b *Buffered) removeProducer(name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.producers, name)
+	b.wakeLocked()
+}
+
+func (b *Buffered) ActiveProducers() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.producers)
 }
 
 func (b *Buffered) Drain() []Message {

@@ -29,7 +29,14 @@ func isRetryableError(err error) bool {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.IsRetryable()
+	}
+	return isRetryableByMessage(err)
+}
 
+func isRetryableByMessage(err error) bool {
 	msg := strings.ToLower(err.Error())
 	for _, pattern := range []string{
 		"stream stalled",

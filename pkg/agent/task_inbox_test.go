@@ -51,17 +51,18 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 		},
 	}
 
-	result, err := Run(context.Background(), "run a scan", tools,
-		WithProvider(scripted),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-		WithInbox(ib),
-	)
+	result, err := (Config{
+		Provider:     scripted,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+		Inbox:        ib,
+	}).Run(context.Background(), "run a scan")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "saw the background task" {
-		t.Fatalf("result = %q, want 'saw the background task'", result)
+	if result.Output != "saw the background task" {
+		t.Fatalf("result = %q, want 'saw the background task'", result.Output)
 	}
 
 	requests := scripted.requestsSnapshot()

@@ -5,52 +5,22 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
-const inboxIdlePollInterval = time.Second
 
-func Run(ctx context.Context, prompt string, tools *command.CommandRegistry, opts ...Option) (string, error) {
-	result, err := RunWithEvents(ctx, prompt, tools, nil, opts...)
-	if err != nil {
-		return "", err
-	}
-	return result.Output, nil
-}
-
-func RunWithEvents(ctx context.Context, prompt string, tools *command.CommandRegistry, emit EventHandler, opts ...Option) (*Result, error) {
-	cfg := applyOpts(Config{Tools: tools}, opts)
-	if emit != nil {
-		cfg.Emit = emit
-	}
-	return cfg.Run(ctx, prompt)
-}
-
-func applyOpts(cfg Config, opts []Option) Config {
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
-	return cfg
-}
-
-func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error) {
+func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 	if cfg.Provider == nil {
 		return nil, fmt.Errorf("agent provider is nil")
 	}
-	if agentCtx.Tools == nil {
-		agentCtx.Tools = command.NewRegistry()
-	}
-	if agentCtx.SystemPrompt == "" {
-		agentCtx.SystemPrompt = cfg.SystemPrompt
+	if cfg.Tools == nil {
+		cfg.Tools = command.NewRegistry()
 	}
 
-	transcript := newTranscript(agentCtx.Messages, 8)
+	transcript := newTranscript(cfg.Messages, 8)
 	turn := 0
 
 	emitFn := cfg.Emit
@@ -59,7 +29,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 		return nil, err
 	}
 	ended := false
-	end := func(result *Result, err error) (*Result, error) {
+	end := func(result *Result, err error, stop StopReason) (*Result, error) {
 		if result == nil {
 			result = transcript.result("", transcript.completedTurns, err)
 		}
@@ -74,6 +44,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 				Messages:    append([]provider.ChatMessage(nil), result.Messages...),
 				NewMessages: append([]provider.ChatMessage(nil), result.NewMessages...),
 				Err:         result.Err,
+				Stop:        stop,
 			}
 			if emitErr := emit(ctx, emitFn, endEvent); emitErr != nil && err == nil {
 				err = emitErr
@@ -89,10 +60,10 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 		if err := ctx.Err(); err != nil {
 			failure := provider.NewTextMessage("assistant", "")
 			transcript.append(failure)
-			return end(nil, err)
+			return end(nil, err, StopReasonCancelled)
 		}
 		if err := emit(ctx, emitFn, Event{Type: EventTurnStart, Turn: turn}); err != nil {
-			return end(nil, err)
+			return end(nil, err, StopReasonError)
 		}
 
 		if ib != nil {
@@ -104,7 +75,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 				for _, cm := range inboxMsgs[i].ToChatMessages() {
 					transcript.append(cm)
 					if err := emitMessage(ctx, emitFn, turn, cm); err != nil {
-						return end(nil, err)
+						return end(nil, err, StopReasonError)
 					}
 				}
 			}
@@ -116,10 +87,10 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 			}
 		}
 
-		reqMessages := requestMessages(agentCtx.SystemPrompt, transcript.messages, cfg.TransformContext)
+		reqMessages := requestMessages(cfg.SystemPrompt, transcript.messages, cfg.TransformContext)
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistantMsg, usage, err := requestWithRetry(ctx, cfg, reqMessages, agentCtx.Tools.ToolDefinitions(), turn)
+		assistantMsg, usage, err := requestWithRetry(ctx, cfg, reqMessages, cfg.Tools.ToolDefinitions(), turn)
 		if usage != nil {
 			totalUsage.PromptTokens += usage.PromptTokens
 			totalUsage.CompletionTokens += usage.CompletionTokens
@@ -129,13 +100,13 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 			failure := provider.NewTextMessage("assistant", "")
 			transcript.append(failure)
 			if emitErr := emitMessage(ctx, emitFn, turn, failure); emitErr != nil {
-				return end(nil, emitErr)
+				return end(nil, emitErr, StopReasonError)
 			}
 			if emitErr := emit(ctx, emitFn, Event{Type: EventTurnEnd, Turn: turn, Message: failure, Err: err}); emitErr != nil {
-				return end(nil, emitErr)
+				return end(nil, emitErr, StopReasonError)
 			}
 			transcript.completedTurns = turn
-			return end(nil, err)
+			return end(nil, err, StopReasonError)
 		}
 		transcript.append(assistantMsg)
 
@@ -144,9 +115,9 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 				cfg.Logger.Warnf("token budget exhausted: %d/%d", totalUsage.TotalTokens, cfg.TokenBudget)
 				result := transcript.result(messageContent(assistantMsg), turn, fmt.Errorf("token budget exhausted: %d/%d", totalUsage.TotalTokens, cfg.TokenBudget))
 				result.TotalUsage = totalUsage
-				return end(result, result.Err)
+				return end(result, result.Err, StopReasonBudget)
 			}
-			if totalUsage.TotalTokens >= cfg.TokenBudget*80/100 {
+			if totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
 				_ = emit(ctx, emitFn, Event{Type: EventTokenBudgetWarning, Turn: turn})
 				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", totalUsage.TotalTokens, cfg.TokenBudget)
 			}
@@ -155,10 +126,10 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 		var toolResults []provider.ChatMessage
 		terminate := false
 		if len(assistantMsg.ToolCalls) > 0 {
-			agentCtx.Messages = append([]provider.ChatMessage(nil), transcript.messages...)
-			batch, err := executeToolCalls(ctx, agentCtx, assistantMsg, cfg, turn)
+			cfg.Messages = append([]provider.ChatMessage(nil), transcript.messages...)
+			batch, err := executeToolCalls(ctx, cfg, assistantMsg, turn)
 			if err != nil {
-				return end(nil, err)
+				return end(nil, err, StopReasonError)
 			}
 			toolResults = batch.messages
 			terminate = batch.terminate
@@ -166,30 +137,28 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 		}
 
 		if err := emit(ctx, emitFn, Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults}); err != nil {
-			return end(nil, err)
+			return end(nil, err, StopReasonError)
 		}
 		transcript.completedTurns = turn
 
 		if cfg.ShouldStopAfterTurn != nil {
 			messages, newMessages := transcript.snapshot()
 			stop, err := cfg.ShouldStopAfterTurn(ctx, ShouldStopAfterTurnContext{
-				Message:     assistantMsg,
-				ToolResults: append([]provider.ChatMessage(nil), toolResults...),
-				Context: Context{
-					SystemPrompt: agentCtx.SystemPrompt,
-					Messages:     messages,
-					Tools:        agentCtx.Tools,
-				},
-				NewMessages: newMessages,
+				Message:      assistantMsg,
+				ToolResults:  append([]provider.ChatMessage(nil), toolResults...),
+				SystemPrompt: cfg.SystemPrompt,
+				Messages:     messages,
+				Tools:        cfg.Tools,
+				NewMessages:  newMessages,
 			})
 			if err != nil {
-				return end(nil, err)
+				return end(nil, err, StopReasonError)
 			}
 			if stop {
 				cfg.Logger.Importantf("agent status=stopped turns=%d tokens=%d", turn, totalUsage.TotalTokens)
 				result := transcript.result(messageContent(assistantMsg), turn, nil)
 				result.TotalUsage = totalUsage
-				return end(result, nil)
+				return end(result, nil, StopReasonStopped)
 			}
 		}
 
@@ -197,7 +166,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			result.TotalUsage = totalUsage
-			return end(result, nil)
+			return end(result, nil, StopReasonTerminated)
 		}
 		if len(assistantMsg.ToolCalls) == 0 {
 			if ib != nil && ib.Len() > 0 {
@@ -206,7 +175,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 			}
 			if ib != nil && !ib.Closed() && cfg.KeepAlive != nil && cfg.KeepAlive() {
 				cfg.Logger.Debugf("[turn %d] waiting for inbox while background work is active", turn)
-				pollCtx, cancel := context.WithTimeout(ctx, inboxIdlePollInterval)
+				pollCtx, cancel := context.WithTimeout(ctx, cfg.InboxIdlePollInterval)
 				hasMessage := ib.Wait(pollCtx)
 				cancel()
 				if hasMessage {
@@ -219,7 +188,7 @@ func runLoop(ctx context.Context, agentCtx Context, cfg Config) (*Result, error)
 			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			result.TotalUsage = totalUsage
-			return end(result, nil)
+			return end(result, nil, StopReasonCompleted)
 		}
 	}
 
@@ -270,7 +239,7 @@ type toolBatchResult struct {
 	terminate bool
 }
 
-func executeToolCalls(ctx context.Context, agentCtx Context, assistantMsg provider.ChatMessage, cfg Config, turn int) (toolBatchResult, error) {
+func executeToolCalls(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, turn int) (toolBatchResult, error) {
 	results := make([]provider.ChatMessage, 0, len(assistantMsg.ToolCalls))
 	terminations := 0
 	for _, tc := range assistantMsg.ToolCalls {
@@ -286,7 +255,7 @@ func executeToolCalls(ctx context.Context, agentCtx Context, assistantMsg provid
 			return toolBatchResult{}, err
 		}
 
-		execution := runToolCall(ctx, agentCtx, assistantMsg, tc, cfg)
+		execution := runToolCall(ctx, cfg, assistantMsg, tc)
 
 		if err := emit(ctx, cfg.Emit, Event{
 			Type:       EventToolExecutionEnd,
@@ -306,7 +275,7 @@ func executeToolCalls(ctx context.Context, agentCtx Context, assistantMsg provid
 			return toolBatchResult{}, err
 		}
 		results = append(results, toolMsg)
-		if execution.terminate {
+		if execution.flow == ToolFlowTerminate {
 			terminations++
 		}
 	}
@@ -317,17 +286,17 @@ func executeToolCalls(ctx context.Context, agentCtx Context, assistantMsg provid
 }
 
 type toolExecution struct {
-	result    string
-	isError   bool
-	err       error
-	terminate bool
+	result  string
+	isError bool
+	err     error
+	flow    ToolFlowDecision
 }
 
-func runToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.ChatMessage, tc provider.ToolCall, cfg Config) toolExecution {
-	execution := beforeToolCall(ctx, agentCtx, assistantMsg, tc, cfg)
+func runToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall) toolExecution {
+	execution := beforeToolCall(ctx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
-		result, execErr := agentCtx.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments,
-			command.ToolContext{SystemPrompt: agentCtx.SystemPrompt, Messages: agentCtx.Messages})
+		result, execErr := cfg.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments,
+			command.ToolContext{SystemPrompt: cfg.SystemPrompt, Messages: cfg.Messages})
 		execution.result = result
 		execution.err = execErr
 		execution.isError = execErr != nil
@@ -336,18 +305,19 @@ func runToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.Ch
 			cfg.Logger.Warnf("tool_error name=%s error=%q", tc.Function.Name, execErr.Error())
 		}
 	}
-	execution.result = truncateResult(execution.result)
-	return afterToolCall(ctx, agentCtx, assistantMsg, tc, cfg, execution)
+	execution.result = truncateResultSize(execution.result, cfg.MaxResultSize)
+	return afterToolCall(ctx, cfg, assistantMsg, tc, execution)
 }
 
-func beforeToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.ChatMessage, tc provider.ToolCall, cfg Config) toolExecution {
+func beforeToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall) toolExecution {
 	if cfg.BeforeToolCall == nil {
 		return toolExecution{}
 	}
 	before, err := cfg.BeforeToolCall(ctx, BeforeToolCallContext{
 		AssistantMessage: assistantMsg,
 		ToolCall:         tc,
-		Context:          agentCtx,
+		SystemPrompt:     cfg.SystemPrompt,
+		Messages:         cfg.Messages,
 	})
 	if err != nil {
 		return toolExecution{result: fmt.Sprintf("error: %s", err.Error()), isError: true, err: err}
@@ -362,7 +332,7 @@ func beforeToolCall(ctx context.Context, agentCtx Context, assistantMsg provider
 	return toolExecution{result: result, isError: true}
 }
 
-func afterToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.ChatMessage, tc provider.ToolCall, cfg Config, execution toolExecution) toolExecution {
+func afterToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall, execution toolExecution) toolExecution {
 	if cfg.AfterToolCall == nil {
 		return execution
 	}
@@ -371,7 +341,8 @@ func afterToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.
 		ToolCall:         tc,
 		Result:           execution.result,
 		IsError:          execution.isError,
-		Context:          agentCtx,
+		SystemPrompt:     cfg.SystemPrompt,
+		Messages:         cfg.Messages,
 	})
 	if err != nil {
 		execution.result = fmt.Sprintf("error: %s", err.Error())
@@ -391,17 +362,21 @@ func afterToolCall(ctx context.Context, agentCtx Context, assistantMsg provider.
 			execution.err = nil
 		}
 	}
-	execution.terminate = after.Terminate
+	execution.flow = after.Flow
 	return execution
 }
 
 func truncateResult(result string) string {
-	if len(result) <= maxResultSize {
+	return truncateResultSize(result, DefaultMaxResultSize)
+}
+
+func truncateResultSize(result string, maxSize int) string {
+	if len(result) <= maxSize {
 		return result
 	}
-	return result[:maxResultSize] + fmt.Sprintf(
+	return result[:maxSize] + fmt.Sprintf(
 		"\n\n[truncated: showing %d of %d bytes. Refine your query or use filter/parse tools to access specific parts.]",
-		maxResultSize, len(result))
+		maxSize, len(result))
 }
 
 func preview(value string, limit int) string {
@@ -451,14 +426,18 @@ func compactLogContent(value string) string {
 }
 
 
-const defaultMaxRetries = 2
-
 func normalizeConfig(cfg Config) Config {
 	if cfg.Logger == nil {
 		cfg.Logger = telemetry.NopLogger()
 	}
 	if cfg.MaxRetries == 0 {
-		cfg.MaxRetries = defaultMaxRetries
+		cfg.MaxRetries = DefaultMaxRetries
+	}
+	if cfg.MaxResultSize <= 0 {
+		cfg.MaxResultSize = DefaultMaxResultSize
+	}
+	if cfg.InboxIdlePollInterval <= 0 {
+		cfg.InboxIdlePollInterval = DefaultInboxIdlePollInterval
 	}
 	return cfg
 }

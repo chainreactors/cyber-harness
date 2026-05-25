@@ -27,7 +27,7 @@ type SkillOption struct {
 func RunSkill(ctx context.Context, prompt string, opts SkillOption) (*SkillResult, error) {
 	maxTokens := opts.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1600
+		maxTokens = DefaultSkillMaxTokens
 	}
 
 	tools := opts.Tools

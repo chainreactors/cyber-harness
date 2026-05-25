@@ -1,6 +1,6 @@
 //go:build e2e && !full
 
-package e2e
+package harness
 
 func buildTags() string { return "emptytemplates noembed" }
 

@@ -23,17 +23,18 @@ func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
 	ib.Push(inbox.NewMessage(inbox.OriginPeer, "user", "[peer] hello"))
 	ib.Push(inbox.NewMessage(inbox.OriginPeer, "user", "[peer] status?"))
 
-	result, err := Run(context.Background(), "main task", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-		WithInbox(ib),
-	)
+	result, err := (Config{
+		Provider:     llm,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+		Inbox:        ib,
+	}).Run(context.Background(), "main task")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "ack" {
-		t.Fatalf("result = %q, want ack", result)
+	if result.Output != "ack" {
+		t.Fatalf("result = %q, want ack", result.Output)
 	}
 
 	requests := llm.requestsSnapshot()
@@ -65,20 +66,18 @@ func TestInboxClosedDoesNotBlock(t *testing.T) {
 			chatResponse(provider.NewTextMessage("assistant", "done")),
 		},
 	}
-	ib := inbox.NewBuffered(4)
-	ib.Close()
 
-	result, err := Run(context.Background(), "task", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-		WithInbox(ib),
-	)
+	result, err := (Config{
+		Provider:     llm,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+	}).Run(context.Background(), "task")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "done" {
-		t.Fatalf("result = %q, want done", result)
+	if result.Output != "done" {
+		t.Fatalf("result = %q, want done", result.Output)
 	}
 }
 
@@ -124,17 +123,18 @@ func TestInboxDrainedBetweenTurns(t *testing.T) {
 		push:  inbox.NewMessage(inbox.OriginPeer, "user", "[peer] watch out for example.com"),
 	}
 
-	result, err := Run(context.Background(), "scan things", tools,
-		WithProvider(pushing),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-		WithInbox(ib),
-	)
+	result, err := (Config{
+		Provider:     pushing,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+		Inbox:        ib,
+	}).Run(context.Background(), "scan things")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "final" {
-		t.Fatalf("result = %q, want final", result)
+	if result.Output != "final" {
+		t.Fatalf("result = %q, want final", result.Output)
 	}
 
 	requests := scripted.requestsSnapshot()
@@ -180,18 +180,19 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		keepAlive.Store(false)
 	}()
 
-	result, err := Run(context.Background(), "start background scan", tools,
-		WithProvider(llm),
-		WithModel("test"),
-		WithSystemPrompt("system"),
-		WithInbox(ib),
-		WithKeepAlive(func() bool { return keepAlive.Load() }),
-	)
+	result, err := (Config{
+		Provider:     llm,
+		Tools:        tools,
+		Model:        "test",
+		SystemPrompt: "system",
+		Inbox:        ib,
+		KeepAlive:    func() bool { return keepAlive.Load() },
+	}).Run(context.Background(), "start background scan")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result != "final" {
-		t.Fatalf("result = %q, want final", result)
+	if result.Output != "final" {
+		t.Fatalf("result = %q, want final", result.Output)
 	}
 	requests := llm.requestsSnapshot()
 	if len(requests) != 2 {

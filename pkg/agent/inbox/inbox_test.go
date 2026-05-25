@@ -7,11 +7,11 @@ import (
 
 func TestBufferedPushDrain(t *testing.T) {
 	b := NewBuffered(4)
-	if !b.Push(NewUserMessage("a")) {
-		t.Fatal("push to empty buffer should succeed")
+	if err := b.Push(NewUserMessage("a")); err != nil {
+		t.Fatalf("push to empty buffer should succeed: %v", err)
 	}
-	if !b.Push(NewUserMessage("b")) {
-		t.Fatal("push should succeed")
+	if err := b.Push(NewUserMessage("b")); err != nil {
+		t.Fatalf("push should succeed: %v", err)
 	}
 	msgs := b.Drain()
 	if len(msgs) != 2 {
@@ -32,8 +32,8 @@ func TestBufferedCapacity(t *testing.T) {
 	b := NewBuffered(2)
 	b.Push(NewUserMessage("a"))
 	b.Push(NewUserMessage("b"))
-	if b.Push(NewUserMessage("c")) {
-		t.Fatal("push beyond capacity should fail")
+	if err := b.Push(NewUserMessage("c")); err != ErrInboxFull {
+		t.Fatalf("push beyond capacity: got %v, want ErrInboxFull", err)
 	}
 }
 
@@ -44,8 +44,8 @@ func TestBufferedClose(t *testing.T) {
 	if !b.Closed() {
 		t.Fatal("should be closed")
 	}
-	if b.Push(NewUserMessage("b")) {
-		t.Fatal("push to closed buffer should fail")
+	if err := b.Push(NewUserMessage("b")); err != ErrInboxClosed {
+		t.Fatalf("push to closed buffer: got %v, want ErrInboxClosed", err)
 	}
 	msgs := b.Drain()
 	if len(msgs) != 1 {
@@ -117,10 +117,38 @@ func TestBufferedConcurrency(t *testing.T) {
 
 func TestNewBufferedMinCapacity(t *testing.T) {
 	b := NewBuffered(0)
-	if !b.Push(NewUserMessage("a")) {
-		t.Fatal("capacity 0 should be clamped to 1")
+	if err := b.Push(NewUserMessage("a")); err != nil {
+		t.Fatalf("capacity 0 should be clamped to 1: %v", err)
 	}
-	if b.Push(NewUserMessage("b")) {
-		t.Fatal("should fail at capacity 1")
+	if err := b.Push(NewUserMessage("b")); err != ErrInboxFull {
+		t.Fatalf("should fail at capacity 1: got %v, want ErrInboxFull", err)
+	}
+}
+
+func TestProducerRegistration(t *testing.T) {
+	b := NewBuffered(4)
+	if b.ActiveProducers() != 0 {
+		t.Fatalf("expected 0 producers, got %d", b.ActiveProducers())
+	}
+
+	h1 := b.RegisterProducer("task-1")
+	h2 := b.RegisterProducer("task-2")
+	if b.ActiveProducers() != 2 {
+		t.Fatalf("expected 2 producers, got %d", b.ActiveProducers())
+	}
+
+	h1.Done()
+	if b.ActiveProducers() != 1 {
+		t.Fatalf("expected 1 producer after Done(), got %d", b.ActiveProducers())
+	}
+
+	h1.Done()
+	if b.ActiveProducers() != 1 {
+		t.Fatal("double Done() should be idempotent")
+	}
+
+	h2.Done()
+	if b.ActiveProducers() != 0 {
+		t.Fatalf("expected 0 producers, got %d", b.ActiveProducers())
 	}
 }

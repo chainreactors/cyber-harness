@@ -331,7 +331,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		Skills:                option.Skills,
 		OnTask:                taskHandler,
 		OnPeer: func(peer swarm.PeerMessage) bool {
-			return sess.Config.Inbox.Push(peerToInboxMessage(peer))
+			return sess.Config.Inbox.Push(peerToInboxMessage(peer)) == nil
 		},
 		OnHeartbeat: heartbeatFunc,
 		Logger:      logger,
