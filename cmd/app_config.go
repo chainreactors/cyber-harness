@@ -1,14 +1,9 @@
 package cmd
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"strconv"
-	"strings"
-	"time"
+	"os"
 
 	"github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -39,158 +34,19 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			AIEnabled:    features.AIEnabled,
 			AITimeout:    defaultInt(DefaultVerifyTimeout, 120),
 			Proxy:        option.ScannerOptions.Proxy,
+			FofaEmail:    resolveString(option.FofaEmail, os.Getenv("FOFA_EMAIL")),
+			FofaKey:      resolveString(option.FofaKey, os.Getenv("FOFA_KEY")),
+			HunterToken:  resolveString(option.HunterToken, os.Getenv("HUNTER_TOKEN")),
+			HunterAPIKey: resolveString(option.HunterAPIKey, os.Getenv("HUNTER_API_KEY")),
+			ReconProxy:   resolveString(option.ReconProxy, os.Getenv("RECON_PROXY")),
+			ReconLimit:   intOptionValue(option.ReconLimit),
 		},
 		Tools: app.ToolConfig{
 			Enabled:       features.ToolsEnabled,
 			BashTimeout:   300,
 			VisionEnabled: visionEnabled(option),
+			TavilyKeys:    DefaultTavilyKeys,
 		},
 		Logger: logger,
 	}
-}
-
-func providerConfig(option *Option) provider.ProviderConfig {
-	cfg := defaultProviderConfig()
-	if option.Provider != "" {
-		cfg.Provider = option.Provider
-	} else if inferred := inferProviderFromBaseURL(option.BaseURL); inferred != "" {
-		cfg.Provider = inferred
-	}
-	if option.BaseURL != "" {
-		cfg.BaseURL = option.BaseURL
-	}
-	if option.APIKey != "" {
-		cfg.APIKey = option.APIKey
-	}
-	if option.Model != "" {
-		cfg.Model = option.Model
-	}
-	if option.LLMProxy != "" {
-		cfg.Proxy = option.LLMProxy
-	}
-	cfg.Timeout = 120
-	return cfg
-}
-
-func visionEnabled(option *Option) bool {
-	return option.Vision || visionHasProviderConfig(option)
-}
-
-func visionHasProviderConfig(option *Option) bool {
-	return option.VisionProvider != "" ||
-		option.VisionBaseURL != "" ||
-		option.VisionAPIKey != "" ||
-		option.VisionModel != "" ||
-		option.VisionProxy != ""
-}
-
-func visionProviderConfig(option *Option) provider.ProviderConfig {
-	cfg := provider.ProviderConfig{}
-	if option.VisionProvider != "" {
-		cfg.Provider = option.VisionProvider
-	} else if inferred := inferProviderFromBaseURL(option.VisionBaseURL); inferred != "" {
-		cfg.Provider = inferred
-	}
-	if option.VisionBaseURL != "" {
-		cfg.BaseURL = option.VisionBaseURL
-	}
-	if option.VisionAPIKey != "" {
-		cfg.APIKey = option.VisionAPIKey
-	}
-	if option.VisionModel != "" {
-		cfg.Model = option.VisionModel
-	}
-	cfg.Proxy = resolveString(option.VisionProxy, option.LLMProxy)
-	cfg.Timeout = 120
-	return cfg
-}
-
-func applyResolvedProviderOptions(option *Option, cfg provider.ProviderConfig) {
-	option.Provider = cfg.Provider
-	option.BaseURL = cfg.BaseURL
-	option.APIKey = cfg.APIKey
-	option.Model = cfg.Model
-}
-
-func applyDefaults(option *Option) {
-	option.CyberhubURL = resolveString(option.CyberhubURL, DefaultCyberhubURL)
-	option.CyberhubKey = resolveString(option.CyberhubKey, DefaultCyberhubKey)
-	option.CyberhubMode = resolveString(resolveString(option.CyberhubMode, DefaultCyberhubMode), "merge")
-	option.ScannerOptions.Proxy = resolveString(option.ScannerOptions.Proxy, DefaultScannerProxy)
-	option.IOAURL = resolveString(option.IOAURL, DefaultIOAURL)
-	option.IOANodeID = resolveString(option.IOANodeID, DefaultIOANodeID)
-	option.IOANodeName = resolveString(option.IOANodeName, DefaultIOANodeName)
-	option.Space = resolveSpace(option.Space)
-	if option.Model == "" {
-		option.Model = resolveString(DefaultModel, "deepseek-v4-pro")
-	}
-}
-
-func resolveString(value, fallback string) string {
-	if value != "" {
-		return value
-	}
-	return fallback
-}
-
-func inferProviderFromBaseURL(baseURL string) string {
-	baseURL = strings.ToLower(strings.TrimSpace(baseURL))
-	switch {
-	case strings.Contains(baseURL, "deepseek.com"):
-		return "deepseek"
-	case strings.Contains(baseURL, "openrouter.ai"):
-		return "openrouter"
-	case strings.Contains(baseURL, "groq.com"):
-		return "groq"
-	case strings.Contains(baseURL, "moonshot.cn"):
-		return "moonshot"
-	case strings.Contains(baseURL, "localhost:11434"), strings.Contains(baseURL, "127.0.0.1:11434"):
-		return "ollama"
-	default:
-		return ""
-	}
-}
-
-func defaultVerifyMode() string {
-	value := strings.ToLower(strings.TrimSpace(DefaultVerify))
-	if value == "" {
-		return "off"
-	}
-	return value
-}
-
-func defaultInt(value string, fallback int) int {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
-}
-
-func resolveSpace(space string) string {
-	if space != "" && space != "default" {
-		return space
-	}
-	if DefaultSpace != "" {
-		return DefaultSpace
-	}
-	if space != "" {
-		return space
-	}
-	return "default"
-}
-
-func defaultIOANodeName(option *Option) string {
-	if option.IOANodeName != "" {
-		return option.IOANodeName
-	}
-	var b [4]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return "aiscan-" + hex.EncodeToString(b[:])
-	}
-	return "aiscan-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }

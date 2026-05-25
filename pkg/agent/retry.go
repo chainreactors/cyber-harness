@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -14,15 +16,23 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx := context.Canceled; err == ctx {
+	if errors.Is(err, provider.ErrCallTimeout) || errors.Is(err, provider.ErrStreamStalled) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
 	}
 
 	msg := strings.ToLower(err.Error())
 	for _, pattern := range []string{
+		"stream stalled",
 		"connection reset",
 		"connection refused",
 		"connection closed",
@@ -81,6 +91,9 @@ func requestWithRetry(ctx context.Context, cfg Config, messages []provider.ChatM
 		}
 		lastErr = err
 
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return provider.ChatMessage{}, nil, ctxErr
+		}
 		if !isRetryableError(err) {
 			return provider.ChatMessage{}, nil, err
 		}
@@ -150,6 +163,9 @@ func streamAssistantMessageWithUsage(ctx context.Context, p provider.StreamingPr
 		if err := emit(ctx, emitFn, Event{Type: EventMessageUpdate, Turn: turn, Message: updated}); err != nil {
 			return provider.ChatMessage{}, nil, err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return provider.ChatMessage{}, nil, err
 	}
 
 	msg := builder.Message()

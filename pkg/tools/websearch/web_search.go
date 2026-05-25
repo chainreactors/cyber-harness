@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,26 +36,75 @@ const (
 
 // Command implements command.PseudoCommand for web search.
 type Command struct {
-	client  *http.Client
-	backend searchBackend
-	apiKey  string
+	client      *http.Client
+	backend     searchBackend
+	apiKey      string
+	apiKeys     []string // multiple Tavily keys for rotation
+	currentKey  int      // index into apiKeys
+	mu          sync.Mutex
 }
 
 // New creates a web_search pseudo-command. It auto-detects the backend:
 // TAVILY_API_KEY set → Tavily, otherwise → DuckDuckGo.
+// Multiple keys can be provided via TAVILY_API_KEYS (comma-separated) for
+// automatic rotation when a key is exhausted (HTTP 401/429).
+// An optional builtinKeys string (comma-separated) supplies build-time
+// fallback keys that are appended after any environment-sourced keys.
 // Proxy is read from standard HTTP_PROXY / HTTPS_PROXY environment variables.
-func New() *Command {
+func New(builtinKeys ...string) *Command {
 	c := &Command{
 		client: &http.Client{
 			Timeout:   searchTimeout,
 			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 		},
 	}
-	if key := os.Getenv("TAVILY_API_KEY"); key != "" {
+
+	// Collect all available Tavily keys: env vars first, then build-time defaults.
+	var keys []string
+	seen := make(map[string]struct{})
+
+	addKeys := func(raw string) {
+		for _, k := range strings.Split(raw, ",") {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+			keys = append(keys, k)
+		}
+	}
+
+	// 1. Environment (highest priority).
+	addKeys(os.Getenv("TAVILY_API_KEY"))
+	addKeys(os.Getenv("TAVILY_API_KEYS"))
+
+	// 2. Build-time fallback keys (via ldflags → Deps → register.go).
+	for _, bk := range builtinKeys {
+		addKeys(bk)
+	}
+
+	if len(keys) > 0 {
 		c.backend = backendTavily
-		c.apiKey = key
+		c.apiKeys = keys
+		c.apiKey = keys[0]
 	}
 	return c
+}
+
+// rotateKey advances to the next Tavily API key. Returns false if all keys
+// have been exhausted (wrapped around to the starting key).
+func (c *Command) rotateKey() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.apiKeys) <= 1 {
+		return false
+	}
+	c.currentKey = (c.currentKey + 1) % len(c.apiKeys)
+	c.apiKey = c.apiKeys[c.currentKey]
+	return true // still have keys to try
 }
 
 func (c *Command) Name() string { return "web_search" }
@@ -83,15 +133,31 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 
 	switch c.backend {
 	case backendTavily:
-		result, err := c.searchTavily(ctx, query, num)
-		if err != nil {
-			fallback, fbErr := c.searchDDG(ctx, query, num)
-			if fbErr != nil {
-				return "", fmt.Errorf("tavily: %w; ddg fallback: %w", err, fbErr)
+		// Try current key; on auth/quota failure rotate through remaining keys.
+		startKey := c.currentKey
+		for {
+			result, err := c.searchTavily(ctx, query, num)
+			if err == nil {
+				return result, nil
 			}
-			return fallback, nil
+			// Only rotate on key-exhaustion errors (401 Unauthorized, 429 Rate Limit).
+			if !isKeyExhausted(err) {
+				// Non-key error — fall through to DDG.
+				break
+			}
+			if !c.rotateKey() {
+				break // single key, nothing to rotate
+			}
+			if c.currentKey == startKey {
+				break // wrapped around, all keys exhausted
+			}
 		}
-		return result, nil
+		// All Tavily keys failed — fallback to DuckDuckGo.
+		fallback, fbErr := c.searchDDG(ctx, query, num)
+		if fbErr != nil {
+			return "", fmt.Errorf("tavily keys exhausted; ddg fallback: %w", fbErr)
+		}
+		return fallback, nil
 	default:
 		return c.searchDDG(ctx, query, num)
 	}
@@ -140,6 +206,18 @@ func parseArgs(args []string, usage string) (query string, num int, err error) {
 		num = maxNumResults
 	}
 	return query, num, nil
+}
+
+// isKeyExhausted checks whether a Tavily error indicates the API key is
+// invalid or rate-limited (HTTP 401 / 429), meaning we should rotate.
+func isKeyExhausted(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "HTTP 401") ||
+		strings.Contains(msg, "HTTP 429") ||
+		strings.Contains(msg, "HTTP 403")
 }
 
 // ---------------------------------------------------------------------------

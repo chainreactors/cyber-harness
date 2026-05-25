@@ -108,6 +108,128 @@ func (c *recordingCommand) lastArgs() []string {
 	return append([]string(nil), c.args[len(c.args)-1]...)
 }
 
+func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
+	registry := command.NewRegistry()
+	registry.Register(newRecordingCommand("spray"), "")
+	bash := command.NewBashTool(t.TempDir(), 5, registry)
+
+	tests := []struct {
+		name     string
+		cmd      string
+		wantHint string
+	}{
+		{
+			name:     "pipe to head",
+			cmd:      `spray -u http://x | head -30`,
+			wantHint: "shell pipes",
+		},
+		{
+			name:     "pipe to grep through 2>&1",
+			cmd:      `spray -u http://x 2>&1 | grep valid`,
+			wantHint: "shell pipes",
+		},
+		{
+			name:     "double pipe",
+			cmd:      `spray -u http://x || echo done`,
+			wantHint: "shell pipes",
+		},
+		{
+			name:     "file redirection >",
+			cmd:      `spray -u http://x > out.txt`,
+			wantHint: "file redirection",
+		},
+		{
+			name:     "file redirection >>",
+			cmd:      `spray -u http://x >> out.txt`,
+			wantHint: "file redirection",
+		},
+		{
+			name:     "stderr to file",
+			cmd:      `spray -u http://x 2>err.log`,
+			wantHint: "file redirection",
+		},
+		{
+			name:     "combined to file",
+			cmd:      `spray -u http://x &> all.log`,
+			wantHint: "file redirection",
+		},
+		{
+			name:     "chained with &&",
+			cmd:      `spray -u http://x && spray -u http://y`,
+			wantHint: "chaining",
+		},
+		{
+			name:     "chained with ;",
+			cmd:      `spray -u http://x ; echo done`,
+			wantHint: "chaining",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
+			if err == nil {
+				t.Fatalf("expected error, got output %q", out)
+			}
+			if !strings.Contains(err.Error(), tt.wantHint) {
+				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestScannerStripsInertStderrDup(t *testing.T) {
+	// 2>&1 has no semantic effect for an in-process command because the
+	// pseudo-command already returns combined output as the tool result.
+	// It should be silently stripped without rejecting the call.
+	registry := command.NewRegistry()
+	rec := newRecordingCommand("spray")
+	registry.Register(rec, "")
+	bash := command.NewBashTool(t.TempDir(), 5, registry)
+
+	out, err := bash.Execute(context.Background(), bashArgs(`spray -u http://x 2>&1`))
+	if err != nil {
+		t.Fatalf("bash.Execute() error = %v", err)
+	}
+	if !strings.Contains(out, "[spray] ok") {
+		t.Fatalf("output = %q, want spray output", out)
+	}
+	want := []string{"-u", "http://x"}
+	if got := rec.lastArgs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v (2>&1 should be stripped)", got, want)
+	}
+}
+
+func TestScannerPseudoCommandForegroundUsesCallerContext(t *testing.T) {
+	// Foreground pseudo-commands should preserve the caller's context instead
+	// of inheriting the bash shell timeout. Long whole-task scans should use
+	// background:true.
+	registry := command.NewRegistry()
+	registry.Register(&deadlineRecordingCommand{name: "spray"}, "")
+	bash := command.NewBashTool(t.TempDir(), 1, registry)
+
+	out, err := bash.Execute(context.Background(), bashArgs("spray -u http://x"))
+	if err != nil {
+		t.Fatalf("bash.Execute() error = %v", err)
+	}
+	if out != "no deadline" {
+		t.Fatalf("output = %q, want no deadline", out)
+	}
+}
+
+type deadlineRecordingCommand struct {
+	name string
+}
+
+func (c *deadlineRecordingCommand) Name() string  { return c.name }
+func (c *deadlineRecordingCommand) Usage() string { return c.name + " - deadline test command" }
+func (c *deadlineRecordingCommand) Execute(ctx context.Context, _ []string) (string, error) {
+	if _, ok := ctx.Deadline(); ok {
+		return "", fmt.Errorf("unexpected deadline")
+	}
+	return "no deadline", nil
+}
+
 func TestBashProxyEnvInjection(t *testing.T) {
 	proxy := "socks5://127.0.0.1:1080"
 	bash := command.NewBashTool(t.TempDir(), 5, nil).WithScannerProxy(proxy)

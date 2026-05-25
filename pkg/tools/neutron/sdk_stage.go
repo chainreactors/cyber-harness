@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
 )
-
-var errNoNeutronTemplates = errors.New("no neutron templates selected")
 
 type neutronExecuteOptions struct {
 	Target              string
@@ -31,6 +30,7 @@ type neutronExecuteOptions struct {
 	MaxPerFinger        int
 	Concurrency         int
 	RateLimit           int
+	TemplateList        bool
 	Debug               bool
 }
 
@@ -46,7 +46,7 @@ func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index 
 	selected, filtered := selectNeutronTemplates(engine, index, opts)
 	if filtered {
 		if len(selected) == 0 {
-			return nil, errNoNeutronTemplates
+			return nil, scanengine.ErrNoNeutronTemplates
 		}
 	}
 	if len(selected) == 0 {
@@ -189,17 +189,7 @@ func selectNeutronTemplates(engine *sdkneutron.Engine, index *association.Finger
 	allowedByFinger := map[string]struct{}{}
 	allowedFingers := stringSet(opts.Fingers)
 	if hasFingerFilter {
-		if index != nil {
-			for _, finger := range opts.Fingers {
-				ids := index.GetPOCsByFinger(finger)
-				if opts.MaxPerFinger > 0 && len(ids) > opts.MaxPerFinger {
-					ids = ids[:opts.MaxPerFinger]
-				}
-				for _, id := range ids {
-					allowedByFinger[strings.ToLower(strings.TrimSpace(id))] = struct{}{}
-				}
-			}
-		}
+		allowedByFinger = scanengine.FingerAllowedIDs(index, opts.Fingers, opts.MaxPerFinger)
 	}
 
 	allowedTags := stringSet(opts.Tags)
@@ -220,6 +210,15 @@ func selectNeutronTemplates(engine *sdkneutron.Engine, index *association.Finger
 			if _, ok := allowedByFinger[id]; !ok && !templateHasAnyFinger(tmpl, allowedFingers) {
 				continue
 			}
+		} else if len(tmpl.Fingers) > 0 && !hasIDFilter && !opts.TemplateList {
+			// Template declares required fingerprints (e.g. shiro-brute-key
+			// needs "shiro"). Without --finger context the caller has no
+			// fingerprint evidence for the target, so running these templates
+			// produces false positives (e.g. shiro matcher hitting a generic
+			// nginx 200). Skip unless the user explicitly selects by --id.
+			// The scan pipeline always provides --finger from gogo/spray
+			// fingerprint results, so this only affects the neutron CLI path.
+			continue
 		}
 		if hasTagFilter && !templateHasAnyTag(tmpl, allowedTags) {
 			continue

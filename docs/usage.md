@@ -289,7 +289,6 @@ full 模式额外增加：
 | `--thread` | 总并发预算，自动分配给各引擎 | `1000` |
 | `--timeout` | 每个探测的超时秒数 | `5` |
 | `--ports` | gogo 端口集合（quick 默认 `all`，full 默认 `-`） | |
-| `--port` | 端口参数，覆盖 `--ports` | |
 | `--dict` | spray 字典文件，可重复 | |
 | `--rule` | spray 变形规则文件，可重复 | |
 | `--word` | spray 词汇生成 DSL | |
@@ -301,7 +300,6 @@ full 模式额外增加：
 | `--max-neutron-per-finger` | 每个指纹最大 neutron 模板数 | `20` |
 | `--broad-poc` | 无指纹时也运行 POC | |
 | `--verify` | AI 验证模式：`off`, `low`, `medium`, `high`, `critical` | `off` |
-| `--verify-timeout` | 单次验证超时秒数 | `120` |
 | `-j, --json` | JSON Lines 输出 | |
 | `--report` | Markdown 报告输出 | |
 | `-f, --file` | 输出写入文件（不含 ANSI 颜色） | |
@@ -336,7 +334,7 @@ full 模式额外增加：
 
 ```bash
 aiscan scan -i http://target.example --mode quick --verify=high --llm-api-key "$OPENAI_API_KEY" --llm-model gpt-4o
-aiscan scan -i http://target.example --mode full --verify=critical --verify-timeout 90
+aiscan scan -i http://target.example --mode full --verify=critical
 aiscan scan -i http://target.example --verify=off
 ```
 

@@ -8,6 +8,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
 )
 
+var extraScannerUsage = map[string]func() string{}
+
 func isScannerHelpRequest(args []string) bool {
 	if len(args) < 2 {
 		return false
@@ -35,6 +37,9 @@ func staticScannerUsage(name string) (string, bool) {
 	case "neutron":
 		return "neutron - POC/vulnerability testing with nuclei-style options\nUsage: neutron -u <target> [options]\n", true
 	default:
+		if fn, ok := extraScannerUsage[name]; ok {
+			return fn(), true
+		}
 		return "", false
 	}
 }
@@ -132,6 +137,14 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 		return out
 	}
 	return append(out, flag+"="+value)
+}
+
+func defaultVerifyMode() string {
+	value := strings.ToLower(strings.TrimSpace(DefaultVerify))
+	if value == "" {
+		return "off"
+	}
+	return value
 }
 
 func removeScannerFlag(args []string, flag string) []string {

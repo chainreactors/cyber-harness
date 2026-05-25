@@ -23,3 +23,4 @@ dist/
 *.sock.lock
 aiscan
 /spray
+out/

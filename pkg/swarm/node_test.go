@@ -714,44 +714,519 @@ func TestSwarmContentRoundTrip(t *testing.T) {
 	}
 }
 
-func TestIsTaskForNode(t *testing.T) {
+func TestIsTaskMessage(t *testing.T) {
 	nodeID := "node-1"
 	rootMsgID := "root-msg-1"
+	empty := SwarmMessage{}
 
-	// Broadcast: no refs
+	// Idle broadcast: no refs, no meta kind -> legacy task.
 	msg := ioa.Message{Refs: ioa.Ref{}}
-	if !isTaskForNode(msg, nodeID, rootMsgID) {
+	if !isTaskMessage(msg, empty, nodeID, rootMsgID, false) {
 		t.Fatal("broadcast should be accepted")
 	}
-
-	// Node-directed: refs.nodes contains nodeID
-	msg = ioa.Message{Refs: ioa.Ref{Nodes: []string{nodeID}}}
-	if !isTaskForNode(msg, nodeID, rootMsgID) {
-		t.Fatal("node-directed should be accepted")
+	if isTaskMessage(msg, empty, nodeID, rootMsgID, true) {
+		t.Fatal("active broadcast without task_dispatch should be peer chatter")
 	}
 
-	// Node-directed: refs.nodes does NOT contain nodeID
+	// Node-directed: refs.nodes contains nodeID.
+	msg = ioa.Message{Refs: ioa.Ref{Nodes: []string{nodeID}}}
+	if !isTaskMessage(msg, empty, nodeID, rootMsgID, false) {
+		t.Fatal("node-directed should be accepted")
+	}
+	if isTaskMessage(msg, empty, nodeID, rootMsgID, true) {
+		t.Fatal("active node-directed without task_dispatch should be peer chatter")
+	}
+
+	// Node-directed: refs.nodes does NOT contain nodeID.
 	msg = ioa.Message{Refs: ioa.Ref{Nodes: []string{"other-node"}}}
-	if isTaskForNode(msg, nodeID, rootMsgID) {
+	if isTaskMessage(msg, empty, nodeID, rootMsgID, false) {
 		t.Fatal("node-directed to other node should be rejected")
 	}
 
-	// Root-message-directed: refs.messages contains rootMsgID
+	// Root-message-directed: refs.messages contains rootMsgID.
 	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{rootMsgID}}}
-	if !isTaskForNode(msg, nodeID, rootMsgID) {
+	if !isTaskMessage(msg, empty, nodeID, rootMsgID, false) {
 		t.Fatal("root-message-directed should be accepted")
 	}
+	if isTaskMessage(msg, empty, nodeID, rootMsgID, true) {
+		t.Fatal("active root-message-directed without task_dispatch should be peer chatter")
+	}
 
-	// Root-message-directed: refs.messages does NOT contain rootMsgID
+	// Root-message-directed: refs.messages does NOT contain rootMsgID.
 	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{"other-root"}}}
-	if isTaskForNode(msg, nodeID, rootMsgID) {
+	if isTaskMessage(msg, empty, nodeID, rootMsgID, false) {
 		t.Fatal("root-message-directed to other root should be rejected")
 	}
 
-	// Empty rootMsgID: refs.messages should be rejected
+	// Empty rootMsgID: refs.messages should be rejected.
 	msg = ioa.Message{Refs: ioa.Ref{Messages: []string{"any-msg"}}}
-	if isTaskForNode(msg, nodeID, "") {
+	if isTaskMessage(msg, empty, nodeID, "", false) {
 		t.Fatal("should reject refs.messages when rootMsgID is empty")
+	}
+
+	// Broadcast with explicit task_dispatch meta kind → task.
+	msg = ioa.Message{Refs: ioa.Ref{}}
+	sm := SwarmMessage{Meta: map[string]any{"kind": "task_dispatch"}}
+	if !isTaskMessage(msg, sm, nodeID, rootMsgID, true) {
+		t.Fatal("task_dispatch broadcast should be accepted")
+	}
+
+	// Broadcast with peer chatter kind → NOT a task.
+	sm = SwarmMessage{Meta: map[string]any{"kind": "update"}}
+	if isTaskMessage(msg, sm, nodeID, rootMsgID, false) {
+		t.Fatal("peer chatter (kind=update) should NOT be treated as task")
+	}
+}
+
+// TestPeerMessagesForwardedToActiveTask verifies the new auto-injection
+// mechanism: while a worker is running OnTask, partner messages arriving in
+// the same space (without task_dispatch meta) are forwarded into the task's
+// Peers channel rather than triggering a second task.
+func TestPeerMessagesForwardedToActiveTask(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerNode, err := controller.RegisterNode(ctx, "controller", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "peer-routing", "peer routing case")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peer, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerNode, err := peer.RegisterNode(ctx, "partner", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peer.Space(ctx, "peer-routing", "peer"); err != nil {
+		t.Fatal(err)
+	}
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskStarted := make(chan struct{})
+	releaseTask := make(chan struct{})
+	receivedPeers := make(chan PeerMessage, 4)
+
+	runCtx, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+	node := NewNode(NodeConfig{
+		Client:           worker,
+		NodeName:         "worker-peer",
+		SpaceName:        "peer-routing",
+		SpaceDescription: "worker",
+		PollInterval:     100 * time.Millisecond,
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			close(taskStarted)
+			select {
+			case <-releaseTask:
+				return "drained", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+		OnPeer: func(peer PeerMessage) bool {
+			select {
+			case receivedPeers <- peer:
+				return true
+			default:
+				return false
+			}
+		},
+	})
+	go func() { _ = node.Run(runCtx) }()
+
+	// Dispatch a task explicitly (refs.nodes), then wait for OnTask to start.
+	// We need to know the worker's node ID; the announce profile carries it.
+	deadline := time.After(5 * time.Second)
+	var workerID string
+	for workerID == "" {
+		select {
+		case <-deadline:
+			t.Fatal("worker did not announce in time")
+		default:
+		}
+		all, err := controller.Read(ctx, space.ID, ioa.ReadOptions{All: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range all {
+			c, _ := m.Content["content"].(string)
+			if strings.Contains(c, "joined the swarm") && m.Sender != peerNode.ID {
+				workerID = m.Sender
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "do work", "meta": map[string]any{"kind": "task_dispatch"}},
+		Refs:    &ioa.Ref{Nodes: []string{workerID}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-taskStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task did not start within 5s")
+	}
+
+	// Now send a peer chatter message (kind=update) — should NOT start a second task,
+	// should land in task.Peers.
+	if _, err := peer.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "watch example.com", "meta": map[string]any{"kind": "update"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case p := <-receivedPeers:
+		if p.Content != "watch example.com" {
+			t.Fatalf("peer content = %q, want watch example.com", p.Content)
+		}
+		if p.Sender != peerNode.ID {
+			t.Fatalf("peer sender = %q, want %q", p.Sender, peerNode.ID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("peer message not forwarded to active task")
+	}
+
+	// Directed partner messages are also peer chatter while a task is active
+	// unless they explicitly declare task_dispatch.
+	if _, err := peer.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "direct note"},
+		Refs:    &ioa.Ref{Nodes: []string{workerID}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-receivedPeers:
+		if p.Content != "direct note" {
+			t.Fatalf("direct peer content = %q, want direct note", p.Content)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("direct peer message not forwarded to active task")
+	}
+
+	// Messages explicitly addressed to another node should not be injected here.
+	if _, err := peer.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"content": "not for this worker"},
+		Refs:    &ioa.Ref{Nodes: []string{controllerNode.ID}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-receivedPeers:
+		t.Fatalf("unexpected peer message for another node: %#v", p)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// Structured IOA messages from the ioa skill do not have content["content"].
+	// They should still be delivered via inbox with the raw content JSON-formatted.
+	if _, err := peer.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{"kind": "asset", "domains": []string{"example.com"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-receivedPeers:
+		if p.Content != "" {
+			t.Fatalf("structured peer content = %q, want empty", p.Content)
+		}
+		if got, _ := p.RawContent["kind"].(string); got != "asset" {
+			t.Fatalf("structured peer kind = %q, want asset", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("structured peer message not forwarded to active task")
+	}
+
+	close(releaseTask)
+}
+
+// TestTasksArrivingWhileBusyAreQueued verifies that task_dispatch messages
+// arriving while another task is in flight are queued (not dropped) and run
+// to completion in arrival order after the current task finishes.
+//
+// Regression: previously these messages were marked processed before the
+// busy-check, so they were stamped as "handled" and never retried by catchUp.
+func TestTasksArrivingWhileBusyAreQueued(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "queue-case", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerNode, err := worker.RegisterNode(ctx, "queue-worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &taskRecorder{name: "queue-worker"}
+	// Block the first task until released so we can dispatch follow-ups while
+	// it's running.
+	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+	var startedOnce sync.Once
+
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	node := NewNode(NodeConfig{
+		Client:           worker,
+		NodeName:         "queue-worker",
+		SpaceName:        "queue-case",
+		SpaceDescription: "worker",
+		PollInterval:     100 * time.Millisecond,
+		Network:          map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			startedOnce.Do(func() { close(firstStarted) })
+			rec.record(task.Content)
+			if task.Content == "task-1" {
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			return "done: " + task.Content, nil
+		},
+	})
+	go func() { _ = node.Run(runCtx) }()
+
+	waitFor(t, 5*time.Second, "worker announce", func() bool {
+		return node.RootMessageID() != ""
+	})
+
+	dispatch := func(content string) {
+		t.Helper()
+		_, err := controller.Send(ctx, space.ID, ioa.SendMessage{
+			Content: map[string]any{
+				"content": content,
+				"meta":    map[string]any{"kind": "task_dispatch"},
+			},
+			Refs: &ioa.Ref{Nodes: []string{workerNode.ID}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dispatch("task-1")
+	select {
+	case <-firstStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first task never started")
+	}
+
+	// While task-1 is blocked inside OnTask, queue two more.
+	dispatch("task-2")
+	dispatch("task-3")
+
+	// Give the routing loop a moment to see and queue them.
+	time.Sleep(300 * time.Millisecond)
+
+	if got := rec.tasks(); len(got) != 1 || got[0] != "task-1" {
+		t.Fatalf("before release: rec.tasks()=%#v, want [task-1]", got)
+	}
+
+	close(release)
+
+	waitFor(t, 5*time.Second, "all 3 tasks ran", func() bool {
+		return len(rec.tasks()) >= 3
+	})
+
+	got := rec.tasks()
+	if len(got) != 3 || got[0] != "task-1" || got[1] != "task-2" || got[2] != "task-3" {
+		t.Fatalf("rec.tasks()=%#v, want [task-1 task-2 task-3]", got)
+	}
+
+	// Verify all three completion reports made it back to the space.
+	all, err := controller.Read(ctx, space.ID, ioa.ReadOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := map[string]bool{}
+	for _, msg := range all {
+		c, _ := msg.Content["content"].(string)
+		if strings.HasPrefix(c, "done: task-") {
+			results[c] = true
+		}
+	}
+	for _, want := range []string{"done: task-1", "done: task-2", "done: task-3"} {
+		if !results[want] {
+			t.Fatalf("missing completion %q in space; got %#v", want, results)
+		}
+	}
+}
+
+// TestPeerOverflowRecoversViaCatchUp verifies that peer messages arriving
+// faster than the consumer can drain do not get permanently lost: when the
+// per-task peer buffer is full we defer (don't mark processed) so the next
+// catchUp tick re-delivers as soon as the consumer drains some.
+func TestPeerOverflowRecoversViaCatchUp(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	controller, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := controller.Space(ctx, "overflow-case", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerClient, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peerClient.RegisterNode(ctx, "peer-sender", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peerClient.Space(ctx, "overflow-case", "peer"); err != nil {
+		t.Fatal(err)
+	}
+
+	worker, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerNode, err := worker.RegisterNode(ctx, "overflow-worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send 2× the peer buffer; the consumer drains slowly so most arrivals
+	// will hit the "buffer full → defer" path. They should still all show up.
+	const totalPeers = 2 * defaultPeerBufferSize
+	gotPeers := make(chan PeerMessage, totalPeers)
+	drainPause := 5 * time.Millisecond
+	startDraining := make(chan struct{})
+	taskDone := make(chan struct{})
+
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	node := NewNode(NodeConfig{
+		Client:           worker,
+		NodeName:         "overflow-worker",
+		SpaceName:        "overflow-case",
+		SpaceDescription: "worker",
+		PollInterval:     50 * time.Millisecond,
+		Network:          map[string]any{"test": true},
+		OnTask: func(ctx context.Context, task Task) (string, error) {
+			select {
+			case <-startDraining:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			select {
+			case <-taskDone:
+				return "drained", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+		OnPeer: func(peer PeerMessage) bool {
+			select {
+			case gotPeers <- peer:
+				if len(gotPeers) >= totalPeers {
+					select {
+					case <-taskDone:
+					default:
+						close(taskDone)
+					}
+				}
+				time.Sleep(drainPause)
+				return true
+			default:
+				return false
+			}
+		},
+	})
+	go func() { _ = node.Run(runCtx) }()
+
+	waitFor(t, 5*time.Second, "worker announce", func() bool {
+		return node.RootMessageID() != ""
+	})
+
+	// Kick off a task so peer routing has an active consumer.
+	if _, err := controller.Send(ctx, space.ID, ioa.SendMessage{
+		Content: map[string]any{
+			"content": "drain peers",
+			"meta":    map[string]any{"kind": "task_dispatch"},
+		},
+		Refs: &ioa.Ref{Nodes: []string{workerNode.ID}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fire all peer messages while the consumer is still gated on
+	// startDraining. The node's buffer is 64, so the latter ~totalPeers-64
+	// will all hit the defer path.
+	for i := 0; i < totalPeers; i++ {
+		if _, err := peerClient.Send(ctx, space.ID, ioa.SendMessage{
+			Content: map[string]any{
+				"content": fmt.Sprintf("peer-%d", i),
+				"meta":    map[string]any{"kind": "update"},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Give the routing loop time to attempt all deliveries.
+	time.Sleep(300 * time.Millisecond)
+	close(startDraining)
+
+	select {
+	case <-taskDone:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("only %d/%d peer messages delivered", len(gotPeers), totalPeers)
+	}
+
+	if len(gotPeers) < totalPeers {
+		t.Fatalf("delivered %d peers, want %d", len(gotPeers), totalPeers)
 	}
 }
 

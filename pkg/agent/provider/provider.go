@@ -45,7 +45,10 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	resolved := *cfg
 
 	if resolved.Provider == "" {
-		resolved.Provider = "openai"
+		resolved.Provider = InferFromBaseURL(resolved.BaseURL)
+		if resolved.Provider == "" {
+			resolved.Provider = "openai"
+		}
 	}
 
 	providerName := strings.ToLower(resolved.Provider)
@@ -83,9 +86,34 @@ func NewProvider(cfg *ProviderConfig) (Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewOpenAIProvider(resolved)
+	return NewProviderFromResolved(resolved)
+}
+
+func InferFromBaseURL(baseURL string) string {
+	baseURL = strings.ToLower(strings.TrimSpace(baseURL))
+	switch {
+	case strings.Contains(baseURL, "api.openai.com"):
+		return "openai"
+	case strings.Contains(baseURL, "api.anthropic.com"):
+		return "anthropic"
+	case strings.Contains(baseURL, "deepseek.com"):
+		return "deepseek"
+	case strings.Contains(baseURL, "openrouter.ai"):
+		return "openrouter"
+	case strings.Contains(baseURL, "groq.com"):
+		return "groq"
+	case strings.Contains(baseURL, "moonshot.cn"):
+		return "moonshot"
+	case strings.Contains(baseURL, "localhost:11434"), strings.Contains(baseURL, "127.0.0.1:11434"):
+		return "ollama"
+	default:
+		return ""
+	}
 }
 
 func NewProviderFromResolved(cfg *ProviderConfig) (Provider, error) {
+	if strings.ToLower(cfg.Provider) == "anthropic" {
+		return NewAnthropicProvider(cfg)
+	}
 	return NewOpenAIProvider(cfg)
 }

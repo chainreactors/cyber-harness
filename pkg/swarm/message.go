@@ -42,6 +42,15 @@ func ParseSwarm(content map[string]any) (SwarmMessage, bool) {
 	if raw, ok := content["meta"].(map[string]any); ok {
 		msg.Meta = raw
 	}
+	for k, v := range content {
+		if k == "content" || k == "targets" || k == "meta" {
+			continue
+		}
+		if msg.Meta == nil {
+			msg.Meta = make(map[string]any)
+		}
+		msg.Meta[k] = v
+	}
 	return msg, true
 }
 
@@ -73,7 +82,16 @@ func swarmFromIOA(msg ioa.Message) (SwarmMessage, bool) {
 	return ParseLegacyTask(msg.Content)
 }
 
-func isProfileMessage(msg SwarmMessage) bool {
-	kind, _ := msg.Meta["kind"].(string)
-	return kind == "node_profile"
+func isProfileMessage(raw ioa.Message, msg SwarmMessage) bool {
+	if kind, _ := msg.Meta["kind"].(string); kind == "node_profile" {
+		return true
+	}
+	if kind, _ := raw.Content["kind"].(string); kind == "node_profile" {
+		return true
+	}
+	if meta, ok := raw.Content["meta"].(map[string]any); ok {
+		kind, _ := meta["kind"].(string)
+		return kind == "node_profile"
+	}
+	return false
 }

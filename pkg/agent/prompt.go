@@ -2,7 +2,10 @@ package agent
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/skills"
@@ -15,7 +18,17 @@ type PromptConfig struct {
 	Skills           []skills.Skill
 	ScannerAgentMode bool
 	ScannerName      string
+	NodeName         string
+	Space            string
 }
+
+const sharedKeyPrinciples = `## Key Principles
+
+- Scanner output is evidence, not proof. Never report "confirmed" without independent verification.
+- Read aiscan://skills/aiscan/SKILL.md for execution rules, output consumption, and triage strategy.
+- Read aiscan://skills/verify/SKILL.md before reporting any vulnerability finding.
+- Use conservative thread counts and timeouts. When done, stop calling tools and provide findings.
+`
 
 func BuildSystemPrompt(cfg *PromptConfig) string {
 	if cfg == nil {
@@ -42,6 +55,23 @@ You can use parse_results and filter_results pseudo-commands via bash for struct
 
 `)
 	}
+
+	sb.WriteString("## Environment\n\n")
+	sb.WriteString(fmt.Sprintf("Operating System: %s/%s\n", runtime.GOOS, runtime.GOARCH))
+	sb.WriteString(fmt.Sprintf("Current Time: %s\n", time.Now().Format(time.RFC3339)))
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		sb.WriteString(fmt.Sprintf("Hostname: %s\n", hostname))
+	}
+	if cfg.NodeName != "" {
+		sb.WriteString(fmt.Sprintf("Node: %s\n", cfg.NodeName))
+	}
+	if cfg.Space != "" {
+		sb.WriteString(fmt.Sprintf("Space: %s\n", cfg.Space))
+	}
+	if runtime.GOOS == "windows" {
+		sb.WriteString("Shell: cmd.exe — do NOT use Unix shell syntax (2>&1, |, /dev/null). Pseudo-commands run in-process and need no shell redirections.\n")
+	}
+	sb.WriteString("\n")
 
 	sb.WriteString("## Available Tools\n\n")
 	for _, t := range tools.Tools() {
@@ -82,38 +112,14 @@ The vision tool requires a local file path. If you need to analyze a remote imag
 `)
 	}
 
+	sb.WriteString(sharedKeyPrinciples)
+
 	if cfg.ScannerAgentMode {
 		sb.WriteString(`## Scanner Agent Constraints
 
 - Execute the scanner command provided in the task via the bash tool.
 - For structured data processing, re-run the scanner with ` + "`-j`" + ` flag and use ` + "`parse_results`" + `/` + "`filter_results`" + ` pseudo-commands via bash.
-- Use conservative thread counts and timeouts.
-- When done, stop calling tools and provide your findings.
-`)
-	} else {
-		sb.WriteString(`## Execution Constraints
 
-Your bash tool is **stateless** — every command runs in a fresh ` + "`sh -c`" + ` process with a hard timeout. There is no persistent session and no environment variables carried between calls.
-
-For long-running services (listeners, tunnels, servers), pass ` + "`background: true`" + ` — the command starts in its own process group and returns a PID immediately.
-
-Foreground commands that block without producing output (e.g. a listener waiting for connections) will hang until timeout. Always prefer non-blocking alternatives.
-
-Consequences for remote command execution: interactive shells, ` + "`su`" + `, interactive ` + "`python`" + `/` + "`mysql`" + ` prompts, and ` + "`expect`" + `-style dialogs do not work. Any remote execution you achieve must follow a "one command in → stdout out" pattern — each invocation self-contained.
-
-## Data Exfiltration Priority
-
-When you need to move data off a target, use these methods in order of preference:
-1. ` + "`curl`" + `/` + "`wget`" + ` POST to your listener (single fire-and-forget command)
-2. ` + "`scp`" + `/` + "`sftp`" + ` with available credentials
-3. Write to a file, then retrieve with a separate command
-4. Base64-encode small payloads into command output
-5. Start a listener with ` + "`background: true`" + ` only when the above methods are unavailable
-
-## Rules
-
-- Use conservative thread counts and timeouts to avoid overwhelming targets or fragile services.
-- When you have completed the task, stop calling tools and provide your findings.
 `)
 	}
 

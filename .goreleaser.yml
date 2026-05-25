@@ -37,6 +37,37 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
+  - id: aiscan-full
+    main: ./cmd/aiscan
+    binary: "{{ .ProjectName }}-full"
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    tags:
+      - forceposix
+      - emptytemplates
+      - noembed
+      - osusergo
+      - netgo
+      - full
+    ldflags:
+      - -s -w
+    asmflags:
+      - all=-trimpath={{.Env.GOPATH}}
+    gcflags:
+      - all=-trimpath={{.Env.GOPATH}}
+
   - id: ioa
     main: ./cmd/ioa
     binary: "ioa"
@@ -58,6 +89,7 @@ builds:
       - forceposix
       - osusergo
       - netgo
+      - sqlite
     ldflags:
       - -s -w
     asmflags:
@@ -75,6 +107,12 @@ archives:
   - id: aiscan
     builds: [aiscan]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - binary
+
+  - id: aiscan-full
+    builds: [aiscan-full]
+    name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
     formats:
       - binary
 

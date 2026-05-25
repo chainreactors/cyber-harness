@@ -9,7 +9,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -37,18 +37,25 @@ type ProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL  string
-	CyberhubKey  string
-	CyberhubMode string
-	AIEnabled    bool
-	AITimeout    int
-	Proxy        string
+	CyberhubURL   string
+	CyberhubKey   string
+	CyberhubMode  string
+	AIEnabled     bool
+	AITimeout     int
+	Proxy         string
+	FofaEmail     string
+	FofaKey       string
+	HunterToken   string
+	HunterAPIKey  string
+	ReconProxy    string
+	ReconLimit    int
 }
 
 type ToolConfig struct {
 	Enabled       bool
 	BashTimeout   int
 	VisionEnabled bool
+	TavilyKeys    string // comma-separated Tavily API keys (build-time fallback)
 }
 
 type IOAConfig struct {
@@ -171,6 +178,15 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 		logger.Warnf("scanner engines init error=%q action=continue_without_scanners", err)
 		return nil
 	}
+	recon := engine.ReconOptions{
+		FofaEmail:     cfg.FofaEmail,
+		FofaKey:       cfg.FofaKey,
+		HunterToken:   cfg.HunterToken,
+		HunterAPIKey:  cfg.HunterAPIKey,
+		IngressProxy:  cfg.ReconProxy,
+		Limit:         cfg.ReconLimit,
+	}
+	engineSet.SetupUncover(recon, logger)
 	return engineSet
 }
 
@@ -183,24 +199,34 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 	if scanCfg.AIEnabled && llmProvider != nil {
 		p := llmProvider
 		scanOpts = append(scanOpts, scan.WithAIFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
-			return agent.Run(ctx, prompt, command.NewRegistry(),
-				agent.WithProvider(p),
-				agent.WithModel(model),
-				agent.WithMaxTokens(maxTokens),
-				agent.WithSystemPrompt(buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt)),
-				agent.WithLogger(logger),
-			)
+			cfg := agent.Config{
+				Provider:     p,
+				Model:        model,
+				MaxTokens:    maxTokens,
+				SystemPrompt: buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt),
+				Logger:       logger,
+			}
+			result, err := cfg.Run(ctx, prompt)
+			if err != nil {
+				return "", err
+			}
+			return result.Output, nil
 		}))
 		scanOpts = append(scanOpts, scan.WithReportFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
-			sysPrompt := buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt)
-			return agent.Run(ctx, prompt, cmdReg,
-				agent.WithProvider(p),
-				agent.WithModel(model),
-				agent.WithMaxTokens(maxTokens),
-				agent.WithSystemPrompt(sysPrompt),
-				agent.WithBeforeToolCall(scanVerifyBeforeToolCall),
-				agent.WithLogger(logger),
-			)
+			cfg := agent.Config{
+				Provider:        p,
+				Tools:           cmdReg,
+				Model:           model,
+				MaxTokens:       maxTokens,
+				SystemPrompt:    buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt),
+				BeforeToolCall:  scanVerifyBeforeToolCall,
+				Logger:          logger,
+			}
+			result, err := cfg.Run(ctx, prompt)
+			if err != nil {
+				return "", err
+			}
+			return result.Output, nil
 		}))
 		scanOpts = append(scanOpts, scan.WithAISkillConfig(scan.AISkillConfig{
 			Model:   model,
@@ -222,6 +248,7 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 		ScanOpts:     scanOpts,
 		Logger:       logger,
 		Model:        model,
+		TavilyKeys:   toolCfg.TavilyKeys,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources
@@ -290,7 +317,7 @@ func scanVerifyBlocksCommand(commandLine string) bool {
 
 func isScanVerifyBlockedCommand(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "scan", "gogo", "spray", "zombie", "neutron":
+	case "scan", "passive", "gogo", "spray", "zombie", "neutron":
 		return true
 	default:
 		return false
@@ -329,4 +356,3 @@ func newIOAClient(cfg IOAConfig) (ioaclient.API, error) {
 	}
 	return ioaclient.NewClient(cfg.URL, cfg.NodeID)
 }
-

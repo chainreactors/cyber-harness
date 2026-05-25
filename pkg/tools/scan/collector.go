@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/chainreactors/parsers"
 	sdkkit "github.com/chainreactors/sdk/pkg"
@@ -85,12 +86,12 @@ func (c *collector) Observe(pe pipelineEvent) {
 	if c.stats != nil {
 		c.stats.Observe(pe)
 	}
-	if pe.Action == pipelineEventAccept {
+	if pe.Action == pipeline.ActionAccept {
 		c.recordAcceptedEvent(pe.Event)
 	}
 	c.mu.Unlock()
 
-	if pe.Action != pipelineEventAccept {
+	if pe.Action != pipeline.ActionAccept {
 		return
 	}
 
@@ -284,7 +285,7 @@ func newStatsCollector(inputs int) *statsCollector {
 
 func (s *statsCollector) Observe(event pipelineEvent) {
 	switch event.Action {
-	case pipelineEventAccept:
+	case pipeline.ActionAccept:
 		if event.Event.Kind == eventStats {
 			s.recordEngineStats(event.Event.Source, event.Event.Stats)
 			return
@@ -300,9 +301,9 @@ func (s *statsCollector) Observe(event pipelineEvent) {
 			}
 			s.summary.SprayByCapability[source]++
 		}
-	case pipelineEventCapabilityStart:
+	case pipeline.ActionCapabilityStart:
 		s.summary.CapabilityRuns[event.Capability]++
-	case pipelineEventEmit:
+	case pipeline.ActionEmit:
 		if event.Event.Source != "" {
 			s.summary.CapabilityOutput[event.Event.Source]++
 		}

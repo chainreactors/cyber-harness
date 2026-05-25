@@ -63,6 +63,26 @@ func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *assoc
 	return out, nil
 }
 
+// FingerAllowedIDs builds the set of template IDs allowed by the given
+// fingerprints and index. This is shared between the scan pipeline and
+// the standalone neutron command.
+func FingerAllowedIDs(index *association.FingerPOCIndex, fingers []string, maxPerFinger int) map[string]struct{} {
+	allowed := make(map[string]struct{})
+	if index == nil {
+		return allowed
+	}
+	for _, finger := range fingers {
+		ids := index.GetPOCsByFinger(finger)
+		if maxPerFinger > 0 && len(ids) > maxPerFinger {
+			ids = ids[:maxPerFinger]
+		}
+		for _, id := range ids {
+			allowed[id] = struct{}{}
+		}
+	}
+	return allowed
+}
+
 func SelectNeutronTemplates(eng *neutron.Engine, index *association.FingerPOCIndex, opts NeutronExecuteOptions) ([]*templates.Template, bool) {
 	if len(opts.Fingers) == 0 {
 		if opts.Broad {
@@ -74,19 +94,7 @@ func SelectNeutronTemplates(eng *neutron.Engine, index *association.FingerPOCInd
 		return nil, true
 	}
 
-	allowedByFinger := make(map[string]struct{})
-	if index == nil {
-		return nil, true
-	}
-	for _, finger := range opts.Fingers {
-		ids := index.GetPOCsByFinger(finger)
-		if opts.MaxPerFinger > 0 && len(ids) > opts.MaxPerFinger {
-			ids = ids[:opts.MaxPerFinger]
-		}
-		for _, id := range ids {
-			allowedByFinger[id] = struct{}{}
-		}
-	}
+	allowedByFinger := FingerAllowedIDs(index, opts.Fingers, opts.MaxPerFinger)
 	if len(allowedByFinger) == 0 {
 		return nil, true
 	}

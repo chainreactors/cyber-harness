@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 )
 
 type PseudoCommand interface {
@@ -29,14 +29,29 @@ type AgentTool interface {
 	Execute(ctx context.Context, arguments string) (string, error)
 }
 
-type CommandRegistry struct {
-	mu     sync.RWMutex
-	items  map[string]PseudoCommand
-	order  []string
-	groups map[string][]string
+type ToolContext struct {
+	SystemPrompt string
+	Messages     []provider.ChatMessage
+}
 
-	tools      map[string]AgentTool
-	toolOrder  []string
+type ContextAwareAgentTool interface {
+	AgentTool
+	ExecuteWithContext(ctx context.Context, arguments string, toolCtx ToolContext) (string, error)
+}
+
+type WorkDirAware interface {
+	SetWorkDir(dir string)
+}
+
+type CommandRegistry struct {
+	mu      sync.RWMutex
+	items   map[string]PseudoCommand
+	order   []string
+	groups  map[string][]string
+	workDir string
+
+	tools     map[string]AgentTool
+	toolOrder []string
 }
 
 func NewRegistry() *CommandRegistry {
@@ -83,12 +98,26 @@ func (r *CommandRegistry) ToolDefinitions() []provider.ToolDefinition {
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (string, error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string, toolCtx ...ToolContext) (string, error) {
 	t, ok := r.GetTool(name)
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
+	if ca, ok := t.(ContextAwareAgentTool); ok && len(toolCtx) > 0 {
+		return ca.ExecuteWithContext(ctx, arguments, toolCtx[0])
+	}
 	return t.Execute(ctx, arguments)
+}
+
+func (r *CommandRegistry) SetWorkDir(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.workDir = dir
+	for _, cmd := range r.items {
+		if wda, ok := cmd.(WorkDirAware); ok {
+			wda.SetWorkDir(dir)
+		}
+	}
 }
 
 func (r *CommandRegistry) Register(cmd PseudoCommand, group string) {
@@ -99,6 +128,11 @@ func (r *CommandRegistry) Register(cmd PseudoCommand, group string) {
 		r.order = append(r.order, name)
 	}
 	r.items[name] = cmd
+	if r.workDir != "" {
+		if wda, ok := cmd.(WorkDirAware); ok {
+			wda.SetWorkDir(r.workDir)
+		}
+	}
 	if group != "" {
 		r.groups[group] = append(r.groups[group], name)
 	}
@@ -170,13 +204,88 @@ func (r *CommandRegistry) ExecuteArgsStreaming(ctx context.Context, tokens []str
 		return "", fmt.Errorf("unknown command: %s", name)
 	}
 
-	args := tokens[1:]
+	args, err := stripShellSyntax(tokens[1:])
+	if err != nil {
+		return "", err
+	}
 	if stream != nil {
 		if streaming, ok := cmd.(StreamingCommand); ok {
 			return streaming.ExecuteStreaming(ctx, args, stream)
 		}
 	}
 	return cmd.Execute(ctx, args)
+}
+
+// stripShellSyntax processes shell-style tokens that LLMs frequently append
+// to pseudo-command invocations. Pseudo-commands run in-process and have no
+// shell to interpret these, so we either strip the inert ones or reject the
+// command outright when the LLM's intent would be silently lost.
+//
+// Silently stripped (no semantic loss for in-process execution):
+//   - stderr/stdout duplication: 2>&1, 1>&2, >&2, &>
+//
+// Rejected with a clear error so the LLM rewrites its next call:
+//   - Pipes (|, ||): the LLM expects output filtering (e.g. "| head -30")
+//     to limit a scanner's run. Silently dropping the pipe makes the
+//     scanner run to completion against the full wordlist, which is the
+//     deadlock we want to prevent.
+//   - File redirections (>file, >>file, <file, 2>file, 1>file): the LLM
+//     expects output to be written somewhere it can read back. Stripping
+//     leaves the file uncreated.
+//   - Command chaining (&&, ;): tokens after these belong to a separate
+//     command the LLM intends to run, not to the pseudo-command.
+func stripShellSyntax(tokens []string) ([]string, error) {
+	clean := make([]string, 0, len(tokens))
+	for i := 0; i < len(tokens); i++ {
+		t := tokens[i]
+		if t == "|" || t == "||" {
+			return nil, fmt.Errorf("pseudo-commands run in-process and do not support shell pipes (got %q). To limit output, use the scanner's own flags (e.g. spray --limit, gogo -p with a smaller port list) or call a separate filter step in a follow-up bash command", t)
+		}
+		if t == "&&" || t == ";" {
+			return nil, fmt.Errorf("pseudo-commands do not support shell command chaining (got %q). Issue each command in a separate bash tool call", t)
+		}
+		if isStderrDup(t) {
+			continue
+		}
+		if isFileRedirection(t) {
+			return nil, fmt.Errorf("pseudo-commands do not support file redirection (got %q). They run in-process and return their output as the tool result; capture it from the result text instead", t)
+		}
+		clean = append(clean, t)
+	}
+	return clean, nil
+}
+
+// isStderrDup reports whether the token is a stderr/stdout duplication that
+// has no effect for in-process execution and can be silently stripped.
+// Note: "&>" is intentionally not here — it always targets a file, so it
+// belongs in isFileRedirection.
+func isStderrDup(token string) bool {
+	switch token {
+	case "2>&1", "1>&2", ">&2", ">&1":
+		return true
+	}
+	return false
+}
+
+// isFileRedirection reports whether the token is a shell redirection that
+// the LLM intends to actually divert output to/from a file. These must be
+// rejected rather than stripped, because stripping silently breaks the
+// LLM's mental model of where the output ends up.
+func isFileRedirection(token string) bool {
+	// Standalone operators (file comes as the next token).
+	switch token {
+	case ">", ">>", "<", "<<", "2>", "1>", "0<", "&>", "&>>":
+		return true
+	}
+	// Glued forms like >file, 2>file, &>/dev/null.
+	for _, prefix := range []string{
+		"&>", "2>", "1>", "0<", ">>", ">", "<<", "<",
+	} {
+		if strings.HasPrefix(token, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *CommandRegistry) UsageDocs() string {
@@ -190,6 +299,19 @@ func (r *CommandRegistry) UsageDocs() string {
 }
 
 func SplitCommandLine(input string) ([]string, error) {
+	// Pre-process: strip comment-only lines and blank lines so that
+	// LLM-generated preambles like "# scanning target\nscan -i ..." work.
+	lines := strings.Split(input, "\n")
+	var kept []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	input = strings.Join(kept, " ")
+
 	var tokens []string
 	var cur strings.Builder
 	var quote rune

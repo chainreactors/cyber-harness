@@ -3,12 +3,9 @@ package telemetry
 import (
 	"io"
 	"os"
-	"sync"
 
 	"github.com/chainreactors/logs"
 )
-
-var enableDebugOnce sync.Once
 
 type Logger interface {
 	Debugf(format string, args ...any)
@@ -71,10 +68,8 @@ func GlobalLogs() *logs.Logger {
 
 func EnableLogsDebug() *logs.Logger {
 	logger := GlobalLogs()
-	enableDebugOnce.Do(func() {
-		logger.SetLevel(logs.DebugLevel)
-		logger.SetQuiet(false)
-	})
+	logger.SetLevel(logs.DebugLevel)
+	logger.SetQuiet(false)
 	return logger
 }
 

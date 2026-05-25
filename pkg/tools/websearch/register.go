@@ -6,7 +6,7 @@ func init() {
 	command.RegisterFactory(command.Factory{
 		Group: "tools",
 		Build: func(deps *command.Deps, reg *command.CommandRegistry) {
-			reg.Register(New(), "tools")
+			reg.Register(New(deps.TavilyKeys), "tools")
 		},
 	})
 }

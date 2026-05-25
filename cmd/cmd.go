@@ -25,6 +25,7 @@ type Option struct {
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	IOAOptions     `group:"IOA Options" config:"ioa"`
+	ReconOptions   `group:"Recon Options" config:"recon"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 }
 
@@ -54,20 +55,20 @@ type ScannerOptions struct {
 }
 
 type AgentOptions struct {
-	Prompt    string   `short:"p" long:"prompt" description:"Natural language task for the agent"`
-	Inputs    []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
-	Skills    []string `short:"s" long:"skill" description:"Embedded skill to apply. Can specify multiple"`
-	TaskFile  string   `long:"task-file" description:"File containing task description"`
-	Loop      bool     `long:"loop" description:"Run as an IOA loop worker instead of local agent mode"`
-	Heartbeat int      `long:"heartbeat" description:"Run an IOA heartbeat agent turn every N minutes in agent --loop (0 disables)" default:"0"`
-	Timeout   int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
+	Prompt     string   `short:"p" long:"prompt" description:"Natural language task for the agent"`
+	Inputs     []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
+	Skills     []string `short:"s" long:"skill" description:"Embedded skill to apply. Can specify multiple"`
+	TaskFile   string   `long:"task-file" description:"File containing task description"`
+	Loop       bool     `long:"loop" description:"Run as an IOA loop worker instead of local agent mode"`
+	Heartbeat  int      `long:"heartbeat" description:"Run an IOA heartbeat agent turn every N minutes in agent --loop (0 disables)" default:"0"`
+	Timeout    int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
+	EventsFile string   `long:"events-file" description:"Write agent events to JSONL file"`
 }
 
 type IOAOptions struct {
 	IOAURL      string `long:"ioa-url" config:"url" description:"IOA server URL for agent tools"`
 	IOANodeID   string `long:"ioa-node-id" description:"Existing IOA node id for agent tools"`
 	IOANodeName string `long:"ioa-node-name" config:"node_name" description:"IOA node name when auto-registering"`
-	IOADB       string `long:"ioa-db" config:"db" description:"IOA SQLite database path for 'aiscan ioa serve'" default:"./ioa.db"`
 	Space       string `long:"space" config:"space" description:"IOA space name for 'aiscan agent --loop'" default:"default"`
 	IOAJSON     bool   `long:"json" description:"Output IOA query results in JSON format"`
 }
@@ -86,14 +87,9 @@ type MiscOptions struct {
 
 type cliOptions struct {
 	Option
-	Agent    struct{}   `command:"agent" description:"Run the LLM agent"`
-	IOA      ioaCommand `command:"ioa" description:"IOA server commands"`
-	Scan     struct{}   `command:"scan" description:"Run the scan pipeline"`
-	Cyberhub struct{}   `command:"cyberhub" description:"Search Cyberhub fingerprints and POCs"`
-	Gogo     struct{}   `command:"gogo" description:"Run gogo scanner"`
-	Spray    struct{}   `command:"spray" description:"Run spray scanner"`
-	Zombie   struct{}   `command:"zombie" description:"Run zombie weakpass scanner"`
-	Neutron  struct{}   `command:"neutron" description:"Run neutron POC scanner"`
+	Agent struct{}   `command:"agent" description:"Run the LLM agent"`
+	IOA   ioaCommand `command:"ioa" description:"IOA server commands"`
+	scannerCommands
 }
 
 type ioaCommand struct {
@@ -180,17 +176,31 @@ func AiScan() {
 		return
 	}
 	if parsed.Mode == runModeNoCommand {
-		fmt.Fprintln(os.Stderr, "error: missing subcommand: use agent, ioa serve, scan, cyberhub, gogo, spray, zombie, or neutron")
+		fmt.Fprintf(os.Stderr, "error: missing subcommand: use %s\n", cliCommandSummary())
 		os.Exit(1)
 	}
 
-	if cfgPath := loadAndApplyConfig(&option); cfgPath != "" && option.Debug {
+	cfgPath, err := loadAndApplyConfig(&option)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(1)
+	}
+	if cfgPath != "" && option.Debug {
 		fmt.Fprintf(os.Stderr, "loaded config: %s\n", cfgPath)
 	}
 	applyDefaults(&option)
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: os.Stderr, Color: !option.NoColor})
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if parsed.Mode == runModeIOAServe {
+		// ioa serve is a long-running daemon; do not inherit the agent timeout.
+		ctx, cancel = context.WithCancel(context.Background())
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
+	}
 	defer cancel()
 
 	setupSignalHandler(cancel, logger)
@@ -322,6 +332,7 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.CyberhubURL = resolveString(manual.CyberhubURL, option.CyberhubURL)
 	option.CyberhubKey = resolveString(manual.CyberhubKey, option.CyberhubKey)
 	option.CyberhubMode = resolveString(manual.CyberhubMode, option.CyberhubMode)
+	mergeReconOptions(option, &manual)
 	option.ScannerOptions.Proxy = resolveString(manual.ScannerOptions.Proxy, option.ScannerOptions.Proxy)
 	if manual.NoColor {
 		option.NoColor = true
@@ -333,10 +344,21 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	}
 }
 
+func mergeReconOptions(option, manual *Option) {
+	option.FofaEmail = resolveString(manual.FofaEmail, option.FofaEmail)
+	option.FofaKey = resolveString(manual.FofaKey, option.FofaKey)
+	option.HunterToken = resolveString(manual.HunterToken, option.HunterToken)
+	option.HunterAPIKey = resolveString(manual.HunterAPIKey, option.HunterAPIKey)
+	option.ReconProxy = resolveString(manual.ReconProxy, option.ReconProxy)
+	if manual.ReconLimit != nil {
+		option.ReconLimit = manual.ReconLimit
+	}
+}
+
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	parser.SubcommandsOptional = true
-	parser.Usage = `[OPTIONS] <command>
+	parser.Usage = fmt.Sprintf(`[OPTIONS] <command>
 
 aiscan - AI-assisted security scanner
 
@@ -345,10 +367,7 @@ Commands:
   agent          Run the natural-language agent
 
 Advanced scanners:
-  gogo           Run gogo directly
-  spray          Run spray directly
-  zombie         Run zombie directly
-  neutron        Run neutron directly
+%s
 
 Infrastructure:
   cyberhub       Search Cyberhub fingerprints and POCs
@@ -369,7 +388,7 @@ Examples:
   aiscan ioa spaces --ioa-url http://127.0.0.1:8765
   aiscan ioa messages default --ioa-url http://127.0.0.1:8765
   aiscan agent --loop -p "localhost web scanner" -s aiscan --space case-1
-  aiscan agent --loop --heartbeat 5 --space case-1 -p "coordinate next scan steps"`
+  aiscan agent --loop --heartbeat 5 --space case-1 -p "coordinate next scan steps"`, scannerUsageLines())
 	return parser
 }
 
@@ -463,6 +482,16 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--vision-api-key"}, arity: 1, apply: func(o *Option, v string) { o.VisionAPIKey = v }},
 	{names: []string{"--vision-model"}, arity: 1, apply: func(o *Option, v string) { o.VisionModel = v }},
 	{names: []string{"--vision-proxy"}, arity: 1, apply: func(o *Option, v string) { o.VisionProxy = v }},
+	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *Option, v string) { o.FofaEmail = v }},
+	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *Option, v string) { o.FofaKey = v }},
+	{names: []string{"--hunter-token"}, arity: 1, apply: func(o *Option, v string) { o.HunterToken = v }},
+	{names: []string{"--hunter-api-key"}, arity: 1, apply: func(o *Option, v string) { o.HunterAPIKey = v }},
+	{names: []string{"--recon-proxy"}, arity: 1, apply: func(o *Option, v string) { o.ReconProxy = v }},
+	{names: []string{"--recon-limit"}, arity: 1, apply: func(o *Option, v string) {
+		if n, e := strconv.Atoi(v); e == nil {
+			o.ReconLimit = &n
+		}
+	}},
 	{names: []string{"--heartbeat"}, arity: 1, apply: func(o *Option, v string) {
 		if n, e := strconv.Atoi(v); e == nil && n >= 0 {
 			o.Heartbeat = n
@@ -506,11 +535,7 @@ func argsAfterCommand(args []string, command string) []string {
 }
 
 func isScannerCommandName(name string) bool {
-	switch name {
-	case "scan", "cyberhub", "gogo", "spray", "zombie", "neutron":
-		return true
-	}
-	return false
+	return scannerCommandAvailable(name)
 }
 
 func selectedMode(parser *goflags.Parser) runMode {
@@ -537,10 +562,23 @@ func selectedMode(parser *goflags.Parser) runMode {
 		return runModeAgent
 	case "serve":
 		return runModeIOAServe
-	case "scan", "cyberhub", "gogo", "spray", "zombie", "neutron":
-		return runModeScanner
+	default:
+		if scannerCommandAvailable(active.Name) {
+			return runModeScanner
+		}
 	}
 	return runModeNoCommand
+}
+
+func selectedScanner(parser *goflags.Parser) string {
+	active := parser.Active
+	if active == nil {
+		return ""
+	}
+	if scannerCommandAvailable(active.Name) {
+		return active.Name
+	}
+	return ""
 }
 
 func extractIOAArgs(cli *cliOptions, mode runMode) ioaClientArgs {
@@ -556,18 +594,6 @@ func extractIOAArgs(cli *cliOptions, mode runMode) ioaClientArgs {
 		return ioaClientArgs{Space: cli.IOA.Nodes.Positional.Space}
 	}
 	return ioaClientArgs{}
-}
-
-func selectedScanner(parser *goflags.Parser) string {
-	active := parser.Active
-	if active == nil {
-		return ""
-	}
-	switch active.Name {
-	case "scan", "cyberhub", "gogo", "spray", "zombie", "neutron":
-		return active.Name
-	}
-	return ""
 }
 
 func applyScannerRootArgs(args []string, option *Option) ([]string, error) {
@@ -714,11 +740,7 @@ func isDirectScannerCommand(rest []string) bool {
 	if len(rest) == 0 {
 		return false
 	}
-	switch rest[0] {
-	case "scan", "cyberhub", "gogo", "spray", "zombie", "neutron":
-		return true
-	}
-	return false
+	return scannerCommandAvailable(rest[0])
 }
 
 func shouldStreamScannerOutput(rest []string) bool {

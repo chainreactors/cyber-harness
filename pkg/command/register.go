@@ -25,7 +25,9 @@ func init() {
 			reg.RegisterTool(NewReadTool(workDir, readers...))
 			reg.RegisterTool(NewWriteTool(workDir))
 			reg.RegisterTool(NewGlobTool(workDir, globbers...))
-			reg.RegisterTool(NewBashTool(workDir, timeout, reg).WithScannerProxy(deps.ScannerProxy))
+			bash := NewBashTool(workDir, timeout, reg).WithScannerProxy(deps.ScannerProxy)
+			reg.RegisterTool(bash)
+			reg.RegisterTool(NewTaskTool(bash.Manager()))
 		},
 	})
 }

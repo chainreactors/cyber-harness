@@ -11,7 +11,7 @@ import (
 func TestDirectScannerHelpIsNotReportedAsFailure(t *testing.T) {
 	exe := buildAiscan(t)
 
-	for _, name := range []string{"gogo", "spray", "zombie", "scan"} {
+	for _, name := range scannerHelpCommands() {
 		t.Run(name, func(t *testing.T) {
 			cmd := exec.Command(exe, name, "-h")
 			out, err := cmd.CombinedOutput()

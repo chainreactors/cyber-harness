@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/sdk/gogo"
@@ -66,12 +66,12 @@ func TestInitCommandRegistryRegistersScannerCommands(t *testing.T) {
 	}
 }
 
-func TestInitCommandRegistryRegisters4CoreTools(t *testing.T) {
+func TestInitCommandRegistryRegisters5CoreTools(t *testing.T) {
 	logger := telemetry.NopLogger()
 	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "", nil, nil, logger)
 
 	tools := reg.Tools()
-	expected := map[string]bool{"read": true, "write": true, "glob": true, "bash": true}
+	expected := map[string]bool{"read": true, "write": true, "glob": true, "bash": true, "task": true}
 	for _, tool := range tools {
 		if !expected[tool.Name()] {
 			t.Fatalf("unexpected agent tool: %s", tool.Name())
@@ -97,7 +97,7 @@ func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
 
 	for _, tool := range reg.Tools() {
 		switch tool.Name() {
-		case "read", "write", "glob", "bash":
+		case "read", "write", "glob", "bash", "task":
 			// ok — core tools
 		default:
 			t.Fatalf("pseudo-command %q should NOT be registered as an agent tool", tool.Name())

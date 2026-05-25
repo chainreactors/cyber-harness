@@ -3,9 +3,10 @@ package agent
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/pkg/provider"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/command"
+	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 const maxResultSize = 50 * 1024
@@ -20,9 +21,9 @@ const (
 	EventMessageStart       EventType = "message_start"
 	EventMessageUpdate      EventType = "message_update"
 	EventMessageEnd         EventType = "message_end"
-	EventToolExecutionStart  EventType = "tool_execution_start"
-	EventToolExecutionEnd    EventType = "tool_execution_end"
-	EventTokenBudgetWarning  EventType = "token_budget_warning"
+	EventToolExecutionStart EventType = "tool_execution_start"
+	EventToolExecutionEnd   EventType = "tool_execution_end"
+	EventTokenBudgetWarning EventType = "token_budget_warning"
 )
 
 type Event struct {
@@ -78,6 +79,7 @@ type ShouldStopAfterTurnContext struct {
 
 type Config struct {
 	Provider            provider.Provider
+	Tools               *command.CommandRegistry
 	Model               string
 	SystemPrompt        string
 	MaxTokens           int
@@ -92,6 +94,82 @@ type Config struct {
 	BeforeToolCall      func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall       func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	ShouldStopAfterTurn func(context.Context, ShouldStopAfterTurnContext) (bool, error)
+	KeepAlive           func() bool
+	Inbox               inbox.Inbox
+	Expander            *inbox.Expander
+}
+
+// Builder methods — each returns a modified copy (Config is a value type).
+
+func (c Config) WithProvider(p provider.Provider) Config { c.Provider = p; return c }
+func (c Config) WithTools(t *command.CommandRegistry) Config { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config { c.SystemPrompt = s; return c }
+func (c Config) WithStream(s bool) Config { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config { c.Logger = l; return c }
+func (c Config) WithEventHandler(h EventHandler) Config { c.Emit = h; return c }
+func (c Config) WithMaxTokens(n int) Config { c.MaxTokens = n; return c }
+func (c Config) WithTokenBudget(n int) Config { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config { c.Expander = e; return c }
+func (c Config) WithKeepAlive(fn func() bool) Config {
+	c.KeepAlive = fn
+	return c
+}
+
+// RunWithContext executes a one-shot agent task inheriting parent messages.
+// Used by fork mode: child sees parent's full conversation + new directive,
+// maximizing prompt cache hit on the shared prefix.
+func (c Config) RunWithContext(ctx context.Context, prompt string, parentMessages []provider.ChatMessage) (*Result, error) {
+	cfg := normalizeConfig(c)
+	if cfg.Tools == nil {
+		cfg.Tools = command.NewRegistry()
+	}
+	if cfg.Inbox == nil {
+		cfg.Inbox = inbox.NewBuffered(8)
+	}
+	cfg.Inbox.Push(inbox.NewUserMessage(prompt))
+	return runLoop(ctx, Context{
+		SystemPrompt: cfg.SystemPrompt,
+		Messages:     parentMessages,
+		Tools:        cfg.Tools,
+	}, cfg)
+}
+
+// Run executes a one-shot agent task and returns the result.
+func (c Config) Run(ctx context.Context, prompt string) (*Result, error) {
+	cfg := normalizeConfig(c)
+	if cfg.Tools == nil {
+		cfg.Tools = command.NewRegistry()
+	}
+	if cfg.Inbox == nil {
+		cfg.Inbox = inbox.NewBuffered(8)
+	}
+	cfg.Inbox.Push(inbox.NewUserMessage(prompt))
+	return runLoop(ctx, Context{
+		SystemPrompt: cfg.SystemPrompt,
+		Tools:        cfg.Tools,
+	}, cfg)
+}
+
+// NewAgent creates a reusable Agent instance for multi-turn interaction.
+func (c Config) NewAgent() *Agent {
+	cfg := normalizeConfig(c)
+	if cfg.Tools == nil {
+		cfg.Tools = command.NewRegistry()
+	}
+	return &Agent{
+		provider: cfg.Provider,
+		tools:    cfg.Tools,
+		config:   cfg,
+		emit:     cfg.Emit,
+		state: State{
+			SystemPrompt:     cfg.SystemPrompt,
+			Tools:            cfg.Tools,
+			PendingToolCalls: make(map[string]struct{}),
+		},
+		done: closedChan(),
+	}
 }
 
 type Option func(*Config)
@@ -120,6 +198,10 @@ type State struct {
 	PendingToolCalls map[string]struct{}
 	ErrorMessage     string
 	LastError        error
+}
+
+func WithTools(tools *command.CommandRegistry) Option {
+	return func(c *Config) { c.Tools = tools }
 }
 
 func WithProvider(p provider.Provider) Option {
@@ -170,6 +252,10 @@ func WithShouldStopAfterTurn(fn func(context.Context, ShouldStopAfterTurnContext
 	return func(c *Config) { c.ShouldStopAfterTurn = fn }
 }
 
+func WithKeepAlive(fn func() bool) Option {
+	return func(c *Config) { c.KeepAlive = fn }
+}
+
 func WithMaxRetries(n int) Option {
 	return func(c *Config) { c.MaxRetries = n }
 }
@@ -180,4 +266,12 @@ func WithTokenBudget(budget int) Option {
 
 func WithResponseFormat(rf *provider.ResponseFormat) Option {
 	return func(c *Config) { c.ResponseFormat = rf }
+}
+
+func WithInbox(ib inbox.Inbox) Option {
+	return func(c *Config) { c.Inbox = ib }
+}
+
+func WithExpander(e *inbox.Expander) Option {
+	return func(c *Config) { c.Expander = e }
 }

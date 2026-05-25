@@ -13,15 +13,27 @@ import (
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 )
 
+// ReconOptions 提供 uncover 资产测绘引擎所需的凭证与默认行为。
+type ReconOptions struct {
+	FofaEmail    string
+	FofaKey      string
+	HunterToken  string // 极少用 — 抓包出来的 web 登录 cookie/JWT, Python 原版 token 模式
+	HunterAPIKey string // 华顺信安后台 API 管理生成的 api-key (推荐, 64 位 hex)
+	Limit        int
+	IngressProxy string // 给 uncover 的全局出站代理 (http://, https://, socks5://, socks5h://)
+}
+
 type Set struct {
 	Fingers   *sdkfingers.Engine
 	Gogo      *gogo.GogoEngine
 	Spray     *spray.SprayEngine
 	Neutron   *neutron.Engine
 	Zombie    *sdkzombie.Engine
+	Uncover   *UncoverEngine
 	Index     *association.FingerPOCIndex
 	Resources *resources.Set
 	Capacity  CapacityConfig
+	Recon     ReconOptions
 }
 
 // CapacityConfig holds per-engine capacity limits. Zero means unlimited.
@@ -30,16 +42,6 @@ type CapacityConfig struct {
 	Spray   int // total concurrent HTTP threads (default: 200)
 	Zombie  int // total concurrent auth threads (default: 500)
 	Neutron int // total concurrent template executions (default: 10)
-}
-
-// DefaultCapacity returns sensible capacity defaults.
-func DefaultCapacity() CapacityConfig {
-	return CapacityConfig{
-		Gogo:    800,
-		Spray:   100,
-		Zombie:  100,
-		Neutron: 100,
-	}
 }
 
 func (e *Set) Close() {
@@ -58,25 +60,16 @@ func (e *Set) Close() {
 	if e.Zombie != nil {
 		e.Zombie.Close()
 	}
-}
-
-func Init(ctx context.Context, cyberhubURL, apiKey string) (*Set, error) {
-	return InitWithLogger(ctx, cyberhubURL, apiKey, telemetry.NopLogger())
-}
-
-func InitWithLogger(ctx context.Context, cyberhubURL, apiKey string, logger telemetry.Logger) (*Set, error) {
-	return InitWithOptions(ctx, resources.Options{
-		CyberhubURL: cyberhubURL,
-		APIKey:      apiKey,
-		Mode:        resources.ModeMerge,
-	}, logger)
+	if e.Uncover != nil {
+		_ = e.Uncover.Close()
+	}
 }
 
 func InitWithOptions(ctx context.Context, opts resources.Options, logger telemetry.Logger) (*Set, error) {
-	return InitWithCapacity(ctx, opts, DefaultCapacity(), logger)
+	return initWithCapacity(ctx, opts, CapacityConfig{}, logger)
 }
 
-func InitWithCapacity(ctx context.Context, opts resources.Options, caps CapacityConfig, logger telemetry.Logger) (*Set, error) {
+func initWithCapacity(ctx context.Context, opts resources.Options, caps CapacityConfig, logger telemetry.Logger) (*Set, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}

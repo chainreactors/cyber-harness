@@ -13,7 +13,8 @@ func buildAiscan(t *testing.T) string {
 	t.Helper()
 
 	exe := filepath.Join(t.TempDir(), "aiscan-test.exe")
-	cmd := exec.Command("go", "build", "-tags", "emptytemplates noembed", "-o", exe, "./cmd/aiscan")
+	args := []string{"build", "-tags", buildTags(), "-o", exe, "./cmd/aiscan"}
+	cmd := exec.Command("go", args...)
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

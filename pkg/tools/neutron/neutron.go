@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/util"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
@@ -24,11 +25,14 @@ import (
 )
 
 type Command struct {
-	engine *sdkneutron.Engine
-	index  *association.FingerPOCIndex
-	logger telemetry.Logger
-	proxy  string
+	engine  *sdkneutron.Engine
+	index   *association.FingerPOCIndex
+	logger  telemetry.Logger
+	proxy   string
+	workDir string
 }
+
+func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 type neutronFlags struct {
 	Inputs            []string `short:"u" long:"target" description:"Target URL, host, or ip:port (can specify multiple)"`
@@ -139,6 +143,7 @@ Examples:
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
+	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
 	_, err := parser.ParseArgs(normalizeNucleiStyleArgs(args))
@@ -197,6 +202,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		MaxPerFinger:        flags.MaxPerFinger,
 		Concurrency:         flags.Concurrency,
 		RateLimit:           flags.RateLimit,
+		TemplateList:        flags.TemplateList,
 		Debug:               flags.Debug,
 	}
 	if err := validateNeutronSeverities(opts.Severities, opts.ExcludeSeverities); err != nil {
@@ -230,7 +236,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		targetOpts := opts
 		targetOpts.Target = target
 		resultCh, err := neutronExecuteStream(ctx, c.engine, c.index, targetOpts)
-		if errors.Is(err, errNoNeutronTemplates) {
+		if errors.Is(err, scanengine.ErrNoNeutronTemplates) {
 			return "", fmt.Errorf("neutron: no templates selected")
 		}
 		if err != nil {
@@ -524,6 +530,45 @@ func (c *Command) installProxy() func() {
 		neutronhttp.DefaultOption.Proxy = prevOption
 		neutronhttp.DefaultTransport.Proxy = prevTransport
 	}
+}
+
+// resolveRelativePaths resolves relative file arguments against workDir.
+func (c *Command) resolveRelativePaths(args []string) []string {
+	if c.workDir == "" {
+		return args
+	}
+	fileFlags := map[string]bool{
+		"-l": true, "--list": true,
+		"-o": true, "--output": true,
+		"-t": true, "--templates": true,
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if key, value, ok := strings.Cut(arg, "="); ok {
+			if fileFlags[key] {
+				out = append(out, key+"="+c.resolvePath(value))
+				continue
+			}
+			out = append(out, arg)
+			continue
+		}
+		if fileFlags[arg] && i+1 < len(args) {
+			out = append(out, arg)
+			i++
+			out = append(out, c.resolvePath(args[i]))
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func (c *Command) resolvePath(value string) string {
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
+		return value
+	}
+	return filepath.Join(c.workDir, value)
 }
 
 func renderTemplateList(selected []*templates.Template, jsonOutput bool) string {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,13 +25,16 @@ import (
 type Command struct {
 	engines    *engine.Set
 	aiFunc     AIFunc
-	reportFunc ReportFunc
+	reportFunc AIFunc
 	aiConfig   AISkillConfig
 	skillStore SkillBodyLoader
 	recorder   *recorder
 	logger     telemetry.Logger
 	proxy      string
+	workDir    string
 }
+
+func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 type flags struct {
 	Inputs          []string `short:"i" long:"input" description:"Input target: URL, IP, IP:port, or CIDR"`
@@ -46,7 +50,7 @@ type flags struct {
 	OutputFile      string   `short:"f" long:"file" description:"Write output to file without ANSI colors"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
-	Port            string   `long:"port" description:"Ports for discovery scanning; overrides --ports when set"`
+	Port            string   `long:"port" hidden:"true" description:"Alias for --ports"`
 	Threads         int      // derived from Thread; not a CLI flag
 	Timeout         int      `long:"timeout" description:"Per-probe timeout in seconds" default:"5"`
 	SprayThreads    int      // derived from Thread; not a CLI flag
@@ -62,7 +66,7 @@ type flags struct {
 	MaxNeutronPerFP int      `long:"max-neutron-per-finger" description:"Maximum neutron templates per fingerprint" default:"20"`
 	BroadPOC        bool     `long:"broad-poc" description:"Run POC templates even without matching fingerprints"`
 	Verify          string   `long:"verify" hidden:"true" description:"Deprecated: use --ai"`
-	VerifyTimeout   int      `long:"verify-timeout" hidden:"true" description:"Deprecated advanced compatibility option" default:"120"`
+	VerifyTimeout   int      `long:"verify-timeout" hidden:"true" description:"Deprecated compatibility option; ignored" default:"120"`
 }
 
 func New(engineSet *engine.Set, opts ...Option) *Command {
@@ -101,7 +105,6 @@ Advanced:
       --thread      Total concurrency budget (default: 1000); auto-distributed across engines
   -j, --json        Output raw gogo and spray results as JSON Lines
       --ports       Ports for gogo scanning (default: all in quick, - in full)
-      --port        Ports for discovery scanning; overrides --ports when set
       --timeout     Timeout in seconds (default: 5)
       --dict        Dictionary file for spray word-based discovery. Can specify multiple.
       --rule        Rule file for spray word mutation. Can specify multiple.
@@ -127,7 +130,7 @@ Examples:
   scan -i http://target.com --ai
   scan -i http://target.com --sniper
   scan -i http://target.com --mode full --ai --report
-  scan -i 192.168.1.0/24 --port top100
+  scan -i 192.168.1.0/24 --ports top100
   scan -i 127.0.0.1 --mode quick -j
   scan -i 127.0.0.1 --mode quick -f 1.txt
   scan -i 127.0.0.1 --mode quick --report
@@ -137,11 +140,11 @@ Examples:
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
-	return c.execute(ctx, args, nil)
+	return c.execute(ctx, c.resolveRelativePaths(args), nil)
 }
 
 func (c *Command) ExecuteStreaming(ctx context.Context, args []string, stream io.Writer) (string, error) {
-	return c.execute(ctx, args, stream)
+	return c.execute(ctx, c.resolveRelativePaths(args), stream)
 }
 
 func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, error) {
@@ -159,6 +162,8 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		defer restoreDebug()
 		c.logger.Debugf("scan debug enabled")
 	}
+	restoreProxy := c.installProxy()
+	defer restoreProxy()
 	if c.aiConfig.Enable {
 		flags.AI = true
 	}
@@ -179,9 +184,6 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		}
 	}
 	options := resolveScanOptions(flags)
-
-	restoreProxy := c.installProxy()
-	defer restoreProxy()
 
 	rawInputs, err := readInputs(flags.Inputs, flags.ListFile)
 	if err != nil {
@@ -209,7 +211,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
 	coll.recorder = c.recorder
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
-		coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw))})
+		coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw))})
 	})
 	if len(seeds) == 0 {
 		return "", fmt.Errorf("scan: no valid inputs")
@@ -247,7 +249,9 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	if flags.OutputFile != "" && !flags.JSON {
 		plainOut := coll.TerminalString(false)
-		_ = os.WriteFile(flags.OutputFile, []byte(plainOut), 0644)
+		if err := writeOutputFile(flags.OutputFile, plainOut); err != nil {
+			c.logger.Errorf("%s", err.Error())
+		}
 	}
 	return out, nil
 }
@@ -311,4 +315,67 @@ func (c *Command) installProxy() func() {
 		neutronhttp.DefaultTransport.DialContext = prevNeutronDial
 		zombiepkg.ProxyDialTimeout = prevZombieProxy
 	}
+}
+
+func (c *Command) resolveRelativePaths(args []string) []string {
+	if c.workDir == "" {
+		return args
+	}
+	fileFlags := map[string]bool{
+		"-l": true, "--list": true,
+		"-f": true, "--file": true,
+		"--dict": true, "--rule": true,
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if key, value, ok := strings.Cut(arg, "="); ok {
+			if fileFlags[key] {
+				out = append(out, key+"="+c.resolvePath(value))
+				continue
+			}
+			out = append(out, arg)
+			continue
+		}
+		if fileFlags[arg] && i+1 < len(args) {
+			out = append(out, arg)
+			i++
+			out = append(out, c.resolvePath(args[i]))
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func (c *Command) resolvePath(value string) string {
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
+		return value
+	}
+	return filepath.Join(c.workDir, value)
+}
+
+func writeOutputFile(path, content string) error {
+	path = filepath.Clean(path)
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("scan output file: create directory: %w", err)
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("scan output file: %w", err)
+	}
+	if _, err := io.WriteString(f, content); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("scan output file: write: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("scan output file: sync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("scan output file: close: %w", err)
+	}
+	return nil
 }

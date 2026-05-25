@@ -23,6 +23,8 @@ GENERATE_ONLY=false
 EMBED_RESOURCES=false
 BUILD_IOA=false
 QUICK_TARGET=""
+PROFILE="mini"
+AISCAN_BIN="aiscan"
 
 # CLI 覆盖（优先级高于 config.yaml）
 OPT_PROVIDER=""
@@ -38,6 +40,7 @@ OPT_IOA_NODE_NAME=""
 OPT_IOA_SPACE=""
 OPT_VERIFY=""
 OPT_VERIFY_TIMEOUT=""
+OPT_TAVILY_KEYS=""
 
 MODULE="github.com/chainreactors/aiscan/cmd"
 
@@ -72,6 +75,7 @@ while [[ $# -gt 0 ]]; do
         -g|--ldflags)       GENERATE_ONLY=true; shift ;;
         --embed)            EMBED_RESOURCES=true; shift ;;
         --ioa)              BUILD_IOA=true; shift ;;
+        --profile)          PROFILE="$2"; shift 2 ;;
         --llm-provider)     OPT_PROVIDER="$2"; shift 2 ;;
         --llm-base-url)     OPT_BASE_URL="$2"; shift 2 ;;
         --llm-api-key)      OPT_API_KEY="$2"; shift 2 ;;
@@ -85,6 +89,7 @@ while [[ $# -gt 0 ]]; do
         --space)            OPT_IOA_SPACE="$2"; shift 2 ;;
         --verify)           OPT_VERIFY="$2"; shift 2 ;;
         --verify-timeout)   OPT_VERIFY_TIMEOUT="$2"; shift 2 ;;
+        --tavily-keys)      OPT_TAVILY_KEYS="$2"; shift 2 ;;
         -h|--help)
             cat <<'HELP'
 aiscan 构建脚本
@@ -101,6 +106,7 @@ aiscan 构建脚本
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
   --ioa                 同时编译 ioa server 二进制
+  --profile PROFILE     构建配置: mini (默认, 核心工具) 或 full (包含 katana/uncover/ioa)
 
 LLM 覆盖（优先级高于 config.yaml）:
   --llm-provider NAME
@@ -119,6 +125,9 @@ IOA 覆盖:
   --ioa-node-name NAME
   --space NAME
 
+Web Search:
+  --tavily-keys KEYS    Comma-separated Tavily API keys (rotation)
+
 扫描覆盖:
   --verify MODE         auto, off, low, medium, high, critical
   --verify-timeout SEC
@@ -132,6 +141,7 @@ IOA 覆盖:
   ./build.sh --embed                            # 嵌入资源的完整构建
   ./build.sh -g                                 # 打印 ldflags（用于自定义构建命令）
   ./build.sh --ioa -o linux/amd64               # 同时编译 ioa server
+  ./build.sh --profile full -o linux/amd64      # full 构建 (含 katana/uncover/ioa)
 HELP
             exit 0
             ;;
@@ -166,6 +176,8 @@ CFG_IOA_SPACE=$(resolve "$OPT_IOA_SPACE" "$(yaml_val "$CONFIG_FILE" ioa space)")
 
 CFG_VERIFY=$(resolve "$OPT_VERIFY" "$(yaml_val "$CONFIG_FILE" scan verify)")
 CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" scan verify_timeout)")
+
+CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" websearch tavily_keys)")
 
 # build 段仅从 config.yaml 读取（不做 CLI 覆盖）
 if [ -z "$OSARCH" ]; then
@@ -203,6 +215,7 @@ add_ldflag DefaultIOANodeName  "$CFG_IOA_NODE_NAME"
 add_ldflag DefaultSpace        "$CFG_IOA_SPACE"
 add_ldflag DefaultVerify       "$CFG_VERIFY"
 add_ldflag DefaultVerifyTimeout "$CFG_VERIFY_TIMEOUT"
+add_ldflag DefaultTavilyKeys   "$CFG_TAVILY_KEYS"
 
 # ─── 仅打印 ldflags ─────────────────────────────────────────────
 
@@ -214,6 +227,7 @@ fi
 # ─── 打印配置摘要 ────────────────────────────────────────────────
 
 echo "=== aiscan build ==="
+echo "profile:  $PROFILE"
 [ -f "$CONFIG_FILE" ] && echo "config:   $CONFIG_FILE" || echo "config:   (none)"
 [ -n "$CFG_PROVIDER" ]     && echo "provider: $CFG_PROVIDER"
 [ -n "$CFG_MODEL" ]        && echo "model:    $CFG_MODEL"
@@ -222,9 +236,27 @@ echo "=== aiscan build ==="
 [ -n "$CFG_IOA_URL" ]      && echo "ioa:      $CFG_IOA_URL"
 [ -n "$CFG_VERIFY" ]       && echo "verify:   $CFG_VERIFY"
 
+# ─── Profile ────────────────────────────────────────────────────
+
+case "$PROFILE" in
+    mini) ;;
+    full)
+        EXTRA_TAGS="full${EXTRA_TAGS:+,$EXTRA_TAGS}"
+        BUILD_IOA=true
+        AISCAN_BIN="aiscan-full"
+        ;;
+    *)
+        echo "未知 profile: $PROFILE (可选: mini, full)" >&2
+        exit 1
+        ;;
+esac
+
 # ─── Build tags ──────────────────────────────────────────────────
 
 TAGS="forceposix osusergo netgo"
+if [ "$BUILD_IOA" = true ]; then
+    TAGS="$TAGS sqlite"
+fi
 if [ "$EMBED_RESOURCES" != true ]; then
     TAGS="$TAGS emptytemplates noembed"
 fi
@@ -271,7 +303,7 @@ read -ra TARGETS <<< "$OSARCH_NORMALIZED"
 echo "编译 aiscan..."
 for target in "${TARGETS[@]}"; do
     IFS='/' read -ra PARTS <<< "$target"
-    build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/aiscan aiscan
+    build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/aiscan "$AISCAN_BIN"
 done
 
 if [ "$BUILD_IOA" = true ]; then
@@ -287,5 +319,5 @@ fi
 
 echo ""
 echo "构建完成:"
-ls -lh "$OUTPUT_DIR"/aiscan_* 2>/dev/null || true
+ls -lh "$OUTPUT_DIR"/aiscan* 2>/dev/null || true
 [ "$BUILD_IOA" = true ] && ls -lh "$OUTPUT_DIR"/ioa_* 2>/dev/null || true

@@ -23,6 +23,11 @@ type Skill struct {
 	Body        string
 	Raw         string
 	Internal    bool
+
+	Agent           bool
+	AgentMaxTurns   int
+	AgentModel      string
+	AgentBackground bool
 }
 
 type Diagnostic struct {
@@ -60,6 +65,9 @@ func LoadEmbedded() ([]Skill, []Diagnostic) {
 		skill, skillDiagnostics, ok := parseSkill(filePath, entry.Name(), string(raw))
 		diagnostics = append(diagnostics, skillDiagnostics...)
 		if !ok {
+			continue
+		}
+		if !skillAvailable(skill.Name) {
 			continue
 		}
 		if existing, exists := seen[skill.Name]; exists {
@@ -101,6 +109,19 @@ func (s *Store) ByName(name string) (Skill, bool) {
 	return skill, ok
 }
 
+func (s *Store) AgentTypes() []Skill {
+	if s == nil {
+		return nil
+	}
+	var agents []Skill
+	for _, skill := range s.Skills {
+		if skill.Agent {
+			agents = append(agents, skill)
+		}
+	}
+	return agents
+}
+
 func (s *Store) ByLocation(location string) (Skill, bool) {
 	if s == nil {
 		return Skill{}, false
@@ -123,6 +144,9 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 	if embedPath == "" {
 		return "", false, nil
 	}
+	if name := skillNameFromEmbedPath(embedPath); name != "" && !skillAvailable(name) {
+		return "", true, fmt.Errorf("virtual file not available in this build: %s", location)
+	}
 	data, err := fs.ReadFile(embeddedFS, embedPath)
 	if err != nil {
 		return "", false, err
@@ -139,9 +163,15 @@ func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
 	if err != nil || len(matches) == 0 {
 		return nil, false
 	}
-	results := make([]string, len(matches))
-	for i, m := range matches {
-		results[i] = "skills/" + m
+	results := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if name := skillNameFromEmbedPath(m); name != "" && !skillAvailable(name) {
+			continue
+		}
+		results = append(results, "skills/"+m)
+	}
+	if len(results) == 0 {
+		return nil, false
 	}
 	return results, true
 }
@@ -160,6 +190,15 @@ func normalizeEmbedPath(location string) string {
 		return location
 	}
 	return ""
+}
+
+func skillNameFromEmbedPath(embedPath string) string {
+	embedPath = path.Clean(strings.TrimSpace(embedPath))
+	if embedPath == "." || strings.HasPrefix(embedPath, "..") {
+		return ""
+	}
+	name, _, _ := strings.Cut(embedPath, "/")
+	return name
 }
 
 func FormatForPrompt(skills []Skill) string {
@@ -255,15 +294,27 @@ func parseSkill(filePath, defaultName, raw string) (Skill, []Diagnostic, bool) {
 		return Skill{}, diagnostics, false
 	}
 	internal := strings.EqualFold(strings.TrimSpace(frontmatter["internal"]), "true")
+	isAgent := strings.EqualFold(strings.TrimSpace(frontmatter["agent"]), "true")
+	agentBackground := strings.EqualFold(strings.TrimSpace(frontmatter["agent_background"]), "true")
+	agentMaxTurns := 0
+	if v := strings.TrimSpace(frontmatter["agent_max_turns"]); v != "" {
+		fmt.Sscanf(v, "%d", &agentMaxTurns)
+	}
+	agentModel := strings.TrimSpace(frontmatter["agent_model"])
+
 	location := uriPrefix + name + "/SKILL.md"
 	return Skill{
-		Name:        name,
-		Description: description,
-		Location:    location,
-		BaseDir:     uriPrefix + name,
-		Body:        strings.TrimSpace(body),
-		Raw:         raw,
-		Internal:    internal,
+		Name:            name,
+		Description:     description,
+		Location:        location,
+		BaseDir:         uriPrefix + name,
+		Body:            strings.TrimSpace(body),
+		Raw:             raw,
+		Internal:        internal,
+		Agent:           isAgent,
+		AgentMaxTurns:   agentMaxTurns,
+		AgentModel:      agentModel,
+		AgentBackground: agentBackground,
 	}, diagnostics, true
 }
 

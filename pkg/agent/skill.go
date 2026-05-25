@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 )
 
 type SkillResult struct {
@@ -18,14 +18,13 @@ type SkillResult struct {
 }
 
 type SkillOption struct {
-	SkillBody  string
-	MaxTokens  int
-	Tools      *command.CommandRegistry
-	ExtraOpts  []Option
+	SkillBody string
+	MaxTokens int
+	Tools     *command.CommandRegistry
+	Base      Config
 }
 
-func RunSkill(ctx context.Context, prompt string, opts SkillOption, agentOpts ...Option) (*SkillResult, error) {
-	systemPrompt := buildSkillSystemPrompt(opts.SkillBody)
+func RunSkill(ctx context.Context, prompt string, opts SkillOption) (*SkillResult, error) {
 	maxTokens := opts.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = 1600
@@ -36,21 +35,18 @@ func RunSkill(ctx context.Context, prompt string, opts SkillOption, agentOpts ..
 		tools = command.NewRegistry()
 	}
 
-	allOpts := make([]Option, 0, len(agentOpts)+len(opts.ExtraOpts)+4)
-	allOpts = append(allOpts, agentOpts...)
-	allOpts = append(allOpts, opts.ExtraOpts...)
-	allOpts = append(allOpts, WithSystemPrompt(systemPrompt))
-	allOpts = append(allOpts, WithMaxTokens(maxTokens))
-	allOpts = append(allOpts,
-		WithResponseFormat(&provider.ResponseFormat{Type: "json_object"}),
-	)
+	cfg := opts.Base
+	cfg.Tools = tools
+	cfg.SystemPrompt = buildSkillSystemPrompt(opts.SkillBody)
+	cfg.MaxTokens = maxTokens
+	cfg.ResponseFormat = &provider.ResponseFormat{Type: "json_object"}
 
-	output, err := Run(ctx, prompt, tools, allOpts...)
+	result, err := cfg.Run(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	return ParseSkillResult(output)
+	return ParseSkillResult(result.Output)
 }
 
 func ParseSkillResult(output string) (*SkillResult, error) {

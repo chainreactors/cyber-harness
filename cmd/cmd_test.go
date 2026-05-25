@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/provider"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 )
@@ -143,8 +143,15 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
 	cfg := providerConfig(&opt)
-	if cfg.Provider != "deepseek" {
-		t.Fatalf("provider = %q, want deepseek", cfg.Provider)
+	if cfg.Provider != "" {
+		t.Fatalf("provider should be unresolved before provider.Resolve, got %q", cfg.Provider)
+	}
+	resolved, err := provider.Resolve(&cfg)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.Provider != "deepseek" {
+		t.Fatalf("resolved provider = %q, want deepseek", resolved.Provider)
 	}
 }
 
@@ -169,8 +176,15 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
 	cfg := providerConfig(&opt)
-	if cfg.Provider != "deepseek" {
-		t.Fatalf("provider = %q, want deepseek", cfg.Provider)
+	if cfg.Provider != "" {
+		t.Fatalf("provider should be unresolved before provider.Resolve, got %q", cfg.Provider)
+	}
+	resolved, err := provider.Resolve(&cfg)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.Provider != "deepseek" {
+		t.Fatalf("resolved provider = %q, want deepseek", resolved.Provider)
 	}
 }
 
@@ -488,7 +502,7 @@ func TestAgentConsolePromptCommandRunsAgent(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 	llm := &fakeConsoleProvider{}
-	session := agent.New(llm, command.NewRegistry())
+	session := (agent.Config{Provider: llm, Tools: command.NewRegistry()}).NewAgent()
 	repl := newAgentConsole(context.Background(), &Option{}, &app.App{Skills: store}, session)
 
 	if err := repl.executeArgs(context.Background(), []string{agentPromptCommandName, "hello"}); err != nil {
@@ -504,7 +518,6 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 		"ioa",
 		"serve",
 		"--ioa-url", "http://127.0.0.1:9999",
-		"--ioa-db", "./test.db",
 		"--timeout", "10",
 	})
 	if err != nil {
@@ -514,7 +527,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, runModeIOAServe)
 	}
 	opt := parsed.Option
-	if opt.IOAURL != "http://127.0.0.1:9999" || opt.IOADB != "./test.db" || opt.Timeout != 10 {
+	if opt.IOAURL != "http://127.0.0.1:9999" || opt.Timeout != 10 {
 		t.Fatalf("option = %#v", opt)
 	}
 }

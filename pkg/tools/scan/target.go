@@ -188,5 +188,5 @@ func (t pocTarget) Kind() targetKind { return targetPOC }
 func (t pocTarget) RawInput() string { return t.Raw }
 
 func (t pocTarget) Key() string {
-	return strings.ToLower(t.Target) + "|" + strings.Join(parsers.NormalizeNames(t.Fingers), ",")
+	return strings.ToLower(t.Target) + "|" + strings.Join(t.Fingers, ",")
 }

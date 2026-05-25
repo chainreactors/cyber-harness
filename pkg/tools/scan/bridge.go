@@ -6,16 +6,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 )
 
-type pipelineEventKind = pipeline.ActionKind
-
-const (
-	pipelineEventEmit            = pipeline.ActionEmit
-	pipelineEventAccept          = pipeline.ActionAccept
-	pipelineEventCapabilityStart = pipeline.ActionCapabilityStart
-)
-
 type pipelineEvent struct {
-	Action     pipelineEventKind
+	Action     pipeline.ActionKind
 	Capability string
 	Event      event
 }

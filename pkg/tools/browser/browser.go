@@ -130,7 +130,9 @@ func (c *Command) getOrLaunchBrowser() (*rod.Browser, error) {
 		Headless(true).
 		Set("disable-gpu").
 		Set("no-sandbox").
-		Set("disable-dev-shm-usage")
+		Set("disable-dev-shm-usage").
+		Set("ignore-certificate-errors").
+		Set("allow-insecure-localhost")
 
 	controlURL, err := l.Launch()
 	if err != nil {

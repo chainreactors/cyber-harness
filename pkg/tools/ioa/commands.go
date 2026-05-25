@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/command"
@@ -13,21 +14,30 @@ import (
 func NewCommands(client ioaclient.API, nodeName string, meta map[string]any) []command.PseudoCommand {
 	var cmds []command.PseudoCommand
 	for _, t := range ioaclient.NewTools(client, ioaclient.ToolOptions{NodeName: nodeName, NodeMeta: meta}) {
-		cmds = append(cmds, &toolAdapter{tool: t})
+		cmds = append(cmds, &toolAdapter{tool: t, descOverride: toolDescOverrides[t.Name()]})
 	}
 	return cmds
 }
 
+var toolDescOverrides = map[string]string{
+	"ioa_send": `Send an IOA message to a space. The content object MUST include a "content" key with the main task text as a string. Example: {"content": "scan 10.0.0.1 ports 80,443", "meta": {"kind": "task_dispatch"}, "targets": ["10.0.0.1"]}. Use refs.nodes to direct the message to a specific node.`,
+}
+
 type toolAdapter struct {
-	tool ioaclient.Tool
+	tool         ioaclient.Tool
+	descOverride string
 }
 
 func (a *toolAdapter) Name() string { return a.tool.Name() }
 
 func (a *toolAdapter) Usage() string {
 	def := a.tool.Definition()
+	desc := a.tool.Description()
+	if a.descOverride != "" {
+		desc = a.descOverride
+	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s - %s\n", def.Function.Name, a.tool.Description()))
+	sb.WriteString(fmt.Sprintf("%s - %s\n", def.Function.Name, desc))
 
 	params := def.Function.Parameters
 	props, _ := params["properties"].(map[string]interface{})
@@ -115,7 +125,5 @@ func argsToJSON(args []string) (string, error) {
 }
 
 func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+	return strconv.Atoi(s)
 }

@@ -147,6 +147,29 @@ func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 	}
 }
 
+func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
+	usage := Usage()
+	if strings.Contains(usage, "--verify-timeout") {
+		t.Fatal("usage should not advertise deprecated --verify-timeout")
+	}
+	if strings.Contains(usage, "--port        ") || strings.Contains(usage, "--port top100") {
+		t.Fatal("usage should not advertise deprecated --port alias")
+	}
+}
+
+func TestScanAcceptsDeprecatedCompatibilityFlags(t *testing.T) {
+	cmd := New(&engine.Set{})
+	_, err := cmd.Execute(context.Background(), []string{
+		"-i", "http://127.0.0.1",
+		"--verify-timeout", "1",
+		"--port", "top100",
+		"--no-color",
+	})
+	if err != nil {
+		t.Fatalf("Execute() with deprecated compatibility flags error = %v", err)
+	}
+}
+
 func TestScanOptionsResolveWebStrategyFlags(t *testing.T) {
 	flags := flags{
 		Dictionaries: []string{"paths.txt", "api.txt"},
@@ -868,7 +891,7 @@ func TestAgentVerifyCapabilitySuppressesUnconfirmedOutput(t *testing.T) {
 	}
 
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: findingEvent(capAgentVerify, finding)})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capAgentVerify, finding)})
 	if len(coll.verifications) != 0 {
 		t.Fatalf("verifications = %d, want 0", len(coll.verifications))
 	}
@@ -1044,8 +1067,8 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 
 func TestScanSummaryJSONLines(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:   true,
 		UrlString: "http://127.0.0.1:80",
 		Status:    401,
@@ -1142,7 +1165,7 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 			var buf bytes.Buffer
 			coll := newCollector([]string{"seed"}, &buf, false, false)
 			coll.Observe(pipelineEvent{
-				Action: pipelineEventAccept,
+				Action: pipeline.ActionAccept,
 				Event:  targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", tc.result)),
 			})
 
@@ -1179,7 +1202,7 @@ func TestScanSkipsInternalPluginCheckBaseline(t *testing.T) {
 
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: event})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: event})
 	if got := buf.String(); got != "" {
 		t.Fatalf("stream output = %q, want empty", got)
 	}
@@ -1200,7 +1223,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	raw := buf.String()
 	if !hasANSI(raw) {
@@ -1218,7 +1241,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 func TestScanColorizesWebProbePrefixOnly(t *testing.T) {
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, true, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", &parsers.SprayResult{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:32768/test.war",
 		Source:     parsers.BakSource,
@@ -1320,7 +1343,7 @@ func TestScanStreamsWithoutColor(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	out := buf.String()
 	if hasANSI(out) {
@@ -1337,8 +1360,8 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipelineEventCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 	coll.Finish()
 
 	out := coll.String()
@@ -1353,7 +1376,7 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 
 func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: statsEvent(capGogoPortscan, sdkkit.Stats{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdkkit.Stats{
 		Engine:   "gogo",
 		Task:     "scan",
 		Targets:  2,
@@ -1362,7 +1385,7 @@ func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 		Results:  1,
 		Duration: 10 * time.Millisecond,
 	})})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: statsEvent(capSprayCheck, sdkkit.Stats{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capSprayCheck, sdkkit.Stats{
 		Engine:   "spray",
 		Task:     "check",
 		Targets:  1,
@@ -1399,7 +1422,7 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 
 	observeDone := make(chan struct{})
 	go func() {
-		coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+		coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 		close(observeDone)
 	}()
 
@@ -1433,7 +1456,7 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 
 func TestScanPlainTextStripsANSI(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:80",
 		Source:     parsers.CheckSource,
@@ -1504,15 +1527,15 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 
 func TestScanReportMarkdown(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipelineEventCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:   true,
 		UrlString: "http://127.0.0.1:80",
 		Status:    200,
 		Distance:  1,
 	}))})
-	coll.Observe(pipelineEvent{Action: pipelineEventAccept, Event: findingEvent(capAgentVerify, verificationFinding{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capAgentVerify, verificationFinding{
 		OriginalKey:      "vuln|1",
 		OriginalKind:     findingVuln,
 		OriginalPriority: priorityHigh,

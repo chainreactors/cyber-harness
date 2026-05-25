@@ -1,0 +1,78 @@
+version: 2
+
+project_name: aiscan-community
+
+before:
+  hooks: []
+
+builds:
+  - id: aiscan
+    main: ./cmd/aiscan
+    binary: "aiscan"
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    tags:
+      - forceposix
+      - emptytemplates
+      - noembed
+      - osusergo
+      - netgo
+    ldflags:
+      - >-
+        -s -w
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultProvider=deepseek'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultModel=deepseek-chat'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultCyberhubURL={{ .Env.COMMUNITY_CYBERHUB_URL }}'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultCyberhubKey={{ .Env.COMMUNITY_CYBERHUB_KEY }}'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultCyberhubMode=merge'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultVerify=auto'
+        -X 'github.com/chainreactors/aiscan/cmd.DefaultTavilyKeys={{ .Env.COMMUNITY_TAVILY_KEYS }}'
+    asmflags:
+      - all=-trimpath={{.Env.GOPATH}}
+    gcflags:
+      - all=-trimpath={{.Env.GOPATH}}
+
+upx:
+  - enabled: true
+    goos: [linux, windows]
+    goarch:
+      - amd64
+
+archives:
+  - id: aiscan
+    builds: [aiscan]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - zip
+    files:
+      - none*
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-community"
+
+changelog:
+  sort: desc
+  filters:
+    exclude:
+      - '^MERGE'
+      - "{{ .Tag }}"
+      - "^docs"
+
+release:
+  disable: true

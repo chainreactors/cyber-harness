@@ -1,0 +1,29 @@
+# aiscan Community Edition 配置
+#
+# 开箱即用：DeepSeek 免费 API + CyberHub 公共实例 + Tavily Web Search
+# 用法: ./build.sh --config community.yaml -o linux/amd64
+
+# LLM — DeepSeek (免费 tier)
+llm:
+  provider: deepseek
+  api_key: "REMOVED_CREDENTIAL"
+  model: "deepseek-chat"
+
+# CyberHub — 公共指纹/POC 资源
+cyberhub:
+  url: "http://38.76.191.190:3000"
+  key: "REMOVED_CREDENTIAL"
+  mode: "merge"
+
+# Web Search — Tavily keys (自动轮换)
+websearch:
+  tavily_keys: "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,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"
+
+# 扫描默认值
+scan:
+  verify: "auto"
+
+# 构建
+build:
+  osarch: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+  output: dist/community

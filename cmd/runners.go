@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -11,11 +13,13 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/app"
+	cmdpkg "github.com/chainreactors/aiscan/pkg/command"
+	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/swarm"
+	taskmod "github.com/chainreactors/aiscan/pkg/agent/task"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/skills"
-	ioaserver "github.com/chainreactors/ioa/server"
 )
 
 func runAgentMode(ctx context.Context, option *Option, logger telemetry.Logger) error {
@@ -57,6 +61,8 @@ func newAgentRuntime(ctx context.Context, option *Option, logger telemetry.Logge
 		Tools:       application.Commands,
 		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
+		NodeName:    defaultIOANodeName(option),
+		Space:       option.Space,
 	})
 	logger.Debugf("system prompt length: %d chars", len(systemPrompt))
 	return &agentRuntime{application: application, systemPrompt: systemPrompt}, nil
@@ -85,13 +91,29 @@ func runAgentOneShotMode(ctx context.Context, option *Option, logger telemetry.L
 	output := newAgentOutput(option)
 	output.Start("task", displayTask)
 
-	result, err := agent.RunWithEvents(ctx, task, application.Commands, output.HandleEvent,
-		agent.WithProvider(application.Provider),
-		agent.WithSystemPrompt(runtime.systemPrompt),
-		agent.WithModel(option.Model),
-		agent.WithStream(false),
-		agent.WithLogger(telemetry.NopLogger()),
-	)
+	events, err := newEventsWriter(option.EventsFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := events.Close(); cerr != nil {
+			logger.Warnf("close events file: %s", cerr)
+		}
+	}()
+
+	sess := newAgentSession(sessionConfig{
+		Application: application,
+		Option:      option,
+		Logger:      logger,
+		Events:      events,
+	})
+	defer sess.Cleanup()
+
+	result, err := sess.Config.
+		WithSystemPrompt(runtime.systemPrompt).
+		WithStream(false).
+		WithEventHandler(combineEventHandlers(output.HandleEvent, events.HandleEvent)).
+		Run(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -251,6 +273,8 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		Tools:       application.Commands,
 		ScannerDocs: application.Commands.UsageDocs(),
 		Skills:      application.Skills.Skills,
+		NodeName:    defaultIOANodeName(option),
+		Space:       option.Space,
 	})
 
 	streamClient := application.IOAStreamClient
@@ -258,24 +282,40 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		return fmt.Errorf("loop requires streaming IOA client")
 	}
 
-	taskHandler := func(ctx context.Context, task swarm.Task) (string, error) {
-		return agent.Run(ctx, task.Content, application.Commands,
-			agent.WithProvider(application.Provider),
-			agent.WithSystemPrompt(systemPrompt),
-			agent.WithModel(option.Model),
-			agent.WithStream(true),
-			agent.WithLogger(logger),
-		)
+	events, err := newEventsWriter(option.EventsFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := events.Close(); cerr != nil {
+			logger.Warnf("close events file: %s", cerr)
+		}
+	}()
+
+	sess := newAgentSession(sessionConfig{
+		Application: application,
+		Option:      option,
+		Logger:      logger,
+		Events:      events,
+	})
+	defer sess.Cleanup()
+
+	loopCfg := sess.Config.WithSystemPrompt(systemPrompt).WithStream(true)
+
+	taskHandler := func(ctx context.Context, st swarm.Task) (string, error) {
+		result, err := loopCfg.Run(ctx, st.Prompt())
+		if err != nil {
+			return "", err
+		}
+		return result.Output, nil
 	}
 
 	heartbeatFunc := func(ctx context.Context, prompt string) (string, error) {
-		return agent.Run(ctx, prompt, application.Commands,
-			agent.WithProvider(application.Provider),
-			agent.WithSystemPrompt(systemPrompt),
-			agent.WithModel(option.Model),
-			agent.WithStream(true),
-			agent.WithLogger(logger),
-		)
+		result, err := loopCfg.Run(ctx, prompt)
+		if err != nil {
+			return "", err
+		}
+		return result.Output, nil
 	}
 
 	node := swarm.NewNode(swarm.NodeConfig{
@@ -290,21 +330,16 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		Intent:                intent,
 		Skills:                option.Skills,
 		OnTask:                taskHandler,
-		OnHeartbeat:           heartbeatFunc,
-		Logger:                logger,
+		OnPeer: func(peer swarm.PeerMessage) bool {
+			return sess.Config.Inbox.Push(peerToInboxMessage(peer))
+		},
+		OnHeartbeat: heartbeatFunc,
+		Logger:      logger,
 	})
 
 	application.Commands.RegisterTool(swarm.CronCommand(node))
 
 	return node.Run(ctx)
-}
-
-func runIOAServe(ctx context.Context, option *Option, logger telemetry.Logger) error {
-	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{
-		URL:    option.IOAURL,
-		DB:     option.IOADB,
-		Logger: logger,
-	})
 }
 
 func registerIOATools(ctx context.Context, application *app.App, option *Option) error {
@@ -324,4 +359,84 @@ func registerIOATools(ctx context.Context, application *app.App, option *Option)
 		cfg.NodeName = defaultIOANodeName(option)
 	}
 	return application.InitIOA(ctx, cfg)
+}
+
+func formatPeerForLLM(peer swarm.PeerMessage) string {
+	var sb strings.Builder
+	sb.WriteString("<swarm_peer")
+	if peer.Sender != "" {
+		writeXMLAttr(&sb, "sender", peer.Sender)
+	}
+	if peer.MessageID != "" {
+		writeXMLAttr(&sb, "message_id", peer.MessageID)
+	}
+	sb.WriteString(">\n")
+	_ = xml.EscapeText(&sb, []byte(peerPayload(peer)))
+	sb.WriteString("\n</swarm_peer>")
+	return sb.String()
+}
+
+func writeXMLAttr(sb *strings.Builder, name, value string) {
+	sb.WriteByte(' ')
+	sb.WriteString(name)
+	sb.WriteString("=\"")
+	_ = xml.EscapeText(sb, []byte(value))
+	sb.WriteByte('"')
+}
+
+func inboxRefsFromPeer(peer swarm.PeerMessage) map[string][]string {
+	refs := make(map[string][]string, 2)
+	if len(peer.Refs.Messages) > 0 {
+		refs["messages"] = append([]string(nil), peer.Refs.Messages...)
+	}
+	if len(peer.Refs.Nodes) > 0 {
+		refs["nodes"] = append([]string(nil), peer.Refs.Nodes...)
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
+func peerPayload(peer swarm.PeerMessage) string {
+	if strings.TrimSpace(peer.Content) != "" {
+		return peer.Content
+	}
+	if len(peer.RawContent) == 0 {
+		return ""
+	}
+	data, err := json.MarshalIndent(peer.RawContent, "", "  ")
+	if err != nil {
+		return fmt.Sprint(peer.RawContent)
+	}
+	return string(data)
+}
+
+func peerToInboxMessage(peer swarm.PeerMessage) inboxpkg.Message {
+	msg := inboxpkg.NewMessage(inboxpkg.OriginPeer, "user", formatPeerForLLM(peer))
+	msg.Meta = map[string]any{
+		"sender":     peer.Sender,
+		"message_id": peer.MessageID,
+	}
+	return msg
+}
+
+// bashTaskManager fetches the task.Manager owned by the bash tool inside the
+// shared command registry. Returns nil if the registry has no bash tool
+// (which only happens in test setups without the core tool factory).
+func bashTaskManager(reg interface {
+	GetTool(string) (cmdpkg.AgentTool, bool)
+}) *taskmod.Manager {
+	if reg == nil {
+		return nil
+	}
+	tool, ok := reg.GetTool("bash")
+	if !ok {
+		return nil
+	}
+	bt, ok := tool.(*cmdpkg.BashTool)
+	if !ok {
+		return nil
+	}
+	return bt.Manager()
 }

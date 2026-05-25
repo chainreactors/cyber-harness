@@ -11,8 +11,6 @@ type Option func(*Command)
 
 type AIFunc func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error)
 
-type ReportFunc func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error)
-
 type AISkillConfig struct {
 	Model   string
 	Timeout int
@@ -28,7 +26,7 @@ func WithAIFunc(fn AIFunc) Option {
 	return func(c *Command) { c.aiFunc = fn }
 }
 
-func WithReportFunc(fn ReportFunc) Option {
+func WithReportFunc(fn AIFunc) Option {
 	return func(c *Command) { c.reportFunc = fn }
 }
 

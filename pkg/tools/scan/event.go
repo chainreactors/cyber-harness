@@ -199,7 +199,7 @@ func (f fingerprintFinding) Priority() priority {
 }
 
 func (f fingerprintFinding) Key() string {
-	return strings.ToLower(f.Target) + "|" + strings.Join(parsers.NormalizeNames(f.Fingers), ",") + fmt.Sprintf("|focus=%t", f.Focus)
+	return strings.ToLower(f.Target) + "|" + strings.Join(f.Fingers, ",") + fmt.Sprintf("|focus=%t", f.Focus)
 }
 
 type weakpassFinding struct {

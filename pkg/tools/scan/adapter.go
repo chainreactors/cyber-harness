@@ -136,13 +136,12 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 	if !ok || target.Target == "" {
 		return
 	}
-	fingers := parsers.NormalizeNames(target.Fingers)
-	if len(fingers) == 0 && !flags.BroadPOC {
+	if len(target.Fingers) == 0 && !flags.BroadPOC {
 		return
 	}
 	resultCh, err := engine.NeutronExecuteStream(ctx, c.engines.Neutron, c.engines.Index, engine.NeutronExecuteOptions{
 		Target:       target.Target,
-		Fingers:      fingers,
+		Fingers:      target.Fingers,
 		MaxPerFinger: flags.MaxNeutronPerFP,
 		Broad:        flags.BroadPOC,
 		Debug:        flags.Debug,
@@ -192,7 +191,7 @@ func deriveServiceResult(profile profile, source string, result *parsers.GOGORes
 		emit(targetEvent(source, "", newWebTarget("", target, "")))
 	}
 	if len(fingers) > 0 {
-		emit(findingEvent(source, fingerprintFinding{Target: target, Fingers: fingers, Focus: result.Frameworks.IsFocus()}))
+		emit(findingEvent(source, fingerprintFinding{Target: target, Fingers: parsers.NormalizeNames(fingers), Focus: result.Frameworks.IsFocus()}))
 	}
 	if len(fingers) > 0 || profile.AllowBroadPOC {
 		emit(targetEvent(source, "", newPOCTarget("", target, fingers)))
@@ -220,7 +219,7 @@ func deriveWebProbeResult(profile profile, source string, result *parsers.SprayR
 	}
 	fingers := parsers.FrameworkNames(result.Frameworks)
 	if len(fingers) > 0 {
-		emit(findingEvent(source, fingerprintFinding{Target: result.UrlString, Fingers: fingers, Focus: result.Frameworks.IsFocus()}))
+		emit(findingEvent(source, fingerprintFinding{Target: result.UrlString, Fingers: parsers.NormalizeNames(fingers), Focus: result.Frameworks.IsFocus()}))
 	}
 	if result.Status > 0 && (len(fingers) > 0 || profile.AllowBroadPOC) {
 		emit(targetEvent(source, "", newPOCTarget("", result.UrlString, fingers)))
