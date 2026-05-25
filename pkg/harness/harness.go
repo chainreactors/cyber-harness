@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,16 @@ type Harness struct {
 	apiKey  string
 	model   string
 	timeout time.Duration
+	monitor *Monitor
+}
+
+func (h *Harness) WithMonitor(out ...io.Writer) *Harness {
+	w := io.Writer(os.Stderr)
+	if len(out) > 0 {
+		w = out[0]
+	}
+	h.monitor = NewMonitor(w)
+	return h
 }
 
 func New(t *testing.T) *Harness {
@@ -49,7 +60,7 @@ func New(t *testing.T) *Harness {
 		t.Fatalf("build aiscan: %v", cachedExeErr)
 	}
 
-	return &Harness{
+	h := &Harness{
 		t:       t,
 		exe:     cachedExe,
 		workDir: t.TempDir(),
@@ -58,6 +69,10 @@ func New(t *testing.T) *Harness {
 		model:   model,
 		timeout: 180 * time.Second,
 	}
+	if os.Getenv("AISCAN_MONITOR") != "" {
+		h.monitor = NewMonitor(os.Stderr)
+	}
+	return h
 }
 
 func buildOnce(t *testing.T) (string, error) {
@@ -119,9 +134,20 @@ func (h *Harness) RunWithTimeout(timeout time.Duration, args ...string) *RunResu
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	var monitorDone chan struct{}
+	if h.monitor != nil && needsEvents {
+		monitorDone = make(chan struct{})
+		go h.monitor.run(eventsFile, monitorDone)
+	}
+
 	start := time.Now()
 	err := cmd.Run()
 	duration := time.Since(start)
+
+	if monitorDone != nil {
+		close(monitorDone)
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	exitCode := 0
 	if err != nil {
