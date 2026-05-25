@@ -132,13 +132,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 		fmt.Fprintf(os.Stderr, "warning: %s\n", features.Warning)
 	}
 	scanAI := option.AI || features.ScannerAI
-	if scanAI && len(scannerArgs) > 0 && scannerArgs[0] == "scan" {
-		features.ProviderEnabled = true
-		features.ProviderOptional = false
-		features.ToolsEnabled = true
-		features.AIEnabled = true
-	}
-	if option.AI {
+	if scanAI {
 		features.ProviderEnabled = true
 		features.ProviderOptional = false
 		features.ToolsEnabled = true
@@ -173,7 +167,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 		scannerArgs = append(scannerArgs, "--debug")
 	}
 	if option.AI && scannerArgs[0] != "scan" {
-		return runScannerAgentMode(ctx, option, application, scannerArgs, logger)
+		return runScannerWithAgent(ctx, option, application, scannerArgs, logger)
 	}
 	var stream io.Writer
 	var streamCapture bytes.Buffer
@@ -199,7 +193,7 @@ func runDirectScannerMode(ctx context.Context, option *Option, rest []string, lo
 		}
 		output := newAgentOutput(option)
 		output.Start("analysis", strings.Join(scannerArgs, " "))
-		result, err := runScannerAIProcess(ctx, option, application, scannerArgs, aiInput, logger)
+		result, err := runScannerPostAnalysis(ctx, option, application, scannerArgs, aiInput, logger)
 		if err != nil {
 			return err
 		}

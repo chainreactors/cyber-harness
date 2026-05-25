@@ -396,9 +396,9 @@ func TestScannerAIIntentInjectsCommandSkill(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
-	intent, err := resolveScannerAIIntent(&Option{AgentOptions: AgentOptions{Prompt: "focus on risky exposed services"}}, store, "gogo")
+	intent, err := resolveScannerIntent(&Option{AgentOptions: AgentOptions{Prompt: "focus on risky exposed services"}}, store, "gogo")
 	if err != nil {
-		t.Fatalf("resolveScannerAIIntent() error = %v", err)
+		t.Fatalf("resolveScannerIntent() error = %v", err)
 	}
 	for _, want := range []string{
 		`<skill name="gogo" location="aiscan://skills/gogo/SKILL.md">`,
