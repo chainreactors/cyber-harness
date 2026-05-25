@@ -81,11 +81,14 @@ type task struct {
 
 type InProcessFn func(ctx context.Context, out io.Writer) error
 
+type ProducerRegistrar func(name string) func()
+
 type Manager struct {
-	mu      sync.Mutex
-	tasks   map[string]*task
-	observe TaskObserver
-	bufCap  int
+	mu               sync.Mutex
+	tasks            map[string]*task
+	observe          TaskObserver
+	registerProducer ProducerRegistrar
+	bufCap           int
 }
 
 func NewManager() *Manager {
@@ -96,6 +99,22 @@ func (m *Manager) SetObserver(fn TaskObserver) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.observe = fn
+}
+
+func (m *Manager) SetProducerRegistrar(fn ProducerRegistrar) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerProducer = fn
+}
+
+func (m *Manager) newProducer(id string) func() {
+	m.mu.Lock()
+	reg := m.registerProducer
+	m.mu.Unlock()
+	if reg == nil {
+		return nil
+	}
+	return reg("task:" + id)
 }
 
 func (m *Manager) bufferCap() int {
@@ -270,6 +289,13 @@ func (m *Manager) SpawnInProcess(label, cmdDisplay string, timeout time.Duration
 }
 
 func (m *Manager) superviseInProcess(t *task, fn InProcessFn, ctx context.Context, timeout time.Duration) {
+	done := m.newProducer(t.ID)
+	defer func() {
+		if done != nil {
+			done()
+		}
+	}()
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -329,6 +355,13 @@ func (m *Manager) superviseInProcess(t *task, fn InProcessFn, ctx context.Contex
 }
 
 func (m *Manager) supervise(t *task, timeout time.Duration) {
+	done := m.newProducer(t.ID)
+	defer func() {
+		if done != nil {
+			done()
+		}
+	}()
+
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- t.cmd.Wait() }()
 

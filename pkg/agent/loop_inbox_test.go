@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,13 +170,12 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		},
 	}
 	ib := inbox.NewBuffered(4)
-	var keepAlive atomic.Bool
-	keepAlive.Store(true)
+	producer := ib.RegisterProducer("test-bg-task")
 
 	go func() {
+		defer producer.Done()
 		time.Sleep(20 * time.Millisecond)
 		ib.Push(inbox.NewMessage(inbox.OriginTask, "user", "<task_completion>scan done</task_completion>"))
-		keepAlive.Store(false)
 	}()
 
 	result, err := (Config{
@@ -186,7 +184,6 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-		KeepAlive:    func() bool { return keepAlive.Load() },
 	}).Run(context.Background(), "start background scan")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

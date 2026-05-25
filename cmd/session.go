@@ -25,6 +25,10 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 
 	taskMgr := bashTaskManager(cfg.Application.Commands)
 	if taskMgr != nil {
+		taskMgr.SetProducerRegistrar(func(name string) func() {
+			h := ib.RegisterProducer(name)
+			return h.Done
+		})
 		taskMgr.SetObserver(func(ev taskmod.TaskEvent) {
 			if ev.Kind != taskmod.EventCompletion {
 				return
@@ -43,13 +47,18 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 		})
 	}
 
+	scheduler := agent.NewLoopScheduler(ib, cfg.Logger)
+
 	agentCfg := agent.Config{
-		Provider: cfg.Application.Provider,
-		Tools:    cfg.Application.Commands,
-		Model:    cfg.Option.Model,
-		Logger:   cfg.Logger,
-		Inbox:    ib,
+		Provider:      cfg.Application.Provider,
+		Tools:         cfg.Application.Commands,
+		Model:         cfg.Option.Model,
+		Logger:        cfg.Logger,
+		Inbox:         ib,
+		LoopScheduler: scheduler,
 	}
+
+	cfg.Application.Commands.RegisterTool(agent.NewLoopTool(scheduler))
 
 	subAgentTool := NewSubAgentTool(SubAgentConfig{
 		ParentConfig: agentCfg,
@@ -58,20 +67,12 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 	})
 	cfg.Application.Commands.RegisterTool(subAgentTool)
 
-	agentCfg.KeepAlive = func() bool {
-		if subAgentTool.RunningCount() > 0 {
-			return true
-		}
-		if taskMgr == nil {
-			return false
-		}
-		return taskMgr.RunningCount() > 0
-	}
 	if cfg.Events != nil {
 		agentCfg.Emit = cfg.Events.HandleEvent
 	}
 
 	cleanup := func() {
+		scheduler.Stop()
 		if taskMgr != nil {
 			taskMgr.Shutdown()
 		}

@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,81 +36,58 @@ func (t *TaskTool) Description() string {
 	return "Inspect and control background tasks started by `bash` with background:true. Actions: list (show running/done tasks), peek (last N lines of stdout), peek_new (incremental output since last check), wait (block until done or timeout), kill (terminate)."
 }
 
-func (t *TaskTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        "task",
-			Description: t.Description(),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"action": map[string]any{
-						"type":        "string",
-						"enum":        []string{"list", "peek", "peek_new", "wait", "kill"},
-						"description": "Which subcommand to invoke. peek_new returns only output added since the last peek_new call for this task (incremental reading).",
-					},
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Task id (required for peek/peek_new/wait/kill).",
-					},
-					"lines": map[string]any{
-						"type":        "integer",
-						"description": "Lines to return from peek. Default 30.",
-					},
-					"timeout_seconds": map[string]any{
-						"type":        "integer",
-						"description": "Seconds to block in wait before returning the task's current state. Default 60.",
-					},
-				},
-				"required": []string{"action"},
-			},
-		},
-	}
+type TaskArgs struct {
+	Action         string `json:"action"                    jsonschema:"description=Which subcommand to invoke. peek_new returns only output added since the last peek_new call for this task (incremental reading).,enum=list,enum=peek,enum=peek_new,enum=wait,enum=kill"`
+	ID             string `json:"id,omitempty"              jsonschema:"description=Task id (required for peek/peek_new/wait/kill)"`
+	Lines          int    `json:"lines,omitempty"           jsonschema:"description=Lines to return from peek. Default 30"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"description=Seconds to block in wait before returning the task's current state. Default 60"`
 }
 
-func (t *TaskTool) Execute(ctx context.Context, arguments string) (string, error) {
-	var args struct {
-		Action         string `json:"action"`
-		ID             string `json:"id"`
-		Lines          int    `json:"lines"`
-		TimeoutSeconds int    `json:"timeout_seconds"`
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+func (t *TaskTool) Definition() provider.ToolDefinition {
+	return ToolDef("task", t.Description(), TaskArgs{})
+}
+
+func (t *TaskTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+	args, err := ParseArgs[TaskArgs](arguments)
+	if err != nil {
+		return ToolResult{}, err
 	}
 	switch strings.ToLower(strings.TrimSpace(args.Action)) {
 	case "list":
-		return t.actionList(), nil
+		return TextResult(t.actionList()), nil
 	case "peek":
 		if args.ID == "" {
-			return "", fmt.Errorf("peek requires id")
+			return ToolResult{}, fmt.Errorf("peek requires id")
 		}
-		return t.manager.Peek(args.ID, args.Lines)
+		output, err := t.manager.Peek(args.ID, args.Lines)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		return TextResult(output), nil
 	case "peek_new":
 		if args.ID == "" {
-			return "", fmt.Errorf("peek_new requires id")
+			return ToolResult{}, fmt.Errorf("peek_new requires id")
 		}
 		t.mu.Lock()
 		offset := t.cursors[args.ID]
 		t.mu.Unlock()
 		output, newOffset, more, err := t.manager.PeekSinceLimit(args.ID, offset, peekNewMaxBytes)
 		if err != nil {
-			return "", err
+			return ToolResult{}, err
 		}
 		t.mu.Lock()
 		t.cursors[args.ID] = newOffset
 		t.mu.Unlock()
 		if output == "" {
-			return "(no new output since last peek_new)", nil
+			return TextResult("(no new output since last peek_new)"), nil
 		}
 		if more {
 			output += "\n\n[more output available; call task peek_new again for the next chunk]"
 		}
-		return output, nil
+		return TextResult(output), nil
 	case "wait":
 		if args.ID == "" {
-			return "", fmt.Errorf("wait requires id")
+			return ToolResult{}, fmt.Errorf("wait requires id")
 		}
 		timeout := time.Duration(args.TimeoutSeconds) * time.Second
 		if timeout <= 0 {
@@ -119,19 +95,19 @@ func (t *TaskTool) Execute(ctx context.Context, arguments string) (string, error
 		}
 		info, err := t.manager.Wait(ctx, args.ID, timeout)
 		if err != nil {
-			return "", err
+			return ToolResult{}, err
 		}
-		return formatInfo(info), nil
+		return TextResult(formatInfo(info)), nil
 	case "kill":
 		if args.ID == "" {
-			return "", fmt.Errorf("kill requires id")
+			return ToolResult{}, fmt.Errorf("kill requires id")
 		}
 		if err := t.manager.Kill(args.ID); err != nil {
-			return "", err
+			return ToolResult{}, err
 		}
-		return fmt.Sprintf("Sent SIGTERM to task %s.", args.ID), nil
+		return TextResult(fmt.Sprintf("Sent SIGTERM to task %s.", args.ID)), nil
 	default:
-		return "", fmt.Errorf("unknown action: %q (expected list/peek/peek_new/wait/kill)", args.Action)
+		return ToolResult{}, fmt.Errorf("unknown action: %q (expected list/peek/peek_new/wait/kill)", args.Action)
 	}
 }
 

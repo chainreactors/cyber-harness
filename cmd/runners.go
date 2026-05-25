@@ -331,7 +331,16 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		Logger:      logger,
 	})
 
-	application.Commands.RegisterTool(swarm.CronCommand(node))
+	if option.Heartbeat > 0 {
+		sess.Config.LoopScheduler.Add(ctx, agent.LoopEntry{
+			Name:     "heartbeat",
+			Interval: time.Duration(option.Heartbeat) * time.Minute,
+			Mode:     agent.ModeIndependent,
+			OnFire: func(fctx context.Context, e agent.LoopEntry) (string, error) {
+				return "", node.RunHeartbeat(fctx)
+			},
+		})
+	}
 
 	return node.Run(ctx)
 }

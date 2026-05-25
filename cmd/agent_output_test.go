@@ -3,11 +3,18 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 )
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
 
 func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 	got := renderAgentMarkdown("  ## Title\n\n- item  ", false)
@@ -63,12 +70,12 @@ func TestAgentOutputToolSummary(t *testing.T) {
 		t.Fatalf("HandleEvent() error = %v", err)
 	}
 
-	got := stderr.String()
-	if !strings.Contains(got, "- bash: scan -i 127.0.0.1 --mode quick") {
-		t.Fatalf("stderr missing short tool summary: %q", got)
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "bash") || !strings.Contains(got, "scan -i 127.0.0.1 --mode quick") {
+		t.Fatalf("stderr missing tool summary: %q", got)
 	}
-	if strings.Contains(got, "args:") || strings.Contains(got, "result:") {
-		t.Fatalf("balanced output should not include debug details: %q", got)
+	if !strings.Contains(got, "⎿") {
+		t.Fatalf("stderr missing ⎿ marker: %q", got)
 	}
 }
 
@@ -94,15 +101,15 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 		Result:     "file content",
 	})
 
-	got := stderr.String()
-	if !strings.Contains(got, "- read: docs/usage.md") {
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "read") || !strings.Contains(got, "docs/usage.md") {
 		t.Fatalf("stderr missing read summary: %q", got)
 	}
 	if !strings.Contains(got, `args: {"path":"docs/usage.md","limit":20}`) {
 		t.Fatalf("stderr missing compact args in debug mode: %q", got)
 	}
-	if !strings.Contains(got, "result: file content") {
-		t.Fatalf("stderr missing result preview in debug mode: %q", got)
+	if !strings.Contains(got, "file content") {
+		t.Fatalf("stderr missing result content in debug mode: %q", got)
 	}
 }
 
@@ -122,7 +129,57 @@ func TestAgentOutputToolError(t *testing.T) {
 		IsError:    true,
 	})
 
-	if got := stderr.String(); !strings.Contains(got, "error: permission denied") {
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "permission denied") {
 		t.Fatalf("stderr missing tool error: %q", got)
+	}
+}
+
+func TestAgentOutputWriteEditSummary(t *testing.T) {
+	var stderr bytes.Buffer
+	output := &agentOutput{
+		stdout: &bytes.Buffer{},
+		stderr: &stderr,
+		tools:  make(map[string]agentToolSummary),
+	}
+
+	_ = output.HandleEvent(context.Background(), agent.Event{
+		Type:       agent.EventToolExecutionStart,
+		ToolCallID: "call-1",
+		ToolName:   "write",
+		Arguments:  `{"path":"src/main.go","edits":[{"old_text":"foo","new_text":"bar"},{"old_text":"baz","new_text":"qux"}]}`,
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "src/main.go") {
+		t.Fatalf("stderr missing file path: %q", got)
+	}
+	if !strings.Contains(got, "2 change(s)") {
+		t.Fatalf("stderr missing edit count: %q", got)
+	}
+}
+
+func TestAgentOutputMultiLineResult(t *testing.T) {
+	var stderr bytes.Buffer
+	output := &agentOutput{
+		stdout: &bytes.Buffer{},
+		stderr: &stderr,
+		tools:  make(map[string]agentToolSummary),
+	}
+
+	result := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+	_ = output.HandleEvent(context.Background(), agent.Event{
+		Type:       agent.EventToolExecutionEnd,
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Result:     result,
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "line1") {
+		t.Fatalf("stderr missing first line: %q", got)
+	}
+	if !strings.Contains(got, "+") && !strings.Contains(got, "lines") {
+		t.Fatalf("stderr missing truncation hint for multi-line result: %q", got)
 	}
 }

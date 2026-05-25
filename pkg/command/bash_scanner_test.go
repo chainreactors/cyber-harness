@@ -54,10 +54,11 @@ func TestScannerSubcommandsThroughBash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
+			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
 			if err != nil {
 				t.Fatalf("bash.Execute() error = %v", err)
 			}
+			out := res.Text()
 			if !strings.Contains(out, "["+tt.name+"] ok") {
 				t.Fatalf("output = %q, want command output", out)
 			}
@@ -167,9 +168,9 @@ func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
+			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
 			if err == nil {
-				t.Fatalf("expected error, got output %q", out)
+				t.Fatalf("expected error, got output %q", res.Text())
 			}
 			if !strings.Contains(err.Error(), tt.wantHint) {
 				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
@@ -187,12 +188,12 @@ func TestScannerStripsInertStderrDup(t *testing.T) {
 	registry.Register(rec, "")
 	bash := command.NewBashTool(t.TempDir(), 5, registry)
 
-	out, err := bash.Execute(context.Background(), bashArgs(`spray -u http://x 2>&1`))
+	res, err := bash.Execute(context.Background(), bashArgs(`spray -u http://x 2>&1`))
 	if err != nil {
 		t.Fatalf("bash.Execute() error = %v", err)
 	}
-	if !strings.Contains(out, "[spray] ok") {
-		t.Fatalf("output = %q, want spray output", out)
+	if !strings.Contains(res.Text(), "[spray] ok") {
+		t.Fatalf("output = %q, want spray output", res.Text())
 	}
 	want := []string{"-u", "http://x"}
 	if got := rec.lastArgs(); !reflect.DeepEqual(got, want) {
@@ -208,12 +209,12 @@ func TestScannerPseudoCommandForegroundUsesCallerContext(t *testing.T) {
 	registry.Register(&deadlineRecordingCommand{name: "spray"}, "")
 	bash := command.NewBashTool(t.TempDir(), 1, registry)
 
-	out, err := bash.Execute(context.Background(), bashArgs("spray -u http://x"))
+	res, err := bash.Execute(context.Background(), bashArgs("spray -u http://x"))
 	if err != nil {
 		t.Fatalf("bash.Execute() error = %v", err)
 	}
-	if out != "no deadline" {
-		t.Fatalf("output = %q, want no deadline", out)
+	if res.Text() != "no deadline" {
+		t.Fatalf("output = %q, want no deadline", res.Text())
 	}
 }
 
@@ -234,10 +235,11 @@ func TestBashProxyEnvInjection(t *testing.T) {
 	proxy := "socks5://127.0.0.1:1080"
 	bash := command.NewBashTool(t.TempDir(), 5, nil).WithScannerProxy(proxy)
 
-	out, err := bash.Execute(context.Background(), bashArgs("env"))
+	res, err := bash.Execute(context.Background(), bashArgs("env"))
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
+	out := res.Text()
 
 	for _, envVar := range []string{"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
 		expected := envVar + "=" + proxy
@@ -250,13 +252,13 @@ func TestBashProxyEnvInjection(t *testing.T) {
 func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 	bash := command.NewBashTool(t.TempDir(), 5, nil)
 
-	out, err := bash.Execute(context.Background(), bashArgs("env"))
+	res, err := bash.Execute(context.Background(), bashArgs("env"))
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
 
-	if strings.Contains(out, "ALL_PROXY=socks5://") {
-		t.Errorf("should not inject proxy env when proxy is empty, got:\n%s", out)
+	if strings.Contains(res.Text(), "ALL_PROXY=socks5://") {
+		t.Errorf("should not inject proxy env when proxy is empty, got:\n%s", res.Text())
 	}
 }
 
@@ -268,12 +270,12 @@ func TestBashPseudoCommandBypassesProxyEnv(t *testing.T) {
 	proxy := "socks5://127.0.0.1:1080"
 	bash := command.NewBashTool(t.TempDir(), 5, registry).WithScannerProxy(proxy)
 
-	out, err := bash.Execute(context.Background(), bashArgs("gogo -i 127.0.0.1"))
+	res, err := bash.Execute(context.Background(), bashArgs("gogo -i 127.0.0.1"))
 	if err != nil {
 		t.Fatalf("bash gogo: %v", err)
 	}
-	if !strings.Contains(out, "[gogo] ok") {
-		t.Fatalf("expected pseudo-command output, got: %s", out)
+	if !strings.Contains(res.Text(), "[gogo] ok") {
+		t.Fatalf("expected pseudo-command output, got: %s", res.Text())
 	}
 }
 

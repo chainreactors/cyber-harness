@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
@@ -119,11 +118,10 @@ type Config struct {
 	BeforeToolCall      func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall       func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	ShouldStopAfterTurn func(context.Context, ShouldStopAfterTurnContext) (bool, error)
-	KeepAlive             func() bool
-	Inbox                 inbox.Inbox
-	Expander              *inbox.Expander
-	MaxResultSize         int
-	InboxIdlePollInterval time.Duration
+	LoopScheduler *LoopScheduler
+	Inbox         inbox.Inbox
+	Expander      *inbox.Expander
+	MaxResultSize int
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
@@ -147,13 +145,13 @@ func (c Config) WithResponseFormat(rf *provider.ResponseFormat) Config {
 	c.ResponseFormat = rf
 	return c
 }
-func (c Config) WithKeepAlive(fn func() bool) Config {
-	c.KeepAlive = fn
+func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
+	c.LoopScheduler = s
 	return c
 }
 
 // DeriveChild creates a child config inheriting provider, tools, model,
-// and logger from the parent. Per-session fields (Inbox, KeepAlive, Emit,
+// and logger from the parent. Per-session fields (Inbox, LoopScheduler, Emit,
 // SystemPrompt, Messages, hooks) are not inherited.
 func (c Config) DeriveChild() Config {
 	return Config{

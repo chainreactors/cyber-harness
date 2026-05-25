@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
@@ -173,18 +174,19 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				cfg.Logger.Debugf("[turn %d] continuing for pending inbox message(s)", turn)
 				continue
 			}
-			if ib != nil && !ib.Closed() && cfg.KeepAlive != nil && cfg.KeepAlive() {
-				cfg.Logger.Debugf("[turn %d] waiting for inbox while background work is active", turn)
-				pollCtx, cancel := context.WithTimeout(ctx, cfg.InboxIdlePollInterval)
-				hasMessage := ib.Wait(pollCtx)
-				cancel()
+
+			alive := (cfg.LoopScheduler != nil && cfg.LoopScheduler.Active() > 0) ||
+				(ib != nil && ib.ActiveProducers() > 0)
+
+			if alive && ib != nil && !ib.Closed() {
+				cfg.Logger.Debugf("[turn %d] waiting for inbox (loops=%d producers=%d)",
+					turn, schedulerActive(cfg.LoopScheduler), ib.ActiveProducers())
+				hasMessage := ib.Wait(ctx)
 				if hasMessage {
 					continue
 				}
-				if cfg.KeepAlive() {
-					continue
-				}
 			}
+
 			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			result.TotalUsage = totalUsage
@@ -240,11 +242,12 @@ type toolBatchResult struct {
 }
 
 func executeToolCalls(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, turn int) (toolBatchResult, error) {
-	results := make([]provider.ChatMessage, 0, len(assistantMsg.ToolCalls))
-	terminations := 0
-	for _, tc := range assistantMsg.ToolCalls {
-		cfg.Logger.Infof("tool_call name=%s args=%q", tc.Function.Name, preview(tc.Function.Arguments, 200))
+	toolCalls := assistantMsg.ToolCalls
+	slots := make([]toolCallSlot, len(toolCalls))
 
+	// Phase 1: preflight all tool calls sequentially (emit start events, check beforeToolCall)
+	for i, tc := range toolCalls {
+		cfg.Logger.Infof("tool_call name=%s args=%q", tc.Function.Name, preview(tc.Function.Arguments, 200))
 		if err := emit(ctx, cfg.Emit, Event{
 			Type:       EventToolExecutionStart,
 			Turn:       turn,
@@ -255,34 +258,84 @@ func executeToolCalls(ctx context.Context, cfg Config, assistantMsg provider.Cha
 			return toolBatchResult{}, err
 		}
 
-		execution := runToolCall(ctx, cfg, assistantMsg, tc)
+		mode := command.ExecSequential
+		if tool, ok := cfg.Tools.GetTool(tc.Function.Name); ok {
+			if pa, ok := tool.(command.ParallelSafe); ok {
+				mode = pa.ExecutionMode()
+			}
+		}
 
+		slots[i] = toolCallSlot{tc: tc, mode: mode}
+	}
+
+	// Phase 2: execute tools — parallel-safe tools run concurrently, sequential tools run in order
+	hasParallel := false
+	for _, s := range slots {
+		if s.mode == command.ExecParallel {
+			hasParallel = true
+			break
+		}
+	}
+
+	if hasParallel {
+		var wg sync.WaitGroup
+		for i := range slots {
+			if slots[i].mode == command.ExecParallel {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					slots[idx].result = runToolCall(ctx, cfg, assistantMsg, slots[idx].tc)
+				}(i)
+			}
+		}
+		for i := range slots {
+			if slots[i].mode == command.ExecSequential {
+				slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc)
+			}
+		}
+		wg.Wait()
+	} else {
+		for i := range slots {
+			slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc)
+		}
+	}
+
+	// Phase 3: emit results in original order
+	messages := make([]provider.ChatMessage, 0, len(slots))
+	terminations := 0
+	for _, s := range slots {
 		if err := emit(ctx, cfg.Emit, Event{
 			Type:       EventToolExecutionEnd,
 			Turn:       turn,
-			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
-			Arguments:  tc.Function.Arguments,
-			Result:     execution.result,
-			IsError:    execution.isError,
-			Err:        execution.err,
+			ToolCallID: s.tc.ID,
+			ToolName:   s.tc.Function.Name,
+			Arguments:  s.tc.Function.Arguments,
+			Result:     s.result.result,
+			IsError:    s.result.isError,
+			Err:        s.result.err,
 		}); err != nil {
 			return toolBatchResult{}, err
 		}
-		cfg.Logger.Debugf("tool_result name=%s bytes=%d", tc.Function.Name, len(execution.result))
-		toolMsg := provider.NewToolResultMessage(tc.ID, execution.result)
+		cfg.Logger.Debugf("tool_result name=%s bytes=%d", s.tc.Function.Name, len(s.result.result))
+		toolMsg := provider.NewToolResultMessage(s.tc.ID, s.result.result)
 		if err := emitMessage(ctx, cfg.Emit, turn, toolMsg); err != nil {
 			return toolBatchResult{}, err
 		}
-		results = append(results, toolMsg)
-		if execution.flow == ToolFlowTerminate {
+		messages = append(messages, toolMsg)
+		if s.result.flow == ToolFlowTerminate {
 			terminations++
 		}
 	}
 	return toolBatchResult{
-		messages:  results,
-		terminate: len(results) > 0 && terminations == len(results),
+		messages:  messages,
+		terminate: len(messages) > 0 && terminations == len(messages),
 	}, nil
+}
+
+type toolCallSlot struct {
+	tc     provider.ToolCall
+	mode   command.ExecutionMode
+	result toolExecution
 }
 
 type toolExecution struct {
@@ -295,14 +348,17 @@ type toolExecution struct {
 func runToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall) toolExecution {
 	execution := beforeToolCall(ctx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
-		result, execErr := cfg.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments,
+		toolResult, execErr := cfg.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments,
 			command.ToolContext{SystemPrompt: cfg.SystemPrompt, Messages: cfg.Messages})
-		execution.result = result
+		execution.result = toolResult.Text()
 		execution.err = execErr
-		execution.isError = execErr != nil
+		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
 			execution.result = fmt.Sprintf("error: %s", execErr.Error())
 			cfg.Logger.Warnf("tool_error name=%s error=%q", tc.Function.Name, execErr.Error())
+		}
+		if toolResult.Terminate {
+			execution.flow = ToolFlowTerminate
 		}
 	}
 	execution.result = truncateResultSize(execution.result, cfg.MaxResultSize)
@@ -436,10 +492,14 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.MaxResultSize <= 0 {
 		cfg.MaxResultSize = DefaultMaxResultSize
 	}
-	if cfg.InboxIdlePollInterval <= 0 {
-		cfg.InboxIdlePollInterval = DefaultInboxIdlePollInterval
-	}
 	return cfg
+}
+
+func schedulerActive(s *LoopScheduler) int {
+	if s == nil {
+		return 0
+	}
+	return s.Active()
 }
 
 type messageBuilder struct {

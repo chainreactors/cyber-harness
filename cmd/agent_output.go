@@ -19,12 +19,26 @@ import (
 const (
 	agentStatusPreviewLimit = 180
 	agentDebugPreviewLimit  = 320
+	toolResultPreviewLines  = 3
+	toolResultPreviewWidth  = 160
+)
+
+// ANSI escape helpers
+var (
+	colorReset = "\033[0m"
+	colorDim   = "\033[2m"
+	colorBold  = "\033[1m"
+	colorGreen = "\033[32m"
+	colorRed   = "\033[31m"
+	colorCyan  = "\033[36m"
+	colorWhite = "\033[37m"
 )
 
 type agentOutput struct {
 	stdout   io.Writer
 	stderr   io.Writer
 	markdown bool
+	color    bool
 	debug    bool
 	quiet    bool
 	tools    map[string]agentToolSummary
@@ -39,14 +53,27 @@ func newAgentOutput(option *Option) *agentOutput {
 	markdown := stdoutMarkdownEnabled(option)
 	debug := false
 	quiet := false
+	noColor := false
 	if option != nil {
 		debug = option.Debug
 		quiet = option.Quiet
+		noColor = option.NoColor
+	}
+	useColor := !noColor && term.IsTerminal(int(os.Stderr.Fd()))
+	if !useColor {
+		colorReset = ""
+		colorDim = ""
+		colorBold = ""
+		colorGreen = ""
+		colorRed = ""
+		colorCyan = ""
+		colorWhite = ""
 	}
 	return &agentOutput{
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 		markdown: markdown,
+		color:    useColor,
 		debug:    debug,
 		quiet:    quiet,
 		tools:    make(map[string]agentToolSummary),
@@ -70,17 +97,17 @@ func (o *agentOutput) Start(label, text string) {
 	}
 	text = compactAgentLine(text, agentStatusPreviewLimit)
 	if text == "" {
-		fmt.Fprintf(o.stderr, "> %s\n", label)
+		fmt.Fprintf(o.stderr, "%s> %s%s\n", colorBold, label, colorReset)
 		return
 	}
-	fmt.Fprintf(o.stderr, "> %s: %s\n", label, text)
+	fmt.Fprintf(o.stderr, "%s> %s:%s %s\n", colorBold, label, colorReset, text)
 }
 
 func (o *agentOutput) Empty() {
 	if o == nil || o.quiet {
 		return
 	}
-	fmt.Fprintln(o.stderr, "No output.")
+	fmt.Fprintf(o.stderr, "%sNo output.%s\n", colorDim, colorReset)
 }
 
 func (o *agentOutput) Final(content string) {
@@ -122,14 +149,17 @@ func (o *agentOutput) toolStart(event agent.Event) {
 	if o.quiet {
 		return
 	}
+
+	// Render tool header: ⎿ tool_name: summary
+	header := fmt.Sprintf("%s⎿ %s%s%s", colorDim, colorCyan, name, colorReset)
 	if summary != "" {
-		fmt.Fprintf(o.stderr, "- %s: %s\n", name, summary)
-	} else {
-		fmt.Fprintf(o.stderr, "- %s\n", name)
+		header += fmt.Sprintf("%s: %s%s", colorDim, colorReset, summary)
 	}
+	fmt.Fprintln(o.stderr, header)
+
 	if o.debug {
 		if args := compactAgentJSON(event.Arguments, agentDebugPreviewLimit); args != "" {
-			fmt.Fprintf(o.stderr, "  args: %s\n", args)
+			fmt.Fprintf(o.stderr, "  %sargs: %s%s\n", colorDim, args, colorReset)
 		}
 	}
 }
@@ -138,22 +168,60 @@ func (o *agentOutput) toolEnd(event agent.Event) {
 	if o.quiet {
 		return
 	}
+
 	if event.IsError || event.Err != nil {
 		errText := toolErrorText(event)
 		if errText == "" {
 			errText = "tool execution failed"
 		}
-		fmt.Fprintf(o.stderr, "  error: %s\n", compactAgentLine(errText, agentStatusPreviewLimit))
+		fmt.Fprintf(o.stderr, "  %s⎿ %s%s%s\n", colorDim, colorRed, compactAgentLine(errText, agentStatusPreviewLimit), colorReset)
 		return
 	}
-	if !o.debug {
-		return
-	}
-	result := compactAgentLine(event.Result, agentDebugPreviewLimit)
+
+	result := strings.TrimSpace(event.Result)
 	if result == "" {
-		result = "ok"
+		return
 	}
-	fmt.Fprintf(o.stderr, "  result: %s\n", result)
+
+	o.renderToolResult(event.ToolName, result)
+}
+
+func (o *agentOutput) renderToolResult(toolName, result string) {
+	lines := strings.Split(result, "\n")
+
+	// Determine how many preview lines to show
+	maxLines := toolResultPreviewLines
+	if o.debug {
+		maxLines = 20
+	}
+
+	// Adjust for specific tool types that benefit from more context
+	switch toolName {
+	case "read":
+		maxLines = 5
+	case "write":
+		maxLines = 6 // edit summary can have multiple lines
+	}
+
+	showLines := lines
+	truncated := false
+	if len(showLines) > maxLines {
+		showLines = showLines[:maxLines]
+		truncated = true
+	}
+
+	for _, line := range showLines {
+		display := line
+		if len(display) > toolResultPreviewWidth {
+			display = display[:toolResultPreviewWidth] + "…"
+		}
+		fmt.Fprintf(o.stderr, "  %s⎿%s %s\n", colorDim, colorReset, display)
+	}
+
+	if truncated {
+		remaining := len(lines) - maxLines
+		fmt.Fprintf(o.stderr, "  %s⎿ … +%d lines%s\n", colorDim, remaining, colorReset)
+	}
 }
 
 func toolErrorText(event agent.Event) string {
@@ -211,13 +279,38 @@ func summarizeToolArguments(name, arguments string) string {
 	switch name {
 	case "bash":
 		return compactAgentLine(stringArg(args, "command"), agentStatusPreviewLimit)
-	case "read", "write":
-		return compactAgentLine(stringArg(args, "path"), agentStatusPreviewLimit)
+	case "read":
+		path := stringArg(args, "path")
+		if offset := stringArg(args, "offset"); offset != "" && offset != "0" {
+			path += fmt.Sprintf(" (offset=%s)", offset)
+		}
+		return compactAgentLine(path, agentStatusPreviewLimit)
+	case "write":
+		path := stringArg(args, "path")
+		if edits, ok := args["edits"]; ok && edits != nil {
+			if arr, ok := edits.([]any); ok {
+				path += fmt.Sprintf(" (edit: %d change(s))", len(arr))
+			}
+		}
+		return compactAgentLine(path, agentStatusPreviewLimit)
 	case "glob":
 		return compactAgentLine(joinAgentSummaryParts(
 			stringArg(args, "pattern"),
 			prefixedArg("in ", stringArg(args, "path")),
 		), agentStatusPreviewLimit)
+	case "task":
+		action := stringArg(args, "action")
+		id := stringArg(args, "id")
+		return compactAgentLine(joinAgentSummaryParts(action, id), agentStatusPreviewLimit)
+	case "subagent":
+		action := stringArg(args, "action")
+		if action == "" || action == "create" {
+			mode := stringArg(args, "mode")
+			typeName := stringArg(args, "type")
+			prompt := compactAgentLine(stringArg(args, "prompt"), 80)
+			return joinAgentSummaryParts(typeName, prefixedArg("mode=", mode), prompt)
+		}
+		return joinAgentSummaryParts(action, stringArg(args, "name"))
 	case "ioa_space":
 		return compactAgentLine(stringArg(args, "name"), agentStatusPreviewLimit)
 	case "ioa_send":
@@ -291,7 +384,7 @@ func joinAgentSummaryParts(parts ...string) string {
 func compactAgentLine(value string, limit int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if limit > 0 && len(value) > limit {
-		return value[:limit] + "..."
+		return value[:limit] + "…"
 	}
 	return value
 }

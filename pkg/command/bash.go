@@ -1,13 +1,11 @@
 package command
 
 import (
-"context"
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-
 	"runtime"
 	"strings"
 	"time"
@@ -74,68 +72,33 @@ func (t *BashTool) Close() {
 	t.tasks.Shutdown()
 }
 
-func (t *BashTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        "bash",
-			Description: t.Description(),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"command": map[string]any{
-						"type":        "string",
-						"description": "The command to execute. For shell commands: any valid sh command. For pseudo-commands: pass them directly here (e.g. 'scan -i 192.168.1.0/24 --mode quick', 'gogo -i 10.0.0.0/24 -p top100', 'spray -u http://target --finger'). Pseudo-commands are built into this tool — do NOT try to run them as standalone tools or system binaries.",
-					},
-					"background": map[string]any{
-						"type":        "boolean",
-						"description": "Run the command as a background task and return immediately with a task_id. Use this for any long-running command (scan, gogo with many targets, neutron, ssh tunnels). The agent loop keeps working while the task runs; you'll receive a follow-up message when it completes. Use the `task` tool to peek/list/wait/kill. Scanner pseudo-commands still execute in-process when background=false.",
-					},
-					"task_name": map[string]any{
-						"type":        "string",
-						"description": "Optional human label for the background task (shown by `task list`). Ignored when background=false.",
-					},
-					"task_timeout_seconds": map[string]any{
-						"type":        "integer",
-						"description": "Optional wall-clock kill deadline for the background task. Defaults to 1800 (30 min). Ignored when background=false.",
-					},
-					"filename": map[string]any{
-						"type":        "string",
-						"description": "Optional file path to save task output. When set, stdout is written to both memory and the file. When omitted, output stays in memory only (use `task peek` to read). Ignored when background=false.",
-					},
-				},
-				"required": []string{"command"},
-			},
-		},
-	}
+type BashArgs struct {
+	Command            string `json:"command"                        jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands: pass them directly here (e.g. scan -i 192.168.1.0/24 --mode quick). Pseudo-commands are built into this tool."`
+	Background         bool   `json:"background,omitempty"           jsonschema:"description=Run the command as a background task and return immediately with a task_id. Use for long-running commands. Use the task tool to peek/list/wait/kill."`
+	TaskName           string `json:"task_name,omitempty"            jsonschema:"description=Optional human label for the background task (shown by task list). Ignored when background=false."`
+	TaskTimeoutSeconds int    `json:"task_timeout_seconds,omitempty" jsonschema:"description=Optional wall-clock kill deadline for the background task. Defaults to 1800 (30 min). Ignored when background=false."`
+	Filename           string `json:"filename,omitempty"             jsonschema:"description=Optional file path to save task output. When set stdout is written to both memory and the file. Ignored when background=false."`
 }
 
-func (t *BashTool) Execute(ctx context.Context, arguments string) (string, error) {
-	var args struct {
-		Command            string `json:"command"`
-		Background         bool   `json:"background"`
-		TaskName           string `json:"task_name"`
-		TaskTimeoutSeconds int    `json:"task_timeout_seconds"`
-		Filename           string `json:"filename"`
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+func (t *BashTool) Definition() provider.ToolDefinition {
+	return ToolDef("bash", t.Description(), BashArgs{})
+}
+
+func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+	args, err := ParseArgs[BashArgs](arguments)
+	if err != nil {
+		return ToolResult{}, err
 	}
 
 	cmdLine := strings.TrimSpace(args.Command)
 	if cmdLine == "" {
-		return "", fmt.Errorf("empty command")
+		return ToolResult{}, fmt.Errorf("empty command")
 	}
 
-	// If the command is entirely comments/blank lines, nothing to run.
 	if isOnlyCommentsOrBlank(cmdLine) {
-		return "ok", nil
+		return TextResult("ok"), nil
 	}
 
-	// Check for pseudo-command up-front so we can route both background and
-	// foreground modes through the right path. A pseudo-command in
-	// background mode runs inside the task manager as an in-process
-	// goroutine; foreground mode runs synchronously as before.
 	var pseudoCleaned string
 	var isPseudo bool
 	if t.registry != nil {
@@ -150,11 +113,11 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (string, error
 	}
 
 	if isPseudo {
-		// Foreground pseudo-commands are intentionally not wrapped in the bash
-		// tool's shell timeout. Scanner commands manage their own request-level
-		// timeouts, and long whole-task runs should be launched with
-		// background:true instead.
-		return t.registry.Execute(ctx, pseudoCleaned)
+		output, err := t.registry.Execute(ctx, pseudoCleaned)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		return TextResult(output), nil
 	}
 
 	return t.execShell(ctx, cmdLine)
@@ -164,7 +127,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (string, error
 // to the task manager so it runs in the background while the agent keeps
 // working. Output is streamed (or returned at end) to the task's stdout
 // file; the completion notification is injected into the agent's inbox.
-func (t *BashTool) execPseudoBackground(cmdLine, name string, timeoutSeconds int, filename string) (string, error) {
+func (t *BashTool) execPseudoBackground(cmdLine, name string, timeoutSeconds int, filename string) (ToolResult, error) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	reg := t.registry
 	fn := func(ctx context.Context, w io.Writer) error {
@@ -184,7 +147,7 @@ func (t *BashTool) execPseudoBackground(cmdLine, name string, timeoutSeconds int
 	opt := task.SpawnOption{Filename: filename}
 	info, err := t.tasks.SpawnInProcess(name, cmdLine, timeout, fn, opt)
 	if err != nil {
-		return "", err
+		return ToolResult{}, err
 	}
 	msg := fmt.Sprintf(
 		"Started pseudo-command task id=%s name=%s (in-process)\nUse `task peek %s` to inspect progress, `task wait %s` to block, `task kill %s` to stop.",
@@ -192,12 +155,12 @@ func (t *BashTool) execPseudoBackground(cmdLine, name string, timeoutSeconds int
 	if info.Filename != "" {
 		msg += fmt.Sprintf("\nOutput also saved to: %s", info.Filename)
 	}
-	return msg, nil
+	return TextResult(msg), nil
 }
 
 const autoBackgroundThreshold = 15 * time.Second
 
-func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error) {
+func (t *BashTool) execShell(ctx context.Context, cmdLine string) (ToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.timeout)*time.Second)
 	defer cancel()
 
@@ -216,7 +179,7 @@ func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error
 	cmd.Stderr = buf
 
 	if err := cmd.Start(); err != nil {
-		return "", err
+		return ToolResult{}, err
 	}
 
 	exited := make(chan error, 1)
@@ -232,9 +195,9 @@ func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error
 			remaining = task.DefaultTimeout
 		}
 		info := t.tasks.Adopt(cmd, buf, labelFromCommand(cmdLine), remaining)
-		return fmt.Sprintf(
+		return TextResult(fmt.Sprintf(
 			"Command auto-backgrounded (exceeded %s).\ntask id=%s name=%s\nUse `task peek %s` to check progress.",
-			autoBackgroundThreshold, info.ID, info.Name, info.ID), nil
+			autoBackgroundThreshold, info.ID, info.Name, info.ID)), nil
 
 	case <-ctx.Done():
 		_ = terminateProcess(cmd)
@@ -248,7 +211,7 @@ func (t *BashTool) execShell(ctx context.Context, cmdLine string) (string, error
 	}
 }
 
-func (t *BashTool) collectForegroundResult(buf *task.OutputBuffer, err error, ctx context.Context) (string, error) {
+func (t *BashTool) collectForegroundResult(buf *task.OutputBuffer, err error, ctx context.Context) (ToolResult, error) {
 	output := buf.String()
 	if len(output) > maxOutputSize {
 		original := len(output)
@@ -257,14 +220,14 @@ func (t *BashTool) collectForegroundResult(buf *task.OutputBuffer, err error, ct
 	}
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return output, fmt.Errorf("command timed out after %ds", t.timeout)
+			return TextResult(output), fmt.Errorf("command timed out after %ds", t.timeout)
 		}
 		if output == "" {
-			return "", err
+			return ToolResult{}, err
 		}
-		return output + "\n[exit code: non-zero]", nil
+		return TextResult(output + "\n[exit code: non-zero]"), nil
 	}
-	return output, nil
+	return TextResult(output), nil
 }
 
 func labelFromCommand(cmdLine string) string {
@@ -277,12 +240,12 @@ func labelFromCommand(cmdLine string) string {
 
 // execBackground delegates to the task manager; the agent gets back a task
 // id immediately and can keep working while the command runs to completion.
-func (t *BashTool) execBackground(cmdLine, name string, timeoutSeconds int, filename string) (string, error) {
+func (t *BashTool) execBackground(cmdLine, name string, timeoutSeconds int, filename string) (ToolResult, error) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	opt := task.SpawnOption{Filename: filename}
 	info, err := t.tasks.Spawn(t.workDir, cmdLine, name, timeout, opt)
 	if err != nil {
-		return "", err
+		return ToolResult{}, err
 	}
 	msg := fmt.Sprintf(
 		"Started background task id=%s name=%s pid=%d\nUse `task peek %s` to inspect progress, `task wait %s` to block, `task kill %s` to stop. A completion message will be injected automatically when the task ends.",
@@ -290,7 +253,7 @@ func (t *BashTool) execBackground(cmdLine, name string, timeoutSeconds int, file
 	if info.Filename != "" {
 		msg += fmt.Sprintf("\nOutput also saved to: %s", info.Filename)
 	}
-	return msg, nil
+	return TextResult(msg), nil
 }
 
 // isOnlyCommentsOrBlank returns true if every line in the input is blank or a

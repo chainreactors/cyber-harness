@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,85 +50,57 @@ func (t *SubAgentTool) Description() string {
 	return "Create a subagent to handle an independent task. Modes: sync (block), async (background), fork (background with parent context for cache efficiency)."
 }
 
-func (t *SubAgentTool) Definition() provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        t.Name(),
-			Description: t.Description(),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"action": map[string]any{
-						"type":        "string",
-						"enum":        []string{"create", "list", "kill", "message"},
-						"description": "create: spawn subagent. list: show running. kill: cancel by name. message: send message to running subagent.",
-					},
-					"prompt": map[string]any{
-						"type":        "string",
-						"description": "Task description for the subagent (required for create).",
-					},
-					"mode": map[string]any{
-						"type":        "string",
-						"enum":        []string{"sync", "async", "fork"},
-						"description": "sync: block until done. async: background with fresh context. fork: background inheriting parent conversation (cache-friendly). Default: async.",
-					},
-					"type": map[string]any{
-						"type":        "string",
-						"description": "Agent type name (a skill with agent:true).",
-					},
-					"name": map[string]any{
-						"type":        "string",
-						"description": "Human-readable label for tracking.",
-					},
-					"message": map[string]any{
-						"type":        "string",
-						"description": "Message to send (action=message, requires name).",
-					},
-					"timeout": map[string]any{
-						"type":        "string",
-						"description": "Optional timeout for sync mode (e.g. '30s', '2m'). Returns error on timeout.",
-					},
-				},
-				"required": []string{"prompt"},
-			},
-		},
-	}
+type SubAgentArgs struct {
+	Action  string `json:"action,omitempty"  jsonschema:"description=create: spawn subagent. list: show running. kill: cancel by name. message: send message to running subagent.,enum=create,enum=list,enum=kill,enum=message"`
+	Prompt  string `json:"prompt"            jsonschema:"description=Task description for the subagent (required for create)"`
+	Mode    string `json:"mode,omitempty"    jsonschema:"description=sync: block until done. async: background with fresh context. fork: background inheriting parent conversation (cache-friendly). Default: async.,enum=sync,enum=async,enum=fork"`
+	Type    string `json:"type,omitempty"    jsonschema:"description=Agent type name (a skill with agent:true)"`
+	Name    string `json:"name,omitempty"    jsonschema:"description=Human-readable label for tracking"`
+	Message string `json:"message,omitempty" jsonschema:"description=Message to send (action=message requires name)"`
+	Timeout string `json:"timeout,omitempty" jsonschema:"description=Optional timeout for sync mode (e.g. 30s or 2m). Returns error on timeout."`
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (string, error) {
+func (t *SubAgentTool) Definition() provider.ToolDefinition {
+	return command.ToolDef(t.Name(), t.Description(), SubAgentArgs{})
+}
+
+func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (command.ToolResult, error) {
 	return t.execute(ctx, arguments, nil)
 }
 
-func (t *SubAgentTool) ExecuteWithContext(ctx context.Context, arguments string, toolCtx command.ToolContext) (string, error) {
+func (t *SubAgentTool) ExecuteWithContext(ctx context.Context, arguments string, toolCtx command.ToolContext) (command.ToolResult, error) {
 	return t.execute(ctx, arguments, &toolCtx)
 }
 
-func (t *SubAgentTool) execute(ctx context.Context, arguments string, toolCtx *command.ToolContext) (string, error) {
-	var args struct {
-		Action  string `json:"action"`
-		Prompt  string `json:"prompt"`
-		Mode    string `json:"mode"`
-		Type    string `json:"type"`
-		Name    string `json:"name"`
-		Message string `json:"message"`
-		Timeout string `json:"timeout"`
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("parse arguments: %w", err)
+func (t *SubAgentTool) execute(ctx context.Context, arguments string, toolCtx *command.ToolContext) (command.ToolResult, error) {
+	args, err := command.ParseArgs[SubAgentArgs](arguments)
+	if err != nil {
+		return command.ToolResult{}, err
 	}
 
 	switch args.Action {
 	case "list":
-		return t.list(), nil
+		return command.TextResult(t.list()), nil
 	case "kill":
-		return t.kill(args.Name)
+		output, err := t.kill(args.Name)
+		if err != nil {
+			return command.ToolResult{}, err
+		}
+		return command.TextResult(output), nil
 	case "message":
-		return t.sendMessage(args.Name, args.Message)
+		output, err := t.sendMessage(args.Name, args.Message)
+		if err != nil {
+			return command.ToolResult{}, err
+		}
+		return command.TextResult(output), nil
 	case "", "create":
-		return t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout, toolCtx)
+		output, err := t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout, toolCtx)
+		if err != nil {
+			return command.ToolResult{}, err
+		}
+		return command.TextResult(output), nil
 	default:
-		return "", fmt.Errorf("unknown action: %s", args.Action)
+		return command.ToolResult{}, fmt.Errorf("unknown action: %s", args.Action)
 	}
 }
 
@@ -215,8 +186,10 @@ func (t *SubAgentTool) runAsync(ctx context.Context, cfg agent.Config, prompt, n
 	childCtx, cancel := context.WithCancel(ctx)
 	childIb := inbox.NewBuffered(16)
 	t.track(name, typeName, "async", cancel, childIb)
+	producer := t.cfg.ParentInbox.RegisterProducer("subagent:" + name)
 
 	go func() {
+		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
 		childCfg := cfg.WithInbox(childIb)
@@ -239,8 +212,10 @@ func (t *SubAgentTool) runFork(ctx context.Context, cfg agent.Config, directive,
 	childCtx, cancel := context.WithCancel(ctx)
 	childIb := inbox.NewBuffered(16)
 	t.track(name, typeName, "fork", cancel, childIb)
+	producer := t.cfg.ParentInbox.RegisterProducer("subagent:" + name)
 
 	go func() {
+		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
 		childCfg := cfg.WithInbox(childIb)

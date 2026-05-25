@@ -143,8 +143,6 @@ type Node struct {
 	rootMessageID string
 	spaceID       string
 	spaceName     string
-	crons         *cronManager
-	cronCh        chan CronTask
 	runCtx        context.Context
 
 	// pending holds task dispatches that arrived while another task was
@@ -191,30 +189,8 @@ func NewNode(cfg NodeConfig) *Node {
 		cfg:        cfg,
 		historical: make(map[string]struct{}),
 		dispatched: make(map[string]struct{}),
-		cronCh:     make(chan CronTask, 4),
 	}
-	n.crons = newCronManager(n.cronCh, n.runCron)
 	return n
-}
-
-func (n *Node) AddCron(task CronTask) error {
-	if task.ContextLimit <= 0 {
-		task.ContextLimit = n.cfg.HeartbeatContextLimit
-	}
-	if n.runCtx == nil {
-		return fmt.Errorf("node not running")
-	}
-	n.cfg.Logger.Importantf("swarm cron=%s interval=%s created", task.Name, task.Interval)
-	return n.crons.Add(n.runCtx, task)
-}
-
-func (n *Node) RemoveCron(name string) error {
-	n.cfg.Logger.Importantf("swarm cron=%s deleted", name)
-	return n.crons.Remove(name)
-}
-
-func (n *Node) ListCrons() []CronTask {
-	return n.crons.List()
 }
 
 func (n *Node) RootMessageID() string {
@@ -271,7 +247,6 @@ func (n *Node) Run(ctx context.Context) error {
 		if err := n.runCron(ctx, heartbeat); err != nil {
 			n.cfg.Logger.Warnf("swarm heartbeat init failed: %s", err)
 		}
-		_ = n.crons.Add(ctx, heartbeat)
 	} else {
 		if err := n.catchUp(ctx, &active); err != nil {
 			return err
@@ -317,20 +292,6 @@ func (n *Node) Run(ctx context.Context) error {
 		case <-ticker.C:
 			if err := n.catchUp(ctx, &active); err != nil {
 				n.cfg.Logger.Warnf("swarm catch-up failed: %s", err)
-			}
-		case cron := <-n.cronCh:
-			if n.cfg.OnHeartbeat != nil {
-				// Heartbeats invoke a full LLM turn-loop that can take minutes.
-				// Running it inline would block the select — no message
-				// routing, no peer forwarding, no task completion handling —
-				// for the duration. Run in a goroutine so the loop keeps
-				// servicing the space.
-				cronCopy := cron
-				go func() {
-					if err := n.runCron(ctx, cronCopy); err != nil {
-						n.cfg.Logger.Warnf("swarm cron=%s failed: %s", cronCopy.Name, err)
-					}
-				}()
 			}
 		case res := <-activeDone():
 			if err := n.completeTask(ctx, res); err != nil {
@@ -459,6 +420,15 @@ func (n *Node) markExisting(ctx context.Context) error {
 		n.mu.Unlock()
 	}
 	return nil
+}
+
+func (n *Node) RunHeartbeat(ctx context.Context) error {
+	return n.runCron(ctx, CronTask{
+		Name:         "heartbeat",
+		Interval:     n.cfg.HeartbeatInterval,
+		Prompt:       n.cfg.Prompt,
+		ContextLimit: n.cfg.HeartbeatContextLimit,
+	})
 }
 
 func (n *Node) runCron(ctx context.Context, cron CronTask) error {

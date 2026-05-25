@@ -646,14 +646,14 @@ func (t *recordingTool) Definition() provider.ToolDefinition {
 	}
 }
 
-func (t *recordingTool) Execute(_ context.Context, arguments string) (string, error) {
+func (t *recordingTool) Execute(_ context.Context, arguments string) (command.ToolResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, arguments)
 	if strings.Contains(arguments, "fail") {
-		return "", fmt.Errorf("failed")
+		return command.ToolResult{}, fmt.Errorf("failed")
 	}
-	return t.output, nil
+	return command.TextResult(t.output), nil
 }
 
 func (t *recordingTool) callsSnapshot() []string {

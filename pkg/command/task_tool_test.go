@@ -32,10 +32,11 @@ func TestTaskToolPeekNewLimitsAndPreservesOverflow(t *testing.T) {
 
 	tool := NewTaskTool(mgr)
 	args := fmt.Sprintf(`{"action":"peek_new","id":%q}`, info.ID)
-	out1, err := tool.Execute(context.Background(), args)
+	res1, err := tool.Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("first peek_new: %v", err)
 	}
+	out1 := res1.Text()
 	firstChunk := strings.Repeat("x", peekNewMaxBytes)
 	if !strings.HasPrefix(out1, firstChunk+"\n\n[more output available") {
 		t.Fatalf("first peek_new did not return exactly one capped payload chunk followed by marker")
@@ -44,11 +45,11 @@ func TestTaskToolPeekNewLimitsAndPreservesOverflow(t *testing.T) {
 		t.Fatalf("first peek_new missing overflow marker")
 	}
 
-	out2, err := tool.Execute(context.Background(), args)
+	res2, err := tool.Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("second peek_new: %v", err)
 	}
-	if out2 != strings.Repeat("x", 7) {
-		t.Fatalf("second peek_new = %q, want remaining payload", out2)
+	if res2.Text() != strings.Repeat("x", 7) {
+		t.Fatalf("second peek_new = %q, want remaining payload", res2.Text())
 	}
 }

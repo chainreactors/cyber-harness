@@ -26,7 +26,7 @@ type AgentTool interface {
 	Name() string
 	Description() string
 	Definition() provider.ToolDefinition
-	Execute(ctx context.Context, arguments string) (string, error)
+	Execute(ctx context.Context, arguments string) (ToolResult, error)
 }
 
 type ToolContext struct {
@@ -36,7 +36,7 @@ type ToolContext struct {
 
 type ContextAwareAgentTool interface {
 	AgentTool
-	ExecuteWithContext(ctx context.Context, arguments string, toolCtx ToolContext) (string, error)
+	ExecuteWithContext(ctx context.Context, arguments string, toolCtx ToolContext) (ToolResult, error)
 }
 
 type WorkDirAware interface {
@@ -98,10 +98,10 @@ func (r *CommandRegistry) ToolDefinitions() []provider.ToolDefinition {
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string, toolCtx ...ToolContext) (string, error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string, toolCtx ...ToolContext) (ToolResult, error) {
 	t, ok := r.GetTool(name)
 	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", name)
+		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
 	}
 	if ca, ok := t.(ContextAwareAgentTool); ok && len(toolCtx) > 0 {
 		return ca.ExecuteWithContext(ctx, arguments, toolCtx[0])
