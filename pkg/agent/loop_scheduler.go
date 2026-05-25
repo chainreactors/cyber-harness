@@ -14,16 +14,25 @@ import (
 type LoopMode int
 
 const (
-	ModeInbox       LoopMode = iota // fire → push to inbox, processed by current agent turn
-	ModeIndependent                 // fire → call OnFire callback independently
+	// ModeInbox pushes LoopEntry.Prompt to the inbox as a system message.
+	// The agent's turn loop drains it and lets the LLM decide what to do.
+	ModeInbox LoopMode = iota
+
+	// ModeIndependent calls LoopEntry.OnFire in a goroutine.
+	// Used for work that needs its own agent run (e.g. swarm heartbeat).
+	ModeIndependent
 )
 
+// LoopEntry defines a single recurring task.
+//
+//   - ModeInbox requires Prompt (static content injected into inbox).
+//   - ModeIndependent requires OnFire (called each interval in a goroutine).
 type LoopEntry struct {
 	Name      string
 	Interval  time.Duration
 	Prompt    string
 	Mode      LoopMode
-	Immediate bool // fire once immediately on creation
+	Immediate bool
 	OnFire    func(ctx context.Context, entry LoopEntry) (string, error)
 	CreatedAt time.Time
 }
@@ -38,10 +47,11 @@ type LoopInfo struct {
 }
 
 type LoopScheduler struct {
-	mu    sync.Mutex
-	loops map[string]*loopState
-	inbox inbox.Inbox
-	log   telemetry.Logger
+	mu          sync.Mutex
+	loops       map[string]*loopState
+	inbox       inbox.Inbox
+	log         telemetry.Logger
+	minInterval time.Duration
 }
 
 type loopState struct {
@@ -51,22 +61,26 @@ type loopState struct {
 	lastFired time.Time
 }
 
+const DefaultMinLoopInterval = 10 * time.Second
+
 func NewLoopScheduler(ib inbox.Inbox, logger telemetry.Logger) *LoopScheduler {
 	return &LoopScheduler{
-		loops: make(map[string]*loopState),
-		inbox: ib,
-		log:   logger,
+		loops:       make(map[string]*loopState),
+		inbox:       ib,
+		log:         logger,
+		minInterval: DefaultMinLoopInterval,
 	}
 }
 
-const minLoopInterval = 10 * time.Second
+func (s *LoopScheduler) SetMinInterval(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.minInterval = d
+}
 
 func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) error {
 	if strings.TrimSpace(entry.Name) == "" {
 		return fmt.Errorf("loop name is required")
-	}
-	if entry.Interval < minLoopInterval {
-		return fmt.Errorf("interval must be >= %s", minLoopInterval)
 	}
 	if entry.Mode == ModeIndependent && entry.OnFire == nil {
 		return fmt.Errorf("OnFire callback is required for ModeIndependent")
@@ -79,16 +93,16 @@ func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) error {
 	}
 
 	s.mu.Lock()
+	if entry.Interval < s.minInterval {
+		s.mu.Unlock()
+		return fmt.Errorf("interval must be >= %s", s.minInterval)
+	}
 	if _, exists := s.loops[entry.Name]; exists {
 		s.mu.Unlock()
 		return fmt.Errorf("loop %q already exists", entry.Name)
 	}
-
 	loopCtx, cancel := context.WithCancel(ctx)
-	state := &loopState{
-		entry:  entry,
-		cancel: cancel,
-	}
+	state := &loopState{entry: entry, cancel: cancel}
 	s.loops[entry.Name] = state
 	s.mu.Unlock()
 
@@ -97,13 +111,11 @@ func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) error {
 	if entry.Immediate {
 		s.fire(loopCtx, state)
 	}
-
-	go s.ticker(loopCtx, state)
-
+	go s.run(loopCtx, state)
 	return nil
 }
 
-func (s *LoopScheduler) ticker(ctx context.Context, state *loopState) {
+func (s *LoopScheduler) run(ctx context.Context, state *loopState) {
 	t := time.NewTicker(state.entry.Interval)
 	defer t.Stop()
 	for {
@@ -126,19 +138,8 @@ func (s *LoopScheduler) fire(ctx context.Context, state *loopState) {
 
 	switch entry.Mode {
 	case ModeInbox:
-		body := entry.Prompt
-		if entry.OnFire != nil {
-			result, err := entry.OnFire(ctx, entry)
-			if err != nil {
-				s.log.Warnf("loop=%s fire=%d OnFire error: %s", entry.Name, count, err)
-				return
-			}
-			if result != "" {
-				body = result
-			}
-		}
 		content := fmt.Sprintf("<loop_fire name=%q interval=%q fire_count=%d>\n%s\n</loop_fire>",
-			entry.Name, entry.Interval, count, body)
+			entry.Name, entry.Interval, count, entry.Prompt)
 		msg := inbox.NewMessage(inbox.OriginSystem, "user", content)
 		msg.Priority = inbox.PriorityLow
 		msg.Meta = map[string]any{
@@ -147,18 +148,13 @@ func (s *LoopScheduler) fire(ctx context.Context, state *loopState) {
 		}
 		if err := s.inbox.Push(msg); err != nil {
 			s.log.Warnf("loop=%s fire=%d inbox push failed: %s", entry.Name, count, err)
-		} else {
-			s.log.Debugf("loop=%s fire=%d pushed to inbox", entry.Name, count)
 		}
 
 	case ModeIndependent:
 		go func() {
-			result, err := entry.OnFire(ctx, entry)
-			if err != nil {
-				s.log.Warnf("loop=%s fire=%d independent execution failed: %s", entry.Name, count, err)
-				return
+			if _, err := entry.OnFire(ctx, entry); err != nil {
+				s.log.Warnf("loop=%s fire=%d failed: %s", entry.Name, count, err)
 			}
-			s.log.Debugf("loop=%s fire=%d independent execution completed (len=%d)", entry.Name, count, len(result))
 		}()
 	}
 }

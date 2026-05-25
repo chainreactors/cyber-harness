@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/agent"
+	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/ioa"
 	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -374,7 +377,7 @@ func TestNodeHeartbeatRunsHandler(t *testing.T) {
 	}
 }
 
-func TestNodeDynamicCrons(t *testing.T) {
+func TestNodeDynamicLoops(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
 	defer server.Close()
@@ -389,7 +392,7 @@ func TestNodeDynamicCrons(t *testing.T) {
 	if _, err := controller.RegisterNode(ctx, "controller", nil); err != nil {
 		t.Fatal(err)
 	}
-	space, err := controller.Space(ctx, "cron-test", "controller")
+	space, err := controller.Space(ctx, "loop-test", "controller")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,13 +404,13 @@ func TestNodeDynamicCrons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := &taskRecorder{name: "cron-worker"}
+	rec := &taskRecorder{name: "loop-worker"}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	node := NewNode(NodeConfig{
 		Client:                worker,
-		NodeName:              "cron-worker",
-		SpaceName:             "cron-test",
+		NodeName:              "loop-worker",
+		SpaceName:             "loop-test",
 		SpaceDescription:      "worker",
 		PollInterval:          100 * time.Millisecond,
 		HeartbeatContextLimit: 50,
@@ -417,65 +420,53 @@ func TestNodeDynamicCrons(t *testing.T) {
 		},
 		OnHeartbeat: func(ctx context.Context, prompt string) (string, error) {
 			rec.record(prompt)
-			if strings.Contains(prompt, "fast-check") {
-				return "fast done", nil
-			}
-			return "slow done", nil
+			return "heartbeat done", nil
 		},
 	})
 	go func() {
 		_ = node.Run(runCtx)
 	}()
 
-	// Wait for node to be ready then add crons dynamically
 	waitFor(t, 3*time.Second, "node ready", func() bool {
 		return node.RootMessageID() != ""
 	})
-	if err := node.AddCron(CronTask{Name: "fast-check", Interval: 50 * time.Millisecond, Prompt: "fast check task"}); err != nil {
+
+	ib := inboxpkg.NewBuffered(64)
+	scheduler := agent.NewLoopScheduler(ib, telemetry.NopLogger())
+	scheduler.SetMinInterval(10 * time.Millisecond)
+	if err := scheduler.Add(runCtx, agent.LoopEntry{
+		Name: "heartbeat-loop", Interval: 50 * time.Millisecond, Mode: agent.ModeIndependent,
+		OnFire: func(ctx context.Context, e agent.LoopEntry) (string, error) {
+			return "", node.RunHeartbeat(ctx)
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := node.AddCron(CronTask{Name: "slow-report", Interval: 80 * time.Millisecond, Prompt: "slow report task"}); err != nil {
-		t.Fatal(err)
+	if loops := scheduler.List(); len(loops) != 1 {
+		t.Fatalf("expected 1 loop, got %d", len(loops))
 	}
-	if crons := node.ListCrons(); len(crons) != 2 {
-		t.Fatalf("expected 2 crons, got %d", len(crons))
-	}
+	defer scheduler.Stop()
 
 	deadline := time.After(5 * time.Second)
 	for {
 		prompts := rec.tasks()
-		hasFast := false
-		hasSlow := false
-		for _, p := range prompts {
-			if strings.Contains(p, "fast check task") && strings.Contains(p, "fast-check") {
-				hasFast = true
-			}
-			if strings.Contains(p, "slow report task") && strings.Contains(p, "slow-report") {
-				hasSlow = true
-			}
-		}
-		if hasFast && hasSlow {
-			// Verify both cron names appear in space messages
+		if len(prompts) >= 2 {
 			all, _ := controller.Read(ctx, space.ID, ioa.ReadOptions{All: true})
-			fastCount := 0
-			slowCount := 0
+			heartbeatCount := 0
 			for _, msg := range all {
 				c, _ := msg.Content["content"].(string)
-				if c == "fast done" {
-					fastCount++
-				}
-				if c == "slow done" {
-					slowCount++
+				if c == "heartbeat done" {
+					heartbeatCount++
 				}
 			}
-			if fastCount == 0 || slowCount == 0 {
-				t.Fatalf("expected both cron results in space; fast=%d slow=%d", fastCount, slowCount)
+			if heartbeatCount < 2 {
+				t.Fatalf("expected >= 2 heartbeat results in space; got %d", heartbeatCount)
 			}
 			return
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for both crons; prompts=%d", len(prompts))
+			t.Fatalf("timed out waiting for heartbeat fires; prompts=%d", len(prompts))
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}

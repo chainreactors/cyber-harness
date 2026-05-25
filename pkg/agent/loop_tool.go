@@ -12,7 +12,6 @@ import (
 
 type LoopTool struct {
 	scheduler *LoopScheduler
-	ctx       context.Context
 }
 
 func NewLoopTool(scheduler *LoopScheduler) *LoopTool {

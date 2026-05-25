@@ -88,11 +88,11 @@ type TaskHandler func(ctx context.Context, task Task) (string, error)
 
 type HeartbeatFunc func(ctx context.Context, prompt string) (string, error)
 
-type CronTask struct {
-	Name         string
-	Interval     time.Duration
-	Prompt       string
-	ContextLimit int
+type heartbeatConfig struct {
+	name         string
+	interval     time.Duration
+	prompt       string
+	contextLimit int
 }
 
 type NodeConfig struct {
@@ -238,13 +238,13 @@ func (n *Node) Run(ctx context.Context) error {
 		if err := n.markExisting(ctx); err != nil {
 			return err
 		}
-		heartbeat := CronTask{
-			Name:         "heartbeat",
-			Interval:     n.cfg.HeartbeatInterval,
-			Prompt:       n.cfg.Prompt,
-			ContextLimit: n.cfg.HeartbeatContextLimit,
+		hb := heartbeatConfig{
+			name:         "heartbeat",
+			interval:     n.cfg.HeartbeatInterval,
+			prompt:       n.cfg.Prompt,
+			contextLimit: n.cfg.HeartbeatContextLimit,
 		}
-		if err := n.runCron(ctx, heartbeat); err != nil {
+		if err := n.execHeartbeat(ctx, hb); err != nil {
 			n.cfg.Logger.Warnf("swarm heartbeat init failed: %s", err)
 		}
 	} else {
@@ -423,27 +423,27 @@ func (n *Node) markExisting(ctx context.Context) error {
 }
 
 func (n *Node) RunHeartbeat(ctx context.Context) error {
-	return n.runCron(ctx, CronTask{
-		Name:         "heartbeat",
-		Interval:     n.cfg.HeartbeatInterval,
-		Prompt:       n.cfg.Prompt,
-		ContextLimit: n.cfg.HeartbeatContextLimit,
+	return n.execHeartbeat(ctx, heartbeatConfig{
+		name:         "heartbeat",
+		interval:     n.cfg.HeartbeatInterval,
+		prompt:       n.cfg.Prompt,
+		contextLimit: n.cfg.HeartbeatContextLimit,
 	})
 }
 
-func (n *Node) runCron(ctx context.Context, cron CronTask) error {
-	messages, err := n.cfg.Client.Read(ctx, n.spaceID, ioa.ReadOptions{All: true, Limit: cron.ContextLimit})
+func (n *Node) execHeartbeat(ctx context.Context, hb heartbeatConfig) error {
+	messages, err := n.cfg.Client.Read(ctx, n.spaceID, ioa.ReadOptions{All: true, Limit: hb.contextLimit})
 	if err != nil {
 		return err
 	}
-	n.cfg.Logger.Importantf("swarm cron=%s running space=%s", cron.Name, n.spaceID)
+	n.cfg.Logger.Importantf("swarm heartbeat=%s running space=%s", hb.name, n.spaceID)
 
-	prompt := n.cronPrompt(cron, messages)
+	prompt := n.heartbeatPrompt(hb, messages)
 	result, runErr := n.cfg.OnHeartbeat(ctx, prompt)
 
 	report := SwarmMessage{Content: result}
 	if runErr != nil {
-		report.Content = fmt.Sprintf("Cron %s error: %s", cron.Name, runErr.Error())
+		report.Content = fmt.Sprintf("Heartbeat %s error: %s", hb.name, runErr.Error())
 	}
 	_, sendErr := n.cfg.Client.Send(ctx, n.spaceID, ioa.SendMessage{
 		Content: swarmContent(report),
@@ -452,17 +452,17 @@ func (n *Node) runCron(ctx context.Context, cron CronTask) error {
 		return runErr
 	}
 	if sendErr == nil {
-		n.cfg.Logger.Importantf("swarm cron=%s completed space=%s", cron.Name, n.spaceID)
+		n.cfg.Logger.Importantf("swarm heartbeat=%s completed space=%s", hb.name, n.spaceID)
 	}
 	return sendErr
 }
 
-func (n *Node) cronPrompt(cron CronTask, messages []ioa.Message) string {
+func (n *Node) heartbeatPrompt(hb heartbeatConfig, messages []ioa.Message) string {
 	contextJSON, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
 		contextJSON = []byte("[]")
 	}
-	intent := strings.TrimSpace(cron.Prompt)
+	intent := strings.TrimSpace(hb.prompt)
 	if intent == "" {
 		intent = strings.TrimSpace(n.cfg.Prompt)
 	}
@@ -474,7 +474,7 @@ func (n *Node) cronPrompt(cron CronTask, messages []ioa.Message) string {
 	}
 	return fmt.Sprintf(`This is a Swarm heartbeat turn.
 
-Cron task: %s (every %s)
+Heartbeat: %s (every %s)
 
 Space:
 - id: %s
@@ -493,7 +493,7 @@ If no action is needed, say that briefly and do not repeat completed work.
 Before sending IOA messages or dispatching tasks to other nodes, read the ioa skill (aiscan://skills/ioa/SKILL.md) for the required message format.
 
 Recent messages (oldest to newest):
-%s`, cron.Name, cron.Interval, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), string(contextJSON))
+%s`, hb.name, hb.interval, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), string(contextJSON))
 }
 
 // routeIncoming filters an IOA message and either starts a new task, forwards
