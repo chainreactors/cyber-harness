@@ -84,6 +84,20 @@ func (r *RunResult) Turns() int {
 	return max
 }
 
+func (r *RunResult) LoopCalls() []AgentEvent {
+	return r.ToolCallsNamed("loop")
+}
+
+func (r *RunResult) LoopCreateCount() int {
+	n := 0
+	for _, e := range r.LoopCalls() {
+		if strings.Contains(e.Args, `"create"`) {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *RunResult) SubagentCalls() []AgentEvent {
 	return r.ToolCallsNamed("subagent")
 }

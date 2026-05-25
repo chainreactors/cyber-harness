@@ -1024,6 +1024,83 @@ func TestAgentTaskAndSubagentCoordination(t *testing.T) {
 }
 
 // ===========================================================================
+// Loop tool
+// ===========================================================================
+
+func TestAgentLoopCreateAndList(t *testing.T) {
+	h := New(t)
+	r := h.Agent(
+		"Use the loop tool to create a loop named 'test-loop' with interval '30s' and prompt 'check status'. " +
+			"Then use the loop tool with action 'list' to show all active loops. " +
+			"Then delete the loop named 'test-loop'. Report what you did.",
+	)
+	h.RequireOK(r)
+	if !r.HasToolCall("loop") {
+		t.Fatal("expected loop tool call")
+	}
+	loopCalls := r.LoopCalls()
+	hasCreate := false
+	hasList := false
+	hasDelete := false
+	for _, c := range loopCalls {
+		if strings.Contains(c.Args, `"create"`) {
+			hasCreate = true
+		}
+		if strings.Contains(c.Args, `"list"`) {
+			hasList = true
+		}
+		if strings.Contains(c.Args, `"delete"`) {
+			hasDelete = true
+		}
+	}
+	if !hasCreate {
+		t.Fatal("expected loop create action")
+	}
+	if !hasList {
+		t.Fatal("expected loop list action")
+	}
+	if !hasDelete {
+		t.Fatal("expected loop delete action")
+	}
+	h.RequireToolResult(r, "loop", "test-loop")
+}
+
+func TestAgentLoopMultipleCreate(t *testing.T) {
+	h := New(t)
+	r := h.Agent(
+		"Use the loop tool to create 2 loops:\n"+
+			"1. Name 'scanner' interval '30s' prompt 'run gogo scan'\n"+
+			"2. Name 'monitor' interval '30s' prompt 'check service health'\n"+
+			"After creating both, list loops. Then delete both loops. Report what you did.",
+	)
+	h.RequireOK(r)
+	if r.LoopCreateCount() < 2 {
+		t.Fatalf("expected ≥2 loop creates, got %d", r.LoopCreateCount())
+	}
+	h.RequireToolResult(r, "loop", "scanner")
+	h.RequireToolResult(r, "loop", "monitor")
+}
+
+func TestAgentLoopAndSubagent(t *testing.T) {
+	h := New(t)
+	r := h.Agent(
+		"Do three things in order:\n"+
+			"1. Create a loop named 'poller' with interval '30s' and prompt 'poll targets'.\n"+
+			"2. Create a sync subagent with prompt 'Reply with the word SUBAGENT_OK and nothing else.'\n"+
+			"3. Delete the loop named 'poller'.\n"+
+			"Report all results.",
+	)
+	h.RequireOK(r)
+	if !r.HasToolCall("loop") {
+		t.Fatal("expected loop tool call")
+	}
+	if !r.HasToolCall("subagent") {
+		t.Fatal("expected subagent tool call")
+	}
+	h.RequireToolResult(r, "loop", "poller")
+}
+
+// ===========================================================================
 // init
 // ===========================================================================
 
