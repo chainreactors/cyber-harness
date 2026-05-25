@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -198,12 +197,7 @@ func (m *Manager) Spawn(workDir, cmdLine, name string, timeout time.Duration, op
 		return Info{}, err
 	}
 
-	var c *exec.Cmd
-	if runtime.GOOS == "windows" {
-		c = exec.Command("cmd", "/c", cmdLine)
-	} else {
-		c = exec.Command("sh", "-c", cmdLine)
-	}
+	c := ShellCommand(cmdLine)
 	c.Dir = workDir
 	c.Stdin = nil
 	c.Stdout = buf

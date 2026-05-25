@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -164,12 +163,7 @@ func (t *BashTool) execShell(ctx context.Context, cmdLine string) (ToolResult, e
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.timeout)*time.Second)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", cmdLine)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdLine)
-	}
+	cmd := task.ShellCommand(cmdLine)
 	cmd.Dir = t.workDir
 	t.applyProxyEnv(cmd)
 	configureProcessGroup(cmd)
