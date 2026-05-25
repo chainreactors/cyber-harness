@@ -56,6 +56,13 @@ type Intent struct {
 	// MaxDuration caps wall-clock time (0 = no limit).
 	MaxDuration time.Duration
 
+	// JudgeCriteria, when non-empty, enables LLM-as-judge evaluation.
+	// The judge receives the intent prompt, this criteria string, and the
+	// full execution trace. It returns a pass/fail verdict.
+	// Example: "The agent must have created exactly one loop named 'scanner',
+	// listed it to confirm it exists, then deleted it."
+	JudgeCriteria string
+
 	// Check is an optional custom verification function.
 	Check func(t *testing.T, r *RunResult)
 }
@@ -67,13 +74,13 @@ func Steps(patterns ...ToolPattern) []ToolPattern { return patterns }
 func (intent Intent) Run(t *testing.T, h *Harness) *RunResult {
 	t.Helper()
 
+	var r *RunResult
 	if intent.Timeout > 0 {
-		r := h.RunWithTimeout(intent.Timeout, intent.buildArgs()...)
-		intent.verify(t, r)
-		return r
+		r = h.RunWithTimeout(intent.Timeout, intent.buildArgs()...)
+	} else {
+		r = h.Agent(intent.Prompt, intent.ExtraArgs...)
 	}
-	r := h.Agent(intent.Prompt, intent.ExtraArgs...)
-	intent.verify(t, r)
+	intent.verify(t, h, r)
 	return r
 }
 
@@ -83,11 +90,12 @@ func (intent Intent) buildArgs() []string {
 	return args
 }
 
-func (intent Intent) verify(t *testing.T, r *RunResult) {
+func (intent Intent) verify(t *testing.T, h *Harness, r *RunResult) {
 	t.Helper()
 
 	v := Verify(t, r).OK()
 
+	// structural checks
 	if len(intent.Steps) > 0 {
 		if intent.Ordered {
 			v = v.ExpectInOrder(intent.Steps...)
@@ -95,14 +103,12 @@ func (intent Intent) verify(t *testing.T, r *RunResult) {
 			v = v.Expect(intent.Steps...)
 		}
 	}
-
 	for _, s := range intent.OutputContains {
 		v = v.OutputContains(s)
 	}
 	for _, s := range intent.OutputMissing {
 		v = v.OutputMissing(s)
 	}
-
 	if intent.NoErrors {
 		v = v.NoToolErrors()
 	}
@@ -114,6 +120,11 @@ func (intent Intent) verify(t *testing.T, r *RunResult) {
 	}
 	if intent.MaxDuration > 0 {
 		v = v.CompletedWithin(intent.MaxDuration)
+	}
+
+	// semantic check via LLM judge
+	if intent.JudgeCriteria != "" {
+		v = v.JudgeWith(h.Judge(), intent.Prompt, intent.JudgeCriteria)
 	}
 
 	v.Done()

@@ -310,3 +310,29 @@ func (v *Verifier) SubagentResultContains(substr string) *Verifier {
 	v.fail(fmt.Sprintf("no subagent result contains %q", substr))
 	return v
 }
+
+// =====================================================================
+// LLM Judge
+// =====================================================================
+
+// JudgeWith uses an LLM to evaluate whether the execution fulfilled the
+// intent. The judge receives the full tool trace and final output, and
+// returns a structured verdict.
+//
+//	Verify(t, r).
+//	    OK().
+//	    JudgeWith(h.Judge(), "create a loop, list it, delete it", "").
+//	    Done()
+func (v *Verifier) JudgeWith(j *Judge, intent, criteria string) *Verifier {
+	verdict, err := j.Evaluate(intent, criteria, v.r)
+	if err != nil {
+		v.fail(fmt.Sprintf("judge error: %s", err))
+		return v
+	}
+	v.t.Logf("judge: pass=%v score=%d reason=%q", verdict.Pass, verdict.Score, verdict.Reason)
+	if !verdict.Pass {
+		issues := strings.Join(verdict.Issues, "; ")
+		v.fail(fmt.Sprintf("judge failed (score=%d): %s [%s]", verdict.Score, verdict.Reason, issues))
+	}
+	return v
+}

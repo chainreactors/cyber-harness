@@ -101,3 +101,27 @@ func TestAgentLoopIntentSuite(t *testing.T) {
 		},
 	)
 }
+
+func TestAgentLoopLifecycleJudged(t *testing.T) {
+	h := New(t)
+	Intent{
+		Name: "loop-lifecycle-judged",
+		Prompt: "Use the loop tool to: 1) create a loop named 'heartbeat' with interval '1m' and prompt 'health check'. " +
+			"2) list all loops to confirm 'heartbeat' exists. " +
+			"3) delete the loop named 'heartbeat'. " +
+			"Report each step's result.",
+		Steps: Steps(
+			Tool("loop").Action("create").Arg("name", "heartbeat"),
+			Tool("loop").Action("list"),
+			Tool("loop").Action("delete").Arg("name", "heartbeat"),
+		),
+		Ordered:  true,
+		NoErrors: true,
+		MaxTurns: 6,
+		JudgeCriteria: "The agent must have: " +
+			"(1) created exactly one loop named 'heartbeat' with interval '1m', " +
+			"(2) listed loops and the list result must show 'heartbeat' as active, " +
+			"(3) deleted the loop named 'heartbeat' and confirmed deletion. " +
+			"All three steps must have completed successfully with correct tool arguments.",
+	}.Run(t, h)
+}
