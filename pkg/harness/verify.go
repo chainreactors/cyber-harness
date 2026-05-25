@@ -6,21 +6,34 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
-// Verify provides chainable assertions on a RunResult.
-// Every check accumulates failures; call Done() to report them.
+// Verifier provides chainable assertions on a RunResult.
+// Accumulates all failures; Done() reports them together.
+//
+// Two verification layers:
+//
+// Layer 1 — Structural (tool-level):
 //
 //	Verify(t, r).
 //	    OK().
-//	    ToolUsed("bash").
-//	    ToolSequence("bash", "task", "bash").
-//	    ToolArgMatch("loop", func(args string) bool { return strings.Contains(args, `"create"`) }).
-//	    ToolResultMatch("bash", func(res string) bool { return strings.Contains(res, "hello") }).
-//	    MinTurns(2).
-//	    MinToolCalls(3).
+//	    Expect(Tool("bash").ArgContains("gogo").NoError()).
+//	    Expect(Tool("loop").Action("create").Arg("name", "scanner")).
+//	    Done()
+//
+// Layer 2 — Intent (outcome-level):
+//
+//	Verify(t, r).
+//	    OK().
+//	    ExpectInOrder(
+//	        Tool("loop").Action("create").Arg("name", "scanner"),
+//	        Tool("loop").Action("list"),
+//	        Tool("loop").Action("delete").Arg("name", "scanner"),
+//	    ).
+//	    OutputContains("scanner").
 //	    NoToolErrors().
-//	    OutputContains("done").
+//	    MaxTurns(5).
 //	    Done()
 type Verifier struct {
 	t        *testing.T
@@ -45,12 +58,15 @@ func (v *Verifier) Done() {
 	for i, f := range v.failures {
 		sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, f))
 	}
-	sb.WriteString(fmt.Sprintf("\nresult: exit=%d turns=%d tools=%d duration=%s",
+	sb.WriteString(fmt.Sprintf("\nresult: exit=%d turns=%d tools=%d duration=%s\n",
 		v.r.ExitCode, v.r.Turns(), len(v.r.ToolCalls()), v.r.Duration))
+	sb.WriteString(fmt.Sprintf("tool sequence: %v\n", v.r.ToolCallSequence()))
 	v.t.Fatal(sb.String())
 }
 
-// --- exit / output ---
+// =====================================================================
+// Exit / Output
+// =====================================================================
 
 func (v *Verifier) OK() *Verifier {
 	if !v.r.OK() {
@@ -66,7 +82,16 @@ func (v *Verifier) OutputContains(substr string) *Verifier {
 	return v
 }
 
-// --- turns ---
+func (v *Verifier) OutputMissing(substr string) *Verifier {
+	if v.r.ContainsOutput(substr) {
+		v.fail(fmt.Sprintf("output should not contain %q", substr))
+	}
+	return v
+}
+
+// =====================================================================
+// Constraints
+// =====================================================================
 
 func (v *Verifier) MinTurns(n int) *Verifier {
 	if v.r.Turns() < n {
@@ -75,7 +100,86 @@ func (v *Verifier) MinTurns(n int) *Verifier {
 	return v
 }
 
-// --- tool presence ---
+func (v *Verifier) MaxTurns(n int) *Verifier {
+	if v.r.Turns() > n {
+		v.fail(fmt.Sprintf("expected <= %d turns, got %d", n, v.r.Turns()))
+	}
+	return v
+}
+
+func (v *Verifier) MinToolCalls(n int) *Verifier {
+	if len(v.r.ToolCalls()) < n {
+		v.fail(fmt.Sprintf("expected >= %d tool calls, got %d", n, len(v.r.ToolCalls())))
+	}
+	return v
+}
+
+func (v *Verifier) MaxToolCalls(n int) *Verifier {
+	if len(v.r.ToolCalls()) > n {
+		v.fail(fmt.Sprintf("expected <= %d tool calls, got %d", n, len(v.r.ToolCalls())))
+	}
+	return v
+}
+
+func (v *Verifier) CompletedWithin(d time.Duration) *Verifier {
+	if v.r.Duration > d {
+		v.fail(fmt.Sprintf("expected completion within %s, took %s", d, v.r.Duration))
+	}
+	return v
+}
+
+func (v *Verifier) ToolCount(name string, min, max int) *Verifier {
+	n := len(v.r.ToolCallsNamed(name))
+	if n < min || n > max {
+		v.fail(fmt.Sprintf("tool %q called %d times, expected [%d, %d]", name, n, min, max))
+	}
+	return v
+}
+
+// =====================================================================
+// Expect — pattern-based tool call verification
+// =====================================================================
+
+// Expect verifies that each pattern matches at least one tool call (any order).
+func (v *Verifier) Expect(patterns ...ToolPattern) *Verifier {
+	result := matchUnordered(patterns, v.r.ToolCalls())
+	for _, p := range result.unmatched {
+		v.fail(fmt.Sprintf("expected tool call not found: %s", p.describe()))
+	}
+	return v
+}
+
+// ExpectInOrder verifies that patterns match tool calls in sequence
+// (subsequence — other calls may appear between them).
+func (v *Verifier) ExpectInOrder(patterns ...ToolPattern) *Verifier {
+	result := matchOrdered(patterns, v.r.ToolCalls())
+	if len(result.unmatched) > 0 {
+		var descs []string
+		for _, p := range result.unmatched {
+			descs = append(descs, p.describe())
+		}
+		v.fail(fmt.Sprintf("tool call sequence incomplete, unmatched: [%s]\nactual: %v",
+			strings.Join(descs, ", "), v.r.ToolCallSequence()))
+	}
+	return v
+}
+
+// ExpectNone verifies that NO tool call matches the pattern.
+func (v *Verifier) ExpectNone(patterns ...ToolPattern) *Verifier {
+	for _, p := range patterns {
+		for _, e := range v.r.ToolCalls() {
+			if p.Match(e) {
+				v.fail(fmt.Sprintf("unexpected tool call matched: %s", p.describe()))
+				break
+			}
+		}
+	}
+	return v
+}
+
+// =====================================================================
+// Legacy tool checks (still useful for simple cases)
+// =====================================================================
 
 func (v *Verifier) ToolUsed(name string) *Verifier {
 	if !v.r.HasToolCall(name) {
@@ -91,26 +195,6 @@ func (v *Verifier) ToolNotUsed(name string) *Verifier {
 	return v
 }
 
-func (v *Verifier) MinToolCalls(n int) *Verifier {
-	if len(v.r.ToolCalls()) < n {
-		v.fail(fmt.Sprintf("expected >= %d tool calls, got %d", n, len(v.r.ToolCalls())))
-	}
-	return v
-}
-
-func (v *Verifier) ToolCount(name string, min, max int) *Verifier {
-	n := len(v.r.ToolCallsNamed(name))
-	if n < min || n > max {
-		v.fail(fmt.Sprintf("tool %q called %d times, expected [%d, %d]", name, n, min, max))
-	}
-	return v
-}
-
-// --- tool sequence ---
-
-// ToolSequence checks that the given tools appear in order (not necessarily
-// contiguous). For example ToolSequence("bash", "task", "bash") passes if
-// the full sequence is [bash, read, task, bash, write].
 func (v *Verifier) ToolSequence(names ...string) *Verifier {
 	seq := v.r.ToolCallSequence()
 	idx := 0
@@ -125,8 +209,6 @@ func (v *Verifier) ToolSequence(names ...string) *Verifier {
 	}
 	return v
 }
-
-// --- tool args / results ---
 
 func (v *Verifier) ToolArgMatch(name string, predicate func(string) bool) *Verifier {
 	found := false
@@ -176,7 +258,9 @@ func (v *Verifier) AnyResultContains(substr string) *Verifier {
 	return v
 }
 
-// --- errors ---
+// =====================================================================
+// Errors
+// =====================================================================
 
 func (v *Verifier) NoToolErrors() *Verifier {
 	errs := v.r.ErroredToolCalls()
@@ -190,50 +274,24 @@ func (v *Verifier) NoToolErrors() *Verifier {
 	return v
 }
 
-// --- loop-specific ---
+// =====================================================================
+// Loop / Subagent shortcuts (built on Expect)
+// =====================================================================
 
 func (v *Verifier) LoopCreated(name string) *Verifier {
-	for _, e := range v.r.LoopCalls() {
-		if strings.Contains(e.Args, `"create"`) && strings.Contains(e.Args, name) {
-			return v
-		}
-	}
-	v.fail(fmt.Sprintf("loop %q was not created", name))
-	return v
+	return v.Expect(Tool("loop").Action("create").Arg("name", name))
 }
 
 func (v *Verifier) LoopDeleted(name string) *Verifier {
-	for _, e := range v.r.LoopCalls() {
-		if strings.Contains(e.Args, `"delete"`) && strings.Contains(e.Args, name) {
-			return v
-		}
-	}
-	v.fail(fmt.Sprintf("loop %q was not deleted", name))
-	return v
+	return v.Expect(Tool("loop").Action("delete").Arg("name", name))
 }
 
 func (v *Verifier) LoopListed() *Verifier {
-	for _, e := range v.r.LoopCalls() {
-		if strings.Contains(e.Args, `"list"`) {
-			return v
-		}
-	}
-	v.fail("loop list was never called")
-	return v
+	return v.Expect(Tool("loop").Action("list"))
 }
 
-// --- subagent-specific ---
-
 func (v *Verifier) SubagentCreated(name string) *Verifier {
-	for _, e := range v.r.SubagentCalls() {
-		if strings.Contains(e.Args, name) &&
-			!strings.Contains(e.Args, `"list"`) &&
-			!strings.Contains(e.Args, `"kill"`) {
-			return v
-		}
-	}
-	v.fail(fmt.Sprintf("subagent %q was not created", name))
-	return v
+	return v.Expect(Tool("subagent").Arg("name", name))
 }
 
 func (v *Verifier) MinSubagentCreates(n int) *Verifier {
