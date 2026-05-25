@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,7 +76,7 @@ func TestAgentScanAnalyzeVerifyPipeline(t *testing.T) {
 		OK().
 		ToolUsed("bash").
 		ToolArgMatch("bash", func(args string) bool {
-			return containsStr(args, "scan") && containsStr(args, "127.0.0.1")
+			return strings.Contains(args, "scan") && strings.Contains(args, "127.0.0.1")
 		}).
 		ToolResultMatch("bash", func(res string) bool { return res != "" }).
 		Done()

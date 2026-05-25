@@ -42,11 +42,25 @@ func (h *Harness) Judge() *Judge {
 	return NewJudge(h.baseURL, h.apiKey, h.model)
 }
 
+const judgeMaxRetries = 3
+
 // Evaluate sends the intent and execution trace to the LLM for judgment.
 func (j *Judge) Evaluate(intent string, criteria string, r *RunResult) (*Verdict, error) {
 	trace := buildTrace(r)
 	prompt := buildJudgePrompt(intent, criteria, trace)
-	return j.call(prompt)
+
+	var lastErr error
+	for attempt := 0; attempt < judgeMaxRetries; attempt++ {
+		v, err := j.call(prompt)
+		if err == nil {
+			return v, nil
+		}
+		lastErr = err
+		if attempt < judgeMaxRetries-1 {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	return nil, fmt.Errorf("judge failed after %d attempts: %w", judgeMaxRetries, lastErr)
 }
 
 func buildTrace(r *RunResult) string {
