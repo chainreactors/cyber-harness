@@ -169,7 +169,10 @@ cyberhub:
   key: ""
   # merge 或 override
   mode: ""
-  # 扫描器代理（gogo, spray, zombie, neutron），如 socks5://127.0.0.1:1080
+  # 扫描器代理，支持以下格式:
+  #   socks5://127.0.0.1:1080
+  #   trojan://password@server:443?sni=example.com
+  #   clash://?url=<encoded-subscribe-url>&strategy=adaptive
   proxy: ""
 
 # IOA 协作

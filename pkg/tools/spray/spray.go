@@ -38,6 +38,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
+func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
+
 func (c *Command) Name() string { return "spray" }
 
 func (c *Command) Usage() string {

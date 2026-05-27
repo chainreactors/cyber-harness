@@ -54,6 +54,10 @@ func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	return t
 }
 
+func (t *BashTool) SetScannerProxy(proxy string) {
+	t.scannerProxy = proxy
+}
+
 func (t *BashTool) Name() string { return "bash" }
 
 func (t *BashTool) Description() string {

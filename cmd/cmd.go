@@ -47,7 +47,7 @@ type ScannerOptions struct {
 	CyberhubURL  string `long:"cyberhub-url" config:"url" description:"Cyberhub server URL for loading fingers/templates"`
 	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
 	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
-	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools (gogo, spray, zombie, neutron), e.g. socks5://127.0.0.1:1080"`
+	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
 }
 
 type AgentOptions struct {
