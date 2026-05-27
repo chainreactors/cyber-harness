@@ -94,6 +94,17 @@ func (p *Pipeline) Run(seeds []Event) {
 		close(queue)
 	}
 	p.workersDone.Wait()
+	p.cleanup()
+}
+
+func (p *Pipeline) cleanup() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	clear(p.seenEvents)
+	p.seenEvents = nil
+	clear(p.seenRuns)
+	p.seenRuns = nil
+	p.queues = nil
 }
 
 func (p *Pipeline) start() {

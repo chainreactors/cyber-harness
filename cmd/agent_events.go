@@ -74,18 +74,20 @@ func (w *eventsWriter) HandleEvent(_ context.Context, event agent.Event) error {
 }
 
 type eventJSON struct {
-	Timestamp   string                 `json:"ts"`
-	Type        agent.EventType        `json:"type"`
-	Turn        int                    `json:"turn,omitempty"`
-	Message     *messageJSON           `json:"message,omitempty"`
-	ToolResults []messageJSON          `json:"tool_results,omitempty"`
-	ToolCallID  string                 `json:"tool_call_id,omitempty"`
-	ToolName    string                 `json:"tool_name,omitempty"`
-	Arguments   string                 `json:"arguments,omitempty"`
-	Result      string                 `json:"result,omitempty"`
-	IsError     bool                   `json:"is_error,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	NewMessages int                    `json:"new_messages,omitempty"`
+	Timestamp     string                 `json:"ts"`
+	Type          agent.EventType        `json:"type"`
+	Turn          int                    `json:"turn,omitempty"`
+	Message       *messageJSON           `json:"message,omitempty"`
+	ToolResults   []messageJSON          `json:"tool_results,omitempty"`
+	ToolCallID    string                 `json:"tool_call_id,omitempty"`
+	ToolName      string                 `json:"tool_name,omitempty"`
+	Arguments     string                 `json:"arguments,omitempty"`
+	Result        string                 `json:"result,omitempty"`
+	IsError       bool                   `json:"is_error,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	NewMessages   int                    `json:"new_messages,omitempty"`
+	Usage         *provider.Usage        `json:"usage,omitempty"`
+	ContextTokens int                    `json:"context_tokens,omitempty"`
 }
 
 type messageJSON struct {
@@ -128,6 +130,10 @@ func serializableEvent(e agent.Event) eventJSON {
 	// only counts to keep the file readable.
 	if len(e.NewMessages) > 0 {
 		out.NewMessages = len(e.NewMessages)
+	}
+	if e.Usage != nil {
+		out.Usage = e.Usage
+		out.ContextTokens = e.ContextTokens
 	}
 	return out
 }

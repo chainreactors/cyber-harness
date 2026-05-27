@@ -130,8 +130,21 @@ func (o *agentOutput) HandleEvent(_ context.Context, event agent.Event) error {
 		o.toolStart(event)
 	case agent.EventToolExecutionEnd:
 		o.toolEnd(event)
+	case agent.EventTurnEnd:
+		o.turnEnd(event)
 	}
 	return nil
+}
+
+func (o *agentOutput) turnEnd(event agent.Event) {
+	if o.quiet || event.Usage == nil {
+		return
+	}
+	fmt.Fprintf(o.stderr, "%s[turn %d] prompt=%d completion=%d total=%d context=%d%s\n",
+		colorDim, event.Turn,
+		event.Usage.PromptTokens, event.Usage.CompletionTokens, event.Usage.TotalTokens,
+		event.ContextTokens,
+		colorReset)
 }
 
 func (o *agentOutput) toolStart(event agent.Event) {

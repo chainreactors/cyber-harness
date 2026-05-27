@@ -55,8 +55,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		return result, err
 	}
 
-	var totalUsage provider.Usage
-
 	for turn = 1; ; turn++ {
 		if err := ctx.Err(); err != nil {
 			failure := provider.NewTextMessage("assistant", "")
@@ -92,11 +90,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
 		assistantMsg, usage, err := requestWithRetry(ctx, cfg, reqMessages, cfg.Tools.ToolDefinitions(), turn)
-		if usage != nil {
-			totalUsage.PromptTokens += usage.PromptTokens
-			totalUsage.CompletionTokens += usage.CompletionTokens
-			totalUsage.TotalTokens += usage.TotalTokens
-		}
+		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
 			failure := provider.NewTextMessage("assistant", "")
 			transcript.append(failure)
@@ -112,15 +106,14 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		transcript.append(assistantMsg)
 
 		if cfg.TokenBudget > 0 {
-			if totalUsage.TotalTokens >= cfg.TokenBudget {
-				cfg.Logger.Warnf("token budget exhausted: %d/%d", totalUsage.TotalTokens, cfg.TokenBudget)
-				result := transcript.result(messageContent(assistantMsg), turn, fmt.Errorf("token budget exhausted: %d/%d", totalUsage.TotalTokens, cfg.TokenBudget))
-				result.TotalUsage = totalUsage
+			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget {
+				cfg.Logger.Warnf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
+				result := transcript.result(messageContent(assistantMsg), turn, fmt.Errorf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget))
 				return end(result, result.Err, StopReasonBudget)
 			}
-			if totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
+			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
 				_ = emit(ctx, emitFn, Event{Type: EventTokenBudgetWarning, Turn: turn})
-				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", totalUsage.TotalTokens, cfg.TokenBudget)
+				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
 			}
 		}
 
@@ -137,7 +130,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.append(toolResults...)
 		}
 
-		if err := emit(ctx, emitFn, Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults}); err != nil {
+		if err := emit(ctx, emitFn, Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults, Usage: usage, ContextTokens: transcript.contextTokens}); err != nil {
 			return end(nil, err, StopReasonError)
 		}
 		transcript.completedTurns = turn
@@ -156,17 +149,15 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				return end(nil, err, StopReasonError)
 			}
 			if stop {
-				cfg.Logger.Importantf("agent status=stopped turns=%d tokens=%d", turn, totalUsage.TotalTokens)
+				cfg.Logger.Importantf("agent status=stopped turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
 				result := transcript.result(messageContent(assistantMsg), turn, nil)
-				result.TotalUsage = totalUsage
 				return end(result, nil, StopReasonStopped)
 			}
 		}
 
 		if terminate {
-			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, totalUsage.TotalTokens)
+			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
-			result.TotalUsage = totalUsage
 			return end(result, nil, StopReasonTerminated)
 		}
 		if len(assistantMsg.ToolCalls) == 0 {
@@ -187,9 +178,8 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				}
 			}
 
-			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, totalUsage.TotalTokens)
+			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
-			result.TotalUsage = totalUsage
 			return end(result, nil, StopReasonCompleted)
 		}
 	}
@@ -200,6 +190,9 @@ type transcript struct {
 	messages       []provider.ChatMessage
 	newMessages    []provider.ChatMessage
 	completedTurns int
+	turnUsages     []TurnUsage
+	totalUsage     provider.Usage
+	contextTokens  int
 }
 
 func newTranscript(base []provider.ChatMessage, newCapacity int) *transcript {
@@ -214,6 +207,23 @@ func (t *transcript) append(messages ...provider.ChatMessage) {
 	t.newMessages = append(t.newMessages, messages...)
 }
 
+func (t *transcript) recordTurnUsage(turn int, usage *provider.Usage) {
+	if usage == nil {
+		return
+	}
+	t.turnUsages = append(t.turnUsages, TurnUsage{
+		Turn:             turn,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+	})
+	t.totalUsage.PromptTokens += usage.PromptTokens
+	t.totalUsage.CompletionTokens += usage.CompletionTokens
+	t.totalUsage.TotalTokens += usage.TotalTokens
+	// prompt_tokens reflects the current context window size sent to the LLM
+	t.contextTokens = usage.PromptTokens
+}
+
 func (t *transcript) snapshot() ([]provider.ChatMessage, []provider.ChatMessage) {
 	return append([]provider.ChatMessage(nil), t.messages...), append([]provider.ChatMessage(nil), t.newMessages...)
 }
@@ -221,11 +231,14 @@ func (t *transcript) snapshot() ([]provider.ChatMessage, []provider.ChatMessage)
 func (t *transcript) result(output string, turns int, err error) *Result {
 	messages, newMessages := t.snapshot()
 	return &Result{
-		Output:      output,
-		NewMessages: newMessages,
-		Messages:    messages,
-		Turns:       turns,
-		Err:         err,
+		Output:        output,
+		NewMessages:   newMessages,
+		Messages:      messages,
+		Turns:         turns,
+		TotalUsage:    t.totalUsage,
+		TurnUsages:    append([]TurnUsage(nil), t.turnUsages...),
+		ContextTokens: t.contextTokens,
+		Err:           err,
 	}
 }
 

@@ -38,19 +38,21 @@ const (
 )
 
 type Event struct {
-	Type        EventType
-	Turn        int
-	Message     provider.ChatMessage
-	Messages    []provider.ChatMessage
-	NewMessages []provider.ChatMessage
-	ToolResults []provider.ChatMessage
-	ToolCallID  string
-	ToolName    string
-	Arguments   string
-	Result      string
-	IsError     bool
-	Err         error
-	Stop        StopReason
+	Type          EventType
+	Turn          int
+	Message       provider.ChatMessage
+	Messages      []provider.ChatMessage
+	NewMessages   []provider.ChatMessage
+	ToolResults   []provider.ChatMessage
+	ToolCallID    string
+	ToolName      string
+	Arguments     string
+	Result        string
+	IsError       bool
+	Err           error
+	Stop          StopReason
+	Usage         *provider.Usage
+	ContextTokens int
 }
 
 type EventHandler func(context.Context, Event) error
@@ -221,13 +223,22 @@ func (c Config) NewAgent() *Agent {
 // NewAgent creates a reusable Agent from a Config.
 func NewAgent(cfg Config) *Agent { return cfg.NewAgent() }
 
+type TurnUsage struct {
+	Turn             int `json:"turn"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 type Result struct {
-	Output      string
-	NewMessages []provider.ChatMessage
-	Messages    []provider.ChatMessage
-	Turns       int
-	TotalUsage  provider.Usage
-	Err         error
+	Output        string
+	NewMessages   []provider.ChatMessage
+	Messages      []provider.ChatMessage
+	Turns         int
+	TotalUsage    provider.Usage
+	TurnUsages    []TurnUsage
+	ContextTokens int
+	Err           error
 }
 
 type State struct {
