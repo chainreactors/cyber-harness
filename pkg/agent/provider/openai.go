@@ -189,7 +189,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 		reqCancel()
 	})
 
-	events := make(chan ChatCompletionStreamEvent)
+	events := make(chan ChatCompletionStreamEvent, 32)
 	go func() {
 		defer reqCancel()
 		defer resp.Body.Close()

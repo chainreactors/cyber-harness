@@ -79,32 +79,33 @@ func newCollector(inputs []string, stream io.Writer, streamColor, debug bool) *c
 }
 
 func (c *collector) Observe(pe pipelineEvent) {
-	c.mu.Lock()
+	accepted := pe.Action == pipeline.ActionAccept
+
+	var traceEntry string
 	if c.debug {
-		c.trace = append(c.trace, formatTraceEvent(pe))
+		traceEntry = formatTraceEvent(pe)
+	}
+	var plain string
+	if accepted {
+		plain = formatEventLine(pe.Event, false)
+	}
+
+	c.mu.Lock()
+	if traceEntry != "" {
+		c.trace = append(c.trace, traceEntry)
 	}
 	if c.stats != nil {
 		c.stats.Observe(pe)
 	}
-	if pe.Action == pipeline.ActionAccept {
+	if accepted {
 		c.recordAcceptedEvent(pe.Event)
+		if plain != "" {
+			c.fileLines = append(c.fileLines, plain)
+		}
 	}
 	c.mu.Unlock()
 
-	if pe.Action != pipeline.ActionAccept {
-		return
-	}
-
-	plain := formatEventLine(pe.Event, false)
-	if plain == "" {
-		return
-	}
-
-	c.mu.Lock()
-	c.fileLines = append(c.fileLines, plain)
-	c.mu.Unlock()
-
-	if c.stream == nil {
+	if !accepted || c.stream == nil {
 		return
 	}
 	line := formatEventLine(pe.Event, c.streamColor)

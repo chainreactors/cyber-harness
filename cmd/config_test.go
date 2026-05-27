@@ -373,9 +373,9 @@ llm:
 	}
 }
 
-// TestLoadScanDefaults verifies scan.verify and scan.verify_timeout are
-// applied to Default* vars.
-func TestLoadScanDefaults(t *testing.T) {
+// TestApplyScanDefaults verifies scan.verify and scan.verify_timeout are
+// applied to Default* vars via the Option struct.
+func TestApplyScanDefaults(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `
 scan:
@@ -390,9 +390,11 @@ scan:
 		DefaultVerifyTimeout = origTimeout
 	}()
 
-	if err := loadScanDefaults(filepath.Join(dir, "config.yaml")); err != nil {
+	var loaded Option
+	if err := LoadConfig(filepath.Join(dir, "config.yaml"), &loaded); err != nil {
 		t.Fatal(err)
 	}
+	applyScanDefaults(loaded.ScanConfig)
 
 	if DefaultVerify != "critical" {
 		t.Errorf("DefaultVerify: got %q, want %q", DefaultVerify, "critical")

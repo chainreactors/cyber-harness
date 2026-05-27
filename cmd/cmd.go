@@ -27,6 +27,12 @@ type Option struct {
 	IOAOptions     `group:"IOA Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
+	ScanConfig     scanConfigOptions `no-flag:"true" config:"scan"`
+}
+
+type scanConfigOptions struct {
+	Verify        string `config:"verify"`
+	VerifyTimeout int    `config:"verify_timeout"`
 }
 
 type LLMOptions struct {

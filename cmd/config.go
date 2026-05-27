@@ -99,24 +99,17 @@ func loadAndApplyConfig(option *Option) (string, error) {
 		return configPath, fmt.Errorf("load config %s: %w", configPath, err)
 	}
 	mergeOption(option, &loaded)
-	if err := loadScanDefaults(configPath); err != nil {
-		return configPath, fmt.Errorf("load scan defaults %s: %w", configPath, err)
-	}
+	applyScanDefaults(loaded.ScanConfig)
 	return configPath, nil
 }
 
-func loadScanDefaults(filename string) error {
-	c := newConfigLoader()
-	if err := c.LoadFiles(filename); err != nil {
-		return err
+func applyScanDefaults(sc scanConfigOptions) {
+	if sc.Verify != "" {
+		DefaultVerify = sc.Verify
 	}
-	if v := c.String("scan.verify"); v != "" {
-		DefaultVerify = v
+	if sc.VerifyTimeout > 0 {
+		DefaultVerifyTimeout = strconv.Itoa(sc.VerifyTimeout)
 	}
-	if v := c.Int("scan.verify_timeout"); v > 0 {
-		DefaultVerifyTimeout = strconv.Itoa(v)
-	}
-	return nil
 }
 
 func mergeOption(dst, src *Option) {

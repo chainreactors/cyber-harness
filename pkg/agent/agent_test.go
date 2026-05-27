@@ -1022,6 +1022,101 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 	}
 }
 
+func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
+	tools := command.NewRegistry()
+	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
+
+	turn := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
+			turn++
+			if turn == 1 {
+				return &provider.ChatCompletionResponse{
+					Choices: []provider.Choice{{Message: provider.ChatMessage{
+						Role: "assistant",
+						ToolCalls: []provider.ToolCall{{
+							ID: "call-1", Type: "function",
+							Function: provider.FunctionCall{Name: "echo", Arguments: `{}`},
+						}},
+					}}},
+					Usage: &provider.Usage{PromptTokens: 200, CompletionTokens: 30, TotalTokens: 230},
+				}, nil
+			}
+			return &provider.ChatCompletionResponse{
+				Choices: []provider.Choice{{Message: provider.NewTextMessage("assistant", "done")}},
+				Usage:   &provider.Usage{PromptTokens: 280, CompletionTokens: 20, TotalTokens: 300},
+			}, nil
+		},
+	}
+
+	result, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+	}).Run(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(result.TurnUsages) != 2 {
+		t.Fatalf("TurnUsages length = %d, want 2", len(result.TurnUsages))
+	}
+	if result.TurnUsages[0].Turn != 1 || result.TurnUsages[0].TotalTokens != 230 {
+		t.Errorf("TurnUsages[0] = %+v, want turn=1 total=230", result.TurnUsages[0])
+	}
+	if result.TurnUsages[1].Turn != 2 || result.TurnUsages[1].TotalTokens != 300 {
+		t.Errorf("TurnUsages[1] = %+v, want turn=2 total=300", result.TurnUsages[1])
+	}
+	if result.TotalUsage.TotalTokens != 530 {
+		t.Errorf("TotalUsage.TotalTokens = %d, want 530", result.TotalUsage.TotalTokens)
+	}
+	if result.TotalUsage.PromptTokens != 480 {
+		t.Errorf("TotalUsage.PromptTokens = %d, want 480", result.TotalUsage.PromptTokens)
+	}
+	if result.ContextTokens != 280 {
+		t.Errorf("ContextTokens = %d, want 280 (last turn prompt tokens)", result.ContextTokens)
+	}
+}
+
+func TestTurnEndEventCarriesUsage(t *testing.T) {
+	tools := command.NewRegistry()
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
+			return &provider.ChatCompletionResponse{
+				Choices: []provider.Choice{{Message: provider.NewTextMessage("assistant", "done")}},
+				Usage:   &provider.Usage{PromptTokens: 500, CompletionTokens: 40, TotalTokens: 540},
+			}, nil
+		},
+	}
+
+	var turnEndUsage *provider.Usage
+	var turnEndContext int
+	_, err := (Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Emit: func(_ context.Context, event Event) error {
+			if event.Type == EventTurnEnd {
+				turnEndUsage = event.Usage
+				turnEndContext = event.ContextTokens
+			}
+			return nil
+		},
+	}).Run(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if turnEndUsage == nil {
+		t.Fatal("EventTurnEnd.Usage is nil")
+	}
+	if turnEndUsage.TotalTokens != 540 {
+		t.Errorf("EventTurnEnd Usage.TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
+	}
+	if turnEndContext != 500 {
+		t.Errorf("EventTurnEnd ContextTokens = %d, want 500", turnEndContext)
+	}
+}
+
 type callbackProvider struct {
 	fn func(context.Context, *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error)
 }
