@@ -2,12 +2,10 @@ package command
 
 import "strings"
 
-// ToolResult is the structured return value from tool execution.
 type ToolResult struct {
 	Content   []ContentBlock
 	IsError   bool
 	Terminate bool
-	Details   map[string]any
 }
 
 // Text returns all text content blocks concatenated, for backward
