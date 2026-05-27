@@ -41,10 +41,6 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 		"--api-key", "KEY",
 		"--model=deepseek-v4-pro",
 		"--base-url", "https://api.deepseek.com",
-		"--vision",
-		"--vision-base-url", "https://openrouter.ai/api/v1",
-		"--vision-api-key", "VISION_KEY",
-		"--vision-model", "qwen/qwen3.6-flash",
 		"--cyberhub-key=HUBKEY",
 	})
 	if err != nil {
@@ -60,12 +56,6 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	opt := parsed.Option
 	if opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
-	}
-	if !opt.Vision {
-		t.Fatalf("vision not enabled")
-	}
-	if opt.VisionBaseURL != "https://openrouter.ai/api/v1" || opt.VisionAPIKey != "VISION_KEY" || opt.VisionModel != "qwen/qwen3.6-flash" {
-		t.Fatalf("vision options = %#v", opt.VisionOptions)
 	}
 	if opt.CyberhubURL != "http://hub:8080" || opt.CyberhubKey != "HUBKEY" {
 		t.Fatalf("scanner options = %#v", opt.ScannerOptions)

@@ -122,6 +122,53 @@ func TestReadDirectory(t *testing.T) {
 	}
 }
 
+func TestReadImageFileByMagicBytes(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name   string
+		header []byte
+		mime   string
+	}{
+		{"png", []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, "image/png"},
+		{"jpeg", []byte{0xFF, 0xD8, 0xFF, 0xE0}, "image/jpeg"},
+		{"gif", []byte("GIF89a"), "image/gif"},
+		{"webp", []byte("RIFF\x00\x00\x00\x00WEBP"), "image/webp"},
+	}
+
+	for _, tt := range tests {
+		path := filepath.Join(dir, tt.name+".dat")
+		os.WriteFile(path, tt.header, 0644)
+
+		tool := NewReadTool(dir)
+		res, err := tool.Execute(context.Background(), fmt.Sprintf(`{"path": "%s.dat"}`, tt.name))
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tt.name, err)
+		}
+		if !res.HasImages() {
+			t.Fatalf("%s: expected image content", tt.name)
+		}
+		if !strings.Contains(res.Text(), tt.mime) {
+			t.Fatalf("%s: expected mime %s in text, got: %s", tt.name, tt.mime, res.Text())
+		}
+	}
+}
+
+func TestReadNonImageBinaryNotDetectedAsImage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	os.WriteFile(path, []byte{0x00, 0x01, 0x02, 0x03}, 0644)
+
+	tool := NewReadTool(dir)
+	res, err := tool.Execute(context.Background(), `{"path": "data.bin"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.HasImages() {
+		t.Fatal("non-image binary should not be detected as image")
+	}
+}
+
 // --- Write Tool Tests ---
 
 func TestWriteNewFile(t *testing.T) {

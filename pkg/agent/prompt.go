@@ -104,14 +104,6 @@ Available pseudo-commands and their flags:
 		sb.WriteString("\n\n")
 	}
 
-	if hasVisionTool(tools) {
-		sb.WriteString(`## Vision Analysis
-
-The vision tool requires a local file path. If you need to analyze a remote image, download it first, then pass the local path to vision.
-
-`)
-	}
-
 	sb.WriteString(sharedKeyPrinciples)
 
 	if cfg.ScannerAgentMode {
@@ -126,13 +118,3 @@ The vision tool requires a local file path. If you need to analyze a remote imag
 	return sb.String()
 }
 
-func hasVisionTool(tools *command.CommandRegistry) bool {
-	if tools == nil {
-		return false
-	}
-	if tools.Has("vision") {
-		return true
-	}
-	_, ok := tools.GetTool("vision")
-	return ok
-}

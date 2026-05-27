@@ -139,14 +139,24 @@ func serializableEvent(e agent.Event) eventJSON {
 }
 
 func toMessageJSON(msg provider.ChatMessage) *messageJSON {
-	if msg.Role == "" && msg.Content == nil && len(msg.ToolCalls) == 0 && msg.ToolCallID == "" {
+	if msg.Role == "" && msg.Content == nil && len(msg.ContentParts) == 0 && len(msg.ToolCalls) == 0 && msg.ToolCallID == "" {
 		return nil
 	}
 	out := &messageJSON{
 		Role:       msg.Role,
 		ToolCallID: msg.ToolCallID,
 	}
-	if msg.Content != nil {
+	if len(msg.ContentParts) > 0 {
+		for _, part := range msg.ContentParts {
+			if part.Type == "text" {
+				out.Content += part.Text
+			} else if part.Type == "image_url" && part.ImageURL != nil {
+				mediaType, _ := provider.ParseDataURI(part.ImageURL.URL)
+				out.Content += fmt.Sprintf("[image: %s]", mediaType)
+			}
+		}
+		out.Content = truncate(out.Content, eventPreviewLimit)
+	} else if msg.Content != nil {
 		out.Content = truncate(*msg.Content, eventPreviewLimit)
 	}
 	for _, tc := range msg.ToolCalls {

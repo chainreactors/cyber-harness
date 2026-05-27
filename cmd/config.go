@@ -118,7 +118,6 @@ func mergeOption(dst, src *Option) {
 	dst.APIKey = resolveString(dst.APIKey, src.APIKey)
 	dst.Model = resolveString(dst.Model, src.Model)
 	dst.LLMProxy = resolveString(dst.LLMProxy, src.LLMProxy)
-	mergeVisionOptions(dst, src)
 	dst.CyberhubURL = resolveString(dst.CyberhubURL, src.CyberhubURL)
 	dst.CyberhubKey = resolveString(dst.CyberhubKey, src.CyberhubKey)
 	dst.CyberhubMode = resolveString(dst.CyberhubMode, src.CyberhubMode)
@@ -138,16 +137,6 @@ func mergeOption(dst, src *Option) {
 	}
 }
 
-func mergeVisionOptions(dst, src *Option) {
-	if !dst.Vision && src.Vision {
-		dst.Vision = true
-	}
-	dst.VisionProvider = resolveString(dst.VisionProvider, src.VisionProvider)
-	dst.VisionBaseURL = resolveString(dst.VisionBaseURL, src.VisionBaseURL)
-	dst.VisionAPIKey = resolveString(dst.VisionAPIKey, src.VisionAPIKey)
-	dst.VisionModel = resolveString(dst.VisionModel, src.VisionModel)
-	dst.VisionProxy = resolveString(dst.VisionProxy, src.VisionProxy)
-}
 
 func InitDefaultConfig() string {
 	return defaultConfigTemplate
@@ -171,18 +160,7 @@ llm:
   api_key: ""
   # 模型名称
   model: ""
-  # LLM API 代理（同时作用于 vision，除非单独设置 vision.proxy）
-  proxy: ""
-
-# Vision 配置
-# enabled: true 时启用 vision 工具。留空 provider 等字段时复用 llm 配置。
-vision:
-  enabled: false
-  # openai, openrouter, ollama, etc.（留空时可从 base_url 推断）
-  provider: ""
-  base_url: ""
-  api_key: ""
-  model: ""
+  # LLM API 代理
   proxy: ""
 
 # Cyberhub 资源服务

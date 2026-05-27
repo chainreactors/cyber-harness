@@ -31,3 +31,12 @@ func ErrorResult(msg string) ToolResult {
 func TerminateResult(s string) ToolResult {
 	return ToolResult{Content: []ContentBlock{TextBlock(s)}, Terminate: true}
 }
+
+func (r ToolResult) HasImages() bool {
+	for _, block := range r.Content {
+		if block.Type == "image" {
+			return true
+		}
+	}
+	return false
+}

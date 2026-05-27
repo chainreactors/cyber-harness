@@ -16,7 +16,6 @@ type Deps struct {
 	Resources    any
 	IOAClient    any
 	Provider     any
-	VisionConfig any // *provider.ProviderConfig for vision-capable LLM
 	Model        string
 	ScannerProxy string
 	ScanOpts     []any

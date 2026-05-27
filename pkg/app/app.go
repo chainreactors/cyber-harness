@@ -23,7 +23,6 @@ import (
 
 type Config struct {
 	Provider ProviderConfig
-	Vision   ProviderConfig
 	Scanner  ScannerConfig
 	Tools    ToolConfig
 	IOA      *IOAConfig
@@ -52,10 +51,9 @@ type ScannerConfig struct {
 }
 
 type ToolConfig struct {
-	Enabled       bool
-	BashTimeout   int
-	VisionEnabled bool
-	TavilyKeys    string // comma-separated Tavily API keys (build-time fallback)
+	Enabled     bool
+	BashTimeout int
+	TavilyKeys  string
 }
 
 type IOAConfig struct {
@@ -70,7 +68,6 @@ type IOAConfig struct {
 type App struct {
 	Provider         provider.Provider
 	ProviderConfig   provider.ProviderConfig
-	VisionConfig     provider.ProviderConfig
 	Commands         *command.CommandRegistry
 	Engines          *engine.Set
 	Skills           *skills.Store
@@ -105,24 +102,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	app.Engines = initEngines(ctx, cfg.Scanner, logger)
 
-	// Resolve vision provider config for the vision pseudo-command.
-	var visionCfg *provider.ProviderConfig
-	if cfg.Tools.Enabled && cfg.Tools.VisionEnabled && cfg.Vision.Enabled {
-		resolved, err := provider.Resolve(&cfg.Vision.Config)
-		if err != nil {
-			if !cfg.Vision.Optional {
-				return nil, fmt.Errorf("vision provider: %w", err)
-			}
-			logger.Debugf("vision provider not configured: %s", err)
-		} else {
-			app.VisionConfig = *resolved
-			visionCfg = &app.VisionConfig
-		}
-	} else if cfg.Tools.Enabled && cfg.Tools.VisionEnabled && app.Provider != nil {
-		visionCfg = &app.ProviderConfig
-	}
-
-	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, cfg.Tools, app.Provider, app.ProviderConfig.Model, app.Skills, visionCfg, logger)
+	app.Commands = initCommandRegistry(app.Engines, cfg.Scanner, cfg.Tools, app.Provider, app.ProviderConfig.Model, app.Skills, logger)
 
 	if cfg.IOA != nil {
 		if err := app.InitIOA(ctx, *cfg.IOA); err != nil {
@@ -190,7 +170,7 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 	return engineSet
 }
 
-func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, visionCfg *provider.ProviderConfig, logger telemetry.Logger) *command.CommandRegistry {
+func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg ToolConfig, llmProvider provider.Provider, model string, skillStore *skills.Store, logger telemetry.Logger) *command.CommandRegistry {
 	cmdReg := command.NewRegistry()
 
 	workDir, _ := os.Getwd()
@@ -243,7 +223,6 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 		BashTimeout:  toolCfg.BashTimeout,
 		SkillStore:   skillStore,
 		EngineSet:    engineSet,
-		VisionConfig: visionCfg,
 		ScannerProxy: scanCfg.Proxy,
 		ScanOpts:     scanOpts,
 		Logger:       logger,

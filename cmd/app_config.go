@@ -23,10 +23,6 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			Config:   providerConfig(option),
 			Optional: features.ProviderOptional,
 		},
-		Vision: app.ProviderConfig{
-			Enabled: visionHasProviderConfig(option),
-			Config:  visionProviderConfig(option),
-		},
 		Scanner: app.ScannerConfig{
 			CyberhubURL:  option.CyberhubURL,
 			CyberhubKey:  option.CyberhubKey,
@@ -42,10 +38,9 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			ReconLimit:   intOptionValue(option.ReconLimit),
 		},
 		Tools: app.ToolConfig{
-			Enabled:       features.ToolsEnabled,
-			BashTimeout:   300,
-			VisionEnabled: visionEnabled(option),
-			TavilyKeys:    DefaultTavilyKeys,
+			Enabled:     features.ToolsEnabled,
+			BashTimeout: 300,
+			TavilyKeys:  DefaultTavilyKeys,
 		},
 		Logger: logger,
 	}

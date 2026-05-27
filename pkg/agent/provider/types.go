@@ -1,17 +1,76 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/chainreactors/ioa"
 )
 
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func TextPart(text string) ContentPart {
+	return ContentPart{Type: "text", Text: text}
+}
+
+func ImagePart(mimeType, base64Data, detail string) ContentPart {
+	return ContentPart{
+		Type:     "image_url",
+		ImageURL: &ImageURL{URL: "data:" + mimeType + ";base64," + base64Data, Detail: detail},
+	}
+}
+
 type ChatMessage struct {
-	Role             string     `json:"role"`
-	Content          *string    `json:"content,omitempty"`
-	ReasoningContent *string    `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	Role             string        `json:"role"`
+	Content          *string       `json:"content,omitempty"`
+	ContentParts     []ContentPart `json:"-"`
+	ReasoningContent *string       `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+}
+
+func (m ChatMessage) MarshalJSON() ([]byte, error) {
+	if len(m.ContentParts) == 0 {
+		type plain ChatMessage
+		return json.Marshal(plain(m))
+	}
+	obj := map[string]interface{}{"role": m.Role, "content": m.ContentParts}
+	if m.ReasoningContent != nil {
+		obj["reasoning_content"] = *m.ReasoningContent
+	}
+	if len(m.ToolCalls) > 0 {
+		obj["tool_calls"] = m.ToolCalls
+	}
+	if m.ToolCallID != "" {
+		obj["tool_call_id"] = m.ToolCallID
+	}
+	return json.Marshal(obj)
+}
+
+func NewMultimodalMessage(role string, parts []ContentPart) ChatMessage {
+	return ChatMessage{Role: role, ContentParts: parts}
+}
+
+func ParseDataURI(dataURI string) (mediaType, base64Data string) {
+	rest, ok := strings.CutPrefix(dataURI, "data:")
+	if !ok {
+		return "", dataURI
+	}
+	parts := strings.SplitN(rest, ";base64,", 2)
+	if len(parts) != 2 {
+		return "", dataURI
+	}
+	return parts[0], parts[1]
 }
 
 type ChatMessageDelta struct {

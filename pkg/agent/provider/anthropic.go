@@ -329,24 +329,37 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 			messages = append(messages, aMsg{Role: "assistant", Content: blocks})
 
 		case "tool":
+			var resultContent interface{}
+			if len(m.ContentParts) > 0 {
+				resultContent = contentPartsToAnthropicBlocks(m.ContentParts)
+			} else {
+				resultContent = deref(m.Content)
+			}
 			messages = append(messages, aMsg{
 				Role: "user",
 				Content: []map[string]interface{}{{
 					"type":        "tool_result",
 					"tool_use_id": m.ToolCallID,
-					"content":     deref(m.Content),
+					"content":     resultContent,
 				}},
 			})
 
 		default:
-			text := ""
-			if m.Content != nil {
-				text = *m.Content
+			if len(m.ContentParts) > 0 {
+				messages = append(messages, aMsg{
+					Role:    m.Role,
+					Content: contentPartsToAnthropicBlocks(m.ContentParts),
+				})
+			} else {
+				text := ""
+				if m.Content != nil {
+					text = *m.Content
+				}
+				messages = append(messages, aMsg{
+					Role:    m.Role,
+					Content: []map[string]interface{}{{"type": "text", "text": text}},
+				})
 			}
-			messages = append(messages, aMsg{
-				Role:    m.Role,
-				Content: []map[string]interface{}{{"type": "text", "text": text}},
-			})
 		}
 	}
 
@@ -397,6 +410,29 @@ func mergeConsecutive(msgs []aMsg) []aMsg {
 		}
 	}
 	return merged
+}
+
+func contentPartsToAnthropicBlocks(parts []ContentPart) []map[string]interface{} {
+	blocks := make([]map[string]interface{}, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			blocks = append(blocks, map[string]interface{}{"type": "text", "text": part.Text})
+		case "image_url":
+			if part.ImageURL != nil {
+				mediaType, data := ParseDataURI(part.ImageURL.URL)
+				blocks = append(blocks, map[string]interface{}{
+					"type": "image",
+					"source": map[string]interface{}{
+						"type":       "base64",
+						"media_type": mediaType,
+						"data":       data,
+					},
+				})
+			}
+		}
+	}
+	return blocks
 }
 
 func deref(s *string) string {

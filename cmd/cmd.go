@@ -21,13 +21,12 @@ const Version = "0.1.0"
 
 type Option struct {
 	LLMOptions     `group:"LLM Options" config:"llm"`
-	VisionOptions  `group:"Vision Options" config:"vision"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	IOAOptions     `group:"IOA Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
-	ScanConfig     scanConfigOptions `no-flag:"true" config:"scan"`
+	ScanConfig scanConfigOptions `no-flag:"true" config:"scan"`
 }
 
 type scanConfigOptions struct {
@@ -40,17 +39,8 @@ type LLMOptions struct {
 	BaseURL  string `long:"base-url" config:"base_url" description:"LLM API base URL"`
 	APIKey   string `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
 	Model    string `long:"model" config:"model" description:"LLM model name"`
-	LLMProxy string `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests (also applies to vision unless --vision-proxy is set)"`
+	LLMProxy string `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
 	AI       bool   `long:"ai" description:"Enable all AI skills: verify findings, sniper fingerprint analysis, and summarize results"`
-}
-
-type VisionOptions struct {
-	Vision         bool   `long:"vision" config:"enabled" description:"Enable the vision tool (uses main LLM provider unless --vision-* overrides are set)"`
-	VisionProvider string `long:"vision-provider" config:"provider" description:"Vision provider name (openai, openrouter, ollama, etc.)"`
-	VisionBaseURL  string `long:"vision-base-url" config:"base_url" description:"Vision API base URL"`
-	VisionAPIKey   string `long:"vision-api-key" config:"api_key" description:"Vision API key"`
-	VisionModel    string `long:"vision-model" config:"model" description:"Vision model name"`
-	VisionProxy    string `long:"vision-proxy" config:"proxy" description:"HTTP proxy for vision API"`
 }
 
 type ScannerOptions struct {
@@ -331,7 +321,6 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.APIKey = resolveString(manual.APIKey, option.APIKey)
 	option.Model = resolveString(manual.Model, option.Model)
 	option.LLMProxy = resolveString(manual.LLMProxy, option.LLMProxy)
-	mergeVisionOptions(option, &manual)
 	if manual.AI {
 		option.AI = true
 	}
@@ -476,18 +465,6 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--model"}, arity: 1, apply: func(o *Option, v string) { o.Model = v }},
 	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.ScannerOptions.Proxy = v }},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *Option, v string) { o.LLMProxy = v }},
-	{names: []string{"--vision"}, arity: 0, apply: func(o *Option, v string) {
-		if v != "" {
-			o.Vision = truthyFlagValue(v)
-		} else {
-			o.Vision = true
-		}
-	}},
-	{names: []string{"--vision-provider"}, arity: 1, apply: func(o *Option, v string) { o.VisionProvider = v }},
-	{names: []string{"--vision-base-url"}, arity: 1, apply: func(o *Option, v string) { o.VisionBaseURL = v }},
-	{names: []string{"--vision-api-key"}, arity: 1, apply: func(o *Option, v string) { o.VisionAPIKey = v }},
-	{names: []string{"--vision-model"}, arity: 1, apply: func(o *Option, v string) { o.VisionModel = v }},
-	{names: []string{"--vision-proxy"}, arity: 1, apply: func(o *Option, v string) { o.VisionProxy = v }},
 	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *Option, v string) { o.FofaEmail = v }},
 	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *Option, v string) { o.FofaKey = v }},
 	{names: []string{"--hunter-token"}, arity: 1, apply: func(o *Option, v string) { o.HunterToken = v }},

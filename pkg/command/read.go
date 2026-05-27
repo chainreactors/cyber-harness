@@ -3,7 +3,9 @@ package command
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +16,8 @@ import (
 
 const (
 	defaultReadLineLimit = 2000
-	defaultReadByteLimit = 50 * 1024 // 50KB
+	defaultReadByteLimit = 50 * 1024     // 50KB
+	maxImageSize         = 20 * 1024 * 1024 // 20MB
 )
 
 type ReadTool struct {
@@ -33,7 +36,7 @@ func NewReadTool(workDir string, readers ...VirtualFileReader) *ReadTool {
 func (t *ReadTool) Name() string { return "read" }
 
 func (t *ReadTool) Description() string {
-	return "Read the contents of a file. Returns the file content as text with line numbers. For large files, use offset and limit to paginate — the tool will tell you the total line count and the next offset to use."
+	return "Read the contents of a file. Returns text with line numbers, or image content for image files (PNG, JPG, GIF, WEBP). For large files, use offset and limit to paginate."
 }
 
 type ReadArgs struct {
@@ -77,6 +80,10 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 
 	if info.IsDir() {
 		return ToolResult{}, fmt.Errorf("%s is a directory, not a file", args.Path)
+	}
+
+	if mime := detectImageMime(resolved); mime != "" {
+		return readImageFile(resolved, args.Path, mime, info.Size())
 	}
 
 	if isBinaryFile(resolved) {
@@ -246,7 +253,62 @@ func (t *ReadTool) resolvePath(path string) string {
 	return filepath.Join(t.workDir, path)
 }
 
-// isBinaryFile samples the first 8KB of a file to check for non-text content.
+const imageSniffSize = 12
+
+func detectImageMime(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	buf := make([]byte, imageSniffSize)
+	n, _ := f.Read(buf)
+	if n < 4 {
+		return ""
+	}
+	buf = buf[:n]
+
+	if buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF {
+		return "image/jpeg"
+	}
+	if buf[0] == 0x89 && buf[1] == 'P' && buf[2] == 'N' && buf[3] == 'G' {
+		return "image/png"
+	}
+	if buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F' {
+		return "image/gif"
+	}
+	if n >= 12 && buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F' &&
+		buf[8] == 'W' && buf[9] == 'E' && buf[10] == 'B' && buf[11] == 'P' {
+		return "image/webp"
+	}
+	return ""
+}
+
+func readImageFile(resolved, displayPath, mime string, size int64) (ToolResult, error) {
+	if size > maxImageSize {
+		return TextResult(fmt.Sprintf("[image too large: %s (%d bytes, max %d)]", displayPath, size, maxImageSize)), nil
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("open image: %w", err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxImageSize+1))
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("read image: %w", err)
+	}
+
+	b64 := base64.StdEncoding.EncodeToString(data)
+	return ToolResult{
+		Content: []ContentBlock{
+			TextBlock(fmt.Sprintf("Read image file [%s] (%d bytes)", mime, len(data))),
+			ImageBlock(mime, b64),
+		},
+	}, nil
+}
+
 func isBinaryFile(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {

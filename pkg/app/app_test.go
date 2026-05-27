@@ -5,42 +5,18 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/sdk/gogo"
 	"github.com/chainreactors/sdk/spray"
 
-	// side-effect imports: register vision, webfetch, websearch factories
-	_ "github.com/chainreactors/aiscan/pkg/tools/vision"
 	_ "github.com/chainreactors/aiscan/pkg/tools/webfetch"
 	_ "github.com/chainreactors/aiscan/pkg/tools/websearch"
 )
 
-func TestInitCommandRegistryRegistersVisionOnlyWhenConfigured(t *testing.T) {
-	logger := telemetry.NopLogger()
-	visionCfg := &provider.ProviderConfig{
-		BaseURL: "http://example.test/v1",
-		APIKey:  "test-key",
-		Model:   "gpt-4o",
-	}
-
-	// Without vision config: vision should not be registered.
-	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{}, nil, "", nil, nil, logger)
-	if reg.Has("vision") {
-		t.Fatal("vision command should not be registered without vision config")
-	}
-
-	// With vision config: vision should be registered.
-	reg = initCommandRegistry(nil, ScannerConfig{}, ToolConfig{}, nil, "", nil, visionCfg, logger)
-	if !reg.Has("vision") {
-		t.Fatal("vision command should be registered when vision config is provided")
-	}
-}
-
 func TestInitCommandRegistryRegistersWebToolsAlways(t *testing.T) {
 	logger := telemetry.NopLogger()
-	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{}, nil, "", nil, nil, logger)
+	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{}, nil, "", nil, logger)
 
 	if !reg.Has("web_fetch") {
 		t.Fatal("web_fetch command should always be registered")
@@ -57,7 +33,7 @@ func TestInitCommandRegistryRegistersScannerCommands(t *testing.T) {
 		Spray: spray.NewEngine(nil),
 	}
 
-	reg := initCommandRegistry(engines, ScannerConfig{}, ToolConfig{}, nil, "", nil, nil, logger)
+	reg := initCommandRegistry(engines, ScannerConfig{}, ToolConfig{}, nil, "", nil, logger)
 
 	for _, name := range []string{"scan", "gogo", "spray"} {
 		if !reg.Has(name) {
@@ -68,7 +44,7 @@ func TestInitCommandRegistryRegistersScannerCommands(t *testing.T) {
 
 func TestInitCommandRegistryRegisters5CoreTools(t *testing.T) {
 	logger := telemetry.NopLogger()
-	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "", nil, nil, logger)
+	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "", nil, logger)
 
 	tools := reg.Tools()
 	expected := map[string]bool{"read": true, "write": true, "glob": true, "bash": true, "task": true}
@@ -87,8 +63,6 @@ func TestInitCommandRegistryRegisters5CoreTools(t *testing.T) {
 }
 
 func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
-	// Verify that pseudo-commands (web_search, web_fetch, etc.) do NOT appear
-	// as agent tools — only as pseudo-commands via the bash tool.
 	reg := command.NewRegistry()
 	command.BuildAll(&command.Deps{
 		WorkDir:     "/tmp",
@@ -98,7 +72,6 @@ func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
 	for _, tool := range reg.Tools() {
 		switch tool.Name() {
 		case "read", "write", "glob", "bash", "task":
-			// ok — core tools
 		default:
 			t.Fatalf("pseudo-command %q should NOT be registered as an agent tool", tool.Name())
 		}

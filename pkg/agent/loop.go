@@ -330,7 +330,7 @@ func executeToolCalls(ctx context.Context, cfg Config, assistantMsg provider.Cha
 			return toolBatchResult{}, err
 		}
 		cfg.Logger.Debugf("tool_result name=%s bytes=%d", s.tc.Function.Name, len(s.result.result))
-		toolMsg := provider.NewToolResultMessage(s.tc.ID, s.result.result)
+		toolMsg := toolResultToMessage(s.tc.ID, s.result)
 		if err := emitMessage(ctx, cfg.Emit, turn, toolMsg); err != nil {
 			return toolBatchResult{}, err
 		}
@@ -352,10 +352,11 @@ type toolCallSlot struct {
 }
 
 type toolExecution struct {
-	result  string
-	isError bool
-	err     error
-	flow    ToolFlowDecision
+	result     string
+	fullResult *command.ToolResult
+	isError    bool
+	err        error
+	flow       ToolFlowDecision
 }
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall) toolExecution {
@@ -373,9 +374,28 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMess
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
+		if toolResult.HasImages() {
+			execution.fullResult = &toolResult
+		}
 	}
 	execution.result = truncateResultSize(execution.result, cfg.MaxResultSize)
 	return afterToolCall(ctx, cfg, assistantMsg, tc, execution)
+}
+
+func toolResultToMessage(toolCallID string, exec toolExecution) provider.ChatMessage {
+	if exec.fullResult != nil && exec.fullResult.HasImages() {
+		parts := make([]provider.ContentPart, 0, len(exec.fullResult.Content))
+		for _, block := range exec.fullResult.Content {
+			switch block.Type {
+			case "text":
+				parts = append(parts, provider.TextPart(block.Text))
+			case "image":
+				parts = append(parts, provider.ImagePart(block.MimeType, block.Base64Data, "high"))
+			}
+		}
+		return provider.ChatMessage{Role: "tool", ToolCallID: toolCallID, ContentParts: parts}
+	}
+	return provider.NewToolResultMessage(toolCallID, exec.result)
 }
 
 func beforeToolCall(ctx context.Context, cfg Config, assistantMsg provider.ChatMessage, tc provider.ToolCall) toolExecution {
