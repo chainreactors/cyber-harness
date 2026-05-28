@@ -20,7 +20,8 @@ func NewCommands(client ioaclient.API, nodeName string, meta map[string]any) []c
 }
 
 var toolDescOverrides = map[string]string{
-	"ioa_send": `Send an IOA message to a space. The content object MUST include a "content" key with the main task text as a string. Example: {"content": "scan 10.0.0.1 ports 80,443", "meta": {"kind": "task_dispatch"}, "targets": ["10.0.0.1"]}. Use refs.nodes to direct the message to a specific node.`,
+	"ioa_send": `Send a structured IOA message to a space. The --content value MUST be a valid JSON object (not a string). It MUST include a "content" key. Correct: --content '{"content": "your message here", "meta": {"kind": "finding"}}'. WRONG: --content '"just a string"'. Use --refs '{"nodes": ["<id>"]}' to direct to a specific node.`,
+	"ioa_read": `Read messages from an IOA space. --space_id is REQUIRED — omitting it will fail. Example: ioa_read --space_id "<space_id>" --all true --limit 50. Use --after "<message_id>" to paginate.`,
 }
 
 type toolAdapter struct {

@@ -13,7 +13,7 @@ Prerequisite: the `ioa` skill covers IOA tool mechanics (`ioa_space`, `ioa_send`
 
 When you enter a space:
 
-1. **Read first.** `ioa_read all=true limit=100` — understand who's here, what's been claimed, what's been found.
+1. **Read first.** `ioa_read --space_id "<space_id>" --all true --limit 100` — understand who's here, what's been claimed, what's been found.
 2. **Introduce yourself.** Send a single message describing:
    - Your name and node ID
    - What tools and skills you have, listing only commands available in your runtime (e.g. "I have gogo, spray, neutron, zombie"; full builds may also have katana/passive)
@@ -39,7 +39,7 @@ Before starting any work phase, always check the space:
 - **What's blocked?** Look for `kind: blocker` messages. Maybe you can help.
 - **What's done?** Look for `kind: result` and `kind: handoff` messages.
 
-Rule: **never start a long operation without reading the space first.** A 5-second `ioa_read` can save 5 minutes of redundant scanning.
+Rule: **never start a long operation without reading the space first.** A 5-second `ioa_read --space_id "<space_id>" --all true` can save 5 minutes of redundant scanning.
 
 ## 3. Target Negotiation
 
@@ -108,7 +108,7 @@ read space → claim → work (share findings as you go) → complete → read s
 ### After completing a claim
 
 1. **Report**: send `{"kind": "result", "scope": "<your scope>", "summary": "...", "findings_count": N}`
-2. **Read**: `ioa_read all=true` — what happened while you were working?
+2. **Read**: `ioa_read --space_id "<space_id>" --all true` — what happened while you were working?
    - Did peers discover new targets or assets you should follow up on?
    - Did a peer hand off work to you (`kind: handoff`)?
    - Did a peer hit a blocker you can unblock?
@@ -165,7 +165,7 @@ Agents specialize by phase: Agent A does recon (passive → gogo), hands off ass
 - **Waiting for permission**: claims are announcements. Don't ask "can I take X?" — say "I'm taking X" and start.
 - **Silent work**: scanning for 10 minutes without sending a single finding or status. Peers can't coordinate with a silent agent.
 - **Hoarding findings**: waiting until you're done to share everything at once. Share as you go.
-- **Ignoring peer messages**: always `ioa_read all=true` before starting a new phase. Your peer may have found something that changes your approach.
+- **Ignoring peer messages**: always `ioa_read --space_id "<space_id>" --all true` before starting a new phase. Your peer may have found something that changes your approach.
 - **Re-scanning claimed targets**: if a peer claimed it and is active, find something else to do.
 - **Endless convergence**: spending more time summarizing than scanning. One summary message is enough.
 
@@ -173,8 +173,8 @@ Agents specialize by phase: Agent A does recon (passive → gogo), hands off ass
 
 | Moment | Action |
 |--------|--------|
-| Enter space | `ioa_read all=true`, then send profile |
-| Before starting work | `ioa_read all=true`, check claims |
+| Enter space | `ioa_read --space_id "<space_id>" --all true`, then send profile |
+| Before starting work | `ioa_read --space_id "<space_id>" --all true`, check claims |
 | Starting a task | Send `kind: claim` with scope and ETA |
 | Found something | Send `kind: asset` or `kind: finding` immediately |
 | Phase done | Send `kind: handoff` with context for peers |

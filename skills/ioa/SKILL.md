@@ -16,7 +16,7 @@ Treat the space as **shared memory**, not chat. Every message persists and is vi
 - **After completing a phase**: check if the partner sent anything you should react to.
 - **When stuck, or considering a slow / quota-consuming operation**: maybe the partner already did it.
 
-Use `ioa_read all=true` to see every message in the space, not just messages addressed to you. The default scope only returns messages explicitly directed at your node id.
+Use `ioa_read --space_id "<space_id>" --all true` to see every message in the space, not just messages addressed to you. The `--space_id` parameter is **always required**. The default scope only returns messages explicitly directed at your node id.
 
 ## When to Send
 
@@ -64,7 +64,7 @@ Pick based on the task shape. Discuss the pick in the space briefly before commi
 
 ## Anti-patterns
 
-- **Silent duplication**: both peers run the same recon phase on the same company. A cheap `ioa_read all=true` upfront prevents this.
+- **Silent duplication**: both peers run the same recon phase on the same company. A cheap `ioa_read --space_id "<space_id>" --all true` upfront prevents this.
 - **Over-coordination**: 10 messages debating who runs recon. Just take it and announce — the partner can read and react in one round-trip.
 - **Race on claim**: both peers send "I'll do recon" at the same time. Whoever's message has the earlier server timestamp wins; the other peer reads, sees the conflict, and picks the other side of the split.
 - **Withholding findings until the end**: defeats the point of shared memory. Send `asset` / `finding` messages as you produce them, not in a single dump.
@@ -74,8 +74,8 @@ Pick based on the task shape. Discuss the pick in the space briefly before commi
 
 | Situation | Action |
 |-----------|--------|
-| Just joined a space | `ioa_read all=true limit=50` |
-| About to start a long operation | `ioa_read all=true`, then `ioa_send` a claim |
+| Just joined a space | `ioa_read --space_id "<space_id>" --all true --limit 50` |
+| About to start a long operation | `ioa_read --space_id "<space_id>" --all true`, then `ioa_send` a claim |
 | Found something useful | `ioa_send` with `kind=asset` or `kind=finding` |
 | Phase finished | `ioa_send` with `kind=handoff` |
 | Stuck | `ioa_send` with `kind=blocker` |
