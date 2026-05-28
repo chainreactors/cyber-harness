@@ -130,6 +130,51 @@ func TestParsePDFOpts_Output(t *testing.T) {
 	}
 }
 
+func TestParseAutofillOpts_NegativeForm(t *testing.T) {
+	_, _, _, err := parseAutofillOpts([]string{"s1", "--form", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative form index")
+	}
+	if !strings.Contains(err.Error(), ">= 0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseAutofillOpts_RejectsUnknownFlag(t *testing.T) {
+	_, _, _, err := parseAutofillOpts([]string{"s1", "--bogus"})
+	if err == nil {
+		t.Fatal("expected error for unknown flag")
+	}
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseOpenOpts_OperationTimeout(t *testing.T) {
+	_, _, ttl, opTimeout, err := parseOpenOpts([]string{
+		"https://example.com", "--ttl", "120", "--op-timeout", "7",
+	}, "usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ttl != 120*time.Second {
+		t.Fatalf("expected ttl 120s, got %v", ttl)
+	}
+	if opTimeout != 7*time.Second {
+		t.Fatalf("expected op timeout 7s, got %v", opTimeout)
+	}
+}
+
+func TestParseOpenOpts_RejectsZeroTTL(t *testing.T) {
+	_, _, _, _, err := parseOpenOpts([]string{"https://example.com", "--ttl", "0"}, "usage")
+	if err == nil {
+		t.Fatal("expected error for zero ttl")
+	}
+	if !strings.Contains(err.Error(), "ttl must be > 0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecute_NoSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
 	_, err := cmd.Execute(context.Background(), nil)
@@ -404,5 +449,111 @@ func TestIntegration_BrowserReuse(t *testing.T) {
 	_, err = cmd.Execute(context.Background(), []string{"navigate", srv.URL})
 	if err != nil {
 		t.Fatalf("second navigate failed: %v", err)
+	}
+}
+
+func TestIntegration_UnifiedSessionCommands(t *testing.T) {
+	skipIfNoBrowser(t)
+
+	srv := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/data" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"session":true}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head><title>Session Page</title></head>
+<body>
+  <div id="app">Session text</div>
+  <button id="fetcher" onclick="fetch('/api/data').then(r=>r.json())">Fetch</button>
+</body>
+</html>`)
+	})
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	cmd := New(workDir)
+	defer cmd.Close()
+
+	if _, err := cmd.Execute(context.Background(), []string{"open", srv.URL, "--session", "s1", "--timeout", "10"}); err != nil {
+		t.Fatalf("open failed: %v", err)
+	}
+
+	out, err := cmd.Execute(context.Background(), []string{"navigate", "s1", "xpath://*[@id='app']"})
+	if err != nil {
+		t.Fatalf("session navigate failed: %v", err)
+	}
+	if !strings.Contains(out, "Session text") {
+		t.Fatalf("expected session text, got:\n%s", out)
+	}
+
+	out, err = cmd.Execute(context.Background(), []string{"text", "s1", "#app"})
+	if err != nil {
+		t.Fatalf("session text alias failed: %v", err)
+	}
+	if !strings.Contains(out, "Session text") {
+		t.Fatalf("expected session text via alias, got:\n%s", out)
+	}
+
+	out, err = cmd.Execute(context.Background(), []string{"content", "s1", "#app"})
+	if err != nil {
+		t.Fatalf("session content failed: %v", err)
+	}
+	if !strings.Contains(out, `id="app"`) {
+		t.Fatalf("expected selected HTML, got:\n%s", out)
+	}
+
+	out, err = cmd.Execute(context.Background(), []string{"eval", "s1", "document.title"})
+	if err != nil {
+		t.Fatalf("session eval failed: %v", err)
+	}
+	if !strings.Contains(out, "Session Page") {
+		t.Fatalf("expected title in eval result, got:\n%s", out)
+	}
+
+	out, err = cmd.Execute(context.Background(), []string{"screenshot", "s1", "--selector", "#app", "--output", "session.png"})
+	if err != nil {
+		t.Fatalf("session screenshot failed: %v", err)
+	}
+	if !strings.Contains(out, "session.png") {
+		t.Fatalf("expected screenshot output path, got:\n%s", out)
+	}
+	if info, err := os.Stat(filepath.Join(workDir, "session.png")); err != nil || info.Size() == 0 {
+		t.Fatalf("session screenshot missing or empty: info=%v err=%v", info, err)
+	}
+
+	if _, err := cmd.Execute(context.Background(), []string{"network", "s1", "--start"}); err != nil {
+		t.Fatalf("session network start failed: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := cmd.Execute(context.Background(), []string{"click", "s1", "#fetcher"}); err != nil {
+		t.Fatalf("session click failed: %v", err)
+	}
+	_, _ = cmd.Execute(context.Background(), []string{"wait", "s1", "--idle"})
+	out, err = cmd.Execute(context.Background(), []string{"network", "s1", "--dump"})
+	if err != nil {
+		t.Fatalf("session network dump failed: %v", err)
+	}
+	if !strings.Contains(out, "/api/data") {
+		t.Fatalf("expected captured API request, got:\n%s", out)
+	}
+	if _, err := cmd.Execute(context.Background(), []string{"network", "s1", "--stop"}); err != nil {
+		t.Fatalf("session network stop failed: %v", err)
+	}
+
+	if _, err := cmd.Execute(context.Background(), []string{"dialog", "s1", "--arm"}); err != nil {
+		t.Fatalf("dialog arm failed: %v", err)
+	}
+	if _, err := cmd.Execute(context.Background(), []string{"eval", "s1", "alert('aiscan_dialog_canary')"}); err != nil {
+		t.Fatalf("dialog eval failed: %v", err)
+	}
+	out, err = cmd.Execute(context.Background(), []string{"dialog", "s1", "--check"})
+	if err != nil {
+		t.Fatalf("dialog check failed: %v", err)
+	}
+	if !strings.Contains(out, "aiscan_dialog_canary") {
+		t.Fatalf("expected captured dialog, got:\n%s", out)
 	}
 }

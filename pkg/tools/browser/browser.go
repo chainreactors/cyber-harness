@@ -35,6 +35,13 @@ type Command struct {
 	mu      sync.Mutex
 	browser *rod.Browser
 	workDir string
+
+	// Session management for multi-step interactive workflows.
+	openMu     sync.Mutex
+	sessions   map[string]*Session
+	sessionsMu sync.Mutex
+	gcOnce     sync.Once
+	gcStop     chan struct{}
 }
 
 // New creates a browser pseudo-command.
@@ -45,36 +52,64 @@ func New(workDir string) *Command {
 func (c *Command) Name() string { return "browser" }
 
 func (c *Command) Usage() string {
-	return `browser - Headless browser for JS-rendered pages, screenshots, and network capture
+	return `browser - Headless browser for JS-rendered pages, screenshots, network capture, and interactive vulnerability verification
 Usage:
-  browser <subcommand> <url> [options]
+  browser <subcommand> [args] [options]
 
-Subcommands:
-  navigate    Open URL, render JS, return visible text content
-  screenshot  Take a screenshot of the page, save to file
-  content     Return full rendered HTML after JS execution
-  eval        Execute JavaScript on a page, return result
-  network     Navigate and capture all network requests/responses (API discovery)
-  pdf         Generate PDF of the rendered page
+Unified Subcommands (URL or session):
+  navigate <url|session> [selector]              Open URL and return text, or extract text from session
+  content <url|session> [selector]               Open URL and return HTML, or extract HTML from session
+  eval <url|session> <script>                    Execute JavaScript on URL or session
+  screenshot <url|session> [options]             Screenshot URL or session page
+  network <url|session> [--start|--dump|--stop]  Capture URL traffic, or control session capture
+
+Stateless-only Subcommands:
+  pdf                                             Generate PDF of the rendered page
+
+Session Subcommands (multi-step interactive workflows):
+  open <url> [--session name] [--ttl secs]        Open a persistent page, return session ID
+             [--op-timeout secs]                  Per-operation timeout for session commands
+  close <session>                                 Close a session and release resources
+
+  Katana Script (page discovery & smart form filling):
+    discover <session>                          List all forms, buttons, onclick elements
+    autofill <session> [--form N] [--data k=v]  Smart form fill using katana heuristics
+
+  Interaction:
+    click <session> <selector>                  Click an element
+    fill <session> <selector> <value>           Type into an input field
+    select <session> <selector> <value>         Select a dropdown option
+    wait <session> <selector|--idle|--stable>   Wait for element/network/DOM
+
+  Extraction:
+    text <session> [selector]                   Alias for navigate <session> [selector]
+    html <session> [selector]                   Alias for content <session> [selector]
+    seval <session> <script>                    Alias for eval <session> <script>
+    sshot <session> [options]                   Alias for screenshot <session> [options]
+    url <session>                               Current URL and page title
+
+  Vuln Verification:
+    dialog <session> --arm|--check|--disarm     JS dialog capture (XSS verification)
+    cookies <session> --list|--set k=v|--clear  Cookie management
+    netcap <session> --start|--dump|--stop      Alias for network <session> capture control
 
 Common Options:
   --timeout <seconds>     Page load timeout in seconds (default: 30)
   --user-agent <string>   Custom User-Agent header
-
-screenshot/pdf Options:
-  --output <filename>     Output filename (auto-generated if omitted)
-  --full-page             Capture full scrollable page (screenshot only)
-
-eval Options:
-  --script <js>           JavaScript expression to execute (alternative to positional arg)
+  --selector <selector>   Element screenshot selector (session screenshot only)
 
 Examples:
   browser navigate https://example.com
-  browser screenshot https://target.com --output evidence.png --full-page
-  browser content https://spa-app.com --timeout 60
-  browser eval https://target.com "document.querySelectorAll('a').length"
-  browser network https://target.com/app
-  browser pdf https://target.com/report --output report.pdf`
+  browser open https://target.com/login --session s1
+  browser discover s1
+  browser autofill s1 --form 0 --data "username=admin,password=test"
+  browser click s1 "button[type=submit]"
+  browser dialog s1 --arm
+  browser fill s1 "input[name=q]" "<script>alert(1)</script>"
+  browser dialog s1 --check
+  browser screenshot s1 --selector "#captcha-img" --output captcha.png
+  browser network s1 --start
+  browser close s1`
 }
 
 // Execute dispatches to the appropriate sub-command.
@@ -87,18 +122,79 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	subArgs := args[1:]
 
 	switch sub {
+	// --- Unified URL/session commands ---
 	case "navigate":
+		if c.firstArgIsSession(subArgs) {
+			return c.execSessionText(ctx, subArgs, "navigate")
+		}
 		return c.execNavigate(ctx, subArgs)
 	case "screenshot":
+		if c.firstArgIsSession(subArgs) {
+			return c.execSessionScreenshot(ctx, subArgs)
+		}
 		return c.execScreenshot(ctx, subArgs)
 	case "content":
+		if c.firstArgIsSession(subArgs) {
+			return c.execSessionContent(ctx, subArgs)
+		}
 		return c.execContent(ctx, subArgs)
 	case "eval":
+		if c.firstArgIsSession(subArgs) {
+			return c.execSessionEval(ctx, subArgs)
+		}
 		return c.execEval(ctx, subArgs)
 	case "network":
+		if c.firstArgIsSession(subArgs) {
+			return c.execSessionNetwork(ctx, subArgs)
+		}
 		return c.execNetwork(ctx, subArgs)
+	case "text":
+		return c.execSessionText(ctx, subArgs, "text")
+	case "html":
+		return c.execSessionContent(ctx, subArgs)
+	case "seval":
+		return c.execSessionEval(ctx, subArgs)
+	case "sshot":
+		return c.execSessionScreenshot(ctx, subArgs)
+	case "netcap":
+		return c.execSessionNetwork(ctx, subArgs)
+
+	// --- Stateless-only ---
 	case "pdf":
 		return c.execPDF(ctx, subArgs)
+
+	// --- Session lifecycle ---
+	case "open":
+		return c.execOpen(ctx, subArgs)
+	case "close":
+		return c.execClose(ctx, subArgs)
+
+	// --- Katana script ---
+	case "discover":
+		return c.execDiscover(ctx, subArgs)
+	case "autofill":
+		return c.execAutofill(ctx, subArgs)
+
+	// --- Interactive ---
+	case "click":
+		return c.execClick(ctx, subArgs)
+	case "fill":
+		return c.execFill(ctx, subArgs)
+	case "select":
+		return c.execSelect(ctx, subArgs)
+	case "wait":
+		return c.execWait(ctx, subArgs)
+
+	// --- Extraction ---
+	case "url":
+		return c.execURL(ctx, subArgs)
+
+	// --- Vuln verification ---
+	case "dialog":
+		return c.execDialog(ctx, subArgs)
+	case "cookies":
+		return c.execCookies(ctx, subArgs)
+
 	default:
 		return "", fmt.Errorf("browser: unknown subcommand %q\n\n%s", sub, c.Usage())
 	}
@@ -106,6 +202,8 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 
 // Close shuts down the browser process if running.
 func (c *Command) Close() {
+	c.closeAllSessions()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.browser != nil {
