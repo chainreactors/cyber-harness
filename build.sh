@@ -41,6 +41,7 @@ OPT_IOA_SPACE=""
 OPT_VERIFY=""
 OPT_VERIFY_TIMEOUT=""
 OPT_TAVILY_KEYS=""
+OPT_WEBSEARCH_PROXY=""
 
 MODULE="github.com/chainreactors/aiscan/cmd"
 
@@ -90,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         --verify)           OPT_VERIFY="$2"; shift 2 ;;
         --verify-timeout)   OPT_VERIFY_TIMEOUT="$2"; shift 2 ;;
         --tavily-keys)      OPT_TAVILY_KEYS="$2"; shift 2 ;;
+        --websearch-proxy)  OPT_WEBSEARCH_PROXY="$2"; shift 2 ;;
         -h|--help)
             cat <<'HELP'
 aiscan 构建脚本
@@ -178,6 +180,7 @@ CFG_VERIFY=$(resolve "$OPT_VERIFY" "$(yaml_val "$CONFIG_FILE" scan verify)")
 CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" scan verify_timeout)")
 
 CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" websearch tavily_keys)")
+CFG_WEBSEARCH_PROXY=$(resolve "$OPT_WEBSEARCH_PROXY" "$(yaml_val "$CONFIG_FILE" websearch proxy)")
 
 # build 段仅从 config.yaml 读取（不做 CLI 覆盖）
 if [ -z "$OSARCH" ]; then
@@ -215,7 +218,8 @@ add_ldflag DefaultIOANodeName  "$CFG_IOA_NODE_NAME"
 add_ldflag DefaultSpace        "$CFG_IOA_SPACE"
 add_ldflag DefaultVerify       "$CFG_VERIFY"
 add_ldflag DefaultVerifyTimeout "$CFG_VERIFY_TIMEOUT"
-add_ldflag DefaultTavilyKeys   "$CFG_TAVILY_KEYS"
+add_ldflag DefaultTavilyKeys      "$CFG_TAVILY_KEYS"
+add_ldflag DefaultWebSearchProxy  "$CFG_WEBSEARCH_PROXY"
 
 # ─── 仅打印 ldflags ─────────────────────────────────────────────
 

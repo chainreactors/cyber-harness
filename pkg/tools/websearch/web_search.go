@@ -50,12 +50,27 @@ type Command struct {
 // automatic rotation when a key is exhausted (HTTP 401/429).
 // An optional builtinKeys string (comma-separated) supplies build-time
 // fallback keys that are appended after any environment-sourced keys.
-// Proxy is read from standard HTTP_PROXY / HTTPS_PROXY environment variables.
-func New(builtinKeys ...string) *Command {
+// Proxy is read from the explicit proxy parameter first, then standard
+// HTTP_PROXY / HTTPS_PROXY environment variables.
+func New(builtinKeys string, proxy ...string) *Command {
+	transport := &http.Transport{}
+
+	// Explicit proxy takes precedence over environment.
+	if len(proxy) > 0 && proxy[0] != "" {
+		proxyURL, err := url.Parse(proxy[0])
+		if err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		} else {
+			transport.Proxy = http.ProxyFromEnvironment
+		}
+	} else {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+
 	c := &Command{
 		client: &http.Client{
 			Timeout:   searchTimeout,
-			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+			Transport: transport,
 		},
 	}
 
@@ -82,9 +97,7 @@ func New(builtinKeys ...string) *Command {
 	addKeys(os.Getenv("TAVILY_API_KEYS"))
 
 	// 2. Build-time fallback keys (via ldflags → Deps → register.go).
-	for _, bk := range builtinKeys {
-		addKeys(bk)
-	}
+	addKeys(builtinKeys)
 
 	if len(keys) > 0 {
 		c.backend = backendTavily

@@ -22,7 +22,8 @@ type Deps struct {
 	Logger       any
 	NodeName     string
 	NodeMeta     map[string]any
-	TavilyKeys   string // comma-separated Tavily API keys (build-time fallback)
+	TavilyKeys     string // comma-separated Tavily API keys (build-time fallback)
+	WebSearchProxy string // HTTP proxy URL for web_search requests
 }
 
 var (
