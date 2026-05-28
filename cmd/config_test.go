@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 func writeTestConfig(t *testing.T, dir, content string) string {
@@ -301,9 +303,34 @@ llm:
 	}
 }
 
-// TestApplyScanDefaults verifies scan.verify and scan.verify_timeout are
-// applied to Default* vars via the Option struct.
-func TestApplyScanDefaults(t *testing.T) {
+func TestLoadConfigWebSearchOptions(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
+websearch:
+  tavily_keys: "K1,K2"
+  proxy: "http://127.0.0.1:7890"
+`)
+
+	origTavilyKeys := DefaultTavilyKeys
+	origWebSearchProxy := DefaultWebSearchProxy
+	defer func() {
+		DefaultTavilyKeys = origTavilyKeys
+		DefaultWebSearchProxy = origWebSearchProxy
+	}()
+
+	if err := loadRuntimeDefaults(filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := appConfig(&Option{}, runtimeFeatures{ToolsEnabled: true}, telemetry.NopLogger())
+	if cfg.Tools.TavilyKeys != "K1,K2" || cfg.Tools.WebSearchProxy != "http://127.0.0.1:7890" {
+		t.Fatalf("tool config = %#v", cfg.Tools)
+	}
+}
+
+// TestLoadScanDefaults verifies scan.verify and scan.verify_timeout are
+// applied to runtime Default* vars.
+func TestLoadScanDefaults(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `
 scan:
@@ -318,11 +345,9 @@ scan:
 		DefaultVerifyTimeout = origTimeout
 	}()
 
-	var loaded Option
-	if err := LoadConfig(filepath.Join(dir, "config.yaml"), &loaded); err != nil {
+	if err := loadRuntimeDefaults(filepath.Join(dir, "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	applyScanDefaults(loaded.ScanConfig)
 
 	if DefaultVerify != "critical" {
 		t.Errorf("DefaultVerify: got %q, want %q", DefaultVerify, "critical")

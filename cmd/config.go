@@ -99,17 +99,30 @@ func loadAndApplyConfig(option *Option) (string, error) {
 		return configPath, fmt.Errorf("load config %s: %w", configPath, err)
 	}
 	mergeOption(option, &loaded)
-	applyScanDefaults(loaded.ScanConfig)
+	if err := loadRuntimeDefaults(configPath); err != nil {
+		return configPath, fmt.Errorf("load runtime defaults %s: %w", configPath, err)
+	}
 	return configPath, nil
 }
 
-func applyScanDefaults(sc scanConfigOptions) {
-	if sc.Verify != "" {
-		DefaultVerify = sc.Verify
+func loadRuntimeDefaults(filename string) error {
+	c := newConfigLoader()
+	if err := c.LoadFiles(filename); err != nil {
+		return err
 	}
-	if sc.VerifyTimeout > 0 {
-		DefaultVerifyTimeout = strconv.Itoa(sc.VerifyTimeout)
+	if v := c.String("scan.verify"); v != "" {
+		DefaultVerify = v
 	}
+	if v := c.Int("scan.verify_timeout"); v > 0 {
+		DefaultVerifyTimeout = strconv.Itoa(v)
+	}
+	if v := c.String("websearch.tavily_keys"); v != "" {
+		DefaultTavilyKeys = v
+	}
+	if v := c.String("websearch.proxy"); v != "" {
+		DefaultWebSearchProxy = v
+	}
+	return nil
 }
 
 func mergeOption(dst, src *Option) {
@@ -173,6 +186,13 @@ cyberhub:
   #   socks5://127.0.0.1:1080
   #   trojan://password@server:443?sni=example.com
   #   clash://?url=<encoded-subscribe-url>&strategy=adaptive
+  proxy: ""
+
+# Web 搜索
+websearch:
+  # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
+  tavily_keys: ""
+  # web_search 请求代理（如 http://127.0.0.1:7890 或 socks5://...）
   proxy: ""
 
 # IOA 协作

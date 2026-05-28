@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/command"
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 )
@@ -566,6 +566,8 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		DefaultCyberhubKey = "HUBKEY"
 		DefaultCyberhubMode = "override"
 		DefaultVerifyTimeout = "77"
+		DefaultTavilyKeys = "BUILTIN_TAVILY"
+		DefaultWebSearchProxy = "http://proxy:7890"
 		DefaultIOAURL = "http://ioa:8765"
 		DefaultIOANodeID = "node-1"
 		DefaultIOANodeName = "worker-1"
@@ -583,6 +585,9 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		}
 		if !cfg.Scanner.AIEnabled || cfg.Scanner.AITimeout != 77 {
 			t.Fatalf("scanner AI config = %#v", cfg.Scanner)
+		}
+		if cfg.Tools.TavilyKeys != DefaultTavilyKeys || cfg.Tools.WebSearchProxy != DefaultWebSearchProxy {
+			t.Fatalf("tool websearch config = %#v", cfg.Tools)
 		}
 		if !cfg.Provider.Enabled || !cfg.Provider.Optional {
 			t.Fatalf("provider config = %#v", cfg.Provider)
@@ -605,6 +610,8 @@ func withDefaults(t *testing.T, fn func()) {
 	savedCyberhubMode := DefaultCyberhubMode
 	savedVerify := DefaultVerify
 	savedVerifyTimeout := DefaultVerifyTimeout
+	savedTavilyKeys := DefaultTavilyKeys
+	savedWebSearchProxy := DefaultWebSearchProxy
 	savedIOAURL := DefaultIOAURL
 	savedIOANodeID := DefaultIOANodeID
 	savedIOANodeName := DefaultIOANodeName
@@ -620,6 +627,8 @@ func withDefaults(t *testing.T, fn func()) {
 		DefaultCyberhubMode = savedCyberhubMode
 		DefaultVerify = savedVerify
 		DefaultVerifyTimeout = savedVerifyTimeout
+		DefaultTavilyKeys = savedTavilyKeys
+		DefaultWebSearchProxy = savedWebSearchProxy
 		DefaultIOAURL = savedIOAURL
 		DefaultIOANodeID = savedIOANodeID
 		DefaultIOANodeName = savedIOANodeName
