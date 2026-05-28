@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
@@ -42,6 +43,11 @@ func newTestPipeline(ctx context.Context, caps []pipeline.Capability, coll *coll
 func testSeeds(events ...event) []pipeline.Event {
 	return seedsToEvents(events)
 }
+
+// stubSkillStore returns a fixed body for any skill name, satisfying SkillBodyLoader.
+type stubSkillStore struct{ body string }
+
+func (s stubSkillStore) LoadBody(string) string { return s.body }
 
 func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	cmd := New(&engine.Set{Spray: spray.NewEngine(nil)})
@@ -756,6 +762,9 @@ func TestFindingPriorityDefaults(t *testing.T) {
 	if got := (vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}).Priority(); got != priorityHigh {
 		t.Fatalf("vuln priority = %s, want %s", got, priorityHigh)
 	}
+	if got := (aiSkillFinding{Skill: "sniper", Status: "info", Summary: "CVE lead"}).Priority(); got != priorityMedium {
+		t.Fatalf("sniper intelligence priority = %s, want %s", got, priorityMedium)
+	}
 }
 
 func TestFocusFingerprintIsDerivedAsHighPriority(t *testing.T) {
@@ -819,11 +828,19 @@ func TestScanPipelineDispatchesHighPriorityFindingToAgentVerifier(t *testing.T) 
 
 func TestAgentVerifyCapabilityAcceptsFocusFingerprint(t *testing.T) {
 	var promptSeen string
-	aiFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+	agentFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (*AgentRunResult, error) {
 		promptSeen = prompt
-		return `{"status":"not_confirmed","target":"http://127.0.0.1","summary":"focus fingerprint requires vulnerability-specific evidence","detail":"safe validation should check exact version"}`, nil
+		return &AgentRunResult{
+			Raw: `{"status":"not_confirmed","target":"http://127.0.0.1","summary":"focus fingerprint requires vulnerability-specific evidence","detail":"safe validation should check exact version"}`,
+			Parsed: &agent.SkillResult{
+				Status:  "not_confirmed",
+				Target:  "http://127.0.0.1",
+				Summary: "focus fingerprint requires vulnerability-specific evidence",
+				Detail:  "safe validation should check exact version",
+			},
+		}, nil
 	}
-	cmd := New(&engine.Set{}, WithAIFunc(aiFn), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
+	cmd := New(&engine.Set{}, WithAgentFunc(agentFn), WithSkillStore(stubSkillStore{body: "test verify prompt"}), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
 	verifySkill := scanAISkills[0]
 	cap := buildAISkillCap(cmd, verifySkill)
 	coll := newCollector([]string{"seed"}, nil, false, false)
@@ -832,9 +849,6 @@ func TestAgentVerifyCapabilityAcceptsFocusFingerprint(t *testing.T) {
 		findingEvent(capSprayCheck, fingerprintFinding{Target: "http://127.0.0.1", Fingers: []string{"struts2"}, Focus: true}),
 	))
 
-	if len(coll.aiSkillResults) != 0 {
-		t.Fatalf("ai skill results = %d, want 0 for not_confirmed", len(coll.aiSkillResults))
-	}
 	if !strings.Contains(promptSeen, "struts2") {
 		t.Fatalf("verification prompt missing fingerprint evidence: %q", promptSeen)
 	}
@@ -842,14 +856,22 @@ func TestAgentVerifyCapabilityAcceptsFocusFingerprint(t *testing.T) {
 
 func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 	var calls int
-	aiFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+	agentFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (*AgentRunResult, error) {
 		calls++
 		if model != "test-model" {
 			t.Fatalf("model = %q, want test-model", model)
 		}
-		return `{"status":"confirmed","target":"http://127.0.0.1","summary":"direct evidence supports the vulnerability","detail":"template matched"}`, nil
+		return &AgentRunResult{
+			Raw: `{"status":"confirmed","target":"http://127.0.0.1","summary":"direct evidence supports the vulnerability","detail":"template matched"}`,
+			Parsed: &agent.SkillResult{
+				Status:  "confirmed",
+				Target:  "http://127.0.0.1",
+				Summary: "direct evidence supports the vulnerability",
+				Detail:  "template matched",
+			},
+		}, nil
 	}
-	cmd := New(&engine.Set{}, WithAIFunc(aiFn), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
+	cmd := New(&engine.Set{}, WithAgentFunc(agentFn), WithSkillStore(stubSkillStore{body: "test verify prompt"}), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
 	verifySkill := scanAISkills[0]
 	cap := buildAISkillCap(cmd, verifySkill)
 	coll := newCollector([]string{"seed"}, nil, false, false)
@@ -870,6 +892,62 @@ func TestAgentVerifyCapabilityUsesProviderAndEmitsVerification(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("verify calls = %d, want 1", calls)
+	}
+}
+
+func TestAISkillConfigVerifyModeDoesNotEnableSniper(t *testing.T) {
+	cmd := New(&engine.Set{}, WithAISkillConfig(AISkillConfig{VerifyMode: "medium"}))
+	var flags flags
+	cmd.applyAISkillConfig(&flags)
+
+	if flags.AI || flags.Sniper {
+		t.Fatalf("verify-only config should not enable full AI skills: %#v", flags)
+	}
+	if flags.Verify != "medium" {
+		t.Fatalf("verify mode = %q, want medium", flags.Verify)
+	}
+}
+
+func TestAISkillConfigEnableKeepsFullAIBehavior(t *testing.T) {
+	cmd := New(&engine.Set{}, WithAISkillConfig(AISkillConfig{Enable: true, VerifyMode: "medium"}))
+	var flags flags
+	cmd.applyAISkillConfig(&flags)
+
+	if !flags.AI || !flags.Sniper || flags.Verify != "high" {
+		t.Fatalf("full AI config = %#v, want AI+sniper with high verify default", flags)
+	}
+}
+
+func TestAgentVerifyCapabilityUsesFallbackPromptWhenSkillBodyMissing(t *testing.T) {
+	var calls int
+	var systemPromptSeen string
+	agentFn := func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (*AgentRunResult, error) {
+		calls++
+		systemPromptSeen = systemPrompt
+		return &AgentRunResult{
+			Raw: `{"status":"not_confirmed","target":"http://127.0.0.1","summary":"no exploit evidence","detail":"403"}`,
+			Parsed: &agent.SkillResult{
+				Status:  "not_confirmed",
+				Target:  "http://127.0.0.1",
+				Summary: "no exploit evidence",
+				Detail:  "403",
+			},
+		}, nil
+	}
+	cmd := New(&engine.Set{}, WithAgentFunc(agentFn), WithAISkillConfig(AISkillConfig{Model: "test-model", Timeout: 5, Enable: true}))
+	verifySkill := scanAISkills[0]
+	cap := buildAISkillCap(cmd, verifySkill)
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	p := newTestPipeline(context.Background(), []pipeline.Capability{cap}, coll, false)
+	p.Run(testSeeds(
+		findingEvent(capNeutronPOC, vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 test high"}),
+	))
+
+	if calls != 1 {
+		t.Fatalf("verify calls = %d, want 1", calls)
+	}
+	if systemPromptSeen != "" {
+		t.Fatalf("system prompt = %q, want empty so app-level fallback can apply", systemPromptSeen)
 	}
 }
 
@@ -897,6 +975,73 @@ func TestAgentVerifyCapabilitySuppressesUnconfirmedOutput(t *testing.T) {
 	}
 	if out := coll.ReportMarkdown(); strings.Contains(out, "fingerprint only") {
 		t.Fatalf("markdown report included unconfirmed verification:\n%s", out)
+	}
+}
+
+func TestAgentVerifyAcceptsSniperFindingsButRejectsOwnOutput(t *testing.T) {
+	verifySkill := scanAISkills[0]
+
+	// Sniper finding with summary should be accepted by verify.
+	sniper := aiSkillFinding{
+		Skill:   "sniper",
+		Target:  "http://10.0.0.1:8080",
+		Status:  "info",
+		Summary: "CVE-2016-4437 Shiro deserialization",
+		Detail:  "Known critical CVE",
+	}
+	if got := sniper.Priority(); got != priorityMedium {
+		t.Fatalf("sniper priority = %s, want %s; verification eligibility should not be encoded as priority", got, priorityMedium)
+	}
+	sniperFinding := findingEvent(capAgentSniper, sniper)
+	if !verifySkill.Accept(sniperFinding) {
+		t.Fatal("verify should accept sniper finding with summary")
+	}
+
+	// Verify's own output should be rejected.
+	verifyOwnFinding := findingEvent(capAgentVerify, aiSkillFinding{
+		Skill:   "verify",
+		Target:  "http://10.0.0.1:8080",
+		Status:  "confirmed",
+		Summary: "direct evidence supports the vulnerability",
+	})
+	if verifySkill.Accept(verifyOwnFinding) {
+		t.Fatal("verify should NOT accept its own output")
+	}
+
+	// Sniper finding without summary should not be accepted (priorityMedium).
+	emptySniperFinding := findingEvent(capAgentSniper, aiSkillFinding{
+		Skill:  "sniper",
+		Target: "http://10.0.0.1:8080",
+		Status: "info",
+	})
+	if verifySkill.Accept(emptySniperFinding) {
+		t.Fatal("verify should NOT accept empty sniper finding")
+	}
+}
+
+func TestVerifyPromptTailoredForSniperFindings(t *testing.T) {
+	verifySkill := scanAISkills[0]
+
+	sniperEvent := findingEvent(capAgentSniper, aiSkillFinding{
+		Skill:   "sniper",
+		Target:  "http://10.0.0.1:8080",
+		Status:  "info",
+		Summary: "CVE-2016-4437 Shiro deserialization",
+		Detail:  "Apache Shiro < 1.2.5 allows remote code execution",
+	})
+	prompt := verifySkill.Prompt(sniperEvent)
+	if !strings.Contains(prompt, "CVE intelligence") {
+		t.Fatalf("sniper prompt should mention CVE intelligence, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "NOT a confirmed exploit") {
+		t.Fatalf("sniper prompt should warn about unconfirmed status, got: %s", prompt)
+	}
+
+	// Regular vulnFinding should get the standard prompt.
+	vulnEvent := findingEvent(capNeutronPOC, vulnFinding{Target: "http://10.0.0.1", Output: "test vuln"})
+	regularPrompt := verifySkill.Prompt(vulnEvent)
+	if !strings.Contains(regularPrompt, "Finding to verify") {
+		t.Fatalf("regular prompt should use standard format, got: %s", regularPrompt)
 	}
 }
 
@@ -1374,6 +1519,24 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 	}
 }
 
+func TestScanSummaryCountsConfirmedAISkillVerify(t *testing.T) {
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capAgentVerify, aiSkillFinding{
+		Skill:   "verify",
+		Target:  "http://127.0.0.1",
+		Status:  "confirmed",
+		Summary: "direct evidence supports the finding",
+	})})
+	coll.Finish()
+
+	if out := coll.String(); !strings.Contains(out, "1 verified") {
+		t.Fatalf("summary missing confirmed AI verify count:\n%s", out)
+	}
+	if report := coll.ReportMarkdown(); !strings.Contains(report, "| AI verifications | 1 |") {
+		t.Fatalf("report missing confirmed AI verification metric:\n%s", report)
+	}
+}
+
 func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdkkit.Stats{
@@ -1553,5 +1716,55 @@ func TestScanReportMarkdown(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestGenerateAIReportUsesAnnotatedMarkdown(t *testing.T) {
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	finding := vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 CVE-2016-4437"}
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capNeutronPOC, finding)})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capAgentVerify, aiSkillFinding{
+		Skill:        "verify",
+		Target:       "http://127.0.0.1",
+		Status:       "not_confirmed",
+		Summary:      "blocked by 403",
+		Detail:       "HTTP/1.1 403 Forbidden",
+		OriginalKey:  finding.Key(),
+		OriginalKind: finding.Kind(),
+	})})
+	coll.Finish()
+
+	var promptSeen string
+	cmd := New(&engine.Set{}, WithReportFunc(func(_ context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
+		promptSeen = prompt
+		return "report body", nil
+	}))
+	out := cmd.generateAIReport(context.Background(), coll)
+
+	if out != "report body\n" {
+		t.Fatalf("report output = %q, want generated report", out)
+	}
+	if !strings.Contains(promptSeen, "~~[vuln] http://127.0.0.1 CVE-2016-4437~~ *(not confirmed)*") {
+		t.Fatalf("AI report prompt missing not_confirmed markdown annotation:\n%s", promptSeen)
+	}
+}
+
+func TestReportMarkdownMarksInconclusiveVerification(t *testing.T) {
+	coll := newCollector([]string{"seed"}, nil, false, false)
+	finding := vulnFinding{Target: "http://127.0.0.1", Output: "http://127.0.0.1 CVE lead"}
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capNeutronPOC, finding)})
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: findingEvent(capAgentVerify, aiSkillFinding{
+		Skill:        "verify",
+		Target:       "http://127.0.0.1",
+		Status:       "inconclusive",
+		Summary:      "unstable connectivity",
+		OriginalKey:  finding.Key(),
+		OriginalKind: finding.Kind(),
+	})})
+	coll.Finish()
+
+	report := coll.ReportMarkdown()
+	if !strings.Contains(report, "**[inconclusive]** [vuln] http://127.0.0.1 CVE lead") {
+		t.Fatalf("report missing inconclusive annotation:\n%s", report)
 	}
 }

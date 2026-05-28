@@ -56,7 +56,7 @@ func formatMarkdown(d *collector) string {
 	sb.WriteString(fmt.Sprintf("| Fingerprints | %d |\n", len(d.fingerprints)))
 	sb.WriteString(fmt.Sprintf("| Weakpass findings | %d |\n", len(d.zombieResults)))
 	sb.WriteString(fmt.Sprintf("| Vulnerability findings | %d |\n", len(d.neutronMatches)))
-	sb.WriteString(fmt.Sprintf("| AI verifications | %d |\n", len(d.verifications)))
+	sb.WriteString(fmt.Sprintf("| AI verifications | %d |\n", d.confirmedVerificationCountLocked()))
 	sb.WriteString(fmt.Sprintf("| AI skill findings | %d |\n", len(d.aiSkillResults)))
 	sb.WriteString(fmt.Sprintf("| Errors | %d |\n", len(d.errors)))
 	sb.WriteString(fmt.Sprintf("| Tasks | %d |\n", stats.Tasks))
@@ -125,7 +125,10 @@ func formatMarkdown(d *collector) string {
 	if len(d.zombieResults) > 0 {
 		sb.WriteString("\n## Risks\n\n")
 		for _, result := range d.zombieResults {
-			writeMarkdownEventLine(&sb, findingEvent(capZombieWeakpass, weakpassFinding{Result: result}))
+			finding := weakpassFinding{Result: result}
+			status := d.verificationStatus(finding.Kind(), finding.Key())
+			line := formatEventLine(findingEvent(capZombieWeakpass, finding), false)
+			writeMarkdownStatusLine(&sb, line, status)
 		}
 	}
 
@@ -134,7 +137,9 @@ func formatMarkdown(d *collector) string {
 		for _, finding := range sortedCopy(d.neutronMatches, func(a, b vulnFinding) bool {
 			return a.String() < b.String()
 		}) {
-			writeMarkdownEventLine(&sb, findingEvent(capNeutronPOC, finding))
+			status := d.verificationStatus(finding.Kind(), finding.Key())
+			line := formatEventLine(findingEvent(capNeutronPOC, finding), false)
+			writeMarkdownStatusLine(&sb, line, status)
 		}
 	}
 
@@ -154,7 +159,11 @@ func formatMarkdown(d *collector) string {
 		for _, item := range sortedCopy(d.aiSkillResults, func(a, b aiSkillResult) bool {
 			return a.Finding.Skill+"|"+a.Finding.Target < b.Finding.Skill+"|"+b.Finding.Target
 		}) {
-			writeMarkdownEventLine(&sb, findingEvent(item.Source, item.Finding))
+			line := formatEventLine(findingEvent(item.Source, item.Finding), false)
+			if line == "" {
+				continue
+			}
+			writeMarkdownStatusLine(&sb, line, d.aiSkillReportStatus(item.Finding))
 		}
 	}
 
@@ -223,7 +232,7 @@ func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string
 	parts = appendCount(parts, len(d.fingerprints), "fingerprint", "fingerprints")
 	parts = appendCount(parts, len(d.zombieResults), "risk", "risks")
 	parts = appendCount(parts, len(d.neutronMatches), "vuln", "vulns")
-	parts = appendCount(parts, len(d.verifications), "verified", "verified")
+	parts = appendCount(parts, d.confirmedVerificationCountLocked(), "verified", "verified")
 	parts = appendCount(parts, len(d.errors), "error", "errors")
 	parts = appendCount64(parts, stats.Tasks, "task", "tasks")
 	parts = appendCount64(parts, stats.Requests, "request", "requests")
@@ -317,9 +326,52 @@ func writeMarkdownEventLine(sb *strings.Builder, event event) {
 	if line == "" {
 		return
 	}
+	writeMarkdownStatusLine(sb, line, "")
+}
+
+func writeMarkdownStatusLine(sb *strings.Builder, line, status string) {
+	if line == "" {
+		return
+	}
 	sb.WriteString("- ")
-	sb.WriteString(line)
+	switch status {
+	case string(verificationNotConfirmed):
+		sb.WriteString("~~")
+		sb.WriteString(line)
+		sb.WriteString("~~ *(not confirmed)*")
+	case string(verificationConfirmed):
+		sb.WriteString("**[verified]** ")
+		sb.WriteString(line)
+	case string(verificationInconclusive):
+		sb.WriteString("**[inconclusive]** ")
+		sb.WriteString(line)
+	case string(verificationFailed):
+		sb.WriteString("**[verification failed]** ")
+		sb.WriteString(line)
+	default:
+		sb.WriteString(line)
+	}
 	sb.WriteString("\n")
+}
+
+func (d *collector) aiSkillReportStatus(finding aiSkillFinding) string {
+	status := strings.TrimSpace(finding.Status)
+	if status == string(verificationNotConfirmed) || status == string(verificationInconclusive) {
+		return status
+	}
+	if finding.OriginalKey != "" {
+		status = verificationDowngrade(status, d.verificationStatus(finding.OriginalKind, finding.OriginalKey))
+	}
+	return verificationDowngrade(status, d.verificationStatus(finding.Kind(), finding.Key()))
+}
+
+func verificationDowngrade(current, verified string) string {
+	switch verified {
+	case string(verificationNotConfirmed), string(verificationInconclusive):
+		return verified
+	default:
+		return current
+	}
 }
 
 func sortedMapKeys(values map[string]int) []string {

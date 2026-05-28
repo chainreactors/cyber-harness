@@ -25,6 +25,7 @@ import (
 type Command struct {
 	engines    *engine.Set
 	aiFunc     AIFunc
+	agentFunc  AgentFunc
 	reportFunc AIFunc
 	aiConfig   AISkillConfig
 	skillStore SkillBodyLoader
@@ -164,15 +165,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	restoreProxy := c.installProxy()
 	defer restoreProxy()
-	if c.aiConfig.Enable {
-		flags.AI = true
-	}
-	if flags.AI {
-		if strings.TrimSpace(flags.Verify) == "" {
-			flags.Verify = "high"
-		}
-		flags.Sniper = true
-	}
+	c.applyAISkillConfig(&flags)
 
 	profile, err := profileForMode(flags.Mode)
 	if err != nil {
@@ -254,6 +247,40 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		}
 	}
 	return out, nil
+}
+
+func (c *Command) applyAISkillConfig(flags *flags) {
+	if flags == nil {
+		return
+	}
+	if c.aiConfig.Enable {
+		flags.AI = true
+	}
+	if flags.AI {
+		if strings.TrimSpace(flags.Verify) == "" {
+			flags.Verify = "high"
+		}
+		flags.Sniper = true
+		return
+	}
+	if strings.TrimSpace(flags.Verify) != "" {
+		return
+	}
+	if mode := defaultVerifyModeFromConfig(c.aiConfig.VerifyMode); mode != "" {
+		flags.Verify = mode
+	}
+}
+
+func defaultVerifyModeFromConfig(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", "off":
+		return ""
+	case "auto":
+		return "high"
+	default:
+		return mode
+	}
 }
 
 // TestInstallProxy is exported for cross-package testing.

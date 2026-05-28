@@ -15,6 +15,7 @@ type AISkill struct {
 	Name    string
 	CapName string
 	Flag    string
+	Agent   bool
 	Accept  func(event) bool
 	Prompt  func(event) string
 	Workers int
@@ -22,25 +23,32 @@ type AISkill struct {
 
 var scanAISkills = []AISkill{
 	{
-		Name: "verify", CapName: capAgentVerify, Flag: "",
-		Accept: func(e event) bool {
-			if e.Kind != eventFinding || e.Finding == nil {
-				return false
-			}
-			if e.Finding.Kind() == findingAISkill || e.Finding.Kind() == findingVerification {
-				return false
-			}
-			return e.Finding.Priority().atLeast(priorityHigh)
-		},
+		Name: "verify", CapName: capAgentVerify, Flag: "", Agent: true,
+		Accept: shouldVerifyFinding,
 		Prompt: func(e event) string {
-			return fmt.Sprintf(`Verify this scan finding:
+			// Sniper findings carry CVE intelligence that needs active probing,
+			// not just evidence review. Tailor the prompt accordingly.
+			if ai, ok := e.Finding.(aiSkillFinding); ok && ai.Skill == "sniper" {
+				return fmt.Sprintf(`CVE intelligence to actively verify against target:
+- target: %s
+- claimed CVEs/vulnerabilities: %s
+- detail: %s
+
+This is CVE lookup intelligence from fingerprint analysis, NOT a confirmed exploit.
+Actively probe the target to determine if any of the claimed vulnerabilities are actually exploitable.
+Check: service reachability, version confirmation, authentication requirements, WAF presence.
+If active probing does not produce direct evidence of exploitability, return status "not_confirmed".
+Use "inconclusive" only when probing cannot be completed or evaluated, not merely because access is denied.`,
+					ai.Target, ai.Summary, ai.Detail)
+			}
+			return fmt.Sprintf(`Finding to verify:
 - source: %s
 - kind: %s
 - priority: %s
 - target: %s
 - evidence: %s
 
-Determine whether this is a real confirmed security issue.`,
+Return "confirmed" only for direct evidence. Return "not_confirmed" when probing runs but does not support the claim.`,
 				e.Source, findingKindOf(e.Finding), findingPriority(e.Finding),
 				findingTarget(e.Finding), findingEvidence(e.Finding))
 		},
@@ -66,6 +74,30 @@ Identify known CVEs (critical/high), public exploits, and remediation.`,
 		},
 		Workers: 3,
 	},
+}
+
+func shouldVerifyFinding(e event) bool {
+	if e.Kind != eventFinding || e.Finding == nil {
+		return false
+	}
+	if e.Finding.Kind() == findingVerification {
+		return false
+	}
+	if ai, ok := e.Finding.(aiSkillFinding); ok {
+		return shouldVerifyAISkillFinding(ai)
+	}
+	return e.Finding.Priority().atLeast(priorityHigh)
+}
+
+func shouldVerifyAISkillFinding(finding aiSkillFinding) bool {
+	switch finding.Skill {
+	case "verify":
+		return false
+	case "sniper":
+		return strings.TrimSpace(finding.Summary) != "" || strings.TrimSpace(finding.Detail) != ""
+	default:
+		return finding.Priority().atLeast(priorityHigh)
+	}
 }
 
 func aiSkillEnabled(skill AISkill, flags flags) bool {
@@ -107,7 +139,12 @@ func buildAISkillCap(c *Command, skill AISkill) pipeline.Capability {
 }
 
 func (c *Command) runAISkill(ctx context.Context, skill AISkill, e event, emit func(event)) {
-	if c.aiFunc == nil {
+	if skill.Agent {
+		if c.agentFunc == nil {
+			c.logger.Debugf("scan capability=%s status=skipped reason=agent_func_unconfigured", skill.CapName)
+			return
+		}
+	} else if c.aiFunc == nil {
 		c.logger.Debugf("scan capability=%s status=skipped reason=provider_unconfigured", skill.CapName)
 		return
 	}
@@ -123,29 +160,54 @@ func (c *Command) runAISkill(ctx context.Context, skill AISkill, e event, emit f
 	if c.skillStore != nil {
 		skillBody = c.skillStore.LoadBody(skill.Name)
 	}
+	if skillBody == "" {
+		c.logger.Warnf("scan capability=%s skill=%s skill_body_empty, using fallback prompt", skill.CapName, skill.Name)
+	}
 
 	prompt := skill.Prompt(e)
 	start := time.Now()
-	result, err := c.aiFunc(skillCtx, prompt, skillBody, c.aiConfig.Model, 1600)
+
+	var parsed *agent.SkillResult
+	var rawResult string
+	var err error
+
+	if skill.Agent && c.agentFunc != nil {
+		agentResult, agentErr := c.agentFunc(skillCtx, prompt, skillBody, c.aiConfig.Model, 1600)
+		if agentErr != nil {
+			c.logger.Debugf("scan capability=%s status=failed error=%q", skill.CapName, agentErr)
+			return
+		}
+		if agentResult == nil {
+			c.logger.Debugf("scan capability=%s status=failed error=nil_result", skill.CapName)
+			return
+		}
+		parsed = agentResult.Parsed
+		rawResult = agentResult.Raw
+	} else {
+		rawResult, err = c.aiFunc(skillCtx, prompt, skillBody, c.aiConfig.Model, 1600)
+		if err != nil {
+			c.logger.Debugf("scan capability=%s status=failed error=%q", skill.CapName, err)
+			return
+		}
+		parsed, err = agent.ParseSkillResult(rawResult)
+		if err != nil || parsed == nil {
+			c.logger.Debugf("scan capability=%s status=parse_failed error=%q", skill.CapName, err)
+			return
+		}
+	}
 	duration := time.Since(start)
 
-	if err != nil {
-		c.logger.Debugf("scan capability=%s status=failed error=%q", skill.CapName, err)
-		return
-	}
-
-	if c.recorder != nil {
-		c.recorder.AITurn(skill.Name, 1, prompt, result, nil, duration, record.TokenUsage{})
-	}
-
-	parsed, err := agent.ParseSkillResult(result)
-	if err != nil || parsed == nil {
-		c.logger.Debugf("scan capability=%s status=parse_failed error=%q", skill.CapName, err)
+	if parsed == nil {
+		c.logger.Debugf("scan capability=%s status=parse_failed error=nil_parsed", skill.CapName)
 		return
 	}
 
 	if parsed.Summary == "" && parsed.Detail == "" {
 		return
+	}
+
+	if c.recorder != nil {
+		c.recorder.AITurn(skill.Name, 1, prompt, rawResult, nil, duration, record.TokenUsage{})
 	}
 
 	originalKey := ""
@@ -185,7 +247,11 @@ func (c *Command) generateAIReport(ctx context.Context, coll *collector) string 
 		return coll.ReportMarkdown()
 	}
 
-	scanData := coll.PlainText()
+	// Use ReportMarkdown so the LLM sees verification annotations:
+	// ~~strikethrough~~ for not_confirmed, **[verified]** for confirmed.
+	// PlainText lacks these annotations, causing the LLM to treat
+	// unverified fingerprints/sniper CVE lookups as confirmed vulns.
+	scanData := coll.ReportMarkdown()
 	if scanData == "" {
 		scanData = coll.TerminalString(false)
 	}

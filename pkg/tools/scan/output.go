@@ -103,7 +103,7 @@ func formatEventLine(event event, color bool) string {
 			if finding.Summary == "" && finding.Detail == "" {
 				return ""
 			}
-			prefix := outputPrefix(aiSkillOutputLabel(finding.Skill), aiSkillOutputColor(finding), color)
+			prefix := outputPrefix(aiSkillOutputLabelWithStatus(finding), aiSkillOutputColor(finding), color)
 			return formatOutputLine(prefix, aiSkillOutput(finding), color)
 		}
 	case eventError:
@@ -164,6 +164,22 @@ func aiSkillOutputLabel(skill string) string {
 		return "ai"
 	}
 	return skill
+}
+
+func aiSkillOutputLabelWithStatus(finding aiSkillFinding) string {
+	base := aiSkillOutputLabel(finding.Skill)
+	switch finding.Status {
+	case "confirmed":
+		return base + ":verified"
+	case "not_confirmed":
+		return base + ":rejected"
+	case "info":
+		return base + ":info"
+	case "inconclusive":
+		return base + ":inconclusive"
+	default:
+		return base
+	}
 }
 
 func aiSkillOutputColor(finding aiSkillFinding) string {

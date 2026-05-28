@@ -56,6 +56,7 @@ type collector struct {
 	neutronMatches []vulnFinding
 	verifications  []verificationResult
 	aiSkillResults []aiSkillResult
+	verifyIndex    map[string]string // "kind|key" → status
 	errors         []string
 	trace          []string
 	seenWeb        map[string]struct{}
@@ -72,6 +73,7 @@ func newCollector(inputs []string, stream io.Writer, streamColor, debug bool) *c
 		stats:       newStatsCollector(len(inputs)),
 		seenWeb:     make(map[string]struct{}),
 		seenFinger:  make(map[string]int),
+		verifyIndex: make(map[string]string),
 		stream:      stream,
 		streamColor: streamColor,
 		fileLines:   make([]string, 0),
@@ -202,11 +204,16 @@ func (c *collector) recordFindingEvent(event event) {
 			})
 		}
 	case aiSkillFinding:
-		if finding.Status == "confirmed" && (finding.Summary != "" || finding.Detail != "") {
+		if finding.Summary != "" || finding.Detail != "" {
 			c.aiSkillResults = append(c.aiSkillResults, aiSkillResult{
 				Finding: finding,
 				Source:  event.Source,
 			})
+		}
+		// Build verification index for original finding downgrade
+		if finding.OriginalKey != "" && finding.Status != "" {
+			indexKey := string(finding.OriginalKind) + "|" + finding.OriginalKey
+			c.verifyIndex[indexKey] = finding.Status
 		}
 	}
 }
@@ -217,6 +224,22 @@ func (c *collector) Finish() {
 	if c.stats != nil {
 		c.stats.Finish()
 	}
+}
+
+// verificationStatus returns the AI verification status for an original finding,
+// or "" if the finding was not verified.
+func (c *collector) verificationStatus(kind findingKind, key string) string {
+	return c.verifyIndex[string(kind)+"|"+key]
+}
+
+func (c *collector) confirmedVerificationCountLocked() int {
+	count := len(c.verifications)
+	for _, item := range c.aiSkillResults {
+		if item.Finding.Skill == "verify" && item.Finding.Status == string(verificationConfirmed) {
+			count++
+		}
+	}
+	return count
 }
 
 func (c *collector) statsSnapshotLocked() statsSnapshot {

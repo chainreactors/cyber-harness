@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -36,24 +36,27 @@ type ProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL   string
-	CyberhubKey   string
-	CyberhubMode  string
-	AIEnabled     bool
-	AITimeout     int
-	Proxy         string
-	FofaEmail     string
-	FofaKey       string
-	HunterToken   string
-	HunterAPIKey  string
-	ReconProxy    string
-	ReconLimit    int
+	CyberhubURL       string
+	CyberhubKey       string
+	CyberhubMode      string
+	AIEnabled         bool
+	EnableAllAISkills bool
+	AITimeout         int
+	VerifyMode        string
+	Proxy             string
+	FofaEmail         string
+	FofaKey           string
+	HunterToken       string
+	HunterAPIKey      string
+	ReconProxy        string
+	ReconLimit        int
 }
 
 type ToolConfig struct {
-	Enabled     bool
-	BashTimeout int
-	TavilyKeys  string
+	Enabled        bool
+	BashTimeout    int
+	TavilyKeys     string // comma-separated Tavily API keys (build-time fallback)
+	WebSearchProxy string // HTTP proxy URL for web_search (e.g. socks5://127.0.0.1:7890)
 }
 
 type IOAConfig struct {
@@ -159,12 +162,12 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 		return nil
 	}
 	recon := engine.ReconOptions{
-		FofaEmail:     cfg.FofaEmail,
-		FofaKey:       cfg.FofaKey,
-		HunterToken:   cfg.HunterToken,
-		HunterAPIKey:  cfg.HunterAPIKey,
-		IngressProxy:  cfg.ReconProxy,
-		Limit:         cfg.ReconLimit,
+		FofaEmail:    cfg.FofaEmail,
+		FofaKey:      cfg.FofaKey,
+		HunterToken:  cfg.HunterToken,
+		HunterAPIKey: cfg.HunterAPIKey,
+		IngressProxy: cfg.ReconProxy,
+		Limit:        cfg.ReconLimit,
 	}
 	engineSet.SetupUncover(recon, logger)
 	return engineSet
@@ -194,13 +197,13 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 		}))
 		scanOpts = append(scanOpts, scan.WithReportFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (string, error) {
 			cfg := agent.Config{
-				Provider:        p,
-				Tools:           cmdReg,
-				Model:           model,
-				MaxTokens:       maxTokens,
-				SystemPrompt:    buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt),
-				BeforeToolCall:  scanVerifyBeforeToolCall,
-				Logger:          logger,
+				Provider:       p,
+				Tools:          cmdReg,
+				Model:          model,
+				MaxTokens:      maxTokens,
+				SystemPrompt:   buildScanAISystemPrompt(cmdReg, skillStore, systemPrompt),
+				BeforeToolCall: scanVerifyBeforeToolCall,
+				Logger:         logger,
 			}
 			result, err := cfg.Run(ctx, prompt)
 			if err != nil {
@@ -209,25 +212,53 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 			return result.Output, nil
 		}))
 		scanOpts = append(scanOpts, scan.WithAISkillConfig(scan.AISkillConfig{
-			Model:   model,
-			Timeout: scanCfg.AITimeout,
-			Workers: 3,
-			Enable:  true,
+			Model:      model,
+			Timeout:    scanCfg.AITimeout,
+			Workers:    3,
+			Enable:     scanCfg.EnableAllAISkills,
+			VerifyMode: scanCfg.VerifyMode,
 		}))
 		scanOpts = append(scanOpts, scan.WithSkillStore(skillStoreAdapter{store: skillStore}))
+		scanOpts = append(scanOpts, scan.WithAgentFunc(func(ctx context.Context, prompt, systemPrompt, model string, maxTokens int) (*scan.AgentRunResult, error) {
+			cfg := agent.Config{
+				Provider:            p,
+				Tools:               cmdReg,
+				Model:               model,
+				MaxTokens:           maxTokens,
+				SystemPrompt:        buildScanVerifySystemPrompt(systemPrompt),
+				BeforeToolCall:      scanVerifyBeforeToolCall,
+				ResponseFormat:      &provider.ResponseFormat{Type: "json_object"},
+				Logger:              logger,
+				ShouldStopAfterTurn: makeMaxTurnStop(10),
+			}
+			result, err := cfg.Run(ctx, prompt)
+			if err != nil {
+				return nil, err
+			}
+			raw := ""
+			if result != nil {
+				raw = result.Output
+			}
+			parsed, parseErr := agent.ParseSkillResult(raw)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			return &scan.AgentRunResult{Raw: raw, Parsed: parsed}, nil
+		}))
 	}
 	scanOpts = append(scanOpts, scan.WithLogger(logger))
 
 	deps := &command.Deps{
-		WorkDir:      workDir,
-		BashTimeout:  toolCfg.BashTimeout,
-		SkillStore:   skillStore,
-		EngineSet:    engineSet,
-		ScannerProxy: scanCfg.Proxy,
-		ScanOpts:     scanOpts,
-		Logger:       logger,
-		Model:        model,
-		TavilyKeys:   toolCfg.TavilyKeys,
+		WorkDir:        workDir,
+		BashTimeout:    toolCfg.BashTimeout,
+		SkillStore:     skillStore,
+		EngineSet:      engineSet,
+		ScannerProxy:   scanCfg.Proxy,
+		ScanOpts:       scanOpts,
+		Logger:         logger,
+		Model:          model,
+		TavilyKeys:     toolCfg.TavilyKeys,
+		WebSearchProxy: toolCfg.WebSearchProxy,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources
@@ -244,6 +275,21 @@ func buildScanAISystemPrompt(_ *command.CommandRegistry, _ *skills.Store, skillP
 		return skillPrompt
 	}
 	return "You are aiscan's scan AI skill agent. Analyze the provided scan finding using your knowledge. Do not call any tools. Return only the requested JSON output."
+}
+
+func buildScanVerifySystemPrompt(skillPrompt string) string {
+	if strings.TrimSpace(skillPrompt) != "" {
+		return skillPrompt
+	}
+	return "You are aiscan's active verification agent. Probe the target to confirm or deny the finding. Return confirmed only with direct evidence, not_confirmed when probing does not support the claim, and inconclusive only when probing cannot be completed or evaluated. Return JSON with status: confirmed|info|not_confirmed|inconclusive."
+}
+
+func makeMaxTurnStop(maxTurns int) func(context.Context, agent.ShouldStopAfterTurnContext) (bool, error) {
+	turn := 0
+	return func(_ context.Context, _ agent.ShouldStopAfterTurnContext) (bool, error) {
+		turn++
+		return turn >= maxTurns, nil
+	}
 }
 
 type skillStoreAdapter struct {
