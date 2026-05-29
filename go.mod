@@ -1,6 +1,6 @@
 module github.com/chainreactors/aiscan
 
-go 1.26.3
+go 1.25.7
 
 require (
 	github.com/chainreactors/fingers v1.2.1-0.20260529085838-71a09ca1823c
