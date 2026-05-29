@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/app"
 	taskmod "github.com/chainreactors/aiscan/pkg/agent/task"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -43,12 +44,13 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 	scheduler := agent.NewLoopScheduler(ib, cfg.Logger)
 
 	agentCfg := agent.Config{
-		Provider:      cfg.Application.Provider,
-		Tools:         cfg.Application.Commands,
-		Model:         cfg.Option.Model,
-		Logger:        cfg.Logger,
-		Inbox:         ib,
-		LoopScheduler: scheduler,
+		Provider:       cfg.Application.Provider,
+		Tools:          cfg.Application.Commands,
+		Model:          cfg.Option.Model,
+		Logger:         cfg.Logger,
+		Inbox:          ib,
+		LoopScheduler:  scheduler,
+		CacheRetention: provider.CacheShort,
 	}
 
 	cfg.Application.Commands.RegisterTool(agent.NewLoopTool(scheduler))

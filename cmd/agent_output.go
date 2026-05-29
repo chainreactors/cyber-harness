@@ -136,10 +136,16 @@ func (o *agentOutput) turnEnd(event agent.Event) {
 	if o.quiet || event.Usage == nil {
 		return
 	}
-	fmt.Fprintf(o.stderr, "%s[turn %d] prompt=%d completion=%d total=%d context=%d%s\n",
+	cache := ""
+	if event.Usage.CacheReadTokens > 0 || event.Usage.CacheWriteTokens > 0 {
+		cache = fmt.Sprintf(" cache_read=%d cache_write=%d (%.0f%%)",
+			event.Usage.CacheReadTokens, event.Usage.CacheWriteTokens,
+			event.Usage.CacheHitRatio()*100)
+	}
+	fmt.Fprintf(o.stderr, "%s[turn %d] prompt=%d completion=%d total=%d context=%d%s%s\n",
 		colorDim, event.Turn,
 		event.Usage.PromptTokens, event.Usage.CompletionTokens, event.Usage.TotalTokens,
-		event.ContextTokens,
+		event.ContextTokens, cache,
 		colorReset)
 }
 

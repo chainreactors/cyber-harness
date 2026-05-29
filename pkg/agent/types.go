@@ -120,10 +120,12 @@ type Config struct {
 	BeforeToolCall      func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall       func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	ShouldStopAfterTurn func(context.Context, ShouldStopAfterTurnContext) (bool, error)
-	LoopScheduler *LoopScheduler
-	Inbox         inbox.Inbox
-	Expander      *inbox.Expander
-	MaxResultSize int
+	LoopScheduler  *LoopScheduler
+	Inbox          inbox.Inbox
+	Expander       *inbox.Expander
+	MaxResultSize  int
+	CacheRetention provider.CacheRetention
+	SessionID      string
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
@@ -143,6 +145,8 @@ func (c Config) WithMaxRetries(n int) Config                         { c.MaxRetr
 func (c Config) WithTokenBudget(n int) Config                        { c.TokenBudget = n; return c }
 func (c Config) WithExpander(e *inbox.Expander) Config               { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config { c.TransformContext = fn; return c }
+func (c Config) WithCacheRetention(r provider.CacheRetention) Config { c.CacheRetention = r; return c }
+func (c Config) WithSessionID(id string) Config                      { c.SessionID = id; return c }
 func (c Config) WithResponseFormat(rf *provider.ResponseFormat) Config {
 	c.ResponseFormat = rf
 	return c
@@ -157,13 +161,15 @@ func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
 // SystemPrompt, Messages, hooks) are not inherited.
 func (c Config) DeriveChild() Config {
 	return Config{
-		Provider:    c.Provider,
-		Tools:       c.Tools,
-		Model:       c.Model,
-		Logger:      c.Logger,
-		MaxRetries:  c.MaxRetries,
-		Stream:      c.Stream,
-		Temperature: c.Temperature,
+		Provider:       c.Provider,
+		Tools:          c.Tools,
+		Model:          c.Model,
+		Logger:         c.Logger,
+		MaxRetries:     c.MaxRetries,
+		Stream:         c.Stream,
+		Temperature:    c.Temperature,
+		CacheRetention: c.CacheRetention,
+		SessionID:      c.SessionID,
 	}
 }
 
@@ -228,6 +234,8 @@ type TurnUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 type Result struct {

@@ -8,6 +8,15 @@ import (
 	"github.com/chainreactors/ioa"
 )
 
+// CacheRetention controls prompt caching behavior across providers.
+type CacheRetention string
+
+const (
+	CacheNone  CacheRetention = ""      // no caching (zero value, backward compatible)
+	CacheShort CacheRetention = "short" // Anthropic ephemeral / OpenAI automatic
+	CacheLong  CacheRetention = "long"  // Anthropic ephemeral+TTL / OpenAI 24h retention
+)
+
 type ContentPart struct {
 	Type     string    `json:"type"`
 	Text     string    `json:"text,omitempty"`
@@ -126,6 +135,8 @@ type ChatCompletionRequest struct {
 	Temperature    *float64         `json:"temperature,omitempty"`
 	Stream         bool             `json:"stream,omitempty"`
 	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
+	CacheRetention CacheRetention   `json:"-"`
+	SessionID      string           `json:"-"`
 }
 
 type ChatCompletionResponse struct {
@@ -144,6 +155,46 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+}
+
+// CacheHitRatio returns the proportion of prompt tokens served from cache,
+// based on the API response. Returns 0 when no cache data is available.
+func (u *Usage) CacheHitRatio() float64 {
+	if u == nil || u.PromptTokens == 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(u.PromptTokens)
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type plain Usage
+	var raw struct {
+		plain
+		// OpenAI format
+		PromptTokensDetails *struct {
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+		// DeepSeek format
+		PromptCacheHitTokens  *int `json:"prompt_cache_hit_tokens,omitempty"`
+		PromptCacheMissTokens *int `json:"prompt_cache_miss_tokens,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*u = Usage(raw.plain)
+	if raw.PromptTokensDetails != nil {
+		u.CacheReadTokens = raw.PromptTokensDetails.CachedTokens
+		u.CacheWriteTokens = raw.PromptTokensDetails.CacheWriteTokens
+	} else if raw.PromptCacheHitTokens != nil {
+		u.CacheReadTokens = *raw.PromptCacheHitTokens
+		if raw.PromptCacheMissTokens != nil {
+			u.CacheWriteTokens = *raw.PromptCacheMissTokens
+		}
+	}
+	return nil
 }
 
 type APIError struct {

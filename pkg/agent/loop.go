@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -216,11 +218,14 @@ func (t *transcript) recordTurnUsage(turn int, usage *provider.Usage) {
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		TotalTokens:      usage.TotalTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
+		CacheWriteTokens: usage.CacheWriteTokens,
 	})
 	t.totalUsage.PromptTokens += usage.PromptTokens
 	t.totalUsage.CompletionTokens += usage.CompletionTokens
 	t.totalUsage.TotalTokens += usage.TotalTokens
-	// prompt_tokens reflects the current context window size sent to the LLM
+	t.totalUsage.CacheReadTokens += usage.CacheReadTokens
+	t.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
 	t.contextTokens = usage.PromptTokens
 }
 
@@ -505,8 +510,14 @@ func logAssistantAndUsage(logger telemetry.Logger, msg provider.ChatMessage, usa
 		logger.Infof("assistant output=%q", preview(compactLogContent(content), 500))
 	}
 	if usage != nil {
-		logger.Debugf("usage prompt=%d completion=%d total=%d",
-			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+			logger.Debugf("usage prompt=%d completion=%d total=%d cache_read=%d cache_write=%d",
+				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
+				usage.CacheReadTokens, usage.CacheWriteTokens)
+		} else {
+			logger.Debugf("usage prompt=%d completion=%d total=%d",
+				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+		}
 	}
 }
 
@@ -524,6 +535,11 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.MaxResultSize <= 0 {
 		cfg.MaxResultSize = DefaultMaxResultSize
+	}
+	if cfg.CacheRetention != provider.CacheNone && cfg.SessionID == "" {
+		b := make([]byte, 8)
+		_, _ = crand.Read(b)
+		cfg.SessionID = hex.EncodeToString(b)
 	}
 	return cfg
 }

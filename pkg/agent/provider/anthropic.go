@@ -274,18 +274,27 @@ func (p *AnthropicProvider) setRequestHeaders(req *http.Request, stream bool) {
 	req.Header.Set("anthropic-version", anthropicVersion)
 }
 
+type cacheControlMarker struct {
+	Type string `json:"type"`
+}
+
+type anthropicTool struct {
+	Type         string                 `json:"type"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  map[string]interface{} `json:"input_schema"`
+	CacheControl *cacheControlMarker    `json:"cache_control,omitempty"`
+}
+
 // marshalRequest serializes req to JSON for the Anthropic Messages API:
 //  1. Tools: type:"function" -> type:"custom", parameters -> input_schema
 //  2. System messages: extracted to top-level "system" field
 //  3. Assistant tool_calls -> tool_use content blocks
 //  4. Tool-role messages -> user-role with tool_result content blocks
+//  5. When CacheRetention is set, injects cache_control markers on system,
+//     last tool definition, and last user message for prompt caching.
 func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, error) {
-	type anthropicTool struct {
-		Type        string                 `json:"type"`
-		Name        string                 `json:"name"`
-		Description string                 `json:"description,omitempty"`
-		InputSchema map[string]interface{} `json:"input_schema"`
-	}
+	cacheEnabled := req.CacheRetention != CacheNone
 
 	var tools []anthropicTool
 	for _, t := range req.Tools {
@@ -299,6 +308,9 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 			Description: t.Function.Description,
 			InputSchema: inputSchema,
 		})
+	}
+	if cacheEnabled && len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = &cacheControlMarker{Type: "ephemeral"}
 	}
 
 	var systemParts []string
@@ -371,15 +383,41 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 	}
 
 	merged := mergeConsecutive(messages)
+
+	// Cache breakpoint on last user message — marks the conversation boundary.
+	if cacheEnabled {
+		for i := len(merged) - 1; i >= 0; i-- {
+			if merged[i].Role == "user" && len(merged[i].Content) > 0 {
+				last := merged[i].Content[len(merged[i].Content)-1]
+				last["cache_control"] = map[string]interface{}{"type": "ephemeral"}
+				break
+			}
+		}
+	}
+
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = defaultAnthropicMaxToken
 	}
 
+	// System prompt: use content blocks array when caching (to attach cache_control),
+	// plain string otherwise.
+	systemText := strings.Join(systemParts, "\n\n")
+	var system interface{}
+	if cacheEnabled && systemText != "" {
+		system = []map[string]interface{}{{
+			"type":          "text",
+			"text":          systemText,
+			"cache_control": map[string]interface{}{"type": "ephemeral"},
+		}}
+	} else {
+		system = systemText
+	}
+
 	wrapper := struct {
 		Model       string          `json:"model"`
 		Messages    []aMsg          `json:"messages"`
-		System      string          `json:"system,omitempty"`
+		System      interface{}     `json:"system,omitempty"`
 		Tools       []anthropicTool `json:"tools,omitempty"`
 		MaxTokens   int             `json:"max_tokens,omitempty"`
 		Temperature *float64        `json:"temperature,omitempty"`
@@ -387,7 +425,7 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 	}{
 		Model:       req.Model,
 		Messages:    merged,
-		System:      strings.Join(systemParts, "\n\n"),
+		System:      system,
 		Tools:       tools,
 		MaxTokens:   maxTokens,
 		Temperature: req.Temperature,
@@ -569,6 +607,8 @@ func convertAnthropicUsage(usage *anthropicUsage) *Usage {
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      promptTokens + completionTokens,
+		CacheReadTokens:  usage.CacheReadInputTokens,
+		CacheWriteTokens: usage.CacheCreationInputTokens,
 	}
 }
 

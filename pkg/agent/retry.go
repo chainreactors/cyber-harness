@@ -116,6 +116,8 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, messages 
 		MaxTokens:      cfg.MaxTokens,
 		Temperature:    cfg.Temperature,
 		ResponseFormat: cfg.ResponseFormat,
+		CacheRetention: cfg.CacheRetention,
+		SessionID:      cfg.SessionID,
 	}
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(provider.StreamingProvider); ok {

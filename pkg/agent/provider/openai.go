@@ -95,7 +95,7 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 		}()
 	}
 
-	bodyBytes, err := json.Marshal(req)
+	bodyBytes, err := marshalOpenAIRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -141,7 +141,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 	}
 	req.Stream = true
 
-	bodyBytes, err := json.Marshal(req)
+	bodyBytes, err := marshalOpenAIRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -279,6 +279,22 @@ func (p *OpenAIProvider) setRequestHeaders(req *http.Request, stream bool) {
 	if p.config.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	}
+}
+
+func marshalOpenAIRequest(req *ChatCompletionRequest) ([]byte, error) {
+	if req.CacheRetention == CacheNone || req.SessionID == "" {
+		return json.Marshal(req)
+	}
+	type wrapper struct {
+		*ChatCompletionRequest
+		PromptCacheKey       string `json:"prompt_cache_key,omitempty"`
+		PromptCacheRetention string `json:"prompt_cache_retention,omitempty"`
+	}
+	w := wrapper{ChatCompletionRequest: req, PromptCacheKey: req.SessionID}
+	if req.CacheRetention == CacheLong {
+		w.PromptCacheRetention = "24h"
+	}
+	return json.Marshal(w)
 }
 
 func openAITimeout(seconds int) time.Duration {
