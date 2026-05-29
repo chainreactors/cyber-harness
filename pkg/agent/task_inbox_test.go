@@ -18,21 +18,18 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 
 	ib := inbox.NewBuffered(8)
 	taskMgr := task.NewManager()
-	taskMgr.SetObserver(func(ev task.TaskEvent) {
-		if ev.Kind != task.EventCompletion {
-			return
-		}
-		tail := taskMgr.PeekOrEmpty(ev.TaskID, 20)
+	taskMgr.SetOnDone(func(info task.Info) {
+		tail := taskMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginTask, "user",
-			task.FormatCompletion(ev.TaskInfo, ev.Killed, ev.KillCause, tail))
-		msg.Meta = map[string]any{"task_id": ev.TaskID}
+			task.FormatCompletion(info, tail))
+		msg.Meta = map[string]any{"task_id": info.ID}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := taskMgr.Spawn(dir, "echo background-result", "bg-scan", 10*time.Second)
+	_, err := taskMgr.Create(dir, "echo background-result", "bg-scan", 10*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
 	time.Sleep(500 * time.Millisecond)
@@ -73,7 +70,7 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 	turn2Msgs := requests[1].Messages
 	found := false
 	for _, m := range turn2Msgs {
-		if m.Content != nil && strings.Contains(*m.Content, "task_completion") {
+		if m.Content != nil && strings.Contains(*m.Content, "session_completion") {
 			found = true
 			if !strings.Contains(*m.Content, "background-result") {
 				t.Errorf("task completion should contain stdout, got: %s", *m.Content)
@@ -95,25 +92,22 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 func TestTaskCompletionMetadata(t *testing.T) {
 	ib := inbox.NewBuffered(4)
 	taskMgr := task.NewManager()
-	taskMgr.SetObserver(func(ev task.TaskEvent) {
-		if ev.Kind != task.EventCompletion {
-			return
-		}
-		tail := taskMgr.PeekOrEmpty(ev.TaskID, 20)
+	taskMgr.SetOnDone(func(info task.Info) {
+		tail := taskMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginTask, "user",
-			task.FormatCompletion(ev.TaskInfo, ev.Killed, ev.KillCause, tail))
+			task.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{
-			"task_id":   ev.TaskID,
-			"task_name": ev.TaskInfo.Name,
-			"exit_code": ev.TaskInfo.ExitCode,
+			"task_id":   info.ID,
+			"task_name": info.Name,
+			"exit_code": info.ExitCode,
 		}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := taskMgr.Spawn(dir, "echo done", "test-task", 10*time.Second)
+	_, err := taskMgr.Create(dir, "echo done", "test-task", 10*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	time.Sleep(500 * time.Millisecond)
 
@@ -137,7 +131,7 @@ func TestTaskCompletionMetadata(t *testing.T) {
 	if len(cms) != 1 {
 		t.Fatalf("expected 1 chat message, got %d", len(cms))
 	}
-	if !strings.Contains(*cms[0].Content, "task_completion") {
+	if !strings.Contains(*cms[0].Content, "session_completion") {
 		t.Errorf("chat message should contain task_completion XML, got: %s", *cms[0].Content)
 	}
 }

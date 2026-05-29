@@ -20,6 +20,5 @@ var (
 	DefaultIOANodeName = ""
 	DefaultSpace       = ""
 
-	DefaultTavilyKeys      = "" // comma-separated Tavily API keys, injected at build time
-	DefaultWebSearchProxy  = "" // HTTP proxy for web_search, injected at build time
+	DefaultTavilyKeys = "" // comma-separated Tavily API keys, injected at build time
 )

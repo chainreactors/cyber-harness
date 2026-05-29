@@ -175,7 +175,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 	go func() {
 		defer producer.Done()
 		time.Sleep(20 * time.Millisecond)
-		ib.Push(inbox.NewMessage(inbox.OriginTask, "user", "<task_completion>scan done</task_completion>"))
+		ib.Push(inbox.NewMessage(inbox.OriginTask, "user", "<session_completion>scan done</session_completion>"))
 	}()
 
 	result, err := (Config{
@@ -197,7 +197,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 	}
 	found := false
 	for _, msg := range requests[1].Messages {
-		if strings.Contains(contentOf(msg), "<task_completion>") {
+		if strings.Contains(contentOf(msg), "<session_completion>") {
 			found = true
 			break
 		}

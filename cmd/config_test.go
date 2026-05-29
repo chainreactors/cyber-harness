@@ -308,14 +308,11 @@ func TestLoadConfigWebSearchOptions(t *testing.T) {
 	writeTestConfig(t, dir, `
 websearch:
   tavily_keys: "K1,K2"
-  proxy: "http://127.0.0.1:7890"
 `)
 
 	origTavilyKeys := DefaultTavilyKeys
-	origWebSearchProxy := DefaultWebSearchProxy
 	defer func() {
 		DefaultTavilyKeys = origTavilyKeys
-		DefaultWebSearchProxy = origWebSearchProxy
 	}()
 
 	if err := loadRuntimeDefaults(filepath.Join(dir, "config.yaml")); err != nil {
@@ -323,7 +320,7 @@ websearch:
 	}
 
 	cfg := appConfig(&Option{}, runtimeFeatures{ToolsEnabled: true}, telemetry.NopLogger())
-	if cfg.Tools.TavilyKeys != "K1,K2" || cfg.Tools.WebSearchProxy != "http://127.0.0.1:7890" {
+	if cfg.Tools.TavilyKeys != "K1,K2" {
 		t.Fatalf("tool config = %#v", cfg.Tools)
 	}
 }

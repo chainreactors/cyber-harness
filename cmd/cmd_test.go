@@ -567,7 +567,6 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		DefaultCyberhubMode = "override"
 		DefaultVerifyTimeout = "77"
 		DefaultTavilyKeys = "BUILTIN_TAVILY"
-		DefaultWebSearchProxy = "http://proxy:7890"
 		DefaultIOAURL = "http://ioa:8765"
 		DefaultIOANodeID = "node-1"
 		DefaultIOANodeName = "worker-1"
@@ -586,7 +585,7 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		if !cfg.Scanner.AIEnabled || cfg.Scanner.AITimeout != 77 {
 			t.Fatalf("scanner AI config = %#v", cfg.Scanner)
 		}
-		if cfg.Tools.TavilyKeys != DefaultTavilyKeys || cfg.Tools.WebSearchProxy != DefaultWebSearchProxy {
+		if cfg.Tools.TavilyKeys != DefaultTavilyKeys {
 			t.Fatalf("tool websearch config = %#v", cfg.Tools)
 		}
 		if !cfg.Provider.Enabled || !cfg.Provider.Optional {
@@ -611,7 +610,6 @@ func withDefaults(t *testing.T, fn func()) {
 	savedVerify := DefaultVerify
 	savedVerifyTimeout := DefaultVerifyTimeout
 	savedTavilyKeys := DefaultTavilyKeys
-	savedWebSearchProxy := DefaultWebSearchProxy
 	savedIOAURL := DefaultIOAURL
 	savedIOANodeID := DefaultIOANodeID
 	savedIOANodeName := DefaultIOANodeName
@@ -628,7 +626,6 @@ func withDefaults(t *testing.T, fn func()) {
 		DefaultVerify = savedVerify
 		DefaultVerifyTimeout = savedVerifyTimeout
 		DefaultTavilyKeys = savedTavilyKeys
-		DefaultWebSearchProxy = savedWebSearchProxy
 		DefaultIOAURL = savedIOAURL
 		DefaultIOANodeID = savedIOANodeID
 		DefaultIOANodeName = savedIOANodeName

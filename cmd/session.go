@@ -25,21 +25,14 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 
 	taskMgr := bashTaskManager(cfg.Application.Commands)
 	if taskMgr != nil {
-		taskMgr.SetProducerRegistrar(func(name string) func() {
-			h := ib.RegisterProducer(name)
-			return h.Done
-		})
-		taskMgr.SetObserver(func(ev taskmod.TaskEvent) {
-			if ev.Kind != taskmod.EventCompletion {
-				return
-			}
-			tail := taskMgr.PeekOrEmpty(ev.TaskID, 20)
+		taskMgr.SetOnDone(func(info taskmod.Info) {
+			tail := taskMgr.PeekOrEmpty(info.ID, 20)
 			msg := inboxpkg.NewMessage(inboxpkg.OriginTask, "user",
-				taskmod.FormatCompletion(ev.TaskInfo, ev.Killed, ev.KillCause, tail))
+				taskmod.FormatCompletion(info, tail))
 			msg.Meta = map[string]any{
-				"task_id":   ev.TaskID,
-				"task_name": ev.TaskInfo.Name,
-				"exit_code": ev.TaskInfo.ExitCode,
+				"session_id":   info.ID,
+				"session_name": info.Name,
+				"exit_code":    info.ExitCode,
 			}
 			if err := ib.Push(msg); err != nil {
 				cfg.Logger.Warnf("inbox push task completion: %s", err)
