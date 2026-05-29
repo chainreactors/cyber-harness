@@ -3,9 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -14,9 +12,10 @@ import (
 )
 
 const (
-	maxOutputSize      = 50 * 1024 // 50KB
-	defaultTimeout     = 300       // 5 minutes
-	foregroundStopWait = 5 * time.Second
+	maxOutputSize          = 50 * 1024
+	defaultTimeout         = 300
+	autoBackgroundThreshold = 15 * time.Second
+	foregroundStopWait     = 5 * time.Second
 )
 
 type BashTool struct {
@@ -25,11 +24,9 @@ type BashTool struct {
 	timeout      int
 	scannerProxy string
 	tasks        *task.Manager
+	selfBinary   string
 }
 
-// NewBashTool constructs a bash tool. The internal task.Manager handles
-// background:true invocations; expose it via Manager() so the task tool
-// can share the same instance.
 func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTool {
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -45,8 +42,6 @@ func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTo
 	}
 }
 
-// Manager exposes the task manager so a sibling task tool (and the swarm
-// glue in cmd/runners.go) can set the inbox sink or kill leftover tasks.
 func (t *BashTool) Manager() *task.Manager { return t.tasks }
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
@@ -54,33 +49,24 @@ func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	return t
 }
 
-func (t *BashTool) SetScannerProxy(proxy string) {
-	t.scannerProxy = proxy
-}
-
-func (t *BashTool) Name() string { return "bash" }
+func (t *BashTool) SetScannerProxy(proxy string) { t.scannerProxy = proxy }
+func (t *BashTool) SetSelfBinary(path string)    { t.selfBinary = path }
+func (t *BashTool) Name() string                 { return "bash" }
+func (t *BashTool) Close()                       { t.tasks.Shutdown() }
 
 func (t *BashTool) Description() string {
 	desc := "Execute a shell command and return its output."
 	if t.registry != nil {
 		names := t.registry.Names()
 		if len(names) > 0 {
-			desc += " IMPORTANT: This tool also handles pseudo-commands (" + strings.Join(names, ", ") + "). Pass them as the command parameter — e.g. {\"command\": \"scan -i 10.0.0.1 --mode quick\"}. These are NOT system binaries; they only work through this bash tool."
+			desc += " IMPORTANT: This tool also handles pseudo-commands (" + strings.Join(names, ", ") + "). Pass them as the command parameter."
 		}
 	}
 	return desc
 }
 
-func (t *BashTool) Close() {
-	t.tasks.Shutdown()
-}
-
 type BashArgs struct {
-	Command            string `json:"command"                        jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands: pass them directly here (e.g. scan -i 192.168.1.0/24 --mode quick). Pseudo-commands are built into this tool."`
-	Background         bool   `json:"background,omitempty"           jsonschema:"description=Run the command as a background task and return immediately with a task_id. Use for long-running commands. Use the task tool to peek/list/wait/kill."`
-	TaskName           string `json:"task_name,omitempty"            jsonschema:"description=Optional human label for the background task (shown by task list). Ignored when background=false."`
-	TaskTimeoutSeconds int    `json:"task_timeout_seconds,omitempty" jsonschema:"description=Optional wall-clock kill deadline for the background task. Defaults to 1800 (30 min). Ignored when background=false."`
-	Filename           string `json:"filename,omitempty"             jsonschema:"description=Optional file path to save task output. When set stdout is written to both memory and the file. Ignored when background=false."`
+	Command string `json:"command" jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands (scan, gogo, tmux, etc.): pass them directly here."`
 }
 
 func (t *BashTool) Definition() provider.ToolDefinition {
@@ -97,166 +83,118 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	if cmdLine == "" {
 		return ToolResult{}, fmt.Errorf("empty command")
 	}
-
 	if isOnlyCommentsOrBlank(cmdLine) {
 		return TextResult("ok"), nil
 	}
 
-	var pseudoCleaned string
-	var isPseudo bool
+	// Check for pseudo-command
 	if t.registry != nil {
-		pseudoCleaned, isPseudo = extractPseudoCommand(cmdLine, t.registry)
-	}
-
-	if args.Background {
-		if isPseudo {
-			return t.execPseudoBackground(pseudoCleaned, args.TaskName, args.TaskTimeoutSeconds, args.Filename)
+		if cleaned, isPseudo := extractPseudoCommand(cmdLine, t.registry); isPseudo {
+			token := firstCommandToken(cleaned)
+			if cmd, ok := t.registry.Get(token); ok {
+				if _, inProc := cmd.(InProcessCommand); inProc {
+					result, err := t.registry.Execute(ctx, cleaned)
+					if err != nil {
+						return ToolResult{}, err
+					}
+					return TextResult(result), nil
+				}
+			}
+			// Scanner pseudo-command: run as subprocess with auto-background
+			return t.execForeground(ctx, cleaned, true)
 		}
-		return t.execBackground(cmdLine, args.TaskName, args.TaskTimeoutSeconds, args.Filename)
 	}
 
-	if isPseudo {
-		output, err := t.registry.Execute(ctx, pseudoCleaned)
-		if err != nil {
-			return ToolResult{}, err
-		}
-		return TextResult(output), nil
-	}
-
-	return t.execShell(ctx, cmdLine)
+	return t.execForeground(ctx, cmdLine, false)
 }
 
-// execPseudoBackground delegates a pseudo-command (scan/gogo/neutron/...)
-// to the task manager so it runs in the background while the agent keeps
-// working. Output is streamed (or returned at end) to the task's stdout
-// file; the completion notification is injected into the agent's inbox.
-func (t *BashTool) execPseudoBackground(cmdLine, name string, timeoutSeconds int, filename string) (ToolResult, error) {
-	timeout := time.Duration(timeoutSeconds) * time.Second
-	reg := t.registry
-	fn := func(ctx context.Context, w io.Writer) error {
-		tokens, err := SplitCommandLine(cmdLine)
-		if err != nil {
-			return err
-		}
-		out, err := reg.ExecuteArgsStreaming(ctx, tokens, w)
-		if err != nil {
-			return err
-		}
-		if out != "" {
-			_, _ = io.WriteString(w, out)
-		}
-		return nil
-	}
-	opt := task.SpawnOption{Filename: filename}
-	info, err := t.tasks.SpawnInProcess(name, cmdLine, timeout, fn, opt)
-	if err != nil {
-		return ToolResult{}, err
-	}
-	msg := fmt.Sprintf(
-		"Started pseudo-command task id=%s name=%s (in-process)\nUse `task peek %s` to inspect progress, `task wait %s` to block, `task kill %s` to stop.",
-		info.ID, info.Name, info.ID, info.ID, info.ID)
-	if info.Filename != "" {
-		msg += fmt.Sprintf("\nOutput also saved to: %s", info.Filename)
-	}
-	return TextResult(msg), nil
-}
-
-const autoBackgroundThreshold = 15 * time.Second
-
-func (t *BashTool) execShell(ctx context.Context, cmdLine string) (ToolResult, error) {
+// execForeground creates a session and waits for completion. If the command
+// exceeds autoBackgroundThreshold, it returns immediately with the session ID.
+func (t *BashTool) execForeground(ctx context.Context, cmdLine string, isPseudo bool) (ToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.timeout)*time.Second)
 	defer cancel()
 
-	cmd := task.ShellCommand(cmdLine)
-	cmd.Dir = t.workDir
-	t.applyProxyEnv(cmd)
-	configureProcessGroup(cmd)
+	var info task.Info
+	var err error
 
-	buf := task.NewOutputBuffer(task.DefaultBufferCap)
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-
-	if err := cmd.Start(); err != nil {
+	if isPseudo {
+		tokens, parseErr := SplitCommandLine(cmdLine)
+		if parseErr != nil {
+			return ToolResult{}, parseErr
+		}
+		if len(tokens) > 1 {
+			if _, valErr := stripShellSyntax(tokens[1:]); valErr != nil {
+				return ToolResult{}, valErr
+			}
+		}
+		self := t.selfBinary
+		if self == "" {
+			self, err = os.Executable()
+			if err != nil {
+				return ToolResult{}, fmt.Errorf("resolve self: %w", err)
+			}
+		}
+		subArgs := append(tokens, "--no-color")
+		env := t.buildSubprocessEnv()
+		info, err = t.tasks.CreateCmd(t.workDir, self, subArgs, "", time.Duration(t.timeout)*time.Second, env, "")
+	} else {
+		info, err = t.tasks.Create(t.workDir, cmdLine, "", time.Duration(t.timeout)*time.Second, t.proxyEnv(), "")
+	}
+	if err != nil {
 		return ToolResult{}, err
 	}
 
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-
+	done := t.tasks.Done(info.ID)
 	select {
-	case err := <-exited:
-		return t.collectForegroundResult(buf, err, ctx)
-
+	case <-done:
+		return t.collectResult(info.ID, ctx), nil
 	case <-time.After(autoBackgroundThreshold):
-		remaining := time.Duration(t.timeout)*time.Second - autoBackgroundThreshold
-		if remaining <= 0 {
-			remaining = task.DefaultTimeout
-		}
-		info := t.tasks.Adopt(cmd, buf, labelFromCommand(cmdLine), remaining)
 		return TextResult(fmt.Sprintf(
-			"Command auto-backgrounded (exceeded %s).\ntask id=%s name=%s\nUse `task peek %s` to check progress.",
-			autoBackgroundThreshold, info.ID, info.Name, info.ID)), nil
-
+			"Command auto-backgrounded (exceeded %s).\nsession id=%s name=%s\nUse `tmux peek -t %s` to check progress, `tmux kill -t %s` to stop.",
+			autoBackgroundThreshold, info.ID, info.Name, info.ID, info.ID)), nil
 	case <-ctx.Done():
-		_ = terminateProcess(cmd)
-		select {
-		case <-exited:
-		case <-time.After(foregroundStopWait):
-			_ = killProcess(cmd)
-			<-exited
-		}
-		return t.collectForegroundResult(buf, ctx.Err(), ctx)
+		_ = t.tasks.Kill(info.ID)
+		<-done
+		return t.collectResult(info.ID, ctx), nil
 	}
 }
 
-func (t *BashTool) collectForegroundResult(buf *task.OutputBuffer, err error, ctx context.Context) (ToolResult, error) {
-	output := buf.String()
+func (t *BashTool) collectResult(id string, ctx context.Context) ToolResult {
+	output := t.tasks.PeekOrEmpty(id, 0)
 	if len(output) > maxOutputSize {
 		original := len(output)
-		output = output[:maxOutputSize] + fmt.Sprintf(
-			"\n\n[truncated: showing %d of %d bytes]", maxOutputSize, original)
+		output = output[:maxOutputSize] + fmt.Sprintf("\n\n[truncated: showing %d of %d bytes]", maxOutputSize, original)
 	}
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return TextResult(output), fmt.Errorf("command timed out after %ds", t.timeout)
-		}
-		if output == "" {
-			return ToolResult{}, err
-		}
-		return TextResult(output + "\n[exit code: non-zero]"), nil
+	if ctx.Err() != nil {
+		output += fmt.Sprintf("\n[command timed out after %ds]", t.timeout)
 	}
-	return TextResult(output), nil
+	info, _ := t.tasks.Get(id)
+	if info.ExitCode != 0 && info.State != task.StateRunning {
+		output += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
+	}
+	return TextResult(output)
 }
 
-func labelFromCommand(cmdLine string) string {
-	cmdLine = strings.TrimSpace(cmdLine)
-	if i := strings.IndexAny(cmdLine, " \t\n"); i > 0 {
-		cmdLine = cmdLine[:i]
+func (t *BashTool) proxyEnv() []string {
+	if t.scannerProxy == "" {
+		return nil
 	}
-	return cmdLine
+	return []string{
+		"ALL_PROXY=" + t.scannerProxy,
+		"all_proxy=" + t.scannerProxy,
+		"HTTP_PROXY=" + t.scannerProxy,
+		"http_proxy=" + t.scannerProxy,
+		"HTTPS_PROXY=" + t.scannerProxy,
+		"https_proxy=" + t.scannerProxy,
+	}
 }
 
-// execBackground delegates to the task manager; the agent gets back a task
-// id immediately and can keep working while the command runs to completion.
-func (t *BashTool) execBackground(cmdLine, name string, timeoutSeconds int, filename string) (ToolResult, error) {
-	timeout := time.Duration(timeoutSeconds) * time.Second
-	opt := task.SpawnOption{Filename: filename}
-	info, err := t.tasks.Spawn(t.workDir, cmdLine, name, timeout, opt)
-	if err != nil {
-		return ToolResult{}, err
-	}
-	msg := fmt.Sprintf(
-		"Started background task id=%s name=%s pid=%d\nUse `task peek %s` to inspect progress, `task wait %s` to block, `task kill %s` to stop. A completion message will be injected automatically when the task ends.",
-		info.ID, info.Name, info.PID, info.ID, info.ID, info.ID)
-	if info.Filename != "" {
-		msg += fmt.Sprintf("\nOutput also saved to: %s", info.Filename)
-	}
-	return TextResult(msg), nil
+func (t *BashTool) buildSubprocessEnv() []string {
+	env := t.proxyEnv()
+	env = append(env, "AISCAN_PARENT=1")
+	return env
 }
 
-// isOnlyCommentsOrBlank returns true if every line in the input is blank or a
-// shell comment (starts with '#' after trimming). LLMs occasionally emit
-// comment-only "commands" which should be treated as no-ops.
 func isOnlyCommentsOrBlank(cmdLine string) bool {
 	for _, line := range strings.Split(cmdLine, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -267,13 +205,7 @@ func isOnlyCommentsOrBlank(cmdLine string) bool {
 	return true
 }
 
-// extractPseudoCommand preprocesses a (possibly multi-line, commented) command
-// string from the LLM and checks whether any segment is a registered pseudo-command.
-// It strips comment lines (lines whose first non-space character is '#'), blank lines,
-// and splits on '&&' / ';' to inspect each segment individually.
-// Returns the cleaned pseudo-command line and true if found, or ("", false) otherwise.
 func extractPseudoCommand(cmdLine string, registry *CommandRegistry) (string, bool) {
-	// 1. Strip comment lines and blank lines
 	lines := strings.Split(cmdLine, "\n")
 	var meaningful []string
 	for _, line := range lines {
@@ -286,18 +218,11 @@ func extractPseudoCommand(cmdLine string, registry *CommandRegistry) (string, bo
 	if len(meaningful) == 0 {
 		return "", false
 	}
-
-	// Rejoin the non-comment lines
 	cleaned := strings.Join(meaningful, "\n")
-
-	// 2. Quick check: is the whole thing a single pseudo-command?
 	token := firstCommandToken(cleaned)
 	if token != "" && registry.Has(token) {
 		return cleaned, true
 	}
-
-	// 3. Split on && and ; to check each segment
-	// Replace && and ; with a common delimiter, then split
 	segments := splitShellChain(cleaned)
 	for _, seg := range segments {
 		seg = strings.TrimSpace(seg)
@@ -309,19 +234,15 @@ func extractPseudoCommand(cmdLine string, registry *CommandRegistry) (string, bo
 			return seg, true
 		}
 	}
-
 	return "", false
 }
 
-// splitShellChain splits a command string on '&&' and ';' delimiters,
-// respecting quoted strings. Returns individual command segments.
 func splitShellChain(input string) []string {
 	var segments []string
 	var cur strings.Builder
 	var quote rune
 	escaped := false
 	runes := []rune(input)
-
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
 		if escaped {
@@ -346,14 +267,12 @@ func splitShellChain(input string) []string {
 			cur.WriteRune(r)
 			continue
 		}
-		// Check for &&
 		if r == '&' && i+1 < len(runes) && runes[i+1] == '&' {
 			segments = append(segments, cur.String())
 			cur.Reset()
-			i++ // skip second '&'
+			i++
 			continue
 		}
-		// Check for ;
 		if r == ';' {
 			segments = append(segments, cur.String())
 			cur.Reset()
@@ -365,22 +284,6 @@ func splitShellChain(input string) []string {
 		segments = append(segments, cur.String())
 	}
 	return segments
-}
-
-func (t *BashTool) applyProxyEnv(cmd *exec.Cmd) {
-	if t.scannerProxy == "" {
-		return
-	}
-	env := os.Environ()
-	env = append(env,
-		"ALL_PROXY="+t.scannerProxy,
-		"all_proxy="+t.scannerProxy,
-		"HTTP_PROXY="+t.scannerProxy,
-		"http_proxy="+t.scannerProxy,
-		"HTTPS_PROXY="+t.scannerProxy,
-		"https_proxy="+t.scannerProxy,
-	)
-	cmd.Env = env
 }
 
 func firstCommandToken(input string) string {

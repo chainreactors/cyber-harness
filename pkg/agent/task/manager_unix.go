@@ -2,16 +2,7 @@
 
 package task
 
-import (
-	"os/exec"
-	"syscall"
-)
-
-// configureTaskProcessGroup makes the child the leader of a new process
-// group so signalProcessGroup can cascade kills to descendants.
-func configureTaskProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
+import "syscall"
 
 // signalProcessGroup delivers SIGTERM (or SIGKILL if hard==true) to the
 // process group whose leader has pid. Returns whatever syscall.Kill returns.

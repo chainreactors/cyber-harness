@@ -22,6 +22,14 @@ type StreamingCommand interface {
 	ExecuteStreaming(ctx context.Context, args []string, stream io.Writer) (string, error)
 }
 
+// InProcessCommand marks a PseudoCommand that must run in-process (not as
+// a subprocess). Used for control-plane commands like tmux that operate on
+// shared in-memory state.
+type InProcessCommand interface {
+	PseudoCommand
+	InProcess()
+}
+
 type AgentTool interface {
 	Name() string
 	Description() string

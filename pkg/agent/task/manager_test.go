@@ -2,8 +2,6 @@ package task
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,49 +9,6 @@ import (
 	"testing"
 	"time"
 )
-
-type completionRecord struct {
-	Info      Info
-	Killed    bool
-	KillCause string
-}
-
-type testCollector struct {
-	mu      sync.Mutex
-	records []completionRecord
-	ch      chan struct{}
-}
-
-func newTestCollector() *testCollector {
-	return &testCollector{ch: make(chan struct{}, 8)}
-}
-
-func (c *testCollector) observer() TaskObserver {
-	return func(ev TaskEvent) {
-		if ev.Kind != EventCompletion {
-			return
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.records = append(c.records, completionRecord{Info: ev.TaskInfo, Killed: ev.Killed, KillCause: ev.KillCause})
-		select {
-		case c.ch <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (c *testCollector) waitOne(t *testing.T, timeout time.Duration) completionRecord {
-	t.Helper()
-	select {
-	case <-c.ch:
-	case <-time.After(timeout):
-		t.Fatalf("no completion received within %s", timeout)
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.records[len(c.records)-1]
-}
 
 func waitUntil(t *testing.T, timeout time.Duration, predicate func() bool) {
 	t.Helper()
@@ -66,49 +21,44 @@ func waitUntil(t *testing.T, timeout time.Duration, predicate func() bool) {
 	}
 }
 
-func TestSpawnCompletesAndNotifies(t *testing.T) {
+func TestCreateAndCompletion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only test")
 	}
 	mgr := NewManager()
-	col := newTestCollector()
-	mgr.SetObserver(col.observer())
+
+	var completed Info
+	done := make(chan struct{})
+	mgr.SetOnDone(func(info Info) {
+		completed = info
+		close(done)
+	})
 
 	dir := t.TempDir()
-	info, err := mgr.Spawn(dir, "printf done; sleep 0.05", "demo", 10*time.Second)
+	info, err := mgr.Create(dir, "printf done; sleep 0.05", "demo", 10*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	if info.State != StateRunning {
 		t.Fatalf("initial state = %s, want running", info.State)
 	}
 
-	rec := col.waitOne(t, 5*time.Second)
-	formatted := FormatCompletion(rec.Info, rec.Killed, rec.KillCause, mgr.PeekOrEmpty(rec.Info.ID, 20))
-	if !strings.Contains(formatted, info.ID) {
-		t.Fatalf("completion missing id: %v", formatted)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnDone not called within 5s")
 	}
+
+	if completed.State != StateCompleted {
+		t.Fatalf("completed state = %s, want completed", completed.State)
+	}
+	if completed.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", completed.ExitCode)
+	}
+
+	formatted := FormatCompletion(completed, mgr.PeekOrEmpty(info.ID, 20))
 	if !strings.Contains(formatted, "done") {
-		t.Fatalf("completion missing stdout tail: %v", formatted)
-	}
-
-	final, ok := mgr.Get(info.ID)
-	if !ok {
-		t.Fatal("task disappeared after completion")
-	}
-	if final.State != StateCompleted {
-		t.Fatalf("final state = %s, want completed", final.State)
-	}
-	if final.ExitCode != 0 {
-		t.Fatalf("exit code = %d, want 0", final.ExitCode)
-	}
-
-	output, err := mgr.Peek(info.ID, 30)
-	if err != nil {
-		t.Fatalf("Peek: %v", err)
-	}
-	if !strings.Contains(output, "done") {
-		t.Fatalf("peek missing 'done': %q", output)
+		t.Fatalf("completion missing stdout: %v", formatted)
 	}
 }
 
@@ -119,10 +69,9 @@ func TestKillCascadesToGrandchild(t *testing.T) {
 	mgr := NewManager()
 	dir := t.TempDir()
 
-	script := "sh -c 'sleep 30 & echo CHILDPID=$! ; wait'"
-	info, err := mgr.Spawn(dir, script, "kill-test", 30*time.Second)
+	info, err := mgr.Create(dir, "sh -c 'sleep 30 & echo CHILDPID=$! ; wait'", "kill-test", 30*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
 	var childPID int
@@ -148,7 +97,7 @@ func TestKillCascadesToGrandchild(t *testing.T) {
 	})
 
 	if err := syscall.Kill(childPID, 0); err != nil {
-		t.Fatalf("grandchild %d already dead before Kill: %v", childPID, err)
+		t.Fatalf("grandchild %d already dead: %v", childPID, err)
 	}
 
 	if err := mgr.Kill(info.ID); err != nil {
@@ -175,15 +124,12 @@ func TestPeekReturnsTail(t *testing.T) {
 	}
 	mgr := NewManager()
 	dir := t.TempDir()
-	info, err := mgr.Spawn(dir, "for i in 1 2 3 4 5; do echo line$i; done", "peek-test", 5*time.Second)
+	info, err := mgr.Create(dir, "for i in 1 2 3 4 5; do echo line$i; done", "peek-test", 5*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
-	waitUntil(t, 3*time.Second, func() bool {
-		final, _ := mgr.Get(info.ID)
-		return final.State == StateCompleted
-	})
+	<-mgr.Done(info.ID)
 
 	out, err := mgr.Peek(info.ID, 3)
 	if err != nil {
@@ -203,35 +149,32 @@ func TestWaitRespectsTimeoutAndContext(t *testing.T) {
 	defer mgr.Shutdown()
 
 	dir := t.TempDir()
-	info, err := mgr.Spawn(dir, "sleep 5", "wait-test", 30*time.Second)
+	info, err := mgr.Create(dir, "sleep 5", "wait-test", 30*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 
 	start := time.Now()
 	got, err := mgr.Wait(context.Background(), info.ID, 200*time.Millisecond)
 	if err != nil {
-		t.Fatalf("Wait returned error: %v", err)
+		t.Fatalf("Wait error: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 600*time.Millisecond {
-		t.Fatalf("Wait returned after %s, expected ~200ms", elapsed)
+	if time.Since(start) > 600*time.Millisecond {
+		t.Fatalf("Wait took too long")
 	}
 	if got.State != StateRunning {
 		t.Fatalf("state after short Wait = %s, want running", got.State)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancelDone := make(chan struct{})
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
-		close(cancelDone)
 	}()
 	_, err = mgr.Wait(ctx, info.ID, 10*time.Second)
 	if err == nil {
 		t.Fatal("Wait did not return error after ctx cancel")
 	}
-	<-cancelDone
 }
 
 func TestShutdownKillsRunning(t *testing.T) {
@@ -241,12 +184,12 @@ func TestShutdownKillsRunning(t *testing.T) {
 	mgr := NewManager()
 	dir := t.TempDir()
 
-	info, err := mgr.Spawn(dir, "sleep 30", "shutdown-test", 60*time.Second)
+	info, err := mgr.Create(dir, "sleep 30", "shutdown-test", 60*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	if syscall.Kill(info.PID, 0) != nil {
-		t.Fatal("process not alive immediately after spawn")
+		t.Fatal("process not alive after Create")
 	}
 
 	mgr.Shutdown()
@@ -254,159 +197,229 @@ func TestShutdownKillsRunning(t *testing.T) {
 	waitUntil(t, 3*time.Second, func() bool {
 		return syscall.Kill(info.PID, 0) != nil
 	})
-	final, _ := mgr.Get(info.ID)
-	if final.State == StateRunning {
-		t.Fatalf("state after Shutdown still running")
-	}
 }
 
-func TestSpawnInProcessCompletesAndNotifies(t *testing.T) {
+func TestWriteInput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
 	mgr := NewManager()
-	col := newTestCollector()
-	mgr.SetObserver(col.observer())
-
-	fn := func(ctx context.Context, out io.Writer) error {
-		fmt.Fprintln(out, "step 1")
-		fmt.Fprintln(out, "step 2")
-		return nil
-	}
-	info, err := mgr.SpawnInProcess("in-proc", "fake-cmd arg1", 5*time.Second, fn)
-	if err != nil {
-		t.Fatalf("SpawnInProcess: %v", err)
-	}
-
-	rec := col.waitOne(t, 3*time.Second)
-	formatted := FormatCompletion(rec.Info, rec.Killed, rec.KillCause, mgr.PeekOrEmpty(rec.Info.ID, 20))
-	if !strings.Contains(formatted, info.ID) {
-		t.Fatalf("completion msg missing id: %v", formatted)
-	}
-	if !strings.Contains(formatted, "step 2") {
-		t.Fatalf("completion msg missing stdout: %v", formatted)
-	}
-
-	final, _ := mgr.Get(info.ID)
-	if final.State != StateCompleted {
-		t.Fatalf("state = %s, want completed", final.State)
-	}
-
-	output, _ := mgr.Peek(info.ID, 30)
-	if !strings.Contains(output, "step 1") {
-		t.Fatalf("peek missing 'step 1': %q", output)
-	}
-}
-
-func TestSpawnInProcessKillCancelsContext(t *testing.T) {
-	mgr := NewManager()
-
-	started := make(chan struct{})
-	fn := func(ctx context.Context, out io.Writer) error {
-		close(started)
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	info, err := mgr.SpawnInProcess("in-proc-kill", "blocker", 30*time.Second, fn)
-	if err != nil {
-		t.Fatalf("SpawnInProcess: %v", err)
-	}
-	<-started
-
-	if err := mgr.Kill(info.ID); err != nil {
-		t.Fatalf("Kill: %v", err)
-	}
-	waitUntil(t, 3*time.Second, func() bool {
-		final, _ := mgr.Get(info.ID)
-		return final.State != StateRunning
+	var completed Info
+	ch := make(chan struct{})
+	mgr.SetOnDone(func(info Info) {
+		completed = info
+		close(ch)
 	})
-	final, _ := mgr.Get(info.ID)
-	if final.State != StateKilled {
-		t.Fatalf("state after Kill = %s, want killed", final.State)
+
+	dir := t.TempDir()
+	info, err := mgr.Create(dir, "head -1", "write-test", 10*time.Second, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if err := mgr.Write(info.ID, []byte("hello world\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnDone not called")
+	}
+
+	if completed.State != StateCompleted {
+		t.Fatalf("state = %s, want completed", completed.State)
+	}
+	output := mgr.PeekOrEmpty(info.ID, 30)
+	if !strings.Contains(output, "hello world") {
+		t.Fatalf("expected 'hello world' in output, got: %q", output)
 	}
 }
 
-func TestCompletionWithNilObserverDoesNotPanic(t *testing.T) {
+func TestCreateCmd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
 	mgr := NewManager()
+	dir := t.TempDir()
 
-	fn := func(ctx context.Context, out io.Writer) error {
-		fmt.Fprintln(out, "done")
-		return nil
-	}
-	info, err := mgr.SpawnInProcess("nil-obs", "nil-obs", 5*time.Second, fn)
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo from-createcmd"}, "cmd-test", 10*time.Second, nil, "")
 	if err != nil {
-		t.Fatalf("SpawnInProcess: %v", err)
+		t.Fatalf("CreateCmd: %v", err)
 	}
-	final, err := mgr.Wait(context.Background(), info.ID, 3*time.Second)
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	if final.State != StateCompleted {
-		t.Fatalf("state = %s, want completed", final.State)
+	<-mgr.Done(info.ID)
+
+	output := mgr.PeekOrEmpty(info.ID, 30)
+	if !strings.Contains(output, "from-createcmd") {
+		t.Fatalf("expected 'from-createcmd', got: %q", output)
 	}
 }
 
-func TestObserverPanicDoesNotCrashManager(t *testing.T) {
+func TestCreateCmdWithEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+	mgr := NewManager()
+	dir := t.TempDir()
+
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo $TEST_MAGIC"}, "env-test", 10*time.Second, []string{"TEST_MAGIC=pty_works"}, "")
+	if err != nil {
+		t.Fatalf("CreateCmd: %v", err)
+	}
+	<-mgr.Done(info.ID)
+
+	output := mgr.PeekOrEmpty(info.ID, 30)
+	if !strings.Contains(output, "pty_works") {
+		t.Fatalf("expected 'pty_works', got: %q", output)
+	}
+}
+
+func TestDoneChannel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+	mgr := NewManager()
+	dir := t.TempDir()
+
+	info, err := mgr.Create(dir, "echo fast", "done-test", 5*time.Second, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	select {
+	case <-mgr.Done(info.ID):
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done channel not closed")
+	}
+
+	// Done on unknown ID returns closed channel
+	select {
+	case <-mgr.Done("nonexistent"):
+	default:
+		t.Fatal("Done for unknown ID should return closed channel")
+	}
+}
+
+func TestPeekNew(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+	mgr := NewManager()
+	dir := t.TempDir()
+
+	payload := strings.Repeat("x", 100)
+	info, err := mgr.Create(dir, "printf '"+payload+"'", "peeknew-test", 10*time.Second, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	<-mgr.Done(info.ID)
+
+	out1, more1, err := mgr.PeekNew(info.ID, 50)
+	if err != nil {
+		t.Fatalf("PeekNew first: %v", err)
+	}
+	if out1 != strings.Repeat("x", 50) || !more1 {
+		t.Fatalf("first = (%q, %t), want 50 x's + more", out1, more1)
+	}
+
+	out2, more2, err := mgr.PeekNew(info.ID, 50)
+	if err != nil {
+		t.Fatalf("PeekNew second: %v", err)
+	}
+	if out2 != strings.Repeat("x", 50) || more2 {
+		t.Fatalf("second = (%q, %t), want 50 x's + no more", out2, more2)
+	}
+
+	out3, _, err := mgr.PeekNew(info.ID, 0)
+	if err != nil {
+		t.Fatalf("PeekNew third: %v", err)
+	}
+	if out3 != "" {
+		t.Fatalf("third = %q, want empty", out3)
+	}
+}
+
+func TestObserverPanicDoesNotCrash(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
 	mgr := NewManager()
 	called := make(chan struct{})
-	mgr.SetObserver(func(ev TaskEvent) {
-		if ev.Kind == EventCompletion {
-			close(called)
-			panic("boom")
-		}
+	mgr.SetOnDone(func(_ Info) {
+		close(called)
+		panic("boom")
 	})
 
-	fn := func(ctx context.Context, out io.Writer) error { return nil }
-	_, err := mgr.SpawnInProcess("panic-test", "panic-test", 5*time.Second, fn)
-	if err != nil {
-		t.Fatalf("SpawnInProcess: %v", err)
-	}
+	dir := t.TempDir()
+	mgr.Create(dir, "echo ok", "panic-test", 5*time.Second, nil, "")
 
 	select {
 	case <-called:
 	case <-time.After(3 * time.Second):
-		t.Fatal("observer was not called")
+		t.Fatal("OnDone not called")
 	}
 }
 
-func TestObserverReceivesStartAndOutput(t *testing.T) {
+func TestOnDoneReceivesEvents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
 	mgr := NewManager()
 	var mu sync.Mutex
-	var events []TaskEvent
-	mgr.SetObserver(func(ev TaskEvent) {
+	var infos []Info
+	mgr.SetOnDone(func(info Info) {
 		mu.Lock()
-		events = append(events, ev)
+		infos = append(infos, info)
 		mu.Unlock()
 	})
 
-	fn := func(ctx context.Context, out io.Writer) error {
-		fmt.Fprintln(out, "hello")
-		return nil
-	}
-	_, err := mgr.SpawnInProcess("events-test", "events-test", 5*time.Second, fn)
-	if err != nil {
-		t.Fatalf("SpawnInProcess: %v", err)
-	}
-	time.Sleep(500 * time.Millisecond)
+	dir := t.TempDir()
+	mgr.Create(dir, "echo hello", "events-test", 5*time.Second, nil, "")
+	time.Sleep(1 * time.Second)
 
 	mu.Lock()
 	defer mu.Unlock()
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 OnDone call, got %d", len(infos))
+	}
+	if infos[0].State != StateCompleted {
+		t.Fatalf("state = %s, want completed", infos[0].State)
+	}
+}
 
-	if len(events) < 3 {
-		t.Fatalf("expected >= 3 events (start, output, completion), got %d", len(events))
+func TestNilOnDoneDoesNotPanic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
 	}
-	if events[0].Kind != EventStart {
-		t.Errorf("first event = %s, want start", events[0].Kind)
+	mgr := NewManager()
+	dir := t.TempDir()
+	info, err := mgr.Create(dir, "echo done", "nil-test", 5*time.Second, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	hasOutput := false
-	for _, ev := range events {
-		if ev.Kind == EventOutput {
-			hasOutput = true
-			break
-		}
+	<-mgr.Done(info.ID)
+	final, _ := mgr.Get(info.ID)
+	if final.State != StateCompleted {
+		t.Fatalf("state = %s, want completed", final.State)
 	}
-	if !hasOutput {
-		t.Error("no output event received")
+}
+
+func TestExecCommandDirect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
 	}
-	if events[len(events)-1].Kind != EventCompletion {
-		t.Errorf("last event = %s, want completion", events[len(events)-1].Kind)
+	mgr := NewManager()
+	dir := t.TempDir()
+
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo direct"}, "", 5*time.Second, nil, "")
+	if err != nil {
+		t.Fatalf("CreateCmd: %v", err)
+	}
+	<-mgr.Done(info.ID)
+	output := mgr.PeekOrEmpty(info.ID, 30)
+	if !strings.Contains(output, "direct") {
+		t.Fatalf("expected 'direct', got: %q", output)
 	}
 }
 

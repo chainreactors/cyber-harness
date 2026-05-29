@@ -27,7 +27,10 @@ func init() {
 			reg.RegisterTool(NewGlobTool(workDir, globbers...))
 			bash := NewBashTool(workDir, timeout, reg).WithScannerProxy(deps.ScannerProxy)
 			reg.RegisterTool(bash)
-			reg.RegisterTool(NewTaskTool(bash.Manager()))
+
+			tmux := NewTmuxCommand(bash.Manager(), reg)
+			tmux.SetProxy(deps.ScannerProxy)
+			reg.Register(tmux, "core")
 		},
 	})
 }
