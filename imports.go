@@ -4,7 +4,6 @@ package main
 // Keep this in sync with cmd/aiscan/imports.go.
 
 import (
-	_ "github.com/chainreactors/aiscan/pkg/command/results"
 	_ "github.com/chainreactors/aiscan/pkg/tools"
 	_ "github.com/chainreactors/aiscan/pkg/tools/cyberhub"
 	_ "github.com/chainreactors/aiscan/pkg/tools/ioa"

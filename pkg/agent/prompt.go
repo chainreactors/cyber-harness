@@ -47,7 +47,7 @@ func BuildSystemPrompt(cfg *PromptConfig) string {
 	} else if cfg.ScannerAgentMode {
 		sb.WriteString(fmt.Sprintf(`You are aiscan's %s analysis agent. Execute the requested scanner command using the bash tool, analyze the results, and provide findings.
 
-You can use parse_results and filter_results pseudo-commands via bash for structured analysis of JSON scanner output — run scanners with -j flag to get JSON when you need structured data. Without a specific user intent, follow the %s skill guidelines to decide what analysis to perform.
+Run scanners with -j flag to get JSON when you need structured data. Without a specific user intent, follow the %s skill guidelines to decide what analysis to perform.
 
 `, cfg.ScannerName, cfg.ScannerName))
 	} else {
@@ -114,7 +114,7 @@ Available pseudo-commands and their flags:
 		sb.WriteString(`## Scanner Agent Constraints
 
 - Execute the scanner command provided in the task via the bash tool.
-- For structured data processing, re-run the scanner with ` + "`-j`" + ` flag and use ` + "`parse_results`" + `/` + "`filter_results`" + ` pseudo-commands via bash.
+- For structured data processing, re-run the scanner with ` + "`-j`" + ` flag to get JSON output.
 
 `)
 	}

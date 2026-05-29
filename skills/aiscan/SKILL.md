@@ -40,8 +40,6 @@ Utility commands:
 - `web_search`: search the web.
 - `web_fetch`: fetch and read a URL.
 - `vision`: analyze an image with a vision LLM.
-- `parse_results`: parse JSON-lines scanner output.
-- `filter_results`: filter JSON-lines scanner output.
 
 Read the corresponding skill file for each command's usage: `aiscan://skills/<command>/SKILL.md`.
 
@@ -49,7 +47,7 @@ Read the corresponding skill file for each command's usage: `aiscan://skills/<co
 
 - Prefer using scan output returned directly from the bash tool call, not from files.
 - When scan writes output to a file (`-f`), use the read tool to access it — do NOT pipe through `head`/`tail`/`grep` which truncates results.
-- For structured analysis, use `parse_results` and `filter_results` pseudo-commands via bash.
+- For structured analysis, re-run the scanner with `-j` flag to get JSON output.
 
 ## Asset Triage
 
@@ -74,7 +72,7 @@ Any scanner invocation that targets multiple hosts/domains, runs neutron, or oth
 
 - A follow-up message is injected automatically when the task completes; you do not need to poll.
 - Use the tmux pseudo-command via bash to interact: `tmux ls` (overview), `tmux capture-pane -t <id> --new` (last output), `tmux wait -t <id>` (block), `tmux kill -t <id>` (terminate).
-- Foreground bash (`background:false`) is still appropriate for short shell utilities and read-only checks (<2 min). Pseudo-commands you only need quick output from (`parse_results`, `filter_results`) stay foreground.
+- Foreground bash (`background:false`) is still appropriate for short shell utilities and read-only checks (<2 min).
 - Never run scan/gogo/spray/neutron foreground against >1 target at once — that blocks the LLM for tens of minutes and starves peer chatter.
 
 ## Data Exfiltration
