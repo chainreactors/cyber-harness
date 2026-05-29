@@ -151,27 +151,14 @@ func TestParseAutofillOpts_RejectsUnknownFlag(t *testing.T) {
 }
 
 func TestParseOpenOpts_OperationTimeout(t *testing.T) {
-	_, _, ttl, opTimeout, err := parseOpenOpts([]string{
-		"https://example.com", "--ttl", "120", "--op-timeout", "7",
+	_, _, opTimeout, err := parseOpenOpts([]string{
+		"https://example.com", "--op-timeout", "7",
 	}, "usage")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ttl != 120*time.Second {
-		t.Fatalf("expected ttl 120s, got %v", ttl)
-	}
 	if opTimeout != 7*time.Second {
 		t.Fatalf("expected op timeout 7s, got %v", opTimeout)
-	}
-}
-
-func TestParseOpenOpts_RejectsZeroTTL(t *testing.T) {
-	_, _, _, _, err := parseOpenOpts([]string{"https://example.com", "--ttl", "0"}, "usage")
-	if err == nil {
-		t.Fatal("expected error for zero ttl")
-	}
-	if !strings.Contains(err.Error(), "ttl must be > 0") {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

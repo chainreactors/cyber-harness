@@ -40,13 +40,23 @@ type Command struct {
 	openMu     sync.Mutex
 	sessions   map[string]*Session
 	sessionsMu sync.Mutex
-	gcOnce     sync.Once
-	gcStop     chan struct{}
+
+	// Proxy URL for Chrome's --proxy-server flag. Updated via SetProxy().
+	proxyMu  sync.RWMutex
+	proxyURL string
 }
 
 // New creates a browser pseudo-command.
 func New(workDir string) *Command {
 	return &Command{workDir: workDir}
+}
+
+// SetProxy updates the proxy URL for new browser launches.
+// Implements the interface used by the proxy command's OnProxyChange callback.
+func (c *Command) SetProxy(proxyURLStr string) {
+	c.proxyMu.Lock()
+	defer c.proxyMu.Unlock()
+	c.proxyURL = proxyURLStr
 }
 
 func (c *Command) Name() string { return "browser" }
@@ -67,8 +77,7 @@ Stateless-only Subcommands:
   pdf                                             Generate PDF of the rendered page
 
 Session Subcommands (multi-step interactive workflows):
-  open <url> [--session name] [--ttl secs]        Open a persistent page, return session ID
-             [--op-timeout secs]                  Per-operation timeout for session commands
+  open <url> [--session name] [--op-timeout secs] Open a persistent page, return session ID
   close <session>                                 Close a session and release resources
 
   Katana Script (page discovery & smart form filling):
@@ -231,6 +240,13 @@ func (c *Command) getOrLaunchBrowser() (*rod.Browser, error) {
 		Set("disable-dev-shm-usage").
 		Set("ignore-certificate-errors").
 		Set("allow-insecure-localhost")
+
+	c.proxyMu.RLock()
+	proxy := c.proxyURL
+	c.proxyMu.RUnlock()
+	if proxy != "" {
+		l = l.Set("proxy-server", proxy)
+	}
 
 	controlURL, err := l.Launch()
 	if err != nil {

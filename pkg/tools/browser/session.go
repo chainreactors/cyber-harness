@@ -18,20 +18,20 @@ import (
 )
 
 const (
-	defaultSessionTimeout          = 120 * time.Second
 	defaultSessionOperationTimeout = 30 * time.Second
 	maxSessions                    = 8
-	gcInterval                     = 15 * time.Second
 )
 
 // Session holds a persistent page across multiple Execute() calls.
+// Sessions are explicitly managed: created via "open" and released via "close".
+// When the max session limit is reached, the least-recently-used session is
+// evicted automatically to make room for a new one.
 type Session struct {
 	Name      string
 	Page      *rod.Page
 	Incognito *rod.Browser // incognito context
 	CreatedAt time.Time
 	LastUsed  time.Time
-	Timeout   time.Duration
 
 	// OperationTimeout limits a single interactive operation on this page.
 	OperationTimeout time.Duration
@@ -52,11 +52,6 @@ type Session struct {
 
 // touch updates LastUsed timestamp.
 func (s *Session) touch() { s.LastUsed = time.Now() }
-
-// expired reports whether the session has exceeded its TTL.
-func (s *Session) expired() bool {
-	return time.Since(s.LastUsed) > s.Timeout
-}
 
 // withPage serializes a single operation against the persistent page and
 // applies the session's per-operation timeout.
@@ -134,38 +129,25 @@ func (c *Command) initSessions() {
 	}
 }
 
-func (c *Command) startGC() {
-	c.gcOnce.Do(func() {
-		stop := make(chan struct{})
-		c.gcStop = stop
-		go func() {
-			ticker := time.NewTicker(gcInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					c.reapExpiredSessions()
-				case <-stop:
-					return
-				}
-			}
-		}()
-	})
-}
-
-func (c *Command) reapExpiredSessions() {
+// evictLRUSession removes the least-recently-used session to make room.
+// Caller must NOT hold sessionsMu.
+func (c *Command) evictLRUSession() {
 	c.sessionsMu.Lock()
-	var expired []*Session
+	var oldest *Session
+	oldestName := ""
 	for name, sess := range c.sessions {
-		if sess.expired() {
-			expired = append(expired, sess)
-			delete(c.sessions, name)
+		if oldest == nil || sess.LastUsed.Before(oldest.LastUsed) {
+			oldest = sess
+			oldestName = name
 		}
+	}
+	if oldest != nil {
+		delete(c.sessions, oldestName)
 	}
 	c.sessionsMu.Unlock()
 
-	for _, sess := range expired {
-		sess.cleanup()
+	if oldest != nil {
+		oldest.cleanup()
 	}
 }
 
@@ -175,12 +157,6 @@ func (c *Command) getSession(name string) (*Session, error) {
 	if !ok {
 		c.sessionsMu.Unlock()
 		return nil, fmt.Errorf("browser: session %q not found", name)
-	}
-	if sess.expired() {
-		delete(c.sessions, name)
-		c.sessionsMu.Unlock()
-		sess.cleanup()
-		return nil, fmt.Errorf("browser: session %q expired", name)
 	}
 	sess.touch()
 	c.sessionsMu.Unlock()
@@ -204,10 +180,6 @@ func (c *Command) closeAllSessions() {
 		sessions = append(sessions, sess)
 		delete(c.sessions, name)
 	}
-	if c.gcStop != nil {
-		close(c.gcStop)
-		c.gcStop = nil
-	}
 	c.sessionsMu.Unlock()
 
 	for _, sess := range sessions {
@@ -220,7 +192,7 @@ func (c *Command) closeAllSessions() {
 // ---------------------------------------------------------------------------
 
 func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
-	opts, sessName, sessTTL, opTimeout, err := parseOpenOpts(args, c.Usage())
+	opts, sessName, opTimeout, err := parseOpenOpts(args, c.Usage())
 	if err != nil {
 		return "", err
 	}
@@ -229,19 +201,18 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	defer c.openMu.Unlock()
 
 	c.initSessions()
-	c.startGC()
-	c.reapExpiredSessions()
 
 	c.sessionsMu.Lock()
-	if len(c.sessions) >= maxSessions {
-		c.sessionsMu.Unlock()
-		return "", fmt.Errorf("browser open: max sessions (%d) reached; close an existing session first", maxSessions)
-	}
 	if _, exists := c.sessions[sessName]; exists {
 		c.sessionsMu.Unlock()
 		return "", fmt.Errorf("browser open: session %q already exists", sessName)
 	}
+	needEvict := len(c.sessions) >= maxSessions
 	c.sessionsMu.Unlock()
+
+	if needEvict {
+		c.evictLRUSession()
+	}
 
 	// Launch browser and create incognito page.
 	b, err := c.getOrLaunchBrowser()
@@ -291,7 +262,6 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		Incognito: incognito,
 		CreatedAt: time.Now(),
 		LastUsed:  time.Now(),
-		Timeout:   sessTTL,
 
 		OperationTimeout: opTimeout,
 	}
@@ -306,8 +276,8 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		title = info.Title
 	}
 
-	return fmt.Sprintf("Session: %s\nURL: %s\nTitle: %s\nTimeout: %s\nOperation timeout: %s",
-		sessName, opts.url, title, sessTTL, opTimeout), nil
+	return fmt.Sprintf("Session: %s\nURL: %s\nTitle: %s\nOperation timeout: %s",
+		sessName, opts.url, title, opTimeout), nil
 }
 
 func (c *Command) execClose(ctx context.Context, args []string) (string, error) {
@@ -333,68 +303,54 @@ func (c *Command) execClose(ctx context.Context, args []string) (string, error) 
 // Argument parsing for open
 // ---------------------------------------------------------------------------
 
-func parseOpenOpts(args []string, usage string) (commonOpts, string, time.Duration, time.Duration, error) {
+func parseOpenOpts(args []string, usage string) (commonOpts, string, time.Duration, error) {
 	opts := commonOpts{timeout: defaultTimeout}
 	sessName := ""
-	sessTTL := defaultSessionTimeout
 	opTimeout := defaultSessionOperationTimeout
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--timeout":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --timeout requires a value")
+				return opts, "", 0, fmt.Errorf("browser open: --timeout requires a value")
 			}
 			i++
 			secs, err := strconv.Atoi(args[i])
 			if err != nil {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --timeout must be an integer: %w", err)
+				return opts, "", 0, fmt.Errorf("browser open: --timeout must be an integer: %w", err)
 			}
 			if secs <= 0 {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --timeout must be > 0")
+				return opts, "", 0, fmt.Errorf("browser open: --timeout must be > 0")
 			}
 			opts.timeout = time.Duration(secs) * time.Second
 		case "--user-agent":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --user-agent requires a value")
+				return opts, "", 0, fmt.Errorf("browser open: --user-agent requires a value")
 			}
 			i++
 			opts.userAgent = args[i]
 		case "--session":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --session requires a value")
+				return opts, "", 0, fmt.Errorf("browser open: --session requires a value")
 			}
 			i++
 			sessName = args[i]
-		case "--ttl":
-			if i+1 >= len(args) {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --ttl requires a value in seconds")
-			}
-			i++
-			secs, err := strconv.Atoi(args[i])
-			if err != nil {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --ttl must be an integer: %w", err)
-			}
-			if secs <= 0 {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --ttl must be > 0")
-			}
-			sessTTL = time.Duration(secs) * time.Second
 		case "--op-timeout":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --op-timeout requires a value in seconds")
+				return opts, "", 0, fmt.Errorf("browser open: --op-timeout requires a value in seconds")
 			}
 			i++
 			secs, err := strconv.Atoi(args[i])
 			if err != nil {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --op-timeout must be an integer: %w", err)
+				return opts, "", 0, fmt.Errorf("browser open: --op-timeout must be an integer: %w", err)
 			}
 			if secs <= 0 {
-				return opts, "", 0, 0, fmt.Errorf("browser open: --op-timeout must be > 0")
+				return opts, "", 0, fmt.Errorf("browser open: --op-timeout must be > 0")
 			}
 			opTimeout = time.Duration(secs) * time.Second
 		default:
 			if strings.HasPrefix(args[i], "-") {
-				return opts, "", 0, 0, fmt.Errorf("browser open: unknown flag: %s", args[i])
+				return opts, "", 0, fmt.Errorf("browser open: unknown flag: %s", args[i])
 			}
 			if opts.url == "" {
 				opts.url = args[i]
@@ -403,10 +359,10 @@ func parseOpenOpts(args []string, usage string) (commonOpts, string, time.Durati
 	}
 
 	if opts.url == "" {
-		return opts, "", 0, 0, fmt.Errorf("browser open: URL is required\n\n%s", usage)
+		return opts, "", 0, fmt.Errorf("browser open: URL is required\n\n%s", usage)
 	}
 	if sessName == "" {
 		sessName = nextSessionName()
 	}
-	return opts, sessName, sessTTL, opTimeout, nil
+	return opts, sessName, opTimeout, nil
 }

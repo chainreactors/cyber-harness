@@ -6,7 +6,11 @@ func init() {
 	command.RegisterFactory(command.Factory{
 		Group: "tools",
 		Build: func(deps *command.Deps, reg *command.CommandRegistry) {
-			reg.Register(New(deps.TavilyKeys, deps.WebSearchProxy), "tools")
+			ws := New(deps.TavilyKeys)
+			if deps.ScannerProxy != "" {
+				ws.SetProxy(deps.ScannerProxy)
+			}
+			reg.Register(ws, "tools")
 		},
 	})
 }

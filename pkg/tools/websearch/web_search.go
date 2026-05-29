@@ -50,27 +50,12 @@ type Command struct {
 // automatic rotation when a key is exhausted (HTTP 401/429).
 // An optional builtinKeys string (comma-separated) supplies build-time
 // fallback keys that are appended after any environment-sourced keys.
-// Proxy is read from the explicit proxy parameter first, then standard
-// HTTP_PROXY / HTTPS_PROXY environment variables.
-func New(builtinKeys string, proxy ...string) *Command {
-	transport := &http.Transport{}
-
-	// Explicit proxy takes precedence over environment.
-	if len(proxy) > 0 && proxy[0] != "" {
-		proxyURL, err := url.Parse(proxy[0])
-		if err == nil {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		} else {
-			transport.Proxy = http.ProxyFromEnvironment
-		}
-	} else {
-		transport.Proxy = http.ProxyFromEnvironment
-	}
-
+// Proxy is managed via SetProxy() and the proxy command's OnProxyChange callback.
+func New(builtinKeys string) *Command {
 	c := &Command{
 		client: &http.Client{
 			Timeout:   searchTimeout,
-			Transport: transport,
+			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 		},
 	}
 
@@ -105,6 +90,25 @@ func New(builtinKeys string, proxy ...string) *Command {
 		c.apiKey = keys[0]
 	}
 	return c
+}
+
+// SetProxy updates the HTTP proxy used for web search requests.
+// Implements the interface used by the proxy command's OnProxyChange callback.
+func (c *Command) SetProxy(proxyURLStr string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	transport := &http.Transport{}
+	if proxyURLStr != "" {
+		proxyURL, err := url.Parse(proxyURLStr)
+		if err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		} else {
+			transport.Proxy = http.ProxyFromEnvironment
+		}
+	} else {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	c.client.Transport = transport
 }
 
 // rotateKey advances to the next Tavily API key. Returns false if all keys

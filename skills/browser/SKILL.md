@@ -64,10 +64,10 @@ Sessions persist a browser page across multiple tool calls. This enables multi-s
 
 ### open / close
 ```bash
-browser open <url> [--session <name>] [--ttl <seconds>] [--timeout <seconds>] [--op-timeout <seconds>]
+browser open <url> [--session <name>] [--timeout <seconds>] [--op-timeout <seconds>]
 browser close <session>
 ```
-- Sessions auto-expire after `--ttl` seconds (default: 120s)
+- Sessions persist until explicitly closed via `close`. When the limit is reached, the least-recently-used session is evicted.
 - Each session operation is serialized and has an `--op-timeout` deadline (default: 30s)
 - Max 8 concurrent sessions
 - Session name is auto-generated if `--session` is omitted
@@ -175,5 +175,6 @@ browser close auth
 - Stateless commands use fresh incognito contexts. Session commands persist pages.
 - Stealth mode is always enabled (go-rod/stealth).
 - Katana JS scripts (page-init.js + utils.js) are injected into session pages for form/element discovery.
-- Sessions are garbage-collected after TTL expiry.
+- Sessions persist until explicitly closed; when the limit (8) is reached, the oldest unused session is evicted.
+- Proxy is managed via the `proxy` command (`proxy auto/switch/clear`) and automatically applies to new browser launches.
 - Chromium is automatically downloaded on first launch if not found.
