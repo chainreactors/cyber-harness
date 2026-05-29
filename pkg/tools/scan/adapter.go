@@ -5,7 +5,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/parsers"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
@@ -28,8 +28,9 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 		Timeout:      discovery.Timeout,
 		VersionLevel: discovery.Version,
 		Exploit:      discovery.Exploit,
+		Proxy:        c.proxy,
 		Debug:        discovery.Debug,
-		OnStats: func(stats sdkkit.Stats) {
+		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capGogoPortscan, stats))
 		},
 	})
@@ -57,7 +58,7 @@ func (c *Command) runSprayCapability(ctx context.Context, flags flags, web webOp
 	opts = applyWebStrategyOptions(flags, web, opts)
 	opts.URLs = []string{target.URL}
 	opts.Host = target.HostHeader
-	opts.OnStats = func(stats sdkkit.Stats) {
+	opts.OnStats = func(stats sdktypes.Stats) {
 		emit(statsEvent(source, stats))
 	}
 
@@ -111,8 +112,9 @@ func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, creden
 		Top:       flags.ZombieTop,
 		Users:     credentials.Users,
 		Passwords: credentials.Passwords,
+		Proxy:     c.proxy,
 		Debug:     flags.Debug,
-		OnStats: func(stats sdkkit.Stats) {
+		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capZombieWeakpass, stats))
 		},
 	})

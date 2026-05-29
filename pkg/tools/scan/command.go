@@ -4,21 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
-	gogopkg "github.com/chainreactors/gogo/v2/pkg"
-	neutronhttp "github.com/chainreactors/neutron/protocols/http"
-	"github.com/chainreactors/proxyclient"
-	zombiepkg "github.com/chainreactors/zombie/pkg"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -163,8 +155,6 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		defer restoreDebug()
 		c.logger.Debugf("scan debug enabled")
 	}
-	restoreProxy := c.installProxy()
-	defer restoreProxy()
 	c.applyAISkillConfig(&flags)
 
 	profile, err := profileForMode(flags.Mode)
@@ -283,66 +273,6 @@ func defaultVerifyModeFromConfig(mode string) string {
 	}
 }
 
-// TestInstallProxy is exported for cross-package testing.
-func (c *Command) TestInstallProxy() func() {
-	return c.installProxy()
-}
-
-func (c *Command) installProxy() func() {
-	if c.proxy == "" {
-		return func() {}
-	}
-	proxyURL, err := url.Parse(c.proxy)
-	if err != nil {
-		c.logger.Warnf("scan: invalid proxy URL %q: %v", c.proxy, err)
-		return func() {}
-	}
-
-	dial, err := proxyclient.NewClient(proxyURL)
-	if err != nil {
-		c.logger.Warnf("scan: proxy setup failed: %v", err)
-		return func() {}
-	}
-	c.logger.Infof("scan proxy=%s", c.proxy)
-
-	dialContext := func(ctx context.Context, network, address string) (net.Conn, error) {
-		return dial.DialContext(ctx, network, address)
-	}
-
-	prevGogoTransport := gogopkg.DefaultTransport.DialContext
-	prevGogoProxy := gogopkg.ProxyDialTimeout
-	prevNeutronProxy := neutronhttp.DefaultOption.Proxy
-	prevNeutronTransport := neutronhttp.DefaultTransport.Proxy
-	prevNeutronDial := neutronhttp.DefaultTransport.DialContext
-	prevZombieProxy := zombiepkg.ProxyDialTimeout
-
-	gogopkg.DefaultTransport.DialContext = dialContext
-	gogopkg.ProxyDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		return dialContext(ctx, network, address)
-	}
-
-	httpProxy := http.ProxyURL(proxyURL)
-	neutronhttp.DefaultOption.Proxy = httpProxy
-	neutronhttp.DefaultTransport.Proxy = httpProxy
-	neutronhttp.DefaultTransport.DialContext = dialContext
-
-	zombiepkg.ProxyDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		return dial.DialContext(ctx, network, address)
-	}
-
-	return func() {
-		gogopkg.DefaultTransport.DialContext = prevGogoTransport
-		gogopkg.ProxyDialTimeout = prevGogoProxy
-		neutronhttp.DefaultOption.Proxy = prevNeutronProxy
-		neutronhttp.DefaultTransport.Proxy = prevNeutronTransport
-		neutronhttp.DefaultTransport.DialContext = prevNeutronDial
-		zombiepkg.ProxyDialTimeout = prevZombieProxy
-	}
-}
 
 func (c *Command) resolveRelativePaths(args []string) []string {
 	if c.workDir == "" {

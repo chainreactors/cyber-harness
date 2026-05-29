@@ -8,7 +8,7 @@ import (
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/parsers"
 	"github.com/chainreactors/sdk/gogo"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 
 const GogoTempLogFile = ".sock.lock"
@@ -22,7 +22,7 @@ type GogoScanOptions struct {
 	Exploit      string
 	Proxy        string
 	Debug        bool
-	OnStats      func(sdkkit.Stats)
+	OnStats      func(sdktypes.Stats)
 }
 
 func GogoScanStream(ctx context.Context, eng *gogo.GogoEngine, opts GogoScanOptions) (<-chan *parsers.GOGOResult, error) {
@@ -36,6 +36,9 @@ func GogoScanStream(ctx context.Context, eng *gogo.GogoEngine, opts GogoScanOpti
 		SetThreads(opts.Threads).
 		SetOption(runOpt).
 		SetStatsHandler(opts.OnStats)
+	if opts.Proxy != "" {
+		gogoCtx = gogoCtx.SetProxy(opts.Proxy)
+	}
 	resultCh, err := eng.Execute(gogoCtx, gogo.NewScanTask(opts.Target, opts.Ports))
 	if err != nil {
 		CleanupGogoTempFiles()

@@ -25,7 +25,7 @@ import (
 	"github.com/chainreactors/parsers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/pkg/association"
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
@@ -677,8 +677,8 @@ func TestPOCCapabilitySkipsUnfingerprintedTargetsByDefault(t *testing.T) {
 
 func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
 	neutronEngine := newScanTestNeutronEngine(t, scanTestTemplate("nginx-poc", "nginx"))
-	index := association.NewFingerPOCIndex()
-	index.BuildFromTemplates(neutronEngine.Get())
+	index := association.NewIndex()
+	index.Build(nil, neutronEngine.Get())
 	cmd := New(&engine.Set{Neutron: neutronEngine, Index: index})
 
 	var events []event
@@ -1539,7 +1539,7 @@ func TestScanSummaryCountsConfirmedAISkillVerify(t *testing.T) {
 
 func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdkkit.Stats{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdktypes.Stats{
 		Engine:   "gogo",
 		Task:     "scan",
 		Targets:  2,
@@ -1548,7 +1548,7 @@ func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 		Results:  1,
 		Duration: 10 * time.Millisecond,
 	})})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capSprayCheck, sdkkit.Stats{
+	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capSprayCheck, sdktypes.Stats{
 		Engine:   "spray",
 		Task:     "check",
 		Targets:  1,

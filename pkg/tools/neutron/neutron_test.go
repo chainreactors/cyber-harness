@@ -41,8 +41,8 @@ func TestSelectNeutronTemplatesFiltersByCommonMetadata(t *testing.T) {
 		testTemplate("low-info", "low", "info", "php"),
 		testTemplate("high-cve", "high", "cve", "nginx"),
 	)
-	index := association.NewFingerPOCIndex()
-	index.BuildFromTemplates(engine.Get())
+	index := association.NewIndex()
+	index.Build(nil, engine.Get())
 
 	selected, filtered := selectNeutronTemplates(engine, index, neutronExecuteOptions{
 		Fingers:           []string{"nginx"},

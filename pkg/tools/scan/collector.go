@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/chainreactors/parsers"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils"
 )
 
@@ -283,7 +283,7 @@ type statsSnapshot struct {
 	CapabilityOutput  map[string]int
 	SprayByCapability map[string]int
 	ErrorsBySource    map[string]int
-	EngineStats       map[string]sdkkit.Stats
+	EngineStats       map[string]sdktypes.Stats
 	Tasks             int64
 	Requests          int64
 }
@@ -302,7 +302,7 @@ func newStatsCollector(inputs int) *statsCollector {
 			CapabilityOutput:  make(map[string]int),
 			SprayByCapability: make(map[string]int),
 			ErrorsBySource:    make(map[string]int),
-			EngineStats:       make(map[string]sdkkit.Stats),
+			EngineStats:       make(map[string]sdktypes.Stats),
 		},
 	}
 }
@@ -334,7 +334,7 @@ func (s *statsCollector) Observe(event pipelineEvent) {
 	}
 }
 
-func (s *statsCollector) recordEngineStats(source string, stats sdkkit.Stats) {
+func (s *statsCollector) recordEngineStats(source string, stats sdktypes.Stats) {
 	if stats.Engine == "" && stats.Task == "" {
 		return
 	}

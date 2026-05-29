@@ -53,10 +53,9 @@ type ScannerConfig struct {
 }
 
 type ToolConfig struct {
-	Enabled        bool
-	BashTimeout    int
-	TavilyKeys     string // comma-separated Tavily API keys (build-time fallback)
-	WebSearchProxy string // HTTP proxy URL for web_search (e.g. socks5://127.0.0.1:7890)
+	Enabled     bool
+	BashTimeout int
+	TavilyKeys  string // comma-separated Tavily API keys (build-time fallback)
 }
 
 type IOAConfig struct {
@@ -156,6 +155,7 @@ func initEngines(ctx context.Context, cfg ScannerConfig, logger telemetry.Logger
 		CyberhubURL: cfg.CyberhubURL,
 		APIKey:      cfg.CyberhubKey,
 		Mode:        cfg.CyberhubMode,
+		Proxy:       cfg.Proxy,
 	}, logger)
 	if err != nil {
 		logger.Warnf("scanner engines init error=%q action=continue_without_scanners", err)
@@ -249,16 +249,15 @@ func initCommandRegistry(engineSet *engine.Set, scanCfg ScannerConfig, toolCfg T
 	scanOpts = append(scanOpts, scan.WithLogger(logger))
 
 	deps := &command.Deps{
-		WorkDir:        workDir,
-		BashTimeout:    toolCfg.BashTimeout,
-		SkillStore:     skillStore,
-		EngineSet:      engineSet,
-		ScannerProxy:   scanCfg.Proxy,
-		ScanOpts:       scanOpts,
-		Logger:         logger,
-		Model:          model,
-		TavilyKeys:     toolCfg.TavilyKeys,
-		WebSearchProxy: toolCfg.WebSearchProxy,
+		WorkDir:      workDir,
+		BashTimeout:  toolCfg.BashTimeout,
+		SkillStore:   skillStore,
+		EngineSet:    engineSet,
+		ScannerProxy: scanCfg.Proxy,
+		ScanOpts:     scanOpts,
+		Logger:       logger,
+		Model:        model,
+		TavilyKeys:   toolCfg.TavilyKeys,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources

@@ -29,15 +29,16 @@ func init() {
 						bash.SetScannerProxy(newProxy)
 					}
 				}
-				// 2. update global scanner transports (gogo, neutron, zombie in-process)
-				InstallGlobalProxy(newProxy)
-				// 3. update individual scanner command proxy fields (gogo --proxy, spray --proxy CLI injection)
+				// 2. update individual scanner command proxy fields;
+				// each command passes proxy to the SDK engine via
+				// Context.SetProxy / RunOptions.ProxyDial on next execution.
 				for _, pc := range reg.All() {
 					if updater, ok := pc.(interface{ SetProxy(string) }); ok {
 						updater.SetProxy(newProxy)
 					}
 				}
 			})
+			cmd.SetCommandExecutor(reg.ExecuteArgs)
 			reg.Register(cmd, "proxy")
 
 			// If --proxy / config proxy is a clash:// URL, auto-activate

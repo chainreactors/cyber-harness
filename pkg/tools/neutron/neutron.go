@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,7 +15,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/util"
-	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -26,7 +23,7 @@ import (
 
 type Command struct {
 	engine  *sdkneutron.Engine
-	index   *association.FingerPOCIndex
+	index   *association.Index
 	logger  telemetry.Logger
 	proxy   string
 	workDir string
@@ -85,7 +82,7 @@ type neutronSummary struct {
 	Errors    int
 }
 
-func New(engine *sdkneutron.Engine, index *association.FingerPOCIndex) *Command {
+func New(engine *sdkneutron.Engine, index *association.Index) *Command {
 	return &Command{engine: engine, index: index, logger: telemetry.NopLogger()}
 }
 
@@ -98,10 +95,14 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 
 func (c *Command) WithProxy(proxy string) *Command {
 	c.proxy = proxy
+	scanengine.ApplyNeutronProxy(proxy)
 	return c
 }
 
-func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
+func (c *Command) SetProxy(proxy string) {
+	c.proxy = proxy
+	scanengine.ApplyNeutronProxy(proxy)
+}
 
 func (c *Command) Name() string { return "neutron" }
 
@@ -160,9 +161,6 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		defer restoreDebug()
 		c.logger.Debugf("neutron debug enabled")
 	}
-	restoreProxy := c.installProxy()
-	defer restoreProxy()
-
 	if flags.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(flags.Timeout)*time.Second)
@@ -447,8 +445,8 @@ func findingFromResult(target string, result *sdkneutron.ExecuteResult) neutronF
 		finding.Tags = cleanTemplateTags(tmpl)
 		finding.Fingers = append([]string(nil), tmpl.Fingers...)
 	}
-	if opResult := result.Result(); opResult != nil {
-		finding.Extracts = append([]string(nil), opResult.OutputExtracts...)
+	if opResult := result.Result(); opResult != nil && opResult.Result != nil {
+		finding.Extracts = append([]string(nil), opResult.Result.OutputExtracts...)
 	}
 	if err := result.Error(); err != nil {
 		finding.Error = err.Error()
@@ -509,30 +507,6 @@ func cleanTemplateTags(tmpl *templates.Template) []string {
 	return tags
 }
 
-// TestInstallProxy is exported for cross-package testing.
-func (c *Command) TestInstallProxy() func() {
-	return c.installProxy()
-}
-
-func (c *Command) installProxy() func() {
-	if c.proxy == "" {
-		return func() {}
-	}
-	proxyURL, err := url.Parse(c.proxy)
-	if err != nil {
-		c.logger.Warnf("neutron: invalid proxy URL %q: %v", c.proxy, err)
-		return func() {}
-	}
-	prevOption := neutronhttp.DefaultOption.Proxy
-	prevTransport := neutronhttp.DefaultTransport.Proxy
-	proxyFunc := http.ProxyURL(proxyURL)
-	neutronhttp.DefaultOption.Proxy = proxyFunc
-	neutronhttp.DefaultTransport.Proxy = proxyFunc
-	return func() {
-		neutronhttp.DefaultOption.Proxy = prevOption
-		neutronhttp.DefaultTransport.Proxy = prevTransport
-	}
-}
 
 // resolveRelativePaths resolves relative file arguments against workDir.
 func (c *Command) resolveRelativePaths(args []string) []string {

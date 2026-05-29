@@ -12,9 +12,13 @@ import (
 
 type OnProxyChange func(newProxyURL string)
 
+// CommandExecutor executes a named command with args. Matches CommandRegistry.ExecuteArgs.
+type CommandExecutor func(ctx context.Context, tokens []string) (string, error)
+
 type Command struct {
 	state         *State
 	onProxyChange OnProxyChange
+	execCommand   CommandExecutor
 }
 
 func New(state *State) *Command {
@@ -25,19 +29,30 @@ func (c *Command) SetOnProxyChange(fn OnProxyChange) {
 	c.onProxyChange = fn
 }
 
+func (c *Command) SetCommandExecutor(fn CommandExecutor) {
+	c.execCommand = fn
+}
+
 func (c *Command) Name() string { return "proxy" }
 
 func (c *Command) Usage() string {
-	return `proxy - Manage proxy nodes from Clash subscriptions
+	return `proxy - Manage proxy nodes and proxy-chain execution
 
 Usage:
-  proxy auto <url> [options]  Auto mode: subscribe + adaptive load balancing (recommended)
-  proxy subscribe <url>       Fetch a Clash subscription and list available nodes
-  proxy list                  List loaded proxy nodes
-  proxy switch <name|index>   Switch the active proxy node (single node)
-  proxy test [name|index]     Test proxy node connectivity
-  proxy current               Show the current active proxy
-  proxy clear                 Clear subscription and revert to original proxy
+  proxy <proxy-url> <command> [args...]   Run a command through the specified proxy (like proxychains)
+  proxy auto <url> [options]              Auto mode: subscribe + adaptive load balancing (recommended)
+  proxy subscribe <url>                   Fetch a Clash subscription and list available nodes
+  proxy list                              List loaded proxy nodes
+  proxy switch <name|index>               Switch the active proxy node (single node)
+  proxy test [name|index]                 Test proxy node connectivity
+  proxy current                           Show the current active proxy
+  proxy clear                             Clear subscription and revert to original proxy
+
+Proxy-chain examples:
+  proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
+  proxy trojan://pass@host:443 zombie -i 10.0.0.1 -s ssh
+  proxy 6 gogo -i 10.0.0.1 -p top2           Use subscribed node #6
+  proxy HK gogo -i 10.0.0.1                   Use first node matching "HK"
 
 Auto mode options:
   --type,-t  trojan,vless     Filter by protocol type
@@ -52,6 +67,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	}
 	subcmd := strings.ToLower(args[0])
 	rest := args[1:]
+
+	// proxy <url> <command> [args...] — proxychain passthrough with explicit URL
+	if strings.Contains(args[0], "://") {
+		return c.execPassthrough(ctx, args[0], rest)
+	}
 
 	switch subcmd {
 	case "auto":
@@ -69,8 +89,44 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	case "clear":
 		return c.execClear()
 	default:
+		// proxy <node-name-or-index> <command> [args...] — resolve from subscription
+		if len(rest) > 0 {
+			if node, _, err := c.findNode(args[0]); err == nil {
+				proxyURL := node.URL.String()
+				return c.execPassthrough(ctx, proxyURL, rest)
+			}
+		}
 		return "", fmt.Errorf("unknown proxy subcommand: %s\n%s", subcmd, c.Usage())
 	}
+}
+
+// execPassthrough runs a command with a one-shot proxy override.
+// The proxy is applied before the command runs and reverted after.
+func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string) (string, error) {
+	if len(cmdArgs) == 0 {
+		return "", fmt.Errorf("usage: proxy <proxy-url> <command> [args...]\nexample: proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2")
+	}
+	if c.execCommand == nil {
+		return "", fmt.Errorf("proxy passthrough not available (no command executor)")
+	}
+
+	// validate proxy URL
+	if _, err := url.Parse(proxyURL); err != nil {
+		return "", fmt.Errorf("invalid proxy URL: %w", err)
+	}
+
+	// save current proxy, apply the one-shot proxy, restore after
+	prev := c.state.ActiveProxy()
+	if c.onProxyChange != nil {
+		c.onProxyChange(proxyURL)
+	}
+	defer func() {
+		if c.onProxyChange != nil {
+			c.onProxyChange(prev)
+		}
+	}()
+
+	return c.execCommand(ctx, cmdArgs)
 }
 
 func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
@@ -258,19 +314,27 @@ func (c *Command) execClear() (string, error) {
 
 func (c *Command) findNode(nameOrIndex string) (*clash.ProxyNode, int, error) {
 	nodes := c.state.Nodes()
-	// try as index
-	if idx, err := fmt.Sscanf(nameOrIndex, "%d", new(int)); err == nil && idx == 1 {
-		var i int
-		fmt.Sscanf(nameOrIndex, "%d", &i)
-		if i < 1 || i > len(nodes) {
-			return nil, 0, fmt.Errorf("index %d out of range (1-%d)", i, len(nodes))
-		}
-		return &nodes[i-1], i - 1, nil
+	if len(nodes) == 0 {
+		return nil, 0, fmt.Errorf("no subscription loaded")
 	}
-	// try as name
+	// try as index
+	var idx int
+	if _, err := fmt.Sscanf(nameOrIndex, "%d", &idx); err == nil {
+		if idx < 1 || idx > len(nodes) {
+			return nil, 0, fmt.Errorf("index %d out of range (1-%d)", idx, len(nodes))
+		}
+		return &nodes[idx-1], idx - 1, nil
+	}
 	lower := strings.ToLower(nameOrIndex)
+	// exact name match
 	for i := range nodes {
 		if strings.ToLower(nodes[i].Name) == lower {
+			return &nodes[i], i, nil
+		}
+	}
+	// substring match (first supported node containing the keyword)
+	for i := range nodes {
+		if nodes[i].Supported && strings.Contains(strings.ToLower(nodes[i].Name), lower) {
 			return &nodes[i], i, nil
 		}
 	}

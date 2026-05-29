@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/parsers"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 
 func formatSummary(d *collector, color bool) string {
@@ -393,7 +393,7 @@ func writeCountTable(sb *strings.Builder, label string, values map[string]int) {
 	}
 }
 
-func sortedStatsKeys(values map[string]sdkkit.Stats) []string {
+func sortedStatsKeys(values map[string]sdktypes.Stats) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		if key != "" {
@@ -404,7 +404,7 @@ func sortedStatsKeys(values map[string]sdkkit.Stats) []string {
 	return keys
 }
 
-func writeEngineStatsTable(sb *strings.Builder, values map[string]sdkkit.Stats) {
+func writeEngineStatsTable(sb *strings.Builder, values map[string]sdktypes.Stats) {
 	sb.WriteString("| Source | Engine | Task | Targets | Tasks | Requests | Results | Errors | Duration |\n")
 	sb.WriteString("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, key := range sortedStatsKeys(values) {

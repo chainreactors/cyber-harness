@@ -6,9 +6,8 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/parsers"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
-	spraycore "github.com/chainreactors/spray/core"
 )
 
 type SprayCheckOptions struct {
@@ -31,7 +30,7 @@ type SprayCheckOptions struct {
 	Timeout       int
 	Proxy         string
 	Debug         bool
-	OnStats       func(sdkkit.Stats)
+	OnStats       func(sdktypes.Stats)
 }
 
 func SprayCheckStream(ctx context.Context, eng *spray.SprayEngine, opts SprayCheckOptions) (<-chan *parsers.SprayResult, error) {
@@ -71,7 +70,7 @@ func SprayCheckStream(ctx context.Context, eng *spray.SprayEngine, opts SprayChe
 	return out, nil
 }
 
-func buildSprayOption(opts SprayCheckOptions) *spraycore.Option {
+func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 	sprayOpt := spray.NewDefaultOption()
 	coreOpt := sprayOpt.Option
 	coreOpt.Threads = opts.Threads
@@ -99,5 +98,5 @@ func buildSprayOption(opts SprayCheckOptions) *spraycore.Option {
 	if opts.Proxy != "" {
 		coreOpt.Proxies = []string{opts.Proxy}
 	}
-	return coreOpt
+	return sprayOpt
 }

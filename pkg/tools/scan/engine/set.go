@@ -2,9 +2,13 @@ package engine
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 
 	"github.com/chainreactors/aiscan/pkg/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	neutronhttp "github.com/chainreactors/neutron/protocols/http"
+	"github.com/chainreactors/proxyclient"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"
 	"github.com/chainreactors/sdk/neutron"
@@ -30,7 +34,7 @@ type Set struct {
 	Neutron   *neutron.Engine
 	Zombie    *sdkzombie.Engine
 	Uncover   *UncoverEngine
-	Index     *association.FingerPOCIndex
+	Index     *association.Index
 	Resources *resources.Set
 	Capacity  CapacityConfig
 	Recon     ReconOptions
@@ -66,10 +70,10 @@ func (e *Set) Close() {
 }
 
 func InitWithOptions(ctx context.Context, opts resources.Options, logger telemetry.Logger) (*Set, error) {
-	return initWithCapacity(ctx, opts, CapacityConfig{}, logger)
+	return initWithCapacity(ctx, opts, CapacityConfig{}, opts.Proxy, logger)
 }
 
-func initWithCapacity(ctx context.Context, opts resources.Options, caps CapacityConfig, logger telemetry.Logger) (*Set, error) {
+func initWithCapacity(ctx context.Context, opts resources.Options, caps CapacityConfig, proxy string, logger telemetry.Logger) (*Set, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
@@ -117,10 +121,9 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	}
 
 	if set.Neutron != nil {
-		set.Index = association.NewFingerPOCIndex()
-		set.Index.BuildFromTemplates(set.Neutron.Get())
-		fingerCount, pocCount := set.Index.Count()
-		logger.Infof("index=finger_poc status=ready fingers=%d pocs=%d", fingerCount, pocCount)
+		set.Index = association.NewIndex()
+		set.Index.Build(nil, set.Neutron.Get())
+		logger.Infof("index=finger_poc status=ready templates=%d", len(set.Neutron.Get()))
 	}
 
 	gogoConfig := gogo.NewConfig()
@@ -134,6 +137,9 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if caps.Gogo > 0 {
 		gogoConfig.WithCapacity(caps.Gogo)
 	}
+	if proxy != "" {
+		gogoConfig.WithProxy(proxy)
+	}
 	set.Gogo = gogo.NewEngine(gogoConfig)
 	logger.Infof("engine=gogo status=ready")
 
@@ -145,6 +151,9 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if caps.Spray > 0 {
 		sprayConfig.WithCapacity(caps.Spray)
 	}
+	if proxy != "" {
+		sprayConfig.WithProxy(proxy)
+	}
 	set.Spray = spray.NewEngine(sprayConfig)
 	logger.Infof("engine=spray status=ready")
 
@@ -152,6 +161,9 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	zombieConfig.WithResourceProvider(resourceSet.ZombieConfig)
 	if caps.Zombie > 0 {
 		zombieConfig.WithCapacity(caps.Zombie)
+	}
+	if proxy != "" {
+		zombieConfig.WithProxy(proxy)
 	}
 	set.Zombie = sdkzombie.NewEngine(zombieConfig)
 	if err := set.Zombie.Init(); err != nil {
@@ -165,6 +177,34 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 		set.Neutron.SetCapacity(caps.Neutron)
 	}
 
+	if proxy != "" {
+		ApplyNeutronProxy(proxy)
+	}
+
 	set.Capacity = caps
 	return set, nil
+}
+
+// ApplyNeutronProxy sets neutron DefaultOption/DefaultTransport proxy. The
+// published neutron SDK does not yet support per-Config proxy, so we set the
+// process-wide defaults. Each neutron execution creates its own transport clone,
+// making this safe for concurrent use. Pass an empty string to clear.
+func ApplyNeutronProxy(proxyURL string) {
+	if proxyURL == "" {
+		neutronhttp.DefaultOption.Proxy = nil
+		neutronhttp.DefaultTransport.Proxy = nil
+		neutronhttp.DefaultTransport.DialContext = nil
+		return
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return
+	}
+	dial, err := proxyclient.NewClient(u)
+	if err != nil {
+		return
+	}
+	neutronhttp.DefaultOption.Proxy = http.ProxyURL(u)
+	neutronhttp.DefaultTransport.Proxy = http.ProxyURL(u)
+	neutronhttp.DefaultTransport.DialContext = dial.DialContext
 }

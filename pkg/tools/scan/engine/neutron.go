@@ -22,7 +22,7 @@ type NeutronExecuteOptions struct {
 	Debug        bool
 }
 
-func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *association.FingerPOCIndex, opts NeutronExecuteOptions) (<-chan *neutron.ExecuteResult, error) {
+func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *association.Index, opts NeutronExecuteOptions) (<-chan *neutron.ExecuteResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("neutron engine is not available")
 	}
@@ -66,24 +66,30 @@ func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *assoc
 // FingerAllowedIDs builds the set of template IDs allowed by the given
 // fingerprints and index. This is shared between the scan pipeline and
 // the standalone neutron command.
-func FingerAllowedIDs(index *association.FingerPOCIndex, fingers []string, maxPerFinger int) map[string]struct{} {
+func FingerAllowedIDs(index *association.Index, fingers []string, maxPerFinger int) map[string]struct{} {
 	allowed := make(map[string]struct{})
 	if index == nil {
 		return allowed
 	}
 	for _, finger := range fingers {
-		ids := index.GetPOCsByFinger(finger)
-		if maxPerFinger > 0 && len(ids) > maxPerFinger {
-			ids = ids[:maxPerFinger]
+		result := index.Lookup(association.NewQuery().WithFingers(finger))
+		if result == nil {
+			continue
 		}
-		for _, id := range ids {
-			allowed[id] = struct{}{}
+		tpls := result.Templates
+		if maxPerFinger > 0 && len(tpls) > maxPerFinger {
+			tpls = tpls[:maxPerFinger]
+		}
+		for _, tpl := range tpls {
+			if tpl != nil && tpl.Id != "" {
+				allowed[tpl.Id] = struct{}{}
+			}
 		}
 	}
 	return allowed
 }
 
-func SelectNeutronTemplates(eng *neutron.Engine, index *association.FingerPOCIndex, opts NeutronExecuteOptions) ([]*templates.Template, bool) {
+func SelectNeutronTemplates(eng *neutron.Engine, index *association.Index, opts NeutronExecuteOptions) ([]*templates.Template, bool) {
 	if len(opts.Fingers) == 0 {
 		if opts.Broad {
 			return nil, false

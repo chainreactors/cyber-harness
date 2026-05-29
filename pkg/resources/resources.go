@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/neutron"
+	"github.com/chainreactors/sdk/pkg/cyberhub"
 	"github.com/chainreactors/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -27,6 +28,7 @@ type Options struct {
 	CyberhubURL string
 	APIKey      string
 	Mode        string
+	Proxy       string
 }
 
 // Set owns the scanner resource bytes and compiled SDK engines used by aiscan.
@@ -233,7 +235,7 @@ func installLocalPortPreset() error {
 }
 
 func loadRemoteFingers(ctx context.Context, cyberhubURL, apiKey string) (fingers.FullFingers, error) {
-	config := fingers.NewConfig().WithCyberhub(cyberhubURL, apiKey)
+	config := fingers.NewConfig().WithProvider(cyberhub.NewProvider(cyberhubURL, apiKey))
 	if err := config.Load(ctx); err != nil {
 		return fingers.FullFingers{}, err
 	}
@@ -241,7 +243,7 @@ func loadRemoteFingers(ctx context.Context, cyberhubURL, apiKey string) (fingers
 }
 
 func loadRemoteTemplates(ctx context.Context, cyberhubURL, apiKey string) (neutron.Templates, error) {
-	config := neutron.NewConfig().WithCyberhub(cyberhubURL, apiKey)
+	config := neutron.NewConfig().WithProvider(cyberhub.NewProvider(cyberhubURL, apiKey))
 	if err := config.Load(ctx); err != nil {
 		return neutron.Templates{}, err
 	}

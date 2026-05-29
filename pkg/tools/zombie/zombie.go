@@ -4,18 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/proxyclient"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	zombiecore "github.com/chainreactors/zombie/core"
-	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 
 type Command struct {
@@ -59,43 +56,22 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		defer restoreDebug()
 		c.logger.Debugf("zombie debug enabled")
 	}
-	restore := c.installProxy()
-	defer restore()
-	if err := zombiecore.RunWithArgs(ctx, args, zombiecore.RunOptions{
-		Output: &buf,
-	}); err != nil {
+	runOpts := zombiecore.RunOptions{Output: &buf}
+	if c.proxy != "" {
+		proxyURL, err := url.Parse(c.proxy)
+		if err == nil {
+			dial, dialErr := proxyclient.NewClient(proxyURL)
+			if dialErr == nil {
+				runOpts.ProxyDial = dial.DialContext
+			}
+		}
+	}
+	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		return buf.String(), fmt.Errorf("zombie: %w", err)
 	}
 	return buf.String(), nil
 }
 
-// TestInstallProxy is exported for cross-package testing.
-func (c *Command) TestInstallProxy() func() {
-	return c.installProxy()
-}
-
-func (c *Command) installProxy() func() {
-	if c.proxy == "" {
-		return func() {}
-	}
-	proxyURL, err := url.Parse(c.proxy)
-	if err != nil {
-		c.logger.Warnf("zombie: invalid proxy URL %q: %v", c.proxy, err)
-		return func() {}
-	}
-	dial, err := proxyclient.NewClient(proxyURL)
-	if err != nil {
-		c.logger.Warnf("zombie: proxy dial setup failed: %v", err)
-		return func() {}
-	}
-	prev := zombiepkg.ProxyDialTimeout
-	zombiepkg.ProxyDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		return dial.DialContext(ctx, network, address)
-	}
-	return func() { zombiepkg.ProxyDialTimeout = prev }
-}
 
 // resolveRelativePaths resolves relative file arguments against workDir.
 func (c *Command) resolveRelativePaths(args []string) []string {

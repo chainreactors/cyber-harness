@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/chainreactors/parsers"
-	sdkkit "github.com/chainreactors/sdk/pkg"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 
 type eventKind string
@@ -28,7 +28,7 @@ type event struct {
 	Target  target
 	Finding finding
 	Error   errorEvent
-	Stats   sdkkit.Stats
+	Stats   sdktypes.Stats
 }
 
 func targetEvent(source, raw string, target target) event {
@@ -46,7 +46,7 @@ func errorEventOf(source, message string) event {
 	return event{Kind: eventError, Source: source, Error: errorEvent{Message: message}}
 }
 
-func statsEvent(source string, stats sdkkit.Stats) event {
+func statsEvent(source string, stats sdktypes.Stats) event {
 	seq := atomic.AddUint64(&statsEventSeq, 1)
 	return event{Kind: eventStats, Source: source, Raw: strconv.FormatUint(seq, 10), Stats: stats}
 }

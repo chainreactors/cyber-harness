@@ -16,7 +16,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
-	neuhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/parsers"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/sdk/gogo"
@@ -257,15 +256,6 @@ func parseSDKScanArgs(args []string) (*sdkScanArgs, bool, error) {
 // executeViaSDK runs the scan through the SDK engine, which spawns a
 // goroutine that checks ctx.Done() at every IP and every ants pool dispatch.
 func (c *Command) executeViaSDK(ctx context.Context, opts *sdkScanArgs) (string, error) {
-	// Install proxy dialer into the global transport variables that
-	// engine.Dispatch reads — same globals the CLI runner.Prepare() sets.
-	if len(opts.proxies) > 0 {
-		if err := installProxyDialer(opts.proxies); err != nil {
-			c.logger.Debugf("gogo: proxy setup failed: %v", err)
-			// Continue without proxy rather than failing entirely.
-		}
-	}
-
 	if err := c.engine.Init(); err != nil {
 		return "", fmt.Errorf("gogo: init: %w", err)
 	}
@@ -277,6 +267,16 @@ func (c *Command) executeViaSDK(ctx context.Context, opts *sdkScanArgs) (string,
 	optCopy.VersionLevel = opts.versionLevel
 	optCopy.Exploit = opts.exploit
 	optCopy.Debug = opts.debug
+
+	proxyURLs := opts.proxies
+	if len(proxyURLs) == 0 && c.proxy != "" {
+		proxyURLs = []string{c.proxy}
+	}
+	if len(proxyURLs) > 0 {
+		if err := applyProxyToRunnerOption(&optCopy, proxyURLs); err != nil {
+			c.logger.Debugf("gogo: proxy setup failed: %v", err)
+		}
+	}
 
 	gogoCtx := gogo.NewContext().
 		WithContext(ctx).
@@ -382,9 +382,7 @@ func isFalseFlagValue(value string) bool {
 	}
 }
 
-// installProxyDialer replicates core.installProxyDialer (which is unexported)
-// to set the global transport dial functions that engine.Dispatch reads.
-func installProxyDialer(proxyURLs []string) error {
+func applyProxyToRunnerOption(opt *gogopkg.RunnerOption, proxyURLs []string) error {
 	var proxies []*url.URL
 	for _, u := range proxyURLs {
 		uri, err := url.Parse(u)
@@ -398,12 +396,11 @@ func installProxyDialer(proxyURLs []string) error {
 		return fmt.Errorf("create proxy chain: %w", err)
 	}
 	dialCtx := dialer.DialContext
-	neuhttp.DefaultTransport.DialContext = dialCtx
-	gogopkg.DefaultTransport.DialContext = dialCtx
-	gogopkg.ProxyDialTimeout = func(network, address string, duration time.Duration) (net.Conn, error) {
-		tCtx, cancel := context.WithTimeout(context.Background(), duration)
+	opt.ProxyDialContext = dialCtx
+	opt.ProxyDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		return dialCtx(tCtx, network, address)
+		return dialCtx(ctx, network, address)
 	}
 	return nil
 }
