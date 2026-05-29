@@ -13,7 +13,7 @@ type Origin string
 const (
 	OriginUser   Origin = "user"
 	OriginPeer   Origin = "peer"
-	OriginTask   Origin = "task"
+	OriginSession Origin = "session"
 	OriginSystem Origin = "system"
 )
 

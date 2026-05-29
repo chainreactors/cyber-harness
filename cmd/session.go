@@ -5,7 +5,7 @@ import (
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/app"
-	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
+	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -24,19 +24,19 @@ type sessionConfig struct {
 func newAgentSession(cfg sessionConfig) *agentSession {
 	ib := inboxpkg.NewBuffered(64)
 
-	taskMgr := bashTaskManager(cfg.Application.Commands)
-	if taskMgr != nil {
-		taskMgr.SetOnDone(func(info taskmod.Info) {
-			tail := taskMgr.PeekOrEmpty(info.ID, 20)
-			msg := inboxpkg.NewMessage(inboxpkg.OriginTask, "user",
-				taskmod.FormatCompletion(info, tail))
+	sessMgr := bashSessionManager(cfg.Application.Commands)
+	if sessMgr != nil {
+		sessMgr.SetOnDone(func(info tmuxpkg.Info) {
+			tail := sessMgr.PeekOrEmpty(info.ID, 20)
+			msg := inboxpkg.NewMessage(inboxpkg.OriginSession, "user",
+				tmuxpkg.FormatCompletion(info, tail))
 			msg.Meta = map[string]any{
 				"session_id":   info.ID,
 				"session_name": info.Name,
 				"exit_code":    info.ExitCode,
 			}
 			if err := ib.Push(msg); err != nil {
-				cfg.Logger.Warnf("inbox push task completion: %s", err)
+				cfg.Logger.Warnf("inbox push session completion: %s", err)
 			}
 		})
 	}
@@ -68,8 +68,8 @@ func newAgentSession(cfg sessionConfig) *agentSession {
 
 	cleanup := func() {
 		scheduler.Stop()
-		if taskMgr != nil {
-			taskMgr.Shutdown()
+		if sessMgr != nil {
+			sessMgr.Shutdown()
 		}
 	}
 

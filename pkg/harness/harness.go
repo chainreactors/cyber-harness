@@ -212,43 +212,6 @@ func (h *Harness) ScannerAI(name string, scannerArgs ...string) *RunResult {
 	return h.Run(args...)
 }
 
-// --- legacy assertion helpers (use Verify for new tests) ---
-
-func (h *Harness) RequireOK(r *RunResult) {
-	h.t.Helper()
-	if !r.OK() {
-		h.t.Fatalf("command failed (exit=%d):\nstdout: %s\nstderr: %s",
-			r.ExitCode, clip(r.Stdout, 1000), clip(r.Stderr, 1000))
-	}
-}
-
-func (h *Harness) RequireContains(r *RunResult, substr string) {
-	h.t.Helper()
-	if !r.ContainsOutput(substr) {
-		h.t.Fatalf("output missing %q:\nstdout: %s\nstderr: %s",
-			substr, clip(r.Stdout, 1000), clip(r.Stderr, 1000))
-	}
-}
-
-func (h *Harness) RequireToolResult(r *RunResult, toolName, substr string) {
-	h.t.Helper()
-	if !r.ToolResultContains(toolName, substr) {
-		var results []string
-		for _, e := range r.ToolCallsNamed(toolName) {
-			results = append(results, clip(e.Result, 300))
-		}
-		h.t.Fatalf("%s tool results missing %q:\nresults: %s", toolName, substr, strings.Join(results, "\n---\n"))
-	}
-}
-
-func (h *Harness) RequireAnyResult(r *RunResult, substr string) {
-	h.t.Helper()
-	all := r.AllToolResults()
-	if !strings.Contains(all, substr) && !r.ContainsOutput(substr) {
-		h.t.Fatalf("no tool result or output contains %q", substr)
-	}
-}
-
 // --- helpers ---
 
 func repoRoot(t *testing.T) string {

@@ -13,7 +13,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
-	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
+	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/app"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/command"
 	"github.com/chainreactors/aiscan/pkg/swarm"
@@ -440,12 +440,12 @@ func peerToInboxMessage(peer swarm.PeerMessage) inboxpkg.Message {
 	return msg
 }
 
-// bashTaskManager fetches the task.Manager owned by the bash tool inside the
-// shared command registry. Returns nil if the registry has no bash tool
+// bashSessionManager fetches the tmux.Manager owned by the bash tool inside
+// the shared command registry. Returns nil if the registry has no bash tool
 // (which only happens in test setups without the core tool factory).
-func bashTaskManager(reg interface {
+func bashSessionManager(reg interface {
 	GetTool(string) (cmdpkg.AgentTool, bool)
-}) *taskmod.Manager {
+}) *tmuxpkg.Manager {
 	if reg == nil {
 		return nil
 	}

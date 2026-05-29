@@ -54,7 +54,7 @@ func ParseSwarm(content map[string]any) (SwarmMessage, bool) {
 	return msg, true
 }
 
-func ParseLegacyTask(content map[string]any) (SwarmMessage, bool) {
+func ParseLegacyMessage(content map[string]any) (SwarmMessage, bool) {
 	if task, ok := content["task"].(string); ok && task != "" {
 		return SwarmMessage{Content: task}, true
 	}
@@ -79,7 +79,7 @@ func swarmFromIOA(msg ioa.Message) (SwarmMessage, bool) {
 	if sm, ok := ParseSwarm(msg.Content); ok {
 		return sm, true
 	}
-	return ParseLegacyTask(msg.Content)
+	return ParseLegacyMessage(msg.Content)
 }
 
 func isProfileMessage(raw ioa.Message, msg SwarmMessage) bool {

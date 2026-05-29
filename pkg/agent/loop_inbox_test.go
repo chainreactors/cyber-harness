@@ -175,7 +175,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 	go func() {
 		defer producer.Done()
 		time.Sleep(20 * time.Millisecond)
-		ib.Push(inbox.NewMessage(inbox.OriginTask, "user", "<session_completion>scan done</session_completion>"))
+		ib.Push(inbox.NewMessage(inbox.OriginSession, "user", "<session_completion>scan done</session_completion>"))
 	}()
 
 	result, err := (Config{
