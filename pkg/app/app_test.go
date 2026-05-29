@@ -42,12 +42,12 @@ func TestInitCommandRegistryRegistersScannerCommands(t *testing.T) {
 	}
 }
 
-func TestInitCommandRegistryRegisters5CoreTools(t *testing.T) {
+func TestInitCommandRegistryRegistersCoreTools(t *testing.T) {
 	logger := telemetry.NopLogger()
 	reg := initCommandRegistry(nil, ScannerConfig{}, ToolConfig{BashTimeout: 30}, nil, "", nil, logger)
 
 	tools := reg.Tools()
-	expected := map[string]bool{"read": true, "write": true, "glob": true, "bash": true, "task": true}
+	expected := map[string]bool{"read": true, "write": true, "glob": true, "bash": true}
 	for _, tool := range tools {
 		if !expected[tool.Name()] {
 			t.Fatalf("unexpected agent tool: %s", tool.Name())
@@ -71,7 +71,7 @@ func TestCommandRegistryOnlyExposesCoreTrueTools(t *testing.T) {
 
 	for _, tool := range reg.Tools() {
 		switch tool.Name() {
-		case "read", "write", "glob", "bash", "task":
+		case "read", "write", "glob", "bash":
 		default:
 			t.Fatalf("pseudo-command %q should NOT be registered as an agent tool", tool.Name())
 		}
