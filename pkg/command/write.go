@@ -201,7 +201,7 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 		return ErrorResult("edits produced no changes"), nil
 	}
 
-	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
+	if err := os.WriteFile(filepath.Clean(path), []byte(result), 0644); err != nil {
 		return ToolResult{}, fmt.Errorf("write edited file: %w", err)
 	}
 

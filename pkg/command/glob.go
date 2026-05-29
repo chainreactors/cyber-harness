@@ -132,13 +132,13 @@ func globRecursive(baseDir, pattern string) ([]string, error) {
 	}
 
 	if _, err := os.Stat(root); err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	var matches []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries
+			return err
 		}
 		if d.IsDir() {
 			return nil
@@ -156,7 +156,7 @@ func globRecursive(baseDir, pattern string) ([]string, error) {
 		// Match the suffix against the relative path from root
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil
+			return err
 		}
 
 		matched, _ := filepath.Match(suffix, filepath.Base(rel))

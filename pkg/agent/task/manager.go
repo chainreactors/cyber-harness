@@ -207,7 +207,7 @@ func (m *Manager) supervise(s *session, timeout time.Duration) {
 	fn := m.onDone
 	m.mu.Unlock()
 	if fn != nil {
-		defer func() { recover() }()
+		defer func() { _ = recover() }()
 		fn(infoCopy)
 	}
 }

@@ -57,7 +57,7 @@ func (b *OutputBuffer) Write(p []byte) (int, error) {
 		b.buf = fresh
 	}
 	if b.file != nil {
-		b.file.Write(p)
+		_, _ = b.file.Write(p)
 	}
 	cb := b.onWrite
 	b.mu.Unlock()
@@ -126,7 +126,7 @@ func (b *OutputBuffer) Len() int64 {
 }
 
 func (b *OutputBuffer) AppendError(msg string) {
-	b.Write([]byte("\n[task error] " + msg + "\n"))
+	_, _ = b.Write([]byte("\n[task error] " + msg + "\n"))
 }
 
 func tailLines(s string, n int) string {

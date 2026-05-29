@@ -188,7 +188,7 @@ func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 
 	supported := clash.SupportedNodes(sub)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[proxy] auto mode enabled\n"))
+	sb.WriteString("[proxy] auto mode enabled\n")
 	sb.WriteString(fmt.Sprintf("  Subscription: %s\n", subURL))
 	sb.WriteString(fmt.Sprintf("  Nodes: %d total, %d supported\n", len(sub.Nodes), len(supported)))
 	sb.WriteString(fmt.Sprintf("  Strategy: %s\n", strategy))

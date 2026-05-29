@@ -328,7 +328,7 @@ func mergeManualScannerOptions(option *Option, manual Option) {
 	option.CyberhubKey = resolveString(manual.CyberhubKey, option.CyberhubKey)
 	option.CyberhubMode = resolveString(manual.CyberhubMode, option.CyberhubMode)
 	mergeReconOptions(option, &manual)
-	option.ScannerOptions.Proxy = resolveString(manual.ScannerOptions.Proxy, option.ScannerOptions.Proxy)
+	option.Proxy = resolveString(manual.Proxy, option.Proxy)
 	if manual.NoColor {
 		option.NoColor = true
 	}
@@ -463,7 +463,7 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *Option, v string) { o.APIKey = v }},
 	{names: []string{"--model"}, arity: 1, apply: func(o *Option, v string) { o.Model = v }},
-	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.ScannerOptions.Proxy = v }},
+	{names: []string{"--proxy"}, arity: 1, apply: func(o *Option, v string) { o.Proxy = v }},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *Option, v string) { o.LLMProxy = v }},
 	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *Option, v string) { o.FofaEmail = v }},
 	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *Option, v string) { o.FofaKey = v }},

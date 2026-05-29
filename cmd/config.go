@@ -20,15 +20,8 @@ func init() {
 	config.AddDriver(yamldrv.Driver)
 }
 
-func intOption(v int) *int           { return &v }
-func floatOption(v float64) *float64 { return &v }
+func intOption(v int) *int { return &v }
 func intOptionValue(p *int) int {
-	if p != nil {
-		return *p
-	}
-	return 0
-}
-func floatOptionValue(p *float64) float64 {
 	if p != nil {
 		return *p
 	}
@@ -139,7 +132,7 @@ func mergeOption(dst, src *Option) {
 	if dst.ReconLimit == nil && src.ReconLimit != nil {
 		dst.ReconLimit = src.ReconLimit
 	}
-	dst.ScannerOptions.Proxy = resolveString(dst.ScannerOptions.Proxy, src.ScannerOptions.Proxy)
+	dst.Proxy = resolveString(dst.Proxy, src.Proxy)
 	dst.IOAURL = resolveString(dst.IOAURL, src.IOAURL)
 	dst.IOANodeName = resolveString(dst.IOANodeName, src.IOANodeName)
 	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {

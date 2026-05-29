@@ -255,7 +255,7 @@ func (t *TmuxCommand) cmdCapturePane(args []string) (string, error) {
 		case "-n":
 			if i+1 < len(rest) {
 				i++
-				fmt.Sscanf(rest[i], "%d", &lines)
+				_, _ = fmt.Sscanf(rest[i], "%d", &lines)
 			}
 		}
 	}

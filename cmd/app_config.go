@@ -31,7 +31,7 @@ func appConfig(option *Option, features runtimeFeatures, logger telemetry.Logger
 			EnableAllAISkills: option.AI,
 			AITimeout:         defaultInt(DefaultVerifyTimeout, 120),
 			VerifyMode:        DefaultVerify,
-			Proxy:             option.ScannerOptions.Proxy,
+			Proxy:             option.Proxy,
 			FofaEmail:         resolveString(option.FofaEmail, os.Getenv("FOFA_EMAIL")),
 			FofaKey:           resolveString(option.FofaKey, os.Getenv("FOFA_KEY")),
 			HunterToken:       resolveString(option.HunterToken, os.Getenv("HUNTER_TOKEN")),

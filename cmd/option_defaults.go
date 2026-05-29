@@ -41,7 +41,7 @@ func applyDefaults(option *Option) {
 	option.CyberhubURL = resolveString(option.CyberhubURL, DefaultCyberhubURL)
 	option.CyberhubKey = resolveString(option.CyberhubKey, DefaultCyberhubKey)
 	option.CyberhubMode = resolveString(resolveString(option.CyberhubMode, DefaultCyberhubMode), "merge")
-	option.ScannerOptions.Proxy = resolveString(option.ScannerOptions.Proxy, DefaultScannerProxy)
+	option.Proxy = resolveString(option.Proxy, DefaultScannerProxy)
 	option.IOAURL = resolveString(option.IOAURL, DefaultIOAURL)
 	option.IOANodeID = resolveString(option.IOANodeID, DefaultIOANodeID)
 	option.IOANodeName = resolveString(option.IOANodeName, DefaultIOANodeName)

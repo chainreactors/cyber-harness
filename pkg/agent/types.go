@@ -34,7 +34,7 @@ const (
 	StopReasonStopped    StopReason = "stopped"
 	StopReasonBudget     StopReason = "budget"
 	StopReasonError      StopReason = "error"
-	StopReasonCancelled  StopReason = "cancelled"
+	StopReasonCanceled StopReason = "canceled"
 )
 
 type Event struct {

@@ -59,7 +59,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		if err := ctx.Err(); err != nil {
 			failure := provider.NewTextMessage("assistant", "")
 			transcript.append(failure)
-			return end(nil, err, StopReasonCancelled)
+			return end(nil, err, StopReasonCanceled)
 		}
 		if err := emit(ctx, emitFn, Event{Type: EventTurnStart, Turn: turn}); err != nil {
 			return end(nil, err, StopReasonError)

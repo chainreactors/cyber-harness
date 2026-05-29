@@ -299,7 +299,7 @@ func (t *SubAgentTool) kill(name string) (string, error) {
 		return "", fmt.Errorf("no running subagent named %q", name)
 	}
 	info.Cancel()
-	return fmt.Sprintf("Subagent %q cancelled.", name), nil
+	return fmt.Sprintf("Subagent %q canceled.", name), nil
 }
 
 func (t *SubAgentTool) track(name, typeName, mode string, cancel context.CancelFunc, ib inbox.Inbox) {

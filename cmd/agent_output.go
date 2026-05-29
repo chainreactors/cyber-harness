@@ -28,10 +28,8 @@ var (
 	colorReset = "\033[0m"
 	colorDim   = "\033[2m"
 	colorBold  = "\033[1m"
-	colorGreen = "\033[32m"
 	colorRed   = "\033[31m"
 	colorCyan  = "\033[36m"
-	colorWhite = "\033[37m"
 )
 
 type agentOutput struct {
@@ -64,10 +62,8 @@ func newAgentOutput(option *Option) *agentOutput {
 		colorReset = ""
 		colorDim = ""
 		colorBold = ""
-		colorGreen = ""
 		colorRed = ""
 		colorCyan = ""
-		colorWhite = ""
 	}
 	return &agentOutput{
 		stdout:   os.Stdout,

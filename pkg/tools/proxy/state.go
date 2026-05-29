@@ -168,7 +168,7 @@ func (s *State) TestNode(ctx context.Context, node *clash.ProxyNode) (time.Durat
 	if err != nil {
 		return latency, err
 	}
-	io.ReadAll(io.LimitReader(resp.Body, 64))
+	_, _ = io.ReadAll(io.LimitReader(resp.Body, 64))
 	resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return latency, fmt.Errorf("HTTP %d", resp.StatusCode)

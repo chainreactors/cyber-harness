@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -109,12 +110,12 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatComplet
 
 	result, err := parseAnthropicResponse(respBody)
 	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			apiErr.StatusCode = resp.StatusCode
+			return nil, apiErr
+		}
 		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if result.Error != nil {
-		result.Error.StatusCode = resp.StatusCode
-		return nil, result.Error
 	}
 
 	return result, nil
@@ -146,9 +147,14 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 		reqCancel()
 		return nil, fmt.Errorf("http request: %w", err)
 	}
+	closeBody := true
+	defer func() {
+		if closeBody {
+			resp.Body.Close()
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
 		defer reqCancel()
 		timeout := anthropicTimeout(p.config.Timeout)
 		respBody, timedOut, err := readAllWithCancelTimeout(resp.Body, reqCancel, timeout)
@@ -166,6 +172,7 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 	})
 
 	events := make(chan ChatCompletionStreamEvent)
+	closeBody = false // ownership transferred to goroutine
 	go func() {
 		defer reqCancel()
 		defer resp.Body.Close()
@@ -476,7 +483,7 @@ func parseAnthropicResponse(data []byte) (*ChatCompletionResponse, error) {
 		return nil, err
 	}
 	if probe.Type == "error" && probe.Error != nil {
-		return &ChatCompletionResponse{Error: probe.Error}, nil
+		return nil, probe.Error
 	}
 
 	var resp anthropicMessageResponse
@@ -484,7 +491,7 @@ func parseAnthropicResponse(data []byte) (*ChatCompletionResponse, error) {
 		return nil, err
 	}
 	if resp.Error != nil {
-		return &ChatCompletionResponse{Error: resp.Error}, nil
+		return nil, resp.Error
 	}
 
 	msg := anthropicBlocksToMessage(resp.Role, resp.Content)

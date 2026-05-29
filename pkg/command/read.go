@@ -118,7 +118,6 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 	lineNum := 0
 	outputLines := 0
 	outputBytes := 0
-	truncatedByBytes := false
 	totalLines := 0
 
 	for scanner.Scan() {
@@ -137,7 +136,6 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 		formatted := fmt.Sprintf("%d\t%s\n", lineNum, line)
 
 		if outputBytes+len(formatted) > defaultReadByteLimit && outputLines > 0 {
-			truncatedByBytes = true
 			continue // keep counting total lines
 		}
 
@@ -148,11 +146,6 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 
 	if err := scanner.Err(); err != nil {
 		return ToolResult{}, fmt.Errorf("read file: %w", err)
-	}
-
-	// Count remaining lines if we stopped early
-	if truncatedByBytes || outputLines >= lineLimit {
-		// We already counted during the scan loop above
 	}
 
 	content := sb.String()

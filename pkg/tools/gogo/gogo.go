@@ -130,14 +130,14 @@ func parseSDKScanArgs(args []string) (*sdkScanArgs, bool, error) {
 		if strings.HasPrefix(a, "--") {
 			key, _, _ = strings.Cut(a, "=")
 		}
-		switch {
-		case key == "-j", key == "--json", key == "-J":
+		switch key {
+		case "-j", "--json", "-J":
 			return nil, false, nil
-		case key == "-w", key == "--workflow", key == "-W":
+		case "-w", "--workflow", "-W":
 			return nil, false, nil
-		case key == "-F", key == "--format":
+		case "-F", "--format":
 			return nil, false, nil
-		case key == "-n", key == "--no":
+		case "-n", "--no":
 			return nil, false, nil
 		}
 	}
@@ -187,15 +187,15 @@ func parseSDKScanArgs(args []string) (*sdkScanArgs, bool, error) {
 			}
 		case arg == "-t" || key == "--thread":
 			if v, ok := nextVal(); ok {
-				fmt.Sscanf(v, "%d", &opts.threads)
+				_, _ = fmt.Sscanf(v, "%d", &opts.threads)
 			}
 		case arg == "-d" || key == "--timeout":
 			if v, ok := nextVal(); ok {
-				fmt.Sscanf(v, "%d", &opts.delay)
+				_, _ = fmt.Sscanf(v, "%d", &opts.delay)
 			}
 		case arg == "-D" || key == "--ssl-timeout":
 			if v, ok := nextVal(); ok {
-				fmt.Sscanf(v, "%d", &opts.httpsDelay)
+				_, _ = fmt.Sscanf(v, "%d", &opts.httpsDelay)
 			}
 		case arg == "-v" || arg == "--verbose":
 			opts.versionLevel++

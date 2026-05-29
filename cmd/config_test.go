@@ -518,7 +518,7 @@ cyberhub:
 		{"Provider", option.Provider, "cli-provider", "CLI > config > build"},
 		{"Model", option.Model, "config-model", "config > build (CLI empty)"},
 		{"APIKey", option.APIKey, "config-key", "config fills empty"},
-		{"Proxy", option.ScannerOptions.Proxy, "config-proxy", "config > build"},
+		{"Proxy", option.Proxy, "config-proxy", "config > build"},
 		{"CyberhubURL", option.CyberhubURL, "http://config-hub:9000", "config fills empty"},
 	}
 	for _, c := range checks {

@@ -332,7 +332,7 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	})
 
 	if option.Heartbeat > 0 {
-		sess.Config.LoopScheduler.Add(ctx, agent.LoopEntry{
+		_ = sess.Config.LoopScheduler.Add(ctx, agent.LoopEntry{
 			Name:     "heartbeat",
 			Interval: time.Duration(option.Heartbeat) * time.Minute,
 			Mode:     agent.ModeIndependent,
@@ -385,20 +385,6 @@ func writeXMLAttr(sb *strings.Builder, name, value string) {
 	sb.WriteString("=\"")
 	_ = xml.EscapeText(sb, []byte(value))
 	sb.WriteByte('"')
-}
-
-func inboxRefsFromPeer(peer swarm.PeerMessage) map[string][]string {
-	refs := make(map[string][]string, 2)
-	if len(peer.Refs.Messages) > 0 {
-		refs["messages"] = append([]string(nil), peer.Refs.Messages...)
-	}
-	if len(peer.Refs.Nodes) > 0 {
-		refs["nodes"] = append([]string(nil), peer.Refs.Nodes...)
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	return refs
 }
 
 func peerPayload(peer swarm.PeerMessage) string {

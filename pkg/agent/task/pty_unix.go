@@ -96,7 +96,7 @@ func pumpOutput(r io.Reader, buf *OutputBuffer) <-chan struct{} {
 		for {
 			n, err := r.Read(tmp)
 			if n > 0 {
-				buf.Write(tmp[:n])
+				_, _ = buf.Write(tmp[:n])
 			}
 			if err != nil {
 				return

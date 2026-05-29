@@ -298,7 +298,7 @@ func parseSkill(filePath, defaultName, raw string) (Skill, []Diagnostic, bool) {
 	agentBackground := strings.EqualFold(strings.TrimSpace(frontmatter["agent_background"]), "true")
 	agentMaxTurns := 0
 	if v := strings.TrimSpace(frontmatter["agent_max_turns"]); v != "" {
-		fmt.Sscanf(v, "%d", &agentMaxTurns)
+		_, _ = fmt.Sscanf(v, "%d", &agentMaxTurns)
 	}
 	agentModel := strings.TrimSpace(frontmatter["agent_model"])
 
