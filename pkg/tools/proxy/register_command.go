@@ -11,6 +11,7 @@ import (
 
 	// Register extra proxy protocols so proxyclient.NewClient can handle them.
 	_ "github.com/chainreactors/proxyclient/extra/anytls"
+	_ "github.com/chainreactors/proxyclient/extra/clash"
 	_ "github.com/chainreactors/proxyclient/extra/hysteria2"
 	_ "github.com/chainreactors/proxyclient/extra/trojan"
 	_ "github.com/chainreactors/proxyclient/extra/vmess"
