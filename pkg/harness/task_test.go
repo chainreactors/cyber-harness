@@ -6,36 +6,29 @@ import "testing"
 
 func TestAgentBackgroundTask(t *testing.T) {
 	h := New(t)
-	r := h.Agent("Start a background bash task: 'sleep 1 && echo bg_done'. Then use the task tool to list running tasks. Wait for it to finish. Report the final output.")
+	r := h.Agent("Start a background shell session: tmux new -d -s bg 'sleep 1 && echo bg_done'. Then use tmux ls to list running sessions. Use tmux wait -t bg to wait for it to finish. Use tmux capture-pane -t bg to get the output. Report the final output.")
 	Verify(t, r).
 		OK().
 		ToolUsed("bash").
-		ToolUsed("task").
-		ToolArgsContain("bash", "background").
-		ToolResultContains("bash", "Started").
 		AnyResultContains("bg_done").
-		ToolSequence("bash", "task").
 		NoToolErrors().
 		Done()
 }
 
-func TestAgentTaskPeek(t *testing.T) {
+func TestAgentTmuxPeek(t *testing.T) {
 	h := New(t)
-	r := h.Agent("Run 'for i in 1 2 3; do echo line_$i; sleep 0.5; done' as a background task. Use task peek to check its output, then wait for completion and report all lines.")
+	r := h.Agent("Run 'for i in 1 2 3; do echo line_$i; sleep 0.5; done' as a detached tmux session named 'lines'. Use tmux capture-pane -t lines --new to check its output, then wait for completion and report all lines.")
 	Verify(t, r).
 		OK().
-		ToolUsed("task").
-		ToolArgsContain("task", "peek").
+		ToolUsed("bash").
 		Done()
 }
 
-func TestAgentTaskKill(t *testing.T) {
+func TestAgentTmuxKill(t *testing.T) {
 	h := New(t)
-	r := h.Agent("Start a background task 'sleep 300' named 'sleeper'. List tasks to confirm it's running. Kill it. List again to confirm it's gone or killed. Report status.")
+	r := h.Agent("Start a detached tmux session: tmux new -d -s sleeper 'sleep 300'. Use tmux ls to confirm it's running. Kill it with tmux kill -t sleeper. List again to confirm it's killed. Report status.")
 	Verify(t, r).
 		OK().
-		ToolUsed("task").
-		ToolCount("task", 2, 10).
-		ToolArgsContain("task", "kill").
+		ToolUsed("bash").
 		Done()
 }

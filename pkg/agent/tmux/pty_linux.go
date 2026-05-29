@@ -1,6 +1,6 @@
 //go:build linux
 
-package task
+package tmux
 
 import (
 	"fmt"

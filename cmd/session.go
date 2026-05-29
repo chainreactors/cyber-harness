@@ -5,7 +5,7 @@ import (
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/app"
-	taskmod "github.com/chainreactors/aiscan/pkg/agent/task"
+	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 

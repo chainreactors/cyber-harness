@@ -104,31 +104,29 @@ func TestAgentParallelTargetScan(t *testing.T) {
 func TestAgentBackgroundTaskDrivesFollowUp(t *testing.T) {
 	h := New(t)
 	r := h.Agent(
-		"Start a background bash task: 'sleep 1 && echo SCAN_COMPLETE port=22 service=ssh'. " +
-			"While it runs, list tasks to confirm it's active. " +
-			"Wait for it to finish. When you see the output, " +
-			"run a follow-up command 'echo VERIFY_22_OK' to simulate verification. " +
+		"Start a detached tmux session: tmux new -d -s scan 'sleep 1 && echo SCAN_COMPLETE port=22 service=ssh'. " +
+			"Use tmux ls to confirm it's running. " +
+			"Use tmux wait -t scan to wait for it. Use tmux capture-pane -t scan to get output. " +
+			"Then run a follow-up command 'echo VERIFY_22_OK' to simulate verification. " +
 			"Report both the scan result and the verification result.",
 	)
 	Verify(t, r).
 		OK().
-		ToolUsed("task").
 		ToolUsed("bash").
 		MinToolCalls(3).
 		AnyResultContains("SCAN_COMPLETE").
 		AnyResultContains("VERIFY_22_OK").
-		ToolSequence("bash", "task").
 		Done()
 }
 
-func TestAgentTaskAndSubagentCoordination(t *testing.T) {
+func TestAgentTmuxAndSubagentCoordination(t *testing.T) {
 	h := New(t)
 	r := h.Agent(
 		"Do these in parallel:\n" +
-			"1. Start a background bash task: 'sleep 1 && echo bg_task_done_xyz'\n" +
+			"1. Start a detached tmux session: tmux new -d -s bg 'sleep 1 && echo bg_task_done_xyz'\n" +
 			"2. Create an async subagent named 'helper' with prompt: " +
 			"'Run echo subagent_helper_done in bash and report.'\n" +
-			"Monitor both: use task list/wait and wait for the subagent completion notification. " +
+			"Monitor both: use tmux wait/capture-pane and wait for the subagent completion notification. " +
 			"Report both results when they complete.",
 	)
 	Verify(t, r).

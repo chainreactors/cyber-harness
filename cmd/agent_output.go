@@ -313,10 +313,6 @@ func summarizeToolArguments(name, arguments string) string {
 			stringArg(args, "pattern"),
 			prefixedArg("in ", stringArg(args, "path")),
 		), agentStatusPreviewLimit)
-	case "task":
-		action := stringArg(args, "action")
-		id := stringArg(args, "id")
-		return compactAgentLine(joinAgentSummaryParts(action, id), agentStatusPreviewLimit)
 	case "subagent":
 		action := stringArg(args, "action")
 		if action == "" || action == "create" {

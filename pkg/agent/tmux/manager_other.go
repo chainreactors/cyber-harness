@@ -1,6 +1,6 @@
 //go:build !unix
 
-package task
+package tmux
 
 func signalProcessGroup(_ int, _ bool) error {
 	return nil

@@ -1,6 +1,6 @@
 //go:build unix
 
-package task
+package tmux
 
 import "syscall"
 

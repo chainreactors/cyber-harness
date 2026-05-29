@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package task
+package tmux
 
 import (
 	"io"

@@ -1,6 +1,6 @@
 //go:build darwin
 
-package task
+package tmux
 
 import (
 	"bytes"

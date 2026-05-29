@@ -16,7 +16,7 @@ import (
 	cmdpkg "github.com/chainreactors/aiscan/pkg/command"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/swarm"
-	taskmod "github.com/chainreactors/aiscan/pkg/agent/task"
+	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/skills"

@@ -8,7 +8,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/agent/task"
+	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/command"
 )
 
@@ -17,11 +17,11 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
 
 	ib := inbox.NewBuffered(8)
-	taskMgr := task.NewManager()
-	taskMgr.SetOnDone(func(info task.Info) {
+	taskMgr := tmux.NewManager()
+	taskMgr.SetOnDone(func(info tmux.Info) {
 		tail := taskMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginTask, "user",
-			task.FormatCompletion(info, tail))
+			tmux.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{"task_id": info.ID}
 		ib.Push(msg)
 	})
@@ -91,11 +91,11 @@ func TestTaskCompletionInjectedIntoAgentLoop(t *testing.T) {
 
 func TestTaskCompletionMetadata(t *testing.T) {
 	ib := inbox.NewBuffered(4)
-	taskMgr := task.NewManager()
-	taskMgr.SetOnDone(func(info task.Info) {
+	taskMgr := tmux.NewManager()
+	taskMgr.SetOnDone(func(info tmux.Info) {
 		tail := taskMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginTask, "user",
-			task.FormatCompletion(info, tail))
+			tmux.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{
 			"task_id":   info.ID,
 			"task_name": info.Name,

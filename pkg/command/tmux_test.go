@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/task"
+	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 )
 
 func tmuxTool(t *testing.T) *TmuxCommand {
 	t.Helper()
-	mgr := task.NewManager()
+	mgr := tmuxpkg.NewManager()
 	t.Cleanup(mgr.Shutdown)
 	return &TmuxCommand{
 		manager: mgr,
@@ -237,7 +237,7 @@ func TestTmuxKillSession(t *testing.T) {
 
 	<-tmux.manager.Done(id)
 	info, _ := tmux.manager.Get(id)
-	if info.State != task.StateKilled {
+	if info.State != tmuxpkg.StateKilled {
 		t.Fatalf("state = %s, want killed", info.State)
 	}
 }

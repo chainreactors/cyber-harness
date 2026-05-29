@@ -73,7 +73,7 @@ Interactive shells, `su`, interactive `python`/`mysql` prompts, and `expect`-sty
 Any scanner invocation that targets multiple hosts/domains, runs neutron, or otherwise takes more than ~2 minutes MUST be launched in the background. Call bash with `background:true` (optionally `task_name` and `task_timeout_seconds`) — you get back a task_id immediately and the agent loop stays free.
 
 - A follow-up message is injected automatically when the task completes; you do not need to poll.
-- Use the task tool to interact: `list` (overview), `peek id=...` (last lines of stdout), `wait id=... timeout_seconds=...` (block), `kill id=...` (terminate).
+- Use the tmux pseudo-command via bash to interact: `tmux ls` (overview), `tmux capture-pane -t <id> --new` (last output), `tmux wait -t <id>` (block), `tmux kill -t <id>` (terminate).
 - Foreground bash (`background:false`) is still appropriate for short shell utilities and read-only checks (<2 min). Pseudo-commands you only need quick output from (`parse_results`, `filter_results`) stay foreground.
 - Never run scan/gogo/spray/neutron foreground against >1 target at once — that blocks the LLM for tens of minutes and starves peer chatter.
 

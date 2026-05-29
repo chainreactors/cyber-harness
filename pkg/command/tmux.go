@@ -8,18 +8,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/task"
+	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 )
 
 type TmuxCommand struct {
-	manager  *task.Manager
+	manager  *tmux.Manager
 	registry *CommandRegistry
 	workDir  string
 	selfBin  string
 	proxy    string
 }
 
-func NewTmuxCommand(mgr *task.Manager, registry *CommandRegistry) *TmuxCommand {
+func NewTmuxCommand(mgr *tmux.Manager, registry *CommandRegistry) *TmuxCommand {
 	return &TmuxCommand{manager: mgr, registry: registry}
 }
 
@@ -103,7 +103,7 @@ func (t *TmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	}
 
 	cmdLine := strings.Join(cmdParts, " ")
-	timeout := task.DefaultTimeout
+	timeout := tmux.DefaultTimeout
 	if timeoutStr != "" {
 		d, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -133,7 +133,7 @@ func (t *TmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	return output, nil
 }
 
-func (t *TmuxCommand) createSession(cmdLine, name string, timeout time.Duration) (task.Info, error) {
+func (t *TmuxCommand) createSession(cmdLine, name string, timeout time.Duration) (tmux.Info, error) {
 	token := firstCommandToken(cmdLine)
 	isPseudo := false
 	if t.registry != nil && token != "tmux" {
@@ -147,11 +147,11 @@ func (t *TmuxCommand) createSession(cmdLine, name string, timeout time.Duration)
 	if isPseudo {
 		tokens, err := SplitCommandLine(cmdLine)
 		if err != nil {
-			return task.Info{}, fmt.Errorf("tmux new-session: %w", err)
+			return tmux.Info{}, fmt.Errorf("tmux new-session: %w", err)
 		}
 		if len(tokens) > 1 {
 			if _, valErr := stripShellSyntax(tokens[1:]); valErr != nil {
-				return task.Info{}, valErr
+				return tmux.Info{}, valErr
 			}
 		}
 		subArgs := append(tokens, "--no-color")
@@ -160,7 +160,7 @@ func (t *TmuxCommand) createSession(cmdLine, name string, timeout time.Duration)
 			var err error
 			self, err = os.Executable()
 			if err != nil {
-				return task.Info{}, fmt.Errorf("tmux new-session: resolve self: %w", err)
+				return tmux.Info{}, fmt.Errorf("tmux new-session: resolve self: %w", err)
 			}
 		}
 		return t.manager.CreateCmd(t.workDir, self, subArgs, name, timeout, t.buildEnv(), "")
@@ -180,7 +180,7 @@ func (t *TmuxCommand) cmdListSessions() (string, error) {
 	var sb strings.Builder
 	for _, it := range items {
 		var elapsed time.Duration
-		if it.State == task.StateRunning {
+		if it.State == tmux.StateRunning {
 			elapsed = time.Since(it.StartedAt).Round(time.Second)
 		} else {
 			elapsed = it.EndedAt.Sub(it.StartedAt).Round(time.Second)
@@ -319,7 +319,7 @@ func (t *TmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if info.State == task.StateRunning {
+	if info.State == tmux.StateRunning {
 		return fmt.Sprintf("%s: still running (%s elapsed)",
 			info.ID, time.Since(info.StartedAt).Round(time.Second)), nil
 	}

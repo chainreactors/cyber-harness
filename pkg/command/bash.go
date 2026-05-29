@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/agent/task"
+	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 )
 
 const (
@@ -23,7 +23,7 @@ type BashTool struct {
 	workDir      string
 	timeout      int
 	scannerProxy string
-	tasks        *task.Manager
+	tasks        *tmux.Manager
 	selfBinary   string
 }
 
@@ -38,11 +38,11 @@ func NewBashTool(workDir string, timeout int, registry *CommandRegistry) *BashTo
 		registry: registry,
 		workDir:  workDir,
 		timeout:  timeout,
-		tasks:    task.NewManager(),
+		tasks:    tmux.NewManager(),
 	}
 }
 
-func (t *BashTool) Manager() *task.Manager { return t.tasks }
+func (t *BashTool) Manager() *tmux.Manager { return t.tasks }
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	t.scannerProxy = proxy
@@ -114,7 +114,7 @@ func (t *BashTool) execForeground(ctx context.Context, cmdLine string, isPseudo 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.timeout)*time.Second)
 	defer cancel()
 
-	var info task.Info
+	var info tmux.Info
 	var err error
 
 	if isPseudo {
@@ -169,7 +169,7 @@ func (t *BashTool) collectResult(id string, ctx context.Context) ToolResult {
 		output += fmt.Sprintf("\n[command timed out after %ds]", t.timeout)
 	}
 	info, _ := t.tasks.Get(id)
-	if info.ExitCode != 0 && info.State != task.StateRunning {
+	if info.ExitCode != 0 && info.State != tmux.StateRunning {
 		output += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
 	return TextResult(output)

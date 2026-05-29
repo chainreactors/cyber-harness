@@ -1,4 +1,4 @@
-package task
+package tmux
 
 import (
 	"os/exec"

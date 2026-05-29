@@ -2,7 +2,7 @@
 // command in a pseudo-terminal with buffered output, interactive input, and
 // lifecycle management. The API mirrors tmux semantics: Create, List, Peek,
 // Write, Kill, Wait.
-package task
+package tmux
 
 import (
 	"context"
