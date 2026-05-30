@@ -2,4 +2,4 @@
 
 package main
 
-import _ "github.com/chainreactors/aiscan/pkg/tools/browser"
+import _ "github.com/chainreactors/aiscan/pkg/tools/playwright"
