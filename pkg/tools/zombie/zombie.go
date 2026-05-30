@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
-	"github.com/chainreactors/proxyclient"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	zombiecore "github.com/chainreactors/zombie/core"
 )
@@ -57,15 +55,6 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		c.logger.Debugf("zombie debug enabled")
 	}
 	runOpts := zombiecore.RunOptions{Output: &buf}
-	if c.proxy != "" {
-		proxyURL, err := url.Parse(c.proxy)
-		if err == nil {
-			dial, dialErr := proxyclient.NewClient(proxyURL)
-			if dialErr == nil {
-				runOpts.ProxyDial = dial.DialContext
-			}
-		}
-	}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		return buf.String(), fmt.Errorf("zombie: %w", err)
 	}

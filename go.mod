@@ -1,20 +1,20 @@
 module github.com/chainreactors/aiscan
 
-go 1.25.7
+go 1.26.3
 
 require (
-	github.com/chainreactors/fingers v1.2.1-0.20260529085838-71a09ca1823c
+	github.com/chainreactors/fingers v1.2.1-0.20260530143622-9b9b6fe7ccf7
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260529071026-65d22e5a6ba3
 	github.com/chainreactors/ioa v0.0.0-20260513035847-c8c38592b651
 	github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c
-	github.com/chainreactors/neutron v0.0.0-20260529083146-4e461e648c82
+	github.com/chainreactors/neutron v0.0.0-20260530143533-ea958251e73e
 	github.com/chainreactors/parsers v0.0.0-20260517174207-da1ebd0e7f68
 	github.com/chainreactors/proxyclient v1.0.4-0.20260527160727-36cf133952c3
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
-	github.com/chainreactors/sdk v0.2.3-0.20260529071242-3071a8a1b385
+	github.com/chainreactors/sdk v0.1.1-0.20260516033200-1c5d96f7cfb6
 	github.com/chainreactors/spray v1.2.6-0.20260523083907-546e8ab7756a
 	github.com/chainreactors/utils v0.0.0-20260529070435-f03100630384
-	github.com/chainreactors/zombie v1.2.3-0.20260529111124-e3c089010626
+	github.com/chainreactors/zombie v1.2.3-0.20260529070819-21a4ec2cbbc8
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/go-rod/rod v0.116.2
 	github.com/go-rod/stealth v0.4.9
@@ -161,7 +161,7 @@ require (
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/nwaples/rardecode/v2 v2.2.2 // indirect
 	github.com/odvcencio/gotreesitter v0.6.1-0.20260306002001-fbe5983c6f41 // indirect
-	github.com/panjf2000/ants/v2 v2.12.0 // indirect
+	github.com/panjf2000/ants/v2 v2.12.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
@@ -254,6 +254,8 @@ require (
 )
 
 replace (
+	github.com/chainreactors/fingers => ./fingers-local/fingers
+	github.com/chainreactors/sdk => ./sdk-local
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260422184128-e856ed004d32
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260422184128-e856ed004d32
 )

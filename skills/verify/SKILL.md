@@ -46,10 +46,10 @@ Test the specific vulnerability claim:
 | Known CVE | Check version string against the affected range and attempt a safe PoC if possible |
 | Web vulnerability (XSS/SQLi) | Send unique canary, compare against baseline |
 | Open management console | Fetch URL, confirm it returns admin/management interface content |
-| **XSS (reflected/stored)** | Use browser session: `open` → `discover` → `dialog --arm` → `fill` payload → `click` submit → `dialog --check` for alert |
-| **SQLi via login** | Use browser session: `open` → `autofill --data "username=admin' OR 1=1--"` → `click` submit → check `url`/`navigate` for admin content |
-| **Weak creds + CAPTCHA** | Use browser session: `open` → `discover` → `screenshot --selector` captcha → `vision` to solve → `autofill --data` with creds + captcha → `click` submit |
-| **Auth bypass via cookies** | Use browser session: `open` → `cookies --set role=admin` → `eval` navigate to admin → check `navigate` text |
+| **XSS (reflected/stored)** | Use playwright session: `open` → `discover` → `dialog --arm` → `fill` payload → `click` submit → `dialog --check` for alert |
+| **SQLi via login** | Use playwright session: `open` → `autofill --data "username=admin' OR 1=1--"` → `click` submit → check `url`/`navigate` for admin content |
+| **Weak creds + CAPTCHA** | Use playwright session: `open` → `discover` → `screenshot --selector` captcha → `vision` to solve → `autofill --data` with creds + captcha → `click` submit |
+| **Auth bypass via cookies** | Use playwright session: `open` → `cookies --set role=admin` → `eval` navigate to admin → check `navigate` text |
 
 ### Tool Selection Decision Tree
 
@@ -57,12 +57,12 @@ Test the specific vulnerability claim:
 Is the target a simple HTTP endpoint?
 ├── YES → use curl/nc (faster, lighter)
 └── NO (JS-rendered, SPA, form submission needed)
-    ├── Just need rendered content? → browser navigate/content
+    ├── Just need rendered content? → playwright goto/content
     └── Need multi-step interaction?
-        └── browser open → discover → fill/autofill → click → check results
-            ├── Page has CAPTCHA? → browser screenshot --selector + vision tool
-            ├── Need XSS dialog detection? → browser dialog --arm before payload
-            └── Need to track requests? → browser network --start before action
+        └── playwright open → discover → fill/autofill → click → check results
+            ├── Page has CAPTCHA? → playwright screenshot --selector + vision tool
+            ├── Need XSS dialog detection? → playwright dialog --arm before payload
+            └── Need to track requests? → playwright network --start before action
 ```
 
 ### Step 4: Baseline Comparison

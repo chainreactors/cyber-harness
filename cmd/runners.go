@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
+	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/app"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/command"
-	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/swarm"
-	taskmod "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/skills"
@@ -253,12 +253,14 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		logger.Warnf("skill %s: %s", diagnostic.Path, diagnostic.Message)
 	}
 
-	intent := strings.TrimSpace(option.Prompt)
-	if intent != "" && len(option.Inputs) > 0 {
-		intent = fmt.Sprintf("%s\n\nTargets:\n%s", intent, formatInputs(option.Inputs))
+	rawPrompt := strings.TrimSpace(option.Prompt)
+	if rawPrompt != "" && len(option.Inputs) > 0 {
+		rawPrompt = fmt.Sprintf("%s\n\nTargets:\n%s", rawPrompt, formatInputs(option.Inputs))
 	}
-	rawPrompt := intent
-	intent, err = applySelectedSkills(intent, option.Skills, application.Skills)
+
+	// Build lightweight skill references for profile announcement.
+	// Only name + description + location are shared; the full body stays local.
+	skillRefs, err := buildSkillRefs(option.Skills, application.Skills)
 	if err != nil {
 		return err
 	}
@@ -321,8 +323,8 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 		HeartbeatInterval:     time.Duration(option.Heartbeat) * time.Minute,
 		HeartbeatContextLimit: 50,
 		Prompt:                rawPrompt,
-		Intent:                intent,
 		Skills:                option.Skills,
+		SkillRefs:             skillRefs,
 		OnTask:                taskHandler,
 		OnPeer: func(peer swarm.PeerMessage) bool {
 			return sess.Config.Inbox.Push(peerToInboxMessage(peer)) == nil
@@ -343,6 +345,34 @@ func runLoop(ctx context.Context, option *Option, logger telemetry.Logger) error
 	}
 
 	return node.Run(ctx)
+}
+
+func buildSkillRefs(selected []string, store *skills.Store) ([]swarm.SkillRef, error) {
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	refs := make([]swarm.SkillRef, 0, len(selected))
+	seen := make(map[string]struct{}, len(selected))
+	for _, name := range selected {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		skill, ok := store.ByName(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown skill %q", name)
+		}
+		seen[name] = struct{}{}
+		refs = append(refs, swarm.SkillRef{
+			Name:        skill.Name,
+			Description: skill.Description,
+			Location:    skill.Location,
+		})
+	}
+	return refs, nil
 }
 
 func registerIOATools(ctx context.Context, application *app.App, option *Option) error {
