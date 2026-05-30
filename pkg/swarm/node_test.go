@@ -151,7 +151,7 @@ func TestThreeSwarmNodesReplyToBroadcastHello(t *testing.T) {
 			SpaceName:        "default",
 			SpaceDescription: "worker",
 			PollInterval:     100 * time.Millisecond,
-			Intent:           "reply loop to hello",
+			Prompt:           "reply loop to hello",
 			Skills:           []string{"aiscan"},
 			Network:          map[string]any{"cidr": "127.0.0.0/8"},
 			OnTask: func(ctx context.Context, task Task) (string, error) {
@@ -218,9 +218,12 @@ func TestNodeAnnouncesSwarmProfile(t *testing.T) {
 		SpaceName:        "default",
 		SpaceDescription: "profile worker",
 		PollInterval:     100 * time.Millisecond,
-		Intent:           "scan localhost",
 		Prompt:           "scan localhost",
 		Skills:           []string{"aiscan", "scan"},
+		SkillRefs: []SkillRef{
+			{Name: "aiscan", Description: "AI-driven security scanner", Location: "aiscan://skills/aiscan/SKILL.md"},
+			{Name: "scan", Description: "Port and service scanner", Location: "aiscan://skills/scan/SKILL.md"},
+		},
 		Network: map[string]any{
 			"hostname": "test-host",
 		},
@@ -260,6 +263,9 @@ func TestNodeAnnouncesSwarmProfile(t *testing.T) {
 			if !strings.Contains(content, "scan localhost") {
 				t.Fatalf("announce content missing intent: %q", content)
 			}
+			if strings.Contains(content, "AI-driven security scanner") || strings.Contains(content, "aiscan://skills") {
+				t.Fatalf("announce content should only contain raw prompt and skill names: %q", content)
+			}
 			meta, ok := profile.Content["meta"].(map[string]any)
 			if !ok {
 				t.Fatalf("announce missing meta: %#v", profile.Content)
@@ -270,6 +276,20 @@ func TestNodeAnnouncesSwarmProfile(t *testing.T) {
 			caps, ok := meta["capabilities"].([]any)
 			if !ok || len(caps) != 2 {
 				t.Fatalf("meta capabilities = %#v", meta["capabilities"])
+			}
+			refs, ok := meta["skill_refs"].([]any)
+			if !ok || len(refs) != 2 {
+				t.Fatalf("meta skill_refs = %#v", meta["skill_refs"])
+			}
+			firstRef, ok := refs[0].(map[string]any)
+			if !ok {
+				t.Fatalf("skill_refs[0] not a map: %#v", refs[0])
+			}
+			if firstRef["name"] != "aiscan" {
+				t.Fatalf("skill_refs[0].name = %v, want aiscan", firstRef["name"])
+			}
+			if firstRef["description"] != "AI-driven security scanner" {
+				t.Fatalf("skill_refs[0].description = %v", firstRef["description"])
 			}
 			if node.RootMessageID() == "" {
 				t.Fatal("RootMessageID() should be non-empty after announceProfile")
@@ -374,6 +394,100 @@ func TestNodeHeartbeatRunsHandler(t *testing.T) {
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
+	}
+}
+
+func TestSlimMessageContextAggregatesOnlyGeneratedErrors(t *testing.T) {
+	messages := []ioa.Message{
+		{
+			ID:      "msg-normal",
+			Sender:  "planner",
+			Content: map[string]any{"content": "please investigate timeout behavior and quota accounting"},
+		},
+		{
+			ID:      "msg-quota",
+			Sender:  "worker",
+			Content: map[string]any{"content": "Error: provider quota exceeded"},
+		},
+		{
+			ID:      "msg-timeout",
+			Sender:  "worker",
+			Content: map[string]any{"content": "Heartbeat heartbeat error: request timed out"},
+		},
+	}
+
+	got := slimMessageContext(messages, 4096)
+	if !strings.Contains(got, "please investigate timeout behavior") {
+		t.Fatalf("normal timeout/quota text was removed:\n%s", got)
+	}
+	if !strings.Contains(got, "provider_quota: 1") {
+		t.Fatalf("quota error was not aggregated:\n%s", got)
+	}
+	if !strings.Contains(got, "timeout: 1") {
+		t.Fatalf("timeout error was not aggregated:\n%s", got)
+	}
+	if strings.Contains(got, "provider_quota: 2") {
+		t.Fatalf("normal quota text should not be counted as an error:\n%s", got)
+	}
+}
+
+func TestSlimMessageContextHonorsBudgetAndKeepsNewest(t *testing.T) {
+	var messages []ioa.Message
+	for i := 0; i < 20; i++ {
+		marker := fmt.Sprintf("marker-%02d", i)
+		messages = append(messages, ioa.Message{
+			ID:      fmt.Sprintf("msg-%02d", i),
+			Sender:  "worker",
+			Content: map[string]any{"content": marker + " " + strings.Repeat("context ", 80)},
+		})
+	}
+
+	got := slimMessageContext(messages, 1000)
+	if len(got) > 1000 {
+		t.Fatalf("slim context length = %d, want <= 1000:\n%s", len(got), got)
+	}
+	if !strings.Contains(got, "older messages trimmed") {
+		t.Fatalf("trim notice missing:\n%s", got)
+	}
+	if !strings.Contains(got, "marker-19") {
+		t.Fatalf("newest message should be preserved:\n%s", got)
+	}
+	if strings.Contains(got, "marker-00") {
+		t.Fatalf("oldest message should be trimmed:\n%s", got)
+	}
+}
+
+func TestHeartbeatPromptUsesNoIntentMessageWhenPromptEmpty(t *testing.T) {
+	service := ioaserver.NewService(ioaserver.NewMemoryStore())
+	server := httptest.NewServer(ioaserver.NewHandler(service))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := ioaclient.NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.RegisterNode(ctx, "worker", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := client.Space(ctx, "heartbeat-empty-intent", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := NewNode(NodeConfig{
+		Client:    client,
+		NodeName:  "worker",
+		SpaceName: "heartbeat-empty-intent",
+	})
+	node.spaceID = space.ID
+	node.spaceName = space.Name
+
+	got := node.heartbeatPrompt(heartbeatConfig{name: "heartbeat", interval: time.Minute}, nil)
+	if !strings.Contains(got, "No explicit worker intent was configured.") {
+		t.Fatalf("heartbeat prompt should use explicit no-intent message:\n%s", got)
 	}
 }
 

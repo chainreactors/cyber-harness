@@ -67,7 +67,6 @@ func TestRealLLMSwarmNodeRepliesThroughIOA(t *testing.T) {
 		SpaceDescription: "real llm worker",
 		PollInterval:     100 * time.Millisecond,
 		Prompt:           "reply loop to hello",
-		Intent:           "reply loop to hello",
 		Network:          map[string]any{"test": "real-llm"},
 		OnTask: func(ctx context.Context, task Task) (string, error) {
 			resp, err := llmProvider.ChatCompletion(ctx, &provider.ChatCompletionRequest{

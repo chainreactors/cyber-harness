@@ -7,9 +7,11 @@ import (
 	"net"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/chainreactors/ioa"
 	ioaclient "github.com/chainreactors/ioa/client"
@@ -95,6 +97,14 @@ type heartbeatConfig struct {
 	contextLimit int
 }
 
+// SkillRef is a lightweight skill reference for profile announcements.
+// The full skill body stays local and is loaded on demand during execution.
+type SkillRef struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Location    string `json:"location"`
+}
+
 type NodeConfig struct {
 	Client                ioaclient.StreamAPI
 	NodeName              string
@@ -103,9 +113,9 @@ type NodeConfig struct {
 	PollInterval          time.Duration
 	HeartbeatInterval     time.Duration
 	HeartbeatContextLimit int
-	Prompt                string
-	Intent                string
-	Skills                []string
+	Prompt                string   // Raw user prompt published in profile and used as heartbeat intent
+	Skills                []string // Skill names for profile capabilities
+	SkillRefs             []SkillRef
 	Network               map[string]any
 	OnTask                TaskHandler
 	OnPeer                func(PeerMessage) bool
@@ -321,8 +331,9 @@ func (n *Node) Run(ctx context.Context) error {
 
 func (n *Node) announceProfile(ctx context.Context) error {
 	parts := []string{fmt.Sprintf("Node %s (%s) joined the swarm.", n.cfg.NodeName, n.cfg.Client.NodeID())}
-	if intent := strings.TrimSpace(n.cfg.Intent); intent != "" {
-		parts = append(parts, "Intent: "+intent)
+	// Publish only the raw user prompt; full skill bodies stay out of IOA profiles.
+	if prompt := strings.TrimSpace(n.cfg.Prompt); prompt != "" {
+		parts = append(parts, "Intent: "+prompt)
 	}
 	if skills := cleanStrings(n.cfg.Skills); len(skills) > 0 {
 		parts = append(parts, "Skills: "+strings.Join(skills, ", "))
@@ -361,6 +372,9 @@ func (n *Node) buildMeta() map[string]any {
 	}
 	if skills := cleanStrings(n.cfg.Skills); len(skills) > 0 {
 		meta["capabilities"] = skills
+	}
+	if len(n.cfg.SkillRefs) > 0 {
+		meta["skill_refs"] = n.cfg.SkillRefs
 	}
 	return meta
 }
@@ -458,16 +472,10 @@ func (n *Node) execHeartbeat(ctx context.Context, hb heartbeatConfig) error {
 }
 
 func (n *Node) heartbeatPrompt(hb heartbeatConfig, messages []ioa.Message) string {
-	contextJSON, err := json.MarshalIndent(messages, "", "  ")
-	if err != nil {
-		contextJSON = []byte("[]")
-	}
+	contextView := slimMessageContext(messages, 32<<10)
 	intent := strings.TrimSpace(hb.prompt)
 	if intent == "" {
 		intent = strings.TrimSpace(n.cfg.Prompt)
-	}
-	if intent == "" {
-		intent = strings.TrimSpace(n.cfg.Intent)
 	}
 	if intent == "" {
 		intent = "No explicit worker intent was configured."
@@ -493,7 +501,176 @@ If no action is needed, say that briefly and do not repeat completed work.
 Before sending IOA messages or dispatching tasks to other nodes, read the ioa skill (aiscan://skills/ioa/SKILL.md) for the required message format.
 
 Recent messages (oldest to newest):
-%s`, hb.name, hb.interval, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), string(contextJSON))
+%s`, hb.name, hb.interval, n.spaceID, n.spaceName, n.cfg.Client.NodeID(), n.cfg.NodeName, intent, strings.Join(cleanStrings(n.cfg.Skills), ", "), contextView)
+}
+
+// slimEntry is the compact per-message summary used in heartbeat context.
+type slimEntry struct {
+	ID       string   `json:"id"`
+	Sender   string   `json:"sender"`
+	Kind     string   `json:"kind,omitempty"`
+	Preview  string   `json:"preview"`
+	RefMsgs  []string `json:"ref_msgs,omitempty"`
+	RefNodes []string `json:"ref_nodes,omitempty"`
+}
+
+// slimMessageContext produces a budget-constrained summary of IOA messages for
+// heartbeat prompts. Profile messages are compressed to a one-liner, repeated
+// provider/quota/timeout errors are aggregated into a single counter block, and
+// the total output is capped at budgetBytes.
+func slimMessageContext(messages []ioa.Message, budgetBytes int) string {
+	var entries []slimEntry
+	errorCounts := make(map[string]int)
+	var latestError string
+
+	for _, msg := range messages {
+		sm, _ := swarmFromIOA(msg)
+		kind := messageKind(msg, sm)
+
+		content := sm.Content
+		if content == "" {
+			// Structured message without content field; summarize keys.
+			keys := make([]string, 0, len(msg.Content))
+			for k := range msg.Content {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			content = "{" + strings.Join(keys, ", ") + "}"
+		}
+
+		// Aggregate repeated error messages instead of listing each one.
+		if cat := classifyError(content); cat != "" {
+			errorCounts[cat]++
+			latestError = truncate(content, 200)
+			continue
+		}
+
+		// Profile messages get a shorter preview; they're capability ads, not work.
+		maxPreview := 300
+		if kind == "node_profile" {
+			maxPreview = 80
+		}
+
+		preview := content
+		if len(preview) > maxPreview {
+			preview = preview[:maxPreview] + "..."
+		}
+
+		entry := slimEntry{
+			ID:      msg.ID,
+			Sender:  msg.Sender,
+			Kind:    kind,
+			Preview: preview,
+		}
+		if len(msg.Refs.Messages) > 0 {
+			entry.RefMsgs = msg.Refs.Messages
+		}
+		if len(msg.Refs.Nodes) > 0 {
+			entry.RefNodes = msg.Refs.Nodes
+		}
+		entries = append(entries, entry)
+	}
+
+	return renderSlimMessageContext(entries, formatErrorSuffix(errorCounts, latestError), budgetBytes)
+}
+
+func renderSlimMessageContext(entries []slimEntry, errSuffix string, budgetBytes int) string {
+	trimmed := 0
+	for {
+		out := formatSlimMessageContext(entries, errSuffix, trimmed)
+		if budgetBytes <= 0 || len(out) <= budgetBytes {
+			return out
+		}
+		if len(entries) == 0 {
+			return truncateToBytes(out, budgetBytes)
+		}
+		entries = entries[1:]
+		trimmed++
+	}
+}
+
+func formatSlimMessageContext(entries []slimEntry, errSuffix string, trimmed int) string {
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		data = []byte("[]")
+	}
+	var sb strings.Builder
+	if trimmed > 0 {
+		fmt.Fprintf(&sb, "[%d older messages trimmed for context budget]\n\n", trimmed)
+	}
+	sb.Write(data)
+	sb.WriteString(errSuffix)
+	return sb.String()
+}
+
+func truncateToBytes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		return ""
+	}
+	return s[:cut]
+}
+
+// classifyError returns a category string for known error patterns that should
+// be aggregated in heartbeat context. Returns "" for non-error content.
+func classifyError(content string) string {
+	lower := strings.ToLower(strings.TrimSpace(content))
+	if !looksLikeGeneratedError(lower) {
+		return ""
+	}
+	switch {
+	case strings.Contains(lower, "quota") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "rate limit"):
+		return "provider_quota"
+	case strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "timed out"):
+		return "timeout"
+	case strings.HasPrefix(lower, "error:"),
+		strings.HasPrefix(lower, "provider error:"),
+		strings.HasPrefix(lower, "heartbeat") && strings.Contains(lower, "error:"):
+		return "provider_error"
+	default:
+		return ""
+	}
+}
+
+func looksLikeGeneratedError(lower string) bool {
+	return strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "provider error:") ||
+		(strings.HasPrefix(lower, "heartbeat ") && strings.Contains(lower, " error:"))
+}
+
+func formatErrorSuffix(counts map[string]int, latest string) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\nAggregated errors:\n")
+	// Stable iteration order for deterministic output.
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&sb, "  %s: %d\n", k, counts[k])
+	}
+	if latest != "" {
+		sb.WriteString("  latest: ")
+		sb.WriteString(latest)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 // routeIncoming filters an IOA message and either starts a new task, forwards
@@ -509,6 +686,7 @@ Recent messages (oldest to newest):
 //   - While a task is active, non-explicit messages are treated as peer chatter
 //     and forwarded to the active task's Peers channel so the agent's next turn
 //     can see them.
+//
 // routeIncoming filters an IOA message and either starts a task, queues it,
 // forwards as peer chatter, or skips it.
 //

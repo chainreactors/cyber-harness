@@ -15,16 +15,16 @@ import (
 
 // TestE2ETwoSwarmNodesCoordinated simulates a real deployment:
 //
-//   IOA Server
-//     └── Space "pentest-case-001"
-//           ├── scanner-node  (skills: gogo, spray)
-//           ├── recon-node    (skills: neutron, cyberhub)
-//           └── controller    (human coordinator)
+//	IOA Server
+//	  └── Space "pentest-case-001"
+//	        ├── scanner-node  (skills: gogo, spray)
+//	        ├── recon-node    (skills: neutron, cyberhub)
+//	        └── controller    (human coordinator)
 //
 // The controller dispatches tasks through three routing modes:
-//   1. refs.nodes     → directed to a specific node
-//   2. refs.messages  → directed via root message ref (new!)
-//   3. no refs        → broadcast to all nodes
+//  1. refs.nodes     → directed to a specific node
+//  2. refs.messages  → directed via root message ref (new!)
+//  3. no refs        → broadcast to all nodes
 func TestE2ETwoSwarmNodesCoordinated(t *testing.T) {
 	service := ioaserver.NewService(ioaserver.NewMemoryStore())
 	server := httptest.NewServer(ioaserver.NewHandler(service))
@@ -47,7 +47,7 @@ func TestE2ETwoSwarmNodesCoordinated(t *testing.T) {
 		SpaceName:        spaceName,
 		SpaceDescription: "port scanner and service detection",
 		PollInterval:     100 * time.Millisecond,
-		Intent:           "scan targets for open ports and services",
+		Prompt:           "scan targets for open ports and services",
 		Skills:           []string{"gogo", "spray"},
 		Network:          map[string]any{"hostname": "scanner-host", "cidr": "10.0.0.0/24"},
 		OnTask: func(ctx context.Context, task Task) (string, error) {
@@ -74,7 +74,7 @@ func TestE2ETwoSwarmNodesCoordinated(t *testing.T) {
 		SpaceName:        spaceName,
 		SpaceDescription: "vulnerability recon and fingerprinting",
 		PollInterval:     100 * time.Millisecond,
-		Intent:           "identify vulnerabilities and fingerprints",
+		Prompt:           "identify vulnerabilities and fingerprints",
 		Skills:           []string{"neutron", "cyberhub"},
 		Network:          map[string]any{"hostname": "recon-host", "cidr": "10.0.0.0/24"},
 		OnTask: func(ctx context.Context, task Task) (string, error) {
