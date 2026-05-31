@@ -298,6 +298,10 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	c.startGC()
 	c.reapExpiredSessions()
 
+	if o.proxyServer != "" {
+		c.SetProxy(o.proxyServer)
+	}
+
 	c.sessionsMu.Lock()
 	if _, exists := c.sessions[o.sessName]; exists {
 		c.sessionsMu.Unlock()
@@ -623,6 +627,10 @@ type openOpts struct {
 	loadStoragePath  string
 	saveStoragePath  string // stored on Session, dumped at close
 	saveHARPath      string // stored on Session, dumped at close
+	saveHARGlob      string
+	proxyServer      string
+	proxyBypass      string
+	blockSW          bool
 }
 
 func parseOpenOpts(args []string, usage string) (openOpts, error) {
@@ -747,6 +755,26 @@ func parseOpenOpts(args []string, usage string) (openOpts, error) {
 			}
 			i++
 			o.saveHARPath = args[i]
+		case "--proxy-server":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --proxy-server requires a value")
+			}
+			i++
+			o.proxyServer = args[i]
+		case "--proxy-bypass":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --proxy-bypass requires a value")
+			}
+			i++
+			o.proxyBypass = args[i]
+		case "--save-har-glob":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --save-har-glob requires a pattern")
+			}
+			i++
+			o.saveHARGlob = args[i]
+		case "--block-service-workers":
+			o.blockSW = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return o, fmt.Errorf("playwright open: unknown flag: %s", args[i])

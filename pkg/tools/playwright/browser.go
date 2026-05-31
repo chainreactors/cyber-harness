@@ -384,14 +384,10 @@ func (c *Command) newPage(ctx context.Context, opts commonOpts) (*rod.Page, func
 		return nil, nil, fmt.Errorf("playwright: stealth inject: %w", err)
 	}
 
-	if opts.userAgent != "" {
-		if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{
-			UserAgent: opts.userAgent,
-		}); err != nil {
-			_ = page.Close()
-			_ = incognito.Close()
-			return nil, nil, fmt.Errorf("playwright: set user-agent: %w", err)
-		}
+	if err := applyContextFlags(page, opts); err != nil {
+		_ = page.Close()
+		_ = incognito.Close()
+		return nil, nil, err
 	}
 
 	page = page.Context(ctx).Timeout(opts.timeout)
@@ -402,6 +398,60 @@ func (c *Command) newPage(ctx context.Context, opts commonOpts) (*rod.Page, func
 	}
 
 	return page, cleanup, nil
+}
+
+// applyContextFlags configures a page with the shared playwright-cli context
+// flags (user-agent, lang, viewport, geolocation, timezone, color-scheme).
+func applyContextFlags(page *rod.Page, opts commonOpts) error {
+	cf := opts.ctx
+	ua := &proto.NetworkSetUserAgentOverride{}
+	if opts.userAgent != "" {
+		ua.UserAgent = opts.userAgent
+	}
+	if cf.lang != "" {
+		ua.AcceptLanguage = cf.lang
+	}
+	if ua.UserAgent != "" || ua.AcceptLanguage != "" {
+		if err := page.SetUserAgent(ua); err != nil {
+			return fmt.Errorf("playwright: set user-agent: %w", err)
+		}
+	}
+	if cf.viewportSize != "" {
+		w, h, err := parseViewportSize(cf.viewportSize)
+		if err != nil {
+			return fmt.Errorf("playwright: %w", err)
+		}
+		if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+			Width: w, Height: h, DeviceScaleFactor: 1,
+		}); err != nil {
+			return fmt.Errorf("playwright: set viewport: %w", err)
+		}
+	}
+	if cf.geolocation != "" {
+		lat, lon, err := parseGeolocation(cf.geolocation)
+		if err != nil {
+			return fmt.Errorf("playwright: %w", err)
+		}
+		if err := (proto.EmulationSetGeolocationOverride{
+			Latitude: &lat, Longitude: &lon, Accuracy: gson.Num(1),
+		}).Call(page); err != nil {
+			return fmt.Errorf("playwright: set geolocation: %w", err)
+		}
+	}
+	if cf.timezone != "" {
+		if err := (proto.EmulationSetTimezoneOverride{TimezoneID: cf.timezone}).Call(page); err != nil {
+			return fmt.Errorf("playwright: set timezone: %w", err)
+		}
+	}
+	if cf.colorScheme != "" {
+		features := []*proto.EmulationMediaFeature{
+			{Name: "prefers-color-scheme", Value: cf.colorScheme},
+		}
+		if err := (proto.EmulationSetEmulatedMedia{Features: features}).Call(page); err != nil {
+			return fmt.Errorf("playwright: set color-scheme: %w", err)
+		}
+	}
+	return nil
 }
 
 // navigateTo navigates to URL and waits for the page to stabilise.
@@ -680,10 +730,32 @@ func (c *Command) execPDF(ctx context.Context, args []string) (string, error) {
 // Argument parsing
 // ---------------------------------------------------------------------------
 
+// contextFlags mirrors the shared playwright-cli flags available on
+// open, screenshot, and pdf commands. They configure the browser context
+// before the page loads.
+type contextFlags struct {
+	proxyServer     string
+	proxyBypass     string
+	viewportSize    string // "WxH"
+	geolocation     string // "lat,lon"
+	timezone        string
+	colorScheme     string
+	lang            string
+	device          string
+	ignoreHTTPSErrs bool
+	loadStoragePath string
+	saveStoragePath string
+	saveHARPath     string
+	saveHARGlob     string
+	blockSW         bool
+	paperFormat     string // pdf only
+}
+
 type commonOpts struct {
 	url       string
 	timeout   time.Duration
 	userAgent string
+	ctx       contextFlags
 }
 
 type screenshotOpts struct {
@@ -704,6 +776,98 @@ type pdfOpts struct {
 	output          string
 	waitForSelector string
 	waitForTimeout  int // ms
+}
+
+// parseContextFlag tries to consume a playwright-cli shared context flag
+// from args[i]. Returns the number of args consumed (0 if not a context flag).
+func parseContextFlag(args []string, i int, cf *contextFlags) (int, error) {
+	switch args[i] {
+	case "--proxy-server":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --proxy-server requires a value")
+		}
+		cf.proxyServer = args[i+1]
+		return 2, nil
+	case "--proxy-bypass":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --proxy-bypass requires a value")
+		}
+		cf.proxyBypass = args[i+1]
+		return 2, nil
+	case "--viewport-size":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --viewport-size requires WxH")
+		}
+		cf.viewportSize = args[i+1]
+		return 2, nil
+	case "--geolocation":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --geolocation requires lat,lon")
+		}
+		cf.geolocation = args[i+1]
+		return 2, nil
+	case "--timezone":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --timezone requires a value")
+		}
+		cf.timezone = args[i+1]
+		return 2, nil
+	case "--color-scheme":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --color-scheme requires light|dark")
+		}
+		cf.colorScheme = args[i+1]
+		return 2, nil
+	case "--lang":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --lang requires a value")
+		}
+		cf.lang = args[i+1]
+		return 2, nil
+	case "--device":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --device requires a name")
+		}
+		cf.device = args[i+1]
+		return 2, nil
+	case "--ignore-https-errors":
+		cf.ignoreHTTPSErrs = true
+		return 1, nil
+	case "--load-storage":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --load-storage requires a file")
+		}
+		cf.loadStoragePath = args[i+1]
+		return 2, nil
+	case "--save-storage":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --save-storage requires a file")
+		}
+		cf.saveStoragePath = args[i+1]
+		return 2, nil
+	case "--save-har":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --save-har requires a file")
+		}
+		cf.saveHARPath = args[i+1]
+		return 2, nil
+	case "--save-har-glob":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --save-har-glob requires a pattern")
+		}
+		cf.saveHARGlob = args[i+1]
+		return 2, nil
+	case "--block-service-workers":
+		cf.blockSW = true
+		return 1, nil
+	case "--paper-format":
+		if i+1 >= len(args) {
+			return 0, fmt.Errorf("playwright: --paper-format requires a value")
+		}
+		cf.paperFormat = args[i+1]
+		return 2, nil
+	}
+	return 0, nil
 }
 
 func parseCommonOpts(args []string, requireURL bool, usage string) (commonOpts, error) {
@@ -728,6 +892,12 @@ func parseCommonOpts(args []string, requireURL bool, usage string) (commonOpts, 
 			i++
 			opts.userAgent = args[i]
 		default:
+			if n, err := parseContextFlag(args, i, &opts.ctx); n > 0 {
+				i += n - 1
+				continue
+			} else if err != nil {
+				return opts, err
+			}
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("playwright: unknown flag: %s", args[i])
 			}
@@ -791,6 +961,12 @@ func parseScreenshotOpts(args []string, usage string) (screenshotOpts, error) {
 			}
 			opts.waitForTimeout = ms
 		default:
+			if n, err := parseContextFlag(args, i, &opts.ctx); n > 0 {
+				i += n - 1
+				continue
+			} else if err != nil {
+				return opts, err
+			}
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("playwright: unknown flag: %s", args[i])
 			}
@@ -906,6 +1082,12 @@ func parsePDFOpts(args []string, usage string) (pdfOpts, error) {
 			}
 			opts.waitForTimeout = ms
 		default:
+			if n, err := parseContextFlag(args, i, &opts.ctx); n > 0 {
+				i += n - 1
+				continue
+			} else if err != nil {
+				return opts, err
+			}
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("playwright: unknown flag: %s", args[i])
 			}
