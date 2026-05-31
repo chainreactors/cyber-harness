@@ -1,5 +1,11 @@
-"""Fixtures for playwright comparison harness."""
+"""Fixtures for playwright comparison harness.
+
+The aiscan 'playwright' is a pseudo-command (not a standalone CLI).
+This harness drives it through pw_driver — a persistent Go process that
+wraps Command.Execute() and speaks JSON-line over stdin/stdout.
+"""
 import http.server
+import json
 import os
 import subprocess
 import threading
@@ -10,7 +16,7 @@ from playwright.sync_api import sync_playwright
 
 HARNESS_DIR = Path(__file__).parent
 FIXTURES_DIR = HARNESS_DIR / "fixtures"
-PROJECT_ROOT = HARNESS_DIR.parents[3]  # pkg/tools/playwright/testharness -> root
+PROJECT_ROOT = HARNESS_DIR.parents[3]
 
 
 class _FixtureHandler(http.server.SimpleHTTPRequestHandler):
@@ -18,12 +24,11 @@ class _FixtureHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(FIXTURES_DIR), **kwargs)
 
     def log_message(self, fmt, *args):
-        pass  # suppress request logs
+        pass
 
 
 @pytest.fixture(scope="session")
 def test_server():
-    """Start a local HTTP server serving fixture HTML pages."""
     server = http.server.HTTPServer(("127.0.0.1", 0), _FixtureHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -34,7 +39,6 @@ def test_server():
 
 @pytest.fixture(scope="session")
 def pw():
-    """Real Playwright instance (session-scoped)."""
     p = sync_playwright().start()
     yield p
     p.stop()
@@ -42,7 +46,6 @@ def pw():
 
 @pytest.fixture(scope="session")
 def pw_browser(pw):
-    """Chromium browser for real Playwright tests."""
     browser = pw.chromium.launch(headless=True)
     yield browser
     browser.close()
@@ -50,47 +53,64 @@ def pw_browser(pw):
 
 @pytest.fixture
 def pw_page(pw_browser):
-    """Fresh Playwright page per test."""
     page = pw_browser.new_page()
     yield page
     page.close()
 
 
-@pytest.fixture(scope="session")
-def aiscan_bin():
-    """Path to the aiscan binary compiled with browser tag.
+class PWDriver:
+    """Persistent driver for aiscan playwright pseudo-command."""
 
-    Set AISCAN_BIN env var to skip compilation, or let the fixture
-    build it into a temp location.
-    """
-    env_bin = os.environ.get("AISCAN_BIN")
-    if env_bin and os.path.isfile(env_bin):
-        return env_bin
-
-    bin_path = PROJECT_ROOT / "aiscan_test_bin"
-    if bin_path.exists():
-        return str(bin_path)
-
-    result = subprocess.run(
-        ["go", "build", "-tags", "browser", "-o", str(bin_path), "."],
-        cwd=str(PROJECT_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"Failed to build aiscan: {result.stderr}")
-    return str(bin_path)
-
-
-def aiscan_playwright(aiscan_bin_path: str, *args, timeout=30) -> str:
-    """Run `aiscan playwright <args>` and return stdout."""
-    cmd = [aiscan_bin_path, "playwright", *args]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"aiscan playwright failed: {result.stderr}\nstdout: {result.stdout}"
+    def __init__(self, bin_path: str):
+        self.proc = subprocess.Popen(
+            [bin_path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
-    return result.stdout.strip()
+
+    def execute(self, *args: str) -> str:
+        req = json.dumps({"args": list(args)}) + "\n"
+        self.proc.stdin.write(req)
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            stderr = self.proc.stderr.read()
+            raise RuntimeError(f"pw_driver died: {stderr}")
+        resp = json.loads(line)
+        if resp.get("error"):
+            raise RuntimeError(f"playwright {' '.join(args)}: {resp['error']}")
+        return resp.get("output", "")
+
+    def close(self):
+        if self.proc.poll() is None:
+            try:
+                self.proc.stdin.write(json.dumps({"args": ["__quit__"]}) + "\n")
+                self.proc.stdin.flush()
+                self.proc.wait(timeout=10)
+            except Exception:
+                self.proc.kill()
+
+
+@pytest.fixture(scope="session")
+def pw_driver():
+    """Build and start the persistent pw_driver process."""
+    driver_src = str(HARNESS_DIR / "pw_driver.go")
+    bin_path = str(PROJECT_ROOT / "pw_driver_bin")
+
+    if not os.path.isfile(bin_path):
+        result = subprocess.run(
+            ["go", "build", "-tags", "browser", "-o", bin_path, driver_src],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Failed to build pw_driver: {result.stderr}")
+
+    driver = PWDriver(bin_path)
+    yield driver
+    driver.close()
