@@ -114,7 +114,6 @@ type NodeConfig struct {
 	HeartbeatInterval     time.Duration
 	HeartbeatContextLimit int
 	Prompt                string   // Raw user prompt published in profile and used as heartbeat intent
-	Intent                string   // Deprecated: use Prompt instead. Kept for backward compatibility.
 	Skills                []string // Skill names for profile capabilities
 	SkillRefs             []SkillRef
 	Network               map[string]any
@@ -332,8 +331,8 @@ func (n *Node) Run(ctx context.Context) error {
 
 func (n *Node) announceProfile(ctx context.Context) error {
 	parts := []string{fmt.Sprintf("Node %s (%s) joined the swarm.", n.cfg.NodeName, n.cfg.Client.NodeID())}
-	if intent := n.resolveIntent(); intent != "" {
-		parts = append(parts, "Intent: "+intent)
+	if prompt := strings.TrimSpace(n.cfg.Prompt); prompt != "" {
+		parts = append(parts, "Intent: "+prompt)
 	}
 	if skills := cleanStrings(n.cfg.Skills); len(skills) > 0 {
 		parts = append(parts, "Skills: "+strings.Join(skills, ", "))
@@ -377,15 +376,6 @@ func (n *Node) buildMeta() map[string]any {
 		meta["skill_refs"] = n.cfg.SkillRefs
 	}
 	return meta
-}
-
-// resolveIntent returns the effective intent string, falling back from Prompt
-// to the deprecated Intent field for backward compatibility.
-func (n *Node) resolveIntent() string {
-	if p := strings.TrimSpace(n.cfg.Prompt); p != "" {
-		return p
-	}
-	return strings.TrimSpace(n.cfg.Intent)
 }
 
 // catchUp polls the space for messages we haven't seen yet, as a fallback
@@ -484,7 +474,7 @@ func (n *Node) heartbeatPrompt(hb heartbeatConfig, messages []ioa.Message) strin
 	contextView := slimMessageContext(messages, 32<<10)
 	intent := strings.TrimSpace(hb.prompt)
 	if intent == "" {
-		intent = n.resolveIntent()
+		intent = strings.TrimSpace(n.cfg.Prompt)
 	}
 	if intent == "" {
 		intent = "No explicit worker intent was configured."
