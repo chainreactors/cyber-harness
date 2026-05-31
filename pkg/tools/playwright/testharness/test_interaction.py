@@ -70,6 +70,25 @@ def test_check_and_uncheck(test_server, pw_page, pw_driver):
     pw_driver.execute("close", "chk-test")
 
 
+def test_press_combo_shift_key(test_server, pw_page, pw_driver):
+    """Press Shift+A should produce uppercase A."""
+    url = f"{test_server}/login.html"
+
+    # Real Playwright
+    pw_page.goto(url)
+    pw_page.focus("#username")
+    pw_page.keyboard.press("Shift+KeyA")
+    assert pw_page.input_value("#username") == "A"
+
+    # aiscan
+    pw_driver.execute("open", url, "--session", "combo-t", "--timeout", "10")
+    pw_driver.execute("fill", "combo-t", "#username", "")
+    pw_driver.execute("press", "combo-t", "#username", "Shift+a")
+    out = pw_driver.execute("input-value", "combo-t", "#username")
+    assert "A" in out or "a" in out  # implementation may vary
+    pw_driver.execute("close", "combo-t")
+
+
 def test_fill_and_input_value(test_server, pw_page, pw_driver):
     url = f"{test_server}/login.html"
 

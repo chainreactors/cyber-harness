@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head><title>Dynamic</title></head>
+<body>
+  <h1>Dynamic Page</h1>
+  <div id="viewport-size"></div>
+  <div id="fetch-result"></div>
+  <button id="fetch-btn">Fetch API</button>
+  <a href="/fixtures/page2.html" id="nav-link">Navigate Away</a>
+  <script>
+    document.getElementById('viewport-size').textContent =
+      window.innerWidth + 'x' + window.innerHeight;
+
+    document.getElementById('fetch-btn').addEventListener('click', function() {
+      fetch('/api/data')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          document.getElementById('fetch-result').textContent = JSON.stringify(d);
+        })
+        .catch(function(e) {
+          document.getElementById('fetch-result').textContent = 'error:' + e.message;
+        });
+    });
+  </script>
+</body>
+</html>

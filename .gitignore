@@ -25,3 +25,4 @@ aiscan
 /spray
 out/
 scan_results.jsonl
+pw_driver_bin

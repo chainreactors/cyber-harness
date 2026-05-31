@@ -37,5 +37,23 @@
       document.getElementById('dbl-result').style.display = 'block';
     });
   </script>
+
+  <input type="text" id="focus-target" value="">
+  <div id="focus-result"></div>
+  <script>
+    document.getElementById('focus-target').addEventListener('focus', function() {
+      document.getElementById('focus-result').textContent = 'focused';
+    });
+    document.getElementById('focus-target').addEventListener('blur', function() {
+      document.getElementById('focus-result').textContent = 'blurred';
+    });
+  </script>
+
+  <div id="dispatch-target">waiting</div>
+  <script>
+    document.getElementById('dispatch-target').addEventListener('custom-ping', function() {
+      this.textContent = 'pinged';
+    });
+  </script>
 </body>
 </html>

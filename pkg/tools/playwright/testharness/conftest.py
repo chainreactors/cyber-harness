@@ -23,6 +23,22 @@ class _FixtureHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(FIXTURES_DIR), **kwargs)
 
+    def do_GET(self):
+        if self.path == "/api/data":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","value":42}')
+            return
+        if self.path == "/api/echo-headers":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            headers = {k: v for k, v in self.headers.items()}
+            self.wfile.write(json.dumps(headers).encode())
+            return
+        super().do_GET()
+
     def log_message(self, fmt, *args):
         pass
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/ysmood/gson"
 )
 
 // ---------------------------------------------------------------------------
@@ -44,9 +45,20 @@ func (c *Command) execSetExtraHeaders(ctx context.Context, args []string) (strin
 		}
 		sess.headerMu.Unlock()
 
-		cleanup, err := page.SetExtraHeaders(flat)
-		if err != nil {
+		// Enable Network domain and set headers via CDP directly.
+		if err := (proto.NetworkEnable{}).Call(page); err != nil {
+			return "", fmt.Errorf("playwright set-extra-headers: enable network: %w", err)
+		}
+		hdrs := proto.NetworkHeaders{}
+		for k, v := range headers {
+			hdrs[k] = gson.New(v)
+		}
+		if err := (proto.NetworkSetExtraHTTPHeaders{Headers: hdrs}).Call(page); err != nil {
 			return "", fmt.Errorf("playwright set-extra-headers: %w", err)
+		}
+
+		cleanup := func() {
+			_ = (proto.NetworkDisable{}).Call(sess.Page)
 		}
 		sess.headerMu.Lock()
 		sess.headerCleanup = cleanup
@@ -133,48 +145,48 @@ func (c *Command) execRoute(ctx context.Context, args []string) (string, error) 
 		return "", err
 	}
 
-	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
-		sess.hijackMu.Lock()
-		if sess.hijackRouter == nil {
-			sess.hijackRouter = page.HijackRequests()
-		}
-		router := sess.hijackRouter
-		sess.hijackMu.Unlock()
+	// Create the hijack router on the persistent session page (not the
+	// timeout-scoped page from withPage) so it outlives individual operations.
+	sess.hijackMu.Lock()
+	if sess.hijackRouter == nil {
+		sess.hijackRouter = sess.Page.HijackRequests()
+	}
+	router := sess.hijackRouter
+	sess.hijackMu.Unlock()
 
-		switch mode {
-		case "fulfill":
-			router.MustAdd(pattern, func(ctx *rod.Hijack) {
-				for k, v := range opts.headers {
-					ctx.Response.SetHeader(k, v)
-				}
-				if opts.contentType != "" {
-					ctx.Response.SetHeader("Content-Type", opts.contentType)
-				}
-				ctx.Response.SetBody(opts.body)
-				ctx.Response.Payload().ResponseCode = opts.status
-			})
-		case "abort":
-			router.MustAdd(pattern, func(ctx *rod.Hijack) {
-				ctx.Response.Fail(proto.NetworkErrorReasonAborted)
-			})
-		case "continue":
-			router.MustAdd(pattern, func(ctx *rod.Hijack) {
-				for k, v := range opts.headers {
-					ctx.Request.Req().Header.Set(k, v)
-				}
-				ctx.ContinueRequest(&proto.FetchContinueRequest{})
-			})
-		}
+	switch mode {
+	case "fulfill":
+		router.MustAdd(pattern, func(h *rod.Hijack) {
+			for k, v := range opts.headers {
+				h.Response.SetHeader(k, v)
+			}
+			if opts.contentType != "" {
+				h.Response.SetHeader("Content-Type", opts.contentType)
+			}
+			h.Response.SetBody(opts.body)
+			h.Response.Payload().ResponseCode = opts.status
+		})
+	case "abort":
+		router.MustAdd(pattern, func(h *rod.Hijack) {
+			h.Response.Fail(proto.NetworkErrorReasonAborted)
+		})
+	case "continue":
+		router.MustAdd(pattern, func(h *rod.Hijack) {
+			for k, v := range opts.headers {
+				h.Request.Req().Header.Set(k, v)
+			}
+			h.ContinueRequest(&proto.FetchContinueRequest{})
+		})
+	}
 
-		sess.hijackMu.Lock()
-		if !sess.hijackRunning {
-			sess.hijackRunning = true
-			go router.Run()
-		}
-		sess.hijackMu.Unlock()
+	sess.hijackMu.Lock()
+	if !sess.hijackRunning {
+		sess.hijackRunning = true
+		go router.Run()
+	}
+	sess.hijackMu.Unlock()
 
-		return fmt.Sprintf("Route set: %s -> %s", pattern, mode), nil
-	})
+	return fmt.Sprintf("Route set: %s -> %s", pattern, mode), nil
 }
 
 type routeOpts struct {
@@ -272,6 +284,10 @@ func (c *Command) execWaitForURL(ctx context.Context, args []string) (string, er
 	}
 	pattern := args[1]
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		// Check current URL first, then listen for navigations.
+		if info, _ := page.Info(); info != nil && strings.Contains(info.URL, pattern) {
+			return fmt.Sprintf("URL matched: %s", info.URL), nil
+		}
 		wait := page.EachEvent(func(e *proto.PageFrameNavigated) bool {
 			return strings.Contains(e.Frame.URL, pattern)
 		})
@@ -299,6 +315,7 @@ func (c *Command) execWaitForRequest(ctx context.Context, args []string) (string
 	}
 	pattern := args[1]
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		_ = (proto.NetworkEnable{}).Call(page)
 		var matched string
 		wait := page.EachEvent(func(e *proto.NetworkRequestWillBeSent) bool {
 			if strings.Contains(e.Request.URL, pattern) {
@@ -322,6 +339,7 @@ func (c *Command) execWaitForResponse(ctx context.Context, args []string) (strin
 	}
 	pattern := args[1]
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		_ = (proto.NetworkEnable{}).Call(page)
 		var matched string
 		wait := page.EachEvent(func(e *proto.NetworkResponseReceived) bool {
 			if strings.Contains(e.Response.URL, pattern) {
