@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
@@ -63,6 +64,9 @@ type Session struct {
 	hijackMu      sync.Mutex
 	hijackRouter  *rod.HijackRouter
 	hijackRunning bool
+
+	// Action recording for nuclei headless template generation.
+	rec *recorder
 
 	// playwright-cli parity: save-storage / save-har on close
 	saveStoragePath string
@@ -461,6 +465,14 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		saveHARPath:      o.saveHARPath,
 	}
 
+	if o.record {
+		sess.rec = newRecorder(o.url)
+		sess.rec.record(RecordedAction{
+			Action: headless.ActionNavigate,
+			Args:   map[string]string{"url": "{{BaseURL}}"},
+		})
+	}
+
 	// Start HAR recording if requested (same as playwright-cli --save-har).
 	if o.saveHARPath != "" {
 		sess.networkMu.Lock()
@@ -495,8 +507,12 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		ttlDisplay = "∞ (persistent)"
 	}
 
-	return fmt.Sprintf("Session: %s\nURL: %s\nTitle: %s\nTTL: %s\nOperation timeout: %s",
-		o.sessName, o.url, title, ttlDisplay, o.opTimeout), nil
+	recDisplay := "off"
+	if o.record {
+		recDisplay = "on"
+	}
+	return fmt.Sprintf("Session: %s\nURL: %s\nTitle: %s\nTTL: %s\nOperation timeout: %s\nRecording: %s",
+		o.sessName, o.url, title, ttlDisplay, o.opTimeout, recDisplay), nil
 }
 
 func (c *Command) execClose(ctx context.Context, args []string) (string, error) {
@@ -566,6 +582,10 @@ func (c *Command) execClose(ctx context.Context, args []string) (string, error) 
 		}
 	}
 
+	if sess.rec != nil && sess.rec.len() > 0 {
+		sb.WriteString(fmt.Sprintf("Warning: %d recorded actions not saved (use 'record --dump' or 'record --save' before closing)\n", sess.rec.len()))
+	}
+
 	sess.cleanup()
 	sb.WriteString(fmt.Sprintf("Session %q closed", name))
 	return sb.String(), nil
@@ -602,7 +622,11 @@ func (c *Command) execSessions(ctx context.Context, args []string) (string, erro
 				url = info.URL
 			}
 		}
-		sb.WriteString(fmt.Sprintf("  %-8s %s  age=%s  ttl=%s\n", name, url, age, ttlStr))
+		recStr := ""
+		if sess.rec != nil {
+			recStr = fmt.Sprintf("  rec=%d", sess.rec.len())
+		}
+		sb.WriteString(fmt.Sprintf("  %-8s %s  age=%s  ttl=%s%s\n", name, url, age, ttlStr, recStr))
 	}
 	return sb.String(), nil
 }
@@ -631,6 +655,7 @@ type openOpts struct {
 	proxyServer      string
 	proxyBypass      string
 	blockSW          bool
+	record           bool
 }
 
 func parseOpenOpts(args []string, usage string) (openOpts, error) {
@@ -775,6 +800,8 @@ func parseOpenOpts(args []string, usage string) (openOpts, error) {
 			o.saveHARGlob = args[i]
 		case "--block-service-workers":
 			o.blockSW = true
+		case "--record":
+			o.record = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return o, fmt.Errorf("playwright open: unknown flag: %s", args[i])

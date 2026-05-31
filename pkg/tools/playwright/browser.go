@@ -78,6 +78,7 @@ Session Subcommands (multi-step interactive workflows):
   open <url> [--session name] [--ttl secs]        Open a persistent page (no auto-expire by default)
              [--op-timeout secs]                  Per-operation timeout for session commands
              [--no-speed-up]                      Disable setTimeout/setInterval acceleration
+             [--record]                           Enable action recording for template codegen
   close <session>                                 Close a session and release resources
   sessions                                        List all active sessions
 
@@ -128,6 +129,13 @@ Session Subcommands (multi-step interactive workflows):
     dialog <session> --arm|--check|--disarm     JS dialog capture (XSS verification)
     cookies <session> --list|--set k=v|--clear  Cookie management
 
+Recording (nuclei headless template codegen):
+  record <session> --start                            Start recording actions
+  record <session> --dump                             Print recorded actions as nuclei headless YAML
+  record <session> --save <file> [--id X] [--name Y]  Save recorded template to file
+  record <session> --clear                            Clear recorded actions
+  record <session> --stop                             Stop recording
+
 Headless Template:
   template <file.yaml> <target-url> [--payload k=v]  Run a nuclei-compatible headless template
 
@@ -150,7 +158,12 @@ Examples:
   playwright get-attribute s1 "a.link" href
   playwright is-visible s1 "#admin-panel"
   playwright go-back s1
-  playwright close s1`
+  playwright close s1
+  playwright open https://target.com --session s1 --record
+  playwright fill s1 "input[name=user]" "admin"
+  playwright click s1 "button[type=submit]"
+  playwright record s1 --dump
+  playwright record s1 --save poc.yaml`
 }
 
 // Execute dispatches to the appropriate sub-command.
@@ -162,155 +175,176 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	sub := args[0]
 	subArgs := args[1:]
 
+	var result string
+	var err error
+
 	switch sub {
 	// --- Unified URL/session commands (Playwright-aligned) ---
 	case "goto", "navigate": // navigate is backward-compat alias
 		if c.firstArgIsSession(subArgs) {
-			return c.execSessionText(ctx, subArgs, "goto")
+			result, err = c.execSessionText(ctx, subArgs, "goto")
+		} else {
+			result, err = c.execNavigate(ctx, subArgs)
 		}
-		return c.execNavigate(ctx, subArgs)
 	case "screenshot":
 		if c.firstArgIsSession(subArgs) {
-			return c.execSessionScreenshot(ctx, subArgs)
+			result, err = c.execSessionScreenshot(ctx, subArgs)
+		} else {
+			result, err = c.execScreenshot(ctx, subArgs)
 		}
-		return c.execScreenshot(ctx, subArgs)
 	case "content":
 		if c.firstArgIsSession(subArgs) {
-			return c.execSessionContent(ctx, subArgs)
+			result, err = c.execSessionContent(ctx, subArgs)
+		} else {
+			result, err = c.execContent(ctx, subArgs)
 		}
-		return c.execContent(ctx, subArgs)
 	case "evaluate", "eval": // eval is backward-compat alias
 		if c.firstArgIsSession(subArgs) {
-			return c.execSessionEval(ctx, subArgs)
+			result, err = c.execSessionEval(ctx, subArgs)
+		} else {
+			result, err = c.execEval(ctx, subArgs)
 		}
-		return c.execEval(ctx, subArgs)
 	case "network", "netcap": // netcap is backward-compat alias
 		if c.firstArgIsSession(subArgs) {
-			return c.execSessionNetwork(ctx, subArgs)
+			result, err = c.execSessionNetwork(ctx, subArgs)
+		} else {
+			result, err = c.execNetwork(ctx, subArgs)
 		}
-		return c.execNetwork(ctx, subArgs)
 	case "text-content", "text": // text is backward-compat alias
-		return c.execSessionText(ctx, subArgs, "text-content")
+		result, err = c.execSessionText(ctx, subArgs, "text-content")
 	case "inner-html", "html": // html is backward-compat alias
-		return c.execSessionContent(ctx, subArgs)
+		result, err = c.execSessionContent(ctx, subArgs)
 	case "seval":
-		return c.execSessionEval(ctx, subArgs)
+		result, err = c.execSessionEval(ctx, subArgs)
 	case "sshot":
-		return c.execSessionScreenshot(ctx, subArgs)
+		result, err = c.execSessionScreenshot(ctx, subArgs)
 
 	// --- Stateless-only ---
 	case "pdf":
-		return c.execPDF(ctx, subArgs)
+		result, err = c.execPDF(ctx, subArgs)
 
 	// --- Session lifecycle ---
 	case "open":
-		return c.execOpen(ctx, subArgs)
+		result, err = c.execOpen(ctx, subArgs)
 	case "close":
-		return c.execClose(ctx, subArgs)
+		result, err = c.execClose(ctx, subArgs)
 	case "sessions":
-		return c.execSessions(ctx, subArgs)
+		result, err = c.execSessions(ctx, subArgs)
 
 	// --- Discovery ---
 	case "discover":
-		return c.execDiscover(ctx, subArgs)
+		result, err = c.execDiscover(ctx, subArgs)
 	case "autofill":
-		return c.execAutofill(ctx, subArgs)
+		result, err = c.execAutofill(ctx, subArgs)
 
 	// --- Page content ---
 	case "set-content":
-		return c.execSetContent(ctx, subArgs)
+		result, err = c.execSetContent(ctx, subArgs)
 	case "title":
-		return c.execTitle(ctx, subArgs)
+		result, err = c.execTitle(ctx, subArgs)
 
 	// --- Navigation ---
 	case "reload":
-		return c.execReload(ctx, subArgs)
+		result, err = c.execReload(ctx, subArgs)
 	case "go-back", "back":
-		return c.execGoBack(ctx, subArgs)
+		result, err = c.execGoBack(ctx, subArgs)
 	case "go-forward", "forward":
-		return c.execGoForward(ctx, subArgs)
+		result, err = c.execGoForward(ctx, subArgs)
 
 	// --- Interactive (Playwright-aligned) ---
 	case "click":
-		return c.execClick(ctx, subArgs)
+		result, err = c.execClick(ctx, subArgs)
 	case "fill":
-		return c.execFill(ctx, subArgs)
+		result, err = c.execFill(ctx, subArgs)
 	case "press":
-		return c.execPress(ctx, subArgs)
+		result, err = c.execPress(ctx, subArgs)
 	case "hover":
-		return c.execHover(ctx, subArgs)
+		result, err = c.execHover(ctx, subArgs)
 	case "dblclick":
-		return c.execDblclick(ctx, subArgs)
+		result, err = c.execDblclick(ctx, subArgs)
 	case "select-option", "select": // select is backward-compat alias
-		return c.execSelect(ctx, subArgs)
+		result, err = c.execSelect(ctx, subArgs)
 	case "check":
-		return c.execCheck(ctx, subArgs)
+		result, err = c.execCheck(ctx, subArgs)
 	case "uncheck":
-		return c.execUncheck(ctx, subArgs)
+		result, err = c.execUncheck(ctx, subArgs)
 	case "set-input-files":
-		return c.execSetInputFiles(ctx, subArgs)
+		result, err = c.execSetInputFiles(ctx, subArgs)
 	case "focus":
-		return c.execFocus(ctx, subArgs)
+		result, err = c.execFocus(ctx, subArgs)
 	case "blur":
-		return c.execBlur(ctx, subArgs)
+		result, err = c.execBlur(ctx, subArgs)
 	case "wait-for", "wait": // wait is backward-compat alias
-		return c.execWait(ctx, subArgs)
+		result, err = c.execWait(ctx, subArgs)
 	case "wait-for-url":
-		return c.execWaitForURL(ctx, subArgs)
+		result, err = c.execWaitForURL(ctx, subArgs)
 	case "wait-for-request":
-		return c.execWaitForRequest(ctx, subArgs)
+		result, err = c.execWaitForRequest(ctx, subArgs)
 	case "wait-for-response":
-		return c.execWaitForResponse(ctx, subArgs)
+		result, err = c.execWaitForResponse(ctx, subArgs)
 
 	// --- Extraction ---
 	case "url":
-		return c.execURL(ctx, subArgs)
+		result, err = c.execURL(ctx, subArgs)
 	case "get-attribute":
-		return c.execGetAttribute(ctx, subArgs)
+		result, err = c.execGetAttribute(ctx, subArgs)
 	case "input-value":
-		return c.execInputValue(ctx, subArgs)
+		result, err = c.execInputValue(ctx, subArgs)
 	case "is-visible":
-		return c.execIsVisible(ctx, subArgs)
+		result, err = c.execIsVisible(ctx, subArgs)
 	case "is-hidden":
-		return c.execIsHidden(ctx, subArgs)
+		result, err = c.execIsHidden(ctx, subArgs)
 	case "is-checked":
-		return c.execIsChecked(ctx, subArgs)
+		result, err = c.execIsChecked(ctx, subArgs)
 	case "is-disabled":
-		return c.execIsDisabled(ctx, subArgs)
+		result, err = c.execIsDisabled(ctx, subArgs)
 	case "is-enabled":
-		return c.execIsEnabled(ctx, subArgs)
+		result, err = c.execIsEnabled(ctx, subArgs)
 	case "inner-text":
-		return c.execInnerText(ctx, subArgs)
+		result, err = c.execInnerText(ctx, subArgs)
 	case "tap":
-		return c.execTap(ctx, subArgs)
+		result, err = c.execTap(ctx, subArgs)
 	case "type":
-		return c.execType(ctx, subArgs)
+		result, err = c.execType(ctx, subArgs)
 
 	// --- Vuln verification ---
 	case "dialog":
-		return c.execDialog(ctx, subArgs)
+		result, err = c.execDialog(ctx, subArgs)
 	case "cookies":
-		return c.execCookies(ctx, subArgs)
+		result, err = c.execCookies(ctx, subArgs)
 
 	// --- Network & Headers ---
 	case "set-extra-headers":
-		return c.execSetExtraHeaders(ctx, subArgs)
+		result, err = c.execSetExtraHeaders(ctx, subArgs)
 	case "set-viewport":
-		return c.execSetViewport(ctx, subArgs)
+		result, err = c.execSetViewport(ctx, subArgs)
 	case "dispatch-event":
-		return c.execDispatchEvent(ctx, subArgs)
+		result, err = c.execDispatchEvent(ctx, subArgs)
 	case "route":
-		return c.execRoute(ctx, subArgs)
+		result, err = c.execRoute(ctx, subArgs)
 	case "unroute":
-		return c.execUnroute(ctx, subArgs)
+		result, err = c.execUnroute(ctx, subArgs)
+
+	// --- Recording ---
+	case "record":
+		result, err = c.execRecord(ctx, subArgs)
 
 	// --- Headless Template ---
 	case "template":
-		return c.execTemplate(ctx, subArgs)
+		result, err = c.execTemplate(ctx, subArgs)
 
 	default:
 		return "", fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())
 	}
+
+	// Record successful session commands for template codegen.
+	if err == nil && len(subArgs) > 0 {
+		if sess, sessErr := c.getSession(subArgs[0]); sessErr == nil && sess.rec != nil {
+			recordCommand(sess, sub, subArgs)
+		}
+	}
+
+	return result, err
 }
 
 // Close shuts down the browser process if running.
