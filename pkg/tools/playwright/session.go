@@ -51,6 +51,15 @@ type Session struct {
 	networkRecorder *networkRecorder
 	networkCancel   context.CancelFunc
 	networkActive   bool
+
+	// Extra headers
+	headerMu      sync.Mutex
+	headerCleanup func()
+
+	// Request interception
+	hijackMu      sync.Mutex
+	hijackRouter  *rod.HijackRouter
+	hijackRunning bool
 }
 
 // touch updates LastUsed timestamp.
@@ -107,6 +116,21 @@ func (s *Session) cleanup() {
 	}
 	s.networkActive = false
 	s.networkMu.Unlock()
+
+	s.headerMu.Lock()
+	if s.headerCleanup != nil {
+		s.headerCleanup()
+		s.headerCleanup = nil
+	}
+	s.headerMu.Unlock()
+
+	s.hijackMu.Lock()
+	if s.hijackRouter != nil {
+		_ = s.hijackRouter.Stop()
+		s.hijackRouter = nil
+		s.hijackRunning = false
+	}
+	s.hijackMu.Unlock()
 
 	s.opMu.Lock()
 	defer s.opMu.Unlock()

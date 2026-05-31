@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/ysmood/gson"
 )
@@ -534,6 +536,353 @@ func networkCaptureStop(ctx context.Context, sess *Session) (string, error) {
 		return fmt.Sprintf("Network capture stopped on session %q - captured %d request(s)", sess.Name, len(entries)), nil
 	})
 }
+
+// ---------------------------------------------------------------------------
+// press
+// ---------------------------------------------------------------------------
+
+var keyNameMap = map[string]input.Key{
+	"enter": input.Enter, "tab": input.Tab, "escape": input.Escape,
+	"backspace": input.Backspace, "delete": input.Delete, "space": input.Space,
+	"arrowup": input.ArrowUp, "arrowdown": input.ArrowDown,
+	"arrowleft": input.ArrowLeft, "arrowright": input.ArrowRight,
+	"home": input.Home, "end": input.End,
+	"pageup": input.PageUp, "pagedown": input.PageDown,
+	"insert": input.Insert,
+	"f1": input.F1, "f2": input.F2, "f3": input.F3, "f4": input.F4,
+	"f5": input.F5, "f6": input.F6, "f7": input.F7, "f8": input.F8,
+	"f9": input.F9, "f10": input.F10, "f11": input.F11, "f12": input.F12,
+	"shift": input.ShiftLeft, "control": input.ControlLeft,
+	"alt": input.AltLeft, "meta": input.MetaLeft,
+}
+
+func resolveKey(name string) (input.Key, error) {
+	if k, ok := keyNameMap[strings.ToLower(name)]; ok {
+		return k, nil
+	}
+	runes := []rune(name)
+	if len(runes) == 1 {
+		return input.Key(runes[0]), nil
+	}
+	return 0, fmt.Errorf("unknown key %q", name)
+}
+
+func (c *Command) execPress(ctx context.Context, args []string) (string, error) {
+	if len(args) < 3 {
+		return "", fmt.Errorf("playwright press: usage: playwright press <session> <selector> <key>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := args[1]
+	keyExpr := strings.Join(args[2:], " ")
+
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright press: element %q not found: %w", selector, err)
+		}
+		if err := el.Focus(); err != nil {
+			return "", fmt.Errorf("playwright press: focus %q: %w", selector, err)
+		}
+
+		parts := strings.Split(keyExpr, "+")
+		if len(parts) == 1 {
+			k, err := resolveKey(parts[0])
+			if err != nil {
+				return "", fmt.Errorf("playwright press: %w", err)
+			}
+			if err := page.Keyboard.Type(k); err != nil {
+				return "", fmt.Errorf("playwright press: %w", err)
+			}
+		} else {
+			ka := page.KeyActions()
+			for _, p := range parts[:len(parts)-1] {
+				mod, err := resolveKey(strings.TrimSpace(p))
+				if err != nil {
+					return "", fmt.Errorf("playwright press: modifier %w", err)
+				}
+				ka = ka.Press(mod)
+			}
+			main, err := resolveKey(strings.TrimSpace(parts[len(parts)-1]))
+			if err != nil {
+				return "", fmt.Errorf("playwright press: %w", err)
+			}
+			ka = ka.Type(main)
+			for i := len(parts) - 2; i >= 0; i-- {
+				mod, _ := resolveKey(strings.TrimSpace(parts[i]))
+				ka = ka.Release(mod)
+			}
+			if err := ka.Do(); err != nil {
+				return "", fmt.Errorf("playwright press: %w", err)
+			}
+		}
+
+		return fmt.Sprintf("Pressed %q on %q", keyExpr, selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// hover
+// ---------------------------------------------------------------------------
+
+func (c *Command) execHover(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright hover: usage: playwright hover <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright hover: element %q not found: %w", selector, err)
+		}
+		if err := el.Hover(); err != nil {
+			return "", fmt.Errorf("playwright hover: %w", err)
+		}
+		return fmt.Sprintf("Hovered over %q", selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// dblclick
+// ---------------------------------------------------------------------------
+
+func (c *Command) execDblclick(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright dblclick: usage: playwright dblclick <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright dblclick: element %q not found: %w", selector, err)
+		}
+		if err := el.Click(proto.InputMouseButtonLeft, 2); err != nil {
+			return "", fmt.Errorf("playwright dblclick: %w", err)
+		}
+		_ = page.WaitStable(waitStableDur)
+		return fmt.Sprintf("Double-clicked %q", selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// get-attribute
+// ---------------------------------------------------------------------------
+
+func (c *Command) execGetAttribute(ctx context.Context, args []string) (string, error) {
+	if len(args) < 3 {
+		return "", fmt.Errorf("playwright get-attribute: usage: playwright get-attribute <session> <selector> <name>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := args[1]
+	attrName := args[2]
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright get-attribute: element %q not found: %w", selector, err)
+		}
+		val, err := el.Attribute(attrName)
+		if err != nil {
+			return "", fmt.Errorf("playwright get-attribute: %w", err)
+		}
+		if val == nil {
+			return fmt.Sprintf("%s @%s = null", selector, attrName), nil
+		}
+		return fmt.Sprintf("%s @%s = %s", selector, attrName, *val), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// input-value
+// ---------------------------------------------------------------------------
+
+func (c *Command) execInputValue(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright input-value: usage: playwright input-value <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright input-value: element %q not found: %w", selector, err)
+		}
+		val, err := el.Property("value")
+		if err != nil {
+			return "", fmt.Errorf("playwright input-value: %w", err)
+		}
+		return fmt.Sprintf("%s value = %s", selector, val.Str()), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// is-visible
+// ---------------------------------------------------------------------------
+
+func (c *Command) execIsVisible(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright is-visible: usage: playwright is-visible <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright is-visible: element %q not found: %w", selector, err)
+		}
+		visible, err := el.Visible()
+		if err != nil {
+			return "", fmt.Errorf("playwright is-visible: %w", err)
+		}
+		return fmt.Sprintf("%s visible = %v", selector, visible), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// check / uncheck
+// ---------------------------------------------------------------------------
+
+func (c *Command) execCheck(ctx context.Context, args []string) (string, error) {
+	return c.execSetChecked(ctx, args, true, "check")
+}
+
+func (c *Command) execUncheck(ctx context.Context, args []string) (string, error) {
+	return c.execSetChecked(ctx, args, false, "uncheck")
+}
+
+func (c *Command) execSetChecked(ctx context.Context, args []string, want bool, cmd string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright %s: usage: playwright %s <session> <selector>", cmd, cmd)
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright %s: element %q not found: %w", cmd, selector, err)
+		}
+		checked, err := el.Property("checked")
+		if err != nil {
+			return "", fmt.Errorf("playwright %s: %w", cmd, err)
+		}
+		if checked.Bool() != want {
+			if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
+				return "", fmt.Errorf("playwright %s: %w", cmd, err)
+			}
+		}
+		verb := "Checked"
+		if !want {
+			verb = "Unchecked"
+		}
+		return fmt.Sprintf("%s %q", verb, selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// set-input-files
+// ---------------------------------------------------------------------------
+
+func (c *Command) execSetInputFiles(ctx context.Context, args []string) (string, error) {
+	if len(args) < 3 {
+		return "", fmt.Errorf("playwright set-input-files: usage: playwright set-input-files <session> <selector> <path...>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := args[1]
+	paths := args[2:]
+
+	resolved := make([]string, len(paths))
+	for i, p := range paths {
+		resolved[i] = resolvePath(c.workDir, p)
+		if _, err := os.Stat(resolved[i]); err != nil {
+			return "", fmt.Errorf("playwright set-input-files: file %q: %w", resolved[i], err)
+		}
+	}
+
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright set-input-files: element %q not found: %w", selector, err)
+		}
+		if err := el.SetFiles(resolved); err != nil {
+			return "", fmt.Errorf("playwright set-input-files: %w", err)
+		}
+		return fmt.Sprintf("Set %d file(s) on %q: %s", len(resolved), selector, strings.Join(paths, ", ")), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// focus / blur
+// ---------------------------------------------------------------------------
+
+func (c *Command) execFocus(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright focus: usage: playwright focus <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright focus: element %q not found: %w", selector, err)
+		}
+		if err := el.Focus(); err != nil {
+			return "", fmt.Errorf("playwright focus: %w", err)
+		}
+		return fmt.Sprintf("Focused %q", selector), nil
+	})
+}
+
+func (c *Command) execBlur(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright blur: usage: playwright blur <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright blur: element %q not found: %w", selector, err)
+		}
+		if err := el.Blur(); err != nil {
+			return "", fmt.Errorf("playwright blur: %w", err)
+		}
+		return fmt.Sprintf("Blurred %q", selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 func findElement(page *rod.Page, selector string) (*rod.Element, error) {
 	selector = strings.TrimSpace(selector)

@@ -81,22 +81,48 @@ Session Subcommands (multi-step interactive workflows):
   close <session>                                 Close a session and release resources
   sessions                                        List all active sessions
 
+  Navigation:
+    reload <session>                            Reload the current page
+    go-back <session>                           Navigate back in history
+    go-forward <session>                        Navigate forward in history
+
   Discovery (page discovery & smart form filling):
     discover <session>                          List forms, buttons, event listeners, SPA routes
     autofill <session> [--form N] [--data k=v]  Smart form fill using katana heuristics
 
   Interaction:
     click <session> <selector>                  Click an element
+    dblclick <session> <selector>               Double-click an element
     fill <session> <selector> <value>           Type into an input field
+    press <session> <selector> <key>            Press a key (Enter, Tab, Shift+Enter, etc.)
+    hover <session> <selector>                  Hover over an element
     select-option <session> <selector> <value>  Select a dropdown option
+    check <session> <selector>                  Check a checkbox
+    uncheck <session> <selector>                Uncheck a checkbox
+    set-input-files <session> <sel> <path...>   Set files for a file input (upload)
+    focus <session> <selector>                  Focus an element
+    blur <session> <selector>                   Blur (unfocus) an element
     wait-for <session> <selector|--idle|--stable>  Wait for element/network/DOM
+    wait-for-url <session> <url-substring>      Wait for navigation to matching URL
+    wait-for-request <session> <url-substring>  Wait for a matching network request
+    wait-for-response <session> <url-substring> Wait for a matching network response
+    dispatch-event <session> <selector> <type>  Dispatch a DOM event (change, input, submit, etc.)
 
   Extraction:
     text-content <session> [selector]           Extract visible text from session
     inner-html <session> [selector]             Extract HTML from session
+    get-attribute <session> <selector> <name>   Get an element attribute value
+    input-value <session> <selector>            Get the current value of an input
+    is-visible <session> <selector>             Check if an element is visible
     evaluate <session> <script>                 Execute JS in session context
     screenshot <session> [options]              Screenshot session page
     url <session>                               Current URL and page title
+
+  Headers & Interception:
+    set-extra-headers <session> <json>          Add extra HTTP headers (e.g. Authorization)
+    set-viewport <session> <width> <height>     Set viewport dimensions
+    route <session> <pattern> --fulfill|--abort|--continue [options]
+    unroute <session>                           Remove all request interception routes
 
   Vuln Verification:
     dialog <session> --arm|--check|--disarm     JS dialog capture (XSS verification)
@@ -110,16 +136,17 @@ Common Options:
 
 Examples:
   playwright goto https://example.com
-  playwright open https://target.com/login --session s1 --ttl 0
+  playwright open https://target.com/login --session s1
   playwright discover s1
-  playwright autofill s1 --form 0 --data "username=admin,password=test"
-  playwright click s1 "button[type=submit]"
-  playwright dialog s1 --arm
-  playwright fill s1 "input[name=q]" "<script>alert(1)</script>"
-  playwright dialog s1 --check
-  playwright screenshot s1 --selector "#captcha-img" --output captcha.png
-  playwright network s1 --start
-  playwright sessions
+  playwright fill s1 "input[name=user]" "admin"
+  playwright press s1 "input[name=user]" Enter
+  playwright hover s1 "nav .dropdown"
+  playwright set-input-files s1 "input[type=file]" /tmp/shell.php
+  playwright set-extra-headers s1 '{"Authorization":"Bearer token123"}'
+  playwright route s1 "*/api/check" --fulfill --status 200 --body '{"valid":true}'
+  playwright get-attribute s1 "a.link" href
+  playwright is-visible s1 "#admin-panel"
+  playwright go-back s1
   playwright close s1`
 }
 
@@ -186,25 +213,73 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	case "autofill":
 		return c.execAutofill(ctx, subArgs)
 
+	// --- Navigation ---
+	case "reload":
+		return c.execReload(ctx, subArgs)
+	case "go-back", "back":
+		return c.execGoBack(ctx, subArgs)
+	case "go-forward", "forward":
+		return c.execGoForward(ctx, subArgs)
+
 	// --- Interactive (Playwright-aligned) ---
 	case "click":
 		return c.execClick(ctx, subArgs)
 	case "fill":
 		return c.execFill(ctx, subArgs)
+	case "press":
+		return c.execPress(ctx, subArgs)
+	case "hover":
+		return c.execHover(ctx, subArgs)
+	case "dblclick":
+		return c.execDblclick(ctx, subArgs)
 	case "select-option", "select": // select is backward-compat alias
 		return c.execSelect(ctx, subArgs)
+	case "check":
+		return c.execCheck(ctx, subArgs)
+	case "uncheck":
+		return c.execUncheck(ctx, subArgs)
+	case "set-input-files":
+		return c.execSetInputFiles(ctx, subArgs)
+	case "focus":
+		return c.execFocus(ctx, subArgs)
+	case "blur":
+		return c.execBlur(ctx, subArgs)
 	case "wait-for", "wait": // wait is backward-compat alias
 		return c.execWait(ctx, subArgs)
+	case "wait-for-url":
+		return c.execWaitForURL(ctx, subArgs)
+	case "wait-for-request":
+		return c.execWaitForRequest(ctx, subArgs)
+	case "wait-for-response":
+		return c.execWaitForResponse(ctx, subArgs)
 
 	// --- Extraction ---
 	case "url":
 		return c.execURL(ctx, subArgs)
+	case "get-attribute":
+		return c.execGetAttribute(ctx, subArgs)
+	case "input-value":
+		return c.execInputValue(ctx, subArgs)
+	case "is-visible":
+		return c.execIsVisible(ctx, subArgs)
 
 	// --- Vuln verification ---
 	case "dialog":
 		return c.execDialog(ctx, subArgs)
 	case "cookies":
 		return c.execCookies(ctx, subArgs)
+
+	// --- Network & Headers ---
+	case "set-extra-headers":
+		return c.execSetExtraHeaders(ctx, subArgs)
+	case "set-viewport":
+		return c.execSetViewport(ctx, subArgs)
+	case "dispatch-event":
+		return c.execDispatchEvent(ctx, subArgs)
+	case "route":
+		return c.execRoute(ctx, subArgs)
+	case "unroute":
+		return c.execUnroute(ctx, subArgs)
 
 	default:
 		return "", fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())

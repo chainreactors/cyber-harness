@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head><title>Forms</title></head>
+<body>
+  <h1>Form Elements</h1>
+  <input type="checkbox" id="agree" name="agree">
+  <label for="agree">I agree</label>
+
+  <input type="checkbox" id="newsletter" name="newsletter" checked>
+  <label for="newsletter">Newsletter</label>
+
+  <select id="color" name="color">
+    <option value="red">Red</option>
+    <option value="green">Green</option>
+    <option value="blue">Blue</option>
+  </select>
+
+  <textarea id="notes" name="notes" placeholder="Notes"></textarea>
+
+  <input type="file" id="upload" name="upload">
+
+  <div id="hidden-div" style="display:none">Hidden Content</div>
+  <div id="visible-div" data-role="info" data-custom="test123">Visible Content</div>
+
+  <button id="hover-btn">Hover Me</button>
+  <div id="hover-result" style="display:none">Hovered!</div>
+  <script>
+    document.getElementById('hover-btn').addEventListener('mouseenter', function() {
+      document.getElementById('hover-result').style.display = 'block';
+    });
+  </script>
+
+  <button id="dbl-btn">Double Click</button>
+  <div id="dbl-result" style="display:none">Double Clicked!</div>
+  <script>
+    document.getElementById('dbl-btn').addEventListener('dblclick', function() {
+      document.getElementById('dbl-result').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

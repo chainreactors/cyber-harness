@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head><title>Login</title></head>
+<body>
+  <h1>Login Page</h1>
+  <form id="login" action="/submit" method="POST">
+    <input type="text" name="username" id="username" placeholder="Username">
+    <input type="password" name="password" id="password" placeholder="Password">
+    <input type="file" name="avatar" id="avatar">
+    <button type="submit" id="submit-btn">Login</button>
+  </form>
+  <div id="result" style="display:none"></div>
+  <script>
+    document.getElementById('login').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var result = document.getElementById('result');
+      result.style.display = 'block';
+      result.textContent = 'Submitted: ' + document.getElementById('username').value;
+      history.pushState({}, '', '/dashboard');
+    });
+  </script>
+</body>
+</html>
