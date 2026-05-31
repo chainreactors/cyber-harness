@@ -881,6 +881,177 @@ func (c *Command) execBlur(ctx context.Context, args []string) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
+// is-hidden / is-checked / is-disabled / is-enabled
+// ---------------------------------------------------------------------------
+
+func (c *Command) execIsHidden(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright is-hidden: usage: playwright is-hidden <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright is-hidden: element %q not found: %w", selector, err)
+		}
+		visible, err := el.Visible()
+		if err != nil {
+			return "", fmt.Errorf("playwright is-hidden: %w", err)
+		}
+		return fmt.Sprintf("%s hidden = %v", selector, !visible), nil
+	})
+}
+
+func (c *Command) execIsChecked(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright is-checked: usage: playwright is-checked <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright is-checked: element %q not found: %w", selector, err)
+		}
+		val, err := el.Property("checked")
+		if err != nil {
+			return "", fmt.Errorf("playwright is-checked: %w", err)
+		}
+		return fmt.Sprintf("%s checked = %v", selector, val.Bool()), nil
+	})
+}
+
+func (c *Command) execIsDisabled(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright is-disabled: usage: playwright is-disabled <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright is-disabled: element %q not found: %w", selector, err)
+		}
+		disabled, err := el.Disabled()
+		if err != nil {
+			return "", fmt.Errorf("playwright is-disabled: %w", err)
+		}
+		return fmt.Sprintf("%s disabled = %v", selector, disabled), nil
+	})
+}
+
+func (c *Command) execIsEnabled(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright is-enabled: usage: playwright is-enabled <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright is-enabled: element %q not found: %w", selector, err)
+		}
+		disabled, err := el.Disabled()
+		if err != nil {
+			return "", fmt.Errorf("playwright is-enabled: %w", err)
+		}
+		return fmt.Sprintf("%s enabled = %v", selector, !disabled), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// inner-text
+// ---------------------------------------------------------------------------
+
+func (c *Command) execInnerText(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright inner-text: usage: playwright inner-text <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright inner-text: element %q not found: %w", selector, err)
+		}
+		text, err := el.Text()
+		if err != nil {
+			return "", fmt.Errorf("playwright inner-text: %w", err)
+		}
+		return text, nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// tap
+// ---------------------------------------------------------------------------
+
+func (c *Command) execTap(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright tap: usage: playwright tap <session> <selector>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright tap: element %q not found: %w", selector, err)
+		}
+		if err := el.Tap(); err != nil {
+			return "", fmt.Errorf("playwright tap: %w", err)
+		}
+		return fmt.Sprintf("Tapped %q", selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// type (character-by-character input)
+// ---------------------------------------------------------------------------
+
+func (c *Command) execType(ctx context.Context, args []string) (string, error) {
+	if len(args) < 3 {
+		return "", fmt.Errorf("playwright type: usage: playwright type <session> <selector> <text>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	selector := args[1]
+	text := strings.Join(args[2:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		el, err := findElement(page, selector)
+		if err != nil {
+			return "", fmt.Errorf("playwright type: element %q not found: %w", selector, err)
+		}
+		for _, r := range text {
+			if err := el.Type(input.Key(r)); err != nil {
+				return "", fmt.Errorf("playwright type: %w", err)
+			}
+		}
+		return fmt.Sprintf("Typed %d chars into %q", len([]rune(text)), selector), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

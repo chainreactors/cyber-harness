@@ -4,8 +4,10 @@ package playwright
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
+	"github.com/ysmood/gson"
 	katanajs "github.com/projectdiscovery/katana/pkg/engine/headless/js"
 )
 
@@ -60,6 +63,10 @@ type Session struct {
 	hijackMu      sync.Mutex
 	hijackRouter  *rod.HijackRouter
 	hijackRunning bool
+
+	// playwright-cli parity: save-storage / save-har on close
+	saveStoragePath string
+	saveHARPath     string
 }
 
 // touch updates LastUsed timestamp.
@@ -354,11 +361,70 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		return "", fmt.Errorf("playwright open: katana js: %w", err)
 	}
 
+	// --- playwright-cli parity: context-level configuration ---
+	uaOverride := &proto.NetworkSetUserAgentOverride{}
 	if o.userAgent != "" {
-		if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: o.userAgent}); err != nil {
+		uaOverride.UserAgent = o.userAgent
+	}
+	if o.lang != "" {
+		uaOverride.AcceptLanguage = o.lang
+	}
+	if uaOverride.UserAgent != "" || uaOverride.AcceptLanguage != "" {
+		if err := page.SetUserAgent(uaOverride); err != nil {
 			_ = page.Close()
 			_ = incognito.Close()
 			return "", fmt.Errorf("playwright open: set user-agent: %w", err)
+		}
+	}
+
+	if o.viewportSize != "" {
+		w, h, parseErr := parseViewportSize(o.viewportSize)
+		if parseErr != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: %w", parseErr)
+		}
+		if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+			Width: w, Height: h, DeviceScaleFactor: 1,
+		}); err != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: set viewport: %w", err)
+		}
+	}
+
+	if o.geolocation != "" {
+		lat, lon, parseErr := parseGeolocation(o.geolocation)
+		if parseErr != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: %w", parseErr)
+		}
+		if err := (proto.EmulationSetGeolocationOverride{
+			Latitude: &lat, Longitude: &lon, Accuracy: gson.Num(1),
+		}).Call(page); err != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: set geolocation: %w", err)
+		}
+	}
+
+	if o.timezone != "" {
+		if err := (proto.EmulationSetTimezoneOverride{TimezoneID: o.timezone}).Call(page); err != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: set timezone: %w", err)
+		}
+	}
+
+	if o.colorScheme != "" {
+		features := []*proto.EmulationMediaFeature{
+			{Name: "prefers-color-scheme", Value: o.colorScheme},
+		}
+		if err := (proto.EmulationSetEmulatedMedia{Features: features}).Call(page); err != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: set color-scheme: %w", err)
 		}
 	}
 
@@ -367,6 +433,15 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		_ = page.Close()
 		_ = incognito.Close()
 		return "", fmt.Errorf("playwright open: %w", err)
+	}
+
+	// Load storage state after navigation so localStorage lands on the correct origin.
+	if o.loadStoragePath != "" {
+		if err := loadStorageState(page, resolvePath(c.workDir, o.loadStoragePath)); err != nil {
+			_ = page.Close()
+			_ = incognito.Close()
+			return "", fmt.Errorf("playwright open: load-storage: %w", err)
+		}
 	}
 
 	sess := &Session{
@@ -378,6 +453,27 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		Timeout:   o.ttl,
 
 		OperationTimeout: o.opTimeout,
+		saveStoragePath:  o.saveStoragePath,
+		saveHARPath:      o.saveHARPath,
+	}
+
+	// Start HAR recording if requested (same as playwright-cli --save-har).
+	if o.saveHARPath != "" {
+		sess.networkMu.Lock()
+		sess.networkRecorder = newNetworkRecorder()
+		sess.networkActive = true
+		if err := (proto.NetworkEnable{}).Call(page); err == nil {
+			capCtx, capCancel := context.WithCancel(context.Background())
+			sess.networkCancel = capCancel
+			capturedPage := page.Context(capCtx)
+			go capturedPage.EachEvent(
+				sess.networkRecorder.requestWillBeSent,
+				sess.networkRecorder.responseReceived,
+				sess.networkRecorder.loadingFinished,
+				sess.networkRecorder.loadingFailed,
+			)()
+		}
+		sess.networkMu.Unlock()
 	}
 
 	c.sessionsMu.Lock()
@@ -405,6 +501,23 @@ func (c *Command) execClose(ctx context.Context, args []string) (string, error) 
 	}
 	name := args[0]
 
+	// Parse optional --save-storage / --save-har overrides.
+	saveStor, saveHAR := "", ""
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--save-storage":
+			if i+1 < len(args) {
+				i++
+				saveStor = args[i]
+			}
+		case "--save-har":
+			if i+1 < len(args) {
+				i++
+				saveHAR = args[i]
+			}
+		}
+	}
+
 	c.sessionsMu.Lock()
 	sess, ok := c.sessions[name]
 	if !ok {
@@ -414,8 +527,44 @@ func (c *Command) execClose(ctx context.Context, args []string) (string, error) 
 	delete(c.sessions, name)
 	c.sessionsMu.Unlock()
 
+	var sb strings.Builder
+
+	// Save storage state before cleanup.
+	storPath := saveStor
+	if storPath == "" {
+		storPath = sess.saveStoragePath
+	}
+	if storPath != "" && sess.Page != nil {
+		if err := saveStorageState(sess.Page, resolvePath(c.workDir, storPath)); err != nil {
+			sb.WriteString(fmt.Sprintf("Warning: save-storage failed: %v\n", err))
+		} else {
+			sb.WriteString(fmt.Sprintf("Storage saved: %s\n", storPath))
+		}
+	}
+
+	// Save HAR before cleanup.
+	harPath := saveHAR
+	if harPath == "" {
+		harPath = sess.saveHARPath
+	}
+	if harPath != "" {
+		sess.networkMu.Lock()
+		if sess.networkRecorder != nil {
+			entries := sess.networkRecorder.snapshot()
+			sess.networkMu.Unlock()
+			if err := writeHAR(resolvePath(c.workDir, harPath), entries); err != nil {
+				sb.WriteString(fmt.Sprintf("Warning: save-har failed: %v\n", err))
+			} else {
+				sb.WriteString(fmt.Sprintf("HAR saved: %s (%d entries)\n", harPath, len(entries)))
+			}
+		} else {
+			sess.networkMu.Unlock()
+		}
+	}
+
 	sess.cleanup()
-	return fmt.Sprintf("Session %q closed", name), nil
+	sb.WriteString(fmt.Sprintf("Session %q closed", name))
+	return sb.String(), nil
 }
 
 // execSessions lists all active sessions.
@@ -460,10 +609,20 @@ func (c *Command) execSessions(ctx context.Context, args []string) (string, erro
 
 type openOpts struct {
 	commonOpts
-	sessName  string
-	ttl       time.Duration
-	opTimeout time.Duration
-	noSpeedUp bool
+	sessName         string
+	ttl              time.Duration
+	opTimeout        time.Duration
+	noSpeedUp        bool
+	ignoreHTTPSErrs  bool
+	viewportSize     string // "WxH"
+	geolocation      string // "lat,lon"
+	timezone         string
+	colorScheme      string // light|dark
+	lang             string
+	device           string
+	loadStoragePath  string
+	saveStoragePath  string // stored on Session, dumped at close
+	saveHARPath      string // stored on Session, dumped at close
 }
 
 func parseOpenOpts(args []string, usage string) (openOpts, error) {
@@ -532,6 +691,62 @@ func parseOpenOpts(args []string, usage string) (openOpts, error) {
 			o.opTimeout = time.Duration(secs) * time.Second
 		case "--no-speed-up":
 			o.noSpeedUp = true
+		case "--ignore-https-errors":
+			o.ignoreHTTPSErrs = true
+		case "--viewport-size":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --viewport-size requires WxH (e.g. 1280x720)")
+			}
+			i++
+			o.viewportSize = args[i]
+		case "--geolocation":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --geolocation requires lat,lon")
+			}
+			i++
+			o.geolocation = args[i]
+		case "--timezone":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --timezone requires a value")
+			}
+			i++
+			o.timezone = args[i]
+		case "--color-scheme":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --color-scheme requires light|dark")
+			}
+			i++
+			o.colorScheme = args[i]
+		case "--lang":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --lang requires a value")
+			}
+			i++
+			o.lang = args[i]
+		case "--device":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --device requires a device name")
+			}
+			i++
+			o.device = args[i]
+		case "--load-storage":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --load-storage requires a file path")
+			}
+			i++
+			o.loadStoragePath = args[i]
+		case "--save-storage":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --save-storage requires a file path")
+			}
+			i++
+			o.saveStoragePath = args[i]
+		case "--save-har":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("playwright open: --save-har requires a file path")
+			}
+			i++
+			o.saveHARPath = args[i]
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return o, fmt.Errorf("playwright open: unknown flag: %s", args[i])
@@ -549,4 +764,157 @@ func parseOpenOpts(args []string, usage string) (openOpts, error) {
 		o.sessName = nextSessionName()
 	}
 	return o, nil
+}
+
+// ---------------------------------------------------------------------------
+// playwright-cli parity helpers
+// ---------------------------------------------------------------------------
+
+func parseViewportSize(s string) (int, int, error) {
+	// Accept "1280x720", "1280,720", "1280 720"
+	s = strings.ReplaceAll(s, ",", "x")
+	s = strings.ReplaceAll(s, " ", "x")
+	parts := strings.SplitN(s, "x", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("--viewport-size must be WxH, got %q", s)
+	}
+	w, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || w <= 0 {
+		return 0, 0, fmt.Errorf("--viewport-size width invalid: %q", parts[0])
+	}
+	h, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || h <= 0 {
+		return 0, 0, fmt.Errorf("--viewport-size height invalid: %q", parts[1])
+	}
+	return w, h, nil
+}
+
+func parseGeolocation(s string) (float64, float64, error) {
+	parts := strings.SplitN(s, ",", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("--geolocation must be lat,lon, got %q", s)
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("--geolocation lat invalid: %w", err)
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("--geolocation lon invalid: %w", err)
+	}
+	return lat, lon, nil
+}
+
+// storageState mirrors the Playwright storage state format.
+type storageState struct {
+	Cookies        []json.RawMessage        `json:"cookies"`
+	LocalStorage   []localStorageEntry       `json:"origins"`
+}
+
+type localStorageEntry struct {
+	Origin       string           `json:"origin"`
+	LocalStorage []nameValuePair  `json:"localStorage"`
+}
+
+type nameValuePair struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func loadStorageState(page *rod.Page, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var state storageState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("invalid storage state JSON: %w", err)
+	}
+	// Restore cookies via CDP.
+	for _, raw := range state.Cookies {
+		var cookie proto.NetworkCookieParam
+		if err := json.Unmarshal(raw, &cookie); err != nil {
+			continue
+		}
+		_ = page.SetCookies([]*proto.NetworkCookieParam{&cookie})
+	}
+	// Restore localStorage entries via JS.
+	for _, origin := range state.LocalStorage {
+		for _, kv := range origin.LocalStorage {
+			k, _ := json.Marshal(kv.Name)
+			v, _ := json.Marshal(kv.Value)
+			_, _ = page.Eval(fmt.Sprintf("localStorage.setItem(%s, %s)", string(k), string(v)))
+		}
+	}
+	return nil
+}
+
+func saveStorageState(page *rod.Page, path string) error {
+	// Collect cookies.
+	cookies, err := page.Cookies(nil)
+	if err != nil {
+		return err
+	}
+	cookieJSON := make([]json.RawMessage, 0, len(cookies))
+	for _, c := range cookies {
+		raw, _ := json.Marshal(c)
+		cookieJSON = append(cookieJSON, raw)
+	}
+	// Collect localStorage via JS.
+	res, err := page.Eval("() => { const items = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); items.push({name: k, value: localStorage.getItem(k)}); } return items; }")
+	var lsItems []nameValuePair
+	if err == nil {
+		_ = res.Value.Unmarshal(&lsItems)
+	}
+	info, _ := page.Info()
+	origin := ""
+	if info != nil {
+		origin = info.URL
+	}
+	state := storageState{
+		Cookies: cookieJSON,
+		LocalStorage: []localStorageEntry{
+			{Origin: origin, LocalStorage: lsItems},
+		},
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func writeHAR(path string, entries []netEntry) error {
+	type harReq struct {
+		Method string `json:"method"`
+		URL    string `json:"url"`
+	}
+	type harResp struct {
+		Status      int    `json:"status"`
+		ContentType string `json:"content_type,omitempty"`
+		BodySize    int    `json:"bodySize"`
+	}
+	type harEntry struct {
+		Request  harReq  `json:"request"`
+		Response harResp `json:"response"`
+	}
+	type harLog struct {
+		Version string     `json:"version"`
+		Entries []harEntry `json:"entries"`
+	}
+	type har struct {
+		Log harLog `json:"log"`
+	}
+	h := har{Log: harLog{Version: "1.2"}}
+	for _, e := range entries {
+		h.Log.Entries = append(h.Log.Entries, harEntry{
+			Request:  harReq{Method: e.Method, URL: e.URL},
+			Response: harResp{Status: e.Status, ContentType: e.ContentType, BodySize: e.Size},
+		})
+	}
+	data, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }

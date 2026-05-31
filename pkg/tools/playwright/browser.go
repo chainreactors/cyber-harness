@@ -213,6 +213,12 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 	case "autofill":
 		return c.execAutofill(ctx, subArgs)
 
+	// --- Page content ---
+	case "set-content":
+		return c.execSetContent(ctx, subArgs)
+	case "title":
+		return c.execTitle(ctx, subArgs)
+
 	// --- Navigation ---
 	case "reload":
 		return c.execReload(ctx, subArgs)
@@ -262,6 +268,20 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		return c.execInputValue(ctx, subArgs)
 	case "is-visible":
 		return c.execIsVisible(ctx, subArgs)
+	case "is-hidden":
+		return c.execIsHidden(ctx, subArgs)
+	case "is-checked":
+		return c.execIsChecked(ctx, subArgs)
+	case "is-disabled":
+		return c.execIsDisabled(ctx, subArgs)
+	case "is-enabled":
+		return c.execIsEnabled(ctx, subArgs)
+	case "inner-text":
+		return c.execInnerText(ctx, subArgs)
+	case "tap":
+		return c.execTap(ctx, subArgs)
+	case "type":
+		return c.execType(ctx, subArgs)
 
 	// --- Vuln verification ---
 	case "dialog":
@@ -444,6 +464,14 @@ func (c *Command) execScreenshot(ctx context.Context, args []string) (string, er
 	if err := navigateTo(page, opts.url); err != nil {
 		return "", fmt.Errorf("playwright screenshot: %w", err)
 	}
+	if opts.waitForTimeout > 0 {
+		time.Sleep(time.Duration(opts.waitForTimeout) * time.Millisecond)
+	}
+	if opts.waitForSelector != "" {
+		if _, err := page.Element(opts.waitForSelector); err != nil {
+			return "", fmt.Errorf("playwright screenshot: wait-for-selector %q: %w", opts.waitForSelector, err)
+		}
+	}
 
 	var data []byte
 	if opts.fullPage {
@@ -609,6 +637,14 @@ func (c *Command) execPDF(ctx context.Context, args []string) (string, error) {
 	if err := navigateTo(page, opts.url); err != nil {
 		return "", fmt.Errorf("playwright pdf: %w", err)
 	}
+	if opts.waitForTimeout > 0 {
+		time.Sleep(time.Duration(opts.waitForTimeout) * time.Millisecond)
+	}
+	if opts.waitForSelector != "" {
+		if _, err := page.Element(opts.waitForSelector); err != nil {
+			return "", fmt.Errorf("playwright pdf: wait-for-selector %q: %w", opts.waitForSelector, err)
+		}
+	}
 
 	reader, err := page.PDF(&proto.PagePrintToPDF{
 		PrintBackground: true,
@@ -652,8 +688,10 @@ type commonOpts struct {
 
 type screenshotOpts struct {
 	commonOpts
-	output   string
-	fullPage bool
+	output          string
+	fullPage        bool
+	waitForSelector string
+	waitForTimeout  int // ms
 }
 
 type evalOpts struct {
@@ -663,7 +701,9 @@ type evalOpts struct {
 
 type pdfOpts struct {
 	commonOpts
-	output string
+	output          string
+	waitForSelector string
+	waitForTimeout  int // ms
 }
 
 func parseCommonOpts(args []string, requireURL bool, usage string) (commonOpts, error) {
@@ -734,6 +774,22 @@ func parseScreenshotOpts(args []string, usage string) (screenshotOpts, error) {
 			opts.output = args[i]
 		case "--full-page":
 			opts.fullPage = true
+		case "--wait-for-selector":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("playwright: --wait-for-selector requires a value")
+			}
+			i++
+			opts.waitForSelector = args[i]
+		case "--wait-for-timeout":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("playwright: --wait-for-timeout requires ms value")
+			}
+			i++
+			ms, err := strconv.Atoi(args[i])
+			if err != nil {
+				return opts, fmt.Errorf("playwright: --wait-for-timeout must be an integer: %w", err)
+			}
+			opts.waitForTimeout = ms
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("playwright: unknown flag: %s", args[i])
@@ -833,6 +889,22 @@ func parsePDFOpts(args []string, usage string) (pdfOpts, error) {
 			}
 			i++
 			opts.output = args[i]
+		case "--wait-for-selector":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("playwright: --wait-for-selector requires a value")
+			}
+			i++
+			opts.waitForSelector = args[i]
+		case "--wait-for-timeout":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("playwright: --wait-for-timeout requires ms value")
+			}
+			i++
+			ms, err := strconv.Atoi(args[i])
+			if err != nil {
+				return opts, fmt.Errorf("playwright: --wait-for-timeout must be an integer: %w", err)
+			}
+			opts.waitForTimeout = ms
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("playwright: unknown flag: %s", args[i])

@@ -5,6 +5,7 @@ package playwright
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-rod/rod"
 )
@@ -50,6 +51,48 @@ func (c *Command) execGoBack(ctx context.Context, args []string) (string, error)
 			url = info.URL
 		}
 		return fmt.Sprintf("Navigated back\nCurrent URL: %s", url), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// set-content
+// ---------------------------------------------------------------------------
+
+func (c *Command) execSetContent(ctx context.Context, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("playwright set-content: usage: playwright set-content <session> <html>")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	html := strings.Join(args[1:], " ")
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		if err := page.SetDocumentContent(html); err != nil {
+			return "", fmt.Errorf("playwright set-content: %w", err)
+		}
+		return fmt.Sprintf("Content set (%d chars)", len(html)), nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// title
+// ---------------------------------------------------------------------------
+
+func (c *Command) execTitle(ctx context.Context, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("playwright title: session name required")
+	}
+	sess, err := c.getSession(args[0])
+	if err != nil {
+		return "", err
+	}
+	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
+		info, err := page.Info()
+		if err != nil {
+			return "", fmt.Errorf("playwright title: %w", err)
+		}
+		return info.Title, nil
 	})
 }
 
