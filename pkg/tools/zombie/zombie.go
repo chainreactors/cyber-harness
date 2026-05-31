@@ -38,6 +38,9 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
+// SetProxy stores the proxy URL. Note: the zombie library's RunOptions no
+// longer exposes ProxyDial, so proxy is not applied at runtime until upstream
+// re-adds support.
 func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
 
 func (c *Command) Name() string { return "zombie" }

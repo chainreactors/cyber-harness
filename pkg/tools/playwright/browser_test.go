@@ -151,47 +151,47 @@ func TestParseAutofillOpts_RejectsUnknownFlag(t *testing.T) {
 }
 
 func TestParseOpenOpts_OperationTimeout(t *testing.T) {
-	_, _, ttl, opTimeout, _, err := parseOpenOpts([]string{
+	o, err := parseOpenOpts([]string{
 		"https://example.com", "--ttl", "120", "--op-timeout", "7",
 	}, "usage")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ttl != 120*time.Second {
-		t.Fatalf("expected ttl 120s, got %v", ttl)
+	if o.ttl != 120*time.Second {
+		t.Fatalf("expected ttl 120s, got %v", o.ttl)
 	}
-	if opTimeout != 7*time.Second {
-		t.Fatalf("expected op timeout 7s, got %v", opTimeout)
+	if o.opTimeout != 7*time.Second {
+		t.Fatalf("expected op timeout 7s, got %v", o.opTimeout)
 	}
 }
 
 func TestParseOpenOpts_ZeroTTL_Persistent(t *testing.T) {
-	_, _, ttl, _, _, err := parseOpenOpts([]string{"https://example.com", "--ttl", "0"}, "usage")
+	o, err := parseOpenOpts([]string{"https://example.com", "--ttl", "0"}, "usage")
 	if err != nil {
 		t.Fatalf("unexpected error for --ttl 0: %v", err)
 	}
-	if ttl != persistentTTL {
-		t.Fatalf("expected persistentTTL for --ttl 0, got %v", ttl)
+	if o.ttl != persistentTTL {
+		t.Fatalf("expected persistentTTL for --ttl 0, got %v", o.ttl)
 	}
 }
 
 func TestParseOpenOpts_NoSpeedUp(t *testing.T) {
-	_, _, _, _, noSpeedUp, err := parseOpenOpts([]string{"https://example.com", "--no-speed-up"}, "usage")
+	o, err := parseOpenOpts([]string{"https://example.com", "--no-speed-up"}, "usage")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !noSpeedUp {
+	if !o.noSpeedUp {
 		t.Fatal("expected noSpeedUp to be true")
 	}
 }
 
 func TestParseOpenOpts_DefaultIsPersistent(t *testing.T) {
-	_, _, ttl, _, _, err := parseOpenOpts([]string{"https://example.com"}, "usage")
+	o, err := parseOpenOpts([]string{"https://example.com"}, "usage")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ttl != persistentTTL {
-		t.Fatalf("expected default TTL to be persistent, got %v", ttl)
+	if o.ttl != persistentTTL {
+		t.Fatalf("expected default TTL to be persistent, got %v", o.ttl)
 	}
 }
 

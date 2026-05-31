@@ -11,7 +11,7 @@ require (
 	github.com/chainreactors/parsers v0.0.0-20260517174207-da1ebd0e7f68
 	github.com/chainreactors/proxyclient v1.0.4-0.20260527160727-36cf133952c3
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
-	github.com/chainreactors/sdk v0.1.1-0.20260516033200-1c5d96f7cfb6
+	github.com/chainreactors/sdk v0.2.3
 	github.com/chainreactors/spray v1.2.6-0.20260523083907-546e8ab7756a
 	github.com/chainreactors/utils v0.0.0-20260529070435-f03100630384
 	github.com/chainreactors/zombie v1.2.3-0.20260529070819-21a4ec2cbbc8
@@ -254,8 +254,6 @@ require (
 )
 
 replace (
-	github.com/chainreactors/fingers => ./fingers-local/fingers
-	github.com/chainreactors/sdk => ./sdk-local
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260422184128-e856ed004d32
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260422184128-e856ed004d32
 )

@@ -9,13 +9,13 @@
 # LLM Provider 配置
 llm:
   # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic
-  provider: "anthropic"
+  provider: ""
   # API base URL（留空使用 provider 默认值）
-  base_url: "https://cc.haxcat.cc/v1"
+  base_url: ""
   # API key（建议使用环境变量而非写入文件）
-  api_key: "REMOVED_CREDENTIAL"
+  api_key: ""
   # 模型名称
-  model: "claude-opus-4-6"
+  model: ""
   # 访问 LLM API 的 HTTP proxy
   proxy: ""
 
@@ -30,22 +30,22 @@ vision:
 
 # Cyberhub 资源服务
 cyberhub:
-  url: "http://38.76.191.190:3000"
-  key: "REMOVED_CREDENTIAL"
+  url: ""
+  key: ""
   # merge 或 override
-  mode: "merge"
+  mode: ""
 
 # IOA 协作
 ioa:
-  url: "http://46.8.226.70:8765"
+  url: ""
   db: ""
-  node_name: "local-master"
-  space: "huaan"
+  node_name: ""
+  space: ""
 
 # 扫描默认值
 scan:
   # auto, off, low, medium, high, critical
-  verify: "medium"
+  verify: ""
   # 单次验证超时秒数（0 表示不覆盖）
   verify_timeout: 0
 
@@ -54,13 +54,13 @@ websearch:
   # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
   tavily_keys: ""
   # web_search 请求代理（如 http://127.0.0.1:7890 或 socks5://...）
-  proxy: "http://127.0.0.1:7890"
+  proxy: ""
 
 # 被动信息收集
 recon:
-  fofa_email: "0x_Jin"
-  fofa_key: "REMOVED_CREDENTIAL"
-  hunter_api_key: "REMOVED_CREDENTIAL"
+  fofa_email: ""
+  fofa_key: ""
+  hunter_api_key: ""
 
 # 通用选项
 misc:

@@ -114,6 +114,7 @@ type NodeConfig struct {
 	HeartbeatInterval     time.Duration
 	HeartbeatContextLimit int
 	Prompt                string   // Raw user prompt published in profile and used as heartbeat intent
+	Intent                string   // Deprecated: use Prompt instead. Kept for backward compatibility.
 	Skills                []string // Skill names for profile capabilities
 	SkillRefs             []SkillRef
 	Network               map[string]any
@@ -331,9 +332,8 @@ func (n *Node) Run(ctx context.Context) error {
 
 func (n *Node) announceProfile(ctx context.Context) error {
 	parts := []string{fmt.Sprintf("Node %s (%s) joined the swarm.", n.cfg.NodeName, n.cfg.Client.NodeID())}
-	// Publish only the raw user prompt; full skill bodies stay out of IOA profiles.
-	if prompt := strings.TrimSpace(n.cfg.Prompt); prompt != "" {
-		parts = append(parts, "Intent: "+prompt)
+	if intent := n.resolveIntent(); intent != "" {
+		parts = append(parts, "Intent: "+intent)
 	}
 	if skills := cleanStrings(n.cfg.Skills); len(skills) > 0 {
 		parts = append(parts, "Skills: "+strings.Join(skills, ", "))
@@ -377,6 +377,15 @@ func (n *Node) buildMeta() map[string]any {
 		meta["skill_refs"] = n.cfg.SkillRefs
 	}
 	return meta
+}
+
+// resolveIntent returns the effective intent string, falling back from Prompt
+// to the deprecated Intent field for backward compatibility.
+func (n *Node) resolveIntent() string {
+	if p := strings.TrimSpace(n.cfg.Prompt); p != "" {
+		return p
+	}
+	return strings.TrimSpace(n.cfg.Intent)
 }
 
 // catchUp polls the space for messages we haven't seen yet, as a fallback
@@ -475,7 +484,7 @@ func (n *Node) heartbeatPrompt(hb heartbeatConfig, messages []ioa.Message) strin
 	contextView := slimMessageContext(messages, 32<<10)
 	intent := strings.TrimSpace(hb.prompt)
 	if intent == "" {
-		intent = strings.TrimSpace(n.cfg.Prompt)
+		intent = n.resolveIntent()
 	}
 	if intent == "" {
 		intent = "No explicit worker intent was configured."
@@ -575,18 +584,30 @@ func slimMessageContext(messages []ioa.Message, budgetBytes int) string {
 }
 
 func renderSlimMessageContext(entries []slimEntry, errSuffix string, budgetBytes int) string {
-	trimmed := 0
-	for {
-		out := formatSlimMessageContext(entries, errSuffix, trimmed)
-		if budgetBytes <= 0 || len(out) <= budgetBytes {
-			return out
-		}
-		if len(entries) == 0 {
-			return truncateToBytes(out, budgetBytes)
-		}
-		entries = entries[1:]
-		trimmed++
+	if budgetBytes <= 0 {
+		return formatSlimMessageContext(entries, errSuffix, 0)
 	}
+	out := formatSlimMessageContext(entries, errSuffix, 0)
+	if len(out) <= budgetBytes {
+		return out
+	}
+	if len(entries) == 0 {
+		return truncateToBytes(out, budgetBytes)
+	}
+	lo, hi := 0, len(entries)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		candidate := formatSlimMessageContext(entries[mid:], errSuffix, mid)
+		if len(candidate) <= budgetBytes {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	if lo >= len(entries) {
+		return truncateToBytes(formatSlimMessageContext(nil, errSuffix, len(entries)), budgetBytes)
+	}
+	return formatSlimMessageContext(entries[lo:], errSuffix, lo)
 }
 
 func formatSlimMessageContext(entries []slimEntry, errSuffix string, trimmed int) string {
@@ -635,9 +656,9 @@ func classifyError(content string) string {
 	case strings.Contains(lower, "timeout") ||
 		strings.Contains(lower, "timed out"):
 		return "timeout"
-	case strings.HasPrefix(lower, "error:"),
-		strings.HasPrefix(lower, "provider error:"),
-		strings.HasPrefix(lower, "heartbeat") && strings.Contains(lower, "error:"):
+	case strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "provider error:") ||
+		(strings.HasPrefix(lower, "heartbeat") && strings.Contains(lower, "error:")):
 		return "provider_error"
 	default:
 		return ""

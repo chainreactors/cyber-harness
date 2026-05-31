@@ -19,15 +19,12 @@ import (
 )
 
 const (
-	// defaultSessionTimeout: sessions never auto-expire by default.
-	// Use --ttl <seconds> to opt-in to auto-expiry.
-	defaultSessionTimeout          = time.Duration(math.MaxInt64)
+	// persistentTTL is the sentinel value for "never expire".
+	// Sessions default to this; use --ttl <seconds> to opt-in to auto-expiry.
+	persistentTTL                  = time.Duration(math.MaxInt64)
 	defaultSessionOperationTimeout = 30 * time.Second
 	maxSessions                    = 8
 	gcInterval                     = 15 * time.Second
-
-	// persistentTTL is the sentinel value for "never expire".
-	persistentTTL = time.Duration(math.MaxInt64)
 )
 
 // Session holds a persistent page across multiple Execute() calls.
@@ -145,22 +142,28 @@ func (c *Command) initSessions() {
 }
 
 func (c *Command) startGC() {
-	c.gcOnce.Do(func() {
-		stop := make(chan struct{})
-		c.gcStop = stop
-		go func() {
-			ticker := time.NewTicker(gcInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					c.reapExpiredSessions()
-				case <-stop:
-					return
-				}
+	c.sessionsMu.Lock()
+	if c.gcRunning {
+		c.sessionsMu.Unlock()
+		return
+	}
+	c.gcRunning = true
+	stop := make(chan struct{})
+	c.gcStop = stop
+	c.sessionsMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(gcInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				c.reapExpiredSessions()
+			case <-stop:
+				return
 			}
-		}()
-	})
+		}
+	}()
 }
 
 func (c *Command) reapExpiredSessions() {
@@ -176,6 +179,27 @@ func (c *Command) reapExpiredSessions() {
 
 	for _, sess := range expired {
 		sess.cleanup()
+	}
+}
+
+// evictLRUSession removes the least-recently-used session to make room.
+func (c *Command) evictLRUSession() {
+	c.sessionsMu.Lock()
+	var oldest *Session
+	oldestName := ""
+	for name, sess := range c.sessions {
+		if oldest == nil || sess.LastUsed.Before(oldest.LastUsed) {
+			oldest = sess
+			oldestName = name
+		}
+	}
+	if oldest != nil {
+		delete(c.sessions, oldestName)
+	}
+	c.sessionsMu.Unlock()
+
+	if oldest != nil {
+		oldest.cleanup()
 	}
 }
 
@@ -218,6 +242,7 @@ func (c *Command) closeAllSessions() {
 		close(c.gcStop)
 		c.gcStop = nil
 	}
+	c.gcRunning = false
 	c.sessionsMu.Unlock()
 
 	for _, sess := range sessions {
@@ -230,7 +255,7 @@ func (c *Command) closeAllSessions() {
 // ---------------------------------------------------------------------------
 
 func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
-	opts, sessName, sessTTL, opTimeout, noSpeedUp, err := parseOpenOpts(args, c.Usage())
+	o, err := parseOpenOpts(args, c.Usage())
 	if err != nil {
 		return "", err
 	}
@@ -243,15 +268,16 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	c.reapExpiredSessions()
 
 	c.sessionsMu.Lock()
-	if len(c.sessions) >= maxSessions {
+	if _, exists := c.sessions[o.sessName]; exists {
 		c.sessionsMu.Unlock()
-		return "", fmt.Errorf("playwright open: max sessions (%d) reached; close an existing session first", maxSessions)
+		return "", fmt.Errorf("playwright open: session %q already exists", o.sessName)
 	}
-	if _, exists := c.sessions[sessName]; exists {
-		c.sessionsMu.Unlock()
-		return "", fmt.Errorf("playwright open: session %q already exists", sessName)
-	}
+	needEvict := len(c.sessions) >= maxSessions
 	c.sessionsMu.Unlock()
+
+	if needEvict {
+		c.evictLRUSession()
+	}
 
 	// Launch browser and create incognito page.
 	b, err := c.getOrLaunchBrowser()
@@ -277,9 +303,6 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	}
 
 	// 2. Activate katana hooks BEFORE page-init.js registers them.
-	//    page-init.js checks window.__katanaHooksOptions.hooked === true
-	//    to decide whether to install event listener capture, SPA route
-	//    hooks, and setTimeout acceleration.
 	hooksActivation := `window.__katanaHooksOptions = { hooked: true, preventFormReset: true };`
 	if _, err := page.EvalOnNewDocument(hooksActivation); err != nil {
 		_ = page.Close()
@@ -288,12 +311,7 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	}
 
 	// 3. Optionally disable setTimeout/setInterval acceleration.
-	//    page-init.js's hookMiscellaneousUtilities() redefines both timers with
-	//    a 0.1x factor. By pinning the native timers as non-configurable here —
-	//    before katana injects — katana's Object.defineProperty on them throws,
-	//    and that throw is swallowed by page-init.js's own try/catch. The
-	//    form-reset and window.close hooks still install since they run first.
-	if noSpeedUp {
+	if o.noSpeedUp {
 		pinTimers := `(function () {
     Object.defineProperty(window, "setTimeout", { value: window.setTimeout, writable: false, configurable: false });
     Object.defineProperty(window, "setInterval", { value: window.setInterval, writable: false, configurable: false });
@@ -312,34 +330,34 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		return "", fmt.Errorf("playwright open: katana js: %w", err)
 	}
 
-	if opts.userAgent != "" {
-		if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: opts.userAgent}); err != nil {
+	if o.userAgent != "" {
+		if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: o.userAgent}); err != nil {
 			_ = page.Close()
 			_ = incognito.Close()
 			return "", fmt.Errorf("playwright open: set user-agent: %w", err)
 		}
 	}
 
-	navPage := page.Context(ctx).Timeout(opts.timeout)
-	if err := navigateTo(navPage, opts.url); err != nil {
+	navPage := page.Context(ctx).Timeout(o.timeout)
+	if err := navigateTo(navPage, o.url); err != nil {
 		_ = page.Close()
 		_ = incognito.Close()
 		return "", fmt.Errorf("playwright open: %w", err)
 	}
 
 	sess := &Session{
-		Name:      sessName,
+		Name:      o.sessName,
 		Page:      page,
 		Incognito: incognito,
 		CreatedAt: time.Now(),
 		LastUsed:  time.Now(),
-		Timeout:   sessTTL,
+		Timeout:   o.ttl,
 
-		OperationTimeout: opTimeout,
+		OperationTimeout: o.opTimeout,
 	}
 
 	c.sessionsMu.Lock()
-	c.sessions[sessName] = sess
+	c.sessions[o.sessName] = sess
 	c.sessionsMu.Unlock()
 
 	info, _ := navPage.Info()
@@ -348,13 +366,13 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		title = info.Title
 	}
 
-	ttlDisplay := sessTTL.String()
-	if sessTTL == persistentTTL {
+	ttlDisplay := o.ttl.String()
+	if o.ttl == persistentTTL {
 		ttlDisplay = "∞ (persistent)"
 	}
 
 	return fmt.Sprintf("Session: %s\nURL: %s\nTitle: %s\nTTL: %s\nOperation timeout: %s",
-		sessName, opts.url, title, ttlDisplay, opTimeout), nil
+		o.sessName, o.url, title, ttlDisplay, o.opTimeout), nil
 }
 
 func (c *Command) execClose(ctx context.Context, args []string) (string, error) {
@@ -416,87 +434,95 @@ func (c *Command) execSessions(ctx context.Context, args []string) (string, erro
 // Argument parsing for open
 // ---------------------------------------------------------------------------
 
-func parseOpenOpts(args []string, usage string) (commonOpts, string, time.Duration, time.Duration, bool, error) {
-	opts := commonOpts{timeout: defaultTimeout}
-	sessName := ""
-	sessTTL := defaultSessionTimeout
-	opTimeout := defaultSessionOperationTimeout
-	noSpeedUp := false
+type openOpts struct {
+	commonOpts
+	sessName  string
+	ttl       time.Duration
+	opTimeout time.Duration
+	noSpeedUp bool
+}
+
+func parseOpenOpts(args []string, usage string) (openOpts, error) {
+	o := openOpts{
+		commonOpts: commonOpts{timeout: defaultTimeout},
+		ttl:        persistentTTL,
+		opTimeout:  defaultSessionOperationTimeout,
+	}
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--timeout":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --timeout requires a value")
+				return o, fmt.Errorf("playwright open: --timeout requires a value")
 			}
 			i++
 			secs, err := strconv.Atoi(args[i])
 			if err != nil {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --timeout must be an integer: %w", err)
+				return o, fmt.Errorf("playwright open: --timeout must be an integer: %w", err)
 			}
 			if secs <= 0 {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --timeout must be > 0")
+				return o, fmt.Errorf("playwright open: --timeout must be > 0")
 			}
-			opts.timeout = time.Duration(secs) * time.Second
+			o.timeout = time.Duration(secs) * time.Second
 		case "--user-agent":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --user-agent requires a value")
+				return o, fmt.Errorf("playwright open: --user-agent requires a value")
 			}
 			i++
-			opts.userAgent = args[i]
+			o.userAgent = args[i]
 		case "--session":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --session requires a value")
+				return o, fmt.Errorf("playwright open: --session requires a value")
 			}
 			i++
-			sessName = args[i]
+			o.sessName = args[i]
 		case "--ttl":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --ttl requires a value in seconds")
+				return o, fmt.Errorf("playwright open: --ttl requires a value in seconds")
 			}
 			i++
 			secs, err := strconv.Atoi(args[i])
 			if err != nil {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --ttl must be an integer: %w", err)
+				return o, fmt.Errorf("playwright open: --ttl must be an integer: %w", err)
 			}
 			if secs < 0 {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --ttl must be >= 0")
+				return o, fmt.Errorf("playwright open: --ttl must be >= 0")
 			}
 			if secs == 0 {
-				sessTTL = persistentTTL // never expire
+				o.ttl = persistentTTL
 			} else {
-				sessTTL = time.Duration(secs) * time.Second
+				o.ttl = time.Duration(secs) * time.Second
 			}
 		case "--op-timeout":
 			if i+1 >= len(args) {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --op-timeout requires a value in seconds")
+				return o, fmt.Errorf("playwright open: --op-timeout requires a value in seconds")
 			}
 			i++
 			secs, err := strconv.Atoi(args[i])
 			if err != nil {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --op-timeout must be an integer: %w", err)
+				return o, fmt.Errorf("playwright open: --op-timeout must be an integer: %w", err)
 			}
 			if secs <= 0 {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: --op-timeout must be > 0")
+				return o, fmt.Errorf("playwright open: --op-timeout must be > 0")
 			}
-			opTimeout = time.Duration(secs) * time.Second
+			o.opTimeout = time.Duration(secs) * time.Second
 		case "--no-speed-up":
-			noSpeedUp = true
+			o.noSpeedUp = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
-				return opts, "", 0, 0, false, fmt.Errorf("playwright open: unknown flag: %s", args[i])
+				return o, fmt.Errorf("playwright open: unknown flag: %s", args[i])
 			}
-			if opts.url == "" {
-				opts.url = args[i]
+			if o.url == "" {
+				o.url = args[i]
 			}
 		}
 	}
 
-	if opts.url == "" {
-		return opts, "", 0, 0, false, fmt.Errorf("playwright open: URL is required\n\n%s", usage)
+	if o.url == "" {
+		return o, fmt.Errorf("playwright open: URL is required\n\n%s", usage)
 	}
-	if sessName == "" {
-		sessName = nextSessionName()
+	if o.sessName == "" {
+		o.sessName = nextSessionName()
 	}
-	return opts, sessName, sessTTL, opTimeout, noSpeedUp, nil
+	return o, nil
 }

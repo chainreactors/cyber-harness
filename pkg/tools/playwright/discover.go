@@ -25,20 +25,20 @@ func (c *Command) execDiscover(ctx context.Context, args []string) (string, erro
 
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
 		var forms []*katanatypes.HTMLForm
-		evalJSON(page, `() => window.getAllForms()`, &forms)
+		_ = evalJSON(page, `() => window.getAllForms()`, &forms)
 
 		var buttons []*katanatypes.HTMLElement
-		evalJSON(page, `() => window.getAllElements("button, input[type='button'], input[type='submit']")`, &buttons)
+		_ = evalJSON(page, `() => window.getAllElements("button, input[type='button'], input[type='submit']")`, &buttons)
 
 		var onclickLinks []*katanatypes.HTMLElement
-		evalJSON(page, `() => window.getAllElements("a[onclick], [onclick]")`, &onclickLinks)
+		_ = evalJSON(page, `() => window.getAllElements("a[onclick], [onclick]")`, &onclickLinks)
 
 		// Captured by page-init.js hooks (see execOpen).
 		var eventListeners []*katanatypes.EventListener
-		evalJSON(page, `() => window.__eventListeners || []`, &eventListeners)
+		_ = evalJSON(page, `() => window.__eventListeners || []`, &eventListeners)
 
 		var navLinks []navigatedLink
-		evalJSON(page, `() => window.__navigatedLinks || []`, &navLinks)
+		_ = evalJSON(page, `() => window.__navigatedLinks || []`, &navLinks)
 
 		info, _ := page.Info()
 		url := ""
@@ -60,12 +60,12 @@ type navigatedLink struct {
 // gson.JSON parses lazily and replaces its stored value on the first read,
 // so Unmarshal must be the first call against the result — never preceded
 // by .Nil()/.Str(), which would consume the raw bytes and make Unmarshal fail.
-func evalJSON(page *rod.Page, js string, out interface{}) {
+func evalJSON(page *rod.Page, js string, out interface{}) error {
 	res, err := page.Eval(js)
 	if err != nil {
-		return
+		return err
 	}
-	_ = res.Value.Unmarshal(out)
+	return res.Value.Unmarshal(out)
 }
 
 // ---------------------------------------------------------------------------

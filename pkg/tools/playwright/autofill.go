@@ -30,7 +30,7 @@ func (c *Command) execAutofill(ctx context.Context, args []string) (string, erro
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
 		// Discover forms via katana JS.
 		var forms []*katanatypes.HTMLForm
-		evalJSON(page, `() => window.getAllForms()`, &forms)
+		_ = evalJSON(page, `() => window.getAllForms()`, &forms)
 
 		if len(forms) == 0 {
 			return "No forms found on page", nil

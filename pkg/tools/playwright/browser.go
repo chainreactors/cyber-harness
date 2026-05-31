@@ -37,13 +37,24 @@ type Command struct {
 	openMu     sync.Mutex
 	sessions   map[string]*Session
 	sessionsMu sync.Mutex
-	gcOnce     sync.Once
+	gcRunning  bool
 	gcStop     chan struct{}
+
+	// Proxy URL for Chrome's --proxy-server flag. Updated via SetProxy().
+	proxyMu  sync.RWMutex
+	proxyURL string
 }
 
 // New creates a playwright pseudo-command.
 func New(workDir string) *Command {
 	return &Command{workDir: workDir}
+}
+
+// SetProxy updates the proxy URL for new browser launches.
+func (c *Command) SetProxy(proxyURLStr string) {
+	c.proxyMu.Lock()
+	defer c.proxyMu.Unlock()
+	c.proxyURL = proxyURLStr
 }
 
 func (c *Command) Name() string { return "playwright" }
@@ -231,6 +242,13 @@ func (c *Command) getOrLaunchBrowser() (*rod.Browser, error) {
 		Set("disable-dev-shm-usage").
 		Set("ignore-certificate-errors").
 		Set("allow-insecure-localhost")
+
+	c.proxyMu.RLock()
+	proxy := c.proxyURL
+	c.proxyMu.RUnlock()
+	if proxy != "" {
+		l = l.Set("proxy-server", proxy)
+	}
 
 	controlURL, err := l.Launch()
 	if err != nil {
