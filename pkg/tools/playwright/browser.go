@@ -128,6 +128,9 @@ Session Subcommands (multi-step interactive workflows):
     dialog <session> --arm|--check|--disarm     JS dialog capture (XSS verification)
     cookies <session> --list|--set k=v|--clear  Cookie management
 
+Headless Template:
+  template <file.yaml> <target-url> [--payload k=v]  Run a nuclei-compatible headless template
+
 Common Options:
   --timeout <seconds>     Page load timeout in seconds (default: 30)
   --user-agent <string>   Custom User-Agent header
@@ -300,6 +303,10 @@ func (c *Command) Execute(ctx context.Context, args []string) (string, error) {
 		return c.execRoute(ctx, subArgs)
 	case "unroute":
 		return c.execUnroute(ctx, subArgs)
+
+	// --- Headless Template ---
+	case "template":
+		return c.execTemplate(ctx, subArgs)
 
 	default:
 		return "", fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())

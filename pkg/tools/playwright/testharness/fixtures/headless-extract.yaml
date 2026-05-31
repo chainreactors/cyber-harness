@@ -1,0 +1,41 @@
+id: test-form-extract
+info:
+  name: Form Input Extraction
+  author: aiscan
+  severity: info
+  description: Extract form action and input fields
+
+headless:
+  - steps:
+      - action: navigate
+        args:
+          url: "{{BaseURL}}/login.html"
+      - action: waitload
+      - action: text
+        args:
+          selector: "input#username"
+          value: "admin"
+      - action: text
+        args:
+          selector: "input#password"
+          value: "secret123"
+      - action: script
+        name: formAction
+        args:
+          code: "() => document.querySelector('form').action"
+      - action: script
+        name: inputVal
+        args:
+          code: "() => document.querySelector('#username').value"
+
+    matchers:
+      - type: word
+        words:
+          - "admin"
+        part: inputVal
+
+    extractors:
+      - type: regex
+        name: form-target
+        regex:
+          - "action=\"([^\"]+)\""

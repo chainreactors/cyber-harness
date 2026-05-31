@@ -1,0 +1,26 @@
+id: test-login-check
+info:
+  name: Login Page Title Check
+  author: aiscan
+  severity: info
+  description: Verify login page renders with expected title
+
+headless:
+  - steps:
+      - action: navigate
+        args:
+          url: "{{BaseURL}}/login.html"
+      - action: waitload
+      - action: script
+        name: pageTitle
+        args:
+          code: "() => document.title"
+      - action: extract
+        name: heading
+        args:
+          selector: "h1"
+
+    matchers:
+      - type: word
+        words:
+          - "Login"

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><title>PostMessage Test</title></head>
+<body>
+<h1>PostMessage Test</h1>
+<script>
+window.addEventListener('message', function(event) {
+  document.getElementById('output').textContent = event.data;
+});
+</script>
+<div id="output"></div>
+</body>
+</html>
