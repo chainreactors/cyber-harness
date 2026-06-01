@@ -3,6 +3,7 @@ package telemetry
 import (
 	"io"
 	"os"
+	"sync"
 
 	"github.com/chainreactors/logs"
 )
@@ -66,10 +67,14 @@ func GlobalLogs() *logs.Logger {
 	return logs.Log
 }
 
+var enableDebugOnce sync.Once
+
 func EnableLogsDebug() *logs.Logger {
 	logger := GlobalLogs()
-	logger.SetLevel(logs.DebugLevel)
-	logger.SetQuiet(false)
+	enableDebugOnce.Do(func() {
+		logger.SetLevel(logs.DebugLevel)
+		logger.SetQuiet(false)
+	})
 	return logger
 }
 

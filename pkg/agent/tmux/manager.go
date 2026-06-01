@@ -80,7 +80,7 @@ func (m *Manager) Create(workDir, cmdLine, name string, timeout time.Duration, e
 	c := ShellCommand(cmdLine)
 	c.Dir = workDir
 	if len(env) > 0 {
-		c.Env = append(os.Environ(), env...)
+		c.Env = mergeEnv(os.Environ(), env)
 	}
 	return m.start(c, cmdLine, name, timeout, outputFile)
 }
@@ -90,10 +90,28 @@ func (m *Manager) CreateCmd(workDir, binary string, args []string, name string, 
 	c := exec.Command(binary, args...)
 	c.Dir = workDir
 	if len(env) > 0 {
-		c.Env = append(os.Environ(), env...)
+		c.Env = mergeEnv(os.Environ(), env)
 	}
 	display := binary + " " + strings.Join(args, " ")
 	return m.start(c, display, name, timeout, outputFile)
+}
+
+// mergeEnv merges override env vars into base, replacing any existing keys.
+func mergeEnv(base, override []string) []string {
+	overrideKeys := make(map[string]bool, len(override))
+	for _, e := range override {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			overrideKeys[k] = true
+		}
+	}
+	result := make([]string, 0, len(base)+len(override))
+	for _, e := range base {
+		if k, _, ok := strings.Cut(e, "="); ok && overrideKeys[k] {
+			continue
+		}
+		result = append(result, e)
+	}
+	return append(result, override...)
 }
 
 func (m *Manager) start(c *exec.Cmd, cmdDisplay, name string, timeout time.Duration, outputFile string) (Info, error) {

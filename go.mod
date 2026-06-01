@@ -4,17 +4,17 @@ go 1.26.3
 
 require (
 	github.com/chainreactors/fingers v1.2.1-0.20260530143622-9b9b6fe7ccf7
-	github.com/chainreactors/gogo/v2 v2.14.2-0.20260529071026-65d22e5a6ba3
-	github.com/chainreactors/ioa v0.0.0-20260513035847-c8c38592b651
+	github.com/chainreactors/gogo/v2 v2.14.2-0.20260529142124-907a45a1456c
+	github.com/chainreactors/ioa v0.0.0-20260519070109-6746bd1fdaef
 	github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c
 	github.com/chainreactors/neutron v0.0.0-20260530143533-ea958251e73e
 	github.com/chainreactors/parsers v0.0.0-20260517174207-da1ebd0e7f68
-	github.com/chainreactors/proxyclient v1.0.4-0.20260527160727-36cf133952c3
+	github.com/chainreactors/proxyclient v1.1.1-0.20260529172347-2a80e08d5593
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
 	github.com/chainreactors/sdk v0.2.3
-	github.com/chainreactors/spray v1.2.6-0.20260523083907-546e8ab7756a
-	github.com/chainreactors/utils v0.0.0-20260529070435-f03100630384
-	github.com/chainreactors/zombie v1.2.3-0.20260529070819-21a4ec2cbbc8
+	github.com/chainreactors/spray v1.3.1-0.20260529172359-9caf4ee3567c
+	github.com/chainreactors/utils v0.0.0-20260529172343-6465cb8568b2
+	github.com/chainreactors/zombie v1.2.3-0.20260529172356-6b3bf94a7dfc
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/go-rod/rod v0.116.2
 	github.com/go-rod/stealth v0.4.9
@@ -88,6 +88,7 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
@@ -96,6 +97,8 @@ require (
 	github.com/facebookincubator/nvdtools v0.1.5 // indirect
 	github.com/gaissmai/bart v0.26.1 // indirect
 	github.com/geoffgarside/ber v1.2.0 // indirect
+	github.com/glebarez/go-sqlite v1.21.2 // indirect
+	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
 	github.com/go-dedup/megophone v0.0.0-20170830025436-f01be21026f5 // indirect
 	github.com/go-dedup/simhash v0.0.0-20170904020510-9ecaca7b509c // indirect
@@ -128,6 +131,8 @@ require (
 	github.com/iangcarroll/cookiemonster v1.6.0 // indirect
 	github.com/icodeface/tls v0.0.0-20230910023335-34df9250cd12 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jlaffaye/ftp v0.2.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kataras/jwt v0.1.8 // indirect
@@ -156,8 +161,7 @@ require (
 	github.com/montanaflynn/stats v0.9.0 // indirect
 	github.com/mozillazg/go-pinyin v0.21.0 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
-	github.com/ncruces/go-sqlite3 v0.29.1 // indirect
-	github.com/ncruces/julianday v1.0.0 // indirect
+	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/nwaples/rardecode/v2 v2.2.2 // indirect
 	github.com/odvcencio/gotreesitter v0.6.1-0.20260306002001-fbe5983c6f41 // indirect
@@ -181,7 +185,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/reeflective/readline v1.1.3 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
-	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/sagernet/sing v0.7.6 // indirect
@@ -190,7 +194,6 @@ require (
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sashabaranov/go-openai v1.37.0 // indirect
-	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
@@ -250,6 +253,11 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.44.0 // indirect
+	gorm.io/gorm v1.31.1 // indirect
+	modernc.org/libc v1.66.10 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.40.1 // indirect
 	mvdan.cc/sh/v3 v3.7.0 // indirect
 )
 

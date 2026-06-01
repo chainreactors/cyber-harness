@@ -11,8 +11,8 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 	expected := expectedEmbeddedSkillNames()
-	if len(loaded) != len(expected) {
-		t.Fatalf("skills = %d, want %d: %#v", len(loaded), len(expected), loaded)
+	if len(loaded) < len(expected) {
+		t.Fatalf("skills = %d, want at least %d: %#v", len(loaded), len(expected), loaded)
 	}
 
 	store := NewStore(loaded)

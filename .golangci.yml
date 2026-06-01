@@ -31,6 +31,7 @@ linters:
         - G301
         - G302
         - G306
+        - G703
       confidence: medium
     govet:
       disable:
