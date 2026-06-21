@@ -1,6 +1,7 @@
 <p align="center">
   <h1 align="center">aiscan</h1>
   <p align="center">Agentic Security Scanner — AI-driven reconnaissance meets deterministic scanning</p>
+  <p align="center"><strong>⚠️ Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
 </p>
 
 <p align="center">
@@ -76,8 +77,10 @@ go build -tags full -o aiscan-full ./cmd/aiscan
 - **AI 增强扫描** — `--verify` 验证减少误报，`--sniper` 搜索公开漏洞，`--deep` 深度动态测试
 - **Katana 爬虫**（full 版）— 进程内 katana，支持 standard/headless/hybrid 引擎
 - **Playwright 浏览器**（full 版）— 交互式浏览器会话、headless 引擎
+- **Arsenal 工具管理** — 内置安全工具包管理器（crtm），`arsenal install httpx` 一键安装，自动注入 PATH
 - **TMux 终端** — agent 可执行长时间后台任务，增量输出自动推送 inbox
 - **Proxy 代理** — Clash 订阅 + 多协议（trojan/vless/anytls/hy2/ss）+ proxy-chain 执行
+- **TUI 分级详细度** — `-v` 显示 tool call 详情，`-vv` 显示 thinking + 完整输出
 - **Passive Recon**（full 版）— FOFA / Hunter 网络空间搜索
 
 ## Architecture
@@ -174,6 +177,7 @@ aiscan agent
 | `cyberhub` | 指纹和 POC 关联搜索 |
 | `web_search` / `fetch` | 搜索安全情报、抓取网页 |
 | `bash` / `tmux` | 执行命令、管理后台会话 |
+| `arsenal` | 安全工具包管理（install/update/remove） |
 | `proxy` | 代理节点管理、proxy-chain 执行 |
 | `playwright` | 无头浏览器操作（仅 full 版） |
 | `subagent` | 子 agent（sync/async/fork） |

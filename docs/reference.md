@@ -20,6 +20,7 @@ aiscan [全局参数] <subcommand> [子命令参数]
 | `neutron` | scanner | 模板化 POC 检测 |
 | `katana` | scanner | Web 爬虫（仅 full 版） |
 | `passive` | scanner | 网络空间搜索 FOFA/Hunter（仅 full 版） |
+| `arsenal` | tool mgr | 安全工具包管理（install/update/remove） |
 | `cyberhub` | query | 查询已加载的指纹和 POC 模板 |
 | `ioa serve` | service | 启动 IOA HTTP server |
 | `ioa spaces/messages/context/nodes` | query | IOA 查询 |
