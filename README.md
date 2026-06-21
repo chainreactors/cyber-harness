@@ -80,51 +80,50 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/kat
 
 ### Design
 
-- **Single binary** — one statically-linked executable, zero runtime dependencies; `aiscan-agent` is under 25 MB
-- **Minimal agent core** — the agent loop is ~160 lines; tool calls, retries, evaluation, and streaming are composed around it rather than baked in
-- **Plugin architecture** — tools register via `init()` side effects; adding a scanner is one file with `RegisterFactory`. Build tags (`full`) gate heavy dependencies (playwright, katana) at compile time
-- **Embedded skills** — each tool ships a `SKILL.md` that the agent loads automatically on invocation, providing usage docs and tactical guidance without hardcoded prompts
-- **Scan + Agent unified** — the same scanner engines power both the deterministic `scan` pipeline and the autonomous `agent` mode; no separate codebases
+- **Single binary, zero dependencies** — statically-linked, drop-in deployment
+- **Minimal agent core** — composable ~160-line loop; tools, retries, evaluation are plugged in, not hardcoded
+- **Plugin architecture** — adding a new tool is one file; heavy dependencies (playwright, katana) are compile-time optional
+- **Embedded skills** — each tool carries its own usage docs and tactical guidance, loaded by the agent on demand
+- **Scan + Agent unified** — the same engines drive both the deterministic pipeline and the autonomous agent
 
 ### Scan — Deterministic Pipeline
 
 - Multi-stage auto-chaining: port discovery → web probing → weak credentials → POC detection — no LLM required
-- AI-enhanced options: `--verify` to reduce false positives, `--sniper` to search public CVEs, `--deep` for AI-driven dynamic testing
-- Two modes: `quick` (fast exposure mapping) and `full` (deep crawl + directory brute + extended ports)
+- Optional AI-driven result verification, public CVE correlation, and dynamic testing
+- Quick mode for fast exposure mapping, full mode for deep crawl and extended coverage
 
-### Agent — AI-Autonomous Security Assessment
+### Agent — Autonomous Security Assessment
 
-- Natural language task description — the agent autonomously plans scan paths, invokes tools, analyzes results, and produces conclusions
-- Goal Evaluation: `-e` sets evaluation criteria; an independent evaluator LLM judges completion and injects feedback for automatic retry
-- Interactive REPL with multi-turn conversation; `!` prefix to execute commands directly (bypass LLM)
-- Multi-provider fallback chain for resilience
-- TUI verbosity levels: `-v` for tool call details, `-vv` for thinking + full output
+- Natural language tasks — the agent plans, scans, analyzes, and reports autonomously
+- Goal evaluation — an independent evaluator judges task completion and drives automatic retry
+- Interactive REPL with direct command execution
+- Multi-provider fallback for resilience
 
-### [IOA](https://github.com/chainreactors/ioa) — Distributed Multi-Agent Collaboration
+### [IOA](https://github.com/chainreactors/ioa) — Multi-Agent Collaboration
 
-- Multiple agents collaborate through shared message spaces
-- IOA worker mode for persistent task listening
+- Shared message spaces for distributed agent coordination
+- Worker mode for persistent task listening
 - Built-in IOA server with token authentication
 
 ### Built-in Toolset
 
 **Scanners**
 - [gogo](https://github.com/chainreactors/gogo) — port, service, and banner discovery
-- [spray](https://github.com/chainreactors/spray) — web probing, HTTP fingerprinting, path fuzzing
-- [zombie](https://github.com/chainreactors/zombie) — credential testing for common services
+- [spray](https://github.com/chainreactors/spray) — web probing, fingerprinting, path fuzzing
+- [zombie](https://github.com/chainreactors/zombie) — credential testing
 - [neutron](https://github.com/chainreactors/neutron) — template-based POC execution
 - [cyberhub](https://github.com/chainreactors/fingers) — fingerprint and POC association query
 
 **Browser & Recon** (full edition)
-- playwright — interactive headless Chromium sessions, screenshots, network capture
-- katana — in-process web crawler with standard/headless/hybrid engines
-- passive — cyberspace search via FOFA, Hunter, Shodan
+- playwright — headless Chromium sessions, screenshots, network capture
+- katana — web crawler with standard/headless/hybrid engines
+- passive — cyberspace search (FOFA, Hunter, Shodan)
 
 **Utilities**
-- tmux — PTY session manager for long-running background tasks with incremental output delivery
-- arsenal — security tool package manager ([crtm](https://github.com/chainreactors/crtm)), one-command install with auto PATH injection
-- proxy — Clash subscription parser + multi-protocol (trojan/vless/anytls/hy2/ss) proxy chain
-- web_search / fetch — web search for CVEs and advisories, URL fetching
+- tmux — background task sessions with incremental output delivery
+- arsenal — security tool package manager ([crtm](https://github.com/chainreactors/crtm)), one-command install
+- proxy — multi-protocol proxy chain (trojan/vless/anytls/hy2/ss)
+- web_search / fetch — CVE search and URL fetching
 
 ---
 

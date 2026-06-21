@@ -80,51 +80,50 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 play
 
 ### 设计理念
 
-- **单文件分发** — 静态链接的单一可执行文件，零运行时依赖；`aiscan-agent` 不到 25 MB
-- **极简 agent 内核** — agent 循环仅 ~160 行；tool call、重试、评估、流式输出围绕它组合而非内建
-- **插件式架构** — 工具通过 `init()` 副作用注册，新增扫描器只需一个文件 + `RegisterFactory`。build tag（`full`）在编译期隔离重依赖（playwright、katana）
-- **内嵌 Skill** — 每个工具自带 `SKILL.md`，agent 调用时自动加载，提供用法文档和战术指导，无需硬编码 prompt
-- **Scan + Agent 统一** — 同一套扫描引擎同时驱动确定性 `scan` 流水线和自主 `agent` 模式，无需维护两套代码
+- **单文件、零依赖** — 静态链接，开箱即用
+- **极简 agent 内核** — 可组合的 ~160 行循环；工具、重试、评估均为插拔式，非硬编码
+- **插件式架构** — 新增工具只需一个文件；重依赖（playwright、katana）编译期可选
+- **内嵌 Skill** — 每个工具自带用法文档和战术指导，agent 按需加载
+- **Scan + Agent 统一** — 同一套引擎驱动确定性流水线和自主 agent
 
 ### Scan — 确定性扫描流水线
 
 - 多阶段自动串联：端口发现 → Web 探测 → 弱口令检测 → POC 检测，无需 LLM
-- AI 增强选项：`--verify` 减少误报，`--sniper` 搜索公开漏洞，`--deep` AI 驱动的动态测试
-- 两种模式：`quick`（快速暴露面发现）和 `full`（深度爬取 + 目录爆破 + 扩展端口）
+- 可选 AI 驱动的结果验证、公开漏洞关联和动态测试
+- quick 模式快速暴露面发现，full 模式深度爬取和扩展覆盖
 
-### Agent — AI 自主安全评估
+### Agent — 自主安全评估
 
-- 自然语言描述任务，agent 自主规划扫描路径、调用工具、分析结果、输出结论
-- Goal Evaluation：`-e` 指定评估标准，独立 evaluator LLM 判定完成度，自动注入反馈驱动重试
-- 交互式 REPL，支持多轮对话；`!` 前缀直接执行命令（绕过 LLM）
-- 多 provider 容错降级链
-- TUI 分级详细度：`-v` 显示 tool call 详情，`-vv` 显示 thinking + 完整输出
+- 自然语言描述任务，agent 自主规划、扫描、分析、输出结论
+- Goal Evaluation — 独立评估器判定任务完成度，自动驱动重试
+- 交互式 REPL，支持直接执行命令
+- 多 provider 容错降级
 
-### [IOA](https://github.com/chainreactors/ioa) — 分布式多 Agent 协作
+### [IOA](https://github.com/chainreactors/ioa) — 多 Agent 协作
 
-- 多个 agent 通过共享消息空间协同扫描
-- IOA worker 模式持续监听任务
+- 共享消息空间实现分布式 agent 协调
+- Worker 模式持续监听任务
 - 内置 IOA server，支持 token 认证
 
 ### 内置工具集
 
 **扫描器**
 - [gogo](https://github.com/chainreactors/gogo) — 端口、服务、banner 发现
-- [spray](https://github.com/chainreactors/spray) — Web 探测、HTTP 指纹、路径 fuzz
-- [zombie](https://github.com/chainreactors/zombie) — 常见服务弱口令检测
+- [spray](https://github.com/chainreactors/spray) — Web 探测、指纹识别、路径 fuzz
+- [zombie](https://github.com/chainreactors/zombie) — 弱口令检测
 - [neutron](https://github.com/chainreactors/neutron) — 模板化 POC 执行
 - [cyberhub](https://github.com/chainreactors/fingers) — 指纹和 POC 关联查询
 
 **浏览器 & 侦察**（完整版）
-- playwright — 交互式 headless Chromium 会话、截图、网络捕获
-- katana — 进程内 Web 爬虫，支持 standard/headless/hybrid 引擎
-- passive — 网络空间搜索（FOFA / Hunter / Shodan）
+- playwright — headless Chromium 会话、截图、网络捕获
+- katana — Web 爬虫，支持 standard/headless/hybrid 引擎
+- passive — 网络空间搜索（FOFA、Hunter、Shodan）
 
 **辅助工具**
-- tmux — PTY 会话管理，后台长时间任务自动推送增量输出
-- arsenal — 安全工具包管理器（[crtm](https://github.com/chainreactors/crtm)），一键安装自动注入 PATH
-- proxy — Clash 订阅解析 + 多协议（trojan/vless/anytls/hy2/ss）代理链
-- web_search / fetch — 搜索 CVE 和安全情报，URL 抓取
+- tmux — 后台任务会话，增量输出自动推送
+- arsenal — 安全工具包管理器（[crtm](https://github.com/chainreactors/crtm)），一键安装
+- proxy — 多协议代理链（trojan/vless/anytls/hy2/ss）
+- web_search / fetch — CVE 搜索和 URL 抓取
 
 ---
 
