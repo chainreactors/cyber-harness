@@ -21,7 +21,7 @@
 
 **aiscan** combines LLM agents with traditional security scanning engines. Three modes: **Scan** (deterministic pipeline, optional AI assist), **Agent** (natural-language autonomous assessment), **IOA** (multi-agent distributed collaboration).
 
-> **Use only on explicitly authorized targets.**
+> **Use only on explicitly authorized targets. Unauthorized use is illegal.**
 
 ## Quick Start
 
@@ -201,6 +201,10 @@ llm:
 3. Commit your changes (`git commit -m 'feat: add xxx'`)
 4. Push to the branch (`git push origin feature/xxx`)
 5. Create a Pull Request
+
+## Disclaimer
+
+This tool is intended for **authorized security testing and research purposes only**. Users are solely responsible for ensuring they have proper authorization before scanning any target. The developers assume no liability for misuse or damage caused by this tool. Unauthorized access to computer systems is illegal in most jurisdictions. By using this tool, you agree that you bear full responsibility for your actions.
 
 ## License
 
