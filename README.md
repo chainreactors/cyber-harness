@@ -104,6 +104,7 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/kat
 - Shared message spaces for distributed agent coordination
 - Worker mode for persistent task listening
 - Built-in IOA server with token authentication
+- See: [Design](https://github.com/chainreactors/ioa/blob/main/docs/design.md) | [CLI](https://github.com/chainreactors/ioa/blob/main/docs/cli.md) | [Extension](https://github.com/chainreactors/ioa/blob/main/docs/extension.md)
 
 ### Built-in Toolset
 

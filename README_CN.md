@@ -104,6 +104,7 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 play
 - 共享消息空间实现分布式 agent 协调
 - Worker 模式持续监听任务
 - 内置 IOA server，支持 token 认证
+- 参阅：[设计理念](https://github.com/chainreactors/ioa/blob/main/docs/design_zh.md) | [CLI 文档](https://github.com/chainreactors/ioa/blob/main/docs/cli_zh.md) | [扩展开发](https://github.com/chainreactors/ioa/blob/main/docs/extension_zh.md)
 
 ### 内置工具集
 
