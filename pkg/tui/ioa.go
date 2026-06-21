@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"text/tabwriter"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
@@ -12,19 +12,19 @@ import (
 	"github.com/chainreactors/ioa/protocols"
 )
 
-func RunIOASpaces(ctx context.Context, client *ioaclient.Client, option *cfg.Option) error {
+func RunIOASpaces(ctx context.Context, client *ioaclient.Client, option *cfg.Option, stdout, stderr io.Writer) error {
 	spaces, err := client.ListSpaces(ctx)
 	if err != nil {
 		return err
 	}
 	if option.IOAJSON {
-		return writeJSONOutput(spaces)
+		return writeJSONOutput(stdout, spaces)
 	}
 	if len(spaces) == 0 {
-		fmt.Fprintln(os.Stderr, "no spaces found")
+		fmt.Fprintln(stderr, "no spaces found")
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "ID\tNAME\tNODES\tMESSAGES\n")
 	for _, s := range spaces {
 		fmt.Fprintf(w, "%s\t%s\t%d\t%d\n", s.ID, s.Name, len(s.Nodes), s.MessageCount)
@@ -32,7 +32,7 @@ func RunIOASpaces(ctx context.Context, client *ioaclient.Client, option *cfg.Opt
 	return w.Flush()
 }
 
-func RunIOAMessages(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs) error {
+func RunIOAMessages(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs, stdout, stderr io.Writer) error {
 	space, err := client.ResolveSpace(ctx, args.Space)
 	if err != nil {
 		return err
@@ -42,13 +42,13 @@ func RunIOAMessages(ctx context.Context, client *ioaclient.Client, option *cfg.O
 		return err
 	}
 	if option.IOAJSON {
-		return writeJSONOutput(messages)
+		return writeJSONOutput(stdout, messages)
 	}
 	if len(messages) == 0 {
-		fmt.Fprintf(os.Stderr, "no start messages in space %q\n", space.Name)
+		fmt.Fprintf(stderr, "no start messages in space %q\n", space.Name)
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "ID\tSENDER\tCONTENT\n")
 	for _, m := range messages {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", m.ID, m.Sender, contentPreview(m.Content, 80))
@@ -56,7 +56,7 @@ func RunIOAMessages(ctx context.Context, client *ioaclient.Client, option *cfg.O
 	return w.Flush()
 }
 
-func RunIOAContext(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs) error {
+func RunIOAContext(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs, stdout, stderr io.Writer) error {
 	space, err := client.ResolveSpace(ctx, args.Space)
 	if err != nil {
 		return err
@@ -66,10 +66,10 @@ func RunIOAContext(ctx context.Context, client *ioaclient.Client, option *cfg.Op
 		return err
 	}
 	if option.IOAJSON {
-		return writeJSONOutput(messages)
+		return writeJSONOutput(stdout, messages)
 	}
 	if len(messages) == 0 {
-		fmt.Fprintf(os.Stderr, "no messages in context of %s\n", args.MessageID)
+		fmt.Fprintf(stderr, "no messages in context of %s\n", args.MessageID)
 		return nil
 	}
 	for _, m := range messages {
@@ -77,25 +77,25 @@ func RunIOAContext(ctx context.Context, client *ioaclient.Client, option *cfg.Op
 		if m.ID == args.MessageID {
 			marker = "*"
 		}
-		fmt.Printf("%s [%s] %s:\n  %s\n", marker, m.ID, m.Sender, contentPreview(m.Content, 120))
+		fmt.Fprintf(stdout, "%s [%s] %s:\n  %s\n", marker, m.ID, m.Sender, contentPreview(m.Content, 120))
 	}
 	return nil
 }
 
-func RunIOANodes(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs) error {
+func RunIOANodes(ctx context.Context, client *ioaclient.Client, option *cfg.Option, args cfg.IOAClientArgs, stdout, stderr io.Writer) error {
 	if args.Space != "" {
 		space, err := client.ResolveSpace(ctx, args.Space)
 		if err != nil {
 			return err
 		}
 		if option.IOAJSON {
-			return writeJSONOutput(space.Nodes)
+			return writeJSONOutput(stdout, space.Nodes)
 		}
 		if len(space.Nodes) == 0 {
-			fmt.Fprintf(os.Stderr, "no nodes in space %q\n", space.Name)
+			fmt.Fprintf(stderr, "no nodes in space %q\n", space.Name)
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintf(w, "ID\tNAME\tDESCRIPTION\n")
 		for _, n := range space.Nodes {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", n.ID, n.Name, n.Description)
@@ -108,13 +108,13 @@ func RunIOANodes(ctx context.Context, client *ioaclient.Client, option *cfg.Opti
 		return err
 	}
 	if option.IOAJSON {
-		return writeJSONOutput(nodes)
+		return writeJSONOutput(stdout, nodes)
 	}
 	if len(nodes) == 0 {
-		fmt.Fprintln(os.Stderr, "no nodes found")
+		fmt.Fprintln(stderr, "no nodes found")
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "ID\tNAME\n")
 	for _, n := range nodes {
 		fmt.Fprintf(w, "%s\t%s\n", n.ID, n.Name)
@@ -137,8 +137,8 @@ func contentPreview(content map[string]any, maxLen int) string {
 	return s
 }
 
-func writeJSONOutput(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+func writeJSONOutput(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }

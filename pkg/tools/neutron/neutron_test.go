@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
@@ -64,12 +65,12 @@ func TestCommandTemplateListSupportsNucleiStyleFlagsAndJSON(t *testing.T) {
 		testTemplate("low-info", "low", "info", "php"),
 	), nil)
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	var result neutronResult
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
 		t.Fatalf("json output = %q, error = %v", out, err)
@@ -101,12 +102,12 @@ http:
 	}
 
 	cmd := New(newTestNeutronEngine(t, testTemplate("embedded", "low", "embedded", "")), nil)
-	var buf strings.Builder
-	err = cmd.Execute(context.Background(), []string{"--template-list", "-t", templatePath}, &buf)
+	commands.Output.Reset(nil)
+	err = cmd.Execute(context.Background(), []string{"--template-list", "-t", templatePath})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "custom-poc") || strings.Contains(out, "embedded") {
 		t.Fatalf("output = %q", out)
 	}

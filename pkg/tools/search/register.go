@@ -25,7 +25,7 @@ func init() {
 			if p != nil {
 				reg.RegisterTool(NewWebSearchTool(p, tavily))
 			}
-			reg.RegisterTool(NewFetchTool())
+			reg.Register(NewFetchCommand(), "tools")
 
 			var idx *association.Index
 			if es, ok := deps.EngineSet.(*engine.Set); ok && es != nil {

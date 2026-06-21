@@ -14,8 +14,8 @@ import (
 	"unicode/utf8"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
@@ -27,11 +27,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	agentStatusPreviewLimit = 180
-	agentDebugPreviewLimit  = 320
+	agentStatusPreviewLimit  = 180
+	agentDebugPreviewLimit   = 320
 	toolResultPreviewDefault = 8
-	toolResultPreviewWidth  = 140
-	toolFetchBodyLines      = 4
+	toolResultPreviewWidth   = 140
+	toolFetchBodyLines       = 4
 
 	toolBlockIndent  = "  "     // 2-space indent for ▸/✓/✗ header lines
 	toolArgIndent    = "    "   // 4-space indent for key-value argument lines
@@ -49,10 +49,10 @@ const (
 // and lifecycle methods so streaming tokens and bus events from different
 // goroutines never interleave output.
 type AgentOutput struct {
-	mu       sync.Mutex
-	stdout   io.Writer
-	stderr   io.Writer
-	markdown bool
+	mu        sync.Mutex
+	stdout    io.Writer
+	stderr    io.Writer
+	markdown  bool
 	color     output.Color
 	debug     bool
 	verbosity int // -1=quiet, 0=default, 1=tools, 2=thinking
@@ -67,7 +67,7 @@ type AgentOutput struct {
 	reasoningBlockOpen     bool   // <thinking> printed, awaiting </thinking>
 	streamLineOpen         bool   // cursor mid-line, needs \n
 	didStream              bool   // Final() dedup flag
-	lastStreamed            string // full cumulative content of the streamed turn
+	lastStreamed           string // full cumulative content of the streamed turn
 	aborted                bool   // current run was interrupted
 
 	// Turn/agent timing and cumulative token stats.
@@ -91,10 +91,32 @@ type agentToolSummary struct {
 	started time.Time
 }
 
-// NewAgentOutput constructs an AgentOutput wired to os.Stdout/os.Stderr with
-// rendering decisions derived from the supplied option and terminal state.
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
-	markdown := stdoutMarkdownEnabled(option)
+	return newAgentOutput(
+		option,
+		os.Stdout,
+		os.Stderr,
+		term.IsTerminal(int(os.Stdout.Fd())),
+		term.IsTerminal(int(os.Stderr.Fd())),
+	)
+}
+
+// NewAgentOutputWithWriters constructs an AgentOutput for a terminal-like
+// stream that is not necessarily backed by os.Stdout/os.Stderr.
+func NewAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = stdout
+	}
+	return newAgentOutput(option, stdout, stderr, terminal, terminal)
+}
+
+// newAgentOutput constructs an AgentOutput with rendering decisions derived
+// from the supplied option and terminal capabilities.
+func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, stderrTTY bool) *AgentOutput {
+	markdown := stdoutMarkdownEnabledFor(option, stdoutTTY)
 	debug := false
 	verbosity := 0
 	noColor := false
@@ -106,29 +128,32 @@ func NewAgentOutput(option *cfg.Option) *AgentOutput {
 		}
 		noColor = option.NoColor
 	}
-	useColor := !noColor && term.IsTerminal(int(os.Stderr.Fd()))
+	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
-	tty := term.IsTerminal(int(os.Stderr.Fd()))
 	return &AgentOutput{
-		stdout:    os.Stdout,
-		stderr:    os.Stderr,
+		stdout:    stdout,
+		stderr:    stderr,
 		markdown:  markdown,
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
 		tools:     make(map[string]agentToolSummary),
-		stream:   stdoutDeltaStreamingEnabled(option),
-		mode:     resolveRenderMode(),
-		tty:      tty,
-		spinner:  newSpinner(os.Stderr, color.Code(output.ANSICyan)),
+		stream:    stdoutDeltaStreamingEnabledFor(option, stdoutTTY),
+		mode:      resolveRenderMode(),
+		tty:       stderrTTY,
+		spinner:   newSpinner(stderr, color.Code(output.ANSICyan)),
 	}
 }
 
 func stdoutMarkdownEnabled(option *cfg.Option) bool {
+	return stdoutMarkdownEnabledFor(option, term.IsTerminal(int(os.Stdout.Fd())))
+}
+
+func stdoutMarkdownEnabledFor(option *cfg.Option, terminal bool) bool {
 	if option != nil && option.NoColor {
 		return false
 	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return terminal
 }
 
 // AgentStreamingEnabled keeps the agent/provider path event-streamed by default,
@@ -143,7 +168,11 @@ func AgentStreamingEnabled(_ *cfg.Option) bool {
 // The agent still streams events when this is false; Final() renders the
 // completed answer for non-interactive callers.
 func stdoutDeltaStreamingEnabled(_ *cfg.Option) bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return stdoutDeltaStreamingEnabledFor(nil, term.IsTerminal(int(os.Stdout.Fd())))
+}
+
+func stdoutDeltaStreamingEnabledFor(_ *cfg.Option, terminal bool) bool {
+	return terminal
 }
 
 // ---------------------------------------------------------------------------
@@ -477,12 +506,6 @@ func (o *AgentOutput) canAnimate() bool {
 	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0
 }
 
-// canHyperlink gates OSC 8 clickable paths. Same boundary as the spinner: only
-// for a local human. Forwarded/piped output degrades to plain text.
-func (o *AgentOutput) canHyperlink() bool {
-	return o != nil && o.mode == ModeInteractive && o.tty
-}
-
 // ---------------------------------------------------------------------------
 // Internal run state
 // ---------------------------------------------------------------------------
@@ -706,7 +729,13 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 }
 
 func (o *AgentOutput) renderToolResult(toolName, toolSummary, result, elapsed, highlightPath string) {
-	preview := buildToolResultPreview(toolName, result, o.debug)
+	var preview toolResultPreview
+	if o.verbosity >= 2 {
+		lines := normalizeToolResultLines(result)
+		preview = toolResultPreview{lines: lines}
+	} else {
+		preview = buildToolResultPreview(toolName, result, o.debug)
+	}
 	if len(preview.lines) == 0 {
 		o.toolHeader("✓", output.ANSIGreen, toolName, compactAgentLine(toolSummary, 80), elapsed)
 		return
@@ -851,7 +880,6 @@ func normalizeToolResultLines(result string) []string {
 func truncateToolResultLine(value string, limit int) string {
 	return truncate.ClipRunes(value, limit)
 }
-
 
 // ---------------------------------------------------------------------------
 // Turn / agent end (debug diagnostics)
@@ -1061,25 +1089,6 @@ func (o *AgentOutput) evalError(event agent.Event) {
 // Hyperlink helper
 // ---------------------------------------------------------------------------
 
-// hyperlinkSummary wraps a path-bearing tool's summary in an OSC 8 file:// link
-// so a local user can click straight to the file. No-op outside interactive TTY
-// sessions (tests and forwarded PTYs get the plain summary).
-func (o *AgentOutput) hyperlinkSummary(name, arguments, summary string) string {
-	if !o.canHyperlink() || summary == "" {
-		return summary
-	}
-	var path string
-	if args := decodeToolArguments(arguments); args != nil {
-		switch name {
-		case "read", "write", "glob":
-			path = stringArg(args, "path")
-		}
-	}
-	if path == "" {
-		return summary
-	}
-	return pathHyperlink(path, summary)
-}
 
 // ---------------------------------------------------------------------------
 // User intent rendering

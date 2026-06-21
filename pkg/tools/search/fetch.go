@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 const (
@@ -130,6 +131,15 @@ type FetchCommand struct {
 	cache  *urlCache
 }
 
+func (c *FetchCommand) Name() string { return "fetch" }
+
+func (c *FetchCommand) Usage() string {
+	return `fetch <url> [--extract <hint>]
+
+Fetch a URL and return the content as readable text.
+Useful for reading advisories, documentation, and vulnerability details.`
+}
+
 func NewFetchCommand() *FetchCommand {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -148,34 +158,37 @@ func NewFetchCommand() *FetchCommand {
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
 
-func (c *FetchCommand) Execute(ctx context.Context, args []string) (string, error) {
+func (c *FetchCommand) Execute(ctx context.Context, args []string) error {
 	rawURL, extract, err := parseFetchArgs(args)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	normalizedURL, err := normalizeURL(rawURL)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := validateURL(normalizedURL); err != nil {
-		return "", err
+		return err
 	}
 
 	if cached, ok := c.cache.Get(normalizedURL); ok {
 		if cached.binary {
-			return formatBinaryCacheOutput(normalizedURL, cached), nil
+			fmt.Fprint(commands.Output, formatBinaryCacheOutput(normalizedURL, cached))
+			return nil
 		}
-		return formatFetchOutput(normalizedURL, cached, extract), nil
+		fmt.Fprint(commands.Output, formatFetchOutput(normalizedURL, cached, extract))
+		return nil
 	}
 
 	result, redir, err := c.fetchWithRedirects(ctx, normalizedURL, 0)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	if redir != nil {
-		return formatRedirectMessage(redir), nil
+		fmt.Fprint(commands.Output, formatRedirectMessage(redir))
+		return nil
 	}
 
 	if isBinaryContentType(result.contentType) {
@@ -189,7 +202,8 @@ func (c *FetchCommand) Execute(ctx context.Context, args []string) (string, erro
 			fetchedAt:   time.Now(),
 		}
 		c.cache.Set(normalizedURL, entry)
-		return formatBinaryCacheOutput(normalizedURL, entry), nil
+		fmt.Fprint(commands.Output, formatBinaryCacheOutput(normalizedURL, entry))
+		return nil
 	}
 
 	content := result.body
@@ -208,7 +222,8 @@ func (c *FetchCommand) Execute(ctx context.Context, args []string) (string, erro
 	}
 	c.cache.Set(normalizedURL, entry)
 
-	return formatFetchOutput(normalizedURL, entry, extract), nil
+	fmt.Fprint(commands.Output, formatFetchOutput(normalizedURL, entry, extract))
+	return nil
 }
 
 // ---------------------------------------------------------------------------

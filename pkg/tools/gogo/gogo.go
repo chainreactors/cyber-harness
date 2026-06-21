@@ -3,10 +3,11 @@ package gogo
 import (
 	"bytes"
 	"context"
-	"io"
+	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
@@ -46,7 +47,7 @@ func (c *Command) Usage() string {
 	return gogocore.Help()
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err error) {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	defer telemetry.SDKRecover("gogo", &err)
 	args = c.normalizeArgs(args)
 	args = c.injectProxy(args)
@@ -73,14 +74,10 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err 
 			return c.engine.Init()
 		},
 	}); err != nil {
-		if buf.Len() > 0 {
-			_, _ = io.WriteString(w, buf.String())
-		}
+		fmt.Fprint(commands.Output, buf.String())
 		return err
 	}
-	if buf.Len() > 0 {
-		_, _ = io.WriteString(w, buf.String())
-	}
+	fmt.Fprint(commands.Output, buf.String())
 	return nil
 }
 

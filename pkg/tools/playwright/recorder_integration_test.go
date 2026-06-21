@@ -5,7 +5,6 @@ package playwright
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/go-rod/rod/lib/launcher"
 )
@@ -67,18 +67,18 @@ func loginTestServer() *httptest.Server {
 // recExecString is a test helper that runs cmd.Execute and returns the output as a string.
 func recExecString(t *testing.T, cmd *Command, ctx context.Context, args []string) string {
 	t.Helper()
-	var buf strings.Builder
-	if err := cmd.Execute(ctx, args, &buf); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, args); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
-	return buf.String()
+	return commands.Output.Captured()
 }
 
 // recExecStringErr is a test helper that runs cmd.Execute and returns (output, error).
 func recExecStringErr(cmd *Command, ctx context.Context, args []string) (string, error) {
-	var buf strings.Builder
-	err := cmd.Execute(ctx, args, &buf)
-	return buf.String(), err
+	commands.Output.Reset(nil)
+	err := cmd.Execute(ctx, args)
+	return commands.Output.Captured(), err
 }
 
 // TestIntegration_RecordOpenWithFlag tests --record flag on open.
@@ -134,7 +134,8 @@ func TestIntegration_RecordFullLoginFlow(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"fill", "login", "#password", "secret123"})
 
 	// Select role
-	if err := cmd.Execute(ctx, []string{"select-option", "login", "#role", "admin"}, io.Discard); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, []string{"select-option", "login", "#role", "admin"}); err != nil {
 		// select might fail depending on rod version, skip if error
 		t.Logf("select-option skipped: %v", err)
 	}
@@ -146,7 +147,8 @@ func TestIntegration_RecordFullLoginFlow(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"wait", "login", "--stable"})
 
 	// Extract text
-	if err := cmd.Execute(ctx, []string{"text-content", "login", "#status"}, io.Discard); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, []string{"text-content", "login", "#status"}); err != nil {
 		t.Logf("text-content skipped: %v", err)
 	}
 
@@ -261,7 +263,8 @@ func TestIntegration_RecordStartStop(t *testing.T) {
 	}
 
 	// Do some actions
-	if err := cmd.Execute(ctx, []string{"click", "s2", "#about-link"}, io.Discard); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, []string{"click", "s2", "#about-link"}); err != nil {
 		t.Logf("click about link: %v (continuing)", err)
 	}
 

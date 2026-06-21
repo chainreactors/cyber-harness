@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/fingers/alias"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"
@@ -98,17 +98,9 @@ Examples:
 func (c *CyberhubSearch) Name() string  { return "cyberhub" }
 func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 
-func (c *CyberhubSearch) Execute(_ context.Context, args []string, w io.Writer) error {
-	result, err := c.execute(args)
-	if result != "" {
-		_, _ = io.WriteString(w, result)
-	}
-	return err
-}
-
-func (c *CyberhubSearch) execute(args []string) (string, error) {
+func (c *CyberhubSearch) Execute(_ context.Context, args []string) error {
 	if c.index == nil {
-		return "", fmt.Errorf("search cyberhub: association index not available")
+		return fmt.Errorf("search cyberhub: association index not available")
 	}
 
 	var opts cyberhubFlags
@@ -116,32 +108,41 @@ func (c *CyberhubSearch) execute(args []string) (string, error) {
 	rest, err := parser.ParseArgs(args)
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			return cyberhubUsage() + "\n", nil
+			fmt.Fprint(commands.Output, cyberhubUsage()+"\n")
+			return nil
 		}
-		return "", fmt.Errorf("search cyberhub: %w", err)
+		return fmt.Errorf("search cyberhub: %w", err)
 	}
 	if opts.Limit < 0 {
-		return "", fmt.Errorf("search cyberhub: --limit cannot be negative")
+		return fmt.Errorf("search cyberhub: --limit cannot be negative")
 	}
 
 	action, typ, query, err := parseCyberhubAction(rest, opts.Type, opts.Query)
 	if err != nil {
-		return "", err
+		return err
 	}
 
+	var out string
 	if action == "id" {
-		return c.executeID(query, opts.JSONLines)
+		out, err = c.executeID(query, opts.JSONLines)
+	} else {
+		q := c.buildQuery(query, opts)
+		result := c.index.Lookup(q)
+		items := c.resultToItems(result, typ, opts)
+		sortCyberhubItems(items)
+		total := len(items)
+		if opts.Limit > 0 && len(items) > opts.Limit {
+			items = items[:opts.Limit]
+		}
+		out, err = renderCyberhubItems(items, total, action, typ, opts.JSONLines)
 	}
-
-	q := c.buildQuery(query, opts)
-	result := c.index.Lookup(q)
-	items := c.resultToItems(result, typ, opts)
-	sortCyberhubItems(items)
-	total := len(items)
-	if opts.Limit > 0 && len(items) > opts.Limit {
-		items = items[:opts.Limit]
+	if err != nil {
+		return err
 	}
-	return renderCyberhubItems(items, total, action, typ, opts.JSONLines)
+	if out != "" {
+		fmt.Fprint(commands.Output, out)
+	}
+	return nil
 }
 
 // buildQuery constructs a single association.Query from all flags and text input.

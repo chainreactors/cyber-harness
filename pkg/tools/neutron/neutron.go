@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/neutron/templates"
@@ -145,14 +145,14 @@ Examples:
   neutron -u http://target.com -t ./pocs --id shiro-detect -j -o loots.jsonl`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
 	_, err := parser.ParseArgs(normalizeNucleiStyleArgs(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			_, _ = io.WriteString(w, c.Usage()+"\n")
+			fmt.Fprint(commands.Output, c.Usage()+"\n")
 			return nil
 		}
 		return fmt.Errorf("neutron: %w", err)
@@ -226,7 +226,7 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 	if flags.TemplateList {
 		result, wErr := c.writeOrReturn(flags.OutputFile, renderTemplateList(selected, flags.JSON || flags.JSONL))
 		if result != "" {
-			_, _ = io.WriteString(w, result)
+			fmt.Fprint(commands.Output, result)
 		}
 		return wErr
 	}
@@ -264,7 +264,7 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 			}
 		}
 		if ctx.Err() != nil {
-			_, _ = io.WriteString(w, sb.String())
+			fmt.Fprint(commands.Output, sb.String())
 			return fmt.Errorf("neutron: %w", ctx.Err())
 		}
 	}
@@ -275,7 +275,7 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 	}
 	result, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
 	if result != "" {
-		_, _ = io.WriteString(w, result)
+		fmt.Fprint(commands.Output, result)
 	}
 	return wErr
 }

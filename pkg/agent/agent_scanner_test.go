@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"runtime"
 	"strings"
@@ -29,6 +30,10 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
 		return registry.Get(name)
 	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
 	bash.Manager().SetWorkDir(dir)
 	registry.RegisterTool(bash)
 
@@ -85,8 +90,8 @@ type stubPseudoCommand struct {
 
 func (c *stubPseudoCommand) Name() string  { return c.name }
 func (c *stubPseudoCommand) Usage() string { return c.name }
-func (c *stubPseudoCommand) Execute(_ context.Context, _ []string, w io.Writer) error {
-	_, _ = io.WriteString(w, c.output)
+func (c *stubPseudoCommand) Execute(_ context.Context, _ []string) error {
+	fmt.Fprint(commands.Output, c.output)
 	return nil
 }
 

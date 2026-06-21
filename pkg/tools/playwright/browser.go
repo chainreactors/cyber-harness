@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -236,7 +237,7 @@ Examples:
 }
 
 // Execute dispatches to the appropriate sub-command.
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
@@ -523,10 +524,13 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 		}
 	}
 
-	if result != "" {
-		_, _ = io.WriteString(w, result)
+	if err != nil {
+		return err
 	}
-	return err
+	if result != "" {
+		fmt.Fprint(commands.Output, result)
+	}
+	return nil
 }
 
 // Close shuts down the browser process if running.

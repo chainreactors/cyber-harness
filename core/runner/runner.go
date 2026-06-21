@@ -29,30 +29,40 @@ type AgentRuntime struct {
 	App          *App
 	NodeName     string
 	SystemPrompt string
+	Option       *cfg.Option
 	Config       agent.Config
 	Bus          *eventbus.Bus[agent.Event]
 	Output       *tui.AgentOutput
+	ConfigFile   string
 	ownsApp      bool
 	cleanup      func()
 }
 
 type RuntimeConfig struct {
-	ExistingApp  *App
-	IOA          *cfg.IOAConfig
-	PromptConfig *PromptConfig
-	NoOutput     bool
+	ExistingApp      *App
+	IOA              *cfg.IOAConfig
+	PromptConfig     *PromptConfig
+	NoOutput         bool
+	ProviderOptional bool
 }
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
 	rt := &AgentRuntime{}
+	if option != nil {
+		optCopy := *option
+		rt.Option = &optCopy
+		rt.ConfigFile = option.ConfigFile
+	}
 
 	if rc != nil && rc.ExistingApp != nil {
 		rt.App = rc.ExistingApp
 	} else {
+		providerOptional := rc != nil && (rc.IOA != nil || rc.ProviderOptional)
 		appCfg := cfg.AppConfig(option, cfg.RuntimeFeatures{
-			ProviderEnabled: true,
-			ToolsEnabled:    true,
-			AIEnabled:       true,
+			ProviderEnabled:  true,
+			ProviderOptional: providerOptional,
+			ToolsEnabled:     true,
+			AIEnabled:        true,
 		}, logger)
 		if rc != nil && rc.IOA != nil {
 			appCfg.IOA = rc.IOA
@@ -217,9 +227,6 @@ func (rt *AgentRuntime) Close() {
 // ---------------------------------------------------------------------------
 
 func RunAgentMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt ...func(func() bool)) error {
-	if option.IOAURL != "" {
-		return runIOAAgent(ctx, option, logger)
-	}
 	var si func(func() bool)
 	if len(setInterrupt) > 0 {
 		si = setInterrupt[0]
@@ -304,54 +311,6 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 		setInterrupt(repl.InterruptCurrentRun)
 	}
 	return repl.Start()
-}
-
-// ---------------------------------------------------------------------------
-// Agent with IOA connection
-// ---------------------------------------------------------------------------
-
-func runIOAAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	ioaURL := option.IOAURL
-
-	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{
-		NoOutput: true,
-		IOA: &cfg.IOAConfig{
-			URL:           ioaURL,
-			NodeID:        option.IOANodeID,
-			NodeName:      option.IOANodeName,
-			Space:         option.Space,
-			RegisterTools: true,
-			AutoRegister:  true,
-		},
-	})
-	if err != nil {
-		return err
-	}
-	defer rt.Close()
-
-	// Wait for scanner engines, then connect to web via WebSocket.
-	callbackDone := make(chan struct{})
-	go func() {
-		defer close(callbackDone)
-		_ = rt.App.WaitEngines(ctx)
-		webURL := DeriveWebURL(ioaURL)
-		if webURL == "" {
-			return
-		}
-		logger.Debugf("web callback to %s", webURL)
-		_ = RunWebCallback(ctx, webURL, rt.NodeName, rt.App.Commands, rt.Bus)
-	}()
-
-	prompt := strings.TrimSpace(option.Prompt)
-	if prompt != "" && len(option.Inputs) > 0 {
-		prompt = fmt.Sprintf("%s\n\nTargets:\n%s", prompt, cfg.FormatInputs(option.Inputs))
-	}
-
-	loopCfg := rt.Config.WithSystemPrompt(rt.SystemPrompt).WithStream(true)
-	_, err = agent.NewAgent(loopCfg).Run(ctx, prompt)
-
-	<-callbackDone
-	return err
 }
 
 // ---------------------------------------------------------------------------

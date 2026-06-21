@@ -3,7 +3,7 @@ package commands_test
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,10 +14,10 @@ import (
 
 type simpleCommand struct{ name string }
 
-func (c *simpleCommand) Name() string                                          { return c.name }
-func (c *simpleCommand) Usage() string                                         { return c.name }
-func (c *simpleCommand) Execute(_ context.Context, _ []string, w io.Writer) error {
-	_, _ = io.WriteString(w, "ok")
+func (c *simpleCommand) Name() string  { return c.name }
+func (c *simpleCommand) Usage() string { return c.name }
+func (c *simpleCommand) Execute(_ context.Context, _ []string) error {
+	fmt.Fprint(commands.Output, "ok")
 	return nil
 }
 

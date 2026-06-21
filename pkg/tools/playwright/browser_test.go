@@ -5,7 +5,6 @@ package playwright
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/go-rod/rod/lib/launcher"
 )
 
@@ -175,7 +175,8 @@ func TestParseOpenOpts_NoSpeedUp(t *testing.T) {
 
 func TestExecute_NoSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	err := cmd.Execute(context.Background(), nil, io.Discard)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for no subcommand")
 	}
@@ -186,7 +187,8 @@ func TestExecute_NoSubcommand(t *testing.T) {
 
 func TestExecute_UnknownSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	err := cmd.Execute(context.Background(), []string{"bogus"}, io.Discard)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"bogus"})
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand")
 	}
@@ -258,18 +260,18 @@ func newTestServer(handler http.HandlerFunc) *httptest.Server {
 // execString is a test helper that runs cmd.Execute and returns the output as a string.
 func execString(t *testing.T, cmd *Command, ctx context.Context, args []string) string {
 	t.Helper()
-	var buf strings.Builder
-	if err := cmd.Execute(ctx, args, &buf); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, args); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
-	return buf.String()
+	return commands.Output.Captured()
 }
 
 // execStringErr is a test helper that runs cmd.Execute and returns (output, error).
 func execStringErr(cmd *Command, ctx context.Context, args []string) (string, error) {
-	var buf strings.Builder
-	err := cmd.Execute(ctx, args, &buf)
-	return buf.String(), err
+	commands.Output.Reset(nil)
+	err := cmd.Execute(ctx, args)
+	return commands.Output.Captured(), err
 }
 
 func TestIntegration_Navigate(t *testing.T) {

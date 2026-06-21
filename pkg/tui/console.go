@@ -15,12 +15,13 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
-ioaclient "github.com/chainreactors/ioa/client"
+	"github.com/chainreactors/aiscan/pkg/agent"
+	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/reeflective/console"
 	"github.com/reeflective/readline/inputrc"
+	rlterm "github.com/reeflective/readline/terminal"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -32,15 +33,18 @@ const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 var errAgentConsoleExit = errors.New("agent console exit")
 
 type AgentConsole struct {
-	ctx         context.Context
-	option      *cfg.Option
-	appInfo     AppInfo
-	agent       *agent.Agent
-	console     *console.Console
-	menu        *console.Menu
-	output      *AgentOutput
-	controller  *interactiveRunController
-	bus         *eventbus.Bus[agent.Event]
+	ctx        context.Context
+	option     *cfg.Option
+	appInfo    AppInfo
+	agent      *agent.Agent
+	console    *console.Console
+	terminal   *rlterm.Terminal
+	menu       *console.Menu
+	output     *AgentOutput
+	stdout     io.Writer
+	stderr     io.Writer
+	controller *interactiveRunController
+	bus        *eventbus.Bus[agent.Event]
 	// readlineActive is true only while the foreground goroutine is blocked in
 	// Readline. Async agent output can then refresh the prompt without changing
 	// the input buffer or creating a duplicate prompt between reads.
@@ -55,11 +59,30 @@ type AgentConsole struct {
 }
 
 func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
-	c := console.New("aiscan")
+	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, nil, bus...)
+}
+
+func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, t *rlterm.Terminal, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
+	if t == nil {
+		t = rlterm.Local()
+	}
+	c := console.NewWithTerminal("aiscan", t)
 	c.NewlineAfter = true
 	configureAgentReadline(c)
+	stdout := t.Out
+	stderr := t.Err
 	if output == nil {
-		output = NewAgentOutput(option)
+		if t.Control == nil {
+			output = NewAgentOutput(option)
+		} else {
+			output = NewAgentOutputWithWriters(option, stdout, stderr, t.Control.IsTerminal())
+		}
+	}
+	if stdout == nil {
+		stdout = output.stdout
+	}
+	if stderr == nil {
+		stderr = output.stderr
 	}
 
 	menu := c.NewMenu("agent")
@@ -71,18 +94,21 @@ func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, s
 		if errors.Is(err, errAgentConsoleExit) {
 			return errAgentConsoleExit
 		}
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		fmt.Fprintf(stderr, "error: %s\n", err)
 		return nil
 	}
 
 	repl := &AgentConsole{
-		ctx:         ctx,
-		option:      option,
-		appInfo:     appInfo,
-		agent:       session,
-		console:     c,
-		menu:        menu,
-		output:      output,
+		ctx:      ctx,
+		option:   option,
+		appInfo:  appInfo,
+		agent:    session,
+		console:  c,
+		terminal: t,
+		menu:     menu,
+		output:   output,
+		stdout:   stdout,
+		stderr:   stderr,
 	}
 	if len(bus) > 0 && bus[0] != nil {
 		repl.bus = bus[0]
@@ -261,34 +287,34 @@ func (r *AgentConsole) Start() error {
 }
 
 func (r *AgentConsole) startFastInput() error {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(r.terminal.In)
 	for {
 		if r.ctx.Err() != nil {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
 
-		fmt.Fprint(os.Stderr, r.promptString())
+		fmt.Fprint(r.stderr, r.promptString())
 		line, err := readFastInputLine(r.ctx, reader)
 		if err != nil && !errors.Is(err, io.EOF) {
 			if errors.Is(err, context.Canceled) {
-				fmt.Fprintln(os.Stdout)
+				fmt.Fprintln(r.stdout)
 				return nil
 			}
-			fmt.Fprintf(os.Stderr, "error: read interactive input: %s\n", err)
+			fmt.Fprintf(r.stderr, "error: read interactive input: %s\n", err)
 			continue
 		}
 		if errors.Is(err, io.EOF) && strings.TrimSpace(line) == "" {
-			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(r.stdout)
 			return nil
 		}
 
 		done, execErr := r.handleInputLine(line)
 		if execErr != nil {
 			if errors.Is(execErr, context.Canceled) && r.ctx.Err() != nil {
-				fmt.Fprintln(os.Stdout)
+				fmt.Fprintln(r.stdout)
 				return nil //nolint:nilerr // clean shutdown — intentionally swallow error on context cancel
 			}
-			fmt.Fprintf(os.Stderr, "error: %s\n", execErr)
+			fmt.Fprintf(r.stderr, "error: %s\n", execErr)
 		}
 		if done || errors.Is(err, io.EOF) {
 			return nil
@@ -330,13 +356,13 @@ func (r *AgentConsole) startReadline() error {
 		if err != nil {
 			switch {
 			case errors.Is(err, io.EOF):
-				fmt.Fprintln(os.Stdout)
+				fmt.Fprintln(r.stdout)
 				return nil
 			case err.Error() == os.Interrupt.String():
 				r.InterruptCurrentRun()
 				continue
 			default:
-				fmt.Fprintf(os.Stderr, "error: read interactive input: %s\n", err)
+				fmt.Fprintf(r.stderr, "error: read interactive input: %s\n", err)
 				continue
 			}
 		}
@@ -344,10 +370,10 @@ func (r *AgentConsole) startReadline() error {
 		done, err := r.handleInputLine(line)
 		if err != nil {
 			if errors.Is(err, context.Canceled) && r.ctx.Err() != nil {
-				fmt.Fprintln(os.Stdout)
+				fmt.Fprintln(r.stdout)
 				return nil //nolint:nilerr // clean shutdown — intentionally swallow error on context cancel
 			}
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			fmt.Fprintf(r.stderr, "error: %s\n", err)
 		}
 		if done {
 			return nil
@@ -386,7 +412,11 @@ func agentPromptString(output *AgentOutput) string {
 }
 
 func (r *AgentConsole) fastInputEnabled() bool {
-	return fastInputEnabledForMode(os.Getenv("AISCAN_REPL"), term.IsTerminal(int(os.Stdin.Fd())))
+	isTerminal := false
+	if r != nil && r.terminal != nil && r.terminal.Control != nil {
+		isTerminal = r.terminal.Control.IsTerminal()
+	}
+	return fastInputEnabledForMode(os.Getenv("AISCAN_REPL"), isTerminal)
 }
 
 func fastInputEnabledForMode(mode string, _ bool) bool {
@@ -416,15 +446,10 @@ func (r *AgentConsole) renderBanner() {
 	if r.output == nil || r.output.verbosity < 0 || r.output.stderr == nil {
 		return
 	}
-	if !writerIsTerminal(r.output.stderr) {
+	if !r.output.tty {
 		return
 	}
 	fmt.Fprint(r.output.stderr, r.bannerOutput())
-}
-
-func writerIsTerminal(w io.Writer) bool {
-	file, ok := w.(*os.File)
-	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 func (r *AgentConsole) bannerOutput() string {
@@ -471,7 +496,11 @@ func (r *AgentConsole) bannerWidth() int {
 		maxWidth     = 78
 	)
 	width := defaultWidth
-	if r != nil && r.output != nil && r.output.stderr != nil {
+	if r != nil && r.terminal != nil && r.terminal.Control != nil {
+		if columns, _ := r.terminal.Control.Size(); columns > 0 {
+			width = columns - 4
+		}
+	} else if r != nil && r.output != nil && r.output.stderr != nil {
 		if columns := writerTerminalWidth(r.output.stderr); columns > 0 {
 			width = columns - 4
 		}
@@ -626,8 +655,8 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 	}
 	root.CompletionOptions.HiddenDefaultCmd = true
 	root.SetHelpCommand(&cobra.Command{Use: "help", Hidden: true})
-	root.SetOut(os.Stdout)
-	root.SetErr(os.Stderr)
+	root.SetOut(r.stdout)
+	root.SetErr(r.stderr)
 
 	root.AddCommand(&cobra.Command{
 		Use: agentPromptCommandName, Hidden: true, Args: cobra.ExactArgs(1),
@@ -669,7 +698,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 			Name: "/help", Description: "查看命令面板",
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
-				fmt.Fprint(os.Stdout, r.renderHelp())
+				fmt.Fprint(r.stdout, r.renderHelp())
 				return nil
 			},
 		},
@@ -677,7 +706,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 			Name: "/status", Description: "查看模型、渲染模式、IOA 和 skills",
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
-				fmt.Fprint(os.Stdout, r.renderStatus())
+				fmt.Fprint(r.stdout, r.renderStatus())
 				return nil
 			},
 		},
@@ -689,7 +718,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 					return fmt.Errorf("task is running — use /stop first")
 				}
 				s.Agent.Reset()
-				fmt.Fprintln(os.Stdout, "Context reset.")
+				fmt.Fprintln(r.stdout, "Context reset.")
 				return nil
 			},
 		},
@@ -705,7 +734,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
 				if !r.InterruptCurrentRun() {
-					fmt.Fprintln(os.Stderr, "No running task.")
+					fmt.Fprintln(r.stderr, "No running task.")
 				}
 				return nil
 			},
@@ -725,22 +754,22 @@ func (r *AgentConsole) builtinCommands() []Command {
 				switch text {
 				case "":
 					if s.EvalCriteria == "" {
-						fmt.Println("Goal evaluation: off")
+						fmt.Fprintln(r.stdout, "Goal evaluation: off")
 					} else {
-						fmt.Printf("Goal evaluation: on\n  criteria: %s\n", s.EvalCriteria)
+						fmt.Fprintf(r.stdout, "Goal evaluation: on\n  criteria: %s\n", s.EvalCriteria)
 					}
 				case "off":
 					s.EvalCriteria = ""
 					if s.OnEvalChange != nil {
 						s.OnEvalChange("")
 					}
-					fmt.Println("Goal evaluation disabled.")
+					fmt.Fprintln(r.stdout, "Goal evaluation disabled.")
 				default:
 					s.EvalCriteria = text
 					if s.OnEvalChange != nil {
 						s.OnEvalChange(text)
 					}
-					fmt.Printf("Goal evaluation enabled: %s\n", text)
+					fmt.Fprintf(r.stdout, "Goal evaluation enabled: %s\n", text)
 				}
 				return nil
 			},
@@ -762,11 +791,17 @@ func (r *AgentConsole) providerCommands() []Command {
 			Description: "查看/管理 LLM provider 链",
 			Args:        ArgsOptional,
 			Run: func(_ context.Context, _ *Session, args []string) error {
-				if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
-					fmt.Fprint(os.Stdout, r.renderProviders())
+				fields := splitArgs(args)
+				if len(fields) == 0 || (len(fields) == 1 && fields[0] == "list") {
+					fmt.Fprint(r.stdout, r.renderProviders())
 					return nil
 				}
-				fmt.Fprintf(os.Stderr, "unknown subcommand: %s (use: list)\n", args[0])
+				switch fields[0] {
+				case "set", "use":
+					return r.configureProvider(fields[1:])
+				default:
+					fmt.Fprintf(r.stderr, "unknown subcommand: %s (use: list, set)\n", fields[0])
+				}
 				return nil
 			},
 		},
@@ -783,7 +818,7 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if err != nil {
 					return err
 				}
-				return RunIOASpaces(ctx, client, r.option)
+				return RunIOASpaces(ctx, client, r.option, r.stdout, r.stderr)
 			},
 		},
 		{
@@ -794,7 +829,7 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if err != nil {
 					return err
 				}
-				return RunIOAMessages(ctx, client, r.option, cfg.IOAClientArgs{Space: args[0]})
+				return RunIOAMessages(ctx, client, r.option, cfg.IOAClientArgs{Space: args[0]}, r.stdout, r.stderr)
 			},
 		},
 		{
@@ -809,7 +844,7 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if err != nil {
 					return err
 				}
-				return RunIOAContext(ctx, client, r.option, cfg.IOAClientArgs{Space: fields[0], MessageID: fields[1]})
+				return RunIOAContext(ctx, client, r.option, cfg.IOAClientArgs{Space: fields[0], MessageID: fields[1]}, r.stdout, r.stderr)
 			},
 		},
 		{
@@ -824,7 +859,7 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if len(args) > 0 {
 					a.Space = args[0]
 				}
-				return RunIOANodes(ctx, client, r.option, a)
+				return RunIOANodes(ctx, client, r.option, a, r.stdout, r.stderr)
 			},
 		},
 	}
@@ -978,13 +1013,13 @@ func (r *AgentConsole) refreshPromptAfterAsyncRun() {
 	if r.output != nil && r.output.mode != ModeInteractive {
 		return
 	}
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
+	if r.terminal == nil || r.terminal.Control == nil || !r.terminal.Control.IsTerminal() {
 		return
 	}
 	if r.console == nil || r.console.Shell() == nil || r.console.Shell().Display == nil {
 		return
 	}
-	r.console.Shell().Display.Refresh()
+	r.console.Shell().Refresh()
 }
 
 func (r *AgentConsole) setDirectCancel(fn context.CancelFunc) {
@@ -1051,6 +1086,76 @@ func (r *AgentConsole) renderProviders() string {
 	return r.renderPanel("providers", renderHelpRows(rows, colorEnabled), colorEnabled)
 }
 
+func (r *AgentConsole) configureProvider(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: /provider set --provider openai --base-url <url> --api-key <key> --model <model>")
+	}
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change provider while a task is running")
+	}
+
+	pc := r.appInfo.ProviderConfig
+	for i := 0; i < len(args); i++ {
+		key := args[i]
+		value := ""
+		if k, v, ok := strings.Cut(key, "="); ok {
+			key, value = k, v
+		} else {
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", key)
+			}
+			i++
+			value = args[i]
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimLeft(key, "-") {
+		case "provider":
+			pc.Provider = value
+		case "base-url", "base_url":
+			pc.BaseURL = value
+		case "api-key", "api_key":
+			pc.APIKey = value
+		case "model":
+			pc.Model = value
+		case "proxy":
+			pc.Proxy = value
+		default:
+			return fmt.Errorf("unknown provider option: %s", key)
+		}
+	}
+
+	resolved, err := agent.ResolveProvider(&pc)
+	if err != nil {
+		return err
+	}
+	prov, err := agent.NewProviderFromResolved(resolved)
+	if err != nil {
+		return err
+	}
+
+	r.appInfo.Provider = prov
+	r.appInfo.ProviderConfig = *resolved
+	if r.appInfo.OnProviderChange != nil {
+		r.appInfo.OnProviderChange(prov, *resolved)
+	}
+	if r.agent != nil {
+		r.agent.Cfg.Provider = prov
+		r.agent.Cfg.Model = resolved.Model
+	}
+	if r.option != nil {
+		cfg.ApplyResolvedProviderOptions(r.option, *resolved)
+		r.option.LLMProxy = resolved.Proxy
+	}
+	r.syncEvalToController()
+
+	if resolved.Model != "" {
+		fmt.Fprintf(r.stdout, "Provider ready: %s / %s\n", resolved.Provider, resolved.Model)
+	} else {
+		fmt.Fprintf(r.stdout, "Provider ready: %s\n", resolved.Provider)
+	}
+	return nil
+}
+
 func (r *AgentConsole) pseudoCommandNames() []string {
 	if r.appInfo.Commands == nil {
 		return nil
@@ -1074,13 +1179,13 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 	result, err := reg.Execute(directCtx, cmdLine)
 	if err != nil {
 		if errors.Is(err, context.Canceled) && directCtx.Err() != nil && ctx.Err() == nil {
-			fmt.Fprintln(os.Stderr, "\ncommand interrupted")
+			fmt.Fprintln(r.stderr, "\ncommand interrupted")
 			return nil
 		}
 		return err
 	}
 	if result != "" {
-		fmt.Fprint(os.Stdout, result)
+		fmt.Fprint(r.stdout, result)
 	}
 	return nil
 }

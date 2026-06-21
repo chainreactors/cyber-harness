@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"time"
@@ -45,7 +44,7 @@ func (t *TmuxCommand) Usage() string {
       Block until session completes.`
 }
 
-func (t *TmuxCommand) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (t *TmuxCommand) Execute(ctx context.Context, args []string) error {
 	var result string
 	var err error
 	if len(args) == 0 {
@@ -71,8 +70,10 @@ func (t *TmuxCommand) Execute(ctx context.Context, args []string, w io.Writer) e
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(w, result)
-	return err
+	if result != "" {
+		fmt.Fprint(Output, result)
+	}
+	return nil
 }
 
 func (t *TmuxCommand) cmdImplicitNewSession(args []string) (string, error) {

@@ -18,6 +18,7 @@ type AppInfo struct {
 	ProviderFallbacks []agent.ProviderEntry
 	Commands          *commands.CommandRegistry
 	Skills            *skills.Store
+	OnProviderChange  func(agent.Provider, agent.ProviderConfig)
 }
 
 // Session holds the dependencies commands need to operate on.
@@ -84,7 +85,11 @@ func SkillCommands(s *Session) []Command {
 // RunPrompt expands skills and submits a prompt to the controller.
 func RunPrompt(s *Session, label, input string) error {
 	prompt := skills.ExpandCommand(input, s.AppInfo.Skills)
-	prompt, err := cfg.ApplySelectedSkills(prompt, s.Option.Skills, s.AppInfo.Skills)
+	var selected []string
+	if s.Option != nil {
+		selected = s.Option.Skills
+	}
+	prompt, err := cfg.ApplySelectedSkills(prompt, selected, s.AppInfo.Skills)
 	if err != nil {
 		return err
 	}

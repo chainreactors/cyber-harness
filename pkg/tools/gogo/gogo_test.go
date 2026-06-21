@@ -3,13 +3,13 @@ package gogo
 import (
 	"bytes"
 	"context"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
@@ -27,7 +27,8 @@ func TestExecuteInstallsResourceProviderBeforePrepare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = New(engine).Execute(context.Background(), []string{"-P", "extract"}, io.Discard)
+	commands.Output.Reset(nil)
+	err = New(engine).Execute(context.Background(), []string{"-P", "extract"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -40,7 +41,8 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	var logs bytes.Buffer
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
-	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}, io.Discard); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "[debug] gogo debug enabled") {

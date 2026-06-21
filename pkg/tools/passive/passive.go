@@ -8,13 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/projectdiscovery/uncover/sources"
@@ -73,21 +73,24 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	src, rest, help, err := splitSource(args)
 	if err != nil {
 		return err
 	}
 	if help {
-		_, _ = io.WriteString(w, c.Usage())
+		fmt.Fprint(commands.Output, c.Usage())
 		return nil
 	}
 	if c.sources[src] {
 		result, err := c.runQuery(ctx, src, rest)
-		if result != "" {
-			_, _ = io.WriteString(w, result)
+		if err != nil {
+			return err
 		}
-		return err
+		if result != "" {
+			fmt.Fprint(commands.Output, result)
+		}
+		return nil
 	}
 	return fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
 }

@@ -2,7 +2,7 @@ package commands
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -14,9 +14,9 @@ type argsCapture struct {
 
 func (c *argsCapture) Name() string  { return c.name }
 func (c *argsCapture) Usage() string { return c.name }
-func (c *argsCapture) Execute(_ context.Context, args []string, w io.Writer) error {
+func (c *argsCapture) Execute(_ context.Context, args []string) error {
 	c.got = append([]string(nil), args...)
-	_, _ = io.WriteString(w, strings.Join(args, " "))
+	fmt.Fprint(Output, strings.Join(args, " "))
 	return nil
 }
 

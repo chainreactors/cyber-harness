@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/projectdiscovery/goflags"
@@ -111,7 +111,7 @@ Examples:
   katana -list urls.txt -d 2 -jc -timeout 60`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err error) {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	defer telemetry.SDKRecover("katana", &err)
 	args = c.resolveRelativePaths(args)
 
@@ -204,8 +204,7 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err 
 
 	// Write collected results.
 	for _, line := range collector.lines() {
-		_, _ = w.Write(line)
-		_, _ = w.Write([]byte("\n"))
+		fmt.Fprint(commands.Output, string(line)+"\n")
 	}
 	return nil
 }

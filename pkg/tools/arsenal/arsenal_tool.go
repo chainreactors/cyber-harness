@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
 )
@@ -35,7 +35,7 @@ func NewArsenalCommand() (*ArsenalCommand, error) {
 	}
 
 	binPath := mgr.BinPath()
-	os.MkdirAll(binPath, 0o755)
+	_ = os.MkdirAll(binPath, 0o755)
 	if path := os.Getenv("PATH"); !strings.Contains(path, binPath) {
 		os.Setenv("PATH", binPath+string(os.PathListSeparator)+path)
 	}
@@ -61,9 +61,9 @@ Usage:
 Installed tools become immediately available via bash.`
 }
 
-func (c *ArsenalCommand) Execute(_ context.Context, args []string, w io.Writer) error {
+func (c *ArsenalCommand) Execute(_ context.Context, args []string) error {
 	if len(args) == 0 {
-		io.WriteString(w, c.Usage()+"\n")
+		_, _ = fmt.Fprint(commands.Output, c.Usage()+"\n")
 		return nil
 	}
 
@@ -98,7 +98,7 @@ func (c *ArsenalCommand) Execute(_ context.Context, args []string, w io.Writer) 
 		return err
 	}
 	if result != "" {
-		io.WriteString(w, result+"\n")
+		_, _ = fmt.Fprint(commands.Output, result+"\n")
 	}
 	return nil
 }
@@ -290,10 +290,10 @@ func formatEntryList(entries []registry.ToolEntry, mgr *crtm.Manager) string {
 	for _, e := range entries {
 		ver := mgr.InstalledVersion(e.Name)
 		var status string
-		switch {
-		case ver == "":
+		switch ver {
+		case "":
 			status = "  "
-		case ver == "installed":
+		case "installed":
 			status = "* "
 			nInstalled++
 		default:

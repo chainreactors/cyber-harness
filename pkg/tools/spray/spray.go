@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/sdk/spray"
@@ -47,7 +47,7 @@ func (c *Command) Usage() string {
 	return spraycore.Help()
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err error) {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	defer telemetry.SDKRecover("spray", &err)
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
@@ -94,12 +94,10 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) (err 
 			return nil
 		},
 	}); err != nil {
-		if buf.Len() > 0 {
-			_, _ = io.WriteString(w, buf.String())
-		}
+		fmt.Fprint(commands.Output, buf.String())
 		return fmt.Errorf("spray: %w", err)
 	}
-	_, _ = io.WriteString(w, buf.String())
+	fmt.Fprint(commands.Output, buf.String())
 	return nil
 }
 

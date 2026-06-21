@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -11,7 +10,6 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,12 +19,11 @@ import (
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/web"
+	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
+	"gopkg.in/yaml.v3"
 )
-
-//go:embed static
-var staticFS embed.FS
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
@@ -76,10 +73,15 @@ func main() {
 	})
 	defer service.Close()
 
-	pool := web.NewAgentPool(service.Hub())
+	var pool *web.AgentPool
+	if *debug {
+		pool = web.NewAgentPool(service.Hub(), "*")
+	} else {
+		pool = web.NewAgentPool(service.Hub())
+	}
 	service.SetAgentPool(pool)
 
-	staticSub, err := fs.Sub(staticFS, "static")
+	staticSub, err := fs.Sub(webstatic.FS, "static")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load static assets: %s\n", err)
 		os.Exit(1)
@@ -119,44 +121,21 @@ func main() {
 	}
 }
 
-type spaFileServer struct {
-	fsys       fs.FS
-	fileServer http.Handler
-}
-
-func newSPAFileServer(fsys fs.FS) http.Handler {
-	return spaFileServer{
-		fsys:       fsys,
-		fileServer: http.FileServer(http.FS(fsys)),
+func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(fsys))
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if name != "" {
+			if f, err := fsys.Open(name); err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		r = r.Clone(r.Context())
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
 	}
-}
-
-func (h spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		h.fileServer.ServeHTTP(w, r)
-		return
-	}
-
-	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-	if name == "" || h.staticFileExists(name) {
-		h.fileServer.ServeHTTP(w, r)
-		return
-	}
-
-	indexReq := r.Clone(r.Context())
-	indexReq.URL.Path = "/"
-	h.fileServer.ServeHTTP(w, indexReq)
-}
-
-func (h spaFileServer) staticFileExists(name string) bool {
-	file, err := h.fsys.Open(name)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	return err == nil && !info.IsDir()
 }
 
 type yamlConfig struct {
@@ -226,27 +205,25 @@ func (s *llmConfigFileStore) SaveLLMConfig(ctx context.Context, cfg web.LLMConfi
 
 	current := yamlConfig{}
 	if len(data) > 0 {
-		parseSimpleYAML(data, &current)
+		_ = yaml.Unmarshal(data, &current)
 	}
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		apiKey = current.LLM.APIKey
 	}
 
-	values := map[string]string{
-		"provider": strings.TrimSpace(cfg.Provider),
-		"base_url": strings.TrimSpace(cfg.BaseURL),
-		"api_key":  apiKey,
-		"model":    strings.TrimSpace(cfg.Model),
-		"proxy":    strings.TrimSpace(cfg.Proxy),
-	}
-	next := replaceYAMLSection(data, "llm", values)
+	current.LLM.Provider = strings.TrimSpace(cfg.Provider)
+	current.LLM.BaseURL = strings.TrimSpace(cfg.BaseURL)
+	current.LLM.APIKey = apiKey
+	current.LLM.Model = strings.TrimSpace(cfg.Model)
+	current.LLM.Proxy = strings.TrimSpace(cfg.Proxy)
+	next, _ := yaml.Marshal(&current)
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return web.LLMConfig{}, err
 		}
 	}
-	if err := os.WriteFile(path, []byte(next), 0600); err != nil {
+	if err := os.WriteFile(path, next, 0600); err != nil {
 		return web.LLMConfig{}, err
 	}
 	saved := loadYAMLConfig(path)
@@ -272,48 +249,6 @@ func (s *llmConfigFileStore) resolvePath() (string, bool) {
 	return "config.yaml", false
 }
 
-func replaceYAMLSection(data []byte, section string, values map[string]string) string {
-	replacement := []string{section + ":"}
-	keys := []string{"provider", "base_url", "api_key", "model", "proxy"}
-	for _, key := range keys {
-		replacement = append(replacement, "  "+key+": "+yamlString(values[key]))
-	}
-
-	lines := splitLines(data)
-	out := make([]string, 0, len(lines)+len(replacement)+1)
-	inSection := false
-	replaced := false
-	for _, line := range lines {
-		trimmed := trimString(line)
-		if !inSection && countLeadingSpaces(line) == 0 {
-			key, _ := splitKV(trimmed)
-			if key == section {
-				out = append(out, replacement...)
-				inSection = true
-				replaced = true
-				continue
-			}
-		}
-		if inSection {
-			if trimmed == "" || trimmed[0] == '#' || countLeadingSpaces(line) > 0 {
-				continue
-			}
-			inSection = false
-		}
-		out = append(out, line)
-	}
-	if !replaced {
-		if len(out) > 0 && trimString(out[len(out)-1]) != "" {
-			out = append(out, "")
-		}
-		out = append(out, replacement...)
-	}
-	return strings.Join(out, "\n") + "\n"
-}
-
-func yamlString(value string) string {
-	return strconv.Quote(value)
-}
 
 func findConfigFile(explicit string) string {
 	if explicit != "" {
@@ -332,16 +267,16 @@ func findConfigFile(explicit string) string {
 }
 
 func loadYAMLConfig(path string) yamlConfig {
-	var cfg yamlConfig
+	var c yamlConfig
 	if path == "" {
-		return cfg
+		return c
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg
+		return c
 	}
-	parseSimpleYAML(data, &cfg)
-	return cfg
+	_ = yaml.Unmarshal(data, &c)
+	return c
 }
 
 func initApp(ctx context.Context, configFile string, logger telemetry.Logger) (*runner.App, error) {
@@ -377,123 +312,3 @@ func initApp(ctx context.Context, configFile string, logger telemetry.Logger) (*
 	return app, nil
 }
 
-// parseSimpleYAML is a minimal YAML parser for flat/two-level config.
-// It avoids importing a YAML library in the web entry point.
-func parseSimpleYAML(data []byte, cfg *yamlConfig) {
-	lines := splitLines(data)
-	var section string
-	for _, line := range lines {
-		trimmed := trimString(line)
-		if trimmed == "" || trimmed[0] == '#' {
-			continue
-		}
-		indent := countLeadingSpaces(line)
-		key, value := splitKV(trimmed)
-		if key == "" {
-			continue
-		}
-		if indent == 0 {
-			section = key
-			continue
-		}
-		value = unquote(value)
-		switch section {
-		case "llm":
-			switch key {
-			case "provider":
-				cfg.LLM.Provider = value
-			case "base_url":
-				cfg.LLM.BaseURL = value
-			case "api_key":
-				cfg.LLM.APIKey = value
-			case "model":
-				cfg.LLM.Model = value
-			case "proxy":
-				cfg.LLM.Proxy = value
-			}
-		case "cyberhub":
-			switch key {
-			case "url":
-				cfg.Cyberhub.URL = value
-			case "key":
-				cfg.Cyberhub.Key = value
-			case "mode":
-				cfg.Cyberhub.Mode = value
-			case "proxy":
-				cfg.Cyberhub.Proxy = value
-			}
-		case "scan":
-			switch key {
-			case "verify":
-				cfg.Scan.Verify = value
-			}
-		case "search":
-			switch key {
-			case "tavily_keys":
-				cfg.Search.TavilyKeys = value
-			}
-		}
-	}
-}
-
-func splitLines(data []byte) []string {
-	var lines []string
-	start := 0
-	for i, b := range data {
-		if b == '\n' {
-			lines = append(lines, string(data[start:i]))
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		lines = append(lines, string(data[start:]))
-	}
-	return lines
-}
-
-func trimString(s string) string {
-	i, j := 0, len(s)
-	for i < j && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r') {
-		i++
-	}
-	for j > i && (s[j-1] == ' ' || s[j-1] == '\t' || s[j-1] == '\r') {
-		j--
-	}
-	return s[i:j]
-}
-
-func countLeadingSpaces(s string) int {
-	n := 0
-	for _, c := range s {
-		switch c {
-		case ' ':
-			n++
-		case '\t':
-			n += 2
-		default:
-			return n
-		}
-	}
-	return n
-}
-
-func splitKV(s string) (string, string) {
-	idx := -1
-	for i, c := range s {
-		if c == ':' {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return s, ""
-	}
-	return trimString(s[:idx]), trimString(s[idx+1:])
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-		return s[1 : len(s)-1]
-	}
-	return s
-}

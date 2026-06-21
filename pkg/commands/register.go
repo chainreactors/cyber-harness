@@ -1,6 +1,10 @@
 package commands
 
-import "github.com/chainreactors/aiscan/pkg/agent/tmux"
+import (
+	"io"
+
+	"github.com/chainreactors/aiscan/pkg/agent/tmux"
+)
 
 func init() {
 	RegisterFactory(Factory{
@@ -33,6 +37,10 @@ func init() {
 			bash.Manager().SetCommands(func(name string) (tmux.Command, bool) {
 				return reg.Get(name)
 			})
+			bash.Manager().SetExecHooks(
+				func(w io.Writer) { Output.Reset(w) },
+				func() { Output.Reset(nil) },
+			)
 			bash.Manager().SetWorkDir(workDir)
 			reg.RegisterTool(bash)
 

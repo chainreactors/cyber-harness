@@ -1,7 +1,6 @@
 package arsenal
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -10,27 +9,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 )
 
 // run executes arsenal as a Command and returns stdout.
 func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
-	var buf bytes.Buffer
-	err := cmd.Execute(context.Background(), args, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("arsenal %s: %v", strings.Join(args, " "), err)
 	}
-	return buf.String()
+	return commands.Output.Captured()
 }
 
 // runErr executes and expects an error.
 func runErr(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
-	var buf bytes.Buffer
-	err := cmd.Execute(context.Background(), args, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), args)
 	if err == nil {
-		t.Fatalf("arsenal %s: expected error, got output: %s", strings.Join(args, " "), buf.String())
+		t.Fatalf("arsenal %s: expected error, got output: %s", strings.Join(args, " "), commands.Output.Captured())
 	}
 	return err.Error()
 }

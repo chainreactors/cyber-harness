@@ -126,6 +126,7 @@ func mergeOption(dst, src *Option) {
 		dst.ReconLimit = src.ReconLimit
 	}
 	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
+	dst.WebURL = ResolveString(dst.WebURL, src.WebURL)
 	dst.IOAURL = ResolveString(dst.IOAURL, src.IOAURL)
 	dst.IOAToken = ResolveString(dst.IOAToken, src.IOAToken)
 	dst.IOANodeName = ResolveString(dst.IOANodeName, src.IOANodeName)
@@ -192,6 +193,11 @@ cyberhub:
 search:
   # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
   tavily_keys: ""
+
+# Agent 远程连接
+agent:
+  # 直接连接 aiscan web，提供远程 REPL / PTY
+  web_url: ""
 
 # IOA 协作
 ioa:

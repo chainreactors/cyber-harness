@@ -68,7 +68,7 @@ func isRetryableByMessage(err error) bool {
 	return false
 }
 
-func retryDelay(attempt int) time.Duration {
+func RetryDelay(attempt int) time.Duration {
 	delay := time.Second << uint(attempt)
 	if delay > 10*time.Second {
 		delay = 10 * time.Second
@@ -84,7 +84,7 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			delay := retryDelay(attempt - 1)
+			delay := RetryDelay(attempt - 1)
 			cfg.Logger.Warnf("retrying LLM call (attempt %d/%d) after %s: %v", attempt+1, maxAttempts, delay, lastErr)
 			select {
 			case <-time.After(delay):

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
@@ -55,12 +55,12 @@ func testSeeds(events ...event) []pipeline.Event {
 func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "[summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
@@ -174,11 +174,12 @@ func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
 
 func TestScanRejectsRemovedAIFlag(t *testing.T) {
 	cmd := New(&engine.Set{})
+	commands.Output.Reset(nil)
 	err := cmd.Execute(context.Background(), []string{
 		"-i", "http://127.0.0.1",
 		"--ai",
 		"--no-color",
-	}, io.Discard)
+	})
 	if err == nil {
 		t.Fatal("Execute() with removed --ai flag should fail")
 	}
@@ -189,12 +190,13 @@ func TestScanRejectsRemovedAIFlag(t *testing.T) {
 
 func TestScanAcceptsDeprecatedCompatibilityFlags(t *testing.T) {
 	cmd := New(&engine.Set{})
+	commands.Output.Reset(nil)
 	err := cmd.Execute(context.Background(), []string{
 		"-i", "http://127.0.0.1",
 		"--verify-timeout", "1",
 		"--port", "top100",
 		"--no-color",
-	}, io.Discard)
+	})
 	if err != nil {
 		t.Fatalf("Execute() with deprecated compatibility flags error = %v", err)
 	}
