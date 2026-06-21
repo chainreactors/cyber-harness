@@ -42,6 +42,12 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 | **aiscan-full** | 完整版，额外包含 playwright 浏览器、passive recon、katana 爬虫 |
 | **aiscan-agent** | 轻量 agent 版，仅包含 agent 运行时，适合部署为远程 worker |
 
+| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
+| --- | --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
+
 ```bash
 # Linux (standard)
 curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64
@@ -258,14 +264,6 @@ llm:
 | [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
 | [Changelog](docs/changelog.md) | 版本变更记录 |
-
-## Supported Platforms
-
-| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
-| --- | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
 
 ## Contributing
 
