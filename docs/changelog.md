@@ -1,5 +1,100 @@
 # Changelog
 
+## v0.2.5 — Remote PTY + Web Terminal + Arsenal 工具管理 + 架构精简
+
+本版本核心引入远程 PTY 机制和浏览器终端，实现 agent ↔ web 双向交互式 shell；新增 Arsenal（crtm）安全工具包管理器；大幅精简代码架构——合并三份静态资源、替换手写 YAML 解析器、迁移到 Go 1.22+ ServeMux 路由。
+
+### New Features
+
+**Remote PTY — net.Conn 级终端协议**
+
+- `pkg/webproto`：Message ↔ Frame 序列化层，支持 data/data_b64 双通道编码，14 种帧类型（open/attach/input/output/resize/detach/kill/list 等）
+- `pkg/webagent`：agent 侧 WebSocket 连接，PTY 路由器集成，provider-optional 模式——无 LLM 配置时仍可提供远程 REPL 和 PTY
+- `pkg/web`：浏览器 ↔ agent 透明终端中继，零解析转发，背压处理，per-terminal stream 隔离
+- `pkg/tui/remote_console`：Writer 注入式 console，同时支持本地 TTY 和远程字节流传输，`\n` → `\r\n` 自动转换
+
+**Web Terminal — xterm.js 浏览器终端**
+
+- `AgentTerminal` 组件：singleton REPL 自动重连、task PTY 面板、resize 事件转发、session 列表导航
+- Session Navigator 侧边栏：running/closed 分组排序，未读活动标记，activity sequence 追踪
+- Details 面板：agent 身份信息、session 元数据、LLM token 统计实时展示
+- 前端拆分为 5 个文件：`AgentTerminal.tsx`、`SessionNavigator.tsx`、`TerminalDetails.tsx`、`terminal-utils.ts`、`index.ts`
+
+**Arsenal — crtm 安全工具包管理器**
+
+- `arsenal install/update/remove`：安全工具的安装、更新、卸载，幂等操作
+- manifest 机制：`arsenal list` 瞬时版本查询，无需遍历文件系统
+- 从 AgentTool 重构为 bash pseudo-command，统一执行模型
+- 自动注入 `$PATH`，安装后的工具立即可通过 bash 调用
+
+**TUI 改进**
+
+- verbose tool 渲染重设计：9 项 UX 改进，包含更好的 tool call 格式化、计时和进度展示
+- `pkg/tui/remote_console`：远程 agent console 支持，通过 `reeflective/readline/terminal` Stream 抽象桥接
+
+### Architecture — 代码精简
+
+**静态资源合一**
+
+- 三个目录（`cmd/web/static/`、`pkg/web/e2e_static/`、`web/frontend/dist/`）合并为单一 `web/static/`
+- `web/embed.go` 导出共享 `embed.FS`，生产和测试共用同一份构建产物
+- vite 构建输出直接到 `web/static/`，无需手动同步
+
+**Go 1.22+ ServeMux 路由**
+
+- `pkg/web/handler.go`：85 行 `if segments[0] == "api"` 链替换为 `mux.HandleFunc("GET /api/scans/{id}", ...)`
+- 路由参数通过 `r.PathValue("id")` 获取，删除 `pathSegments` 辅助函数和 `serveScans`/`serveConfig` 分发器
+- `ServeHTTP` 简化为纯 CORS 中间件
+
+**YAML 解析器替换**
+
+- `cmd/web/main.go`：120 行手写解析器（`parseSimpleYAML`、`splitLines`、`trimString`、`countLeadingSpaces`、`splitKV`、`unquote`）替换为 `gopkg.in/yaml.v3`（已是直接依赖）
+- `SaveLLMConfig` 改为直接修改 struct + `yaml.Marshal`，`spaFileServer` 从 40 行 struct 简化为 15 行闭包
+
+**命令输出统一**
+
+- `pkg/commands/output.go`：全局 `OutputWriter` + exec hooks，pseudo-command 输出自动重定向到 session writer
+- 替代之前 `io.Discard` 默认行为，消除 pseudo-command 输出丢失问题
+
+**PTY 平台整合**
+
+- 4 个平台特定 PTY 文件（`pty_darwin.go`/`pty_linux.go`/`pty_unix.go`/`pty_other.go`）替换为单一 `go-pty` wrapper
+- `tmux.Manager` 提取 `finishSession()` 去重 supervise 逻辑
+- IOA 函数从 8 个导出简化为 4 个（统一 writer 参数）
+
+**其他精简**
+
+- `stripANSI` 重复实现委托到 `output.StripANSI`
+- 双 task map (`activeTasks` + `taskCancels`) 合并为单一 `tasks map`
+- PTY 输出 debounce 从复杂 timer 管理改为 ticker + dirty flag
+- `frameTypeFromMessage` 14-case switch 改为 map 查表
+- `remoteTerminalWriter` 改用 `bytes.Buffer` 复用避免 per-Write 分配
+- 删除死代码 `CommandNames()` stub、`captureStdoutForTest`、`canHyperlink`/`hyperlinkSummary`/`hyperlink`/`pathHyperlink`
+
+### Security & Robustness
+
+- **WebSocket origin check**：`NewAgentPool(hub, allowedOrigins...)` 可配置，默认同源检查，debug 模式 `"*"`
+- **streamWriter 缓冲上限**：64KB cap，超限自动 flush，防止无界内存增长
+- **指数退避重连**：agent WebSocket 从固定 3s 改为 `RetryDelay()` 1s→2s→4s→...→10s，成功后 reset
+- **PTY channel 扩容**：64 → 256 buffer，新增 `atomic.Int64` 丢帧计数
+- **agent retry 扩展**：HTTP 406 等瞬态错误纳入可重试范围
+
+### Bug Fixes
+
+- 修复 4 个 pre-existing 测试失败：pseudo-command 缺少 `SetExecHooks` 导致输出到 `io.Discard`；remote REPL 测试 `\r` vs `\n` 行终止符不匹配
+- 修复 `go.mod` 本地 replace 路径（`../malice-network/external/readline`）导致 CI 构建失败
+- 解决全部 golangci-lint 错误：bodyclose、nilerr、errcheck、gosec G705、staticcheck QF1008、unused
+- 修复 DirectScanner 测试数据竞争
+- `go.sum` tidy 清理
+
+### Breaking Changes
+
+- 前端静态资源路径 `cmd/web/static/` → `web/static/`，自定义构建脚本需更新
+- `NewAgentPool` 签名变更：`NewAgentPool(hub *Hub, allowedOrigins ...string)`
+- `agent.RetryDelay` 从 unexported 改为 exported（`retryDelay` → `RetryDelay`）
+
+---
+
 ## v0.2.3 — Playwright 全面升级 + Provider 双协议简化 + TUI 流式渲染 + IOA 架构精简
 
 本版本包含 **Breaking Changes**。核心变更：Playwright 浏览器自动化对齐 microsoft/playwright-cli 接口，Provider 层简化为 openai/anthropic 双协议，TUI 流式 Markdown 渲染，移除 `--loop` 和 `checkpoint`/`loop` custom tool。
