@@ -78,6 +78,14 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 play
 
 ## Features
 
+### 设计理念
+
+- **单文件分发** — 静态链接的单一可执行文件，零运行时依赖；`aiscan-agent` 不到 25 MB
+- **极简 agent 内核** — agent 循环仅 ~160 行；tool call、重试、评估、流式输出围绕它组合而非内建
+- **插件式架构** — 工具通过 `init()` 副作用注册，新增扫描器只需一个文件 + `RegisterFactory`。build tag（`full`）在编译期隔离重依赖（playwright、katana）
+- **内嵌 Skill** — 每个工具自带 `SKILL.md`，agent 调用时自动加载，提供用法文档和战术指导，无需硬编码 prompt
+- **Scan + Agent 统一** — 同一套扫描引擎同时驱动确定性 `scan` 流水线和自主 `agent` 模式，无需维护两套代码
+
 ### Scan — 确定性扫描流水线
 
 - 多阶段自动串联：端口发现 → Web 探测 → 弱口令检测 → POC 检测，无需 LLM

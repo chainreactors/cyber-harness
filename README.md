@@ -78,6 +78,14 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/kat
 
 ## Features
 
+### Design
+
+- **Single binary** — one statically-linked executable, zero runtime dependencies; `aiscan-agent` is under 25 MB
+- **Minimal agent core** — the agent loop is ~160 lines; tool calls, retries, evaluation, and streaming are composed around it rather than baked in
+- **Plugin architecture** — tools register via `init()` side effects; adding a scanner is one file with `RegisterFactory`. Build tags (`full`) gate heavy dependencies (playwright, katana) at compile time
+- **Embedded skills** — each tool ships a `SKILL.md` that the agent loads automatically on invocation, providing usage docs and tactical guidance without hardcoded prompts
+- **Scan + Agent unified** — the same scanner engines power both the deterministic `scan` pipeline and the autonomous `agent` mode; no separate codebases
+
 ### Scan — Deterministic Pipeline
 
 - Multi-stage auto-chaining: port discovery → web probing → weak credentials → POC detection — no LLM required
