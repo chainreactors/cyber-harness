@@ -1,15 +1,16 @@
 <p align="center">
+  <img src="assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
   <p align="center">Agentic Security Scanner — AI-driven reconnaissance meets deterministic scanning</p>
-  <p align="center"><strong>⚠️ Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
+  <p align="center"><strong>Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square&color=00E59B" alt="Release"></a>
   <a href="https://github.com/chainreactors/aiscan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/aiscan/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square" alt="Downloads"></a>
-  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/github/license/chainreactors/aiscan?style=flat-square" alt="License"></a>
-  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square&color=yellow" alt="Stars"></a>
 </p>
 
 ---
@@ -71,7 +72,7 @@ go build -tags full -o aiscan-full ./cmd/aiscan
 - **多阶段扫描流水线** — `scan` 命令自动串联端口发现 → Web 探测 → 弱口令检测 → POC 检测，无需 LLM 也能运行
 - **AI Agent 模式** — 自然语言描述任务，agent 自主选择扫描路径、调用工具、分析结果、生成结论
 - **Goal Evaluation** — `-e` 指定评估标准，独立 evaluator LLM 判定任务完成度，fail 时自动注入反馈驱动 agent 重试
-- **IOA 分布式协作** — 多 agent 通过消息空间协同扫描，支持 IOA worker 持续监听任务
+- **[IOA](https://github.com/chainreactors/ioa) 分布式协作** — 多 agent 通过消息空间协同扫描，支持 IOA worker 持续监听任务
 - **内置扫描引擎** — [gogo](https://github.com/chainreactors/gogo)（端口/服务）、[spray](https://github.com/chainreactors/spray)（Web/指纹）、[zombie](https://github.com/chainreactors/zombie)（弱口令）、[neutron](https://github.com/chainreactors/neutron)（POC）
 - **多 LLM 支持** — OpenAI、DeepSeek、Anthropic、OpenRouter、Groq、Moonshot、Ollama 等，支持多 provider 容错降级
 - **AI 增强扫描** — `--verify` 验证减少误报，`--sniper` 搜索公开漏洞，`--deep` 深度动态测试
@@ -188,7 +189,7 @@ aiscan agent
 
 ## Mode 3: IOA — 分布式多 Agent 协作
 
-通过 [IOA（Internet of Agents）](docs/ioa.md) 架构，多个 aiscan agent 实例通过消息空间协同工作。
+通过 [IOA（Internet of Agents）](https://github.com/chainreactors/ioa) 架构，多个 aiscan agent 实例通过消息空间协同工作。详见 [IOA 文档](docs/ioa.md)。
 
 ```bash
 # 启动 IOA Server
@@ -276,6 +277,7 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 ## Links
 
 - [chainreactors](https://github.com/chainreactors) — Organization
+- [IOA](https://github.com/chainreactors/ioa) — Internet of Agents, multi-agent collaboration protocol
 - [gogo](https://github.com/chainreactors/gogo) — Port & service discovery
 - [spray](https://github.com/chainreactors/spray) — Web probing & fingerprinting
 - [zombie](https://github.com/chainreactors/zombie) — Credential testing
