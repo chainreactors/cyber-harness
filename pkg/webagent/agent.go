@@ -86,11 +86,11 @@ func runConnection(ctx context.Context, serverURL, name string, reg *commands.Co
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: suppress error on context cancellation
 		}
 		err := runConnectionOnce(ctx, serverURL, name, reg, bus, rt)
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: suppress error on context cancellation
 		}
 		if err != nil {
 			delay := agent.RetryDelay(attempt)
@@ -111,7 +111,10 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 		return fmt.Errorf("command registry is nil")
 	}
 	wsURL := httpToWS(serverURL) + "/api/agent/ws"
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	conn, wsResp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if wsResp != nil && wsResp.Body != nil {
+		wsResp.Body.Close()
+	}
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}

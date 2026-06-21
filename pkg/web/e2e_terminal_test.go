@@ -67,7 +67,10 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
 func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("dial agent: %v", err)
 	}

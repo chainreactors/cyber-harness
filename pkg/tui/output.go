@@ -145,10 +145,6 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	}
 }
 
-func stdoutMarkdownEnabled(option *cfg.Option) bool {
-	return stdoutMarkdownEnabledFor(option, term.IsTerminal(int(os.Stdout.Fd())))
-}
-
 func stdoutMarkdownEnabledFor(option *cfg.Option, terminal bool) bool {
 	if option != nil && option.NoColor {
 		return false
@@ -162,13 +158,6 @@ func stdoutMarkdownEnabledFor(option *cfg.Option, terminal bool) bool {
 // message_update events.
 func AgentStreamingEnabled(_ *cfg.Option) bool {
 	return true
-}
-
-// stdoutDeltaStreamingEnabled gates direct stdout rendering of assistant deltas.
-// The agent still streams events when this is false; Final() renders the
-// completed answer for non-interactive callers.
-func stdoutDeltaStreamingEnabled(_ *cfg.Option) bool {
-	return stdoutDeltaStreamingEnabledFor(nil, term.IsTerminal(int(os.Stdout.Fd())))
 }
 
 func stdoutDeltaStreamingEnabledFor(_ *cfg.Option, terminal bool) bool {

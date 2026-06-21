@@ -110,7 +110,7 @@ func NewManager() *Manager {
 		events:  eventbus.New[Event](),
 	}
 	// Bridge pty.Manager events into the aiscan eventbus.
-	m.Manager.SetOnEvent(func(ev Event) {
+	m.SetOnEvent(func(ev Event) {
 		if m.events != nil {
 			m.events.Emit(ev)
 		}
@@ -187,7 +187,7 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 				name = token
 			}
 			args := tokens[1:]
-			return m.Manager.CreateFunc(opts.Ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
+			return m.CreateFunc(opts.Ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
 				if m.beforeExec != nil {
 					m.beforeExec(w)
 				}
@@ -199,7 +199,7 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 		}
 	}
 
-	return m.Manager.Create(workDir, cmdLine, opts.Name, timeout, opts.Env, "")
+	return m.Create(workDir, cmdLine, opts.Name, timeout, opts.Env, "")
 }
 
 func stripCommentsAndBlanks(input string) string {

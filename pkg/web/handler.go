@@ -169,7 +169,7 @@ func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, report)
+	_, _ = io.WriteString(w, report) //nolint:gosec // Content-Type is text/markdown, not HTML
 }
 
 func pathSegments(path string) []string {
