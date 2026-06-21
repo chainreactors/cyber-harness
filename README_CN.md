@@ -1,0 +1,218 @@
+<p align="center">
+  <img src="assets/logo.svg" width="180" alt="aiscan logo">
+  <h1 align="center">aiscan</h1>
+  <p align="center">Agentic Security Scanner — AI 驱动的侦察与确定性扫描融合</p>
+  <p align="center"><strong>Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
+</p>
+
+<p align="center">
+  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square&color=00E59B" alt="Release"></a>
+  <a href="https://github.com/chainreactors/aiscan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/aiscan/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square&color=yellow" alt="Stars"></a>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a>
+</p>
+
+---
+
+**aiscan** 融合 LLM agent 与传统安全扫描引擎。三种模式：**Scan**（确定性流水线扫描，AI 可选辅助）、**Agent**（自然语言驱动的自主安全评估）、**IOA**（多 agent 分布式协作）。
+
+> **请只在明确授权的目标上使用。**
+
+## 快速开始
+
+```bash
+# 无需 LLM，一行启动扫描
+aiscan scan -i 192.168.1.0/24
+
+# 有 LLM，一行启动 agent
+aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
+  -p "扫描目标并检查高风险漏洞" -i 192.168.1.0/24
+```
+
+## 安装
+
+### 下载二进制
+
+从 [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest) 下载：
+
+| 版本 | 说明 |
+| --- | --- |
+| **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/arsenal |
+| **aiscan-full** | 完整版 — 额外包含 playwright 浏览器、passive recon、katana 爬虫 |
+| **aiscan-agent** | 轻量 agent 版 — 仅 agent 运行时，适合部署为远程 worker |
+
+| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
+| --- | --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
+
+```bash
+# Linux
+curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+
+# macOS
+curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+
+# Windows (PowerShell)
+Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.exe" -OutFile aiscan.exe
+```
+
+### 从源码构建
+
+```bash
+git clone https://github.com/chainreactors/aiscan.git && cd aiscan
+
+go build -o aiscan ./cmd/aiscan                          # 标准版
+go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 playwright/katana/passive）
+```
+
+---
+
+## Features
+
+### Scan — 确定性扫描流水线
+
+- 多阶段自动串联：端口发现 → Web 探测 → 弱口令检测 → POC 检测，无需 LLM
+- AI 增强选项：`--verify` 减少误报，`--sniper` 搜索公开漏洞，`--deep` AI 驱动的动态测试
+- 两种模式：`quick`（快速暴露面发现）和 `full`（深度爬取 + 目录爆破 + 扩展端口）
+
+### Agent — AI 自主安全评估
+
+- 自然语言描述任务，agent 自主规划扫描路径、调用工具、分析结果、输出结论
+- Goal Evaluation：`-e` 指定评估标准，独立 evaluator LLM 判定完成度，自动注入反馈驱动重试
+- 交互式 REPL，支持多轮对话；`!` 前缀直接执行命令（绕过 LLM）
+- 多 provider 容错降级链
+- TUI 分级详细度：`-v` 显示 tool call 详情，`-vv` 显示 thinking + 完整输出
+
+### [IOA](https://github.com/chainreactors/ioa) — 分布式多 Agent 协作
+
+- 多个 agent 通过共享消息空间协同扫描
+- IOA worker 模式持续监听任务
+- 内置 IOA server，支持 token 认证
+
+### 内置工具集
+
+**扫描器**
+- [gogo](https://github.com/chainreactors/gogo) — 端口、服务、banner 发现
+- [spray](https://github.com/chainreactors/spray) — Web 探测、HTTP 指纹、路径 fuzz
+- [zombie](https://github.com/chainreactors/zombie) — 常见服务弱口令检测
+- [neutron](https://github.com/chainreactors/neutron) — 模板化 POC 执行
+- [cyberhub](https://github.com/chainreactors/fingers) — 指纹和 POC 关联查询
+
+**浏览器 & 侦察**（完整版）
+- playwright — 交互式 headless Chromium 会话、截图、网络捕获
+- katana — 进程内 Web 爬虫，支持 standard/headless/hybrid 引擎
+- passive — 网络空间搜索（FOFA / Hunter / Shodan）
+
+**辅助工具**
+- tmux — PTY 会话管理，后台长时间任务自动推送增量输出
+- arsenal — 安全工具包管理器（[crtm](https://github.com/chainreactors/crtm)），一键安装自动注入 PATH
+- proxy — Clash 订阅解析 + 多协议（trojan/vless/anytls/hy2/ss）代理链
+- web_search / fetch — 搜索 CVE 和安全情报，URL 抓取
+
+---
+
+## 使用示例
+
+### Scan 模式
+
+```bash
+aiscan scan -i 192.168.1.0/24                                    # 快速扫描
+aiscan scan -i 192.168.1.0/24 --mode full                        # 完整扫描
+aiscan scan -i http://target.example --verify=high --sniper       # AI 增强
+aiscan scan -i http://target.example --mode full --deep --report  # 完整 + 深度 + 报告
+```
+
+### Agent 模式
+
+```bash
+# 一次性任务
+aiscan agent -p "扫描目标，发现所有 Web 服务并检查高风险漏洞" -i 192.168.1.0/24
+
+# 带 Goal Evaluation
+aiscan agent -p "全面扫描目标" -i http://target.example -e "发现所有开放端口并输出服务指纹"
+
+# 交互式 REPL
+aiscan agent
+```
+
+### IOA 模式
+
+```bash
+# 启动 IOA Server
+aiscan ioa serve --ioa-url http://0.0.0.0:8765
+
+# 启动 IOA worker
+aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
+  -p "scan assigned targets and report findings"
+```
+
+### LLM 配置
+
+```bash
+# 环境变量
+export OPENAI_API_KEY="sk-..."
+
+# CLI 参数
+aiscan agent --provider deepseek --base-url https://api.deepseek.com --api-key sk-... --model deepseek-chat
+```
+
+配置文件 `~/.config/aiscan/config.yaml`：
+
+```yaml
+llm:
+  provider: openai
+  api_key: sk-...
+  model: gpt-4o
+```
+
+---
+
+## 文档
+
+| 文档 | 说明 |
+| --- | --- |
+| [Scan 模式详解](docs/scan.md) | 扫描流水线、AI 增强、输出格式 |
+| [Agent 模式详解](docs/agent.md) | Agent 工具集、Goal Evaluation、REPL |
+| [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
+| [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
+| [Changelog](docs/changelog.md) | 版本变更记录 |
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。
+
+1. Fork 本仓库
+2. 创建功能分支 (`git checkout -b feature/xxx`)
+3. 提交更改 (`git commit -m 'feat: add xxx'`)
+4. 推送分支 (`git push origin feature/xxx`)
+5. 创建 Pull Request
+
+## 许可证
+
+本项目使用 [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) 许可。
+
+## 链接
+
+- [chainreactors](https://github.com/chainreactors) — 组织
+- [IOA](https://github.com/chainreactors/ioa) — Internet of Agents 多 agent 协作协议
+- [gogo](https://github.com/chainreactors/gogo) — 端口和服务发现
+- [spray](https://github.com/chainreactors/spray) — Web 探测和指纹识别
+- [zombie](https://github.com/chainreactors/zombie) — 弱口令检测
+- [neutron](https://github.com/chainreactors/neutron) — 模板化 POC 引擎
+
+---
+
+<p align="center">
+  <a href="https://star-history.com/#chainreactors/aiscan&Date">
+    <img src="https://api.star-history.com/svg?repos=chainreactors/aiscan&type=Date" alt="Star History" width="600">
+  </a>
+</p>
