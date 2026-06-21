@@ -36,13 +36,20 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 从 [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest) 下载：
 
-- **aiscan** — 基础版，包含 scan/agent/gogo/spray/zombie/neutron
-- **aiscan-full** — 完整版，额外包含 playwright 浏览器、passive recon、katana 爬虫
+| 版本 | 说明 |
+| --- | --- |
+| **aiscan** | 标准版，包含 scan/agent/gogo/spray/zombie/neutron/arsenal |
+| **aiscan-full** | 完整版，额外包含 playwright 浏览器、passive recon、katana 爬虫 |
+| **aiscan-agent** | 轻量 agent 版，仅包含 agent 运行时，适合部署为远程 worker |
 
 ```bash
-# Linux
+# Linux (standard)
 curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+
+# Linux (agent-only)
+curl -L -o aiscan-agent https://github.com/chainreactors/aiscan/releases/latest/download/aiscan-agent_linux_amd64
+chmod +x aiscan-agent && sudo mv aiscan-agent /usr/local/bin/
 
 # macOS
 curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64
@@ -254,11 +261,11 @@ llm:
 
 ## Supported Platforms
 
-| 系统 | 架构 | 基础版 | 完整版 |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
+| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
+| --- | --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
 
 ## Contributing
 
