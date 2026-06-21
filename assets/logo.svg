@@ -1,73 +1,107 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <defs>
-    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00E59B"/>
-      <stop offset="100%" stop-color="#00B4D8"/>
+    <linearGradient id="gr" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#800000"/>
+      <stop offset="100%" stop-color="#ff4d4d"/>
     </linearGradient>
-    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00E59B" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#00B4D8" stop-opacity="0.3"/>
-    </linearGradient>
-    <linearGradient id="scan" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#00E59B" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#00E59B" stop-opacity="0"/>
-    </linearGradient>
+    <radialGradient id="sweep" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#ff4d4d" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ff4d4d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#d90429" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#d90429" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+    </filter>
   </defs>
 
-  <!-- Outer ring nodes — 8 satellite nodes in octagon -->
-  <!-- Top -->
-  <circle cx="256" cy="72" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Top-right -->
-  <circle cx="386" cy="126" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Right -->
-  <circle cx="440" cy="256" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Bottom-right -->
-  <circle cx="386" cy="386" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Bottom -->
-  <circle cx="256" cy="440" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Bottom-left -->
-  <circle cx="126" cy="386" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Left -->
-  <circle cx="72" cy="256" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
-  <!-- Top-left -->
-  <circle cx="126" cy="126" r="18" fill="url(#ring)" stroke="#00E59B" stroke-width="2"/>
+  <!-- Background glow halo -->
+  <circle cx="256" cy="256" r="140" fill="url(#coreGlow)"/>
 
-  <!-- Connection lines from center to satellites -->
-  <g stroke="#00E59B" stroke-width="1.5" opacity="0.35">
-    <line x1="256" y1="256" x2="256" y2="72"/>
-    <line x1="256" y1="256" x2="386" y2="126"/>
-    <line x1="256" y1="256" x2="440" y2="256"/>
-    <line x1="256" y1="256" x2="386" y2="386"/>
-    <line x1="256" y1="256" x2="256" y2="440"/>
-    <line x1="256" y1="256" x2="126" y2="386"/>
-    <line x1="256" y1="256" x2="72" y2="256"/>
-    <line x1="256" y1="256" x2="126" y2="126"/>
+  <!-- Radial scan lines (dashed, from center to each node) -->
+  <g stroke="url(#gr)" stroke-width="1" stroke-dasharray="6 8" opacity="0.25">
+    <line x1="256" y1="256" x2="256" y2="91"/>
+    <line x1="256" y1="256" x2="372.7" y2="139.3"/>
+    <line x1="256" y1="256" x2="421" y2="256"/>
+    <line x1="256" y1="256" x2="372.7" y2="372.7"/>
+    <line x1="256" y1="256" x2="256" y2="421"/>
+    <line x1="256" y1="256" x2="139.3" y2="372.7"/>
+    <line x1="256" y1="256" x2="91" y2="256"/>
+    <line x1="256" y1="256" x2="139.3" y2="139.3"/>
   </g>
 
-  <!-- Cross-links between adjacent satellites -->
-  <g stroke="#00B4D8" stroke-width="1" opacity="0.2">
-    <line x1="256" y1="72" x2="386" y2="126"/>
-    <line x1="386" y1="126" x2="440" y2="256"/>
-    <line x1="440" y1="256" x2="386" y2="386"/>
-    <line x1="386" y1="386" x2="256" y2="440"/>
-    <line x1="256" y1="440" x2="126" y2="386"/>
-    <line x1="126" y1="386" x2="72" y2="256"/>
-    <line x1="72" y1="256" x2="126" y2="126"/>
-    <line x1="126" y1="126" x2="256" y2="72"/>
+  <!-- Chain arcs connecting adjacent nodes -->
+  <g stroke="url(#gr)" stroke-width="2.5" fill="none" opacity="0.4" stroke-linecap="round">
+    <path d="M256,91 A165,165 0 0,1 372.7,139.3"/>
+    <path d="M372.7,139.3 A165,165 0 0,1 421,256"/>
+    <path d="M421,256 A165,165 0 0,1 372.7,372.7"/>
+    <path d="M372.7,372.7 A165,165 0 0,1 256,421"/>
+    <path d="M256,421 A165,165 0 0,1 139.3,372.7"/>
+    <path d="M139.3,372.7 A165,165 0 0,1 91,256"/>
+    <path d="M91,256 A165,165 0 0,1 139.3,139.3"/>
+    <path d="M139.3,139.3 A165,165 0 0,1 256,91"/>
   </g>
 
-  <!-- Scan sweep arc — radar-like effect -->
-  <path d="M256,256 L256,100 A156,156 0 0,1 366,166 Z" fill="url(#scan)" opacity="0.15"/>
+  <!-- Radar sweep arc (60° sector, upper-right) -->
+  <path d="M256,256 L256,106 A150,150 0 0,1 362,152 Z" fill="url(#sweep)" opacity="0.6"/>
 
-  <!-- Center core — AI brain node -->
-  <circle cx="256" cy="256" r="52" fill="#0D1117" stroke="url(#core)" stroke-width="3"/>
-  <circle cx="256" cy="256" r="38" fill="none" stroke="#00E59B" stroke-width="1" opacity="0.3"/>
+  <!-- Outer ring nodes — small hexagons -->
+  <g filter="url(#glow)">
+    <!-- 0° (top) -->
+    <polygon points="256,77 268,84 268,98 256,105 244,98 244,84" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 45° -->
+    <polygon points="372.7,125.3 384.7,132.3 384.7,146.3 372.7,153.3 360.7,146.3 360.7,132.3" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 90° (right) -->
+    <polygon points="421,242 433,249 433,263 421,270 409,263 409,249" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 135° -->
+    <polygon points="372.7,358.7 384.7,365.7 384.7,379.7 372.7,386.7 360.7,379.7 360.7,365.7" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 180° (bottom) -->
+    <polygon points="256,407 268,414 268,428 256,435 244,428 244,414" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 225° -->
+    <polygon points="139.3,358.7 151.3,365.7 151.3,379.7 139.3,386.7 127.3,379.7 127.3,365.7" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 270° (left) -->
+    <polygon points="91,242 103,249 103,263 91,270 79,263 79,249" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+    <!-- 315° -->
+    <polygon points="139.3,125.3 151.3,132.3 151.3,146.3 139.3,153.3 127.3,146.3 127.3,132.3" fill="#d90429" fill-opacity="0.3" stroke="url(#gr)" stroke-width="2"/>
+  </g>
 
-  <!-- AI symbol inside core -->
-  <text x="256" y="265" text-anchor="middle" font-family="JetBrains Mono, Consolas, monospace" font-size="28" font-weight="700" fill="url(#core)">AI</text>
+  <!-- Node center dots (white highlights) -->
+  <g fill="#ffffff" filter="url(#glow)">
+    <circle cx="256" cy="91" r="3.5"/>
+    <circle cx="372.7" cy="139.3" r="3.5"/>
+    <circle cx="421" cy="256" r="3.5"/>
+    <circle cx="372.7" cy="372.7" r="3.5"/>
+    <circle cx="256" cy="421" r="3.5"/>
+    <circle cx="139.3" cy="372.7" r="3.5"/>
+    <circle cx="91" cy="256" r="3.5"/>
+    <circle cx="139.3" cy="139.3" r="3.5"/>
+  </g>
 
-  <!-- Pulse rings -->
-  <circle cx="256" cy="256" r="80" fill="none" stroke="#00E59B" stroke-width="1" opacity="0.12"/>
-  <circle cx="256" cy="256" r="120" fill="none" stroke="#00E59B" stroke-width="0.8" opacity="0.08"/>
-  <circle cx="256" cy="256" r="160" fill="none" stroke="#00B4D8" stroke-width="0.6" opacity="0.05"/>
+  <!-- Center radar — concentric rings -->
+  <g filter="url(#glow)">
+    <circle cx="256" cy="256" r="55" fill="none" stroke="url(#gr)" stroke-width="2" opacity="0.3"/>
+    <circle cx="256" cy="256" r="38" fill="none" stroke="url(#gr)" stroke-width="1.8" opacity="0.5"/>
+    <circle cx="256" cy="256" r="22" fill="none" stroke="url(#gr)" stroke-width="1.5" opacity="0.7"/>
+  </g>
+
+  <!-- Crosshair lines -->
+  <g stroke="url(#gr)" stroke-width="1.2" opacity="0.5" filter="url(#glow)">
+    <line x1="256" y1="195" x2="256" y2="317"/>
+    <line x1="195" y1="256" x2="317" y2="256"/>
+  </g>
+
+  <!-- Center core dot -->
+  <circle cx="256" cy="256" r="7" fill="#ffffff" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="3" fill="#ff4d4d"/>
 </svg>
