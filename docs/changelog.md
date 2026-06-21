@@ -6,19 +6,30 @@
 
 ### New Features
 
-**Remote PTY — net.Conn 级终端协议**
+**Remote PTY + Web Terminal — 浏览器内操控远程 agent**
 
 - `pkg/webproto`：Message ↔ Frame 序列化层，支持 data/data_b64 双通道编码，14 种帧类型（open/attach/input/output/resize/detach/kill/list 等）
 - `pkg/webagent`：agent 侧 WebSocket 连接，PTY 路由器集成，provider-optional 模式——无 LLM 配置时仍可提供远程 REPL 和 PTY
 - `pkg/web`：浏览器 ↔ agent 透明终端中继，零解析转发，背压处理，per-terminal stream 隔离
-- `pkg/tui/remote_console`：Writer 注入式 console，同时支持本地 TTY 和远程字节流传输，`\n` → `\r\n` 自动转换
+- `pkg/tui/remote_console`：Writer 注入式 console，同时支持本地 TTY 和远程字节流传输
+- 前端 `AgentTerminal`：singleton REPL 自动重连、task PTY 面板、resize 事件转发、session 列表导航
 
-**Web Terminal — xterm.js 浏览器终端**
+```bash
+# 1. 启动 web 控制台（内置 IOA server + 前端 + API）
+aiscan-web --addr 0.0.0.0:8080 --config config.yaml --debug
 
-- `AgentTerminal` 组件：singleton REPL 自动重连、task PTY 面板、resize 事件转发、session 列表导航
-- Session Navigator 侧边栏：running/closed 分组排序，未读活动标记，activity sequence 追踪
-- Details 面板：agent 身份信息、session 元数据、LLM token 统计实时展示
-- 前端拆分为 5 个文件：`AgentTerminal.tsx`、`SessionNavigator.tsx`、`TerminalDetails.tsx`、`terminal-utils.ts`、`index.ts`
+# 2. 在目标机器上启动 agent，连回 web 控制台
+aiscan agent --web-url http://10.0.0.1:8080
+
+# 3. 打开浏览器 http://10.0.0.1:8080
+#    → 点击顶部 "1 agent connected" pill
+#    → 进入 xterm.js 终端，直接操作远程 agent 的 REPL
+
+# agent 也可以同时带任务和 IOA 协作
+aiscan agent --web-url http://10.0.0.1:8080 \
+  --ioa-url http://token@10.0.0.1:8080/ioa --space case-1 \
+  -p "扫描内网 192.168.1.0/24 的 Web 服务"
+```
 
 **Arsenal — crtm 安全工具包管理器**
 
@@ -26,6 +37,30 @@
 - manifest 机制：`arsenal list` 瞬时版本查询，无需遍历文件系统
 - 从 AgentTool 重构为 bash pseudo-command，统一执行模型
 - 自动注入 `$PATH`，安装后的工具立即可通过 bash 调用
+
+```bash
+# 在 REPL 或 agent 对话中使用（通过 bash pseudo-command）
+
+# 查看所有可用工具及安装状态
+!arsenal list
+
+# 搜索关键词
+!arsenal search subdomain
+
+# 安装工具（自动下载 + 注入 PATH）
+!arsenal install httpx
+!arsenal install nuclei --version v3.3.0
+
+# 安装后立即可用
+!httpx -l targets.txt -silent
+
+# 更新 / 卸载
+!arsenal update httpx
+!arsenal remove nuclei
+
+# 添加第三方仓库
+!arsenal add projectdiscovery/subfinder
+```
 
 **TUI 改进**
 
