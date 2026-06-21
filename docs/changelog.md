@@ -1,35 +1,10 @@
 # Changelog
 
-## v0.2.5 — Remote PTY + Web Terminal + Arsenal 工具管理 + 架构精简
+## v0.2.5 — Arsenal 工具管理 + TUI 重设计 + 命令接口统一 + PTY 平台整合
 
-本版本核心引入远程 PTY 机制和浏览器终端，实现 agent ↔ web 双向交互式 shell；新增 Arsenal（crtm）安全工具包管理器；大幅精简代码架构——合并三份静态资源、替换手写 YAML 解析器、迁移到 Go 1.22+ ServeMux 路由。
+新增 Arsenal（crtm）安全工具包管理器；Playwright 新增 `-s` 全局 session flag；TUI verbose 渲染全面重设计；命令接口统一为全局 OutputWriter；4 平台 PTY 文件整合为单一 go-pty wrapper。
 
 ### New Features
-
-**Remote PTY + Web Terminal — 浏览器内操控远程 agent**
-
-- `pkg/webproto`：Message ↔ Frame 序列化层，支持 data/data_b64 双通道编码，14 种帧类型（open/attach/input/output/resize/detach/kill/list 等）
-- `pkg/webagent`：agent 侧 WebSocket 连接，PTY 路由器集成，provider-optional 模式——无 LLM 配置时仍可提供远程 REPL 和 PTY
-- `pkg/web`：浏览器 ↔ agent 透明终端中继，零解析转发，背压处理，per-terminal stream 隔离
-- `pkg/tui/remote_console`：Writer 注入式 console，同时支持本地 TTY 和远程字节流传输
-- 前端 `AgentTerminal`：singleton REPL 自动重连、task PTY 面板、resize 事件转发、session 列表导航
-
-```bash
-# 1. 启动 web 控制台（内置 IOA server + 前端 + API）
-aiscan-web --addr 0.0.0.0:8080 --config config.yaml --debug
-
-# 2. 在目标机器上启动 agent，连回 web 控制台
-aiscan agent --web-url http://10.0.0.1:8080
-
-# 3. 打开浏览器 http://10.0.0.1:8080
-#    → 点击顶部 "1 agent connected" pill
-#    → 进入 xterm.js 终端，直接操作远程 agent 的 REPL
-
-# agent 也可以同时带任务和 IOA 协作
-aiscan agent --web-url http://10.0.0.1:8080 \
-  --ioa-url http://token@10.0.0.1:8080/ioa --space case-1 \
-  -p "扫描内网 192.168.1.0/24 的 Web 服务"
-```
 
 **Arsenal — crtm 安全工具包管理器**
 
@@ -62,34 +37,37 @@ aiscan agent --web-url http://10.0.0.1:8080 \
 !arsenal add projectdiscovery/subfinder
 ```
 
-**TUI 改进**
+**Playwright — `-s` 全局 session flag**
 
-- verbose tool 渲染重设计：9 项 UX 改进，包含更好的 tool call 格式化、计时和进度展示
-- `pkg/tui/remote_console`：远程 agent console 支持，通过 `reeflective/readline/terminal` Stream 抽象桥接
+- 所有子命令支持 `-s=<name>` / `-s <name>` 指定目标 session，对齐 playwright-cli 习惯
+- 环境变量 `PLAYWRIGHT_CLI_SESSION=<name>` 设置默认 session
+
+```bash
+# -s flag 替代位置参数指定 session
+playwright -s=mySession click "button"
+playwright -s=s1 goto
+```
+
+**TUI — verbose 渲染重设计**
+
+- ▸/✓/✗ 标记替代 ⎿/│ 盒线，结构化 key-value 参数展示
+- turn 统计新增 cache hit ratio（`cached=85%`）
+- 耗时颜色编码（<1s 绿色，1-5s 黄色，>5s 红色）
+- 并行 tool 调用标记（`[parallel 3/3]`）
+- turn 开始分隔标记
+- agent 结束时汇总 tool 调用统计
+- eval 渲染增强（verdict + feedback 结构化展示）
+- result preview 行数限制优化
+- `-vv` 模式禁用输出截断，显示完整 tool result
 
 ### Architecture — 代码精简
 
-**静态资源合一**
+**命令接口统一**
 
-- 三个目录（`cmd/web/static/`、`pkg/web/e2e_static/`、`web/frontend/dist/`）合并为单一 `web/static/`
-- `web/embed.go` 导出共享 `embed.FS`，生产和测试共用同一份构建产物
-- vite 构建输出直接到 `web/static/`，无需手动同步
-
-**Go 1.22+ ServeMux 路由**
-
-- `pkg/web/handler.go`：85 行 `if segments[0] == "api"` 链替换为 `mux.HandleFunc("GET /api/scans/{id}", ...)`
-- 路由参数通过 `r.PathValue("id")` 获取，删除 `pathSegments` 辅助函数和 `serveScans`/`serveConfig` 分发器
-- `ServeHTTP` 简化为纯 CORS 中间件
-
-**YAML 解析器替换**
-
-- `cmd/web/main.go`：120 行手写解析器（`parseSimpleYAML`、`splitLines`、`trimString`、`countLeadingSpaces`、`splitKV`、`unquote`）替换为 `gopkg.in/yaml.v3`（已是直接依赖）
-- `SaveLLMConfig` 改为直接修改 struct + `yaml.Marshal`，`spaFileServer` 从 40 行 struct 简化为 15 行闭包
-
-**命令输出统一**
-
-- `pkg/commands/output.go`：全局 `OutputWriter` + exec hooks，pseudo-command 输出自动重定向到 session writer
-- 替代之前 `io.Discard` 默认行为，消除 pseudo-command 输出丢失问题
+- `Command.Execute` 签名简化：移除 `io.Writer` 参数，统一通过 `fmt.Fprint(commands.Output, ...)` 输出
+- `pkg/commands/output.go`：全局 `OutputWriter` + exec hooks，Registry 在每次执行前自动配置 Output（`Reset`/`Captured`）
+- `FetchTool` wrapper 移除：`fetch` 从 `RegisterTool` 转为直接 `Register` 的 Command
+- `SetExecHooks` 注入 tmux.Manager，打破 commands ↔ output 的循环依赖
 
 **PTY 平台整合**
 
@@ -99,34 +77,23 @@ aiscan agent --web-url http://10.0.0.1:8080 \
 
 **其他精简**
 
-- `stripANSI` 重复实现委托到 `output.StripANSI`
-- 双 task map (`activeTasks` + `taskCancels`) 合并为单一 `tasks map`
-- PTY 输出 debounce 从复杂 timer 管理改为 ticker + dirty flag
-- `frameTypeFromMessage` 14-case switch 改为 map 查表
-- `remoteTerminalWriter` 改用 `bytes.Buffer` 复用避免 per-Write 分配
-- 删除死代码 `CommandNames()` stub、`captureStdoutForTest`、`canHyperlink`/`hyperlinkSummary`/`hyperlink`/`pathHyperlink`
+- 删除死代码 `CommandNames()` stub、`captureStdoutForTest`、`canHyperlink`/`hyperlinkSummary`
 
-### Security & Robustness
+### Robustness
 
-- **WebSocket origin check**：`NewAgentPool(hub, allowedOrigins...)` 可配置，默认同源检查，debug 模式 `"*"`
-- **streamWriter 缓冲上限**：64KB cap，超限自动 flush，防止无界内存增长
-- **指数退避重连**：agent WebSocket 从固定 3s 改为 `RetryDelay()` 1s→2s→4s→...→10s，成功后 reset
-- **PTY channel 扩容**：64 → 256 buffer，新增 `atomic.Int64` 丢帧计数
 - **agent retry 扩展**：HTTP 406 等瞬态错误纳入可重试范围
 
 ### Bug Fixes
 
-- 修复 4 个 pre-existing 测试失败：pseudo-command 缺少 `SetExecHooks` 导致输出到 `io.Discard`；remote REPL 测试 `\r` vs `\n` 行终止符不匹配
-- 修复 `go.mod` 本地 replace 路径（`../malice-network/external/readline`）导致 CI 构建失败
-- 解决全部 golangci-lint 错误：bodyclose、nilerr、errcheck、gosec G705、staticcheck QF1008、unused
+- 修复测试失败：pseudo-command 缺少 `SetExecHooks` 导致输出到 `io.Discard`
+- 修复 `go.mod` 本地 replace 路径导致 CI 构建失败
+- 解决全部 golangci-lint 错误
 - 修复 DirectScanner 测试数据竞争
-- `go.sum` tidy 清理
 
 ### Breaking Changes
 
-- 前端静态资源路径 `cmd/web/static/` → `web/static/`，自定义构建脚本需更新
-- `NewAgentPool` 签名变更：`NewAgentPool(hub *Hub, allowedOrigins ...string)`
-- `agent.RetryDelay` 从 unexported 改为 exported（`retryDelay` → `RetryDelay`）
+- **`Command.Execute` 签名变更**：`Execute(ctx, args []string) error`（移除 `io.Writer` 参数），所有 pseudo-command 改用 `commands.Output` 全局 writer
+- **`FetchTool` 移除**：`fetch` 不再是独立 `AgentTool`，改为普通 `Command` 通过 `Register` 注册
 
 ---
 
