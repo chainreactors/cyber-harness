@@ -219,7 +219,7 @@ func parseOpenAIStreamChunk(data []byte) (ChatCompletionStreamEvent, error) {
 		return ChatCompletionStreamEvent{}, fmt.Errorf("unmarshal stream chunk: %w", err)
 	}
 	if chunk.Error != nil {
-		return ChatCompletionStreamEvent{}, fmt.Errorf("API error: [%s] %s", chunk.Error.Type, chunk.Error.Message)
+		return ChatCompletionStreamEvent{}, chunk.Error
 	}
 	event := ChatCompletionStreamEvent{Usage: chunk.Usage}
 	if len(chunk.Choices) == 0 {

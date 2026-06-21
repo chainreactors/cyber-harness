@@ -674,24 +674,7 @@ func generateID() string {
 }
 
 func stripANSI(s string) string {
-	var out []byte
-	i := 0
-	for i < len(s) {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			j := i + 2
-			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
-				j++
-			}
-			if j < len(s) {
-				j++
-			}
-			i = j
-			continue
-		}
-		out = append(out, s[i])
-		i++
-	}
-	return string(out)
+	return output.StripANSI(s)
 }
 
 func lastOutputLine(output string) string {

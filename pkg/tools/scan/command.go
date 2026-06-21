@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -135,12 +136,15 @@ Examples:
   scan -l targets.txt --mode full --zombie-top 5`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	out, _, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
-	if out != "" {
-		_, _ = io.WriteString(w, out)
+	if err != nil {
+		return err
 	}
-	return err
+	if out != "" {
+		fmt.Fprint(commands.Output, out)
+	}
+	return nil
 }
 
 func (c *Command) ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {

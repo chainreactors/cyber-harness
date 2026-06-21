@@ -457,7 +457,7 @@ func (p *anthropicStreamParser) parse(eventName string, data []byte) (ChatComple
 		eventType = eventName
 	}
 	if probe.Error != nil {
-		return ChatCompletionStreamEvent{}, fmt.Errorf("API error: [%s] %s", probe.Error.Type, probe.Error.Message)
+		return ChatCompletionStreamEvent{}, probe.Error
 	}
 
 	switch eventType {
@@ -579,7 +579,7 @@ func (p *anthropicStreamParser) parse(eventName string, data []byte) (ChatComple
 		if probe.Error == nil {
 			return ChatCompletionStreamEvent{}, fmt.Errorf("API error: anthropic stream error event without details")
 		}
-		return ChatCompletionStreamEvent{}, fmt.Errorf("API error: [%s] %s", probe.Error.Type, probe.Error.Message)
+		return ChatCompletionStreamEvent{}, probe.Error
 
 	default:
 		return ChatCompletionStreamEvent{}, nil

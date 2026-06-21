@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -83,29 +82,6 @@ func writeSynced(w io.Writer, fn func()) {
 // ---------------------------------------------------------------------------
 // Terminal hyperlinks (OSC 8)
 // ---------------------------------------------------------------------------
-
-// hyperlink renders text as a clickable OSC 8 terminal hyperlink. Dumb
-// consumers (piped output, forwarded PTYs read by non-terminal parsers) print
-// the bare label — the escape sequences pass through harmlessly.
-func hyperlink(url, text string) string {
-	if url == "" {
-		return text
-	}
-	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
-}
-
-// pathHyperlink wraps a filesystem path in a file:// OSC 8 link when it
-// resolves to an absolute path; otherwise the display text is returned
-// unchanged.
-func pathHyperlink(path, display string) string {
-	if path == "" {
-		return display
-	}
-	if abs, err := filepath.Abs(path); err == nil && abs != "" {
-		return hyperlink("file://"+abs, display)
-	}
-	return display
-}
 
 // ---------------------------------------------------------------------------
 // Spinner — single-line primary-buffer activity indicator

@@ -6,11 +6,11 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tools/gogo"
 	"github.com/chainreactors/aiscan/pkg/tools/neutron"
 	"github.com/chainreactors/aiscan/pkg/tools/spray"
@@ -92,12 +92,12 @@ func TestGogoInjectProxy(t *testing.T) {
 
 	cmd := gogo.New(nil).WithProxy(proxyAddr)
 
-	var gogoHelp strings.Builder
-	err := cmd.Execute(context.Background(), []string{"--help"}, &gogoHelp)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"--help"})
 	if err != nil {
 		t.Fatalf("gogo --help with proxy: %v", err)
 	}
-	if gogoHelp.String() == "" {
+	if commands.Output.Captured() == "" {
 		t.Fatal("expected help output")
 	}
 
@@ -152,7 +152,8 @@ func TestZombieExecuteWithProxy(t *testing.T) {
 
 	// Execute with --help just to verify no panic; the proxy is built
 	// but not exercised because --help exits before any network I/O.
-	err := cmd.Execute(context.Background(), []string{"--help"}, io.Discard)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"--help"})
 	if err != nil {
 		t.Fatalf("zombie --help: %v", err)
 	}

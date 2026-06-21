@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,8 +14,8 @@ import (
 	"unicode/utf8"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
@@ -26,14 +27,15 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	agentStatusPreviewLimit = 180
-	agentDebugPreviewLimit  = 320
-	toolResultPreviewLines  = 6
-	toolResultPreviewWidth  = 140
-	toolFetchBodyLines      = 4
+	agentStatusPreviewLimit  = 180
+	agentDebugPreviewLimit   = 320
+	toolResultPreviewDefault = 8
+	toolResultPreviewWidth   = 140
+	toolFetchBodyLines       = 4
 
-	toolIndent       = "    "    // 4-space indent for tool ⎿ lines
-	toolResultIndent = "       " // 7-space indent for tool │ result lines
+	toolBlockIndent  = "  "     // 2-space indent for ▸/✓/✗ header lines
+	toolArgIndent    = "    "   // 4-space indent for key-value argument lines
+	toolResultIndent = "      " // 6-space indent for result content lines
 
 	thinkingPreviewMaxLines = 20
 )
@@ -47,10 +49,10 @@ const (
 // and lifecycle methods so streaming tokens and bus events from different
 // goroutines never interleave output.
 type AgentOutput struct {
-	mu       sync.Mutex
-	stdout   io.Writer
-	stderr   io.Writer
-	markdown bool
+	mu        sync.Mutex
+	stdout    io.Writer
+	stderr    io.Writer
+	markdown  bool
 	color     output.Color
 	debug     bool
 	verbosity int // -1=quiet, 0=default, 1=tools, 2=thinking
@@ -65,13 +67,15 @@ type AgentOutput struct {
 	reasoningBlockOpen     bool   // <thinking> printed, awaiting </thinking>
 	streamLineOpen         bool   // cursor mid-line, needs \n
 	didStream              bool   // Final() dedup flag
-	lastStreamed            string // full cumulative content of the streamed turn
+	lastStreamed           string // full cumulative content of the streamed turn
 	aborted                bool   // current run was interrupted
 
 	// Turn/agent timing and cumulative token stats.
-	turnStart  time.Time
-	agentStart time.Time
-	totalUsage agent.Usage // accumulated from per-turn Usage events
+	turnStart      time.Time
+	agentStart     time.Time
+	totalUsage     agent.Usage // accumulated from per-turn Usage events
+	toolCallCount  int
+	toolErrorCount int
 
 	// Pretty-render state. The REPL runs inside a PTY that may be forwarded to a
 	// remote agent (aider), so transient chrome is gated by mode+tty: spinners,
@@ -87,10 +91,32 @@ type agentToolSummary struct {
 	started time.Time
 }
 
-// NewAgentOutput constructs an AgentOutput wired to os.Stdout/os.Stderr with
-// rendering decisions derived from the supplied option and terminal state.
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
-	markdown := stdoutMarkdownEnabled(option)
+	return newAgentOutput(
+		option,
+		os.Stdout,
+		os.Stderr,
+		term.IsTerminal(int(os.Stdout.Fd())),
+		term.IsTerminal(int(os.Stderr.Fd())),
+	)
+}
+
+// NewAgentOutputWithWriters constructs an AgentOutput for a terminal-like
+// stream that is not necessarily backed by os.Stdout/os.Stderr.
+func NewAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = stdout
+	}
+	return newAgentOutput(option, stdout, stderr, terminal, terminal)
+}
+
+// newAgentOutput constructs an AgentOutput with rendering decisions derived
+// from the supplied option and terminal capabilities.
+func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, stderrTTY bool) *AgentOutput {
+	markdown := stdoutMarkdownEnabledFor(option, stdoutTTY)
 	debug := false
 	verbosity := 0
 	noColor := false
@@ -102,29 +128,28 @@ func NewAgentOutput(option *cfg.Option) *AgentOutput {
 		}
 		noColor = option.NoColor
 	}
-	useColor := !noColor && term.IsTerminal(int(os.Stderr.Fd()))
+	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
-	tty := term.IsTerminal(int(os.Stderr.Fd()))
 	return &AgentOutput{
-		stdout:    os.Stdout,
-		stderr:    os.Stderr,
+		stdout:    stdout,
+		stderr:    stderr,
 		markdown:  markdown,
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
 		tools:     make(map[string]agentToolSummary),
-		stream:   stdoutDeltaStreamingEnabled(option),
-		mode:     resolveRenderMode(),
-		tty:      tty,
-		spinner:  newSpinner(os.Stderr, color.Code(output.ANSICyan)),
+		stream:    stdoutDeltaStreamingEnabledFor(option, stdoutTTY),
+		mode:      resolveRenderMode(),
+		tty:       stderrTTY,
+		spinner:   newSpinner(stderr, color.Code(output.ANSICyan)),
 	}
 }
 
-func stdoutMarkdownEnabled(option *cfg.Option) bool {
+func stdoutMarkdownEnabledFor(option *cfg.Option, terminal bool) bool {
 	if option != nil && option.NoColor {
 		return false
 	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return terminal
 }
 
 // AgentStreamingEnabled keeps the agent/provider path event-streamed by default,
@@ -135,11 +160,8 @@ func AgentStreamingEnabled(_ *cfg.Option) bool {
 	return true
 }
 
-// stdoutDeltaStreamingEnabled gates direct stdout rendering of assistant deltas.
-// The agent still streams events when this is false; Final() renders the
-// completed answer for non-interactive callers.
-func stdoutDeltaStreamingEnabled(_ *cfg.Option) bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
+func stdoutDeltaStreamingEnabledFor(_ *cfg.Option, terminal bool) bool {
+	return terminal
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +345,10 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		o.streamReasoningPrinted = 0
 		o.lastReasoningFull = ""
 		o.turnStart = time.Now()
+		if o.verbosity >= 1 && event.Turn > 1 {
+			o.ensureStreamNewlineLocked()
+			fmt.Fprintln(o.stderr, o.dim("  turn "+fmt.Sprint(event.Turn)))
+		}
 		if o.canAnimate() {
 			o.spinner.Start("thinking")
 		}
@@ -335,7 +361,11 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		o.closeReasoningBlock()
 		o.toolStart(event)
 		if o.canAnimate() {
-			o.spinner.Start(o.toolSpinnerLabel(event))
+			if n := len(o.tools); n > 1 {
+				o.spinner.Start(fmt.Sprintf("running %d tools in parallel", n))
+			} else {
+				o.spinner.Start(o.toolSpinnerLabel(event))
+			}
 		}
 	case agent.EventToolExecutionEnd:
 		o.spinner.Stop()
@@ -465,12 +495,6 @@ func (o *AgentOutput) canAnimate() bool {
 	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0
 }
 
-// canHyperlink gates OSC 8 clickable paths. Same boundary as the spinner: only
-// for a local human. Forwarded/piped output degrades to plain text.
-func (o *AgentOutput) canHyperlink() bool {
-	return o != nil && o.mode == ModeInteractive && o.tty
-}
-
 // ---------------------------------------------------------------------------
 // Internal run state
 // ---------------------------------------------------------------------------
@@ -479,6 +503,8 @@ func (o *AgentOutput) beginRun() {
 	o.resetStreamState()
 	o.aborted = false
 	o.tools = make(map[string]agentToolSummary)
+	o.toolCallCount = 0
+	o.toolErrorCount = 0
 }
 
 func (o *AgentOutput) resetStreamState() {
@@ -516,17 +542,39 @@ func (o *AgentOutput) colored(code, text string) string {
 	return o.color.Code(code) + text + o.color.Code(output.ANSIReset)
 }
 
-func (o *AgentOutput) toolLine(symbol, text string) {
-	fmt.Fprintf(o.stderr, "%s%s %s\n", toolIndent, o.dim(symbol), text)
+func (o *AgentOutput) toolHeader(marker, markerColor, name string, parts ...string) {
+	header := o.colored(markerColor, marker) + " " + o.bold(name)
+	for _, p := range parts {
+		if p != "" {
+			header += "  " + o.dim(p)
+		}
+	}
+	fmt.Fprintf(o.stderr, "%s%s\n", toolBlockIndent, header)
 }
 
-func (o *AgentOutput) resultLine(text string) {
+func (o *AgentOutput) renderToolArgBlock(lines []toolArgLine) {
+	if len(lines) == 0 {
+		return
+	}
+	maxKey := 0
+	for _, l := range lines {
+		if len(l.key) > maxKey {
+			maxKey = len(l.key)
+		}
+	}
+	for _, l := range lines {
+		padding := strings.Repeat(" ", maxKey-len(l.key)+2)
+		fmt.Fprintf(o.stderr, "%s%s%s%s\n", toolArgIndent, o.dim(l.key), padding, l.value)
+	}
+}
+
+func (o *AgentOutput) toolResultLine(text string) {
 	if text == "" {
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim("│"))
+		fmt.Fprintln(o.stderr, toolResultIndent)
 	} else if isToolMetaLine(text) {
-		fmt.Fprintf(o.stderr, "%s%s %s\n", toolResultIndent, o.dim("│"), o.colored(output.ANSIYellow, text))
+		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.colored(output.ANSIYellow, text))
 	} else {
-		fmt.Fprintf(o.stderr, "%s%s %s\n", toolResultIndent, o.dim("│"), text)
+		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, text)
 	}
 }
 
@@ -541,16 +589,49 @@ func isToolMetaLine(line string) bool {
 // Spinner label helpers
 // ---------------------------------------------------------------------------
 
+var knownScanners = map[string]bool{
+	"scan": true, "gogo": true, "spray": true, "zombie": true,
+	"neutron": true, "katana": true, "passive": true,
+}
+
 func (o *AgentOutput) toolSpinnerLabel(event agent.Event) string {
 	name := strings.TrimSpace(event.ToolName)
 	if name == "" {
 		name = "tool"
 	}
 	summary := compactAgentLine(summarizeToolArguments(name, event.Arguments), 48)
+	if name == "bash" {
+		if real, target := extractPseudoCommand(summary); real != "" {
+			if target != "" {
+				return real + " · " + target
+			}
+			return real
+		}
+	}
 	if summary == "" {
 		return name
 	}
-	return name + " " + summary
+	return name + " · " + summary
+}
+
+func extractPseudoCommand(cmdLine string) (tool, target string) {
+	fields := strings.Fields(cmdLine)
+	if len(fields) == 0 {
+		return "", ""
+	}
+	cmd := fields[0]
+	if !knownScanners[cmd] {
+		return "", ""
+	}
+	for i := 1; i < len(fields); i++ {
+		if (fields[i] == "-i" || fields[i] == "--input") && i+1 < len(fields) {
+			return cmd, fields[i+1]
+		}
+	}
+	if len(fields) > 1 {
+		return cmd, compactAgentLine(strings.Join(fields[1:], " "), 40)
+	}
+	return cmd, ""
 }
 
 // ---------------------------------------------------------------------------
@@ -573,27 +654,31 @@ func (o *AgentOutput) toolStart(event agent.Event) {
 		return
 	}
 	o.ensureStreamNewlineLocked()
+	fmt.Fprintln(o.stderr)
 
-	display := o.hyperlinkSummary(name, event.Arguments, summary)
-	label := o.dim("⎿ ") + o.colored(output.ANSICyan, name+" started")
-	if display != "" {
-		label += o.dim("  ") + display
-	}
-	fmt.Fprintf(o.stderr, "%s%s\n", toolIndent, label)
+	o.toolHeader("▸", output.ANSICyan, name)
+	o.renderToolArgBlock(formatToolArguments(name, event.Arguments))
 
 	if o.debug {
 		if args := compactAgentJSON(event.Arguments, agentDebugPreviewLimit); args != "" {
-			fmt.Fprintf(o.stderr, "%s%s\n", toolIndent, o.dim("args: "+args))
+			fmt.Fprintf(o.stderr, "%s%s\n", toolArgIndent, o.dim("raw: "+args))
 		}
 	}
 }
 
 func (o *AgentOutput) toolEnd(event agent.Event) {
+	o.toolCallCount++
+	if event.IsError || event.Err != nil {
+		o.toolErrorCount++
+	}
+
 	if o.verbosity < 1 {
 		return
 	}
 
 	summary := o.toolSummaryForEvent(event)
+	fmt.Fprintln(o.stderr)
+
 	if event.IsError || event.Err != nil {
 		o.ensureStreamNewlineLocked()
 		errText := strings.TrimSpace(event.Result)
@@ -604,25 +689,19 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 			errText = "tool execution failed"
 		}
 		name := firstNonEmptyString(summary.name, event.ToolName, "tool")
-		if summary.summary != "" {
-			errText = summary.summary + ": " + errText
-		}
-		fmt.Fprintf(o.stderr, "%s%s  %s\n", toolIndent,
-			o.dim("⎿ ")+o.colored(output.ANSIRed, name+" failed"),
-			compactAgentLine(errText, agentStatusPreviewLimit))
+		o.toolHeader("✗", output.ANSIRed, name, summary.summary)
+		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent,
+			o.colored(output.ANSIRed, compactAgentLine(errText, agentStatusPreviewLimit)))
 		o.forgetTool(event.ToolCallID)
 		return
 	}
 
 	result := strings.TrimSpace(event.Result)
 	toolName := firstNonEmptyString(summary.name, event.ToolName, "tool")
-	elapsed := elapsedToolText(summary.started)
+	elapsed := o.coloredElapsed(summary.started)
 	if result == "" {
 		o.ensureStreamNewlineLocked()
-		if elapsed != "" {
-			fmt.Fprintf(o.stderr, "%s%s\n", toolIndent,
-				o.dim("⎿ "+toolName+" done "+elapsed))
-		}
+		o.toolHeader("✓", output.ANSIGreen, toolName, summary.summary, elapsed)
 		o.forgetTool(event.ToolCallID)
 		return
 	}
@@ -639,33 +718,25 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 }
 
 func (o *AgentOutput) renderToolResult(toolName, toolSummary, result, elapsed, highlightPath string) {
-	preview := buildToolResultPreview(toolName, result, o.debug)
+	var preview toolResultPreview
+	if o.verbosity >= 2 {
+		lines := normalizeToolResultLines(result)
+		preview = toolResultPreview{lines: lines}
+	} else {
+		preview = buildToolResultPreview(toolName, result, o.debug)
+	}
 	if len(preview.lines) == 0 {
+		o.toolHeader("✓", output.ANSIGreen, toolName, compactAgentLine(toolSummary, 80), elapsed)
 		return
 	}
 
-	if highlightPath != "" && o.markdown {
+	if highlightPath != "" && o.color.Enabled {
 		preview.lines = highlightReadResult(highlightPath, preview.lines, o.color)
 	}
 
-	// Build header: "⎿ toolName  summary · elapsed"
-	header := toolName
-	if toolSummary != "" {
-		header += "  " + compactAgentLine(toolSummary, 80)
-	}
-	if elapsed != "" {
-		header += " " + elapsed
-	}
-
-	if len(preview.lines) == 1 && !preview.truncated {
-		o.toolLine("⎿", header)
-		o.resultLine(preview.lines[0])
-		return
-	}
-
-	o.toolLine("⎿", header)
+	o.toolHeader("✓", output.ANSIGreen, toolName, compactAgentLine(toolSummary, 80), elapsed)
 	for _, line := range preview.lines {
-		o.resultLine(line)
+		o.toolResultLine(line)
 	}
 	if preview.truncated {
 		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(fmt.Sprintf("… +%d lines hidden", preview.hidden)))
@@ -692,18 +763,18 @@ func buildToolResultPreview(toolName, result string, debug bool) toolResultPrevi
 		return buildFetchToolResultPreview(lines, debug)
 	}
 
-	maxLines := toolResultPreviewLines
+	maxLines := toolResultPreviewDefault
 	if debug {
 		maxLines = 20
 	}
 
 	switch toolName {
 	case "read":
-		maxLines = 8
+		maxLines = 10
 	case "write":
 		maxLines = 6
 	case "bash":
-		maxLines = 8
+		maxLines = 12
 	}
 
 	return selectToolResultLines(lines, maxLines)
@@ -718,7 +789,7 @@ func buildFetchToolResultPreview(lines []string, debug bool) toolResultPreview {
 		}
 	}
 	if sep < 0 {
-		return selectToolResultLines(lines, toolResultPreviewLines)
+		return selectToolResultLines(lines, toolResultPreviewDefault)
 	}
 
 	bodyLines := toolFetchBodyLines
@@ -798,7 +869,6 @@ func normalizeToolResultLines(result string) []string {
 func truncateToolResultLine(value string, limit int) string {
 	return truncate.ClipRunes(value, limit)
 }
-
 
 // ---------------------------------------------------------------------------
 // Turn / agent end (debug diagnostics)
@@ -888,6 +958,7 @@ func (o *AgentOutput) renderTurnStats(event agent.Event) {
 	}
 	parts = append(parts, formatElapsed(elapsed))
 	fmt.Fprintln(o.stderr, o.dim("  ["+strings.Join(parts, " | ")+"]"))
+	fmt.Fprintln(o.stderr)
 }
 
 func (o *AgentOutput) agentEnd(event agent.Event) {
@@ -898,6 +969,13 @@ func (o *AgentOutput) agentEnd(event agent.Event) {
 		parts := []string{
 			fmt.Sprintf("agent %s", event.Stop),
 			fmt.Sprintf("turns=%d", event.Turn),
+		}
+		if o.toolCallCount > 0 {
+			toolPart := fmt.Sprintf("tools=%d", o.toolCallCount)
+			if o.toolErrorCount > 0 {
+				toolPart += fmt.Sprintf(" (%d err)", o.toolErrorCount)
+			}
+			parts = append(parts, toolPart)
 		}
 		if o.totalUsage.TotalTokens > 0 {
 			parts = append(parts, formatTokenUsage(&o.totalUsage))
@@ -957,11 +1035,12 @@ func (o *AgentOutput) evalStart(event agent.Event) {
 	if o.stderr == nil {
 		return
 	}
-	label := fmt.Sprintf("Evaluating (round %d)...", event.EvalRound+1)
+	label := fmt.Sprintf("eval · round %d", event.EvalRound+1)
 	if o.canAnimate() {
 		o.spinner.Start(label)
 	} else {
-		fmt.Fprintf(o.stderr, "%s\n", label)
+		fmt.Fprintln(o.stderr)
+		o.toolHeader("⋯", output.ANSICyan, "eval", fmt.Sprintf("round %d", event.EvalRound+1))
 	}
 }
 
@@ -969,11 +1048,15 @@ func (o *AgentOutput) evalEnd(event agent.Event) {
 	if o.stderr == nil {
 		return
 	}
+	fmt.Fprintln(o.stderr)
+	round := fmt.Sprintf("round %d", event.EvalRound+1)
 	if event.EvalPass {
-		fmt.Fprintln(o.stderr, o.colored(output.ANSIGreen, "[eval] pass — "+event.EvalReason))
+		o.toolHeader("✓", output.ANSIGreen, "eval", round, "pass")
 	} else {
-		fmt.Fprintln(o.stderr, o.colored(output.ANSIYellow,
-			fmt.Sprintf("[eval] fail (round %d) — %s", event.EvalRound+1, event.EvalReason)))
+		o.toolHeader("⟳", output.ANSIYellow, "eval", round, "fail")
+	}
+	if reason := strings.TrimSpace(event.EvalReason); reason != "" {
+		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(reason))
 	}
 }
 
@@ -981,37 +1064,20 @@ func (o *AgentOutput) evalError(event agent.Event) {
 	if o.stderr == nil {
 		return
 	}
+	fmt.Fprintln(o.stderr)
+	round := fmt.Sprintf("round %d", event.EvalRound+1)
+	o.toolHeader("⚠", output.ANSIYellow, "eval", round, "error")
 	detail := "evaluator LLM call failed"
 	if event.EvalError != "" {
 		detail = event.EvalError
 	}
-	fmt.Fprintln(o.stderr, o.colored(output.ANSIYellow,
-		fmt.Sprintf("[eval] error (round %d) — %s, continuing...", event.EvalRound+1, detail)))
+	fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(detail+", continuing..."))
 }
 
 // ---------------------------------------------------------------------------
 // Hyperlink helper
 // ---------------------------------------------------------------------------
 
-// hyperlinkSummary wraps a path-bearing tool's summary in an OSC 8 file:// link
-// so a local user can click straight to the file. No-op outside interactive TTY
-// sessions (tests and forwarded PTYs get the plain summary).
-func (o *AgentOutput) hyperlinkSummary(name, arguments, summary string) string {
-	if !o.canHyperlink() || summary == "" {
-		return summary
-	}
-	var path string
-	if args := decodeToolArguments(arguments); args != nil {
-		switch name {
-		case "read", "write", "glob":
-			path = stringArg(args, "path")
-		}
-	}
-	if path == "" {
-		return summary
-	}
-	return pathHyperlink(path, summary)
-}
 
 // ---------------------------------------------------------------------------
 // User intent rendering
@@ -1068,20 +1134,35 @@ func elapsedToolText(started time.Time) string {
 	return fmt.Sprintf("· %.1fs", elapsed.Seconds())
 }
 
+func (o *AgentOutput) coloredElapsed(started time.Time) string {
+	text := elapsedToolText(started)
+	if text == "" {
+		return ""
+	}
+	elapsed := time.Since(started)
+	switch {
+	case elapsed > 30*time.Second:
+		return o.colored(output.ANSIRed, text)
+	case elapsed > 5*time.Second:
+		return o.colored(output.ANSIYellow, text)
+	default:
+		return text
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Formatting helpers for stats
 // ---------------------------------------------------------------------------
 
-// formatTokenUsage formats token usage like: "input=2,378 (+ 9,088 cached) output=27"
+// formatTokenUsage formats token usage like: "input=2,378 output=27 cache 95%"
 func formatTokenUsage(u *agent.Usage) string {
 	if u == nil {
 		return ""
 	}
-	s := fmt.Sprintf("input=%s", formatNumber(u.PromptTokens))
-	if u.CacheReadTokens > 0 {
-		s += fmt.Sprintf(" (+ %s cached)", formatNumber(u.CacheReadTokens))
+	s := fmt.Sprintf("input=%s output=%s", formatNumber(u.PromptTokens), formatNumber(u.CompletionTokens))
+	if ratio := u.CacheHitRatio(); ratio > 0 {
+		s += fmt.Sprintf(" cache %.0f%%", ratio*100)
 	}
-	s += fmt.Sprintf(" output=%s", formatNumber(u.CompletionTokens))
 	return s
 }
 
@@ -1344,6 +1425,103 @@ func summarizeToolArguments(name, arguments string) string {
 	default:
 		return compactAgentLine(firstNonEmptyArg(args, "target", "url", "input", "path", "name"), agentStatusPreviewLimit)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Structured tool argument formatting (verbose mode)
+// ---------------------------------------------------------------------------
+
+type toolArgLine struct {
+	key   string
+	value string
+}
+
+func formatToolArguments(name, arguments string) []toolArgLine {
+	args := decodeToolArguments(arguments)
+	if len(args) == 0 {
+		return nil
+	}
+	switch name {
+	case "bash":
+		return collectArgs(args, "command")
+	case "read":
+		return collectArgs(args, "path", "offset", "limit")
+	case "write":
+		return collectWriteArgs(args)
+	case "glob":
+		return collectArgs(args, "pattern", "path")
+	case "fetch":
+		return collectArgs(args, "url", "extract")
+	case "web_search":
+		return collectArgs(args, "query", "num")
+	case "subagent":
+		return collectSubagentArgs(args)
+	case "ioa_space":
+		return collectArgs(args, "name")
+	case "ioa_send":
+		return collectArgs(args, "space_id", "message")
+	case "ioa_read":
+		return collectArgs(args, "space_id", "message_id", "after")
+	default:
+		return collectAllArgs(args)
+	}
+}
+
+func collectArgs(args map[string]any, keys ...string) []toolArgLine {
+	var lines []toolArgLine
+	for _, k := range keys {
+		v := stringArg(args, k)
+		if v == "" || v == "0" {
+			continue
+		}
+		lines = append(lines, toolArgLine{key: k, value: compactAgentLine(v, agentStatusPreviewLimit)})
+	}
+	return lines
+}
+
+func collectWriteArgs(args map[string]any) []toolArgLine {
+	var lines []toolArgLine
+	if p := stringArg(args, "path"); p != "" {
+		lines = append(lines, toolArgLine{key: "path", value: p})
+	}
+	if edits, ok := args["edits"]; ok && edits != nil {
+		if arr, ok := edits.([]any); ok {
+			lines = append(lines, toolArgLine{key: "edits", value: fmt.Sprintf("%d change(s)", len(arr))})
+		}
+	} else if content := stringArg(args, "content"); content != "" {
+		lines = append(lines, toolArgLine{key: "content", value: fmt.Sprintf("%d bytes", len(content))})
+	}
+	return lines
+}
+
+func collectSubagentArgs(args map[string]any) []toolArgLine {
+	var lines []toolArgLine
+	for _, k := range []string{"action", "type", "mode", "name"} {
+		if v := stringArg(args, k); v != "" {
+			lines = append(lines, toolArgLine{key: k, value: v})
+		}
+	}
+	if p := stringArg(args, "prompt"); p != "" {
+		lines = append(lines, toolArgLine{key: "prompt", value: compactAgentLine(p, 80)})
+	}
+	return lines
+}
+
+func collectAllArgs(args map[string]any) []toolArgLine {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var lines []toolArgLine
+	for _, k := range keys {
+		v := stringArg(args, k)
+		if v == "" {
+			continue
+		}
+		lines = append(lines, toolArgLine{key: k, value: compactAgentLine(v, agentStatusPreviewLimit)})
+	}
+	return lines
 }
 
 // ---------------------------------------------------------------------------

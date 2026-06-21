@@ -10,6 +10,16 @@ Headless Chromium browser for interacting with JS-rendered pages, taking screens
 
 Command names are aligned with [microsoft/playwright-cli](https://github.com/microsoft/playwright-cli) for familiarity.
 
+## Global Session Flag
+
+Use `-s=<name>` or `-s <name>` on any command to target a named session, matching the playwright-cli convention:
+```bash
+playwright -s=mySession click "button"       # equivalent to: playwright click mySession "button"
+playwright -s=s1 goto                        # extract text from session s1
+```
+
+Environment variable: `PLAYWRIGHT_CLI_SESSION=<name>` sets the default session when `-s` is not provided.
+
 ## Unified URL Or Session Commands
 
 The first argument can be either a URL or an existing session name. If it matches a live session, the command runs against that persistent page; otherwise it opens the URL in a fresh incognito context.
@@ -65,21 +75,29 @@ playwright pdf <url> [--output <filename>] [--timeout <seconds>]
 
 Sessions persist a browser page across multiple tool calls. This enables multi-step vulnerability verification: open a page, discover forms, fill inputs, submit, and check results.
 
-### open / close / sessions
+### open / close / sessions / attach / detach
 ```bash
 playwright open <url> [--session <name>] [--timeout <seconds>] [--op-timeout <seconds>] [--no-speed-up]
                       [--headed]              # Launch with GUI (non-headless)
                       [--cdp <ws-url>]         # Connect to external browser via CDP endpoint
-playwright close <session>
-playwright sessions
+playwright close <session>                    # Close a session (release resources)
+playwright sessions                           # List all active sessions
+playwright list                               # Alias for sessions
+playwright close-all                          # Close all sessions
+playwright kill-all                           # Kill browser process and all sessions
+playwright delete-data <session>              # Close session and discard all data
+playwright attach --cdp <url> [--session name]  # Attach to running browser via CDP
+playwright detach <session>                   # Disconnect from attached session (browser keeps running)
 ```
 - Sessions persist until explicitly closed via `playwright close <session>` or process exit
 - `--no-speed-up` disables setTimeout/setInterval acceleration (use for timing-sensitive verification)
 - Each session operation is serialized and has an `--op-timeout` deadline (default: 30s)
 - Max 8 concurrent sessions
 - Session name is auto-generated if `--session` is omitted
-- `playwright sessions` lists all active sessions with URL and age
+- `playwright sessions` / `playwright list` lists all active sessions with URL and age
 - Console messages are automatically captured from session open (retrieve with `console`)
+- `attach` connects to an external browser and imports its existing tabs; use `detach` to disconnect without closing
+- `close` on an attached session disconnects without killing the external browser
 
 ### discover
 Call katana's injected JS to enumerate all interactive elements on the page: forms (with their fields), buttons, elements with onclick handlers, **event listeners** (captured by hooks), and **SPA navigated links** (pushState, fetch, WebSocket URLs).
@@ -110,6 +128,7 @@ playwright select-option <session> <selector> <value>
 playwright check <session> <selector>
 playwright uncheck <session> <selector>
 playwright set-input-files <session> <selector> <path...>
+playwright upload <session> <selector> <path...>        # alias for set-input-files
 playwright focus <session> <selector>
 playwright blur <session> <selector>
 playwright tap <session> <selector>
@@ -138,6 +157,18 @@ playwright is-enabled <session> <selector>
 ```
 
 Short aliases (backward compat): `text-content`, `inner-html`, `navigate`, `evaluate`, `select`, `wait`, `text`, `html`, `seval`, `sshot`.
+
+### Tab Management (playwright-cli aligned)
+Manage multiple tabs within a single session. Each session starts with one tab; new tabs share the same browser context (cookies, storage).
+```bash
+playwright tab-list <session>                 # List all tabs (* marks active)
+playwright tab-new <session> [url]            # Open a new tab, optionally navigate
+playwright tab-close <session> [index]        # Close a tab (default: active tab)
+playwright tab-select <session> <index>       # Switch the active tab by index
+```
+- `tab-new` injects stealth + console hooks (same as `open`)
+- All session commands (click, fill, eval, etc.) operate on the **active tab**
+- Use `tab-select` to switch focus before interacting with a different tab
 
 ### Navigation
 ```bash
@@ -380,8 +411,18 @@ Use browser automation when evidence depends on rendered DOM, user interaction, 
 | `dialog-dismiss` | `dialog-dismiss` | one-shot dismiss |
 | `state-save` / `state-load` | `state-save` / `state-load` | also `--save-storage`/`--load-storage` flags |
 | `resize` | `set-viewport` | |
-| `tab-list` / `tab-new` / `tab-close` | — | use multiple sessions |
-| `attach --cdp=<url>` | `open --cdp <url>` | connect to external browser |
+| `tab-list` | `tab-list` | |
+| `tab-new` | `tab-new` | |
+| `tab-close` | `tab-close` | |
+| `tab-select` | `tab-select` | |
+| `attach --cdp=<url>` | `attach --cdp <url>` | |
+| `detach` | `detach` | |
+| `list` | `list` / `sessions` | |
+| `close-all` | `close-all` | |
+| `kill-all` | `kill-all` | |
+| `delete-data` | `delete-data` | |
+| `upload` | `upload` | alias: `set-input-files` |
+| `-s=<name>` (global flag) | `-s=<name>` / `-s <name>` | also `PLAYWRIGHT_CLI_SESSION` env |
 | `open` (headed) | `open --headed` | launch with GUI |
 
 ## aiscan Extensions (no playwright-cli equivalent)

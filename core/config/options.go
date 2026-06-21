@@ -27,13 +27,13 @@ type ScanConfigOptions struct {
 }
 
 type LLMOptions struct {
-	Provider  string              `long:"provider" config:"provider" description:"LLM provider type: openai (default, OpenAI-compatible) or anthropic"`
-	BaseURL   string              `long:"base-url" config:"base_url" description:"LLM API base URL"`
-	APIKey    string              `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
-	Model     string              `long:"model" config:"model" description:"LLM model name"`
-	LLMProxy  string              `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
-	Providers []LLMProviderEntry  `no-flag:"true" config:"providers" yaml:"providers"`
-	AI        bool                `long:"ai" description:"Analyze direct scanner output with an LLM"`
+	Provider  string             `long:"provider" config:"provider" description:"LLM provider type: openai (default, OpenAI-compatible) or anthropic"`
+	BaseURL   string             `long:"base-url" config:"base_url" description:"LLM API base URL"`
+	APIKey    string             `long:"api-key" config:"api_key" description:"LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)"`
+	Model     string             `long:"model" config:"model" description:"LLM model name"`
+	LLMProxy  string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
+	Providers []LLMProviderEntry `no-flag:"true" config:"providers" yaml:"providers"`
+	AI        bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
 }
 
 type LLMProviderEntry struct {
@@ -62,6 +62,7 @@ type AgentOptions struct {
 	EvalCriteria   string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
+	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
 }
 
 type IOAOptions struct {
@@ -79,9 +80,9 @@ type MiscOptions struct {
 	ViewFile   string `short:"F" long:"view" description:"View a scan record JSONL file"`
 	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
 	ViewOutput string `short:"f" long:"file" description:"Write -F output to file instead of stdout"`
-	Debug   bool   `long:"debug" config:"debug" description:"Enable debug logging"`
-	Verbose []bool `short:"v" long:"verbose" description:"Increase verbosity (-v tools, -vv thinking)"`
-	Quiet   bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
+	Debug      bool   `long:"debug" config:"debug" description:"Enable debug logging"`
+	Verbose    []bool `short:"v" long:"verbose" description:"Increase verbosity (-v tools, -vv thinking)"`
+	Quiet      bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
 	NoColor    bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
 	Version    bool   `long:"version" description:"Print version and exit"`
 }

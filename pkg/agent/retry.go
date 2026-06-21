@@ -11,11 +11,13 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
+var errEmptyResponse = errors.New("empty response from LLM")
+
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrCallTimeout) || errors.Is(err, ErrStreamStalled) {
+	if errors.Is(err, ErrCallTimeout) || errors.Is(err, ErrStreamStalled) || errors.Is(err, errEmptyResponse) {
 		return true
 	}
 	if errors.Is(err, context.Canceled) {
@@ -66,7 +68,7 @@ func isRetryableByMessage(err error) bool {
 	return false
 }
 
-func retryDelay(attempt int) time.Duration {
+func RetryDelay(attempt int) time.Duration {
 	delay := time.Second << uint(attempt)
 	if delay > 10*time.Second {
 		delay = 10 * time.Second
@@ -82,7 +84,7 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			delay := retryDelay(attempt - 1)
+			delay := RetryDelay(attempt - 1)
 			cfg.Logger.Warnf("retrying LLM call (attempt %d/%d) after %s: %v", attempt+1, maxAttempts, delay, lastErr)
 			select {
 			case <-time.After(delay):
@@ -130,7 +132,7 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, bus emitt
 		return ChatMessage{}, nil, fmt.Errorf("LLM call failed at turn %d: %w", turn, err)
 	}
 	if len(resp.Choices) == 0 {
-		return ChatMessage{}, nil, fmt.Errorf("empty response from LLM at turn %d", turn)
+		return ChatMessage{}, nil, fmt.Errorf("%w at turn %d", errEmptyResponse, turn)
 	}
 	msg := resp.Choices[0].Message
 	bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: msg})

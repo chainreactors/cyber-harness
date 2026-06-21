@@ -109,6 +109,39 @@ export interface AgentInfo {
   commands?: string[];
   busy: boolean;
   connected_at: string;
+  identity?: AgentIdentity;
+  stats?: AgentStats;
+}
+
+export interface AgentIdentity {
+  node_id?: string;
+  node_name?: string;
+  space?: string;
+  ioa_url?: string;
+  hostname?: string;
+  username?: string;
+  working_dir?: string;
+  os?: string;
+  arch?: string;
+  pid?: number;
+  provider?: string;
+  model?: string;
+  capabilities?: string[];
+  meta?: Record<string, unknown>;
+}
+
+export interface AgentStats {
+  turns?: number;
+  tool_calls?: number;
+  running_tools?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  assets?: number;
+  loots?: number;
+  last_event?: string;
 }
 
 export interface LLMConfig {
@@ -120,6 +153,15 @@ export interface LLMConfig {
   api_key_configured: boolean;
   model: string;
   proxy: string;
+}
+
+export interface TerminalMessage {
+  type: string;
+  task_id?: string;
+  stream_id?: string;
+  data?: string;
+  data_b64?: string;
+  payload?: Record<string, unknown>;
 }
 
 export async function getStatus(): Promise<ServerStatus> {
@@ -216,6 +258,11 @@ export function subscribeScanEvents(
   es.addEventListener('output', handler('output'));
 
   return () => es.close();
+}
+
+export function agentTerminalWebSocketURL(agentID: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
 }
 
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {

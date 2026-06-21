@@ -257,10 +257,11 @@ func (e *APIError) Error() string {
 
 func (e *APIError) IsRetryable() bool {
 	switch e.StatusCode {
-	case 429, 500, 502, 503, 529:
-		return true
+	case 401, 403, 404:
+		return false
+	default:
+		return e.StatusCode >= 400
 	}
-	return false
 }
 
 type ChatCompletionStreamEvent struct {

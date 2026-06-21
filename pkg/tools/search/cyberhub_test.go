@@ -3,10 +3,10 @@ package search
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/fingers/common"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"
@@ -16,12 +16,12 @@ import (
 func TestCyberhubSearchesFingerprints(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"search", "finger", "nginx"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"search", "finger", "nginx"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "nginx") {
 		t.Fatalf("output missing nginx fingerprint: %q", out)
 	}
@@ -33,12 +33,12 @@ func TestCyberhubSearchesFingerprints(t *testing.T) {
 func TestCyberhubListsPOCsWithFilters(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"list", "poc", "--severity", "critical,high", "--limit", "0"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"list", "poc", "--severity", "critical,high", "--limit", "0"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "spring-rce") {
 		t.Fatalf("output missing spring poc: %q", out)
 	}
@@ -50,12 +50,12 @@ func TestCyberhubListsPOCsWithFilters(t *testing.T) {
 func TestCyberhubSearchJSONLines(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"search", "poc", "spring", "--json"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"search", "poc", "spring", "--json"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1: %q", len(lines), out)
@@ -72,12 +72,12 @@ func TestCyberhubSearchJSONLines(t *testing.T) {
 func TestCyberhubFingerAssociation(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"search", "--finger", "spring"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"search", "--finger", "spring"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "spring-rce") {
 		t.Fatalf("--finger spring should find associated poc: %q", out)
 	}
@@ -86,12 +86,12 @@ func TestCyberhubFingerAssociation(t *testing.T) {
 func TestCyberhubID(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	var buf strings.Builder
-	err := cmd.Execute(context.Background(), []string{"id", "nginx"}, &buf)
+	commands.Output.Reset(nil)
+	err := cmd.Execute(context.Background(), []string{"id", "nginx"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := buf.String()
+	out := commands.Output.Captured()
 	if !strings.Contains(out, "nginx") {
 		t.Fatalf("id nginx should return nginx detail: %q", out)
 	}
@@ -154,9 +154,3 @@ func newTestCyberhub() *CyberhubSearch {
 	return NewCyberhubSearch(idx)
 }
 
-// noopWriter discards output.
-type noopWriter struct{}
-
-func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
-
-var _ io.Writer = noopWriter{}

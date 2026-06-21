@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -45,6 +46,10 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
 		return registry.Get(name)
 	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
 	bash.Manager().SetWorkDir(dir)
 	registry.RegisterTool(bash)
 	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
@@ -230,6 +235,10 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
 		return registry.Get(name)
 	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
 	bash.Manager().SetWorkDir(dir)
 	registry.RegisterTool(bash)
 	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
@@ -353,6 +362,10 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
 		return registry.Get(name)
 	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
 	bash.Manager().SetWorkDir(dir)
 	registry.RegisterTool(bash)
 	tmuxCmd := commands.NewTmuxCommand(bash.Manager())

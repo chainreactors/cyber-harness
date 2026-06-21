@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	passivecmd "github.com/chainreactors/aiscan/pkg/tools/passive"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
@@ -19,11 +20,11 @@ import (
 
 func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
 	t.Helper()
-	var buf strings.Builder
-	if err := cmd.Execute(ctx, args, &buf); err != nil {
+	commands.Output.Reset(nil)
+	if err := cmd.Execute(ctx, args); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
-	return buf.String()
+	return commands.Output.Captured()
 }
 
 func TestIntegrationPassiveFofa(t *testing.T) {

@@ -12,9 +12,10 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/webagent"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -103,6 +104,9 @@ func AiScan() {
 	if cfgPath != "" && option.Debug {
 		fmt.Fprintf(os.Stderr, "loaded config: %s\n", cfgPath)
 	}
+	if cfgPath != "" {
+		option.ConfigFile = cfgPath
+	}
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: os.Stderr, Color: !option.NoColor})
 
 	var (
@@ -120,7 +124,13 @@ func AiScan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		if err := runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc); err != nil {
+		var err error
+		if option.WebURL != "" {
+			err = webagent.Run(ctx, &option, logger)
+		} else {
+			err = runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc)
+		}
+		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
 		}
@@ -258,6 +268,7 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	}
 	option.Prompt = cfg.ResolveString(manual.Prompt, option.Prompt)
 	option.TaskFile = cfg.ResolveString(manual.TaskFile, option.TaskFile)
+	option.WebURL = cfg.ResolveString(manual.WebURL, option.WebURL)
 	if len(manual.Skills) > 0 {
 		option.Skills = append(option.Skills, manual.Skills...)
 	}
@@ -297,8 +308,8 @@ Examples:
   aiscan ioa serve --ioa-token mysecret
   aiscan ioa spaces --ioa-url http://token@127.0.0.1:8765
   aiscan ioa messages default --ioa-url http://token@127.0.0.1:8765
-  aiscan agent --ioa-url http://127.0.0.1:8765 -p "localhost web scanner" -s aiscan --space case-1
-  aiscan agent --ioa-url http://127.0.0.1:8765 --heartbeat 5 --space case-1 -p "coordinate next scan steps"`, cfg.ScannerUsageLines())
+  aiscan agent --web-url http://127.0.0.1:8080
+  aiscan agent --web-url http://127.0.0.1:8080 --ioa-url http://token@127.0.0.1:8080/ioa --space case-1`, cfg.ScannerUsageLines())
 	return parser
 }
 
@@ -373,6 +384,7 @@ var scannerKnownFlags = []knownFlag{
 	}},
 	{names: []string{"--prompt", "-p"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Prompt = v }},
 	{names: []string{"--task-file"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TaskFile = v }},
+	{names: []string{"--web-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.WebURL = v }},
 	{names: []string{"--skill", "-s"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Skills = append(o.Skills, v) }},
 	{names: []string{"--provider"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Provider = v }},
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.BaseURL = v }},

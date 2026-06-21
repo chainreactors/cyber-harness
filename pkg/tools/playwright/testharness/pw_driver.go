@@ -15,13 +15,13 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tools/playwright"
 )
 
@@ -55,9 +55,9 @@ func main() {
 			break
 		}
 
-		var buf bytes.Buffer
-		err := cmd.Execute(ctx, req.Args, &buf)
-		resp := response{Output: buf.String()}
+		commands.Output.Reset(nil)
+		err := cmd.Execute(ctx, req.Args)
+		resp := response{Output: commands.Output.Captured()}
 		if err != nil {
 			resp.Error = err.Error()
 		}

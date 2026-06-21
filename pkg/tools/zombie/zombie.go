@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
@@ -50,7 +50,7 @@ func (c *Command) Usage() string {
 	return zombiecore.Help()
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {
@@ -61,11 +61,11 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 	runOpts := zombiecore.RunOptions{Output: &buf}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		if buf.Len() > 0 {
-			_, _ = io.WriteString(w, buf.String())
+			fmt.Fprint(commands.Output, buf.String())
 		}
 		return fmt.Errorf("zombie: %w", err)
 	}
-	_, _ = io.WriteString(w, buf.String())
+	fmt.Fprint(commands.Output, buf.String())
 	return nil
 }
 

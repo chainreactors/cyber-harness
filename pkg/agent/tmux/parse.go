@@ -1,19 +1,9 @@
 package tmux
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"strings"
 )
-
-// Command is the minimal interface for an in-process command that can be
-// executed inside a goroutine-based session. The command package's Command
-// interface (which adds Usage()) satisfies this via Go structural subtyping.
-type Command interface {
-	Name() string
-	Execute(ctx context.Context, args []string, w io.Writer) error
-}
 
 // SplitCommandLine splits a command string into tokens, handling quoting and
 // escaping. Comment-only lines (# ...) and blank lines are stripped.

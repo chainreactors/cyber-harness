@@ -19,7 +19,7 @@ type FunctionDefinition = provider.FunctionDefinition
 type Command interface {
 	Name() string
 	Usage() string
-	Execute(ctx context.Context, args []string, w io.Writer) error
+	Execute(ctx context.Context, args []string) error
 }
 
 type AgentTool interface {
@@ -39,9 +39,16 @@ type CommandRegistry struct {
 	order     []string
 	groups    map[string][]string
 	workDir   string
+	output    io.Writer
 
 	tools     map[string]AgentTool
 	toolOrder []string
+}
+
+func (r *CommandRegistry) SetOutput(w io.Writer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.output = w
 }
 
 func NewRegistry() *CommandRegistry {
@@ -208,15 +215,18 @@ func (r *CommandRegistry) ExecuteArgsStreaming(ctx context.Context, tokens []str
 	}
 	args = normalizeNoColor(name, args)
 
-	var buf strings.Builder
-	var w io.Writer = &buf
-	if stream != nil {
-		w = io.MultiWriter(&buf, stream)
+	w := stream
+	if w == nil {
+		r.mu.RLock()
+		w = r.output
+		r.mu.RUnlock()
 	}
-	if execErr := cmd.Execute(ctx, args, w); execErr != nil {
-		return buf.String(), execErr
-	}
-	return buf.String(), nil
+
+	Output.Reset(w)
+	defer Output.Reset(nil)
+
+	execErr := cmd.Execute(ctx, args)
+	return Output.Captured(), execErr
 }
 
 // stripShellSyntax processes shell-style tokens that LLMs frequently append

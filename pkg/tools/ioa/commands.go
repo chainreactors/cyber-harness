@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,12 +60,12 @@ func ensureNode(ctx context.Context, client protocols.ClientAPI, name string, me
 	return err
 }
 
-func writeJSON(w io.Writer, v any) error {
+func writeJSON(v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	_, err = w.Write(data)
+	_, err = commands.Output.Write(data)
 	return err
 }
 
@@ -97,7 +96,7 @@ nodes     Show nodes in the current space
 topics    Show root messages (conversation starters) in the current space`
 }
 
-func (c *spaceCommand) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *spaceCommand) Execute(ctx context.Context, args []string) error {
 	sub := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
 		sub = args[0]
@@ -110,19 +109,19 @@ func (c *spaceCommand) Execute(ctx context.Context, args []string, w io.Writer) 
 		if err != nil {
 			return fmt.Errorf("ioa_space: %w\n\n%s", err, c.Usage())
 		}
-		return c.execJoin(ctx, m, w)
+		return c.execJoin(ctx, m)
 	case "list", "ls":
-		return c.execList(ctx, w)
+		return c.execList(ctx)
 	case "nodes":
-		return c.execNodes(ctx, w)
+		return c.execNodes(ctx)
 	case "topics":
-		return c.execTopics(ctx, w)
+		return c.execTopics(ctx)
 	default:
 		return fmt.Errorf("ioa_space: unknown subcommand %q\n\n%s", sub, c.Usage())
 	}
 }
 
-func (c *spaceCommand) execJoin(ctx context.Context, m map[string]interface{}, w io.Writer) error {
+func (c *spaceCommand) execJoin(ctx context.Context, m map[string]interface{}) error {
 	name, _ := m["name"].(string)
 	desc, _ := m["description"].(string)
 	if name == "" || desc == "" {
@@ -148,7 +147,7 @@ func (c *spaceCommand) execJoin(ctx context.Context, m map[string]interface{}, w
 
 	allMessages, readErr := c.client.Read(ctx, info.ID, protocols.ReadOptions{All: true})
 	if readErr != nil {
-		return writeJSON(w, info)
+		return writeJSON(info)
 	}
 	var startMessages []protocols.Message
 	for _, msg := range allMessages {
@@ -156,13 +155,13 @@ func (c *spaceCommand) execJoin(ctx context.Context, m map[string]interface{}, w
 			startMessages = append(startMessages, msg)
 		}
 	}
-	return writeJSON(w, struct {
+	return writeJSON(struct {
 		protocols.SpaceInfo
 		StartMessages []protocols.Message `json:"start_messages"`
 	}{info, startMessages})
 }
 
-func (c *spaceCommand) execList(ctx context.Context, w io.Writer) error {
+func (c *spaceCommand) execList(ctx context.Context) error {
 	type lister interface {
 		ListSpaces(ctx context.Context) ([]protocols.SpaceInfo, error)
 	}
@@ -174,10 +173,10 @@ func (c *spaceCommand) execList(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, spaces)
+	return writeJSON(spaces)
 }
 
-func (c *spaceCommand) execNodes(ctx context.Context, w io.Writer) error {
+func (c *spaceCommand) execNodes(ctx context.Context) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join --name <name> --description <role> first")
@@ -193,10 +192,10 @@ func (c *spaceCommand) execNodes(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, info.Nodes)
+	return writeJSON(info.Nodes)
 }
 
-func (c *spaceCommand) execTopics(ctx context.Context, w io.Writer) error {
+func (c *spaceCommand) execTopics(ctx context.Context) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join --name <name> --description <role> first")
@@ -214,7 +213,7 @@ func (c *spaceCommand) execTopics(ctx context.Context, w io.Writer) error {
 			topics = append(topics, msg)
 		}
 	}
-	return writeJSON(w, topics)
+	return writeJSON(topics)
 }
 
 // --- ioa_send ---
@@ -246,7 +245,7 @@ Options:
   --status          Verification status: confirmed, not_confirmed, info, inconclusive (checkpoint)`
 }
 
-func (c *sendCommand) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *sendCommand) Execute(ctx context.Context, args []string) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join first")
@@ -272,8 +271,8 @@ func (c *sendCommand) Execute(ctx context.Context, args []string, w io.Writer) e
 		if err != nil {
 			return err
 		}
-		_, err = io.WriteString(w, result)
-		return err
+		fmt.Fprint(commands.Output, result)
+		return nil
 	}
 
 	content, _ := m["content"].(map[string]interface{})
@@ -318,7 +317,7 @@ func (c *sendCommand) Execute(ctx context.Context, args []string, w io.Writer) e
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, msg)
+	return writeJSON(msg)
 }
 
 
@@ -346,7 +345,7 @@ Options:
   --id              Message ID for thread context`
 }
 
-func (c *readCommand) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *readCommand) Execute(ctx context.Context, args []string) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join first")
@@ -395,7 +394,7 @@ func (c *readCommand) Execute(ctx context.Context, args []string, w io.Writer) e
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, messages)
+	return writeJSON(messages)
 }
 
 // --- arg parsing ---

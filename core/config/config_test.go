@@ -79,6 +79,8 @@ cyberhub:
   url: http://hub:9000
   key: testkey
   mode: override
+agent:
+  web_url: http://web:8080
 ioa:
   url: http://ioa:8765
   space: case-1
@@ -97,6 +99,7 @@ ioa:
 		{"CyberhubURL", opt.CyberhubURL, "http://hub:9000"},
 		{"CyberhubKey", opt.CyberhubKey, "testkey"},
 		{"CyberhubMode", opt.CyberhubMode, "override"},
+		{"WebURL", opt.WebURL, "http://web:8080"},
 		{"IOAURL", opt.IOAURL, "http://ioa:8765"},
 		{"Space", opt.Space, "case-1"},
 	}

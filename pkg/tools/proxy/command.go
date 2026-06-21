@@ -3,10 +3,10 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
 
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 )
@@ -62,9 +62,9 @@ Auto mode options:
   --strategy,-s adaptive      Load balance strategy (adaptive, url-test, round-robin, random)`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		_, _ = io.WriteString(w, c.Usage())
+		fmt.Fprint(commands.Output, c.Usage())
 		return nil
 	}
 	subcmd := strings.ToLower(args[0])
@@ -103,10 +103,14 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 			}
 		}
 	}
-	if result != "" {
-		_, _ = io.WriteString(w, result)
+
+	if err != nil {
+		return err
 	}
-	return err
+	if result != "" {
+		fmt.Fprint(commands.Output, result)
+	}
+	return nil
 }
 
 // execPassthrough runs a command with a one-shot proxy override.

@@ -50,6 +50,7 @@ Available only when they appear in the runtime pseudo-command list:
 
 ### Utilities
 
+- `arsenal`: security tool package manager (22+ tools from chainreactors & projectdiscovery). Run `arsenal list` first. Reference: `aiscan://skills/aiscan/reference/arsenal.md`.
 - `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `aiscan://skills/aiscan/reference/search.md`.
 - `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `aiscan://skills/aiscan/reference/tmux.md`.
 - `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/reference/proxy.md`.

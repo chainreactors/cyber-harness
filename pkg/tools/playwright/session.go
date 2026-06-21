@@ -65,6 +65,13 @@ type Session struct {
 	// playwright-cli parity: save-storage / save-har on close
 	saveStoragePath string
 	saveHARPath     string
+
+	// Tab management (multi-page support, aligned with playwright-cli tab-* commands).
+	tabs      []*rod.Page
+	activeTab int
+
+	// attached marks sessions created via attach (external browser, not launched by us).
+	attached bool
 }
 
 type routeEntry struct {
@@ -133,14 +140,20 @@ func (s *Session) cleanup() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
-	if s.Page != nil {
-		_ = s.Page.Close()
-		s.Page = nil
+	if !s.attached {
+		for _, p := range s.tabs {
+			if p != nil {
+				_ = p.Close()
+			}
+		}
 	}
-	if s.Incognito != nil {
+	s.tabs = nil
+	s.Page = nil
+
+	if s.Incognito != nil && !s.attached {
 		_ = s.Incognito.Close()
-		s.Incognito = nil
 	}
+	s.Incognito = nil
 }
 
 // sessionCounter provides unique auto-increment IDs.
@@ -402,6 +415,9 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 		OperationTimeout: o.opTimeout,
 		saveStoragePath:  o.saveStoragePath,
 		saveHARPath:      o.saveHARPath,
+
+		tabs:      []*rod.Page{page},
+		activeTab: 0,
 	}
 
 	if o.record {
@@ -551,6 +567,173 @@ func (c *Command) execSessions(ctx context.Context, args []string) (string, erro
 		sb.WriteString(fmt.Sprintf("  %-8s %s  age=%s%s\n", name, url, age, recStr))
 	}
 	return sb.String(), nil
+}
+
+// ---------------------------------------------------------------------------
+// list / close-all / kill-all / attach / detach / delete-data
+// ---------------------------------------------------------------------------
+
+func (c *Command) execCloseAll(ctx context.Context, args []string) (string, error) {
+	c.sessionsMu.Lock()
+	count := len(c.sessions)
+	c.sessionsMu.Unlock()
+
+	c.closeAllSessions()
+	return fmt.Sprintf("Closed %d session(s)", count), nil
+}
+
+func (c *Command) execKillAll(ctx context.Context, args []string) (string, error) {
+	c.sessionsMu.Lock()
+	count := len(c.sessions)
+	c.sessionsMu.Unlock()
+
+	c.Close()
+	return fmt.Sprintf("Killed browser and %d session(s)", count), nil
+}
+
+func (c *Command) execDeleteData(ctx context.Context, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("playwright delete-data: session name required")
+	}
+	name := args[0]
+
+	c.sessionsMu.Lock()
+	sess, ok := c.sessions[name]
+	if !ok {
+		c.sessionsMu.Unlock()
+		return "", fmt.Errorf("playwright delete-data: session %q not found", name)
+	}
+	delete(c.sessions, name)
+	c.sessionsMu.Unlock()
+
+	sess.cleanup()
+	return fmt.Sprintf("Deleted data and closed session %q", name), nil
+}
+
+func (c *Command) execAttach(ctx context.Context, args []string) (string, error) {
+	var cdpURL, sessName string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--cdp":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("playwright attach: --cdp requires a WebSocket/HTTP URL")
+			}
+			i++
+			cdpURL = args[i]
+		case "--session":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("playwright attach: --session requires a name")
+			}
+			i++
+			sessName = args[i]
+		default:
+			if !strings.HasPrefix(args[i], "-") && cdpURL == "" {
+				cdpURL = args[i]
+			}
+		}
+	}
+	if cdpURL == "" {
+		return "", fmt.Errorf("playwright attach: --cdp <url> required\n\nUsage: playwright attach --cdp <ws-url|http-url> [--session <name>]")
+	}
+	if sessName == "" {
+		sessName = nextSessionName()
+	}
+
+	c.initSessions()
+
+	c.sessionsMu.Lock()
+	if _, exists := c.sessions[sessName]; exists {
+		c.sessionsMu.Unlock()
+		return "", fmt.Errorf("playwright attach: session %q already exists", sessName)
+	}
+	needEvict := len(c.sessions) >= maxSessions
+	c.sessionsMu.Unlock()
+
+	if needEvict {
+		c.evictLRUSession()
+	}
+
+	b := rod.New().ControlURL(cdpURL)
+	if err := b.Connect(); err != nil {
+		return "", fmt.Errorf("playwright attach: connect to %s: %w", cdpURL, err)
+	}
+
+	pages, err := b.Pages()
+	if err != nil {
+		return "", fmt.Errorf("playwright attach: list pages: %w", err)
+	}
+	if len(pages) == 0 {
+		return "", fmt.Errorf("playwright attach: no pages found in browser at %s", cdpURL)
+	}
+
+	page := pages[0]
+	tabs := make([]*rod.Page, len(pages))
+	copy(tabs, pages)
+
+	sess := &Session{
+		Name:             sessName,
+		Page:             page,
+		Incognito:        b,
+		CreatedAt:        time.Now(),
+		OperationTimeout: defaultSessionOperationTimeout,
+		tabs:             tabs,
+		activeTab:        0,
+		attached:         true,
+	}
+
+	// Auto-capture network requests.
+	sess.networkMu.Lock()
+	sess.networkRecorder = newNetworkRecorder()
+	sess.networkActive = true
+	if err := (proto.NetworkEnable{}).Call(page); err == nil {
+		capCtx, capCancel := context.WithCancel(context.Background())
+		sess.networkCancel = capCancel
+		capturedPage := page.Context(capCtx)
+		go capturedPage.EachEvent(
+			sess.networkRecorder.requestWillBeSent,
+			sess.networkRecorder.responseReceived,
+			sess.networkRecorder.loadingFinished,
+			sess.networkRecorder.loadingFailed,
+		)()
+	}
+	sess.networkMu.Unlock()
+
+	c.sessionsMu.Lock()
+	c.sessions[sessName] = sess
+	c.sessionsMu.Unlock()
+
+	info, _ := page.Info()
+	url, title := "", ""
+	if info != nil {
+		url = info.URL
+		title = info.Title
+	}
+
+	return fmt.Sprintf("Attached session: %s\nCDP: %s\nURL: %s\nTitle: %s\nTabs: %d",
+		sessName, cdpURL, url, title, len(pages)), nil
+}
+
+func (c *Command) execDetach(ctx context.Context, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("playwright detach: session name required")
+	}
+	name := args[0]
+
+	c.sessionsMu.Lock()
+	sess, ok := c.sessions[name]
+	if !ok {
+		c.sessionsMu.Unlock()
+		return "", fmt.Errorf("playwright detach: session %q not found", name)
+	}
+	if !sess.attached {
+		c.sessionsMu.Unlock()
+		return "", fmt.Errorf("playwright detach: session %q was not created via attach (use close instead)", name)
+	}
+	delete(c.sessions, name)
+	c.sessionsMu.Unlock()
+
+	sess.cleanup()
+	return fmt.Sprintf("Detached session %q (browser still running)", name), nil
 }
 
 // ---------------------------------------------------------------------------

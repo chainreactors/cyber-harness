@@ -202,13 +202,13 @@ func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option,
 
 	switch mode {
 	case cfg.RunModeIOASpaces:
-		return tui.RunIOASpaces(ctx, client, option)
+		return tui.RunIOASpaces(ctx, client, option, os.Stdout, os.Stderr)
 	case cfg.RunModeIOAMessages:
-		return tui.RunIOAMessages(ctx, client, option, args)
+		return tui.RunIOAMessages(ctx, client, option, args, os.Stdout, os.Stderr)
 	case cfg.RunModeIOAContext:
-		return tui.RunIOAContext(ctx, client, option, args)
+		return tui.RunIOAContext(ctx, client, option, args, os.Stdout, os.Stderr)
 	case cfg.RunModeIOANodes:
-		return tui.RunIOANodes(ctx, client, option, args)
+		return tui.RunIOANodes(ctx, client, option, args, os.Stdout, os.Stderr)
 	default:
 		return fmt.Errorf("unknown ioa mode: %s", mode)
 	}

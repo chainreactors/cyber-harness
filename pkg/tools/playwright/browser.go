@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -82,7 +83,11 @@ func (c *Command) Name() string { return "playwright" }
 func (c *Command) Usage() string {
 	return `playwright - Headless browser for JS-rendered pages, screenshots, network capture, and interactive vulnerability verification
 Usage:
-  playwright <subcommand> [args] [options]
+  playwright [-s=<session>] <subcommand> [args] [options]
+
+Global Options:
+  -s <name> / -s=<name>                            Target a named session (all subcommands)
+  Environment: PLAYWRIGHT_CLI_SESSION=<name>       Default session when -s is not provided
 
 Unified Subcommands (URL or session):
   goto <url|session> [selector]                  Navigate to URL and return text, or extract text from session
@@ -102,7 +107,12 @@ Session Subcommands (multi-step interactive workflows):
              [--headed]                           Launch browser with GUI (non-headless)
              [--cdp <ws-url>]                     Connect to an external browser via CDP endpoint
   close <session>                                 Close a session and release resources
-  sessions                                        List all active sessions
+  sessions / list                                 List all active sessions
+  close-all                                       Close all sessions
+  kill-all                                        Kill browser process and all sessions
+  delete-data <session>                           Close session and discard all data
+  attach --cdp <url> [--session name]             Attach to a running browser (use detach to disconnect)
+  detach <session>                                Disconnect from attached session without closing browser
 
   Navigation:
     reload <session>                            Reload the current page
@@ -122,7 +132,8 @@ Session Subcommands (multi-step interactive workflows):
     select-option <session> <selector> <value>  Select a dropdown option
     check <session> <selector>                  Check a checkbox
     uncheck <session> <selector>                Uncheck a checkbox
-    set-input-files <session> <sel> <path...>   Set files for a file input (upload)
+    set-input-files <session> <sel> <path...>   Set files for a file input
+    upload <session> <selector> <path...>       Upload files (alias for set-input-files)
     focus <session> <selector>                  Focus an element
     blur <session> <selector>                   Blur (unfocus) an element
     wait-for <session> <selector|--idle|--stable>  Wait for element/network/DOM
@@ -183,6 +194,12 @@ Session Subcommands (multi-step interactive workflows):
     dialog-accept <session> [prompt-text]       Accept the next JS dialog
     dialog-dismiss <session>                    Dismiss the next JS dialog
 
+  Tab Management (playwright-cli aligned):
+    tab-list <session>                          List all tabs with URL and title
+    tab-new <session> [url]                     Open a new tab (optionally navigate)
+    tab-close <session> [index]                 Close a tab (default: active tab)
+    tab-select <session> <index>                Switch active tab by index
+
 Recording (nuclei headless template codegen):
   record <session> --start                            Start recording actions
   record <session> --dump                             Print recorded actions as nuclei headless YAML
@@ -220,13 +237,36 @@ Examples:
 }
 
 // Execute dispatches to the appropriate sub-command.
-func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error {
+func (c *Command) Execute(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
+	}
+
+	// Extract global -s flag (playwright-cli alignment) and PLAYWRIGHT_CLI_SESSION env var.
+	globalSession := os.Getenv("PLAYWRIGHT_CLI_SESSION")
+	var cleanArgs []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-s" && i+1 < len(args) {
+			i++
+			globalSession = args[i]
+		} else if strings.HasPrefix(args[i], "-s=") {
+			globalSession = args[i][3:]
+		} else {
+			cleanArgs = append(cleanArgs, args[i])
+		}
+	}
+	args = cleanArgs
+
 	if len(args) == 0 {
 		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
 
 	sub := args[0]
 	subArgs := args[1:]
+
+	if globalSession != "" {
+		subArgs = c.injectGlobalSession(sub, subArgs, globalSession)
+	}
 
 	var result string
 	var err error
@@ -283,6 +323,18 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 		result, err = c.execClose(ctx, subArgs)
 	case "sessions":
 		result, err = c.execSessions(ctx, subArgs)
+	case "list":
+		result, err = c.execSessions(ctx, subArgs)
+	case "close-all":
+		result, err = c.execCloseAll(ctx, subArgs)
+	case "kill-all":
+		result, err = c.execKillAll(ctx, subArgs)
+	case "attach":
+		result, err = c.execAttach(ctx, subArgs)
+	case "detach":
+		result, err = c.execDetach(ctx, subArgs)
+	case "delete-data":
+		result, err = c.execDeleteData(ctx, subArgs)
 
 	// --- Discovery ---
 	case "discover":
@@ -322,6 +374,8 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 	case "uncheck":
 		result, err = c.execUncheck(ctx, subArgs)
 	case "set-input-files":
+		result, err = c.execSetInputFiles(ctx, subArgs)
+	case "upload":
 		result, err = c.execSetInputFiles(ctx, subArgs)
 	case "focus":
 		result, err = c.execFocus(ctx, subArgs)
@@ -442,6 +496,16 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 	case "dialog-dismiss":
 		result, err = c.execDialogDismiss(ctx, subArgs)
 
+	// --- Tab management (playwright-cli aligned) ---
+	case "tab-list":
+		result, err = c.execTabList(ctx, subArgs)
+	case "tab-new":
+		result, err = c.execTabNew(ctx, subArgs)
+	case "tab-close":
+		result, err = c.execTabClose(ctx, subArgs)
+	case "tab-select":
+		result, err = c.execTabSelect(ctx, subArgs)
+
 	// --- Recording ---
 	case "record":
 		result, err = c.execRecord(ctx, subArgs)
@@ -460,10 +524,13 @@ func (c *Command) Execute(ctx context.Context, args []string, w io.Writer) error
 		}
 	}
 
-	if result != "" {
-		_, _ = io.WriteString(w, result)
+	if err != nil {
+		return err
 	}
-	return err
+	if result != "" {
+		fmt.Fprint(commands.Output, result)
+	}
+	return nil
 }
 
 // Close shuts down the browser process if running.
@@ -1273,6 +1340,35 @@ func parsePDFOpts(args []string, usage string) (pdfOpts, error) {
 		return opts, fmt.Errorf("playwright: URL is required\n\n%s", usage)
 	}
 	return opts, nil
+}
+
+// injectGlobalSession prepends the global session name (-s flag or
+// PLAYWRIGHT_CLI_SESSION env) into subArgs when the command needs it.
+func (c *Command) injectGlobalSession(sub string, subArgs []string, globalSession string) []string {
+	switch sub {
+	case "open", "attach":
+		for _, a := range subArgs {
+			if a == "--session" {
+				return subArgs
+			}
+		}
+		return append(subArgs, "--session", globalSession)
+
+	case "sessions", "list", "close-all", "kill-all", "pdf":
+		return subArgs
+
+	case "goto", "navigate", "screenshot", "content", "evaluate", "eval", "network", "netcap":
+		if len(subArgs) == 0 {
+			return append([]string{globalSession}, subArgs...)
+		}
+		return subArgs
+
+	default:
+		if len(subArgs) == 0 || !c.firstArgIsSession(subArgs) {
+			return append([]string{globalSession}, subArgs...)
+		}
+		return subArgs
+	}
 }
 
 // ---------------------------------------------------------------------------
