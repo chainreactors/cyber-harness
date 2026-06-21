@@ -204,7 +204,11 @@ llm:
 
 ## Disclaimer
 
-This tool is intended for **authorized security testing and research purposes only**. Users are solely responsible for ensuring they have proper authorization before scanning any target. The developers assume no liability for misuse or damage caused by this tool. Unauthorized access to computer systems is illegal in most jurisdictions. By using this tool, you agree that you bear full responsibility for your actions.
+1. This tool is intended for **authorized security testing and research purposes only**. If you need to test its capabilities, please set up your own lab environment.
+2. Before using this tool for any scanning, you must ensure compliance with local laws and regulations and obtain **sufficient authorization. Do not scan unauthorized targets.**
+3. If you engage in any illegal activity while using this tool, you shall bear all consequences yourself. We assume no legal or joint liability.
+4. Before installing and using this tool, please **carefully read and fully understand all terms**. Limitation and disclaimer clauses may be highlighted for your attention.
+5. Unless you have fully read, understood, and accepted all terms of this agreement, please do not install or use this tool. Your use or any other express or implied acceptance constitutes your agreement to be bound by these terms.
 
 ## License
 
