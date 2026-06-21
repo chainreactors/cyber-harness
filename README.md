@@ -213,6 +213,12 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 - [spray](https://github.com/chainreactors/spray) — Web probing & fingerprinting
 - [zombie](https://github.com/chainreactors/zombie) — Credential testing
 - [neutron](https://github.com/chainreactors/neutron) — Template-based POC engine
+- [fingers](https://github.com/chainreactors/fingers) — Fingerprint rule engine
+- [sdk](https://github.com/chainreactors/sdk) — Scanner SDK (gogo/spray/zombie core)
+- [proxyclient](https://github.com/chainreactors/proxyclient) — Multi-protocol proxy client
+- [crtm](https://github.com/chainreactors/crtm) — Security tool package registry
+- [utils](https://github.com/chainreactors/utils) — Shared utilities & PTY manager
+- [parsers](https://github.com/chainreactors/parsers) — Protocol & data parsers
 
 ---
 

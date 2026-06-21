@@ -215,6 +215,12 @@ llm:
 - [spray](https://github.com/chainreactors/spray) — Web 探测和指纹识别
 - [zombie](https://github.com/chainreactors/zombie) — 弱口令检测
 - [neutron](https://github.com/chainreactors/neutron) — 模板化 POC 引擎
+- [fingers](https://github.com/chainreactors/fingers) — 指纹规则引擎
+- [sdk](https://github.com/chainreactors/sdk) — 扫描器 SDK（gogo/spray/zombie 核心）
+- [proxyclient](https://github.com/chainreactors/proxyclient) — 多协议代理客户端
+- [crtm](https://github.com/chainreactors/crtm) — 安全工具包注册中心
+- [utils](https://github.com/chainreactors/utils) — 共享工具库 & PTY 管理器
+- [parsers](https://github.com/chainreactors/parsers) — 协议和数据解析器
 
 ---
 
