@@ -53,11 +53,13 @@ func applyExplicitReconNumericOptions(c *gkcfg.Config, v interface{}) {
 }
 
 func findDefaultConfigFile() string {
+	// 1. 当前工作目录
 	if _, err := os.Stat(DefaultConfigName); err == nil {
 		return DefaultConfigName
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		p := filepath.Join(dir, "aiscan", DefaultConfigName)
+	// 2. 二进制所在目录
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), DefaultConfigName)
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
@@ -133,6 +135,9 @@ func mergeOption(dst, src *Option) {
 	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {
 		dst.Space = src.Space
 	}
+	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
+		dst.Tools = src.Tools
+	}
 }
 
 func InitDefaultConfig() string {
@@ -142,7 +147,7 @@ func InitDefaultConfig() string {
 const defaultConfigTemplate = `# aiscan 配置文件
 #
 # 编译时: build.sh 读取此文件，通过 ldflags 将配置固化到二进制
-# 运行时: aiscan 自动加载 ./config.yaml 或 ~/.config/aiscan/config.yaml
+# 运行时: aiscan 自动加载 ./config.yaml 或 <二进制所在目录>/config.yaml
 # 优先级: CLI 参数 > 环境变量 > 配置文件（-c 或默认路径）> 编译时固化值
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
@@ -194,10 +199,15 @@ search:
   # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
   tavily_keys: ""
 
-# Agent 远程连接
+# Agent 配置
 agent:
   # 直接连接 aiscan web，提供远程 REPL / PTY
   web_url: ""
+  # 可选工具组（Arsenal 始终加载）。留空加载全部，显式指定则只加载列出的组
+  # 可选值: search (web_search/fetch/cyberhub), browser (playwright)
+  # tools:
+  #   - search
+  #   - browser
 
 # IOA 协作
 ioa:
