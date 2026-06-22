@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chainreactors/aiscan/cmd/ioaserve"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/resources"
@@ -19,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
 	ioaclient "github.com/chainreactors/ioa/client"
+	ioaserver "github.com/chainreactors/ioa/server"
 )
 
 func init() {
@@ -27,6 +27,10 @@ func init() {
 	runner.IOAServeFunc = ioaServe
 	runner.IOAClientCommandFunc = ioaClientCommand
 }
+
+// ---------------------------------------------------------------------------
+// Scanner engine initialization
+// ---------------------------------------------------------------------------
 
 func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
@@ -45,14 +49,15 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 		logger.Warnf("scanner engines init error=%q action=continue_without_scanners", err)
 		return nil
 	}
-	engineSet.SetupUncover(engine.ReconOptions{
+	recon := engine.ReconOptions{
 		FofaEmail:    sc.FofaEmail,
 		FofaKey:      sc.FofaKey,
 		HunterToken:  sc.HunterToken,
 		HunterAPIKey: sc.HunterAPIKey,
 		IngressProxy: sc.ReconProxy,
 		Limit:        sc.ReconLimit,
-	}, logger)
+	}
+	engineSet.SetupUncover(recon, logger)
 	return engineSet
 }
 
@@ -100,6 +105,10 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 	commands.BuildGroup("ioa", deps, cmdReg)
 	logger.Infof("scanner commands ready: %v", cmdReg.GroupNames("scanner"))
 }
+
+// ---------------------------------------------------------------------------
+// Scanner with agent
+// ---------------------------------------------------------------------------
 
 func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runner.App, scannerArgs []string, logger telemetry.Logger) error {
 	if application.Provider == nil {
@@ -177,12 +186,19 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 	return strings.Join(sections, "\n\n"), nil
 }
 
+// ---------------------------------------------------------------------------
+// IOA
+// ---------------------------------------------------------------------------
+
 func ioaServe(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	return ioaserve.RunServe(ctx, ioaserve.Config{
-		URL:   option.IOAURL,
-		Token: option.IOAToken,
-		DB:    "",
-	}, logger)
+	store := ioaserver.NewMemoryStore()
+	logger.Importantf("ioa_server store=memory")
+	defer func() { _ = store.Close() }()
+	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{
+		URL:       option.IOAURL,
+		AccessKey: option.IOAToken,
+		Store:     store,
+	})
 }
 
 func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option, args cfg.IOAClientArgs, logger telemetry.Logger) error {
@@ -213,3 +229,4 @@ func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option,
 		return fmt.Errorf("unknown ioa mode: %s", mode)
 	}
 }
+

@@ -7,7 +7,7 @@ import (
 
 func init() {
 	commands.RegisterFactory(commands.Factory{
-		Group: "tools",
+		Group: "arsenal",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger, _ := deps.Logger.(telemetry.Logger)
 			if logger == nil {
@@ -19,7 +19,7 @@ func init() {
 				logger.Warnf("arsenal init: %v", err)
 				return
 			}
-			reg.Register(cmd, "tools")
+			reg.Register(cmd, "arsenal")
 		},
 	})
 }

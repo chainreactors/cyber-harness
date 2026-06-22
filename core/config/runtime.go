@@ -39,9 +39,10 @@ type ScannerConfig struct {
 }
 
 type ToolConfig struct {
-	Enabled     bool
-	BashTimeout int
-	TavilyKeys  string
+	Enabled       bool
+	BashTimeout   int
+	TavilyKeys    string
+	OptionalTools []string // optional tool groups to enable (e.g. "search", "browser")
 }
 
 type IOAConfig struct {

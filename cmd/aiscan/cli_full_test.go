@@ -1,6 +1,6 @@
 //go:build full
 
-package cmd
+package main
 
 import (
 	"reflect"

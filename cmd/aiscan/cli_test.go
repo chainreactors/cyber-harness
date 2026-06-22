@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"bytes"
@@ -633,4 +633,3 @@ func withDefaults(t *testing.T, fn func()) {
 	})
 	fn()
 }
-

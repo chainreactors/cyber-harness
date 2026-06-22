@@ -10,7 +10,7 @@ import (
 
 func init() {
 	commands.RegisterFactory(commands.Factory{
-		Group: "tools",
+		Group: "search",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			var p provider.Provider
 			if deps.Provider != nil {
@@ -25,7 +25,7 @@ func init() {
 			if p != nil {
 				reg.RegisterTool(NewWebSearchTool(p, tavily))
 			}
-			reg.Register(NewFetchCommand(), "tools")
+			reg.Register(NewFetchCommand(), "search")
 
 			var idx *association.Index
 			if es, ok := deps.EngineSet.(*engine.Set); ok && es != nil {
@@ -39,7 +39,7 @@ func init() {
 				}
 			}
 			if idx != nil {
-				reg.Register(NewCyberhubSearch(idx), "tools")
+				reg.Register(NewCyberhubSearch(idx), "search")
 			}
 		},
 	})

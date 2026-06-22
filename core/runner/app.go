@@ -129,6 +129,10 @@ func initProvider(provCfg agent.ProviderConfig, logger telemetry.Logger) (agent.
 	return llmProvider, resolved, nil
 }
 
+// optionalToolGroups lists all selectable tool groups that can be enabled via
+// --tools or config.  Arsenal is always loaded and is NOT in this list.
+var optionalToolGroups = []string{"search", "browser"}
+
 func initCoreCommands(rc cfg.RuntimeConfig, llmProvider agent.Provider, skillStore *skills.Store, logger telemetry.Logger) *commands.CommandRegistry {
 	cmdReg := commands.NewRegistry()
 	workDir, _ := os.Getwd()
@@ -142,7 +146,18 @@ func initCoreCommands(rc cfg.RuntimeConfig, llmProvider agent.Provider, skillSto
 		TavilyKeys:  rc.Tools.TavilyKeys,
 	}
 	commands.BuildGroup("core", deps, cmdReg)
-	commands.BuildGroup("tools", deps, cmdReg)
+	commands.BuildGroup("arsenal", deps, cmdReg)
+
+	enabled := rc.Tools.OptionalTools
+	if len(enabled) == 0 {
+		for _, g := range optionalToolGroups {
+			commands.BuildGroup(g, deps, cmdReg)
+		}
+	} else {
+		for _, g := range enabled {
+			commands.BuildGroup(g, deps, cmdReg)
+		}
+	}
 	return cmdReg
 }
 

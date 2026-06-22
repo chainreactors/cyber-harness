@@ -21,7 +21,7 @@ dist/
 *.db
 *.db-*
 *.sock.lock
-aiscan
+/aiscan
 /spray
 out/
 scan_results.jsonl

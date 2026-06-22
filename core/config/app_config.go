@@ -40,9 +40,10 @@ func AppConfig(option *Option, features RuntimeFeatures, logger telemetry.Logger
 			ReconLimit:        intOptionValue(option.ReconLimit),
 		},
 		Tools: ToolConfig{
-			Enabled:     features.ToolsEnabled,
-			BashTimeout: 300,
-			TavilyKeys:  DefaultTavilyKeys,
+			Enabled:       features.ToolsEnabled,
+			BashTimeout:   300,
+			TavilyKeys:    DefaultTavilyKeys,
+			OptionalTools: option.Tools,
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),

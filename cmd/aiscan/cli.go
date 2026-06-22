@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"context"
@@ -19,9 +19,23 @@ import (
 	goflags "github.com/jessevdk/go-flags"
 )
 
+const runModeWeb cfg.RunMode = "web"
+
+// webServeFunc is set via init() in web_full.go (full build only).
+var webServeFunc func(ctx context.Context, option *cfg.Option, web webCommand, logger telemetry.Logger) error
+
+type webCommand struct {
+	Addr        string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
+	DB          string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
+	MaxScans    int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
+	ScanTimeout int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
+	IOAToken    string `long:"ioa-token" description:"IOA access key (auto-generated if empty)"`
+}
+
 type cliOptions struct {
 	cfg.Option
 	Agent struct{}   `command:"agent" description:"Run the LLM agent"`
+	Web   webCommand `command:"web" description:"Start the web UI server"`
 	IOA   ioaCommand `command:"ioa" description:"IOA server commands"`
 	cfg.ScannerCommands
 }
@@ -58,10 +72,11 @@ type parsedCLI struct {
 	Mode        cfg.RunMode
 	ScannerArgs []string
 	IOAArgs     cfg.IOAClientArgs
+	WebOpts     webCommand
 	Help        bool
 }
 
-func AiScan() {
+func aiscan() {
 	parsed, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
@@ -113,9 +128,10 @@ func AiScan() {
 		ctx    context.Context
 		cancel context.CancelFunc
 	)
-	if parsed.Mode == cfg.RunModeIOAServe {
+	switch parsed.Mode {
+	case cfg.RunModeIOAServe, runModeWeb:
 		ctx, cancel = context.WithCancel(context.Background())
-	} else {
+	default:
 		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
 	}
 	defer cancel()
@@ -132,6 +148,15 @@ func AiScan() {
 		}
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
+			os.Exit(1)
+		}
+	case runModeWeb:
+		if webServeFunc == nil {
+			fmt.Fprintln(os.Stderr, "error: web server not available (requires full build)")
+			os.Exit(1)
+		}
+		if err := webServeFunc(ctx, &option, parsed.WebOpts, logger); err != nil {
+			logger.Errorf("web server failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeIOAServe:
@@ -193,6 +218,10 @@ func parseCLI(args []string) (parsedCLI, error) {
 		}
 		scannerArgs := append([]string{scannerName}, scannerRest...)
 		return parsedCLI{Option: option, Mode: mode, ScannerArgs: scannerArgs}, nil
+	}
+
+	if mode == runModeWeb {
+		return parsedCLI{Option: option, Mode: runModeWeb, WebOpts: cli.Web}, nil
 	}
 
 	ioaArgs := extractIOAArgs(&cli, mode)
@@ -284,12 +313,12 @@ aiscan - AI-assisted security scanner
 Commands:
   scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
   agent          Run the natural-language agent
+  web            Start the web UI server
 
 Advanced scanners:
 %s
 
 Infrastructure:
-  cyberhub       Search Cyberhub fingerprints and POCs
   ioa serve      Run the IOA HTTP server
   ioa spaces     List all IOA spaces
   ioa messages   List start messages in a space
@@ -299,17 +328,8 @@ Infrastructure:
 Examples:
   aiscan scan -i 127.0.0.1
   aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
-  aiscan scan -i http://target.com --sniper
-  aiscan scan -i http://target.com --mode full --deep
-  aiscan scan -i 192.168.1.0/24 --mode full
-  aiscan scan -i http://target.com --mode full --verify=high --sniper --report
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
-  aiscan ioa serve
-  aiscan ioa serve --ioa-token mysecret
-  aiscan ioa spaces --ioa-url http://token@127.0.0.1:8765
-  aiscan ioa messages default --ioa-url http://token@127.0.0.1:8765
-  aiscan agent --web-url http://127.0.0.1:8080
-  aiscan agent --web-url http://127.0.0.1:8080 --ioa-url http://token@127.0.0.1:8080/ioa --space case-1`, cfg.ScannerUsageLines())
+  aiscan web --addr 0.0.0.0:8080`, cfg.ScannerUsageLines())
 	return parser
 }
 
@@ -371,6 +391,7 @@ type knownFlag struct {
 
 var scannerKnownFlags = []knownFlag{
 	{names: []string{"--config", "-c"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ConfigFile = v }},
+	{names: []string{"--data-dir"}, arity: 1, apply: func(o *cfg.Option, v string) { o.DataDir = v }},
 	{names: []string{"--cyberhub-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubURL = v }},
 	{names: []string{"--cyberhub-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubKey = v }},
 	{names: []string{"--cyberhub-mode"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubMode = v }},
@@ -470,6 +491,8 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	switch active.Name {
 	case "agent":
 		return cfg.RunModeAgent
+	case "web":
+		return runModeWeb
 	case "serve":
 		return cfg.RunModeIOAServe
 	default:
@@ -588,23 +611,18 @@ func boolFlagEnabled(args []string, flag string) bool {
 	return false
 }
 
-// SignalHandler manages SIGINT/SIGTERM with a two-phase shutdown:
-// first Ctrl+C stops the current task (if any), second cancels the
-// root context, third force-exits.
-type SignalHandler struct {
+type signalHandler struct {
 	mu     sync.Mutex
 	stopFn func() bool
 }
 
-// SetStopFunc registers a callback that attempts to stop the current
-// task. It should return true if a task was stopped.
-func (h *SignalHandler) SetStopFunc(fn func() bool) {
+func (h *signalHandler) SetStopFunc(fn func() bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.stopFn = fn
 }
 
-func (h *SignalHandler) tryStop() bool {
+func (h *signalHandler) tryStop() bool {
 	h.mu.Lock()
 	fn := h.stopFn
 	h.mu.Unlock()
@@ -614,11 +632,11 @@ func (h *SignalHandler) tryStop() bool {
 	return false
 }
 
-func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *SignalHandler {
+func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *signalHandler {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	handler := &SignalHandler{}
+	handler := &signalHandler{}
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 

@@ -105,7 +105,7 @@ aiscan 构建脚本
   --tags TAGS           额外 build tags，逗号分隔
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
-  --ioa                 同时编译 ioa server 二进制
+  --ioa                 (已废弃, ioa serve 已集成到 aiscan 主二进制)
   --profile PROFILE     构建配置: agent (~28MB), mini (默认, ~77MB), full (~123MB)
 
 LLM 覆盖（优先级高于 config.yaml）:
@@ -140,8 +140,7 @@ Web Search:
   ./build.sh --llm-provider deepseek --llm-model deepseek-chat
   ./build.sh --embed                            # 嵌入资源的完整构建
   ./build.sh -g                                 # 打印 ldflags（用于自定义构建命令）
-  ./build.sh --ioa -o linux/amd64               # 同时编译 ioa server
-  ./build.sh --profile agent -o linux/amd64      # agent 构建 (仅 agent REPL + bash, 无内置扫描器)
+  ./build.sh --profile agent -o linux/amd64      # agent 构建 (仅 agent REPL + Arsenal, 无内置扫描器)
   ./build.sh --profile full -o linux/amd64      # full 构建 (全部扫描器 + browser + recon + ioa)
 HELP
             exit 0
@@ -313,18 +312,8 @@ for target in "${TARGETS[@]}"; do
     build_one "${PARTS[0]}" "${PARTS[1]}" "$AISCAN_MAIN" "$AISCAN_BIN"
 done
 
-if [ "$BUILD_IOA" = true ]; then
-    echo ""
-    echo "编译 ioa..."
-    for target in "${TARGETS[@]}"; do
-        IFS='/' read -ra PARTS <<< "$target"
-        build_one "${PARTS[0]}" "${PARTS[1]}" ./cmd/ioa ioa
-    done
-fi
-
 # ─── 完成 ────────────────────────────────────────────────────────
 
 echo ""
 echo "构建完成:"
 ls -lh "$OUTPUT_DIR"/aiscan* 2>/dev/null || true
-[ "$BUILD_IOA" = true ] && ls -lh "$OUTPUT_DIR"/ioa_* 2>/dev/null || true
