@@ -106,7 +106,14 @@ func (r *CommandRegistry) ToolDefinitions() []ToolDefinition {
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (ToolResult, error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result ToolResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = ToolResult{}
+			err = fmt.Errorf("tool %s panic: %v\n%s", name, recovered, debug.Stack())
+		}
+	}()
+
 	t, ok := r.GetTool(name)
 	if !ok {
 		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)

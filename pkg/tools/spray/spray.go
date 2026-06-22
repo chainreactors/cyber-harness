@@ -48,7 +48,6 @@ func (c *Command) Usage() string {
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
-	defer telemetry.SDKRecover("spray", &err)
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")

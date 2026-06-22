@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type Event interface {
@@ -185,11 +186,13 @@ func (p *Pipeline) start() {
 			go func(cap *Capability, queue <-chan Event) {
 				defer p.workersDone.Done()
 				for input := range queue {
-					p.emit(ActionCapabilityStart, cap.Name, input)
-					cap.Run(p.ctx, input, func(e Event) {
-						p.submit(e, cap.Name)
+					telemetry.SafeRun("pipeline."+cap.Name, func() {
+						p.emit(ActionCapabilityStart, cap.Name, input)
+						cap.Run(p.ctx, input, func(e Event) {
+							p.submit(e, cap.Name)
+						})
+						p.emit(ActionCapabilityDone, cap.Name, input)
 					})
-					p.emit(ActionCapabilityDone, cap.Name, input)
 					p.done()
 				}
 			}(cap, queue)
@@ -199,7 +202,9 @@ func (p *Pipeline) start() {
 	go func() {
 		defer close(p.dispatcherDone)
 		for re := range p.events {
-			p.dispatch(re)
+			telemetry.SafeRun("pipeline.dispatcher", func() {
+				p.dispatch(re)
+			})
 			p.done()
 		}
 	}()

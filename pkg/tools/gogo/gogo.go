@@ -48,7 +48,6 @@ func (c *Command) Usage() string {
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
-	defer telemetry.SDKRecover("gogo", &err)
 	args = c.normalizeArgs(args)
 	args = c.injectProxy(args)
 

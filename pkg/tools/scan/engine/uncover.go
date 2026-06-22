@@ -161,7 +161,7 @@ func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, que
 		return nil, errors.New("empty fofa keys")
 	}
 	results := make(chan sources.Result)
-	go func() {
+	telemetry.SafeGo("uncover-fofa", func() {
 		defer close(results)
 		var total int
 		for page := 1; ; page++ {
@@ -206,7 +206,7 @@ func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, que
 				return
 			}
 		}
-	}()
+	})
 	return results, nil
 }
 
@@ -250,7 +250,7 @@ func (a *richHunterAgent) Query(ctx context.Context, session *sources.Session, q
 		return nil, errors.New("empty hunter keys")
 	}
 	results := make(chan sources.Result)
-	go func() {
+	telemetry.SafeGo("uncover-hunter", func() {
 		defer close(results)
 		var total int
 		for page := 1; ; page++ {
@@ -304,7 +304,7 @@ func (a *richHunterAgent) Query(ctx context.Context, session *sources.Session, q
 				return
 			}
 		}
-	}()
+	})
 	return results, nil
 }
 

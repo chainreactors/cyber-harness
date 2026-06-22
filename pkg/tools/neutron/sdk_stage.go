@@ -35,8 +35,6 @@ type neutronExecuteOptions struct {
 }
 
 func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index *association.Index, opts neutronExecuteOptions) (_ <-chan *sdkneutron.ExecuteResult, err error) {
-	defer telemetry.SDKRecover("neutron", &err)
-
 	if engine == nil {
 		return nil, errors.New("neutron engine is not available")
 	}

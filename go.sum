@@ -202,6 +202,8 @@ github.com/chainreactors/sdk v0.3.4-0.20260616124448-4dee008baf5e h1:zdiBiBCwyVR
 github.com/chainreactors/sdk v0.3.4-0.20260616124448-4dee008baf5e/go.mod h1:yeXckJkuO8sl/FXhEYlQ6lq1RaWIei3VzrPEAF6pA9A=
 github.com/chainreactors/spray v1.3.1-0.20260616101714-a52580bd9040 h1:azWxO/71klGMcfZcmGHHYAI/0qq2qbRi68Sv/byJ3Ms=
 github.com/chainreactors/spray v1.3.1-0.20260616101714-a52580bd9040/go.mod h1:lWxsw+RHzAUKp78rkatxBereXqNunBe22hSpRGrfbo0=
+github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158 h1:JcQ0oVS3mZybQq7qM0iD27cjs3/JnXlnOctVsdsQx6E=
+github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158/go.mod h1:lWxsw+RHzAUKp78rkatxBereXqNunBe22hSpRGrfbo0=
 github.com/chainreactors/utils v0.0.0-20240716182459-e85f2b01ee16/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
 github.com/chainreactors/utils v0.0.0-20260529172343-6465cb8568b2 h1:ygWUs11z/bg/NsTuH1p37Excj7+IAoRSNGpHBrCsVk8=
 github.com/chainreactors/utils v0.0.0-20260529172343-6465cb8568b2/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
