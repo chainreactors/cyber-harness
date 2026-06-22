@@ -17,6 +17,9 @@ func ResolveRuntimeConfig(option *Option) (string, error) {
 	}
 	applyEnvironment(option, explicit, os.LookupEnv)
 	ApplyDefaults(option)
+	if strings.TrimSpace(option.DataDir) != "" {
+		SetDataDir(option.DataDir)
+	}
 	return configPath, nil
 }
 

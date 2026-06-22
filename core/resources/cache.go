@@ -9,23 +9,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/fingers"
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	cacheDirName = ".aiscan"
-	cacheTTL     = 24 * time.Hour
-)
+const cacheTTL = 24 * time.Hour
 
 func cachePath(cyberhubURL, apiKey, kind string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	dir := filepath.Join(home, cacheDirName, "cache")
-	_ = os.MkdirAll(dir, 0o755)
+	dir := config.DataSubDir("cache")
 	h := sha256.Sum256([]byte(cyberhubURL + "|" + apiKey))
 	return filepath.Join(dir, fmt.Sprintf("%s_%s.cache", kind, hex.EncodeToString(h[:8])))
 }

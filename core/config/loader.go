@@ -138,6 +138,7 @@ func mergeOption(dst, src *Option) {
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
 	}
+	dst.DataDir = ResolveString(dst.DataDir, src.DataDir)
 }
 
 func InitDefaultConfig() string {
@@ -236,6 +237,10 @@ scan:
 
 # 通用选项
 misc:
+  # 数据目录（缓存、arsenal、历史记录等）
+  # 默认: <二进制所在目录>/.aiscan
+  # 环境变量: AISCAN_DATA_DIR
+  data_dir: ""
   debug: false
   quiet: false
   no_color: false

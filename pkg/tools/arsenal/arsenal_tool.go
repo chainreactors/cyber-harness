@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
@@ -23,8 +24,7 @@ type ArsenalCommand struct {
 }
 
 func NewArsenalCommand() (*ArsenalCommand, error) {
-	home, _ := os.UserHomeDir()
-	base := filepath.Join(home, ".aiscan", "arsenal")
+	base := config.DataSubDir("arsenal")
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    filepath.Join(base, "bin"),

@@ -1228,13 +1228,5 @@ func AgentConsoleArgsForLine(line string) ([]string, error) {
 }
 
 func agentConsoleHistoryPath() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil || strings.TrimSpace(configDir) == "" {
-		return ".aiscan_agent_history"
-	}
-	dir := filepath.Join(configDir, "aiscan")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return ".aiscan_agent_history"
-	}
-	return filepath.Join(dir, "agent_history")
+	return filepath.Join(cfg.DataSubDir(""), "agent_history")
 }
