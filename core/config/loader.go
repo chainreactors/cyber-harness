@@ -138,116 +138,12 @@ func mergeOption(dst, src *Option) {
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
 	}
+	if !dst.SaveSession && src.SaveSession {
+		dst.SaveSession = true
+	}
 	dst.DataDir = ResolveString(dst.DataDir, src.DataDir)
 }
 
 func InitDefaultConfig() string {
-	return defaultConfigTemplate
+	return generateDefaultConfig()
 }
-
-const defaultConfigTemplate = `# aiscan 配置文件
-#
-# 编译时: build.sh 读取此文件，通过 ldflags 将配置固化到二进制
-# 运行时: aiscan 自动加载 ./config.yaml 或 <二进制所在目录>/config.yaml
-# 优先级: CLI 参数 > 环境变量 > 配置文件（-c 或默认路径）> 编译时固化值
-#
-# 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
-
-# LLM Provider 配置
-llm:
-  # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic
-  # 环境变量: AISCAN_PROVIDER / AISCAN_LLM_PROVIDER
-  provider: ""
-  # API base URL（留空使用 provider 默认值）
-  # 环境变量: AISCAN_BASE_URL / AISCAN_BASEURL / AISCAN_LLM_BASE_URL / AISCAN_LLM_BASEURL
-  # OpenAI/Codex 风格: OPENAI_BASE_URL / OPENAI_BASEURL
-  # Claude Code 风格: ANTHROPIC_BASE_URL / ANTHROPIC_BASEURL
-  base_url: ""
-  # API key（建议使用环境变量而非写入文件）
-  # 环境变量: AISCAN_API_KEY / Provider 对应 API key 变量（如 OPENAI_API_KEY）
-  api_key: ""
-  # 模型名称
-  # 环境变量: AISCAN_MODEL / AISCAN_LLM_MODEL
-  # OpenAI/Codex 风格: OPENAI_MODEL
-  # Claude Code 风格: ANTHROPIC_MODEL
-  model: ""
-  # LLM API 代理
-  # 环境变量: AISCAN_LLM_PROXY
-  proxy: ""
-  # 备用 provider 列表（按优先级排序，主 provider 不可用时自动切换）
-  # providers:
-  #   - provider: openai
-  #     model: gpt-4o
-  #     api_key: ""
-  #   - provider: ollama
-  #     model: llama3.1
-  #     base_url: http://localhost:11434/v1
-
-# Cyberhub 资源服务
-cyberhub:
-  url: ""
-  key: ""
-  # merge 或 override
-  mode: ""
-  # 扫描器代理，支持以下格式:
-  #   socks5://127.0.0.1:1080
-  #   trojan://password@server:443?sni=example.com
-  #   clash://?url=<encoded-subscribe-url>&strategy=adaptive
-  proxy: ""
-
-# 搜索
-search:
-  # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
-  tavily_keys: ""
-
-# Agent 配置
-agent:
-  # 直接连接 aiscan web，提供远程 REPL / PTY
-  web_url: ""
-  # 可选工具组（Arsenal 始终加载）。留空加载全部，显式指定则只加载列出的组
-  # 可选值: search (web_search/fetch/cyberhub), browser (playwright)
-  # tools:
-  #   - search
-  #   - browser
-
-# IOA 协作
-ioa:
-  url: ""
-  db: ""
-  node_name: ""
-  space: ""
-
-# 资产测绘 (通过 uncover SDK)
-# FOFA 凭证从此处或环境变量 FOFA_EMAIL / FOFA_KEY 读取
-# 额外 source (Shodan/Censys/...) 通过环境变量或 ~/.uncover-config/provider-config.yaml 配置
-recon:
-  fofa_email: ""
-  fofa_key: ""
-  hunter_token: ""    # 极少用; Hunter web 端 token
-  hunter_api_key: ""  # 华顺信安后台 API 管理生成的 64 位 hex key
-  proxy: ""           # 出站代理 (Hunter 屏蔽境外 IP, 中国 VPS 走 socks5://host:1080)
-  limit: 0            # 单次查询最多返回多少 asset, 0 = 不限
-
-# 扫描默认值
-scan:
-  # auto, off, low, medium, high, critical
-  verify: ""
-  # 单次验证超时秒数（0 表示不覆盖）
-  verify_timeout: 0
-
-# 通用选项
-misc:
-  # 数据目录（缓存、arsenal、历史记录等）
-  # 默认: <二进制所在目录>/.aiscan
-  # 环境变量: AISCAN_DATA_DIR
-  data_dir: ""
-  debug: false
-  quiet: false
-  no_color: false
-
-# 以下仅 build.sh 使用
-build:
-  osarch: ""
-  tags: ""
-  output: dist
-`

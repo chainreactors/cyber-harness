@@ -110,6 +110,12 @@ func (a *Agent) Reset() {
 	a.state.ErrorMessage = ""
 }
 
+func (a *Agent) LoadMessages(messages []ChatMessage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state.Messages = append([]ChatMessage(nil), messages...)
+}
+
 func (a *Agent) validateContinue() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

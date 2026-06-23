@@ -26,16 +26,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type AgentRuntime struct {
-	App          *App
-	NodeName     string
-	SystemPrompt string
-	Option       *cfg.Option
-	Config       agent.Config
-	Bus          *eventbus.Bus[agent.Event]
-	Output       *tui.AgentOutput
-	ConfigFile   string
-	ownsApp      bool
-	cleanup      func()
+	App            *App
+	NodeName       string
+	SystemPrompt   string
+	Option         *cfg.Option
+	Config         agent.Config
+	Bus            *eventbus.Bus[agent.Event]
+	Output         *tui.AgentOutput
+	ConfigFile     string
+	ResumeMessages []agent.ChatMessage
+	ownsApp        bool
+	cleanup        func()
 }
 
 type RuntimeConfig struct {
@@ -200,6 +201,35 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
 
+	if option.Resume || option.ResumeFile != "" {
+		path := option.ResumeFile
+		if path == "" {
+			path = agent.LatestSessionPath(cfg.DataSubDir("sessions"))
+		}
+		data, err := agent.LoadSession(path)
+		if err != nil {
+			return nil, fmt.Errorf("resume session: %w", err)
+		}
+		rt.ResumeMessages = data.Messages
+		logger.Importantf("resumed %d messages from %s", len(data.Messages), path)
+	}
+
+	if option.SaveSession {
+		sessDir := cfg.DataSubDir("sessions")
+		agentBus.Subscribe(func(ev agent.Event) {
+			if ev.Type != agent.EventAgentEnd || len(ev.Messages) == 0 {
+				return
+			}
+			if err := agent.SaveSession(sessDir, &agent.SessionData{
+				Model:    option.Model,
+				Provider: option.Provider,
+				Messages: ev.Messages,
+			}); err != nil {
+				logger.Warnf("save session: %s", err)
+			}
+		})
+	}
+
 	rt.cleanup = func() {
 		scheduler.Stop()
 		if sessMgr != nil {
@@ -264,6 +294,9 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	a := agent.NewAgent(rt.Config.
 		WithSystemPrompt(rt.SystemPrompt).
 		WithStream(tui.AgentStreamingEnabled(option)))
+	if len(rt.ResumeMessages) > 0 {
+		a.LoadMessages(rt.ResumeMessages)
+	}
 
 	var result *agent.Result
 	if option.EvalCriteria != "" {
@@ -299,6 +332,9 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 	session := agent.NewAgent(rt.Config.
 		WithSystemPrompt(rt.SystemPrompt).
 		WithStream(tui.AgentStreamingEnabled(option)))
+	if len(rt.ResumeMessages) > 0 {
+		session.LoadMessages(rt.ResumeMessages)
+	}
 
 	repl := tui.NewAgentConsole(ctx, option, tui.AppInfo{
 		Provider:          rt.App.Provider,
