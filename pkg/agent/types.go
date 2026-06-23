@@ -6,10 +6,10 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -78,9 +78,9 @@ const (
 	EventToolExecutionStart EventType = "tool_execution_start"
 	EventToolExecutionEnd   EventType = "tool_execution_end"
 	EventTokenBudgetWarning EventType = "token_budget_warning"
-	EventEvalStart EventType = "eval_start"
-	EventEvalEnd   EventType = "eval_end"
-	EventEvalError EventType = "eval_error"
+	EventEvalStart          EventType = "eval_start"
+	EventEvalEnd            EventType = "eval_end"
+	EventEvalError          EventType = "eval_error"
 )
 
 type StopReason string
@@ -100,25 +100,26 @@ type Event struct {
 	ParentSessionID string
 	Turn            int
 	EmittedAt       time.Time
-	Request       *ChatCompletionRequest
-	Message       ChatMessage
-	Messages      []ChatMessage
-	NewMessages   []ChatMessage
-	ToolResults   []ChatMessage
-	ToolCallID    string
-	ToolName      string
-	Arguments     string
-	Result        string
-	IsError       bool
-	Err           error
-	StartedAt     time.Time // tool execution start time (set on ToolExecutionEnd)
-	Stop          StopReason
-	Usage         *Usage
-	ContextTokens int
-	EvalRound     int
-	EvalPass      bool
-	EvalReason    string
-	EvalError     string
+	Request         *ChatCompletionRequest
+	Message         ChatMessage
+	Messages        []ChatMessage
+	NewMessages     []ChatMessage
+	ToolResults     []ChatMessage
+	ToolCallID      string
+	ToolName        string
+	Arguments       string
+	Result          string
+	IsError         bool
+	Err             error
+	StartedAt       time.Time // tool execution start time (set on ToolExecutionEnd)
+	Stop            StopReason
+	Usage           *Usage
+	TotalUsage      *Usage // cumulative usage across all turns (set on TurnEnd/AgentEnd)
+	ContextTokens   int
+	EvalRound       int
+	EvalPass        bool
+	EvalReason      string
+	EvalError       string
 }
 
 type TransformContextFunc func([]ChatMessage) []ChatMessage
@@ -197,26 +198,26 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config                { c.Provider = p; return c }
-func (c Config) WithTools(t *commands.CommandRegistry) Config   { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config                     { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config              { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config        { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config                      { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config               { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config          { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[Event]) Config         { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config                    { c.MaxTokens = n; return c }
-func (c Config) WithTemperature(t float64) Config              { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config                   { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config                  { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config         { c.Expander = e; return c }
+func (c Config) WithProvider(p Provider) Config               { c.Provider = p; return c }
+func (c Config) WithTools(t *commands.CommandRegistry) Config { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config                    { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config             { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []ChatMessage) Config       { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                     { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config              { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config         { c.Logger = l; return c }
+func (c Config) WithBus(b *eventbus.Bus[Event]) Config        { c.Bus = b; return c }
+func (c Config) WithMaxTokens(n int) Config                   { c.MaxTokens = n; return c }
+func (c Config) WithTemperature(t float64) Config             { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config                  { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config                 { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config        { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
 }
-func (c Config) WithCacheRetention(r CacheRetention) Config    { c.CacheRetention = r; return c }
-func (c Config) WithSessionID(id string) Config                { c.SessionID = id; return c }
+func (c Config) WithCacheRetention(r CacheRetention) Config { c.CacheRetention = r; return c }
+func (c Config) WithSessionID(id string) Config             { c.SessionID = id; return c }
 func (c Config) WithResponseFormat(rf *ResponseFormat) Config {
 	c.ResponseFormat = rf
 	return c

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
 func runLoop(ctx context.Context, cfg Config) (*Result, error) {
@@ -41,6 +41,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		result.Stop = stop
 		if !ended {
 			ended = true
+			totalUsage := transcript.totalUsage
 			bus.Emit(Event{
 				Type:        EventAgentEnd,
 				Turn:        result.Turns,
@@ -48,6 +49,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				NewMessages: append([]ChatMessage(nil), result.NewMessages...),
 				Err:         result.Err,
 				Stop:        stop,
+				TotalUsage:  &totalUsage,
 			})
 		}
 		return result, err
@@ -140,7 +142,8 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.append(toolResults...)
 		}
 
-		bus.Emit(Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults, Usage: usage, ContextTokens: transcript.contextTokens})
+		totalUsageCopy := transcript.totalUsage
+		bus.Emit(Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults, Usage: usage, TotalUsage: &totalUsageCopy, ContextTokens: transcript.contextTokens})
 		transcript.completedTurns = turn
 
 		if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
@@ -238,7 +241,6 @@ func (t *transcript) result(output string, turns int, err error) *Result {
 		Err:           err,
 	}
 }
-
 
 type toolBatchResult struct {
 	messages  []ChatMessage
@@ -469,8 +471,6 @@ func afterToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc
 	return execution
 }
 
-
-
 func requestMessages(systemPrompt string, messages []ChatMessage, transform TransformContextFunc) []ChatMessage {
 	out := sanitizeMessages(append([]ChatMessage(nil), messages...))
 	if transform != nil {
@@ -494,7 +494,6 @@ func sanitizeMessages(msgs []ChatMessage) []ChatMessage {
 	}
 	return out
 }
-
 
 func messageContent(msg ChatMessage) string {
 	if msg.Content == nil {
@@ -522,7 +521,6 @@ func logAssistantAndUsage(logger telemetry.Logger, msg ChatMessage, usage *Usage
 func compactLogContent(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
-
 
 func schedulerActive(s *LoopScheduler) int {
 	if s == nil {
