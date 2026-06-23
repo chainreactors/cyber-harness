@@ -57,6 +57,7 @@ aiscan agent --resume .aiscan/sessions/2026-06-22_scan.json
 - 错误路径不再向 transcript 追加空 assistant 消息，防止 session 损坏
 - 统一 panic recovery 覆盖 tool 执行和 scan pipeline
 - 修复 passive scanner 包循环导入
+- PTY 兼容 Windows 7 / Server 2008（utils/pty 更新）
 
 ---
 

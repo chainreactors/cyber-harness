@@ -15,7 +15,7 @@ require (
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
 	github.com/chainreactors/sdk v0.3.4-0.20260616124448-4dee008baf5e
 	github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158
-	github.com/chainreactors/utils v0.0.0-20260529172343-6465cb8568b2
+	github.com/chainreactors/utils v0.0.0-20260620140628-4a3715583ae7
 	github.com/chainreactors/utils/pty v0.0.0-20260620140628-4a3715583ae7
 	github.com/chainreactors/zombie v1.2.3-0.20260616102212-9bcfed7622ab
 	github.com/charmbracelet/glamour v0.8.0
@@ -36,8 +36,8 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/ysmood/gson v0.7.3
 	golang.org/x/image v0.42.0
-	golang.org/x/sys v0.45.0
-	golang.org/x/term v0.43.0
+	golang.org/x/sys v0.46.0
+	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
 	sigs.k8s.io/yaml v1.6.0
@@ -280,7 +280,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
-	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
