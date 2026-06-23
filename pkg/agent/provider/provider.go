@@ -100,15 +100,16 @@ func inferImageSupport(provider, model string) bool {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	m := strings.ToLower(strings.TrimSpace(model))
 
-	switch p {
-	case "anthropic", "openai":
+	if isKnownMultimodalModel(m) {
 		return true
 	}
+	if isKnownTextOnlyModel(m) {
+		return false
+	}
 
-	for _, kw := range []string{"claude", "gpt", "gemini", "vision", "vl", "multimodal", "4o", "gpt-4-turbo"} {
-		if strings.Contains(m, kw) {
-			return true
-		}
+	switch p {
+	case "anthropic":
+		return true
 	}
 
 	return false
@@ -127,4 +128,67 @@ func NewProviderFromResolved(cfg *ProviderConfig) (Provider, error) {
 		return NewAnthropicProvider(cfg)
 	}
 	return NewOpenAIProvider(cfg)
+}
+
+// Model capability registry extracted from pi's models.generated.ts.
+// Check order: multimodal keywords first (more specific), then text-only
+// keywords (broader families). Unknown models fall through to provider defaults.
+
+var knownMultimodalKeywords = []string{
+	"claude",
+	"gemini",
+	"pixtral",
+	"gpt-4o",
+	"4o",
+	"gpt-4-turbo",
+	"nova-lite",
+	"nova-pro",
+	"nova-2",
+	"vision",
+	"vl",
+	"multimodal",
+}
+
+var knownTextOnlyKeywords = []string{
+	"deepseek",
+	"llama",
+	"qwen",
+	"glm",
+	"mistral",
+	"mixtral",
+	"ministral",
+	"magistral",
+	"minimax",
+	"grok",
+	"mimo",
+	"nemotron",
+	"codestral",
+	"devstral",
+	"kimi",
+	"gpt-oss",
+	"command-r",
+	"jamba",
+	"solar",
+	"nova-micro",
+	"o3-mini",
+	"seed-",
+	"step-",
+}
+
+func isKnownMultimodalModel(model string) bool {
+	for _, kw := range knownMultimodalKeywords {
+		if strings.Contains(model, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownTextOnlyModel(model string) bool {
+	for _, kw := range knownTextOnlyKeywords {
+		if strings.Contains(model, kw) {
+			return true
+		}
+	}
+	return false
 }

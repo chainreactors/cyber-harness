@@ -39,13 +39,18 @@ func (p *AnthropicProvider) supportsImages() bool {
 	return true
 }
 
+func (p *AnthropicProvider) DisableImages() {
+	v := false
+	p.config.Images = &v
+}
+
 func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	if req.Model == "" {
 		req.Model = p.config.Model
 	}
 	req.Stream = false
 	if !p.supportsImages() {
-		req.Messages = stripImageParts(req.Messages)
+		req.Messages = StripImageParts(req.Messages)
 	}
 
 	bodyBytes, err := p.marshalRequest(req)
@@ -77,7 +82,7 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 	}
 	req.Stream = true
 	if !p.supportsImages() {
-		req.Messages = stripImageParts(req.Messages)
+		req.Messages = StripImageParts(req.Messages)
 	}
 
 	bodyBytes, err := p.marshalRequest(req)

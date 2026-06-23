@@ -100,7 +100,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				continue
 			}
 			failure := NewTextMessage("assistant", "")
-			transcript.append(failure)
 			bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: failure})
 			bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: failure})
 			bus.Emit(Event{Type: EventTurnEnd, Turn: turn, Message: failure, Err: err})
@@ -451,12 +450,25 @@ func afterToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc
 
 
 func requestMessages(systemPrompt string, messages []ChatMessage, transform TransformContextFunc) []ChatMessage {
-	out := append([]ChatMessage(nil), messages...)
+	out := sanitizeMessages(append([]ChatMessage(nil), messages...))
 	if transform != nil {
 		out = transform(out)
 	}
 	if systemPrompt != "" {
 		out = append([]ChatMessage{NewTextMessage("system", systemPrompt)}, out...)
+	}
+	return out
+}
+
+func sanitizeMessages(msgs []ChatMessage) []ChatMessage {
+	out := make([]ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) == 0 &&
+			messageContent(m) == "" && len(m.ContentParts) == 0 &&
+			(m.ReasoningContent == nil || *m.ReasoningContent == "") {
+			continue
+		}
+		out = append(out, m)
 	}
 	return out
 }

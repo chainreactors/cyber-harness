@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -1148,5 +1150,328 @@ func TestNoFallbackWhenPrimarySucceeds(t *testing.T) {
 	}
 	if len(fallback.requestsSnapshot()) != 0 {
 		t.Fatal("fallback provider should not be called when primary succeeds")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error recovery & fault tolerance tests
+// ---------------------------------------------------------------------------
+
+// imageErrorProvider simulates a provider that returns 400 "image_url" errors
+// until DisableImages is called, then succeeds.
+type imageErrorProvider struct {
+	imagesDisabled atomic.Bool
+	callCount      atomic.Int32
+}
+
+func (p *imageErrorProvider) Name() string { return "image-error" }
+
+func (p *imageErrorProvider) DisableImages() {
+	p.imagesDisabled.Store(true)
+}
+
+func (p *imageErrorProvider) ChatCompletion(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	p.callCount.Add(1)
+	if p.imagesDisabled.Load() || !messagesContainImages(req.Messages) {
+		return chatResponse(NewTextMessage("assistant", "success without images")), nil
+	}
+	return nil, &APIError{StatusCode: 400, Message: "Invalid parameter: messages[5].content[1].type is not supported, unknown type: image_url"}
+}
+
+func messagesContainImages(msgs []ChatMessage) bool {
+	for _, m := range msgs {
+		for _, p := range m.ContentParts {
+			if p.Type == "image_url" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestSessionContinuesAfterLLMError(t *testing.T) {
+	callCount := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, fmt.Errorf("API error (400): server returned bad request")
+			}
+			return chatResponse(NewTextMessage("assistant", "recovered")), nil
+		},
+	}
+
+	a := NewAgent(Config{
+		Provider:   llm,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	_, err := a.Run(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("first Run() should fail")
+	}
+
+	result, err := a.Run(context.Background(), "try again")
+	if err != nil {
+		t.Fatalf("second Run() error = %v, want nil", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want 'recovered'", result.Output)
+	}
+}
+
+func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
+	callCount := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, fmt.Errorf("boom")
+			}
+			for _, msg := range req.Messages {
+				if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+					t.Errorf("found empty assistant message in request on call %d", callCount)
+				}
+			}
+			return chatResponse(NewTextMessage("assistant", "ok")), nil
+		},
+	}
+
+	a := NewAgent(Config{
+		Provider:   llm,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	a.Run(context.Background(), "hello")
+
+	a.mu.Lock()
+	for i, msg := range a.state.Messages {
+		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+			t.Errorf("state.Messages[%d] is empty assistant message", i)
+		}
+	}
+	a.mu.Unlock()
+
+	a.Run(context.Background(), "retry")
+}
+
+func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
+	var captured []*ChatCompletionRequest
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			captured = append(captured, cloneRequest(req))
+			return chatResponse(NewTextMessage("assistant", "ok")), nil
+		},
+	}
+
+	a := NewAgent(Config{
+		Provider:   llm,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	a.LoadMessages([]ChatMessage{
+		NewTextMessage("user", "first question"),
+		NewTextMessage("assistant", "first answer"),
+		NewTextMessage("user", "second question"),
+		NewTextMessage("assistant", ""), // stale error message from old session
+	})
+
+	result, err := a.Run(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "ok" {
+		t.Fatalf("output = %q, want 'ok'", result.Output)
+	}
+	if len(captured) == 0 {
+		t.Fatal("no requests captured")
+	}
+	for _, msg := range captured[0].Messages {
+		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+			t.Error("empty assistant message was NOT filtered from LLM request")
+		}
+	}
+}
+
+func TestImageErrorAutoRecovery(t *testing.T) {
+	imgProvider := &imageErrorProvider{}
+
+	a := NewAgent(Config{
+		Provider:   imgProvider,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	a.LoadMessages([]ChatMessage{
+		NewTextMessage("user", "take screenshot"),
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{{
+				ID: "tc1", Type: "function",
+				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "tc1",
+			ContentParts: []ContentPart{
+				provider.TextPart("Screenshot captured"),
+				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
+			},
+		},
+	})
+
+	result, err := a.Run(context.Background(), "analyze this")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.Output, "success") {
+		t.Fatalf("output = %q, want 'success without images'", result.Output)
+	}
+	if !imgProvider.imagesDisabled.Load() {
+		t.Fatal("DisableImages() was not called")
+	}
+}
+
+func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
+	imgProvider := &imageErrorProvider{}
+
+	a := NewAgent(Config{
+		Provider:   imgProvider,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	a.LoadMessages([]ChatMessage{
+		NewTextMessage("user", "take screenshot"),
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{{
+				ID: "tc1", Type: "function",
+				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "tc1",
+			ContentParts: []ContentPart{
+				provider.TextPart("Screenshot taken"),
+				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
+			},
+		},
+	})
+
+	result, err := a.Run(context.Background(), "analyze the screenshot")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil (image error should auto-recover)", err)
+	}
+	if result.Output != "success without images" {
+		t.Fatalf("output = %q, want 'success without images'", result.Output)
+	}
+	if !imgProvider.imagesDisabled.Load() {
+		t.Fatal("DisableImages() was not called on provider")
+	}
+	if got := imgProvider.callCount.Load(); got != 2 {
+		t.Fatalf("provider call count = %d, want 2 (initial + retry)", got)
+	}
+}
+
+func TestMultiTurnAfterImageError(t *testing.T) {
+	imgProvider := &imageErrorProvider{}
+
+	a := NewAgent(Config{
+		Provider:   imgProvider,
+		Model:      "test",
+		MaxRetries: 0,
+		Logger:     telemetry.NopLogger(),
+	})
+
+	a.LoadMessages([]ChatMessage{
+		NewTextMessage("user", "screenshot"),
+		{
+			Role:       "tool",
+			ToolCallID: "tc1",
+			ContentParts: []ContentPart{
+				provider.TextPart("img"),
+				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
+			},
+		},
+	})
+
+	result, err := a.Run(context.Background(), "analyze")
+	if err != nil {
+		t.Fatalf("first Run() error = %v", err)
+	}
+	if result.Output != "success without images" {
+		t.Fatalf("first output = %q", result.Output)
+	}
+
+	imgProvider.callCount.Store(0)
+	result, err = a.Run(context.Background(), "follow up")
+	if err != nil {
+		t.Fatalf("second Run() error = %v", err)
+	}
+	if got := imgProvider.callCount.Load(); got != 1 {
+		t.Fatalf("second run call count = %d, want 1 (no retry needed)", got)
+	}
+}
+
+func TestInferImageSupportModelRegistry(t *testing.T) {
+	tests := []struct {
+		provider string
+		model    string
+		want     bool
+	}{
+		{"openai", "claude-sonnet-4-20250514", true},
+		{"openai", "gemini-2.5-pro", true},
+		{"openai", "gpt-4o-2024-05-13", true},
+		{"openai", "gpt-4-turbo-2024-04-09", true},
+		{"openai", "pixtral-large-2411", true},
+		{"openai", "qwen-vl-plus", true},
+
+		{"openai", "deepseek-v4-pro", false},
+		{"openai", "deepseek-v4-flash", false},
+		{"openai", "Qwen3-235B-A22B", false},
+		{"openai", "glm-4.7", false},
+		{"openai", "mistral-large-2411", false},
+		{"openai", "llama-3.3-70b-instruct", false},
+		{"openai", "grok-3", false},
+		{"openai", "kimi-k2-thinking", false},
+		{"openai", "minimax-m2.7", false},
+		{"openai", "nemotron-3-super-120b", false},
+		{"openai", "o3-mini", false},
+		{"openai", "gpt-oss-120b", false},
+		{"openai", "codestral-latest", false},
+		{"openai", "devstral-2512", false},
+		{"openai", "mimo-v2-flash", false},
+		{"openai", "command-r-plus-08-2024", false},
+
+		{"anthropic", "some-unknown-model", true},
+		{"openai", "some-random-model", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
+			cfg := &ProviderConfig{
+				Provider: tt.provider,
+				Model:    tt.model,
+				APIKey:   "test-key",
+			}
+			resolved, err := ResolveProvider(cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if got := *resolved.Images; got != tt.want {
+				t.Errorf("inferImageSupport(%q, %q) = %v, want %v", tt.provider, tt.model, got, tt.want)
+			}
+		})
 	}
 }

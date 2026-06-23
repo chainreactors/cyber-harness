@@ -81,10 +81,7 @@ func ParseDataURI(dataURI string) (mediaType, base64Data string) {
 	return parts[0], parts[1]
 }
 
-// stripImageParts returns a copy of msgs with all image_url content parts
-// removed and replaced by a text notice.  Used when the target provider does
-// not support multimodal input.
-func stripImageParts(msgs []ChatMessage) []ChatMessage {
+func StripImageParts(msgs []ChatMessage) []ChatMessage {
 	out := make([]ChatMessage, len(msgs))
 	for i, m := range msgs {
 		if len(m.ContentParts) == 0 {
@@ -257,11 +254,21 @@ func (e *APIError) Error() string {
 
 func (e *APIError) IsRetryable() bool {
 	switch e.StatusCode {
-	case 401, 403, 404:
-		return false
+	case 429, 500, 502, 503, 529:
+		return true
 	default:
-		return e.StatusCode >= 400
+		return false
 	}
+}
+
+func IsImageUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "image_url") ||
+		strings.Contains(msg, "image url") ||
+		(strings.Contains(msg, "image") && strings.Contains(msg, "not support"))
 }
 
 type ChatCompletionStreamEvent struct {

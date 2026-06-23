@@ -33,13 +33,18 @@ func (p *OpenAIProvider) supportsImages() bool {
 	return false
 }
 
+func (p *OpenAIProvider) DisableImages() {
+	v := false
+	p.config.Images = &v
+}
+
 func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	if req.Model == "" {
 		req.Model = p.config.Model
 	}
 	req.Stream = false
 	if !p.supportsImages() {
-		req.Messages = stripImageParts(req.Messages)
+		req.Messages = StripImageParts(req.Messages)
 	}
 
 	bodyBytes, err := marshalOpenAIRequest(req)
@@ -70,7 +75,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 	}
 	req.Stream = true
 	if !p.supportsImages() {
-		req.Messages = stripImageParts(req.Messages)
+		req.Messages = StripImageParts(req.Messages)
 	}
 
 	bodyBytes, err := marshalOpenAIRequest(req)

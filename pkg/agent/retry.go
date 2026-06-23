@@ -8,8 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
+
+type imageDisabler interface {
+	DisableImages()
+}
 
 var errEmptyResponse = errors.New("empty response from LLM")
 
@@ -102,6 +107,19 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ChatMessage{}, nil, ctxErr
 		}
+
+		if provider.IsImageUnsupportedError(err) {
+			cfg.Logger.Warnf("provider does not support images, disabling and retrying")
+			if d, ok := cfg.Provider.(imageDisabler); ok {
+				d.DisableImages()
+			}
+			msg, usage, retryErr := requestAssistantMessageWithUsage(ctx, cfg, bus, messages, tools, turn)
+			if retryErr == nil {
+				return msg, usage, nil
+			}
+			return ChatMessage{}, nil, retryErr
+		}
+
 		if !isRetryableError(err) {
 			return ChatMessage{}, nil, err
 		}
