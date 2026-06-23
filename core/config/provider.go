@@ -68,6 +68,7 @@ func FallbackProviderConfigs(option *Option) []agent.ProviderConfig {
 			Model:    entry.Model,
 			Proxy:    entry.Proxy,
 			Timeout:  entry.Timeout,
+			Images:   entry.Images,
 		}
 		if cfg.Timeout <= 0 {
 			cfg.Timeout = 120

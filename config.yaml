@@ -8,16 +8,17 @@
 
 # LLM Options
 llm:
-  # LLM provider type: openai (default, OpenAI-compatible) or anthropic
+  # LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot
   provider: ""
-  # LLM API base URL
+  # LLM API base URL (leave empty to use provider default)
   base_url: ""
-  # LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)
+  # LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)
   api_key: ""
   # LLM model name
   model: ""
   # Proxy for LLM API requests
   proxy: ""
+  # Additional LLM providers for fallback or multi-model routing
   # providers:
   #   - provider: ""
   #     base_url: ""
@@ -25,6 +26,7 @@ llm:
   #     model: ""
   #     proxy: ""
   #     timeout: 0
+  #     images: ""
 
 # Scanner Options
 cyberhub:
