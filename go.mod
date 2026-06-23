@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/alecthomas/chroma/v2 v2.14.0
+	github.com/carapace-sh/carapace v1.7.1
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260615064219-7e07a99c93e0
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260616122548-b8e5ed3b1b40
@@ -11,6 +12,7 @@ require (
 	github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c
 	github.com/chainreactors/neutron v0.0.0-20260615055126-a9bbe4fc3e95
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe
+	github.com/chainreactors/proton v0.3.1-0.20260611174627-89c10c8c27e5
 	github.com/chainreactors/proxyclient v1.1.1-0.20260529172347-2a80e08d5593
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
 	github.com/chainreactors/sdk v0.3.4-0.20260616124448-4dee008baf5e
@@ -18,6 +20,7 @@ require (
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
 	github.com/chainreactors/utils/pty v0.0.0-20260623065725-737b33d61c6b
 	github.com/chainreactors/zombie v1.2.3-0.20260616102212-9bcfed7622ab
+	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/go-rod/rod v0.116.2
 	github.com/go-rod/stealth v0.4.9
@@ -80,15 +83,12 @@ require (
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
 	github.com/brianvoe/gofakeit/v7 v7.2.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
-	github.com/carapace-sh/carapace v1.7.1 // indirect
 	github.com/carapace-sh/carapace-shlex v1.0.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.0.0-20260615055126-a9bbe4fc3e95 // indirect
-	github.com/chainreactors/proton v0.3.1-0.20260611174627-89c10c8c27e5 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
-	github.com/charmbracelet/bubbles v1.0.0 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect

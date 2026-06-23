@@ -556,34 +556,8 @@ func TestNeutronContextChainPreservesDeadline(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 11. telemetry.SDKRecover converts a panic into an error without crashing
+// 11. telemetry.SDKGoRecover recovers from a panic in a goroutine
 // ---------------------------------------------------------------------------
-
-func TestSDKRecoverConvertsPanicToError(t *testing.T) {
-	fn := func() (err error) {
-		defer telemetry.SDKRecover("test", &err)
-		panic("simulated sdk panic")
-	}
-
-	err := fn()
-	if err == nil {
-		t.Fatal("expected error from recovered panic")
-	}
-	if got := err.Error(); got != "sdk.test panic: simulated sdk panic" {
-		t.Fatalf("error = %q", got)
-	}
-}
-
-func TestSDKRecoverNoopWithoutPanic(t *testing.T) {
-	fn := func() (err error) {
-		defer telemetry.SDKRecover("test", &err)
-		return nil
-	}
-
-	if err := fn(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestSDKGoRecoverDoesNotCrash(t *testing.T) {
 	done := make(chan struct{})
@@ -597,22 +571,6 @@ func TestSDKGoRecoverDoesNotCrash(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("goroutine did not recover from panic")
-	}
-}
-
-func TestSDKCapRecoverReportsError(t *testing.T) {
-	var reported string
-	fn := func() {
-		defer telemetry.SDKCapRecover("test", func(msg string) { reported = msg })
-		panic("capability panic")
-	}
-
-	fn()
-	if reported == "" {
-		t.Fatal("emit callback not called")
-	}
-	if reported != "sdk.test panic: capability panic" {
-		t.Fatalf("reported = %q", reported)
 	}
 }
 

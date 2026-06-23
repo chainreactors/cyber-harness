@@ -39,8 +39,15 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	}
 	p := &sources.Provider{}
 
-	if opts.FofaEmail != "" && opts.FofaKey != "" {
-		p.Fofa = append(p.Fofa, opts.FofaEmail+":"+opts.FofaKey)
+	// FOFA simplified auth (announced 2023): only the API key is required and the
+	// email never appears in the request URL. Accept key-only credentials while
+	// keeping the legacy "email:key" format compatible.
+	if opts.FofaKey != "" {
+		cred := opts.FofaKey
+		if opts.FofaEmail != "" {
+			cred = opts.FofaEmail + ":" + opts.FofaKey
+		}
+		p.Fofa = append(p.Fofa, cred)
 	}
 	if opts.HunterAPIKey != "" {
 		p.Hunter = append(p.Hunter, opts.HunterAPIKey)
@@ -51,6 +58,16 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	p.LoadProviderKeysFromEnv()
 
 	keys := p.GetKeys()
+	// uncover's GetKeys only populates the FofaEmail/FofaKey pair when the stored
+	// credential splits into exactly two "email:key" segments. A key-only credential
+	// therefore yields empty keys here; backfill it so key-only setups (config.yaml /
+	// --fofa-key / FOFA_KEY without an email) still resolve to a usable FofaKey.
+	if keys.FofaKey == "" && opts.FofaKey != "" {
+		keys.FofaKey = opts.FofaKey
+		if opts.FofaEmail != "" {
+			keys.FofaEmail = opts.FofaEmail
+		}
+	}
 
 	timeout := 600
 	limit := opts.Limit
@@ -76,7 +93,7 @@ func (e *UncoverEngine) detectSources() []string {
 		ok   bool
 	}
 	checks := []check{
-		{"fofa", e.keys.FofaEmail != "" && e.keys.FofaKey != ""},
+		{"fofa", e.keys.FofaKey != ""},
 		{"hunter", e.keys.HunterToken != ""},
 		{"shodan", e.keys.Shodan != ""},
 		{"shodan-idb", true},
@@ -157,8 +174,8 @@ type richFofaAgent struct{}
 func (a *richFofaAgent) Name() string { return "fofa" }
 
 func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
-	if session.Keys.FofaEmail == "" || session.Keys.FofaKey == "" {
-		return nil, errors.New("empty fofa keys")
+	if session.Keys.FofaKey == "" {
+		return nil, errors.New("empty fofa key")
 	}
 	results := make(chan sources.Result)
 	telemetry.SafeGo("uncover-fofa", func() {
