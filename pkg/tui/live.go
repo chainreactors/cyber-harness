@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/util"
 )
 
 const (
@@ -19,7 +20,11 @@ type LiveStatus struct {
 
 	status string
 	note   string
-	usage  *agent.Usage
+
+	turnUsage      *agent.Usage
+	completedUsage agent.Usage
+	contextTokens  int
+	contextWindow  int
 
 	tools map[string]agent.Event
 	order []string
@@ -44,6 +49,13 @@ func NewLiveStatus(view *LiveView, dim func(string) string, renderToolLine func(
 	}
 }
 
+func (l *LiveStatus) SetContextWindow(tokens int) {
+	if l == nil {
+		return
+	}
+	l.contextWindow = tokens
+}
+
 func (l *LiveStatus) Reset() {
 	if l == nil {
 		return
@@ -51,7 +63,9 @@ func (l *LiveStatus) Reset() {
 	l.Stop()
 	l.status = liveStatusThinking
 	l.note = ""
-	l.usage = nil
+	l.turnUsage = nil
+	l.completedUsage = agent.Usage{}
+	l.contextTokens = 0
 	l.tools = make(map[string]agent.Event)
 	l.order = nil
 }
@@ -62,25 +76,21 @@ func (l *LiveStatus) BeginTurn() {
 	}
 	l.status = liveStatusThinking
 	l.note = ""
-	l.usage = nil
+	l.turnUsage = nil
 	l.clearTools()
 	l.Render()
 }
 
-func (l *LiveStatus) SetUsage(usage *agent.Usage) {
-	if l == nil || usage == nil {
-		return
-	}
-	copied := *usage
-	l.usage = &copied
-}
-
-func (l *LiveStatus) SetTalking() {
+func (l *LiveStatus) MessageUpdate(event agent.Event, contentDelta bool) {
 	if l == nil {
 		return
 	}
-	l.status = liveStatusTalking
-	l.note = ""
+	l.setTurnUsage(event.Usage)
+	if contentDelta && !l.HasTools() {
+		l.status = liveStatusTalking
+		l.note = ""
+	}
+	l.Render()
 }
 
 func (l *LiveStatus) ShowEvalRound(round int) {
@@ -122,6 +132,31 @@ func (l *LiveStatus) UpdateTool(event agent.Event) (tracked bool, done bool) {
 	}
 	l.Render()
 	return true, false
+}
+
+func (l *LiveStatus) FinishTurn(event agent.Event) {
+	if l == nil {
+		return
+	}
+	switch {
+	case event.TotalUsage != nil:
+		l.completedUsage = *event.TotalUsage
+	case event.Usage != nil:
+		l.addCompleted(event.Usage)
+	}
+	if event.ContextTokens > 0 {
+		l.contextTokens = event.ContextTokens
+	} else if event.Usage != nil && event.Usage.PromptTokens > 0 {
+		l.contextTokens = event.Usage.PromptTokens
+	}
+	l.turnUsage = nil
+}
+
+func (l *LiveStatus) FinishAgent(event agent.Event) {
+	if l == nil || event.TotalUsage == nil {
+		return
+	}
+	l.completedUsage = *event.TotalUsage
 }
 
 func (l *LiveStatus) HasTools() bool {
@@ -203,7 +238,7 @@ func (l *LiveStatus) lines() []string {
 func (l *LiveStatus) statusLine() string {
 	line := spinnerSentinel + " " + fmt.Sprintf("%-*s", liveStatusWidth, l.Status())
 	var details []string
-	if usage := formatLiveTokenUsage(l.usage); usage != "" {
+	if usage := l.formatTokenDetails(); usage != "" {
 		details = append(details, l.dim(usage))
 	}
 	if l.note != "" {
@@ -225,6 +260,90 @@ func (l *LiveStatus) toolLines() []string {
 		}
 	}
 	return lines
+}
+
+func (l *LiveStatus) setTurnUsage(usage *agent.Usage) {
+	if usage == nil {
+		return
+	}
+	copied := *usage
+	l.turnUsage = &copied
+}
+
+func (l *LiveStatus) addCompleted(usage *agent.Usage) {
+	if usage == nil {
+		return
+	}
+	l.completedUsage.PromptTokens += usage.PromptTokens
+	l.completedUsage.CompletionTokens += usage.CompletionTokens
+	l.completedUsage.TotalTokens += usageTotal(usage)
+	l.completedUsage.CacheReadTokens += usage.CacheReadTokens
+	l.completedUsage.CacheWriteTokens += usage.CacheWriteTokens
+}
+
+func (l *LiveStatus) formatTokenDetails() string {
+	total := usageTotal(&l.completedUsage)
+	output := 0
+	contextTokens := l.contextTokens
+	if l.turnUsage != nil {
+		total += usageTotal(l.turnUsage)
+		output = l.turnUsage.CompletionTokens
+		if l.turnUsage.PromptTokens > 0 {
+			contextTokens = l.turnUsage.PromptTokens
+		}
+	}
+	if total == 0 && output == 0 && contextTokens == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, 3)
+	if total > 0 {
+		parts = append(parts, "tokens="+util.FormatNumber(total))
+	}
+	if context := l.ContextUsage(contextTokens); context != "" {
+		parts = append(parts, context)
+	}
+	if output > 0 {
+		parts = append(parts, "out="+util.FormatNumber(output))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (l *LiveStatus) ContextUsage(tokens int) string {
+	if l == nil {
+		return ""
+	}
+	if tokens <= 0 {
+		tokens = l.contextTokens
+	}
+	if tokens <= 0 || l.contextWindow <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("ctx=%s/%s (%s)",
+		util.FormatNumber(tokens),
+		util.FormatNumber(l.contextWindow),
+		formatUsagePercent(tokens, l.contextWindow))
+}
+
+func usageTotal(usage *agent.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.PromptTokens + usage.CompletionTokens
+}
+
+func formatUsagePercent(used, total int) string {
+	if used <= 0 || total <= 0 {
+		return "0%"
+	}
+	pct := float64(used) / float64(total) * 100
+	if pct > 0 && pct < 1 {
+		return "<1%"
+	}
+	return fmt.Sprintf("%.0f%%", pct)
 }
 
 func (l *LiveStatus) clearTools() {

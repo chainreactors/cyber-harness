@@ -187,6 +187,77 @@ func TestThinkingLineShowsTokenUsage(t *testing.T) {
 	}
 }
 
+func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
+	}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type:  agent.EventMessageUpdate,
+		Turn:  1,
+		Usage: &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
+		Message: agent.ChatMessage{
+			Role: "assistant",
+		},
+	})
+	o.HandleEvent(agent.Event{
+		Type:          agent.EventTurnEnd,
+		Turn:          1,
+		Usage:         &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
+		TotalUsage:    &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
+		ContextTokens: 400,
+		Message:       agent.ChatMessage{Role: "assistant"},
+	})
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 2})
+	o.HandleEvent(agent.Event{
+		Type:  agent.EventMessageUpdate,
+		Turn:  2,
+		Usage: &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 2000},
+		Message: agent.ChatMessage{
+			Role: "assistant",
+		},
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "tokens=3,000") {
+		t.Fatalf("live line missing cumulative tokens: %q", got)
+	}
+	if !strings.Contains(got, "ctx=4,096/8,192 (50%)") {
+		t.Fatalf("live line missing context percentage: %q", got)
+	}
+	if !strings.Contains(got, "out=50") {
+		t.Fatalf("live line missing current output tokens: %q", got)
+	}
+}
+
+func TestTurnStatsShowsContextWindowUse(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
+	}, &stdout, &stderr, true)
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type:          agent.EventTurnEnd,
+		Turn:          1,
+		Usage:         &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 4146},
+		TotalUsage:    &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 4146},
+		ContextTokens: 4096,
+		Message:       agent.ChatMessage{Role: "assistant"},
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "turn 1") ||
+		!strings.Contains(got, "input=4,096 output=50") ||
+		!strings.Contains(got, "ctx=4,096/8,192 (50%)") {
+		t.Fatalf("turn stats missing context window use: %q", got)
+	}
+}
+
 func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)

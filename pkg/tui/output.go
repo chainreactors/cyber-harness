@@ -37,7 +37,6 @@ type AgentOutput struct {
 	color     output.Color
 	debug     bool
 	verbosity int
-	tools     map[string]agent.Event
 
 	stream  *StreamWriter
 	aborted bool
@@ -90,6 +89,7 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	debug := false
 	verbosity := 0
 	noColor := false
+	model := ""
 	if option != nil {
 		debug = option.Debug
 		verbosity = len(option.Verbose)
@@ -97,6 +97,7 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 			verbosity = -1
 		}
 		noColor = option.NoColor
+		model = option.Model
 	}
 	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
@@ -110,6 +111,7 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 		tty:       stderrTTY,
 	}
 	o.live = NewLiveStatus(lv, o.dim, o.renderToolLine)
+	o.live.SetContextWindow(agent.ModelContextWindow(model))
 	return o
 }
 
@@ -331,7 +333,6 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		}
 
 	case agent.EventMessageUpdate:
-		o.live.SetUsage(event.Usage)
 		contentDelta := o.stream.WouldPrintContentDelta(event.Message.Content)
 		visible := o.stream.WouldPrintDelta(event.Message.Content, event.Message.ReasoningContent)
 		if o.verbosity >= 0 {
@@ -347,11 +348,8 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 				writeDelta()
 			}
 		}
-		if o.canAnimate() && !o.live.HasTools() {
-			if contentDelta {
-				o.live.SetTalking()
-			}
-			o.live.Render()
+		if o.canAnimate() {
+			o.live.MessageUpdate(event, contentDelta)
 		}
 
 	case agent.EventToolExecutionStart:
@@ -404,9 +402,11 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		}
 
 	case agent.EventTurnEnd:
+		o.live.FinishTurn(event)
 		o.stopLive()
 		o.turnEnd(event)
 	case agent.EventAgentEnd:
+		o.live.FinishAgent(event)
 		o.stopLive()
 		o.agentEnd(event)
 	case agent.EventEvalStart:
@@ -626,6 +626,9 @@ func (o *AgentOutput) renderTurnStats(w io.Writer, event agent.Event) {
 	}
 	if event.Usage != nil {
 		parts = append(parts, formatTokenUsage(event.Usage))
+	}
+	if context := o.live.ContextUsage(event.ContextTokens); context != "" {
+		parts = append(parts, context)
 	}
 	parts = append(parts, util.FormatDuration(elapsed))
 	fmt.Fprintln(w, o.dim("  ["+strings.Join(parts, " | ")+"]"))

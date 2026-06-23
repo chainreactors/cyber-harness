@@ -217,20 +217,6 @@ func formatTokenUsage(u *agent.Usage) string {
 	return s
 }
 
-func formatLiveTokenUsage(u *agent.Usage) string {
-	if u == nil {
-		return ""
-	}
-	total := u.TotalTokens
-	if total == 0 {
-		total = u.PromptTokens + u.CompletionTokens
-	}
-	if total == 0 {
-		return ""
-	}
-	return "tokens=" + util.FormatNumber(total)
-}
-
 // ---------------------------------------------------------------------------
 // Chat message summarisation helpers
 // ---------------------------------------------------------------------------
