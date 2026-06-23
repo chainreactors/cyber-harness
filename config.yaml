@@ -1,72 +1,105 @@
 # aiscan 配置文件
 #
-# 编译时: build.sh 读取此文件，通过 ldflags 将配置固化到二进制
-# 运行时: aiscan 自动加载 ./config.yaml 或 ~/.config/aiscan/config.yaml
-# 优先级: CLI 参数 > 环境变量 > 配置文件（-c 或默认路径）> 编译时固化值
+# 运行时: aiscan 自动加载 ./config.yaml 或 <二进制所在目录>/config.yaml
+# 优先级: CLI 参数 > 环境变量 > 配置文件 > 默认值
+# 生成:   aiscan --init
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
 
-# LLM Provider 配置
+# LLM Options
 llm:
-  # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic
-  # 环境变量: AISCAN_PROVIDER / AISCAN_LLM_PROVIDER
+  # LLM provider type: openai (default, OpenAI-compatible) or anthropic
   provider: ""
-  # API base URL（留空使用 provider 默认值）
-  # 环境变量: AISCAN_BASE_URL / AISCAN_BASEURL / AISCAN_LLM_BASE_URL / AISCAN_LLM_BASEURL
-  # OpenAI/Codex 风格: OPENAI_BASE_URL / OPENAI_BASEURL
-  # Claude Code 风格: ANTHROPIC_BASE_URL / ANTHROPIC_BASEURL
+  # LLM API base URL
   base_url: ""
-  # API key（建议使用环境变量而非写入文件）
-  # 环境变量: AISCAN_API_KEY / Provider 对应 API key 变量（如 OPENAI_API_KEY）
+  # LLM API key (or set env: OPENAI_API_KEY, AISCAN_API_KEY)
   api_key: ""
-  # 模型名称
-  # 环境变量: AISCAN_MODEL / AISCAN_LLM_MODEL
-  # OpenAI/Codex 风格: OPENAI_MODEL
-  # Claude Code 风格: ANTHROPIC_MODEL
+  # LLM model name
   model: ""
-  # 访问 LLM API 的 HTTP proxy
-  # 环境变量: AISCAN_LLM_PROXY
+  # Proxy for LLM API requests
+  proxy: ""
+  # providers:
+  #   - provider: ""
+  #     base_url: ""
+  #     api_key: ""
+  #     model: ""
+  #     proxy: ""
+  #     timeout: 0
+
+# Scanner Options
+cyberhub:
+  # Cyberhub server URL for loading fingers/templates
+  url: ""
+  # Cyberhub API key
+  key: ""
+  # Cyberhub resource mode: merge or override
+  mode: ""
+  # Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)
   proxy: ""
 
-# Cyberhub 资源服务
-cyberhub:
-  url: ""
-  key: ""
-  # merge 或 override
-  mode: ""
+# Agent Options
+agent:
+  # Optional tool groups to enable (search, browser). Arsenal is always loaded
+  # tools: []
+  # Overall timeout in seconds
+  timeout: 3600
+  # Goal evaluation criteria — an independent LLM evaluates whether the task was achieved
+  eval_criteria: ""
+  # Model for goal evaluation (defaults to main model)
+  eval_model: ""
+  # Max goal evaluation retry rounds
+  eval_retries: 3
+  # AIScan web server URL for remote REPL and PTY access
+  web_url: ""
+  # Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)
+  save_session: false
 
-# IOA 协作
+# IOA Options
 ioa:
+  # IOA server URL (supports http://token@host:port for auth)
   url: ""
-  db: ""
+  # IOA server access key (for 'ioa serve'; auto-generated if empty)
+  token: ""
+  # IOA node name when auto-registering
   node_name: ""
-  space: ""
+  # IOA space name
+  space: "default"
 
-# 扫描默认值
+# Recon Options
+recon:
+  # FOFA account email for passive recon (or set env FOFA_EMAIL)
+  fofa_email: ""
+  # FOFA API key for passive recon (or set env FOFA_KEY)
+  fofa_key: ""
+  # Hunter web token (rarely needed; prefer hunter-api-key)
+  hunter_token: ""
+  # Hunter API key (64-hex from console) (or env HUNTER_API_KEY)
+  hunter_api_key: ""
+  # Outbound proxy for passive recon (socks5://host:port for hunter via mainland)
+  proxy: ""
+  # Per-query asset limit for passive recon (0 = unlimited)
+  limit: 0
+
+# Miscellaneous Options
+misc:
+  # Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)
+  data_dir: ""
+  # Enable debug logging
+  debug: false
+  # Quiet mode — only show final result
+  quiet: false
+  # Disable ANSI colors in scanner output
+  no_color: false
+
 scan:
-  # auto, off, low, medium, high, critical
   verify: ""
-  # 单次验证超时秒数（0 表示不覆盖）
   verify_timeout: 0
+
 
 # 搜索
 search:
-  # Tavily API keys（逗号分隔，留空则 fallback 到 DuckDuckGo）
+  # Tavily API keys (逗号分隔，留空则 fallback 到 DuckDuckGo)
   tavily_keys: ""
-  # search tavily 请求代理（如 http://127.0.0.1:7890 或 socks5://...）
-  proxy: ""
-
-# 被动信息收集
-recon:
-  fofa_email: ""
-  fofa_key: ""
-  hunter_api_key: ""
-
-# 通用选项
-misc:
-  debug: false
-  quiet: false
-  no_color: false
 
 # 以下仅 build.sh 使用
 build:
