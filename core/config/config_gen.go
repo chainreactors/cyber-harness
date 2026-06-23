@@ -13,6 +13,25 @@ const configFileHeader = `# aiscan 配置文件
 # 生成:   aiscan --init
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
+#
+# LLM 配置支持两种格式:
+#   格式一 — 单 provider 简写（兼容旧配置）:
+#     llm:
+#       provider: deepseek
+#       api_key: sk-...
+#       model: deepseek-chat
+#
+#   格式二 — providers 列表（第一个为主 provider，其余为 fallback）:
+#     llm:
+#       providers:
+#         - provider: deepseek
+#           api_key: sk-...
+#           model: deepseek-chat
+#         - provider: openai
+#           api_key: sk-...
+#           model: gpt-4o
+#
+#   两种可混用：单字段设为主 provider，providers 列表设为 fallback
 
 `
 

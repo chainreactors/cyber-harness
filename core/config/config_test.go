@@ -602,6 +602,75 @@ llm:
 	})
 }
 
+func TestProvidersListOnly(t *testing.T) {
+	option := Option{}
+	option.Providers = []LLMProviderEntry{
+		{Provider: "deepseek", APIKey: "key1", Model: "deepseek-chat"},
+		{Provider: "openai", APIKey: "key2", Model: "gpt-4o"},
+	}
+
+	primary := ProviderConfig(&option)
+	if primary.Provider != "deepseek" || primary.APIKey != "key1" || primary.Model != "deepseek-chat" {
+		t.Errorf("primary should be providers[0], got %+v", primary)
+	}
+
+	fallbacks := FallbackProviderConfigs(&option)
+	if len(fallbacks) != 1 || fallbacks[0].Provider != "openai" || fallbacks[0].Model != "gpt-4o" {
+		t.Errorf("fallback should be providers[1:], got %+v", fallbacks)
+	}
+}
+
+func TestProvidersListWithSingleFields(t *testing.T) {
+	option := Option{}
+	option.Provider = "anthropic"
+	option.APIKey = "cli-key"
+	option.Providers = []LLMProviderEntry{
+		{Provider: "deepseek", APIKey: "fb1", Model: "deepseek-chat"},
+	}
+
+	primary := ProviderConfig(&option)
+	if primary.Provider != "anthropic" || primary.APIKey != "cli-key" {
+		t.Errorf("single fields should win when set, got %+v", primary)
+	}
+
+	fallbacks := FallbackProviderConfigs(&option)
+	if len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" {
+		t.Errorf("providers should be fallback when single fields set, got %+v", fallbacks)
+	}
+}
+
+func TestProvidersListFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
+llm:
+  providers:
+    - provider: deepseek
+      api_key: dk-111
+      model: deepseek-chat
+    - provider: openai
+      api_key: sk-222
+      model: gpt-4o
+`)
+
+	var opt Option
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
+		t.Fatal(err)
+	}
+	if len(opt.Providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(opt.Providers))
+	}
+
+	primary := ProviderConfig(&opt)
+	if primary.Provider != "deepseek" || primary.APIKey != "dk-111" {
+		t.Errorf("primary from list: %+v", primary)
+	}
+
+	fallbacks := FallbackProviderConfigs(&opt)
+	if len(fallbacks) != 1 || fallbacks[0].APIKey != "sk-222" {
+		t.Errorf("fallbacks from list: %+v", fallbacks)
+	}
+}
+
 func withDefaults(t *testing.T, fn func()) {
 	t.Helper()
 	saved := []*string{

@@ -34,7 +34,30 @@ func defaultProviderConfig() agent.ProviderConfig {
 	}
 }
 
+func hasSingleProviderFields(option *Option) bool {
+	return option.Provider != "" || option.BaseURL != "" || option.APIKey != "" || option.Model != ""
+}
+
+func entryToProviderConfig(entry LLMProviderEntry) agent.ProviderConfig {
+	cfg := agent.ProviderConfig{
+		Provider: entry.Provider,
+		BaseURL:  entry.BaseURL,
+		APIKey:   entry.APIKey,
+		Model:    entry.Model,
+		Proxy:    entry.Proxy,
+		Timeout:  entry.Timeout,
+		Images:   entry.Images,
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 120
+	}
+	return cfg
+}
+
 func ProviderConfig(option *Option) agent.ProviderConfig {
+	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
+		return entryToProviderConfig(option.Providers[0])
+	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
 		cfg.Provider = option.Provider
@@ -59,21 +82,16 @@ func ProviderConfig(option *Option) agent.ProviderConfig {
 }
 
 func FallbackProviderConfigs(option *Option) []agent.ProviderConfig {
+	if !hasSingleProviderFields(option) && len(option.Providers) > 1 {
+		var configs []agent.ProviderConfig
+		for _, entry := range option.Providers[1:] {
+			configs = append(configs, entryToProviderConfig(entry))
+		}
+		return configs
+	}
 	var configs []agent.ProviderConfig
 	for _, entry := range option.Providers {
-		cfg := agent.ProviderConfig{
-			Provider: entry.Provider,
-			BaseURL:  entry.BaseURL,
-			APIKey:   entry.APIKey,
-			Model:    entry.Model,
-			Proxy:    entry.Proxy,
-			Timeout:  entry.Timeout,
-			Images:   entry.Images,
-		}
-		if cfg.Timeout <= 0 {
-			cfg.Timeout = 120
-		}
-		configs = append(configs, cfg)
+		configs = append(configs, entryToProviderConfig(entry))
 	}
 	return configs
 }
