@@ -96,7 +96,7 @@ Interactive shells (`su`, `python`, `mysql` prompts) do not work. Use "one comma
 Both shell commands and pseudo-commands support **single pipes** (`|`). The pipe runs the pseudo-command in-process, captures its output, then feeds it as stdin to the shell pipeline via `sh -c`:
 ```bash
 # pseudo-command piped to shell filters — works natively
-found -i . -c keys | grep critical
+proton -i . -c keys | grep critical
 scan -i target -j | head -20
 spray -u http://target | grep -E "200|301" | wc -l
 gogo -i 192.168.1.0/24 | awk '{print $1}' | sort | uniq -c | sort -rn

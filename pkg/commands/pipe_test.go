@@ -42,7 +42,7 @@ func newBashWithPseudo(dir string, cmds ...*outputCommand) *commands.BashTool {
 	return bash
 }
 
-const foundOutput = `[critical] aws-access-key  .aws/credentials
+const sampleOutput = `[critical] aws-access-key  .aws/credentials
 [info] generic-api-key  src/config.js
 [high] github-pat  .env.production
 [critical] stripe-secret  payment/handler.go
@@ -55,9 +55,9 @@ func TestPseudoPipeGrep(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | grep critical`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | grep critical`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,9 +81,9 @@ func TestPseudoPipeHead(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | head -2`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | head -2`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,9 +102,9 @@ func TestPseudoPipeWc(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | wc -l`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | wc -l`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,9 +122,9 @@ func TestPseudoPipeChain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | grep -v info | wc -l`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | grep -v info | wc -l`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,9 +142,9 @@ func TestPseudoPipeAwk(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | awk '{print $1}' | sort | uniq -c | sort -rn`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | awk '{print $1}' | sort | uniq -c | sort -rn`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,11 +165,11 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: foundOutput})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	// The regex "critical|high" is inside quotes — the | in the regex should not
 	// be treated as a pipe delimiter.
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i . | grep -E "critical|high"`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | grep -E "critical|high"`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,9 +185,9 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 // ---------- Test 7: || (logical OR) still rejected ----------
 
 func TestDoublesPipeStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: "ok"})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
-	_, err := bash.Execute(context.Background(), bashArgs(`found -i . || echo fallback`))
+	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . || echo fallback`))
 	if err == nil {
 		t.Fatal("expected error for ||, got nil")
 	}
@@ -197,9 +197,9 @@ func TestDoublesPipeStillRejected(t *testing.T) {
 // ---------- Test 8: && still rejected ----------
 
 func TestChainStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: "ok"})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
-	_, err := bash.Execute(context.Background(), bashArgs(`found -i . && echo next`))
+	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . && echo next`))
 	if err == nil {
 		t.Fatal("expected error for &&, got nil")
 	}
@@ -209,9 +209,9 @@ func TestChainStillRejected(t *testing.T) {
 // ---------- Test 9: > redirection still rejected ----------
 
 func TestRedirectionStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: "ok"})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
-	_, err := bash.Execute(context.Background(), bashArgs(`found -i . > out.txt`))
+	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . > out.txt`))
 	if err == nil {
 		t.Fatal("expected error for >, got nil")
 	}
@@ -221,9 +221,9 @@ func TestRedirectionStillRejected(t *testing.T) {
 // ---------- Test 10: no pipe — existing behavior preserved ----------
 
 func TestNoPipeStillWorks(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: "all findings here\n"})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "all findings here\n"})
 
-	res, err := bash.Execute(context.Background(), bashArgs(`found -i .`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -i .`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestShellPipeStillWorks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "found", output: "x"})
+	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "x"})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`echo -e "line1\nline2\nline3" | wc -l`))
 	if err != nil {
@@ -256,12 +256,12 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	cmd := &outputCommand{name: "found", output: "match\n"}
+	cmd := &outputCommand{name: "sample", output: "match\n"}
 	bash := newBashWithPseudo(t.TempDir(), cmd)
 
 	// -e "a|b" — the | inside quotes is part of the regex, not a pipe.
 	// This should run without pipe splitting.
-	res, err := bash.Execute(context.Background(), bashArgs(`found -e "a|b"`))
+	res, err := bash.Execute(context.Background(), bashArgs(`sample -e "a|b"`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

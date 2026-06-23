@@ -175,15 +175,14 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 		workDir = m.workDir
 	}
 
-	token := firstCommandToken(cmdLine)
-
 	resolve := m.commands
+	token := firstCommandToken(cmdLine)
+	leftPart, rightPart, hasPipe := splitPipeline(cmdLine)
 
 	if resolve != nil && token != "" {
+		// pseudo | shell  (left side is a pseudo-command)
 		if cmd, ok := resolve(token); ok {
-			pseudoPart, shellPipeline, hasPipe := splitPipeline(cmdLine)
-
-			tokens, err := SplitCommandLine(pseudoPart)
+			tokens, err := SplitCommandLine(leftPart)
 			if err != nil {
 				return Info{}, err
 			}
@@ -192,33 +191,19 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 					return Info{}, valErr
 				}
 			}
-
 			name := opts.Name
 			if name == "" {
 				name = token
 			}
 			args := tokens[1:]
 
-			if hasPipe && shellPipeline != "" {
-				return m.runPipedPseudo(opts.Ctx, cmd, args, shellPipeline, name, timeout, workDir, opts.Env)
+			if hasPipe && rightPart != "" {
+				return m.runPipedPseudo(opts.Ctx, cmd, args, rightPart, name, timeout, workDir, opts.Env)
 			}
-
-			return m.CreateFunc(opts.Ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
-				if m.beforeExec != nil {
-					m.beforeExec(w)
-				}
-				if m.afterExec != nil {
-					defer m.afterExec()
-				}
-				return cmd.Execute(ctx, args)
-			})
+			return m.createPseudo(opts.Ctx, cmd, args, name, timeout)
 		}
-	}
 
-	// Check for "shell | pseudo" pattern: first token is not a pseudo-command,
-	// but after a pipe there is one.
-	if resolve != nil {
-		leftPart, rightPart, hasPipe := splitPipeline(cmdLine)
+		// shell | pseudo  (right side is a pseudo-command)
 		if hasPipe && rightPart != "" {
 			rightToken := firstCommandToken(rightPart)
 			if cmd, ok := resolve(rightToken); ok {
@@ -241,6 +226,19 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 	}
 
 	return m.Create(workDir, cmdLine, opts.Name, timeout, opts.Env, "")
+}
+
+// createPseudo runs a pseudo-command in-process without pipes.
+func (m *Manager) createPseudo(ctx context.Context, cmd Command, args []string, name string, timeout time.Duration) (Info, error) {
+	return m.CreateFunc(ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
+		if m.beforeExec != nil {
+			m.beforeExec(w)
+		}
+		if m.afterExec != nil {
+			defer m.afterExec()
+		}
+		return cmd.Execute(ctx, args)
+	})
 }
 
 // runPipedPseudo runs a pseudo-command in-process, captures its output,

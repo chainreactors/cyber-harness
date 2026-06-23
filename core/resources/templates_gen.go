@@ -206,6 +206,14 @@ func parser(key string) []byte {
 		return loadRawFiles("zombie/rule")
 	case "zombie_template":
 		return loadZombieTemplates("neutron")
+	case "found_keys":
+		return recuLoadPoc("found/keys")
+	case "found_spray":
+		return recuLoadPoc("found/spray")
+	case "found_filter_ext":
+		return loadYAMLFile("found/filters/extensions.yaml")
+	case "found_filter_dir":
+		return loadYAMLFile("found/filters/directories.yaml")
 	default:
 		panic("illegal key: " + key)
 	}
@@ -239,6 +247,7 @@ func main() {
 			"port", "extract", "workflow", "neutron",
 			"spray_rule", "spray_dict", "spray_common",
 			"zombie_common", "zombie_default", "zombie_rule", "zombie_template",
+			"found_keys", "found_spray", "found_filter_ext", "found_filter_dir",
 		}
 	} else {
 		needs = strings.Split(*need, ",")

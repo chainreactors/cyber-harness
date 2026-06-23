@@ -383,6 +383,12 @@ func (s *Set) ZombieConfig(name string) []byte {
 	return cloneBytes(s.zombieConfigs[name])
 }
 
+// ProtonConfig returns proton/found template data by category name.
+// Used as ResourceProvider for sdk/proton.Config.
+func ProtonConfig(name string) []byte {
+	return loadEmbeddedConfig(name)
+}
+
 func cloneBytes(data []byte) []byte {
 	if len(data) == 0 {
 		return nil
