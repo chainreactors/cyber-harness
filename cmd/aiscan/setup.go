@@ -94,7 +94,6 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 		ScannerProxy: scanCfg.Proxy,
 		ScanOpts:     scanOpts,
 		Logger:       logger,
-		Model:        model,
 		TavilyKeys:   toolCfg.TavilyKeys,
 	}
 	if engineSet != nil {

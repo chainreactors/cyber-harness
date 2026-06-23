@@ -141,7 +141,6 @@ func initCoreCommands(rc cfg.RuntimeConfig, llmProvider agent.Provider, skillSto
 		BashTimeout: rc.Tools.BashTimeout,
 		SkillStore:  skillStore,
 		Provider:    llmProvider,
-		Model:       rc.Provider.Config.Model,
 		Logger:      logger,
 		TavilyKeys:  rc.Tools.TavilyKeys,
 	}
