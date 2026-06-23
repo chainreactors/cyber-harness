@@ -251,7 +251,6 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 	toolCalls := assistantMsg.ToolCalls
 	slots := make([]toolCallSlot, len(toolCalls))
 
-	// Phase 1: preflight all tool calls sequentially (emit start events, check beforeToolCall)
 	for i, tc := range toolCalls {
 		cfg.Logger.Infof("[turn %d] tool_call id=%s name=%s args=%q", turn, tc.ID, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
 		bus.Emit(Event{
@@ -261,62 +260,24 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			ToolName:   tc.Function.Name,
 			Arguments:  tc.Function.Arguments,
 		})
-
-		mode := commands.ExecSequential
-		if tool, ok := cfg.Tools.GetTool(tc.Function.Name); ok {
-			if pa, ok := tool.(commands.ParallelSafe); ok {
-				mode = pa.ExecutionMode()
-			}
-		}
-
-		slots[i] = toolCallSlot{tc: tc, mode: mode}
+		slots[i] = toolCallSlot{tc: tc}
 	}
 
-	// Phase 2: execute tools — parallel-safe tools run concurrently, sequential tools run in order
-	hasParallel := false
-	for _, s := range slots {
-		if s.mode == commands.ExecParallel {
-			hasParallel = true
-			break
-		}
-	}
-
-	if hasParallel {
-		var wg sync.WaitGroup
-		for i := range slots {
-			if slots[i].mode == commands.ExecParallel {
-				wg.Add(1)
-				go func(idx int) {
-					defer wg.Done()
-					slots[idx].startedAt = time.Now()
-					slots[idx].result = runToolCall(ctx, cfg, assistantMsg, slots[idx].tc, turn)
-				}(i)
-			}
-		}
-		wg.Wait()
-		if ctx.Err() != nil {
-			return toolBatchResult{}, ctx.Err()
-		}
-		for i := range slots {
-			if ctx.Err() != nil {
-				return toolBatchResult{}, ctx.Err()
-			}
-			if slots[i].mode == commands.ExecSequential {
-				slots[i].startedAt = time.Now()
-				slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc, turn)
-			}
-		}
-	} else {
-		for i := range slots {
-			if ctx.Err() != nil {
-				return toolBatchResult{}, ctx.Err()
-			}
+	sem := make(chan struct{}, cfg.MaxParallelTools)
+	var wg sync.WaitGroup
+	for i := range slots {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
 			slots[i].startedAt = time.Now()
 			slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc, turn)
-		}
+		}()
 	}
+	wg.Wait()
 
-	// Phase 3: emit results in original order
+	// Emit results in original order.
 	messages := make([]ChatMessage, 0, len(slots))
 	terminations := 0
 	for _, s := range slots {
@@ -348,7 +309,6 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 
 type toolCallSlot struct {
 	tc        ToolCall
-	mode      commands.ExecutionMode
 	result    toolExecution
 	startedAt time.Time
 }

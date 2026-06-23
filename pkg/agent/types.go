@@ -191,6 +191,7 @@ type Config struct {
 	Inbox            inbox.Inbox
 	Expander         *inbox.Expander
 	MaxResultSize    int
+	MaxParallelTools int
 	CacheRetention   CacheRetention
 	SessionID        string
 	ParentSessionID  string
@@ -236,6 +237,9 @@ func (c Config) init() Config {
 	}
 	if c.MaxResultSize <= 0 {
 		c.MaxResultSize = DefaultMaxResultSize
+	}
+	if c.MaxParallelTools <= 0 {
+		c.MaxParallelTools = DefaultMaxParallelTools
 	}
 	if c.SessionID == "" {
 		b := make([]byte, 8)

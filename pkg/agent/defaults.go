@@ -8,4 +8,5 @@ const (
 	DefaultTokenBudgetWarningPct = 80
 	DefaultInboxCapacity         = 64
 	SubInboxCapacity             = 16
+	DefaultMaxParallelTools      = 16
 )

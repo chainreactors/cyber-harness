@@ -47,7 +47,6 @@ func (t *ReadTool) Definition() ToolDefinition {
 	return ToolDef("read", t.Description(), ReadArgs{})
 }
 
-func (t *ReadTool) ExecutionMode() ExecutionMode { return ExecParallel }
 
 func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
 	args, err := ParseArgs[ReadArgs](arguments)

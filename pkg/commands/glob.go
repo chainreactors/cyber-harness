@@ -41,7 +41,6 @@ func (t *GlobTool) Definition() ToolDefinition {
 	return ToolDef("glob", t.Description(), GlobArgs{})
 }
 
-func (t *GlobTool) ExecutionMode() ExecutionMode { return ExecParallel }
 
 func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
 	args, err := ParseArgs[GlobArgs](arguments)
