@@ -28,6 +28,7 @@ import (
 
 const agentPromptCommandName = "__prompt"
 const agentConsoleInterruptCommandName = "aiscan-interrupt"
+const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
 const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 
 var errAgentConsoleExit = errors.New("agent console exit")
@@ -119,6 +120,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	repl.controller = newInteractiveRunController(ctx, repl.agent, output)
 	repl.controller.SetOnFinish(repl.refreshPromptAfterAsyncRun)
 	repl.configureInterruptKey()
+	repl.configureVerbosityToggleKey()
 	menu.SetCommands(repl.rootCommand)
 	menu.Command = repl.rootCommand()
 	c.SwitchMenu("agent")
@@ -161,6 +163,40 @@ func (r *AgentConsole) configureInterruptKey() {
 	escape := inputrc.Unescape(`\e`)
 	for _, keymap := range []string{"emacs", "emacs-standard"} {
 		_ = shell.Config.Bind(keymap, escape, agentConsoleInterruptCommandName, false)
+	}
+}
+
+func (r *AgentConsole) configureVerbosityToggleKey() {
+	if r == nil || r.console == nil || r.console.Shell() == nil {
+		return
+	}
+	shell := r.console.Shell()
+	shell.Keymap.Register(map[string]func(){
+		agentConsoleToggleVerbosityCommandName: func() {
+			r.handleToggleVerbosity()
+		},
+	})
+	ctrlO := inputrc.Unescape(`\C-o`)
+	for _, keymap := range []string{"emacs", "emacs-standard"} {
+		_ = shell.Config.Bind(keymap, ctrlO, agentConsoleToggleVerbosityCommandName, false)
+	}
+}
+
+func (r *AgentConsole) handleToggleVerbosity() {
+	out := r.ensureOutput()
+	if out == nil {
+		return
+	}
+	current := out.VerbosityLevel()
+	next := (current + 1) % 3
+	out.SetVerbosity(next)
+	label := out.VerbosityLabel()
+	if out.color.Enabled {
+		fmt.Fprintf(r.stderr, "\n%s %s\n",
+			out.dim("verbosity:"),
+			out.colored(outputpkg.ANSICyan, label))
+	} else {
+		fmt.Fprintf(r.stderr, "\nverbosity: %s\n", label)
 	}
 }
 
@@ -474,6 +510,7 @@ func (r *AgentConsole) bannerOutput() string {
 	lines = append(lines, bannerKV("model", modelStyle(modelText, colorEnabled), colorEnabled))
 	lines = append(lines, bannerKV("mode", ansiDim(r.sessionSummary(), colorEnabled), colorEnabled))
 	lines = append(lines, bannerKV("help", renderInlineCommands([]string{"/help", "/status", "/exit"}, colorEnabled), colorEnabled))
+	lines = append(lines, bannerKV("keys", ansiDim("Esc", colorEnabled)+" "+ansiDim("interrupt", colorEnabled)+ansiDim("  ", colorEnabled)+ansiDim("Ctrl+O", colorEnabled)+" "+ansiDim("verbosity", colorEnabled), colorEnabled))
 
 	box := renderFixedBox(strings.Join(lines, "\n"), width, colorEnabled)
 	intent := ansiDim("输入目标或任务即可；例如：扫描 192.168.1.10 的 Web 风险", colorEnabled)

@@ -165,6 +165,44 @@ func stdoutDeltaStreamingEnabledFor(_ *cfg.Option, terminal bool) bool {
 }
 
 // ---------------------------------------------------------------------------
+// Verbosity control
+// ---------------------------------------------------------------------------
+
+func (o *AgentOutput) SetVerbosity(level int) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.verbosity = level
+}
+
+func (o *AgentOutput) VerbosityLevel() int {
+	if o == nil {
+		return 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.verbosity
+}
+
+// VerbosityLabel returns a human-readable label for the current verbosity.
+func (o *AgentOutput) VerbosityLabel() string {
+	switch o.VerbosityLevel() {
+	case -1:
+		return "quiet"
+	case 0:
+		return "default"
+	case 1:
+		return "tools"
+	case 2:
+		return "thinking"
+	default:
+		return "thinking"
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle methods
 // ---------------------------------------------------------------------------
 
@@ -650,14 +688,16 @@ func (o *AgentOutput) toolStart(event agent.Event) {
 	if event.ToolCallID != "" {
 		o.tools[event.ToolCallID] = agentToolSummary{name: name, summary: summary, started: time.Now()}
 	}
-	if o.verbosity < 1 {
+	if o.verbosity < 0 {
 		return
 	}
 	o.ensureStreamNewlineLocked()
 	fmt.Fprintln(o.stderr)
 
-	o.toolHeader("▸", output.ANSICyan, name)
-	o.renderToolArgBlock(formatToolArguments(name, event.Arguments))
+	o.toolHeader("▸", output.ANSICyan, name, compactAgentLine(summary, 80))
+	if o.verbosity >= 1 {
+		o.renderToolArgBlock(formatToolArguments(name, event.Arguments))
+	}
 
 	if o.debug {
 		if args := compactAgentJSON(event.Arguments, agentDebugPreviewLimit); args != "" {
@@ -672,7 +712,7 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 		o.toolErrorCount++
 	}
 
-	if o.verbosity < 1 {
+	if o.verbosity < 0 {
 		return
 	}
 
@@ -690,8 +730,10 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 		}
 		name := firstNonEmptyString(summary.name, event.ToolName, "tool")
 		o.toolHeader("✗", output.ANSIRed, name, summary.summary)
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent,
-			o.colored(output.ANSIRed, compactAgentLine(errText, agentStatusPreviewLimit)))
+		if o.verbosity >= 1 {
+			fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent,
+				o.colored(output.ANSIRed, compactAgentLine(errText, agentStatusPreviewLimit)))
+		}
 		o.forgetTool(event.ToolCallID)
 		return
 	}
@@ -699,7 +741,7 @@ func (o *AgentOutput) toolEnd(event agent.Event) {
 	result := strings.TrimSpace(event.Result)
 	toolName := firstNonEmptyString(summary.name, event.ToolName, "tool")
 	elapsed := o.coloredElapsed(summary.started)
-	if result == "" {
+	if result == "" || o.verbosity < 1 {
 		o.ensureStreamNewlineLocked()
 		o.toolHeader("✓", output.ANSIGreen, toolName, summary.summary, elapsed)
 		o.forgetTool(event.ToolCallID)
