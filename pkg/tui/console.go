@@ -711,22 +711,15 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
-			Name: "/reset", Description: "清空当前会话上下文",
+			Name: "/clear", Description: "清空当前会话上下文",
 			Args: ArgsNone,
 			Run: func(_ context.Context, s *Session, _ []string) error {
 				if s.Controller != nil && s.Controller.Running() {
 					return fmt.Errorf("task is running — use /stop first")
 				}
 				s.Agent.Reset()
-				fmt.Fprintln(r.stdout, "Context reset.")
+				fmt.Fprintln(r.stdout, "Context cleared.")
 				return nil
-			},
-		},
-		{
-			Name: "/continue", Description: "不追加输入，继续上一轮任务",
-			Args: ArgsNone,
-			Run: func(_ context.Context, s *Session, _ []string) error {
-				return s.Controller.Continue()
 			},
 		},
 		{
@@ -747,7 +740,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
-			Name: "/eval", Description: "设置/查看/关闭 goal evaluation (/eval off 关闭)",
+			Name: "/eval", Aliases: []string{"/goal"}, Description: "设置/查看/关闭 goal evaluation (/eval off 关闭)",
 			Args: ArgsOptional,
 			Run: func(_ context.Context, s *Session, args []string) error {
 				text := strings.TrimSpace(strings.Join(args, " "))
@@ -772,6 +765,26 @@ func (r *AgentConsole) builtinCommands() []Command {
 					fmt.Fprintf(r.stdout, "Goal evaluation enabled: %s\n", text)
 				}
 				return nil
+			},
+		},
+		{
+			Name: "/loop", Description: "管理定时循环任务 (自然语言描述或 /loop list|stop <name>)",
+			Args: ArgsOptional,
+			Run: func(_ context.Context, s *Session, args []string) error {
+				text := strings.TrimSpace(strings.Join(args, " "))
+				if text == "" {
+					text = "list"
+				}
+				switch text {
+				case "list":
+					return RunPrompt(s, "loop", "List all active loop tasks using the loop tool (action=list).")
+				default:
+					if strings.HasPrefix(text, "stop ") || strings.HasPrefix(text, "remove ") {
+						name := strings.TrimSpace(strings.SplitN(text, " ", 2)[1])
+						return RunPrompt(s, "loop", fmt.Sprintf("Remove the loop task named %q using the loop tool (action=remove).", name))
+					}
+					return RunPrompt(s, "loop", fmt.Sprintf("The user wants to create a recurring scheduled task. Use the loop tool (action=create) to register it. User request: %s", text))
+				}
 			},
 		},
 		{

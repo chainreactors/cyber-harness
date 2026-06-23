@@ -200,6 +200,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}, nil
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
+	rt.App.Commands.RegisterTool(agent.NewLoopTool(scheduler))
 
 	if option.Resume != "" {
 		path := option.Resume
