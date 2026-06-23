@@ -103,17 +103,24 @@ func (p *OpenAIProvider) setAuthHeaders(req *http.Request) {
 }
 
 func marshalOpenAIRequest(req *ChatCompletionRequest) ([]byte, error) {
-	if req.CacheRetention == CacheNone || req.SessionID == "" {
-		return json.Marshal(req)
+	type streamOptions struct {
+		IncludeUsage bool `json:"include_usage"`
 	}
 	type wrapper struct {
 		*ChatCompletionRequest
-		PromptCacheKey       string `json:"prompt_cache_key,omitempty"`
-		PromptCacheRetention string `json:"prompt_cache_retention,omitempty"`
+		StreamOptions        *streamOptions `json:"stream_options,omitempty"`
+		PromptCacheKey       string         `json:"prompt_cache_key,omitempty"`
+		PromptCacheRetention string         `json:"prompt_cache_retention,omitempty"`
 	}
-	w := wrapper{ChatCompletionRequest: req, PromptCacheKey: req.SessionID}
-	if req.CacheRetention == CacheLong {
-		w.PromptCacheRetention = "24h"
+	w := wrapper{ChatCompletionRequest: req}
+	if req.Stream {
+		w.StreamOptions = &streamOptions{IncludeUsage: true}
+	}
+	if req.CacheRetention != CacheNone && req.SessionID != "" {
+		w.PromptCacheKey = req.SessionID
+		if req.CacheRetention == CacheLong {
+			w.PromptCacheRetention = "24h"
+		}
 	}
 	return json.Marshal(w)
 }

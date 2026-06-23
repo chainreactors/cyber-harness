@@ -183,6 +183,9 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 				usage = event.Usage
 			}
 			if event.Done {
+				if usage != nil {
+					bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: builder.Message(), Usage: usage})
+				}
 				goto streamDone
 			}
 			updated := builder.Apply(event.Delta)
@@ -190,7 +193,7 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 				started = true
 				bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: updated})
 			}
-			bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: updated})
+			bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: updated, Usage: usage})
 		}
 	}
 streamDone:

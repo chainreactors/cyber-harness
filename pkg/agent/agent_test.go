@@ -13,8 +13,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -81,7 +81,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(e Event) { events = append(events, e.Type) }),
+		Bus:      testBus(func(e Event) { events = append(events, e.Type) }),
 	})).Run(context.Background(), "use tool")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -376,6 +376,38 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 	}
 	if updates == 0 {
 		t.Fatal("expected message_update events")
+	}
+}
+
+func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
+	tools := commands.NewRegistry()
+	llm := &scriptedProvider{
+		streamEvents: []ChatCompletionStreamEvent{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{Content: strPtr("done")}},
+			{Done: true, Usage: &Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}},
+		},
+	}
+	var updateUsage *Usage
+	result, err := (NewAgent(Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Stream:   true,
+		Bus: testBus(func(event Event) {
+			if event.Type == EventMessageUpdate && event.Usage != nil {
+				updateUsage = event.Usage
+			}
+		}),
+	})).Run(context.Background(), "stream")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "done" {
+		t.Fatalf("output = %q, want done", result.Output)
+	}
+	if updateUsage == nil || updateUsage.TotalTokens != 12 {
+		t.Fatalf("message_update usage = %#v, want total 12", updateUsage)
 	}
 }
 

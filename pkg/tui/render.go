@@ -85,6 +85,8 @@ type LiveView struct {
 	mu       sync.Mutex
 	lines    []string
 	running  bool
+	hidden   bool
+	frame    string
 	rendered int
 	stop     chan struct{}
 	done     chan struct{}
@@ -102,6 +104,9 @@ func (v *LiveView) Update(lines []string) {
 	defer v.mu.Unlock()
 	v.lines = make([]string, len(lines))
 	copy(v.lines, lines)
+	if v.running && !v.hidden {
+		v.renderLocked(v.currentFrame())
+	}
 }
 
 func (v *LiveView) Start() {
@@ -116,7 +121,8 @@ func (v *LiveView) Start() {
 	v.stop = make(chan struct{})
 	v.done = make(chan struct{})
 	v.running = true
-	v.renderLocked(defaultFrames.Frames[0])
+	v.frame = defaultFrames.Frames[0]
+	v.renderLocked(v.frame)
 	go v.tick()
 }
 
@@ -144,11 +150,21 @@ func (v *LiveView) render(frame string) {
 }
 
 func (v *LiveView) renderLocked(frame string) {
+	v.frame = frame
+	if v.hidden {
+		return
+	}
 	lines := make([]string, len(v.lines))
 	copy(lines, v.lines)
 	prev := v.rendered
 
 	if len(lines) == 0 {
+		if prev > 0 {
+			writeSynced(v.w, func() {
+				eraseLines(v.w, prev)
+			})
+			v.rendered = 0
+		}
 		return
 	}
 
@@ -168,6 +184,42 @@ func (v *LiveView) renderLocked(frame string) {
 	v.rendered = len(lines)
 }
 
+func (v *LiveView) WithHidden(fn func()) {
+	if v == nil {
+		if fn != nil {
+			fn()
+		}
+		return
+	}
+	v.mu.Lock()
+	if !v.running {
+		v.mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+		return
+	}
+	if v.rendered > 0 {
+		writeSynced(v.w, func() {
+			eraseLines(v.w, v.rendered)
+		})
+		v.rendered = 0
+	}
+	v.hidden = true
+	v.mu.Unlock()
+
+	if fn != nil {
+		fn()
+	}
+
+	v.mu.Lock()
+	v.hidden = false
+	if v.running {
+		v.renderLocked(v.currentFrame())
+	}
+	v.mu.Unlock()
+}
+
 func (v *LiveView) Stop() {
 	if v == nil {
 		return
@@ -179,6 +231,7 @@ func (v *LiveView) Stop() {
 	}
 	close(v.stop)
 	v.running = false
+	v.hidden = false
 	n := v.rendered
 	v.rendered = 0
 	done := v.done
@@ -189,4 +242,11 @@ func (v *LiveView) Stop() {
 			eraseLines(v.w, n)
 		})
 	}
+}
+
+func (v *LiveView) currentFrame() string {
+	if v.frame != "" {
+		return v.frame
+	}
+	return defaultFrames.Frames[0]
 }

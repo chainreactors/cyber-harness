@@ -24,6 +24,7 @@ type StreamWriter struct {
 	reasonPrt  int    // reasoning bytes flushed
 	reasonFull string // cumulative reasoning text
 	reasonOpen bool   // reasoning is being printed; flush remainder before content
+	reasonLine bool   // stderr cursor is mid-reasoning-line
 	lineOpen   bool   // stdout cursor mid-line
 	streamed   bool   // any content was streamed this turn
 }
@@ -57,6 +58,7 @@ func (w *StreamWriter) Delta(content, reasoning *string) {
 			}
 			fmt.Fprint(w.stderr, w.color.Wrap(w.reasonFull[w.reasonPrt:], output.ANSIDim))
 			w.reasonPrt = len(w.reasonFull)
+			w.reasonLine = !strings.HasSuffix(w.reasonFull, "\n")
 		}
 	}
 
@@ -113,6 +115,13 @@ func (w *StreamWriter) WouldPrintDelta(content, reasoning *string) bool {
 	return findParagraphFlushPoint(w.buf+delta) > 0
 }
 
+func (w *StreamWriter) WouldPrintContentDelta(content *string) bool {
+	if w == nil || content == nil {
+		return false
+	}
+	return len(*content) > w.printed
+}
+
 // Flush writes any buffered content and closes open reasoning blocks.
 func (w *StreamWriter) Flush() {
 	if w.buf != "" {
@@ -131,11 +140,20 @@ func (w *StreamWriter) EnsureNewline() {
 	}
 }
 
+func (w *StreamWriter) EnsureLiveBoundary() {
+	w.EnsureNewline()
+	if w.reasonLine && w.stderr != nil {
+		fmt.Fprintln(w.stderr)
+		w.reasonLine = false
+	}
+}
+
 // NewTurn resets per-turn counters (called at EventTurnStart).
 func (w *StreamWriter) NewTurn() {
 	w.printed = 0
 	w.reasonPrt = 0
 	w.reasonFull = ""
+	w.reasonLine = false
 }
 
 // Reset clears all state (called at run start).
@@ -145,6 +163,7 @@ func (w *StreamWriter) Reset() {
 	w.reasonPrt = 0
 	w.reasonFull = ""
 	w.reasonOpen = false
+	w.reasonLine = false
 	w.lineOpen = false
 	w.streamed = false
 }
@@ -181,8 +200,10 @@ func (w *StreamWriter) closeReasoning() {
 	if len(w.reasonFull) > w.reasonPrt {
 		fmt.Fprintln(w.stderr, w.color.Wrap(w.reasonFull[w.reasonPrt:], output.ANSIDim))
 		w.reasonPrt = len(w.reasonFull)
-	} else if w.reasonFull != "" && !strings.HasSuffix(w.reasonFull, "\n") {
+		w.reasonLine = false
+	} else if w.reasonLine {
 		fmt.Fprintln(w.stderr)
+		w.reasonLine = false
 	}
 	w.reasonOpen = false
 }

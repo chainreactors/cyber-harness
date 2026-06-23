@@ -21,20 +21,18 @@ func stripANSI(s string) string {
 func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
 	stdout := &bytes.Buffer{}
 	color := output.NewColor(false)
-	return &AgentOutput{
+	o := &AgentOutput{
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
-		tools:     make(map[string]agent.Event),
 		stream:    NewStreamWriter(stdout, stderr, true, false, color, verbosity),
-		liveView:  NewLiveView(stderr, ""),
 	}
+	o.live = NewLiveStatus(NewLiveView(stderr, ""), o.dim, o.renderToolLine)
+	return o
 }
 
-func liveRunning(v *LiveView) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.running
+func liveRunning(l *LiveStatus) bool {
+	return l.Running()
 }
 
 func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
@@ -49,11 +47,10 @@ func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 	var stdout bytes.Buffer
 	color := output.NewColor(false)
 	o := &AgentOutput{
-		color:    color,
-		tools:    make(map[string]agent.Event),
-		stream:   NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, 0),
-		liveView: NewLiveView(&bytes.Buffer{}, ""),
+		color:  color,
+		stream: NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, 0),
 	}
+	o.live = NewLiveStatus(NewLiveView(&bytes.Buffer{}, ""), o.dim, o.renderToolLine)
 
 	o.Final("## Report\n\nDone.")
 
@@ -66,15 +63,15 @@ func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
-	defer o.liveView.Stop()
+	defer o.live.Stop()
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	if !liveRunning(o.liveView) {
+	if !liveRunning(o.live) {
 		t.Fatal("thinking spinner did not start")
 	}
 
 	o.HandleEvent(agent.Event{Type: agent.EventMessageUpdate, Turn: 1, Message: agent.ChatMessage{Role: "assistant"}})
-	if !liveRunning(o.liveView) {
+	if !liveRunning(o.live) {
 		t.Fatal("role-only stream update stopped thinking spinner")
 	}
 
@@ -84,7 +81,7 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 		Turn:    1,
 		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
 	})
-	if !liveRunning(o.liveView) {
+	if !liveRunning(o.live) {
 		t.Fatal("hidden reasoning stream update stopped thinking spinner")
 	}
 
@@ -94,7 +91,7 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 		Turn:    1,
 		Message: agent.ChatMessage{Role: "assistant", Content: &content},
 	})
-	if !liveRunning(o.liveView) {
+	if !liveRunning(o.live) {
 		t.Fatal("buffered markdown stream update stopped thinking spinner before visible output")
 	}
 
@@ -104,8 +101,8 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 		Turn:    1,
 		Message: agent.ChatMessage{Role: "assistant", Content: &content},
 	})
-	if liveRunning(o.liveView) {
-		t.Fatal("visible stream update did not stop thinking spinner")
+	if !liveRunning(o.live) {
+		t.Fatal("visible stream update stopped thinking spinner")
 	}
 	if !strings.Contains(stdout.String(), "partial paragraph") {
 		t.Fatalf("visible content was not written: stdout=%q stderr=%q", stdout.String(), stderr.String())
@@ -140,10 +137,10 @@ func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
 func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	o := NewStaticAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
-	defer o.liveView.Stop()
+	defer o.live.Stop()
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	if liveRunning(o.liveView) {
+	if liveRunning(o.live) {
 		t.Fatal("static output started thinking live view")
 	}
 
@@ -153,7 +150,7 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 		ToolName:   "bash",
 		Arguments:  `{"command":"echo hi"}`,
 	})
-	if liveRunning(o.liveView) {
+	if liveRunning(o.live) {
 		t.Fatal("static output started tool live view")
 	}
 
@@ -166,12 +163,73 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 	}
 }
 
+func TestThinkingLineShowsTokenUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type:  agent.EventMessageUpdate,
+		Turn:  1,
+		Usage: &agent.Usage{PromptTokens: 1000, CompletionTokens: 234, TotalTokens: 1234},
+		Message: agent.ChatMessage{
+			Role: "assistant",
+		},
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "tokens=1,234") {
+		t.Fatalf("thinking line missing token usage: %q", got)
+	}
+	if !liveRunning(o.live) {
+		t.Fatal("usage update stopped thinking spinner")
+	}
+}
+
+func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	if o.live.Status() != liveStatusThinking {
+		t.Fatalf("live status = %q, want thinking", o.live.Status())
+	}
+
+	content := "partial assistant answer"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", Content: &content},
+	})
+	if o.live.Status() != liveStatusTalking {
+		t.Fatalf("live status = %q, want talking", o.live.Status())
+	}
+
+	o.HandleEvent(agent.Event{
+		Type:       agent.EventToolExecutionStart,
+		Turn:       1,
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Arguments:  `{"command":"echo hi"}`,
+	})
+	if o.live.Status() != liveStatusTooling {
+		t.Fatalf("live status = %q, want tooling", o.live.Status())
+	}
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, liveStatusTalking) || !strings.Contains(got, liveStatusTooling) {
+		t.Fatalf("live output missing status labels: %q", got)
+	}
+}
+
 func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
 	}, &stdout, &stderr, true)
-	defer o.liveView.Stop()
+	defer o.live.Stop()
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
 	reasoning := "checking target scope\nprobing admin route"
@@ -185,8 +243,8 @@ func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 	if !strings.Contains(got, "checking target scope") || !strings.Contains(got, "probing admin route") {
 		t.Fatalf("streamed thinking block missing reasoning: %q", got)
 	}
-	if liveRunning(o.liveView) {
-		t.Fatal("thinking spinner kept running while reasoning was streamed")
+	if !liveRunning(o.live) {
+		t.Fatal("thinking spinner stopped while reasoning was streamed")
 	}
 	if strings.Contains(stderr.String(), "<thinking>") {
 		t.Fatalf("reasoning tag was printed: %q", stderr.String())
@@ -201,7 +259,7 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
 	}, &stdout, &stderr, true)
-	defer o.liveView.Stop()
+	defer o.live.Stop()
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
 	reasoning := "The user wants"
@@ -221,7 +279,7 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	if strings.Count(got, "The user wants") != 1 {
 		t.Fatalf("reasoning prefix rendered repeatedly: %q", got)
 	}
-	if !strings.Contains(got, "The user wants me to test redhaze.top") {
+	if !strings.Contains(got, "me to test redhaze.top") {
 		t.Fatalf("reasoning delta not streamed correctly: %q", got)
 	}
 }

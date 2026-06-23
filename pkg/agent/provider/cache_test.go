@@ -290,6 +290,31 @@ func TestOpenAIMarshalCacheKey(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamRequestIncludesUsage(t *testing.T) {
+	req := &ChatCompletionRequest{
+		Model:    "gpt-4o",
+		Messages: []ChatMessage{NewTextMessage("user", "Hello")},
+		Stream:   true,
+	}
+
+	data, err := marshalOpenAIRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, ok := parsed["stream_options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("stream_options missing: %v", parsed)
+	}
+	if opts["include_usage"] != true {
+		t.Fatalf("include_usage = %v, want true", opts["include_usage"])
+	}
+}
+
 func TestUsageUnmarshalDeepSeek(t *testing.T) {
 	raw := `{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20}`
 	var u Usage

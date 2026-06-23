@@ -49,10 +49,9 @@ type AgentOutput struct {
 	toolErrorCount int
 
 	// Transient UI.
-	mode          RenderMode
-	tty           bool
-	liveView      *LiveView
-	liveToolOrder []string
+	mode RenderMode
+	tty  bool
+	live *LiveStatus
 }
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
@@ -102,16 +101,16 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
 	lv := NewLiveView(stderr, color.Code(output.ANSICyan))
-	return &AgentOutput{
+	o := &AgentOutput{
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
-		tools:     make(map[string]agent.Event),
 		stream:    NewStreamWriter(stdout, stderr, stdoutTTY, !noColor && stdoutTTY, color, verbosity),
 		mode:      mode,
 		tty:       stderrTTY,
-		liveView:  lv,
 	}
+	o.live = NewLiveStatus(lv, o.dim, o.renderToolLine)
+	return o
 }
 
 func AgentStreamingEnabled(_ *cfg.Option) bool { return true }
@@ -288,14 +287,10 @@ func (o *AgentOutput) AbortCurrentRun() {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.liveView.Stop()
-	o.liveToolOrder = nil
+	o.live.Reset()
 	o.stream.Flush()
 	o.stream.Reset()
 	o.aborted = true
-	for id := range o.tools {
-		delete(o.tools, id)
-	}
 }
 
 func (o *AgentOutput) EnsureStreamNewline() {
@@ -332,36 +327,43 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 			fmt.Fprintln(o.Stderr(), o.dim("  turn "+fmt.Sprint(event.Turn)))
 		}
 		if o.canAnimate() {
-			o.liveView.Update([]string{spinnerSentinel + " thinking"})
-			o.liveView.Start()
+			o.live.BeginTurn()
 		}
 
 	case agent.EventMessageUpdate:
-		if o.stream.WouldPrintDelta(event.Message.Content, event.Message.ReasoningContent) {
-			o.stopLive()
-		}
+		o.live.SetUsage(event.Usage)
+		contentDelta := o.stream.WouldPrintContentDelta(event.Message.Content)
+		visible := o.stream.WouldPrintDelta(event.Message.Content, event.Message.ReasoningContent)
 		if o.verbosity >= 0 {
-			o.stream.Delta(event.Message.Content, event.Message.ReasoningContent)
+			writeDelta := func() {
+				o.stream.Delta(event.Message.Content, event.Message.ReasoningContent)
+			}
+			if o.canAnimate() && !o.live.HasTools() && visible {
+				o.live.WithHidden(func() {
+					writeDelta()
+					o.stream.EnsureLiveBoundary()
+				})
+			} else {
+				writeDelta()
+			}
+		}
+		if o.canAnimate() && !o.live.HasTools() {
+			if contentDelta {
+				o.live.SetTalking()
+			}
+			o.live.Render()
 		}
 
 	case agent.EventToolExecutionStart:
 		if o.canAnimate() {
-			if len(o.liveToolOrder) == 0 {
-				o.liveView.Stop()
+			if !o.live.HasTools() {
+				o.live.Stop()
 				o.stream.Flush()
 			}
-			if event.ToolCallID != "" {
-				o.tools[event.ToolCallID] = event
-				o.liveToolOrder = append(o.liveToolOrder, event.ToolCallID)
-			}
-			o.liveView.Update(o.allToolLines())
-			o.liveView.Start()
+			o.live.StartTool(event)
 		} else {
-			o.liveView.Stop()
+			o.live.Stop()
 			o.stream.Flush()
-			if event.ToolCallID != "" {
-				o.tools[event.ToolCallID] = event
-			}
 			if o.verbosity >= 0 {
 				name := toolNameOrDefault(event)
 				w := o.Stderr()
@@ -381,19 +383,13 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		}
 
 	case agent.EventToolExecutionEnd:
-		if event.ToolCallID != "" {
-			o.tools[event.ToolCallID] = event
-		}
 		o.toolCallCount++
 		if event.IsError || event.Err != nil {
 			o.toolErrorCount++
 		}
-		if o.hasLiveTool(event.ToolCallID) {
-			if o.allDone() {
-				o.liveView.Stop()
-				o.printPermanentTools()
-			} else {
-				o.liveView.Update(o.allToolLines())
+		if tracked, done := o.live.UpdateTool(event); tracked {
+			if done {
+				o.printPermanentTools(o.live.StopAndDrainTools())
 			}
 		} else {
 			o.stopLive()
@@ -405,7 +401,6 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 					o.printToolDetail(w, event)
 				}
 			}
-			delete(o.tools, event.ToolCallID)
 		}
 
 	case agent.EventTurnEnd:
@@ -459,16 +454,6 @@ func (o *AgentOutput) renderToolLine(ev agent.Event) string {
 		line += "  " + o.dim(summary)
 	}
 	return toolBlockIndent + line
-}
-
-func (o *AgentOutput) allToolLines() []string {
-	lines := make([]string, 0, len(o.liveToolOrder))
-	for _, id := range o.liveToolOrder {
-		if ev, ok := o.tools[id]; ok {
-			lines = append(lines, o.renderToolLine(ev))
-		}
-	}
-	return lines
 }
 
 func (o *AgentOutput) printToolDetail(w io.Writer, ev agent.Event) {
@@ -533,54 +518,22 @@ func (o *AgentOutput) printToolArgBlock(w io.Writer, name, arguments string) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Live tool tracking
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) hasLiveTool(id string) bool {
-	for _, tid := range o.liveToolOrder {
-		if tid == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (o *AgentOutput) allDone() bool {
-	for _, id := range o.liveToolOrder {
-		if ev, ok := o.tools[id]; ok && ev.Type != agent.EventToolExecutionEnd {
-			return false
-		}
-	}
-	return true
-}
-
-func (o *AgentOutput) printPermanentTools() {
-	order := o.liveToolOrder
-	o.liveToolOrder = nil
-	if len(order) == 0 {
+func (o *AgentOutput) printPermanentTools(events []agent.Event) {
+	if len(events) == 0 {
 		return
 	}
 	w := o.Stderr()
 	fmt.Fprintln(w)
-	for _, id := range order {
-		ev, ok := o.tools[id]
-		if !ok {
-			continue
-		}
-		fmt.Fprintln(w, o.renderToolLine(ev))
+	for _, event := range events {
+		fmt.Fprintln(w, o.renderToolLine(event))
 		if o.verbosity >= 1 {
-			o.printToolDetail(w, ev)
+			o.printToolDetail(w, event)
 		}
-		delete(o.tools, id)
 	}
 }
 
 func (o *AgentOutput) stopLive() {
-	o.liveView.Stop()
-	if len(o.liveToolOrder) > 0 {
-		o.printPermanentTools()
-	}
+	o.printPermanentTools(o.live.StopAndDrainTools())
 }
 
 // ---------------------------------------------------------------------------
@@ -590,8 +543,7 @@ func (o *AgentOutput) stopLive() {
 func (o *AgentOutput) beginRun() {
 	o.stream.Reset()
 	o.aborted = false
-	o.tools = make(map[string]agent.Event)
-	o.liveToolOrder = nil
+	o.live.Reset()
 	o.toolCallCount = 0
 	o.toolErrorCount = 0
 }
@@ -764,8 +716,7 @@ func (o *AgentOutput) evalStart(event agent.Event) {
 		return
 	}
 	if o.canAnimate() {
-		o.liveView.Update([]string{spinnerSentinel + " eval · round " + fmt.Sprint(event.EvalRound+1)})
-		o.liveView.Start()
+		o.live.ShowEvalRound(event.EvalRound)
 	} else {
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
