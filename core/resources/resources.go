@@ -44,10 +44,7 @@ type Set struct {
 	NeutronConfig    *neutron.Config
 	Fingers          *fingers.Engine
 	Neutron          *neutron.Engine
-	gogoConfigs      map[string][]byte
-	sprayConfigs     map[string][]byte
-	zombieConfigs    map[string][]byte
-	protonConfigs    map[string][]byte
+	configs map[string]map[string][]byte
 }
 
 // Init loads scanner resources once for aiscan and prepares SDK configs.
@@ -72,10 +69,7 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 	set := &Set{
 		Mode:          mode,
 		RemoteEnabled: opts.CyberhubURL != "" && opts.APIKey != "",
-		gogoConfigs:   defaultGogoConfigs(),
-		sprayConfigs:  defaultSprayConfigs(),
-		zombieConfigs: defaultZombieConfigs(),
-		protonConfigs: defaultProtonConfigs(),
+		configs: defaultConfigs(),
 	}
 
 	if set.RemoteEnabled {
@@ -122,13 +116,13 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 
 	finalFingers := finalFullFingers.Fingers()
 	httpFingers, socketFingers := splitFingers(finalFingers)
-	set.gogoConfigs["http"] = marshalJSON(httpFingers)
-	set.gogoConfigs["socket"] = marshalJSON(socketFingers)
-	set.gogoConfigs["neutron"] = marshalTemplates(finalTemplates)
-	set.sprayConfigs["http"] = marshalJSON(httpFingers)
-	set.sprayConfigs["socket"] = marshalJSON(socketFingers)
-	set.zombieConfigs["http"] = marshalJSON(httpFingers)
-	set.zombieConfigs["socket"] = marshalJSON(socketFingers)
+	httpData := marshalJSON(httpFingers)
+	socketData := marshalJSON(socketFingers)
+	for _, engine := range []string{"gogo", "spray", "zombie"} {
+		set.configs[engine]["http"] = httpData
+		set.configs[engine]["socket"] = socketData
+	}
+	set.configs["gogo"]["neutron"] = marshalTemplates(finalTemplates)
 
 	set.FingersConfig = fingers.NewConfig()
 	set.FingersConfig.FullFingers = finalFullFingers
@@ -158,30 +152,21 @@ func NormalizeMode(mode string) (string, error) {
 	}
 }
 
-func defaultGogoConfigs() map[string][]byte {
-	return map[string][]byte{
-		"http":                   embeddedOrDefault(loadEmbeddedConfig, "http", []byte("[]")),
-		"socket":                 embeddedOrDefault(loadEmbeddedConfig, "socket", []byte("[]")),
-		"fingerprinthub_web":     embeddedOrDefault(loadEmbeddedConfig, "fingerprinthub_web", []byte("[]")),
-		"fingerprinthub_service": embeddedOrDefault(loadEmbeddedConfig, "fingerprinthub_service", []byte("[]")),
-		"port":                   embeddedOrDefault(loadEmbeddedConfig, "port", []byte("[]")),
-		"extract":                embeddedOrDefault(loadEmbeddedConfig, "extract", []byte("[]")),
-		"workflow":               embeddedOrDefault(loadEmbeddedConfig, "workflow", []byte("[]")),
-		"neutron":                embeddedOrDefault(loadEmbeddedConfig, "neutron", []byte("[]")),
+func defaultConfigs() map[string]map[string][]byte {
+	shared := loadEngineConfigs("http", "socket", "port")
+	return map[string]map[string][]byte{
+		"gogo":   mergeConfigs(shared,
+			"fingerprinthub_web", "fingerprinthub_service",
+			"extract", "workflow", "neutron"),
+		"spray":  mergeConfigs(shared, "extract", "spray_rule", "spray_dict", "spray_common"),
+		"zombie": mergeConfigs(shared, "zombie_common", "zombie_default", "zombie_rule", "zombie_template"),
+		"proton": loadEngineConfigs("found_keys", "found_spray", "found_filter_ext", "found_filter_dir"),
 	}
 }
 
-func defaultSprayConfigs() map[string][]byte {
-	m := map[string][]byte{
-		"http":    embeddedOrDefault(loadEmbeddedConfig, "http", []byte("[]")),
-		"socket":  embeddedOrDefault(loadEmbeddedConfig, "socket", []byte("[]")),
-		"port":    embeddedOrDefault(loadEmbeddedConfig, "port", []byte("[]")),
-		"extract": embeddedOrDefault(loadEmbeddedConfig, "extract", []byte("[]")),
-	}
-	// Include spray-specific keys when generated templates provide them.
-	// When loadEmbeddedConfig returns nil (stub build), these entries are
-	// omitted so that spray falls through to its own embedded defaults.
-	for _, key := range []string{"spray_rule", "spray_dict", "spray_common"} {
+func loadEngineConfigs(keys ...string) map[string][]byte {
+	m := make(map[string][]byte, len(keys))
+	for _, key := range keys {
 		if data := loadEmbeddedConfig(key); len(data) > 0 {
 			m[key] = data
 		}
@@ -189,41 +174,17 @@ func defaultSprayConfigs() map[string][]byte {
 	return m
 }
 
-func defaultZombieConfigs() map[string][]byte {
-	m := map[string][]byte{
-		"http":   embeddedOrDefault(loadEmbeddedConfig, "http", []byte("[]")),
-		"socket": embeddedOrDefault(loadEmbeddedConfig, "socket", []byte("[]")),
-		"port":   embeddedOrDefault(loadEmbeddedConfig, "port", []byte("[]")),
+func mergeConfigs(base map[string][]byte, extra ...string) map[string][]byte {
+	m := make(map[string][]byte, len(base)+len(extra))
+	for k, v := range base {
+		m[k] = v
 	}
-	// Include zombie-specific keys when generated templates provide them.
-	// When loadEmbeddedConfig returns nil (stub build), these entries are
-	// omitted so that zombie falls through to its own embedded defaults.
-	for _, key := range []string{"zombie_common", "zombie_default", "zombie_rule", "zombie_template"} {
+	for _, key := range extra {
 		if data := loadEmbeddedConfig(key); len(data) > 0 {
 			m[key] = data
 		}
 	}
 	return m
-}
-
-func defaultProtonConfigs() map[string][]byte {
-	m := make(map[string][]byte)
-	for _, key := range []string{"found_keys", "found_spray", "found_filter_ext", "found_filter_dir"} {
-		if data := loadEmbeddedConfig(key); len(data) > 0 {
-			m[key] = data
-		}
-	}
-	return m
-}
-
-func embeddedOrDefault(provider func(string) []byte, name string, fallback []byte) []byte {
-	if provider == nil {
-		return fallback
-	}
-	if data := provider(name); len(data) > 0 {
-		return data
-	}
-	return fallback
 }
 
 func loadLocalFingers() (fingerslib.Fingers, fingerslib.Fingers, error) {
@@ -371,40 +332,23 @@ func marshalTemplates(tpls []*templates.Template) []byte {
 	return data
 }
 
-// GogoConfig returns gogo config bytes by logical template name.
-func (s *Set) GogoConfig(name string) []byte {
-	if s == nil {
-		return nil
-	}
-	return cloneBytes(s.gogoConfigs[name])
-}
-
-// SprayConfig returns spray config bytes by logical template name.
-func (s *Set) SprayConfig(name string) []byte {
-	if s == nil {
-		return nil
-	}
-	return cloneBytes(s.sprayConfigs[name])
-}
-
-// ZombieConfig returns zombie config bytes by logical template name.
-func (s *Set) ZombieConfig(name string) []byte {
-	if s == nil {
-		return nil
-	}
-	return cloneBytes(s.zombieConfigs[name])
-}
-
-// ProtonConfig returns proton/found template data by category name.
-func (s *Set) ProtonConfig(name string) []byte {
-	if s == nil {
-		return loadEmbeddedConfig(name)
-	}
-	if data := s.protonConfigs[name]; len(data) > 0 {
-		return cloneBytes(data)
+// Config returns config bytes for the given engine and template name.
+// Falls back to embedded data when the Set is nil or the key is missing.
+func (s *Set) Config(engine, name string) []byte {
+	if s != nil {
+		if m := s.configs[engine]; m != nil {
+			if data := m[name]; len(data) > 0 {
+				return cloneBytes(data)
+			}
+		}
 	}
 	return loadEmbeddedConfig(name)
 }
+
+func (s *Set) GogoConfig(name string) []byte   { return s.Config("gogo", name) }
+func (s *Set) SprayConfig(name string) []byte  { return s.Config("spray", name) }
+func (s *Set) ZombieConfig(name string) []byte { return s.Config("zombie", name) }
+func (s *Set) ProtonConfig(name string) []byte { return s.Config("proton", name) }
 
 func cloneBytes(data []byte) []byte {
 	if len(data) == 0 {

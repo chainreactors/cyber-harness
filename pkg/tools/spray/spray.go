@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -137,58 +136,14 @@ func withDefaultBoolFlag(args []string, flag string) []string {
 	return out
 }
 
-// resolveRelativePaths resolves relative file arguments against workDir
-// for flags that accept file paths.
-func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
-		return args
-	}
-	fileFlags := map[string]bool{
-		"--resume":         true,
-		"-c":               true,
-		"--config":         true,
-		"-l":               true,
-		"--list":           true,
-		"--raw":            true,
-		"-d":               true,
-		"--dict":           true,
-		"-r":               true,
-		"--rules":          true,
-		"-R":               true,
-		"--append-rule":    true,
-		"--append":         true,
-		"-f":               true,
-		"--file":           true,
-		"--dump-file":      true,
-		"--extract-config": true,
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		// Handle --flag=value form
-		if key, value, ok := strings.Cut(arg, "="); ok {
-			if fileFlags[key] {
-				out = append(out, key+"="+c.resolvePath(value))
-				continue
-			}
-			out = append(out, arg)
-			continue
-		}
-		// Handle --flag value form
-		if fileFlags[arg] && i+1 < len(args) {
-			out = append(out, arg)
-			i++
-			out = append(out, c.resolvePath(args[i]))
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
+var sprayFileFlags = map[string]bool{
+	"--resume": true, "-c": true, "--config": true,
+	"-l": true, "--list": true, "--raw": true,
+	"-d": true, "--dict": true, "-r": true, "--rules": true,
+	"-R": true, "--append-rule": true, "--append": true,
+	"-f": true, "--file": true, "--dump-file": true, "--extract-config": true,
 }
 
-func (c *Command) resolvePath(value string) string {
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
-		return value
-	}
-	return filepath.Join(c.workDir, value)
+func (c *Command) resolveRelativePaths(args []string) []string {
+	return toolargs.ResolveRelativePaths(args, sprayFileFlags, c.workDir)
 }

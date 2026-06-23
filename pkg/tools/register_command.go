@@ -3,7 +3,6 @@ package tools
 import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	gogocmd "github.com/chainreactors/aiscan/pkg/tools/gogo"
 	neutroncmd "github.com/chainreactors/aiscan/pkg/tools/neutron"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -21,10 +20,7 @@ func init() {
 			if es == nil {
 				return
 			}
-			logger, _ := deps.Logger.(telemetry.Logger)
-			if logger == nil {
-				logger = telemetry.NopLogger()
-			}
+			logger := deps.GetLogger()
 			proxy := deps.ScannerProxy
 
 			var scanOpts []scan.Option

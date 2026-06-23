@@ -5,7 +5,6 @@ package passive
 import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 )
 
@@ -22,10 +21,7 @@ func init() {
 			if es == nil || es.Uncover == nil {
 				return
 			}
-			logger, _ := deps.Logger.(telemetry.Logger)
-			if logger == nil {
-				logger = telemetry.NopLogger()
-			}
+			logger := deps.GetLogger()
 			reg.Register(New(es.Uncover).WithLogger(logger), "scanner")
 		},
 	})

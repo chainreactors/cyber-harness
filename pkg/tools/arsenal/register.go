@@ -1,18 +1,12 @@
 package arsenal
 
-import (
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
-)
+import "github.com/chainreactors/aiscan/pkg/commands"
 
 func init() {
 	commands.RegisterFactory(commands.Factory{
 		Group: "arsenal",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			logger, _ := deps.Logger.(telemetry.Logger)
-			if logger == nil {
-				logger = telemetry.NopLogger()
-			}
+			logger := deps.GetLogger()
 
 			cmd, err := NewArsenalCommand()
 			if err != nil {

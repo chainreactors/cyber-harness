@@ -14,6 +14,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
@@ -518,42 +519,14 @@ func cleanTemplateTags(tmpl *templates.Template) []string {
 }
 
 // resolveRelativePaths resolves relative file arguments against workDir.
-func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
-		return args
-	}
-	fileFlags := map[string]bool{
-		"-l": true, "--list": true,
-		"-o": true, "--output": true,
-		"-t": true, "--templates": true,
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if key, value, ok := strings.Cut(arg, "="); ok {
-			if fileFlags[key] {
-				out = append(out, key+"="+c.resolvePath(value))
-				continue
-			}
-			out = append(out, arg)
-			continue
-		}
-		if fileFlags[arg] && i+1 < len(args) {
-			out = append(out, arg)
-			i++
-			out = append(out, c.resolvePath(args[i]))
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
+var neutronFileFlags = map[string]bool{
+	"-l": true, "--list": true,
+	"-o": true, "--output": true,
+	"-t": true, "--templates": true,
 }
 
-func (c *Command) resolvePath(value string) string {
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
-		return value
-	}
-	return filepath.Join(c.workDir, value)
+func (c *Command) resolveRelativePaths(args []string) []string {
+	return toolargs.ResolveRelativePaths(args, neutronFileFlags, c.workDir)
 }
 
 func appendNonEmpty(parts []string, values ...string) []string {

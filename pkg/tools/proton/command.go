@@ -16,6 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/neutron/operators"
 	"github.com/chainreactors/neutron/protocols"
 	"github.com/chainreactors/proton/proton/file"
@@ -344,43 +345,15 @@ func readInputs(input, listFile string, remaining []string) ([]string, error) {
 	return out, sc.Err()
 }
 
-func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
-		return args
-	}
-	fileFlags := map[string]bool{
-		"-i": true, "--input": true,
-		"-l": true, "--list": true,
-		"-o": true, "--output": true,
-		"-t": true, "--templates": true,
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if key, value, ok := strings.Cut(arg, "="); ok {
-			if fileFlags[key] {
-				out = append(out, key+"="+c.resolvePath(value))
-				continue
-			}
-			out = append(out, arg)
-			continue
-		}
-		if fileFlags[arg] && i+1 < len(args) {
-			out = append(out, arg)
-			i++
-			out = append(out, c.resolvePath(args[i]))
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
+var protonFileFlags = map[string]bool{
+	"-i": true, "--input": true,
+	"-l": true, "--list": true,
+	"-o": true, "--output": true,
+	"-t": true, "--templates": true,
 }
 
-func (c *Command) resolvePath(value string) string {
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
-		return value
-	}
-	return filepath.Join(c.workDir, value)
+func (c *Command) resolveRelativePaths(args []string) []string {
+	return toolargs.ResolveRelativePaths(args, protonFileFlags, c.workDir)
 }
 
 // --- output ---
@@ -576,38 +549,15 @@ func buildExpressionRule(expressions []string, extFilter string, textOnly bool) 
 	}, nil
 }
 
+var protonKnownFlags = map[string]struct{}{
+	"-input": {}, "-list": {}, "-expression": {}, "-ext": {},
+	"-templates": {}, "-category": {}, "-id": {}, "-exclude-id": {},
+	"-tags": {}, "-exclude-tags": {}, "-severity": {}, "-exclude-severity": {},
+	"-template-list": {}, "-output": {}, "-json": {},
+	"-stats": {}, "-no-stats": {}, "-silent": {},
+	"-bin": {}, "-timeout": {}, "-debug": {},
+}
+
 func normalizeShortFlags(args []string) []string {
-	known := map[string]struct{}{
-		"-input": {}, "-list": {}, "-expression": {}, "-ext": {},
-		"-templates": {}, "-category": {}, "-id": {}, "-exclude-id": {},
-		"-tags": {}, "-exclude-tags": {}, "-severity": {}, "-exclude-severity": {},
-		"-template-list": {}, "-output": {}, "-json": {},
-		"-stats": {}, "-no-stats": {}, "-silent": {},
-		"-bin": {}, "-timeout": {}, "-debug": {},
-		"-etags": {}, "-eid": {}, "-es": {}, "-tl": {},
-	}
-	aliases := map[string]string{
-		"-etags": "-exclude-tags",
-		"-eid":   "-exclude-id",
-		"-es":    "-exclude-severity",
-		"-tl":    "-template-list",
-	}
-	out := make([]string, 0, len(args))
-	for _, arg := range args {
-		key := arg
-		suffix := ""
-		if i := strings.IndexByte(arg, '='); i > 0 {
-			key = arg[:i]
-			suffix = arg[i:]
-		}
-		if replacement, ok := aliases[key]; ok {
-			key = replacement
-		}
-		if _, ok := known[key]; ok {
-			out = append(out, "-" + key + suffix)
-		} else {
-			out = append(out, arg)
-		}
-	}
-	return out
+	return toolargs.NormalizeFlags(args, protonKnownFlags, toolargs.CommonAliases)
 }

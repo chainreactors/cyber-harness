@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -70,52 +68,13 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 }
 
 
-// resolveRelativePaths resolves relative file arguments against workDir.
-func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
-		return args
-	}
-	fileFlags := map[string]bool{
-		"-I":     true,
-		"--IP":   true,
-		"-U":     true,
-		"--USER": true,
-		"-P":     true,
-		"--PWD":  true,
-		"-A":     true,
-		"--AUTH": true,
-		"-j":     true,
-		"--json": true,
-		"-g":     true,
-		"--gogo": true,
-		"-f":     true,
-		"--file": true,
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if key, value, ok := strings.Cut(arg, "="); ok {
-			if fileFlags[key] {
-				out = append(out, key+"="+c.resolvePath(value))
-				continue
-			}
-			out = append(out, arg)
-			continue
-		}
-		if fileFlags[arg] && i+1 < len(args) {
-			out = append(out, arg)
-			i++
-			out = append(out, c.resolvePath(args[i]))
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
+var zombieFileFlags = map[string]bool{
+	"-I": true, "--IP": true, "-U": true, "--USER": true,
+	"-P": true, "--PWD": true, "-A": true, "--AUTH": true,
+	"-j": true, "--json": true, "-g": true, "--gogo": true,
+	"-f": true, "--file": true,
 }
 
-func (c *Command) resolvePath(value string) string {
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
-		return value
-	}
-	return filepath.Join(c.workDir, value)
+func (c *Command) resolveRelativePaths(args []string) []string {
+	return toolargs.ResolveRelativePaths(args, zombieFileFlags, c.workDir)
 }

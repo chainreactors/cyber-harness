@@ -6,10 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -289,43 +289,15 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	return out, coll.StructuredResult(), nil
 }
 
-func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
-		return args
-	}
-	fileFlags := map[string]bool{
-		"-l": true, "--list": true,
-		"-f": true, "--file": true,
-		"-F": true, "--format": true,
-		"--dict": true, "--rule": true,
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if key, value, ok := strings.Cut(arg, "="); ok {
-			if fileFlags[key] {
-				out = append(out, key+"="+c.resolvePath(value))
-				continue
-			}
-			out = append(out, arg)
-			continue
-		}
-		if fileFlags[arg] && i+1 < len(args) {
-			out = append(out, arg)
-			i++
-			out = append(out, c.resolvePath(args[i]))
-			continue
-		}
-		out = append(out, arg)
-	}
-	return out
+var scanFileFlags = map[string]bool{
+	"-l": true, "--list": true,
+	"-f": true, "--file": true,
+	"-F": true, "--format": true,
+	"--dict": true, "--rule": true,
 }
 
-func (c *Command) resolvePath(value string) string {
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
-		return value
-	}
-	return filepath.Join(c.workDir, value)
+func (c *Command) resolveRelativePaths(args []string) []string {
+	return toolargs.ResolveRelativePaths(args, scanFileFlags, c.workDir)
 }
 
 func writeOutputFile(path, content string) error {

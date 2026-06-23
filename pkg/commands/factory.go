@@ -1,6 +1,10 @@
 package commands
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/chainreactors/aiscan/pkg/telemetry"
+)
 
 type Factory struct {
 	Group string
@@ -16,13 +20,21 @@ type Deps struct {
 	Resources    any
 	IOAClient    any
 	Provider     any
-	Model        string
 	ScannerProxy string
 	ScanOpts     []any
 	Logger       any
 	NodeName     string
 	NodeMeta     map[string]any
 	TavilyKeys string // comma-separated Tavily API keys (build-time fallback)
+}
+
+func (d *Deps) GetLogger() telemetry.Logger {
+	if d != nil {
+		if logger, ok := d.Logger.(telemetry.Logger); ok && logger != nil {
+			return logger
+		}
+	}
+	return telemetry.NopLogger()
 }
 
 var (

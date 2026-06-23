@@ -3,17 +3,13 @@ package proton
 import (
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 func init() {
 	commands.RegisterFactory(commands.Factory{
 		Group: "proton",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			logger, _ := deps.Logger.(telemetry.Logger)
-			if logger == nil {
-				logger = telemetry.NopLogger()
-			}
+			logger := deps.GetLogger()
 			cmd := New().WithLogger(logger).WithProxy(deps.ScannerProxy)
 			if rs, ok := deps.Resources.(*resources.Set); ok && rs != nil {
 				cmd.WithResourceProvider(rs.ProtonConfig)
