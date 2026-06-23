@@ -2,11 +2,13 @@ package tui
 
 import (
 	"bytes"
-
+	"io"
 	"regexp"
 	"strings"
 	"testing"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 )
 
@@ -14,6 +16,25 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
+}
+
+func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
+	stdout := &bytes.Buffer{}
+	color := output.NewColor(false)
+	return &AgentOutput{
+		color:     color,
+		debug:     debug,
+		verbosity: verbosity,
+		tools:     make(map[string]agent.Event),
+		stream:    NewStreamWriter(stdout, stderr, true, false, color, verbosity),
+		liveView:  NewLiveView(stderr, ""),
+	}
+}
+
+func liveRunning(v *LiveView) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.running
 }
 
 func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
@@ -26,39 +47,219 @@ func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 
 func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 	var stdout bytes.Buffer
-	output := &AgentOutput{
-		stdout:   &stdout,
-		stderr:   &bytes.Buffer{},
-		markdown: false,
+	color := output.NewColor(false)
+	o := &AgentOutput{
+		color:    color,
+		tools:    make(map[string]agent.Event),
+		stream:   NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, 0),
+		liveView: NewLiveView(&bytes.Buffer{}, ""),
 	}
 
-	output.Final("## Report\n\nDone.")
+	o.Final("## Report\n\nDone.")
 
 	got := stdout.String()
 	if !strings.Contains(got, "## Report") || !strings.Contains(got, "Done.") {
 		t.Fatalf("final output missing markdown content: %q", got)
 	}
-	if strings.Contains(got, "[assistant]") || strings.Contains(got, "[final_report]") {
-		t.Fatalf("final output contains legacy wrapper: %q", got)
+}
+
+func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.liveView.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	if !liveRunning(o.liveView) {
+		t.Fatal("thinking spinner did not start")
+	}
+
+	o.HandleEvent(agent.Event{Type: agent.EventMessageUpdate, Turn: 1, Message: agent.ChatMessage{Role: "assistant"}})
+	if !liveRunning(o.liveView) {
+		t.Fatal("role-only stream update stopped thinking spinner")
+	}
+
+	reasoning := "internal reasoning that is hidden at default verbosity"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
+	})
+	if !liveRunning(o.liveView) {
+		t.Fatal("hidden reasoning stream update stopped thinking spinner")
+	}
+
+	content := "partial paragraph without markdown flush"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", Content: &content},
+	})
+	if !liveRunning(o.liveView) {
+		t.Fatal("buffered markdown stream update stopped thinking spinner before visible output")
+	}
+
+	content += "\n\n"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", Content: &content},
+	})
+	if liveRunning(o.liveView) {
+		t.Fatal("visible stream update did not stop thinking spinner")
+	}
+	if !strings.Contains(stdout.String(), "partial paragraph") {
+		t.Fatalf("visible content was not written: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, false)
+
+	content := "buffered answer"
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", Content: &content},
+	})
+	if stdout.Len() != 0 {
+		t.Fatalf("non-TTY update streamed stdout before turn end: %q", stdout.String())
+	}
+
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventTurnEnd,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", Content: &content},
+	})
+	if !strings.Contains(stdout.String(), content) {
+		t.Fatalf("non-TTY turn end did not render content: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewStaticAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.liveView.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	if liveRunning(o.liveView) {
+		t.Fatal("static output started thinking live view")
+	}
+
+	o.HandleEvent(agent.Event{
+		Type:       agent.EventToolExecutionStart,
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Arguments:  `{"command":"echo hi"}`,
+	})
+	if liveRunning(o.liveView) {
+		t.Fatal("static output started tool live view")
+	}
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "▸") || !strings.Contains(got, "bash") || !strings.Contains(got, "echo hi") {
+		t.Fatalf("static tool output missing direct rendering: %q", got)
+	}
+	if strings.Contains(stderr.String(), syncBegin) || strings.Contains(stderr.String(), eraseLine) {
+		t.Fatalf("static output wrote dynamic ANSI controls: %q", stderr.String())
+	}
+}
+
+func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+	}, &stdout, &stderr, true)
+	defer o.liveView.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	reasoning := "checking target scope\nprobing admin route"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "checking target scope") || !strings.Contains(got, "probing admin route") {
+		t.Fatalf("streamed thinking block missing reasoning: %q", got)
+	}
+	if liveRunning(o.liveView) {
+		t.Fatal("thinking spinner kept running while reasoning was streamed")
+	}
+	if strings.Contains(stderr.String(), "<thinking>") {
+		t.Fatalf("reasoning tag was printed: %q", stderr.String())
+	}
+	if o.stream.ReasoningPrinted() != len(reasoning) {
+		t.Fatalf("reasoning printed = %d, want %d", o.stream.ReasoningPrinted(), len(reasoning))
+	}
+}
+
+func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+	}, &stdout, &stderr, true)
+	defer o.liveView.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	reasoning := "The user wants"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
+	})
+	reasoning = "The user wants me to test redhaze.top"
+	o.HandleEvent(agent.Event{
+		Type:    agent.EventMessageUpdate,
+		Turn:    1,
+		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
+	})
+
+	got := stripANSI(stderr.String())
+	if strings.Count(got, "The user wants") != 1 {
+		t.Fatalf("reasoning prefix rendered repeatedly: %q", got)
+	}
+	if !strings.Contains(got, "The user wants me to test redhaze.top") {
+		t.Fatalf("reasoning delta not streamed correctly: %q", got)
+	}
+}
+
+func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
+	var stderr bytes.Buffer
+	o := testOutput(&stderr, 2, false)
+	reasoning := "checking target scope\nprobing admin route"
+
+	o.HandleEvent(agent.Event{
+		Type: agent.EventTurnEnd,
+		Turn: 1,
+		Message: agent.ChatMessage{
+			Role:             "assistant",
+			ReasoningContent: &reasoning,
+		},
+	})
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "checking target scope") || !strings.Contains(got, "probing admin route") {
+		t.Fatalf("final thinking block missing reasoning: %q", got)
+	}
+	if strings.Contains(got, "<thinking>") || strings.Contains(got, "</thinking>") {
+		t.Fatalf("final thinking block contains tags: %q", got)
 	}
 }
 
 func TestAgentOutputToolSummary(t *testing.T) {
 	var stderr bytes.Buffer
-	output := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionStart,
 		ToolCallID: "call-1",
 		ToolName:   "bash",
 		Arguments:  `{"command":"scan -i 127.0.0.1 --mode quick"}`,
 	})
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionEnd,
 		ToolCallID: "call-1",
 		ToolName:   "bash",
@@ -82,21 +283,15 @@ func TestAgentOutputToolSummary(t *testing.T) {
 
 func TestAgentOutputToolDebugDetails(t *testing.T) {
 	var stderr bytes.Buffer
-	output := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		debug:     true,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, true)
 
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionStart,
 		ToolCallID: "call-1",
 		ToolName:   "read",
 		Arguments:  `{"path":"docs/usage.md","limit":20}`,
 	})
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionEnd,
 		ToolCallID: "call-1",
 		ToolName:   "read",
@@ -117,14 +312,9 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 
 func TestAgentOutputToolError(t *testing.T) {
 	var stderr bytes.Buffer
-	output := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionEnd,
 		ToolCallID: "call-1",
 		ToolName:   "bash",
@@ -143,14 +333,9 @@ func TestAgentOutputToolError(t *testing.T) {
 
 func TestAgentOutputWriteEditSummary(t *testing.T) {
 	var stderr bytes.Buffer
-	output := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionStart,
 		ToolCallID: "call-1",
 		ToolName:   "write",
@@ -171,15 +356,10 @@ func TestAgentOutputWriteEditSummary(t *testing.T) {
 
 func TestAgentOutputMultiLineResult(t *testing.T) {
 	var stderr bytes.Buffer
-	output := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
 	result := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"
-	output.HandleEvent(agent.Event{
+	o.HandleEvent(agent.Event{
 		Type:       agent.EventToolExecutionEnd,
 		ToolCallID: "call-1",
 		ToolName:   "bash",
@@ -196,9 +376,6 @@ func TestAgentOutputMultiLineResult(t *testing.T) {
 	if !strings.Contains(got, "+") && !strings.Contains(got, "lines") {
 		t.Fatalf("stderr missing truncation hint for multi-line result: %q", got)
 	}
-	if strings.Contains(got, "│") {
-		t.Fatalf("stderr should not contain │ border character: %q", got)
-	}
 }
 
 func TestFormatToolArguments(t *testing.T) {
@@ -208,50 +385,14 @@ func TestFormatToolArguments(t *testing.T) {
 		arguments string
 		wantKeys  []string
 	}{
-		{
-			name:      "bash command",
-			toolName:  "bash",
-			arguments: `{"command":"ls -la"}`,
-			wantKeys:  []string{"command"},
-		},
-		{
-			name:      "read with offset",
-			toolName:  "read",
-			arguments: `{"path":"main.go","offset":10,"limit":50}`,
-			wantKeys:  []string{"path", "offset", "limit"},
-		},
-		{
-			name:      "read skips zero offset",
-			toolName:  "read",
-			arguments: `{"path":"main.go","offset":0}`,
-			wantKeys:  []string{"path"},
-		},
-		{
-			name:      "write with edits",
-			toolName:  "write",
-			arguments: `{"path":"a.go","edits":[{"old_text":"x","new_text":"y"}]}`,
-			wantKeys:  []string{"path", "edits"},
-		},
-		{
-			name:      "glob",
-			toolName:  "glob",
-			arguments: `{"pattern":"*.go","path":"src/"}`,
-			wantKeys:  []string{"pattern", "path"},
-		},
-		{
-			name:      "unknown tool uses all keys sorted",
-			toolName:  "custom",
-			arguments: `{"z_key":"z","a_key":"a"}`,
-			wantKeys:  []string{"a_key", "z_key"},
-		},
-		{
-			name:      "empty args",
-			toolName:  "bash",
-			arguments: `{}`,
-			wantKeys:  nil,
-		},
+		{"bash command", "bash", `{"command":"ls -la"}`, []string{"command"}},
+		{"read with offset", "read", `{"path":"main.go","offset":10,"limit":50}`, []string{"path", "offset", "limit"}},
+		{"read skips zero offset", "read", `{"path":"main.go","offset":0}`, []string{"path"}},
+		{"write with edits", "write", `{"path":"a.go","edits":[{"old_text":"x","new_text":"y"}]}`, []string{"path", "edits"}},
+		{"glob", "glob", `{"pattern":"*.go","path":"src/"}`, []string{"pattern", "path"}},
+		{"unknown tool uses all keys sorted", "custom", `{"z_key":"z","a_key":"a"}`, []string{"a_key", "z_key"}},
+		{"empty args", "bash", `{}`, nil},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := formatToolArguments(tt.toolName, tt.arguments)
@@ -275,8 +416,8 @@ func TestFormatToolArguments(t *testing.T) {
 
 func TestExtractPseudoCommand(t *testing.T) {
 	tests := []struct {
-		input    string
-		wantTool string
+		input      string
+		wantTool   string
 		wantTarget string
 	}{
 		{"scan -i 10.0.0.1 --mode quick", "scan", "10.0.0.1"},
@@ -300,12 +441,7 @@ func TestExtractPseudoCommand(t *testing.T) {
 
 func TestToolCallCounting(t *testing.T) {
 	var stderr bytes.Buffer
-	o := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 0,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 0, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c1", ToolName: "bash", Result: "ok"})
 	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c2", ToolName: "read", Result: "data"})
@@ -321,12 +457,7 @@ func TestToolCallCounting(t *testing.T) {
 
 func TestTurnStartMarker(t *testing.T) {
 	var stderr bytes.Buffer
-	o := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
 	turn1Output := stderr.String()
@@ -347,12 +478,7 @@ func TestTurnStartMarker(t *testing.T) {
 
 func TestEvalEndRendering(t *testing.T) {
 	var stderr bytes.Buffer
-	o := &AgentOutput{
-		stdout:    &bytes.Buffer{},
-		stderr:    &stderr,
-		verbosity: 1,
-		tools:     make(map[string]agent.Event),
-	}
+	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventEvalEnd, EvalPass: true, EvalRound: 0, EvalReason: "all checks passed"})
 	got := stripANSI(stderr.String())

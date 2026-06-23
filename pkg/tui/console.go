@@ -14,11 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/carapace-sh/carapace"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/carapace-sh/carapace"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/reeflective/console"
 	"github.com/reeflective/readline/inputrc"
@@ -83,10 +83,10 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		}
 	}
 	if stdout == nil {
-		stdout = output.stdout
+		stdout = output.Stdout()
 	}
 	if stderr == nil {
-		stderr = output.stderr
+		stderr = output.Stderr()
 	}
 
 	menu := c.NewMenu("agent")
@@ -235,7 +235,7 @@ func (r *AgentConsole) handleToggleVerbosity() {
 	if out.color.Enabled {
 		fmt.Fprintf(r.stderr, "\n%s %s\n",
 			out.dim("verbosity:"),
-			out.colored(outputpkg.ANSICyan, label))
+			out.color.Wrap(label, outputpkg.ANSICyan))
 	} else {
 		fmt.Fprintf(r.stderr, "\nverbosity: %s\n", label)
 	}
@@ -520,13 +520,13 @@ func (r *AgentConsole) executeArgs(ctx context.Context, args []string) error {
 // background probes. stderr-TTY-only and skipped in quiet mode so redirected
 // logs stay clean. Printed once into the scrollback (PTY-forward safe).
 func (r *AgentConsole) renderBanner() {
-	if r.output == nil || r.output.verbosity < 0 || r.output.stderr == nil {
+	if r.output == nil || r.output.VerbosityLevel() < 0 || r.output.Stderr() == nil {
 		return
 	}
 	if !r.output.tty {
 		return
 	}
-	fmt.Fprint(r.output.stderr, r.bannerOutput())
+	fmt.Fprint(r.output.Stderr(), r.bannerOutput())
 }
 
 func (r *AgentConsole) bannerOutput() string {
@@ -578,8 +578,8 @@ func (r *AgentConsole) bannerWidth() int {
 		if columns, _ := r.terminal.Control.Size(); columns > 0 {
 			width = columns - 4
 		}
-	} else if r != nil && r.output != nil && r.output.stderr != nil {
-		if columns := writerTerminalWidth(r.output.stderr); columns > 0 {
+	} else if r != nil && r.output != nil && r.output.Stderr() != nil {
+		if columns := writerTerminalWidth(r.output.Stderr()); columns > 0 {
 			width = columns - 4
 		}
 	}
@@ -675,14 +675,16 @@ func (r *AgentConsole) sessionSummary() string {
 	var parts []string
 	if r != nil && r.output != nil {
 		switch r.output.mode {
+		case ModeStatic:
+			parts = append(parts, "static")
 		case ModeForwarded:
 			parts = append(parts, "forwarded")
 		default:
 			parts = append(parts, "pty")
 		}
-		if r.output.stream {
+		if r.output.stream.enabled {
 			parts = append(parts, "stream")
-		} else if r.output.markdown {
+		} else if r.output.Markdown() {
 			parts = append(parts, "pretty")
 		} else {
 			parts = append(parts, "plain")

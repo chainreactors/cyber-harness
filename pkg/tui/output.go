@@ -1,31 +1,20 @@
 package tui
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/util"
-	"github.com/charmbracelet/glamour"
-	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const (
 	agentStatusPreviewLimit  = 180
@@ -33,87 +22,72 @@ const (
 	toolResultPreviewDefault = 8
 	toolResultPreviewWidth   = 140
 	toolFetchBodyLines       = 4
-
-	toolBlockIndent  = "  "     // 2-space indent for ▸/✓/✗ header lines
-	toolArgIndent    = "    "   // 4-space indent for key-value argument lines
-	toolResultIndent = "      " // 6-space indent for result content lines
-
-	thinkingPreviewMaxLines = 20
+	toolBlockIndent          = "  "
+	toolArgIndent            = "    "
+	toolResultIndent         = "      "
+	thinkingPreviewMaxLines  = 20
 )
 
 // ---------------------------------------------------------------------------
 // AgentOutput
 // ---------------------------------------------------------------------------
 
-// AgentOutput renders agent events and assistant content to the terminal. It is
-// safe for concurrent use: a sync.Mutex serializes HandleEvent, streamDelta,
-// and lifecycle methods so streaming tokens and bus events from different
-// goroutines never interleave output.
 type AgentOutput struct {
 	mu        sync.Mutex
-	stdout    io.Writer
-	stderr    io.Writer
-	markdown  bool
 	color     output.Color
 	debug     bool
-	verbosity int // -1=quiet, 0=default, 1=tools, 2=thinking
-	tools     map[string]agent.Event // start events keyed by ToolCallID; replaced by end events on completion
+	verbosity int
+	tools     map[string]agent.Event
 
-	// Streaming state.
-	stream                 bool
-	streamPrinted          int    // bytes of content already flushed to stdout
-	streamBuf              string // content buffered for paragraph-level markdown rendering
-	streamReasoningPrinted int    // bytes of reasoning flushed as complete lines
-	lastReasoningFull      string // full cumulative reasoning (for flushing remainder on close)
-	reasoningBlockOpen     bool   // <thinking> printed, awaiting </thinking>
-	streamLineOpen         bool   // cursor mid-line, needs \n
-	didStream              bool   // Final() dedup flag
-	lastStreamed           string // full cumulative content of the streamed turn
-	aborted                bool   // current run was interrupted
+	stream  *StreamWriter
+	aborted bool
 
-	// Turn/agent timing and cumulative token stats.
+	// Stats (tool call/error counts tracked here; token usage comes from events).
 	turnStart      time.Time
 	agentStart     time.Time
-	totalUsage     agent.Usage // accumulated from per-turn Usage events
 	toolCallCount  int
 	toolErrorCount int
 
-	// Pretty-render state. The REPL runs inside a PTY that may be forwarded to a
-	// remote agent (aider), so transient chrome is gated by mode+tty: spinners,
-	// OSC 8 hyperlinks and synchronized output only render for a local human.
-	mode           RenderMode
-	tty            bool
-	spinner        *spinner
-	liveToolOrder  []string // ordered tool-call IDs in the spinner's live region
+	// Transient UI.
+	mode          RenderMode
+	tty           bool
+	liveView      *LiveView
+	liveToolOrder []string
 }
-
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
-	return newAgentOutput(
-		option,
-		os.Stdout,
-		os.Stderr,
+	return newAgentOutput(option, os.Stdout, os.Stderr,
 		term.IsTerminal(int(os.Stdout.Fd())),
 		term.IsTerminal(int(os.Stderr.Fd())),
-	)
+		resolveRenderMode())
 }
 
-// NewAgentOutputWithWriters constructs an AgentOutput for a terminal-like
-// stream that is not necessarily backed by os.Stdout/os.Stderr.
+func NewStaticAgentOutput(option *cfg.Option) *AgentOutput {
+	return newAgentOutput(option, os.Stdout, os.Stderr,
+		term.IsTerminal(int(os.Stdout.Fd())),
+		term.IsTerminal(int(os.Stderr.Fd())),
+		ModeStatic)
+}
+
 func NewAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {
+	return newAgentOutputWithWriters(option, stdout, stderr, terminal, resolveRenderMode())
+}
+
+func NewStaticAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {
+	return newAgentOutputWithWriters(option, stdout, stderr, terminal, ModeStatic)
+}
+
+func newAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool, mode RenderMode) *AgentOutput {
 	if stdout == nil {
 		stdout = io.Discard
 	}
 	if stderr == nil {
 		stderr = stdout
 	}
-	return newAgentOutput(option, stdout, stderr, terminal, terminal)
+	return newAgentOutput(option, stdout, stderr, terminal, terminal, mode)
 }
 
-// newAgentOutput constructs an AgentOutput with rendering decisions derived
-// from the supplied option and terminal capabilities.
-func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, stderrTTY bool) *AgentOutput {
-	markdown := stdoutMarkdownEnabledFor(option, stdoutTTY)
+func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, stderrTTY bool, mode RenderMode) *AgentOutput {
 	debug := false
 	verbosity := 0
 	noColor := false
@@ -127,42 +101,32 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	}
 	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
+	lv := NewLiveView(stderr, color.Code(output.ANSICyan))
 	return &AgentOutput{
-		stdout:    stdout,
-		stderr:    stderr,
-		markdown:  markdown,
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
 		tools:     make(map[string]agent.Event),
-		stream:    stdoutDeltaStreamingEnabledFor(option, stdoutTTY),
-		mode:      resolveRenderMode(),
+		stream:    NewStreamWriter(stdout, stderr, stdoutTTY, !noColor && stdoutTTY, color, verbosity),
+		mode:      mode,
 		tty:       stderrTTY,
-		spinner:   newSpinnerWithHint(stderr, color.Code(output.ANSICyan)),
+		liveView:  lv,
 	}
 }
 
-func stdoutMarkdownEnabledFor(option *cfg.Option, terminal bool) bool {
-	if option != nil && option.NoColor {
-		return false
-	}
-	return terminal
-}
+func AgentStreamingEnabled(_ *cfg.Option) bool { return true }
 
-// AgentStreamingEnabled keeps the agent/provider path event-streamed by default,
-// matching the streamSimple-first model. Rendering decisions are separate:
-// non-TTY stdout can stay buffered while subscribers still receive
-// message_update events.
-func AgentStreamingEnabled(_ *cfg.Option) bool {
-	return true
-}
+// Stderr returns the stream writer's stderr for direct output.
+func (o *AgentOutput) Stderr() io.Writer { return o.stream.stderr }
 
-func stdoutDeltaStreamingEnabledFor(_ *cfg.Option, terminal bool) bool {
-	return terminal
-}
+// Stdout returns the stream writer's stdout.
+func (o *AgentOutput) Stdout() io.Writer { return o.stream.stdout }
+
+// Markdown returns whether markdown rendering is enabled.
+func (o *AgentOutput) Markdown() bool { return o.stream.markdown }
 
 // ---------------------------------------------------------------------------
-// Verbosity control
+// Verbosity
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) SetVerbosity(level int) {
@@ -172,6 +136,7 @@ func (o *AgentOutput) SetVerbosity(level int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.verbosity = level
+	o.stream.verbosity = level
 }
 
 func (o *AgentOutput) VerbosityLevel() int {
@@ -183,7 +148,6 @@ func (o *AgentOutput) VerbosityLevel() int {
 	return o.verbosity
 }
 
-// VerbosityLabel returns a human-readable label for the current verbosity.
 func (o *AgentOutput) VerbosityLabel() string {
 	switch o.VerbosityLevel() {
 	case -1:
@@ -192,15 +156,13 @@ func (o *AgentOutput) VerbosityLabel() string {
 		return "default"
 	case 1:
 		return "tools"
-	case 2:
-		return "thinking"
 	default:
 		return "thinking"
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle methods
+// Lifecycle
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) Start(label, text string) {
@@ -209,8 +171,8 @@ func (o *AgentOutput) Start(label, text string) {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
+	o.stopLive()
+	o.stream.Flush()
 	o.beginRun()
 	if o.verbosity < 0 {
 		return
@@ -219,23 +181,19 @@ func (o *AgentOutput) Start(label, text string) {
 	if label == "" {
 		label = "task"
 	}
-
-	// Interactive prompt echo: render like Claude Code's user-message bullet,
-	// preserving the full (possibly multi-line) intent instead of compacting it.
 	if label == "prompt" {
-		body := strings.TrimRight(text, "\n")
-		if shouldRenderUserIntent(body) {
+		if body := strings.TrimRight(text, "\n"); shouldRenderUserIntent(body) {
 			o.renderUserIntent(body)
 		}
 		return
 	}
-
+	w := o.Stderr()
 	text = truncate.Clip(text, agentStatusPreviewLimit)
 	if text == "" {
-		fmt.Fprintf(o.stderr, "%s\n", o.bold("> "+label))
-		return
+		fmt.Fprintf(w, "%s\n", o.bold("> "+label))
+	} else {
+		fmt.Fprintf(w, "%s %s\n", o.bold("> "+label+":"), text)
 	}
-	fmt.Fprintf(o.stderr, "%s %s\n", o.bold("> "+label+":"), text)
 }
 
 func (o *AgentOutput) Empty() {
@@ -244,12 +202,11 @@ func (o *AgentOutput) Empty() {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.aborted {
-		return
+	if !o.aborted {
+		o.stopLive()
+		o.stream.Flush()
+		fmt.Fprintln(o.Stderr(), o.dim("No output."))
 	}
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
-	fmt.Fprintln(o.stderr, o.dim("No output."))
 }
 
 func (o *AgentOutput) Final(content string) {
@@ -261,17 +218,15 @@ func (o *AgentOutput) Final(content string) {
 	if o.aborted {
 		return
 	}
-	o.stopSpinnerAndFlushLive()
-	if o.didStream {
-		o.ensureStreamNewlineLocked()
-		o.resetStreamState()
+	o.stopLive()
+	if o.stream.Streamed() {
+		o.stream.Flush()
+		o.stream.Reset()
 		return
 	}
-	rendered := renderAgentMarkdown(content, o.markdown)
-	if rendered == "" {
-		return
+	if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
+		fmt.Fprintln(o.Stdout(), rendered)
 	}
-	fmt.Fprintln(o.stdout, rendered)
 }
 
 func (o *AgentOutput) Queued(text string) {
@@ -280,19 +235,18 @@ func (o *AgentOutput) Queued(text string) {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
+	o.stopLive()
+	o.stream.Flush()
+	w := o.Stderr()
 	text = truncate.Clip(text, agentStatusPreviewLimit)
 	if text == "" {
-		fmt.Fprintln(o.stderr, o.bold("queued"))
-		return
+		fmt.Fprintln(w, o.bold("queued"))
+	} else {
+		fmt.Fprintf(w, "%s %s\n", o.bold("queued:"), text)
 	}
-	fmt.Fprintf(o.stderr, "%s %s\n", o.bold("queued:"), text)
 }
 
-func (o *AgentOutput) QueuedFollowUp(text string) {
-	o.Queued("follow-up: " + text)
-}
+func (o *AgentOutput) QueuedFollowUp(text string) { o.Queued("follow-up: " + text) }
 
 func (o *AgentOutput) Stopping() {
 	if o == nil || o.verbosity < 0 {
@@ -300,9 +254,8 @@ func (o *AgentOutput) Stopping() {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
-	fmt.Fprintln(o.stderr, o.colored(output.ANSIYellow, "Stopping current task..."))
+	o.stopLive()
+	o.stream.Flush()
 }
 
 func (o *AgentOutput) Stopped() {
@@ -311,9 +264,9 @@ func (o *AgentOutput) Stopped() {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
-	fmt.Fprintln(o.stderr, o.dim("Task stopped."))
+	o.stopLive()
+	o.stream.Flush()
+	fmt.Fprintln(o.Stderr(), o.dim("Task stopped."))
 }
 
 func (o *AgentOutput) Error(err error) {
@@ -322,12 +275,11 @@ func (o *AgentOutput) Error(err error) {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.aborted {
-		return
+	if !o.aborted {
+		o.stopLive()
+		o.stream.Flush()
+		fmt.Fprintf(o.Stderr(), "error: %s\n", err)
 	}
-	o.stopSpinnerAndFlushLive()
-	o.ensureStreamNewlineLocked()
-	fmt.Fprintf(o.stderr, "error: %s\n", err)
 }
 
 func (o *AgentOutput) AbortCurrentRun() {
@@ -336,27 +288,23 @@ func (o *AgentOutput) AbortCurrentRun() {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.spinner.Stop()
+	o.liveView.Stop()
 	o.liveToolOrder = nil
-	o.ensureStreamNewlineLocked()
-	o.resetStreamState()
+	o.stream.Flush()
+	o.stream.Reset()
 	o.aborted = true
-	if o.tools != nil {
-		for id := range o.tools {
-			delete(o.tools, id)
-		}
+	for id := range o.tools {
+		delete(o.tools, id)
 	}
 }
 
-// EnsureStreamNewline closes any open streamed line (mid-line cursor) by
-// emitting a newline. Thread-safe wrapper for the locked variant.
 func (o *AgentOutput) EnsureStreamNewline() {
 	if o == nil {
 		return
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.ensureStreamNewlineLocked()
+	o.stream.EnsureNewline()
 }
 
 // ---------------------------------------------------------------------------
@@ -375,361 +323,201 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 	switch event.Type {
 	case agent.EventAgentStart:
 		o.agentStart = time.Now()
-		o.totalUsage = agent.Usage{}
+
 	case agent.EventTurnStart:
-		o.streamPrinted = 0
-		o.streamReasoningPrinted = 0
-		o.lastReasoningFull = ""
+		o.stream.NewTurn()
 		o.turnStart = time.Now()
 		if o.verbosity >= 1 && event.Turn > 1 {
-			o.ensureStreamNewlineLocked()
-			fmt.Fprintln(o.stderr, o.dim("  turn "+fmt.Sprint(event.Turn)))
+			o.stream.EnsureNewline()
+			fmt.Fprintln(o.Stderr(), o.dim("  turn "+fmt.Sprint(event.Turn)))
 		}
 		if o.canAnimate() {
-			o.spinner.Start("thinking")
+			o.liveView.Update([]string{spinnerSentinel + " thinking"})
+			o.liveView.Start()
 		}
+
 	case agent.EventMessageUpdate:
-		o.stopSpinnerAndFlushLive()
-		o.streamDelta(event)
+		if o.stream.WouldPrintDelta(event.Message.Content, event.Message.ReasoningContent) {
+			o.stopLive()
+		}
+		if o.verbosity >= 0 {
+			o.stream.Delta(event.Message.Content, event.Message.ReasoningContent)
+		}
+
 	case agent.EventToolExecutionStart:
 		if o.canAnimate() {
 			if len(o.liveToolOrder) == 0 {
-				o.spinner.Stop()
-				o.flushStreamBuf()
-				o.closeReasoningBlock()
-				o.ensureStreamNewlineLocked()
+				o.liveView.Stop()
+				o.stream.Flush()
 			}
 			if event.ToolCallID != "" {
 				o.tools[event.ToolCallID] = event
 				o.liveToolOrder = append(o.liveToolOrder, event.ToolCallID)
 			}
-			o.updateSpinnerLiveLines()
-			pending := o.pendingLiveToolCount()
-			if pending > 1 {
-				o.spinner.Start(fmt.Sprintf("running %d tools in parallel", pending))
-			} else {
-				o.spinner.Start(o.toolSpinnerLabel(event))
-			}
+			o.liveView.Update(o.allToolLines())
+			o.liveView.Start()
 		} else {
-			o.spinner.Stop()
-			o.flushStreamBuf()
-			o.closeReasoningBlock()
-			o.toolStart(event)
-		}
-	case agent.EventToolExecutionEnd:
-		if o.isLiveTool(event.ToolCallID) {
-			o.tools[event.ToolCallID] = event
-			pending := o.pendingLiveToolCount()
-			if pending == 0 {
-				o.spinner.Stop()
-				o.flushLiveToolBlock()
-			} else {
-				o.updateSpinnerLiveLines()
-				if pending == 1 {
-					o.spinner.Start(o.firstPendingSpinnerLabel())
-				} else {
-					o.spinner.Start(fmt.Sprintf("running %d tools in parallel", pending))
+			o.liveView.Stop()
+			o.stream.Flush()
+			if event.ToolCallID != "" {
+				o.tools[event.ToolCallID] = event
+			}
+			if o.verbosity >= 0 {
+				name := toolNameOrDefault(event)
+				w := o.Stderr()
+				fmt.Fprintln(w)
+				fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+					o.color.Wrap("▸", output.ANSICyan)+" "+o.bold(name)+"  "+
+						o.dim(truncate.Clip(summarizeToolArguments(name, event.Arguments), 80)))
+				if o.verbosity >= 1 {
+					o.printToolArgBlock(w, name, event.Arguments)
+				}
+				if o.debug {
+					if args := compactAgentJSON(event.Arguments, agentDebugPreviewLimit); args != "" {
+						fmt.Fprintf(w, "%s%s\n", toolArgIndent, o.dim("raw: "+args))
+					}
 				}
 			}
-		} else {
-			o.stopSpinnerAndFlushLive()
-			o.toolEnd(event)
 		}
+
+	case agent.EventToolExecutionEnd:
+		if event.ToolCallID != "" {
+			o.tools[event.ToolCallID] = event
+		}
+		o.toolCallCount++
+		if event.IsError || event.Err != nil {
+			o.toolErrorCount++
+		}
+		if o.hasLiveTool(event.ToolCallID) {
+			if o.allDone() {
+				o.liveView.Stop()
+				o.printPermanentTools()
+			} else {
+				o.liveView.Update(o.allToolLines())
+			}
+		} else {
+			o.stopLive()
+			if o.verbosity >= 0 {
+				w := o.Stderr()
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, o.renderToolLine(event))
+				if o.verbosity >= 1 {
+					o.printToolDetail(w, event)
+				}
+			}
+			delete(o.tools, event.ToolCallID)
+		}
+
 	case agent.EventTurnEnd:
-		o.stopSpinnerAndFlushLive()
+		o.stopLive()
 		o.turnEnd(event)
 	case agent.EventAgentEnd:
-		o.stopSpinnerAndFlushLive()
+		o.stopLive()
 		o.agentEnd(event)
 	case agent.EventEvalStart:
-		o.stopSpinnerAndFlushLive()
+		o.stopLive()
 		o.evalStart(event)
 	case agent.EventEvalEnd:
-		o.stopSpinnerAndFlushLive()
+		o.stopLive()
 		o.evalEnd(event)
 	case agent.EventEvalError:
-		o.stopSpinnerAndFlushLive()
+		o.stopLive()
 		o.evalError(event)
 	}
 }
 
-// streamDelta renders newly-arrived assistant content. Text content streams
-// token-by-token to stdout. Reasoning content (verbose mode) is buffered and
-// flushed line-by-line to stderr in dim color.
-func (o *AgentOutput) streamDelta(event agent.Event) {
-	if o.verbosity < 0 || !o.stream || o.stdout == nil {
-		return
-	}
-
-	if o.verbosity >= 2 && event.Message.ReasoningContent != nil {
-		reasoning := *event.Message.ReasoningContent
-		o.lastReasoningFull = reasoning
-		lastNL := strings.LastIndex(reasoning, "\n")
-		if lastNL >= 0 {
-			flushTo := lastNL + 1
-			if flushTo > o.streamReasoningPrinted {
-				if !o.reasoningBlockOpen {
-					o.ensureStreamNewlineLocked()
-					fmt.Fprintln(o.stderr, o.dim("<thinking>"))
-					o.reasoningBlockOpen = true
-				}
-				delta := reasoning[o.streamReasoningPrinted:flushTo]
-				fmt.Fprint(o.stderr, o.dim(delta))
-				o.streamReasoningPrinted = flushTo
-			}
-		}
-	}
-
-	content := ""
-	if event.Message.Content != nil {
-		content = *event.Message.Content
-	}
-	if len(content) <= o.streamPrinted {
-		return
-	}
-	if o.streamPrinted == 0 && o.reasoningBlockOpen {
-		o.closeReasoningBlock()
-	}
-
-	delta := content[o.streamPrinted:]
-	o.streamPrinted = len(content)
-	o.didStream = true
-	o.lastStreamed = content
-
-	if !o.markdown {
-		fmt.Fprint(o.stdout, delta)
-		o.streamLineOpen = !strings.HasSuffix(content, "\n")
-		return
-	}
-
-	o.streamBuf += delta
-	flushPoint := findParagraphFlushPoint(o.streamBuf)
-	if flushPoint <= 0 {
-		return
-	}
-	o.renderAndFlush(o.streamBuf[:flushPoint])
-	o.streamBuf = o.streamBuf[flushPoint:]
-}
-
-// flushStreamBuf renders any remaining buffered content and writes it to
-// stdout. Called before tool execution and at turn end.
-func (o *AgentOutput) flushStreamBuf() {
-	if o.streamBuf == "" {
-		return
-	}
-	o.renderAndFlush(o.streamBuf)
-	o.streamBuf = ""
-}
-
-// renderAndFlush renders text through glamour (if enabled) and writes to stdout.
-func (o *AgentOutput) renderAndFlush(text string) {
-	if o.markdown {
-		if rendered := renderAgentMarkdown(text, true); rendered != "" {
-			text = rendered
-		}
-	}
-	fmt.Fprint(o.stdout, text)
-	if !strings.HasSuffix(text, "\n") {
-		fmt.Fprintln(o.stdout)
-	}
-	o.streamLineOpen = false
-}
-
-// closeReasoningBlock flushes any remaining buffered reasoning line and prints
-// the </thinking> closing tag. No-op if no block is open.
-func (o *AgentOutput) closeReasoningBlock() {
-	if !o.reasoningBlockOpen {
-		return
-	}
-	if len(o.lastReasoningFull) > o.streamReasoningPrinted {
-		fmt.Fprintln(o.stderr, o.dim(o.lastReasoningFull[o.streamReasoningPrinted:]))
-		o.streamReasoningPrinted = len(o.lastReasoningFull)
-	}
-	fmt.Fprintln(o.stderr, o.dim("</thinking>"))
-	o.reasoningBlockOpen = false
-}
-
 // ---------------------------------------------------------------------------
-// Animation / hyperlink gating
+// Tool rendering
 // ---------------------------------------------------------------------------
 
-// canAnimate gates transient chrome (spinners). Forwarded PTY sessions and
-// non-TTY pipes get no spinner — a perpetually repainting line would corrupt
-// the line-oriented stream a remote agent (aider) consumes.
 func (o *AgentOutput) canAnimate() bool {
 	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0
 }
 
-// ---------------------------------------------------------------------------
-// Live tool block — in-place ▸→✓ updates in the spinner's live region
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) isLiveTool(id string) bool {
-	for _, tid := range o.liveToolOrder {
-		if tid == id {
-			return true
+func (o *AgentOutput) renderToolLine(ev agent.Event) string {
+	name := toolNameOrDefault(ev)
+	summary := truncate.Clip(summarizeToolArguments(name, ev.Arguments), 80)
+	if ev.Type == agent.EventToolExecutionEnd {
+		marker, mc := "✓", output.ANSIGreen
+		if ev.IsError || ev.Err != nil {
+			marker, mc = "✗", output.ANSIRed
 		}
+		line := o.color.Wrap(marker, mc) + " " + o.bold(name)
+		if summary != "" {
+			line += "  " + o.dim(summary)
+		}
+		if len(ev.Result) > 0 {
+			line += "  " + o.dim(truncate.FormatSize(len(ev.Result)))
+		}
+		if elapsed := o.coloredElapsed(ev.StartedAt); elapsed != "" {
+			line += "  " + elapsed
+		}
+		return toolBlockIndent + line
 	}
-	return false
+	line := spinnerSentinel + " " + o.bold(name)
+	if summary != "" {
+		line += "  " + o.dim(summary)
+	}
+	return toolBlockIndent + line
 }
 
-func (o *AgentOutput) pendingLiveToolCount() int {
-	n := 0
-	for _, id := range o.liveToolOrder {
-		if ev, ok := o.tools[id]; ok && ev.Type != agent.EventToolExecutionEnd {
-			n++
-		}
-	}
-	return n
-}
-
-func (o *AgentOutput) updateSpinnerLiveLines() {
+func (o *AgentOutput) allToolLines() []string {
 	lines := make([]string, 0, len(o.liveToolOrder))
 	for _, id := range o.liveToolOrder {
-		ev, ok := o.tools[id]
-		if !ok {
-			continue
+		if ev, ok := o.tools[id]; ok {
+			lines = append(lines, o.renderToolLine(ev))
 		}
-		name := toolNameOrDefault(ev)
-		summary := truncate.Clip(summarizeToolArguments(name, ev.Arguments), 80)
-		if ev.Type == agent.EventToolExecutionEnd {
-			marker := "✓"
-			markerColor := output.ANSIGreen
-			if ev.IsError || ev.Err != nil {
-				marker = "✗"
-				markerColor = output.ANSIRed
+	}
+	return lines
+}
+
+func (o *AgentOutput) printToolDetail(w io.Writer, ev agent.Event) {
+	name := toolNameOrDefault(ev)
+	if ev.IsError || ev.Err != nil {
+		errText := strings.TrimSpace(ev.Result)
+		if ev.Err != nil {
+			errText = ev.Err.Error()
+		}
+		if errText != "" {
+			fmt.Fprintf(w, "%s%s\n", toolResultIndent,
+				o.color.Wrap(truncate.Clip(errText, agentStatusPreviewLimit), output.ANSIRed))
+		}
+		return
+	}
+	result := strings.TrimSpace(ev.Result)
+	if result == "" {
+		return
+	}
+	var preview toolResultPreview
+	if o.verbosity >= 2 {
+		preview = toolResultPreview{lines: normalizeToolResultLines(result)}
+	} else {
+		preview = buildToolResultPreview(name, result, o.debug)
+	}
+	if len(preview.lines) == 0 {
+		return
+	}
+	if name == "read" && o.color.Enabled {
+		if args := decodeToolArguments(ev.Arguments); args != nil {
+			if path := stringArg(args, "path"); path != "" {
+				preview.lines = highlightReadResult(path, preview.lines, o.color)
 			}
-			header := o.colored(markerColor, marker) + " " + o.bold(name)
-			if summary != "" {
-				header += "  " + o.dim(summary)
-			}
-			if len(ev.Result) > 0 {
-				header += "  " + o.dim(truncate.FormatSize(len(ev.Result)))
-			}
-			if elapsed := o.coloredElapsed(ev.StartedAt); elapsed != "" {
-				header += "  " + elapsed
-			}
-			lines = append(lines, toolBlockIndent+header)
+		}
+	}
+	for _, line := range preview.lines {
+		if isToolMetaLine(line) {
+			fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.color.Wrap(line, output.ANSIYellow))
 		} else {
-			header := spinnerSentinel + " " + o.bold(name)
-			if summary != "" {
-				header += "  " + o.dim(summary)
-			}
-			lines = append(lines, toolBlockIndent+header)
+			fmt.Fprintf(w, "%s%s\n", toolResultIndent, line)
 		}
 	}
-	o.spinner.SetLines(lines)
-}
-
-func (o *AgentOutput) firstPendingSpinnerLabel() string {
-	for _, id := range o.liveToolOrder {
-		ev, ok := o.tools[id]
-		if !ok || ev.Type == agent.EventToolExecutionEnd {
-			continue
-		}
-		return o.toolSpinnerLabel(ev)
-	}
-	return "tool"
-}
-
-// flushLiveToolBlock prints permanent lines for all tracked live tools, then
-// clears the order list. Call after spinner.Stop() has erased the live region.
-func (o *AgentOutput) flushLiveToolBlock() {
-	order := o.liveToolOrder
-	o.liveToolOrder = nil
-	if len(order) == 0 {
-		return
-	}
-	for _, id := range order {
-		ev, ok := o.tools[id]
-		if !ok {
-			continue
-		}
-		if ev.Type != agent.EventToolExecutionEnd {
-			name := toolNameOrDefault(ev)
-			fmt.Fprintln(o.stderr)
-			o.toolHeader("▸", output.ANSICyan, name, truncate.Clip(summarizeToolArguments(name, ev.Arguments), 80))
-			o.forgetTool(id)
-			continue
-		}
-		o.toolEnd(ev)
+	if preview.truncated {
+		fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(fmt.Sprintf("… +%d lines hidden", preview.hidden)))
 	}
 }
 
-// stopSpinnerAndFlushLive stops the spinner and prints permanent lines for any
-// tools that were tracked in the live region.
-func (o *AgentOutput) stopSpinnerAndFlushLive() {
-	o.spinner.Stop()
-	o.flushLiveToolBlock()
-}
-
-func toolNameOrDefault(ev agent.Event) string {
-	if name := strings.TrimSpace(ev.ToolName); name != "" {
-		return name
-	}
-	return "tool"
-}
-
-
-// ---------------------------------------------------------------------------
-// Internal run state
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) beginRun() {
-	o.resetStreamState()
-	o.aborted = false
-	o.tools = make(map[string]agent.Event)
-	o.liveToolOrder = nil
-	o.toolCallCount = 0
-	o.toolErrorCount = 0
-}
-
-func (o *AgentOutput) resetStreamState() {
-	o.didStream = false
-	o.streamPrinted = 0
-	o.streamBuf = ""
-	o.streamReasoningPrinted = 0
-	o.lastReasoningFull = ""
-	o.reasoningBlockOpen = false
-	o.streamLineOpen = false
-	o.lastStreamed = ""
-}
-
-func (o *AgentOutput) ensureStreamNewlineLocked() {
-	if o == nil || !o.streamLineOpen || o.stdout == nil {
-		return
-	}
-	fmt.Fprintln(o.stdout)
-	o.streamLineOpen = false
-}
-
-// ---------------------------------------------------------------------------
-// Rendering helpers — reduce o.color.Code() boilerplate
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) dim(text string) string {
-	return o.color.Wrap(text, output.ANSIDim)
-}
-
-func (o *AgentOutput) bold(text string) string {
-	return o.color.Wrap(text, output.ANSIBold)
-}
-
-func (o *AgentOutput) colored(code, text string) string {
-	return o.color.Wrap(text, code)
-}
-
-func (o *AgentOutput) toolHeader(marker, markerColor, name string, parts ...string) {
-	header := o.colored(markerColor, marker) + " " + o.bold(name)
-	for _, p := range parts {
-		if p != "" {
-			header += "  " + o.dim(p)
-		}
-	}
-	fmt.Fprintf(o.stderr, "%s%s\n", toolBlockIndent, header)
-}
-
-func (o *AgentOutput) renderToolArgBlock(lines []toolArgLine) {
+func (o *AgentOutput) printToolArgBlock(w io.Writer, name, arguments string) {
+	lines := formatToolArguments(name, arguments)
 	if len(lines) == 0 {
 		return
 	}
@@ -740,355 +528,122 @@ func (o *AgentOutput) renderToolArgBlock(lines []toolArgLine) {
 		}
 	}
 	for _, l := range lines {
-		padding := strings.Repeat(" ", maxKey-len(l.key)+2)
-		fmt.Fprintf(o.stderr, "%s%s%s%s\n", toolArgIndent, o.dim(l.key), padding, l.value)
+		fmt.Fprintf(w, "%s%s%s%s\n", toolArgIndent,
+			o.dim(l.key), strings.Repeat(" ", maxKey-len(l.key)+2), l.value)
 	}
-}
-
-func (o *AgentOutput) toolResultLine(text string) {
-	if text == "" {
-		fmt.Fprintln(o.stderr, toolResultIndent)
-	} else if isToolMetaLine(text) {
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.colored(output.ANSIYellow, text))
-	} else {
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, text)
-	}
-}
-
-func isToolMetaLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "[exit code:") ||
-		strings.HasPrefix(trimmed, "[command timed out") ||
-		strings.HasPrefix(trimmed, "[truncated:")
 }
 
 // ---------------------------------------------------------------------------
-// Spinner label helpers
+// Live tool tracking
 // ---------------------------------------------------------------------------
 
-var knownScanners = map[string]bool{
-	"scan": true, "gogo": true, "spray": true, "zombie": true,
-	"neutron": true, "katana": true, "passive": true,
-}
-
-func (o *AgentOutput) toolSpinnerLabel(event agent.Event) string {
-	name := strings.TrimSpace(event.ToolName)
-	if name == "" {
-		name = "tool"
-	}
-	summary := truncate.Clip(summarizeToolArguments(name, event.Arguments), 48)
-	if name == "bash" {
-		if real, target := extractPseudoCommand(summary); real != "" {
-			if target != "" {
-				return real + " · " + target
-			}
-			return real
+func (o *AgentOutput) hasLiveTool(id string) bool {
+	for _, tid := range o.liveToolOrder {
+		if tid == id {
+			return true
 		}
 	}
-	if summary == "" {
-		return name
-	}
-	return name + " · " + summary
+	return false
 }
 
-func extractPseudoCommand(cmdLine string) (tool, target string) {
-	fields := strings.Fields(cmdLine)
-	if len(fields) == 0 {
-		return "", ""
-	}
-	cmd := fields[0]
-	if !knownScanners[cmd] {
-		return "", ""
-	}
-	for i := 1; i < len(fields); i++ {
-		if (fields[i] == "-i" || fields[i] == "--input") && i+1 < len(fields) {
-			return cmd, fields[i+1]
+func (o *AgentOutput) allDone() bool {
+	for _, id := range o.liveToolOrder {
+		if ev, ok := o.tools[id]; ok && ev.Type != agent.EventToolExecutionEnd {
+			return false
 		}
 	}
-	if len(fields) > 1 {
-		return cmd, truncate.Clip(strings.Join(fields[1:], " "), 40)
-	}
-	return cmd, ""
+	return true
 }
 
-// ---------------------------------------------------------------------------
-// Tool execution rendering
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) toolStart(event agent.Event) {
-	if event.ToolCallID != "" {
-		o.tools[event.ToolCallID] = event
-	}
-	if o.verbosity < 0 {
+func (o *AgentOutput) printPermanentTools() {
+	order := o.liveToolOrder
+	o.liveToolOrder = nil
+	if len(order) == 0 {
 		return
 	}
-	name := toolNameOrDefault(event)
-	summary := summarizeToolArguments(name, event.Arguments)
-	o.ensureStreamNewlineLocked()
-	fmt.Fprintln(o.stderr)
-
-	o.toolHeader("▸", output.ANSICyan, name, truncate.Clip(summary, 80))
-	if o.verbosity >= 1 {
-		o.renderToolArgBlock(formatToolArguments(name, event.Arguments))
-	}
-
-	if o.debug {
-		if args := compactAgentJSON(event.Arguments, agentDebugPreviewLimit); args != "" {
-			fmt.Fprintf(o.stderr, "%s%s\n", toolArgIndent, o.dim("raw: "+args))
+	w := o.Stderr()
+	fmt.Fprintln(w)
+	for _, id := range order {
+		ev, ok := o.tools[id]
+		if !ok {
+			continue
 		}
-	}
-}
-
-func (o *AgentOutput) toolEnd(event agent.Event) {
-	o.toolCallCount++
-	if event.IsError || event.Err != nil {
-		o.toolErrorCount++
-	}
-
-	if o.verbosity < 0 {
-		o.forgetTool(event.ToolCallID)
-		return
-	}
-
-	name := toolNameOrDefault(event)
-	summary := summarizeToolArguments(name, event.Arguments)
-	fmt.Fprintln(o.stderr)
-
-	if event.IsError || event.Err != nil {
-		o.ensureStreamNewlineLocked()
-		errText := strings.TrimSpace(event.Result)
-		if event.Err != nil {
-			errText = event.Err.Error()
-		}
-		if errText == "" {
-			errText = "tool execution failed"
-		}
-		o.toolHeader("✗", output.ANSIRed, name, summary)
+		fmt.Fprintln(w, o.renderToolLine(ev))
 		if o.verbosity >= 1 {
-			fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent,
-				o.colored(output.ANSIRed, truncate.Clip(errText, agentStatusPreviewLimit)))
+			o.printToolDetail(w, ev)
 		}
-		o.forgetTool(event.ToolCallID)
-		return
+		delete(o.tools, id)
 	}
-
-	result := strings.TrimSpace(event.Result)
-	elapsed := o.coloredElapsed(event.StartedAt)
-	if result == "" || o.verbosity < 1 {
-		o.ensureStreamNewlineLocked()
-		o.toolHeader("✓", output.ANSIGreen, name, summary, truncate.FormatSize(len(result)), elapsed)
-		o.forgetTool(event.ToolCallID)
-		return
-	}
-
-	o.ensureStreamNewlineLocked()
-	highlightPath := ""
-	if name == "read" {
-		if args := decodeToolArguments(event.Arguments); args != nil {
-			highlightPath = stringArg(args, "path")
-		}
-	}
-	o.renderToolResult(name, summary, result, elapsed, highlightPath)
-	o.forgetTool(event.ToolCallID)
 }
 
-func (o *AgentOutput) renderToolResult(toolName, toolSummary, result, elapsed, highlightPath string) {
-	var preview toolResultPreview
-	if o.verbosity >= 2 {
-		lines := normalizeToolResultLines(result)
-		preview = toolResultPreview{lines: lines}
-	} else {
-		preview = buildToolResultPreview(toolName, result, o.debug)
-	}
-	if len(preview.lines) == 0 {
-		o.toolHeader("✓", output.ANSIGreen, toolName, truncate.Clip(toolSummary, 80), elapsed)
-		return
-	}
-
-	if highlightPath != "" && o.color.Enabled {
-		preview.lines = highlightReadResult(highlightPath, preview.lines, o.color)
-	}
-
-	o.toolHeader("✓", output.ANSIGreen, toolName, truncate.Clip(toolSummary, 80), elapsed)
-	for _, line := range preview.lines {
-		o.toolResultLine(line)
-	}
-	if preview.truncated {
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(fmt.Sprintf("… +%d lines hidden", preview.hidden)))
+func (o *AgentOutput) stopLive() {
+	o.liveView.Stop()
+	if len(o.liveToolOrder) > 0 {
+		o.printPermanentTools()
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Tool result preview
+// Internal state
 // ---------------------------------------------------------------------------
 
-type toolResultPreview struct {
-	lines     []string
-	truncated bool
-	hidden    int
+func (o *AgentOutput) beginRun() {
+	o.stream.Reset()
+	o.aborted = false
+	o.tools = make(map[string]agent.Event)
+	o.liveToolOrder = nil
+	o.toolCallCount = 0
+	o.toolErrorCount = 0
 }
 
-func buildToolResultPreview(toolName, result string, debug bool) toolResultPreview {
-	lines := normalizeToolResultLines(result)
-	if len(lines) == 0 {
-		return toolResultPreview{}
-	}
+func (o *AgentOutput) dim(text string) string  { return o.color.Wrap(text, output.ANSIDim) }
+func (o *AgentOutput) bold(text string) string { return o.color.Wrap(text, output.ANSIBold) }
 
-	if toolName == "fetch" {
-		return buildFetchToolResultPreview(lines, debug)
+func (o *AgentOutput) coloredElapsed(started time.Time) string {
+	if started.IsZero() {
+		return ""
 	}
-
-	maxLines := toolResultPreviewDefault
-	if debug {
-		maxLines = 20
+	d := time.Since(started)
+	text := "· " + util.FormatDuration(d)
+	switch {
+	case d > 30*time.Second:
+		return o.color.Wrap(text, output.ANSIRed)
+	case d > 5*time.Second:
+		return o.color.Wrap(text, output.ANSIYellow)
+	default:
+		return text
 	}
-
-	switch toolName {
-	case "read":
-		maxLines = 10
-	case "write":
-		maxLines = 6
-	case "bash":
-		maxLines = 12
-	}
-
-	return selectToolResultLines(lines, maxLines)
-}
-
-func buildFetchToolResultPreview(lines []string, debug bool) toolResultPreview {
-	sep := -1
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "---" {
-			sep = i
-			break
-		}
-	}
-	if sep < 0 {
-		return selectToolResultLines(lines, toolResultPreviewDefault)
-	}
-
-	bodyLines := toolFetchBodyLines
-	if debug {
-		bodyLines = 16
-	}
-
-	selected := make([]string, 0, sep+1+bodyLines)
-	selected = append(selected, lines[:sep+1]...)
-
-	bodyKept := 0
-	lastSelected := sep
-	for i := sep + 1; i < len(lines); i++ {
-		line := lines[i]
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		selected = append(selected, line)
-		lastSelected = i
-		bodyKept++
-		if bodyKept >= bodyLines {
-			break
-		}
-	}
-
-	hidden := len(lines) - lastSelected - 1
-	if hidden < 0 {
-		hidden = 0
-	}
-	display := make([]string, 0, len(selected))
-	for _, line := range selected {
-		display = append(display, truncateToolResultLine(line, toolResultPreviewWidth))
-	}
-	return toolResultPreview{lines: display, truncated: hidden > 0, hidden: hidden}
-}
-
-func selectToolResultLines(lines []string, maxLines int) toolResultPreview {
-	hidden := 0
-	selected := lines
-	if maxLines > 0 && maxLines < len(lines) {
-		selected = lines[:maxLines]
-		hidden = len(lines) - maxLines
-	}
-	display := make([]string, 0, len(selected))
-	for _, line := range selected {
-		display = append(display, truncateToolResultLine(line, toolResultPreviewWidth))
-	}
-	return toolResultPreview{lines: display, truncated: hidden > 0, hidden: hidden}
-}
-
-func normalizeToolResultLines(result string) []string {
-	result = strings.ReplaceAll(result, "\r\n", "\n")
-	result = strings.ReplaceAll(result, "\r", "\n")
-
-	rawLines := strings.Split(result, "\n")
-	lines := make([]string, 0, len(rawLines))
-	lastBlank := false
-	for _, line := range rawLines {
-		line = strings.TrimRight(line, " \t")
-		if strings.TrimSpace(line) == "" {
-			if len(lines) == 0 || lastBlank {
-				continue
-			}
-			lines = append(lines, "")
-			lastBlank = true
-			continue
-		}
-		lines = append(lines, line)
-		lastBlank = false
-	}
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
-}
-
-func truncateToolResultLine(value string, limit int) string {
-	return truncate.ClipRunes(value, limit)
 }
 
 // ---------------------------------------------------------------------------
-// Turn / agent end (debug diagnostics)
+// Turn / agent end — stats come from events, not accumulated
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) turnEnd(event agent.Event) {
 	if o.verbosity < 0 {
 		return
 	}
+	o.stream.Flush()
+	w := o.Stderr()
 
-	o.flushStreamBuf()
-	o.ensureStreamNewlineLocked()
-	o.closeReasoningBlock()
-
-	// Render thinking (verbosity >= 2) if not already streamed.
-	if o.verbosity >= 2 && o.streamReasoningPrinted == 0 {
-		if event.Message.ReasoningContent != nil {
-			if reasoning := strings.TrimSpace(*event.Message.ReasoningContent); reasoning != "" {
-				o.renderThinkingBlock(reasoning)
-			}
+	if o.verbosity >= 2 && o.stream.ReasoningPrinted() == 0 && event.Message.ReasoningContent != nil {
+		if reasoning := strings.TrimSpace(*event.Message.ReasoningContent); reasoning != "" {
+			o.renderThinkingBlock(w, reasoning)
 		}
 	}
-
-	// Render assistant content if not already streamed.
-	if o.streamPrinted == 0 {
-		if event.Message.Content != nil {
-			if content := strings.TrimSpace(*event.Message.Content); content != "" {
-				rendered := renderAgentMarkdown(content, o.markdown)
-				if rendered != "" {
-					fmt.Fprintln(o.stdout, rendered)
-				}
-				o.didStream = true
-				o.lastStreamed = content
+	if o.stream.ContentPrinted() == 0 && event.Message.Content != nil {
+		if content := strings.TrimSpace(*event.Message.Content); content != "" {
+			if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
+				fmt.Fprintln(o.Stdout(), rendered)
 			}
+			o.stream.MarkStreamed()
 		}
 	}
-
-	// Turn statistics.
-	o.renderTurnStats(event)
-
-	// Debug diagnostics — only when --debug is set.
+	o.renderTurnStats(w, event)
 	if o.debug {
 		role, contentLen, toolCalls, reasoningLen, preview := summarizeChatMessage(event.Message)
 		if role != "" || contentLen > 0 || toolCalls > 0 || reasoningLen > 0 {
-			fmt.Fprintf(o.stderr, "%s[debug] [turn %d] role=%s content=%d reasoning=%d tool_calls=%d preview=%q%s\n",
+			fmt.Fprintf(w, "%s[debug] [turn %d] role=%s content=%d reasoning=%d tool_calls=%d preview=%q%s\n",
 				o.color.Code(output.ANSIDim), event.Turn, role, contentLen, reasoningLen, toolCalls, preview,
 				o.color.Code(output.ANSIReset))
 		}
@@ -1099,7 +654,7 @@ func (o *AgentOutput) turnEnd(event agent.Event) {
 					event.Usage.CacheReadTokens, event.Usage.CacheWriteTokens,
 					event.Usage.CacheHitRatio()*100)
 			}
-			fmt.Fprintf(o.stderr, "%s[debug] [turn %d] prompt=%d completion=%d total=%d context=%d%s%s\n",
+			fmt.Fprintf(w, "%s[debug] [turn %d] prompt=%d completion=%d total=%d context=%d%s%s\n",
 				o.color.Code(output.ANSIDim), event.Turn,
 				event.Usage.PromptTokens, event.Usage.CompletionTokens, event.Usage.TotalTokens,
 				event.ContextTokens, cache, o.color.Code(output.ANSIReset))
@@ -1107,23 +662,12 @@ func (o *AgentOutput) turnEnd(event agent.Event) {
 	}
 }
 
-// renderTurnStats prints a compact one-line summary for the completed turn.
-func (o *AgentOutput) renderTurnStats(event agent.Event) {
-	if o.stderr == nil {
+func (o *AgentOutput) renderTurnStats(w io.Writer, event agent.Event) {
+	if w == nil {
 		return
 	}
-	// Accumulate usage for agent-end summary.
-	if event.Usage != nil {
-		o.totalUsage.PromptTokens += event.Usage.PromptTokens
-		o.totalUsage.CompletionTokens += event.Usage.CompletionTokens
-		o.totalUsage.TotalTokens += event.Usage.TotalTokens
-		o.totalUsage.CacheReadTokens += event.Usage.CacheReadTokens
-		o.totalUsage.CacheWriteTokens += event.Usage.CacheWriteTokens
-	}
-
 	elapsed := time.Since(o.turnStart)
 	toolCalls := max(len(event.Message.ToolCalls), len(event.ToolResults))
-
 	parts := []string{fmt.Sprintf("turn %d", event.Turn)}
 	if toolCalls > 0 {
 		parts = append(parts, fmt.Sprintf("tools=%d", toolCalls))
@@ -1132,14 +676,14 @@ func (o *AgentOutput) renderTurnStats(event agent.Event) {
 		parts = append(parts, formatTokenUsage(event.Usage))
 	}
 	parts = append(parts, util.FormatDuration(elapsed))
-	fmt.Fprintln(o.stderr, o.dim("  ["+strings.Join(parts, " | ")+"]"))
-	fmt.Fprintln(o.stderr)
+	fmt.Fprintln(w, o.dim("  ["+strings.Join(parts, " | ")+"]"))
+	fmt.Fprintln(w)
 }
 
 func (o *AgentOutput) agentEnd(event agent.Event) {
-	o.ensureStreamNewlineLocked()
-
-	if o.stderr != nil && event.Turn > 0 {
+	o.stream.EnsureNewline()
+	w := o.Stderr()
+	if w != nil && event.Turn > 0 {
 		elapsed := time.Since(o.agentStart)
 		parts := []string{
 			fmt.Sprintf("agent %s", event.Stop),
@@ -1152,17 +696,15 @@ func (o *AgentOutput) agentEnd(event agent.Event) {
 			}
 			parts = append(parts, toolPart)
 		}
-		if o.totalUsage.TotalTokens > 0 {
-			parts = append(parts, formatTokenUsage(&o.totalUsage))
+		if event.TotalUsage != nil && event.TotalUsage.TotalTokens > 0 {
+			parts = append(parts, formatTokenUsage(event.TotalUsage))
 		}
 		parts = append(parts, util.FormatDuration(elapsed))
 		if event.Err != nil {
 			parts = append(parts, fmt.Sprintf("err=%q", event.Err.Error()))
 		}
-		fmt.Fprintln(o.stderr, o.dim("  ["+strings.Join(parts, " | ")+"]"))
+		fmt.Fprintln(w, o.dim("  ["+strings.Join(parts, " | ")+"]"))
 	}
-
-	// Debug diagnostics.
 	if !o.debug {
 		return
 	}
@@ -1176,7 +718,7 @@ func (o *AgentOutput) agentEnd(event agent.Event) {
 	if event.Err != nil {
 		errText = fmt.Sprintf(" err=%q", event.Err.Error())
 	}
-	fmt.Fprintf(o.stderr, "%s[debug] [agent] stop=%s turns=%d messages=%d new=%d last_role=%s content=%d reasoning=%d tools=%d preview=%q%s%s%s\n",
+	fmt.Fprintf(w, "%s[debug] [agent] stop=%s turns=%d messages=%d new=%d last_role=%s content=%d reasoning=%d tools=%d preview=%q%s%s%s\n",
 		o.color.Code(output.ANSIDim), event.Stop, event.Turn,
 		len(event.Messages), len(event.NewMessages),
 		lastRole, lastContentLen, lastReasoningLen, lastToolCalls,
@@ -1184,553 +726,99 @@ func (o *AgentOutput) agentEnd(event agent.Event) {
 }
 
 // ---------------------------------------------------------------------------
-// Goal evaluation output
+// Eval / thinking / user intent
 // ---------------------------------------------------------------------------
 
-func (o *AgentOutput) renderThinkingBlock(reasoning string) {
-	if o.stderr == nil {
-		return
+func (o *AgentOutput) renderThinkingBlock(w io.Writer, reasoning string) {
+	for _, line := range o.thinkingBlockLines(reasoning) {
+		fmt.Fprintln(w, line)
 	}
-	lines := strings.Split(reasoning, "\n")
-	fmt.Fprintln(o.stderr, o.dim("<thinking>"))
-	limit := len(lines)
-	if limit > thinkingPreviewMaxLines {
-		limit = thinkingPreviewMaxLines
+}
+
+func (o *AgentOutput) thinkingBlockLines(reasoning string) []string {
+	reasoning = strings.ReplaceAll(reasoning, "\r\n", "\n")
+	reasoning = strings.ReplaceAll(reasoning, "\r", "\n")
+	raw := strings.Split(reasoning, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, truncate.ClipRunes(line, agentStatusPreviewLimit))
+		}
 	}
-	for _, line := range lines[:limit] {
-		fmt.Fprintln(o.stderr, o.dim(line))
+	if len(lines) == 0 {
+		return nil
 	}
-	if len(lines) > thinkingPreviewMaxLines {
-		fmt.Fprintln(o.stderr, o.dim(fmt.Sprintf("… +%d lines hidden", len(lines)-thinkingPreviewMaxLines)))
+	if hidden := len(lines) - thinkingPreviewMaxLines; hidden > 0 {
+		lines = append([]string{fmt.Sprintf("… +%d earlier lines hidden", hidden)}, lines[hidden:]...)
 	}
-	fmt.Fprintln(o.stderr, o.dim("</thinking>"))
+	for i := range lines {
+		lines[i] = o.dim(lines[i])
+	}
+	return lines
 }
 
 func (o *AgentOutput) evalStart(event agent.Event) {
-	if o.stderr == nil {
+	w := o.Stderr()
+	if w == nil {
 		return
 	}
-	label := fmt.Sprintf("eval · round %d", event.EvalRound+1)
 	if o.canAnimate() {
-		o.spinner.Start(label)
+		o.liveView.Update([]string{spinnerSentinel + " eval · round " + fmt.Sprint(event.EvalRound+1)})
+		o.liveView.Start()
 	} else {
-		fmt.Fprintln(o.stderr)
-		o.toolHeader("⋯", output.ANSICyan, "eval", fmt.Sprintf("round %d", event.EvalRound+1))
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+			o.color.Wrap("⋯", output.ANSICyan)+" "+o.bold("eval")+"  "+o.dim(fmt.Sprintf("round %d", event.EvalRound+1)))
 	}
 }
 
 func (o *AgentOutput) evalEnd(event agent.Event) {
-	if o.stderr == nil {
+	w := o.Stderr()
+	if w == nil {
 		return
 	}
-	fmt.Fprintln(o.stderr)
-	round := fmt.Sprintf("round %d", event.EvalRound+1)
-	if event.EvalPass {
-		o.toolHeader("✓", output.ANSIGreen, "eval", round, "pass")
-	} else {
-		o.toolHeader("⟳", output.ANSIYellow, "eval", round, "fail")
+	fmt.Fprintln(w)
+	marker, mc, status := "✓", output.ANSIGreen, "pass"
+	if !event.EvalPass {
+		marker, mc, status = "⟳", output.ANSIYellow, "fail"
 	}
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap(marker, mc)+" "+o.bold("eval")+"  "+
+			o.dim(fmt.Sprintf("round %d", event.EvalRound+1))+"  "+o.dim(status))
 	if reason := strings.TrimSpace(event.EvalReason); reason != "" {
-		fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(reason))
+		fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(reason))
 	}
 }
 
 func (o *AgentOutput) evalError(event agent.Event) {
-	if o.stderr == nil {
+	w := o.Stderr()
+	if w == nil {
 		return
 	}
-	fmt.Fprintln(o.stderr)
-	round := fmt.Sprintf("round %d", event.EvalRound+1)
-	o.toolHeader("⚠", output.ANSIYellow, "eval", round, "error")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("⚠", output.ANSIYellow)+" "+o.bold("eval")+"  "+
+			o.dim(fmt.Sprintf("round %d", event.EvalRound+1))+"  "+o.dim("error"))
 	detail := "evaluator LLM call failed"
 	if event.EvalError != "" {
 		detail = event.EvalError
 	}
-	fmt.Fprintf(o.stderr, "%s%s\n", toolResultIndent, o.dim(detail+", continuing..."))
+	fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(detail+", continuing..."))
 }
-
-// ---------------------------------------------------------------------------
-// Hyperlink helper
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
-// User intent rendering
-// ---------------------------------------------------------------------------
 
 func (o *AgentOutput) renderUserIntent(body string) {
-	if o == nil || o.stderr == nil {
+	w := o.Stderr()
+	if w == nil {
 		return
 	}
-	fmt.Fprintln(o.stderr, o.dim("╭─ ")+o.bold("user"))
+	fmt.Fprintln(w, o.dim("╭─ ")+o.bold("user"))
 	if strings.TrimSpace(body) == "" {
-		fmt.Fprintln(o.stderr, o.dim("│"))
+		fmt.Fprintln(w, o.dim("│"))
 	} else {
 		for _, line := range strings.Split(body, "\n") {
-			fmt.Fprintf(o.stderr, "%s %s\n", o.dim("│"), line)
+			fmt.Fprintf(w, "%s %s\n", o.dim("│"), line)
 		}
 	}
-	fmt.Fprintln(o.stderr, o.dim("╰─"))
-}
-
-func shouldRenderUserIntent(body string) bool {
-	return strings.Contains(strings.TrimRight(body, "\n"), "\n")
-}
-
-// ---------------------------------------------------------------------------
-// Tool tracking
-// ---------------------------------------------------------------------------
-
-func (o *AgentOutput) forgetTool(id string) {
-	if o == nil || id == "" || o.tools == nil {
-		return
-	}
-	delete(o.tools, id)
-}
-
-func (o *AgentOutput) coloredElapsed(started time.Time) string {
-	if started.IsZero() {
-		return ""
-	}
-	d := time.Since(started)
-	text := "· " + util.FormatDuration(d)
-	switch {
-	case d > 30*time.Second:
-		return o.colored(output.ANSIRed, text)
-	case d > 5*time.Second:
-		return o.colored(output.ANSIYellow, text)
-	default:
-		return text
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Formatting helpers for stats
-// ---------------------------------------------------------------------------
-
-// formatTokenUsage formats token usage like: "input=2,378 output=27 cache 95%"
-func formatTokenUsage(u *agent.Usage) string {
-	if u == nil {
-		return ""
-	}
-	s := fmt.Sprintf("input=%s output=%s", util.FormatNumber(u.PromptTokens), util.FormatNumber(u.CompletionTokens))
-	if ratio := u.CacheHitRatio(); ratio > 0 {
-		s += fmt.Sprintf(" cache %.0f%%", ratio*100)
-	}
-	return s
-}
-
-// ---------------------------------------------------------------------------
-// Chat message summarisation helpers
-// ---------------------------------------------------------------------------
-
-func lastMessageSummary(messages []agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
-	if len(messages) == 0 {
-		return "", 0, 0, 0, ""
-	}
-	return summarizeChatMessage(messages[len(messages)-1])
-}
-
-func summarizeChatMessage(msg agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
-	role = msg.Role
-	if msg.Content != nil {
-		contentLen = len(*msg.Content)
-		preview = truncate.Clip(*msg.Content, agentDebugPreviewLimit)
-	}
-	if msg.ReasoningContent != nil {
-		reasoningLen = len(*msg.ReasoningContent)
-	}
-	toolCalls = len(msg.ToolCalls)
-	return role, contentLen, toolCalls, reasoningLen, preview
-}
-
-// ---------------------------------------------------------------------------
-// Markdown rendering
-// ---------------------------------------------------------------------------
-
-var (
-	agentMarkdownRenderer     *glamour.TermRenderer
-	agentMarkdownRendererErr  error
-	agentMarkdownRendererOnce sync.Once
-)
-
-func renderAgentMarkdown(content string, enabled bool) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
-	}
-	if !enabled {
-		return content
-	}
-	r, err := getAgentMarkdownRenderer()
-	if err != nil {
-		return content
-	}
-	rendered, err := r.Render(content)
-	if err != nil {
-		return content
-	}
-	rendered = strings.TrimSpace(trimRenderedMarkdownLineEnds(rendered))
-	if rendered == "" {
-		return content
-	}
-	return rendered
-}
-
-func getAgentMarkdownRenderer() (*glamour.TermRenderer, error) {
-	agentMarkdownRendererOnce.Do(func() {
-		opts := []glamour.TermRendererOption{
-			glamour.WithAutoStyle(),
-			// Auto-detect the richest profile the terminal advertises (truecolor
-			// -> 256 -> ANSI) instead of pinning 16-color ANSI, so markdown answers
-			// render with real depth on modern terminals.
-			glamour.WithColorProfile(termenv.ColorProfile()),
-			glamour.WithEmoji(),
-		}
-		if w := terminalWidth(); w > 0 {
-			opts = append(opts, glamour.WithWordWrap(w))
-		}
-		agentMarkdownRenderer, agentMarkdownRendererErr = glamour.NewTermRenderer(opts...)
-	})
-	return agentMarkdownRenderer, agentMarkdownRendererErr
-}
-
-// terminalWidth returns the stdout column count, or 0 when unknown (piped /
-// forwarded sessions) so the markdown renderer skips width-bounded wrapping.
-func terminalWidth() int {
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		return w
-	}
-	return 0
-}
-
-// trimRenderedMarkdownLineEnds strips trailing visible whitespace from each
-// line while preserving ANSI escape sequences that follow the last visible
-// character. This avoids the "invisible trailing spaces" artifact from glamour
-// padding without clobbering reset sequences that close styled spans.
-func trimRenderedMarkdownLineEnds(s string) string {
-	if s == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	start := 0
-	for start < len(s) {
-		rel := strings.IndexByte(s[start:], '\n')
-		if rel < 0 {
-			b.WriteString(trimANSIVisibleRight(s[start:]))
-			break
-		}
-		end := start + rel
-		b.WriteString(trimANSIVisibleRight(s[start:end]))
-		b.WriteByte('\n')
-		start = end + 1
-	}
-	return b.String()
-}
-
-func trimANSIVisibleRight(line string) string {
-	cut := 0
-	extendCutWithANSI := false
-	for i := 0; i < len(line); {
-		if end, ok := ansiEscapeEnd(line, i); ok {
-			if extendCutWithANSI && ansiClosesStyle(line[i:end]) {
-				cut = end
-			}
-			i = end
-			continue
-		}
-
-		r, size := utf8.DecodeRuneInString(line[i:])
-		if r == utf8.RuneError && size == 1 {
-			cut = i + size
-			extendCutWithANSI = true
-			i += size
-			continue
-		}
-
-		end := i + size
-		if unicode.IsSpace(r) {
-			extendCutWithANSI = false
-		} else {
-			cut = end
-			extendCutWithANSI = true
-		}
-		i = end
-	}
-	return line[:cut]
-}
-
-func ansiClosesStyle(seq string) bool {
-	if strings.HasPrefix(seq, "\x1b]8;;") {
-		return true
-	}
-	if len(seq) < 3 || seq[0] != '\x1b' || seq[1] != '[' || seq[len(seq)-1] != 'm' {
-		return false
-	}
-	params := seq[2 : len(seq)-1]
-	if params == "" {
-		return true
-	}
-	for _, param := range strings.FieldsFunc(params, func(r rune) bool { return r == ';' || r == ':' }) {
-		switch param {
-		case "0", "22", "23", "24", "25", "27", "28", "29", "39", "49", "59":
-			return true
-		}
-	}
-	return false
-}
-
-func ansiEscapeEnd(s string, start int) (int, bool) {
-	if start >= len(s) || s[start] != '\x1b' {
-		return 0, false
-	}
-	if start+1 >= len(s) {
-		return start + 1, true
-	}
-
-	switch s[start+1] {
-	case '[':
-		for i := start + 2; i < len(s); i++ {
-			if s[i] >= 0x40 && s[i] <= 0x7e {
-				return i + 1, true
-			}
-		}
-		return len(s), true
-	case ']':
-		for i := start + 2; i < len(s); i++ {
-			switch {
-			case s[i] == '\a':
-				return i + 1, true
-			case s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\':
-				return i + 2, true
-			}
-		}
-		return len(s), true
-	default:
-		return start + 2, true
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tool argument summarisation
-// ---------------------------------------------------------------------------
-
-func summarizeToolArguments(name, arguments string) string {
-	args := decodeToolArguments(arguments)
-	if len(args) == 0 {
-		return ""
-	}
-	switch name {
-	case "bash":
-		return truncate.Clip(stringArg(args, "command"), agentStatusPreviewLimit)
-	case "read":
-		path := stringArg(args, "path")
-		if offset := stringArg(args, "offset"); offset != "" && offset != "0" {
-			path += fmt.Sprintf(" (offset=%s)", offset)
-		}
-		return truncate.Clip(path, agentStatusPreviewLimit)
-	case "write":
-		path := stringArg(args, "path")
-		if edits, ok := args["edits"]; ok && edits != nil {
-			if arr, ok := edits.([]any); ok {
-				path += fmt.Sprintf(" (edit: %d change(s))", len(arr))
-			}
-		}
-		return truncate.Clip(path, agentStatusPreviewLimit)
-	case "glob":
-		return truncate.Clip(joinAgentSummaryParts(
-			stringArg(args, "pattern"),
-			prefixedArg("in ", stringArg(args, "path")),
-		), agentStatusPreviewLimit)
-	case "subagent":
-		action := stringArg(args, "action")
-		if action == "" || action == "create" {
-			mode := stringArg(args, "mode")
-			typeName := stringArg(args, "type")
-			prompt := truncate.Clip(stringArg(args, "prompt"), 80)
-			return joinAgentSummaryParts(typeName, prefixedArg("mode=", mode), prompt)
-		}
-		return joinAgentSummaryParts(action, stringArg(args, "name"))
-	case "ioa_space":
-		return truncate.Clip(stringArg(args, "name"), agentStatusPreviewLimit)
-	case "ioa_send":
-		return truncate.Clip(prefixedArg("space ", stringArg(args, "space_id")), agentStatusPreviewLimit)
-	case "ioa_read":
-		return truncate.Clip(joinAgentSummaryParts(
-			prefixedArg("space ", stringArg(args, "space_id")),
-			prefixedArg("message ", stringArg(args, "message_id")),
-			prefixedArg("after ", stringArg(args, "after")),
-		), agentStatusPreviewLimit)
-	default:
-		return truncate.Clip(firstNonEmptyArg(args, "target", "url", "input", "path", "name"), agentStatusPreviewLimit)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Structured tool argument formatting (verbose mode)
-// ---------------------------------------------------------------------------
-
-type toolArgLine struct {
-	key   string
-	value string
-}
-
-func formatToolArguments(name, arguments string) []toolArgLine {
-	args := decodeToolArguments(arguments)
-	if len(args) == 0 {
-		return nil
-	}
-	switch name {
-	case "bash":
-		return collectArgs(args, "command")
-	case "read":
-		return collectArgs(args, "path", "offset", "limit")
-	case "write":
-		return collectWriteArgs(args)
-	case "glob":
-		return collectArgs(args, "pattern", "path")
-	case "fetch":
-		return collectArgs(args, "url", "extract")
-	case "web_search":
-		return collectArgs(args, "query", "num")
-	case "subagent":
-		return collectSubagentArgs(args)
-	case "ioa_space":
-		return collectArgs(args, "name")
-	case "ioa_send":
-		return collectArgs(args, "space_id", "message")
-	case "ioa_read":
-		return collectArgs(args, "space_id", "message_id", "after")
-	default:
-		return collectAllArgs(args)
-	}
-}
-
-func collectArgs(args map[string]any, keys ...string) []toolArgLine {
-	var lines []toolArgLine
-	for _, k := range keys {
-		v := stringArg(args, k)
-		if v == "" || v == "0" {
-			continue
-		}
-		lines = append(lines, toolArgLine{key: k, value: truncate.Clip(v, agentStatusPreviewLimit)})
-	}
-	return lines
-}
-
-func collectWriteArgs(args map[string]any) []toolArgLine {
-	var lines []toolArgLine
-	if p := stringArg(args, "path"); p != "" {
-		lines = append(lines, toolArgLine{key: "path", value: p})
-	}
-	if edits, ok := args["edits"]; ok && edits != nil {
-		if arr, ok := edits.([]any); ok {
-			lines = append(lines, toolArgLine{key: "edits", value: fmt.Sprintf("%d change(s)", len(arr))})
-		}
-	} else if content := stringArg(args, "content"); content != "" {
-		lines = append(lines, toolArgLine{key: "content", value: fmt.Sprintf("%d bytes", len(content))})
-	}
-	return lines
-}
-
-func collectSubagentArgs(args map[string]any) []toolArgLine {
-	var lines []toolArgLine
-	for _, k := range []string{"action", "type", "mode", "name"} {
-		if v := stringArg(args, k); v != "" {
-			lines = append(lines, toolArgLine{key: k, value: v})
-		}
-	}
-	if p := stringArg(args, "prompt"); p != "" {
-		lines = append(lines, toolArgLine{key: "prompt", value: truncate.Clip(p, 80)})
-	}
-	return lines
-}
-
-func collectAllArgs(args map[string]any) []toolArgLine {
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var lines []toolArgLine
-	for _, k := range keys {
-		v := stringArg(args, k)
-		if v == "" {
-			continue
-		}
-		lines = append(lines, toolArgLine{key: k, value: truncate.Clip(v, agentStatusPreviewLimit)})
-	}
-	return lines
-}
-
-// ---------------------------------------------------------------------------
-// JSON / string helpers
-// ---------------------------------------------------------------------------
-
-func decodeToolArguments(arguments string) map[string]any {
-	var args map[string]any
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return nil
-	}
-	return args
-}
-
-func stringArg(args map[string]any, key string) string {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case float64, bool:
-		return fmt.Sprint(typed)
-	default:
-		data, err := json.Marshal(typed)
-		if err != nil {
-			return fmt.Sprint(typed)
-		}
-		return string(data)
-	}
-}
-
-func firstNonEmptyArg(args map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value := stringArg(args, key); strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func prefixedArg(prefix, value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return prefix + value
-}
-
-func joinAgentSummaryParts(parts ...string) string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			kept = append(kept, part)
-		}
-	}
-	return strings.Join(kept, " ")
-}
-
-func compactAgentJSON(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, []byte(value)); err == nil {
-		value = buf.String()
-	}
-	return truncate.Clip(value, limit)
+	fmt.Fprintln(w, o.dim("╰─"))
 }

@@ -40,11 +40,12 @@ type AgentRuntime struct {
 }
 
 type RuntimeConfig struct {
-	ExistingApp      *App
-	IOA              *cfg.IOAConfig
-	PromptConfig     *PromptConfig
-	NoOutput         bool
-	ProviderOptional bool
+	ExistingApp       *App
+	IOA               *cfg.IOAConfig
+	PromptConfig      *PromptConfig
+	NoOutput          bool
+	InteractiveOutput bool
+	ProviderOptional  bool
 }
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
@@ -117,7 +118,11 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	logger.Debugf("system prompt length: %d chars", len(rt.SystemPrompt))
 
 	if rc == nil || !rc.NoOutput {
-		rt.Output = tui.NewAgentOutput(option)
+		if rc != nil && rc.InteractiveOutput {
+			rt.Output = tui.NewAgentOutput(option)
+		} else {
+			rt.Output = tui.NewStaticAgentOutput(option)
+		}
 	}
 
 	agentBus := eventbus.New[agent.Event]()
@@ -320,7 +325,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	rt, err := NewAgentRuntime(ctx, option, logger, nil)
+	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{InteractiveOutput: true})
 	if err != nil {
 		return err
 	}
