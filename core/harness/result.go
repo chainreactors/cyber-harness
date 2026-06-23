@@ -4,10 +4,10 @@ package harness
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 )
 
@@ -195,18 +195,17 @@ func (r *RunResult) SubagentResults() []string {
 }
 
 func loadEvents(path string) []AgentEvent {
-	data, err := os.ReadFile(path)
+	records, err := output.ParseRecordFile(path)
 	if err != nil {
 		return nil
 	}
 	var events []AgentEvent
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, rec := range records {
+		if rec.Type != output.TypeAgent {
 			continue
 		}
 		var e AgentEvent
-		if json.Unmarshal([]byte(line), &e) == nil {
+		if json.Unmarshal(rec.Data, &e) == nil {
 			events = append(events, e)
 		}
 	}

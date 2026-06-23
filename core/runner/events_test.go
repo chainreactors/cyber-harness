@@ -9,8 +9,39 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 )
+
+func parseEventLines(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer f.Close()
+
+	var events []map[string]any
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var rec output.Record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			t.Fatalf("invalid Record line %q: %v", scanner.Text(), err)
+		}
+		if rec.Type != output.TypeAgent {
+			t.Fatalf("unexpected record type %s, want agent", rec.Type)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(rec.Data, &m); err != nil {
+			t.Fatalf("invalid agent event data: %v", err)
+		}
+		events = append(events, m)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan events file: %v", err)
+	}
+	return events
+}
 
 func TestEventsFileSubscriberAppendsJSONL(t *testing.T) {
 	dir := t.TempDir()
@@ -51,23 +82,7 @@ func TestEventsFileSubscriberAppendsJSONL(t *testing.T) {
 		w.HandleEvent(e)
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open events file: %v", err)
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	var lines []map[string]any
-	for scanner.Scan() {
-		var m map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
-			t.Fatalf("invalid JSON line %q: %v", scanner.Text(), err)
-		}
-		lines = append(lines, m)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan events file: %v", err)
-	}
+	lines := parseEventLines(t, path)
 	if got, want := len(lines), len(events); got != want {
 		t.Fatalf("line count = %d, want %d", got, want)
 	}
@@ -132,14 +147,8 @@ func TestEventsFileSubscriberLLMRequest(t *testing.T) {
 		},
 	})
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	lines := parseEventLines(t, path)
+	m := lines[0]
 	if v, _ := m["request_model"].(string); v != "deepseek-v4-pro" {
 		t.Errorf("request_model = %v, want deepseek-v4-pro", m["request_model"])
 	}
@@ -168,12 +177,10 @@ func TestEventsFileSubscriberToolEndNoArgs(t *testing.T) {
 		Result:     "ok",
 	})
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	if strings.Contains(string(data), "arguments") {
-		t.Errorf("tool_execution_end should not contain arguments field, got: %s", data)
+	lines := parseEventLines(t, path)
+	m := lines[0]
+	if _, ok := m["arguments"]; ok {
+		t.Errorf("tool_execution_end should not contain arguments field")
 	}
 }
 
@@ -193,14 +200,8 @@ func TestEventsFileSubscriberErrorField(t *testing.T) {
 		Err:     fmt.Errorf("connection refused"),
 	})
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	lines := parseEventLines(t, path)
+	m := lines[0]
 	if v, _ := m["error"].(string); v != "connection refused" {
 		t.Errorf("error = %v, want connection refused", m["error"])
 	}

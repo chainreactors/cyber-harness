@@ -19,15 +19,18 @@ func TestLootRecordRoundTrip(t *testing.T) {
 			"severity":      "high",
 		},
 	}
-	rec := NewRecord(TypeLoot, loot)
+	rec := NewLootRecord(TypeNeutron, loot)
 
 	line := rec.Marshal()
 	parsed, err := ParseRecord(line)
 	if err != nil {
 		t.Fatalf("ParseRecord: %v", err)
 	}
-	if parsed.Type != TypeLoot {
-		t.Fatalf("type = %s, want loot", parsed.Type)
+	if parsed.Type != TypeNeutron {
+		t.Fatalf("type = %s, want neutron", parsed.Type)
+	}
+	if !parsed.Loot {
+		t.Fatal("loot flag not set")
 	}
 
 	got, err := ParseRecordData[Loot](parsed)

@@ -7,8 +7,7 @@ import (
 	"sync"
 )
 
-// TimelineWriter writes both scan records and agent events to a single
-// JSONL file. It is the unified write-side counterpart to ParseTimelineFile.
+// TimelineWriter writes Record entries to a single JSONL file.
 type TimelineWriter struct {
 	mu   sync.Mutex
 	file *os.File
@@ -33,10 +32,8 @@ func (w *TimelineWriter) Close() error {
 	return err
 }
 
-// WriteJSON writes any JSON-marshalable value as one JSONL line.
-// Used for both Record (scan) and Event (agent) — they share the file.
-func (w *TimelineWriter) WriteJSON(v any) {
-	line, err := json.Marshal(v)
+func (w *TimelineWriter) WriteRecord(rec Record) {
+	line, err := json.Marshal(rec)
 	if err != nil {
 		return
 	}
@@ -47,9 +44,4 @@ func (w *TimelineWriter) WriteJSON(v any) {
 		return
 	}
 	_, _ = w.file.Write(line)
-}
-
-// WriteRecord is a convenience alias for scan records.
-func (w *TimelineWriter) WriteRecord(rec Record) {
-	w.WriteJSON(rec)
 }

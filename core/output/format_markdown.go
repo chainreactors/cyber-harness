@@ -11,11 +11,16 @@ import (
 func RecordsToResult(records []Record) *Result {
 	result := &Result{}
 	for _, r := range records {
+		if r.Loot {
+			d, _ := ParseRecordData[Loot](r)
+			result.Loots = append(result.Loots, d)
+			continue
+		}
 		switch r.Type {
-		case TypeService:
+		case TypeGogo:
 			d, _ := ParseRecordData[parsers.GOGOResult](r)
 			result.Services = append(result.Services, &d)
-		case TypeWeb:
+		case TypeSpray:
 			d, _ := ParseRecordData[parsers.SprayResult](r)
 			if d.UrlString == "" {
 				continue
@@ -23,9 +28,6 @@ func RecordsToResult(records []Record) *Result {
 			if d.Status > 0 {
 				result.WebProbes = append(result.WebProbes, &d)
 			}
-		case TypeLoot:
-			d, _ := ParseRecordData[Loot](r)
-			result.Loots = append(result.Loots, d)
 		case TypeScanEnd:
 			d, _ := ParseRecordData[ScanEnd](r)
 			result.Summary = Summary{

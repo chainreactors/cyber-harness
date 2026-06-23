@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -93,8 +94,12 @@ func (m *Monitor) tailFile(f *os.File, done <-chan struct{}) {
 }
 
 func (m *Monitor) renderLine(line string) {
+	rec, err := output.ParseRecord([]byte(line))
+	if err != nil || rec.Type != output.TypeAgent {
+		return
+	}
 	var ev monitorEvent
-	if json.Unmarshal([]byte(line), &ev) != nil {
+	if json.Unmarshal(rec.Data, &ev) != nil {
 		return
 	}
 	m.renderEvent(ev)

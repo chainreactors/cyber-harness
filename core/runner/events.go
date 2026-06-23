@@ -22,5 +22,5 @@ func (s *eventsFileSubscriber) Close() {
 }
 
 func (s *eventsFileSubscriber) HandleEvent(event agent.Event) {
-	s.w.WriteJSON(event)
+	s.w.WriteRecord(output.NewRecord(output.TypeAgent, event))
 }

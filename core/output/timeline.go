@@ -18,22 +18,16 @@ import (
 // Core types
 // ---------------------------------------------------------------------------
 
-// timelineItem is implemented by every data payload that can appear in a
-// TimelineEntry. Each type knows how to render itself as one or more
-// markdown lines.
 type timelineItem interface {
 	writeMarkdown(sb *strings.Builder, ctx *renderContext)
 }
 
-// TimelineEntry is one parsed JSONL line.
 type TimelineEntry struct {
 	Timestamp time.Time
 	Type      string
 	Data      timelineItem
 }
 
-// renderContext is threaded through the walk so items can reference
-// session-level state (e.g. start time for elapsed offsets).
 type renderContext struct {
 	startTS time.Time
 }
@@ -42,8 +36,6 @@ type renderContext struct {
 // Parse
 // ---------------------------------------------------------------------------
 
-// ParseTimelineFile reads a JSONL file (scan records, agent events, or mixed)
-// and returns a flat, chronological slice of entries.
 func ParseTimelineFile(path string) ([]TimelineEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -67,48 +59,31 @@ func ParseTimelineFile(path string) ([]TimelineEntry, error) {
 }
 
 func parseLine(line []byte) (TimelineEntry, bool) {
-	var probe struct {
-		Type      string          `json:"type"`
-		Timestamp json.RawMessage `json:"ts"`
-		SessionID string          `json:"session_id"`
-		Data      json.RawMessage `json:"data"`
-	}
-	if json.Unmarshal(line, &probe) != nil || probe.Type == "" {
+	rec, err := ParseRecord(line)
+	if err != nil || rec.Type == "" {
 		return TimelineEntry{}, false
 	}
-	ts := parseJSONTimestamp(probe.Timestamp)
-
-	// Agent event: has session_id at top level.
-	if probe.SessionID != "" {
-		var ev AgentEvent
-		if json.Unmarshal(line, &ev) != nil {
-			return TimelineEntry{}, false
-		}
-		ev.eventType = probe.Type
-		return TimelineEntry{Timestamp: ts, Type: probe.Type, Data: &ev}, true
-	}
-
-	// Scan record: has nested data field.
-	if len(probe.Data) > 0 {
-		if item := parseScanData(probe.Type, probe.Data); item != nil {
-			return TimelineEntry{Timestamp: ts, Type: probe.Type, Data: item}, true
-		}
+	if item := parseRecordData(rec); item != nil {
+		return TimelineEntry{Timestamp: rec.Timestamp, Type: string(rec.Type), Data: item}, true
 	}
 	return TimelineEntry{}, false
 }
 
-func parseScanData(typ string, data json.RawMessage) timelineItem {
-	switch RecordType(typ) {
+func parseRecordData(rec Record) timelineItem {
+	if rec.Loot {
+		return unmarshalItem[Loot](rec.Data)
+	}
+	switch rec.Type {
 	case TypeScanStart:
-		return unmarshalItem[ScanStart](data)
-	case TypeService:
-		return unmarshalItem[serviceView](data)
-	case TypeWeb:
-		return unmarshalItem[webView](data)
-	case TypeLoot:
-		return unmarshalItem[Loot](data)
+		return unmarshalItem[ScanStart](rec.Data)
+	case TypeGogo:
+		return unmarshalItem[serviceView](rec.Data)
+	case TypeSpray:
+		return unmarshalItem[webView](rec.Data)
+	case TypeAgent:
+		return unmarshalItem[AgentEvent](rec.Data)
 	case TypeScanEnd:
-		return unmarshalItem[ScanEnd](data)
+		return unmarshalItem[ScanEnd](rec.Data)
 	}
 	return nil
 }
@@ -119,21 +94,6 @@ func unmarshalItem[T any](data json.RawMessage) *T {
 		return nil
 	}
 	return &v
-}
-
-func parseJSONTimestamp(raw json.RawMessage) time.Time {
-	if len(raw) == 0 {
-		return time.Time{}
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-			return t
-		}
-	}
-	var t time.Time
-	_ = json.Unmarshal(raw, &t)
-	return t
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +110,6 @@ func RenderTimelineMarkdown(w io.Writer, entries []TimelineEntry) error {
 	return err
 }
 
-// BuildTimelineMarkdown produces a single markdown document from entries.
 func BuildTimelineMarkdown(entries []TimelineEntry) string {
 	var sb strings.Builder
 	sess := collectSessionMeta(entries)
@@ -197,6 +156,7 @@ func writeHeader(sb *strings.Builder, sess *sessionMeta) {
 // ---------------------------------------------------------------------------
 
 type AgentEvent struct {
+	Type            string           `json:"type"`
 	SessionID       string           `json:"session_id"`
 	ParentSessionID string           `json:"parent_session_id"`
 	Turn            int              `json:"turn"`
@@ -215,9 +175,6 @@ type AgentEvent struct {
 	RequestModel    string           `json:"request_model"`
 	RequestMessages int              `json:"request_messages"`
 	RequestTools    int              `json:"request_tools"`
-
-	// eventType is set during parsing so writeMarkdown can dispatch.
-	eventType string
 }
 
 type AgentEventMsg struct {
@@ -245,7 +202,7 @@ type agentToolCall struct {
 }
 
 func (ev *AgentEvent) writeMarkdown(sb *strings.Builder, _ *renderContext) {
-	switch ev.eventType {
+	switch ev.Type {
 	case "turn_start":
 		sb.WriteString(fmt.Sprintf("## Turn %d\n\n", ev.Turn))
 
@@ -364,7 +321,7 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 		if ev.RequestModel != "" && m.model == "" {
 			m.model = ev.RequestModel
 		}
-		switch e.Type {
+		switch ev.Type {
 		case "agent_start":
 			m.startTS = e.Timestamp
 		case "agent_end":

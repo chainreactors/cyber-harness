@@ -1,6 +1,8 @@
 package scan
 
 import (
+	"strings"
+
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -58,7 +60,7 @@ func (w *scanJSONLWriter) handleObservation(obs pipeline.Observation) {
 }
 
 func (w *scanJSONLWriter) handleAgentEvent(event agent.Event) {
-	w.w.WriteJSON(event)
+	w.w.WriteRecord(output.NewRecord(output.TypeAgent, event))
 }
 
 func observationToRecords(e event) []output.Record {
@@ -76,11 +78,11 @@ func targetToRecords(e event) []output.Record {
 	switch target := e.Target.(type) {
 	case serviceTarget:
 		if target.Result != nil {
-			return []output.Record{output.NewRecord(output.TypeService, target.Result)}
+			return []output.Record{output.NewRecord(output.TypeGogo, target.Result)}
 		}
 	case webProbeTarget:
 		if reportableSprayResultForCapability(target.Result, target.Capability) && target.Result != nil {
-			return []output.Record{output.NewRecord(output.TypeWeb, target.Result)}
+			return []output.Record{output.NewRecord(output.TypeSpray, target.Result)}
 		}
 	}
 	return nil
@@ -90,7 +92,22 @@ func lootToRecords(e event) []output.Record {
 	if e.Loot == nil {
 		return nil
 	}
-	return []output.Record{output.NewRecord(output.TypeLoot, e.Loot)}
+	return []output.Record{output.NewLootRecord(capabilityRecordType(e.Source), e.Loot)}
+}
+
+func capabilityRecordType(source string) output.RecordType {
+	switch {
+	case strings.HasPrefix(source, "gogo"):
+		return output.TypeGogo
+	case strings.HasPrefix(source, "spray"), source == capCoreWeb:
+		return output.TypeSpray
+	case strings.HasPrefix(source, "zombie"), source == capHTTPBasicAuth:
+		return output.TypeZombie
+	case strings.HasPrefix(source, "neutron"):
+		return output.TypeNeutron
+	default:
+		return output.RecordType(source)
+	}
 }
 
 func ObservationToRecord(obs pipeline.Observation) *output.Record {

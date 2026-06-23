@@ -14,15 +14,18 @@ type RecordType string
 
 const (
 	TypeScanStart RecordType = "scan_start"
-	TypeService   RecordType = "service"
-	TypeWeb       RecordType = "web"
-	TypeLoot      RecordType = "loot"
+	TypeGogo      RecordType = "gogo"
+	TypeSpray     RecordType = "spray"
+	TypeZombie    RecordType = "zombie"
+	TypeNeutron   RecordType = "neutron"
+	TypeAgent     RecordType = "agent"
 	TypeScanEnd   RecordType = "scan_end"
 )
 
 type Record struct {
 	Type      RecordType      `json:"type"`
 	Timestamp time.Time       `json:"ts"`
+	Loot      bool            `json:"loot,omitempty"`
 	Data      json.RawMessage `json:"data"`
 }
 
@@ -33,6 +36,12 @@ func NewRecord(t RecordType, data interface{}) Record {
 		Timestamp: time.Now(),
 		Data:      raw,
 	}
+}
+
+func NewLootRecord(t RecordType, data interface{}) Record {
+	r := NewRecord(t, data)
+	r.Loot = true
+	return r
 }
 
 func (r Record) Marshal() []byte {
