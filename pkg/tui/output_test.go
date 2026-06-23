@@ -49,7 +49,7 @@ func TestAgentOutputToolSummary(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	output.HandleEvent(agent.Event{
@@ -87,7 +87,7 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 		stderr:    &stderr,
 		debug:     true,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	output.HandleEvent(agent.Event{
@@ -121,7 +121,7 @@ func TestAgentOutputToolError(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	output.HandleEvent(agent.Event{
@@ -147,7 +147,7 @@ func TestAgentOutputWriteEditSummary(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	output.HandleEvent(agent.Event{
@@ -175,7 +175,7 @@ func TestAgentOutputMultiLineResult(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	result := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"
@@ -304,7 +304,7 @@ func TestToolCallCounting(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 0,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c1", ToolName: "bash", Result: "ok"})
@@ -325,7 +325,7 @@ func TestTurnStartMarker(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
@@ -351,7 +351,7 @@ func TestEvalEndRendering(t *testing.T) {
 		stdout:    &bytes.Buffer{},
 		stderr:    &stderr,
 		verbosity: 1,
-		tools:     make(map[string]agentToolSummary),
+		tools:     make(map[string]agent.Event),
 	}
 
 	o.HandleEvent(agent.Event{Type: agent.EventEvalEnd, EvalPass: true, EvalRound: 0, EvalReason: "all checks passed"})

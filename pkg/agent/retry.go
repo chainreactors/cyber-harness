@@ -168,26 +168,32 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 	builder := newMessageBuilder()
 	started := false
 	var usage *Usage
-	for event := range events {
-		if event.Err != nil {
-			return ChatMessage{}, nil, fmt.Errorf("LLM stream failed at turn %d: %w", turn, event.Err)
+	for {
+		select {
+		case <-ctx.Done():
+			return ChatMessage{}, nil, ctx.Err()
+		case event, ok := <-events:
+			if !ok {
+				goto streamDone
+			}
+			if event.Err != nil {
+				return ChatMessage{}, nil, fmt.Errorf("LLM stream failed at turn %d: %w", turn, event.Err)
+			}
+			if event.Usage != nil {
+				usage = event.Usage
+			}
+			if event.Done {
+				goto streamDone
+			}
+			updated := builder.Apply(event.Delta)
+			if !started {
+				started = true
+				bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: updated})
+			}
+			bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: updated})
 		}
-		if event.Usage != nil {
-			usage = event.Usage
-		}
-		if event.Done {
-			break
-		}
-		updated := builder.Apply(event.Delta)
-		if !started {
-			started = true
-			bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: updated})
-		}
-		bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: updated})
 	}
-	if err := ctx.Err(); err != nil {
-		return ChatMessage{}, nil, err
-	}
+streamDone:
 
 	msg := builder.Message()
 	if !started {

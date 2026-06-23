@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -90,6 +91,9 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		assistantMsg, usage, err := requestWithRetry(ctx, cfg, bus, reqMessages, cfg.Tools.ToolDefinitions(), turn)
 		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
+			if ctx.Err() != nil {
+				return end(nil, ctx.Err(), StopReasonCanceled)
+			}
 			if fallbackIndex < len(fallbacks) {
 				next := fallbacks[fallbackIndex]
 				fallbackIndex++
@@ -126,6 +130,9 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			cfg.Messages = append([]ChatMessage(nil), transcript.messages...)
 			batch, err := executeToolCalls(ctx, cfg, bus, assistantMsg, turn)
 			if err != nil {
+				if ctx.Err() != nil {
+					return end(nil, ctx.Err(), StopReasonCanceled)
+				}
 				return end(nil, err, StopReasonError)
 			}
 			toolResults = batch.messages
@@ -279,18 +286,30 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 				wg.Add(1)
 				go func(idx int) {
 					defer wg.Done()
+					slots[idx].startedAt = time.Now()
 					slots[idx].result = runToolCall(ctx, cfg, assistantMsg, slots[idx].tc, turn)
 				}(i)
 			}
 		}
 		wg.Wait()
+		if ctx.Err() != nil {
+			return toolBatchResult{}, ctx.Err()
+		}
 		for i := range slots {
+			if ctx.Err() != nil {
+				return toolBatchResult{}, ctx.Err()
+			}
 			if slots[i].mode == commands.ExecSequential {
+				slots[i].startedAt = time.Now()
 				slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc, turn)
 			}
 		}
 	} else {
 		for i := range slots {
+			if ctx.Err() != nil {
+				return toolBatchResult{}, ctx.Err()
+			}
+			slots[i].startedAt = time.Now()
 			slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc, turn)
 		}
 	}
@@ -304,9 +323,11 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			Turn:       turn,
 			ToolCallID: s.tc.ID,
 			ToolName:   s.tc.Function.Name,
+			Arguments:  s.tc.Function.Arguments,
 			Result:     s.result.eventResult(),
 			IsError:    s.result.isError,
 			Err:        s.result.err,
+			StartedAt:  s.startedAt,
 		})
 		cfg.Logger.Debugf("[turn %d] tool_result id=%s name=%s bytes=%d", turn, s.tc.ID, s.tc.Function.Name, len(s.result.result))
 		toolMsg := toolResultToMessage(s.tc.ID, s.result)
@@ -324,9 +345,10 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 }
 
 type toolCallSlot struct {
-	tc     ToolCall
-	mode   commands.ExecutionMode
-	result toolExecution
+	tc        ToolCall
+	mode      commands.ExecutionMode
+	result    toolExecution
+	startedAt time.Time
 }
 
 type toolExecution struct {

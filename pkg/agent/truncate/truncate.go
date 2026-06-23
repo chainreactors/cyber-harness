@@ -1,9 +1,10 @@
 package truncate
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/chainreactors/aiscan/pkg/util"
 )
 
 // ── Tier 1: 通用工具结果 (bash/read/grep/find/ls/inbox/agent result) ──
@@ -229,14 +230,7 @@ func Line(line string, maxChars int) (string, bool) {
 
 // FormatSize returns a human-readable size string.
 func FormatSize(bytes int) string {
-	switch {
-	case bytes < 1024:
-		return fmt.Sprintf("%dB", bytes)
-	case bytes < 1024*1024:
-		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
-	default:
-		return fmt.Sprintf("%.1fMB", float64(bytes)/(1024*1024))
-	}
+	return util.FormatSize(bytes)
 }
 
 // safeUTF8Cut truncates s to at most maxBytes, backing up to a valid

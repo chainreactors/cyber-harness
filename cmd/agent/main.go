@@ -62,20 +62,27 @@ Examples:
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
 	defer cancel()
 
+	var interruptFn func() bool
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-sigChan
-		fmt.Fprintf(os.Stderr, "\nPress Ctrl+C again to exit\n")
-		cancel()
-		<-sigChan
-		os.Exit(1)
+		for {
+			<-sigChan
+			if interruptFn != nil && interruptFn() {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "\nPress Ctrl+C again to exit\n")
+			<-sigChan
+			os.Exit(1)
+		}
 	}()
 
 	if option.WebURL != "" {
 		err = webagent.Run(ctx, &option, logger)
 	} else {
-		err = runner.RunAgentMode(ctx, &option, logger)
+		err = runner.RunAgentMode(ctx, &option, logger, func(fn func() bool) {
+			interruptFn = fn
+		})
 	}
 	if err != nil {
 		logger.Errorf("agent failed: %s", err)

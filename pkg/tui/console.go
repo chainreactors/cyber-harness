@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/carapace-sh/carapace"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/reeflective/console"
 	"github.com/reeflective/readline/inputrc"
@@ -28,6 +29,7 @@ import (
 
 const agentPromptCommandName = "__prompt"
 const agentConsoleInterruptCommandName = "aiscan-interrupt"
+const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
 const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
 const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 
@@ -57,6 +59,7 @@ type AgentConsole struct {
 
 	directMu     sync.Mutex
 	directCancel context.CancelFunc
+	pendingExit  atomic.Bool
 }
 
 func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
@@ -87,9 +90,6 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	}
 
 	menu := c.NewMenu("agent")
-	menu.Prompt().Primary = func() string {
-		return agentPromptString(output)
-	}
 	menu.AddHistorySourceFile("history", agentConsoleHistoryPath())
 	menu.ErrorHandler = func(err error) error {
 		if errors.Is(err, errAgentConsoleExit) {
@@ -111,6 +111,12 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		stdout:   stdout,
 		stderr:   stderr,
 	}
+	menu.Prompt().Primary = func() string {
+		if repl.pendingExit.Load() {
+			return ""
+		}
+		return agentPromptString(output)
+	}
 	if len(bus) > 0 && bus[0] != nil {
 		repl.bus = bus[0]
 	}
@@ -120,6 +126,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	repl.controller = newInteractiveRunController(ctx, repl.agent, output)
 	repl.controller.SetOnFinish(repl.refreshPromptAfterAsyncRun)
 	repl.configureInterruptKey()
+	repl.configureCtrlCKey()
 	repl.configureVerbosityToggleKey()
 	menu.SetCommands(repl.rootCommand)
 	menu.Command = repl.rootCommand()
@@ -164,6 +171,40 @@ func (r *AgentConsole) configureInterruptKey() {
 	for _, keymap := range []string{"emacs", "emacs-standard"} {
 		_ = shell.Config.Bind(keymap, escape, agentConsoleInterruptCommandName, false)
 	}
+}
+
+func (r *AgentConsole) configureCtrlCKey() {
+	if r == nil || r.console == nil || r.console.Shell() == nil {
+		return
+	}
+	shell := r.console.Shell()
+	shell.Keymap.Register(map[string]func(){
+		agentConsoleCtrlCCommandName: func() {
+			r.handleCtrlC()
+		},
+	})
+	ctrlC := inputrc.Unescape(`\C-c`)
+	for _, keymap := range []string{"emacs", "emacs-standard"} {
+		_ = shell.Config.Bind(keymap, ctrlC, agentConsoleCtrlCCommandName, false)
+	}
+}
+
+func (r *AgentConsole) handleCtrlC() {
+	if r.InterruptCurrentRun() {
+		return
+	}
+	if r.pendingExit.Load() {
+		os.Exit(0)
+	}
+	r.pendingExit.Store(true)
+	fmt.Fprintf(r.stderr, " Press Ctrl+C again to exit\n")
+	go func() {
+		time.Sleep(3 * time.Second)
+		r.pendingExit.Store(false)
+	}()
+	shell := r.console.Shell()
+	shell.Display.AcceptLine()
+	shell.History.Accept(false, false, errors.New(os.Interrupt.String()))
 }
 
 func (r *AgentConsole) configureVerbosityToggleKey() {
@@ -218,8 +259,7 @@ func (r *AgentConsole) handleEscapeInterruptKey() {
 		shell.Keys.Feed(true, []rune(pending)...)
 		return
 	}
-	shell.Display.AcceptLine()
-	shell.History.Accept(false, false, errors.New(os.Interrupt.String()))
+	r.InterruptCurrentRun()
 }
 
 func agentConsoleEscapeSequenceFeed(binds map[string]inputrc.Bind, pending string) (string, bool) {
@@ -403,6 +443,7 @@ func (r *AgentConsole) startReadline() error {
 			}
 		}
 
+		r.pendingExit.Store(false)
 		done, err := r.handleInputLine(line)
 		if err != nil {
 			if errors.Is(err, context.Canceled) && r.ctx.Err() != nil {
@@ -603,10 +644,7 @@ func visibleRuneLen(s string) int {
 }
 
 func ansiWrap(s, code string, enabled bool) string {
-	if !enabled {
-		return s
-	}
-	return code + s + outputpkg.ANSIReset
+	return outputpkg.NewColor(enabled).Wrap(s, code)
 }
 
 func ansiTitle(s string, enabled bool) string {
@@ -622,7 +660,7 @@ func ansiWarn(s string, enabled bool) string {
 }
 
 func ansiDim(s string, enabled bool) string {
-	return ansiWrap(s, "\033[90m", enabled)
+	return ansiWrap(s, outputpkg.ANSIDim, enabled)
 }
 
 func renderInlineCommands(commands []string, colorEnabled bool) string {
@@ -716,6 +754,13 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 	for _, cmd := range r.allCommands() {
 		root.AddCommand(wrapCommand(cmd, r.replSession()))
 	}
+
+	carapace.Gen(root).PositionalAnyCompletion(
+		carapace.ActionCallback(func(c carapace.Context) carapace.Action {
+			return r.atCompleteAction(c)
+		}),
+	)
+
 	return root
 }
 
@@ -1275,6 +1320,14 @@ func AgentConsoleArgsForLine(line string) ([]string, error) {
 		return []string{text}, nil
 	}
 	return []string{command, strings.TrimSpace(rest)}, nil
+}
+
+func (r *AgentConsole) atCompleteAction(c carapace.Context) carapace.Action {
+	if !strings.HasPrefix(c.Value, "@") {
+		return carapace.ActionValues()
+	}
+	c.Value = c.Value[1:]
+	return carapace.ActionFiles().Invoke(c).Prefix("@").ToA().NoSpace()
 }
 
 func agentConsoleHistoryPath() string {

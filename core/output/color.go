@@ -32,6 +32,13 @@ func (c Color) Code(code string) string {
 	return code
 }
 
+func (c Color) Wrap(s, code string) string {
+	if !c.Enabled {
+		return s
+	}
+	return code + s + ANSIReset
+}
+
 func (c Color) Green(s string) string {
 	if !c.Enabled {
 		return s

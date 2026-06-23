@@ -111,6 +111,7 @@ type Event struct {
 	Result        string
 	IsError       bool
 	Err           error
+	StartedAt     time.Time // tool execution start time (set on ToolExecutionEnd)
 	Stop          StopReason
 	Usage         *Usage
 	ContextTokens int

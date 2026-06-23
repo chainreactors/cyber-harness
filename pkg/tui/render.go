@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	bspinner "github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // This file owns render-mode detection, ANSI escape helpers, terminal
@@ -22,23 +25,13 @@ import (
 // Render mode
 // ---------------------------------------------------------------------------
 
-// RenderMode selects how aggressively the renderer decorates output.
 type RenderMode int
 
 const (
-	// ModeInteractive: a human sits at a local TTY. Full firepower — truecolor
-	// via lipgloss/glamour, single-line spinners, OSC 8 hyperlinks, and
-	// synchronized-output flicker suppression.
 	ModeInteractive RenderMode = iota
-	// ModeForwarded: the PTY stream is consumed by a remote agent (aider).
-	// Transient UI (spinners) is suppressed so the forwarded transcript stays a
-	// clean line-oriented stream; OSC sequences degrade to no-ops in dumb
-	// consumers and colors are kept (harmless — stripped or rendered downstream).
 	ModeForwarded
 )
 
-// resolveRenderMode honors an explicit AISCAN_RENDER override so the rem
-// forwarding path can opt into the degraded renderer without code changes.
 func resolveRenderMode() RenderMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AISCAN_RENDER"))) {
 	case "forwarded", "forward", "remote", "pipe":
@@ -53,23 +46,18 @@ func resolveRenderMode() RenderMode {
 // ANSI escape constants
 // ---------------------------------------------------------------------------
 
-// Inline ANSI escape helpers. All are line-local: they move within or rewrite
-// the current row only, which keeps them safe over a forwarded PTY.
 const (
-	syncBegin = "\x1b[?2026h" // DCS 2026: begin synchronized output (flicker-free)
-	syncEnd   = "\x1b[?2026l" // DCS 2026: end synchronized output
-	eraseLine = "\x1b[2K"     // erase the entire current line
-	carriage  = "\r"          // move to column 0 of the current row
+	syncBegin = "\x1b[?2026h"
+	syncEnd   = "\x1b[?2026l"
+	eraseLine = "\x1b[2K"
+	carriage  = "\r"
+	cursorUp  = "\x1b[1A"
 )
 
 // ---------------------------------------------------------------------------
 // Synchronized output
 // ---------------------------------------------------------------------------
 
-// writeSynced wraps a burst of volatile writes in synchronized-output escape
-// sequences so capable terminals paint them as a single frame (no flicker on
-// spinner repaints). Forwarders/terminals that don't understand DCS 2026 ignore
-// the unknown passthrough — graceful degradation, never corruption.
 func writeSynced(w io.Writer, fn func()) {
 	if w == nil {
 		return
@@ -79,40 +67,135 @@ func writeSynced(w io.Writer, fn func()) {
 	fn()
 }
 
-// ---------------------------------------------------------------------------
-// Terminal hyperlinks (OSC 8)
-// ---------------------------------------------------------------------------
+// eraseLines clears n lines ending at the current cursor row.
+func eraseLines(w io.Writer, n int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprint(w, carriage+eraseLine)
+	for i := 1; i < n; i++ {
+		fmt.Fprint(w, cursorUp+eraseLine)
+	}
+}
 
 // ---------------------------------------------------------------------------
-// Spinner — single-line primary-buffer activity indicator
+// Spinner — bubbletea-based multi-line activity indicator
 // ---------------------------------------------------------------------------
 
-const spinnerFrameInterval = 90 * time.Millisecond
+// spinnerSentinel is a placeholder embedded in live lines to mark where the
+// animated spinner frame should be injected during render.
+const spinnerSentinel = "\x00"
 
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+var defaultSpinnerType = bspinner.Spinner{
+	Frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+	FPS:    90 * time.Millisecond,
+}
 
-// spinner is a single-line, primary-buffer activity indicator. It repaints the
-// current row using carriage-return + line-erase (never absolute cursor moves),
-// and Stop() always collapses the line so the recorded PTY transcript never
-// retains a dangling transient frame. All methods are nil-safe.
+// bubbletea messages for spinner control
+type spinnerLabelMsg string
+type spinnerLinesMsg []string
+type spinnerQuitMsg struct{}
+
+type spinnerModel struct {
+	spin     bspinner.Model
+	label    string
+	lines    []string
+	start    time.Time
+	accent   string
+	hint     string
+	quitting bool
+}
+
+func (m spinnerModel) Init() tea.Cmd {
+	return m.spin.Tick
+}
+
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case spinnerQuitMsg:
+		m.quitting = true
+		return m, tea.Quit
+	case spinnerLabelMsg:
+		m.label = string(msg)
+		return m, nil
+	case spinnerLinesMsg:
+		m.lines = msg
+		return m, nil
+	case bspinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m spinnerModel) View() string {
+	if m.quitting {
+		return ""
+	}
+
+	frame := m.accent + m.spin.View() + "\x1b[0m"
+	var b strings.Builder
+
+	if len(m.lines) > 0 {
+		for i, line := range m.lines {
+			b.WriteString(strings.Replace(line, spinnerSentinel, frame, 1))
+			if i < len(m.lines)-1 {
+				b.WriteByte('\n')
+			}
+		}
+	} else {
+		elapsed := ""
+		if e := time.Since(m.start); e >= time.Second {
+			elapsed = fmt.Sprintf(" · %.0fs", e.Seconds())
+		}
+		fmt.Fprintf(&b, "%s %s%s", frame, m.label, elapsed)
+	}
+
+	if m.hint != "" {
+		fmt.Fprintf(&b, "\n\x1b[90m%s\x1b[0m", m.hint)
+	}
+	return b.String()
+}
+
+func (m spinnerModel) lineCount() int {
+	n := 1
+	if len(m.lines) > 0 {
+		n = len(m.lines)
+	}
+	if m.hint != "" {
+		n++
+	}
+	return n
+}
+
+// spinner wraps a bubbletea program to provide the Start/Stop/SetLines API.
+// All methods are nil-safe and goroutine-safe.
 type spinner struct {
 	w      io.Writer
-	accent string // ANSI color code for the frame ("" when color disabled)
+	accent string
+	hint   string
 
-	mu      sync.Mutex
-	label   string
-	start   time.Time
-	stop    chan struct{}
-	done    chan struct{}
-	running bool
+	mu         sync.Mutex
+	program    *tea.Program
+	inputClose io.Closer
+	running    bool
+	done       chan struct{}
+	lineCount  int // last known rendered line count for cleanup
 }
 
 func newSpinner(w io.Writer, accent string) *spinner {
 	return &spinner{w: w, accent: accent}
 }
 
-// Start begins (or retargets) the spinner. Calling Start while already running
-// only refreshes the label in place — no second goroutine is spawned.
+func newSpinnerWithHint(w io.Writer, accent string) *spinner {
+	return &spinner{
+		w:      w,
+		accent: accent,
+		hint:   "Esc/Ctrl+C stop · Ctrl+O verbosity",
+	}
+}
+
 func (s *spinner) Start(label string) {
 	if s == nil || s.w == nil {
 		return
@@ -120,52 +203,54 @@ func (s *spinner) Start(label string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
-		s.label = label
+		s.program.Send(spinnerLabelMsg(label))
 		return
 	}
-	s.label = label
-	s.start = time.Now()
-	s.stop = make(chan struct{})
+	m := spinnerModel{
+		spin:   bspinner.New(bspinner.WithSpinner(defaultSpinnerType)),
+		label:  label,
+		start:  time.Now(),
+		accent: s.accent,
+		hint:   s.hint,
+	}
+	s.lineCount = m.lineCount()
+	pr, pw := io.Pipe()
+	s.inputClose = pw
+	s.program = tea.NewProgram(
+		m,
+		tea.WithOutput(s.w),
+		tea.WithInput(pr),
+		tea.WithoutSignalHandler(),
+	)
 	s.done = make(chan struct{})
 	s.running = true
-	go s.tick()
+	go func() {
+		defer close(s.done)
+		s.program.Run()
+	}()
 }
 
-func (s *spinner) tick() {
-	defer close(s.done)
-	t := time.NewTicker(spinnerFrameInterval)
-	defer t.Stop()
-	frame := 0
-	for {
-		s.render(frame)
-		frame = (frame + 1) % len(spinnerFrames)
-		select {
-		case <-s.stop:
-			return
-		case <-t.C:
-		}
-	}
-}
-
-func (s *spinner) render(frame int) {
-	if s == nil || s.w == nil {
+func (s *spinner) SetLines(lines []string) {
+	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	label := s.label
-	elapsed := ""
-	if e := time.Since(s.start); e >= time.Second {
-		elapsed = fmt.Sprintf(" · %.0fs", e.Seconds())
+	defer s.mu.Unlock()
+	if s.running && s.program != nil {
+		copied := make([]string, len(lines))
+		copy(copied, lines)
+		n := len(copied)
+		if n == 0 {
+			n = 1
+		}
+		if s.hint != "" {
+			n++
+		}
+		s.lineCount = n
+		s.program.Send(spinnerLinesMsg(copied))
 	}
-	s.mu.Unlock()
-	writeSynced(s.w, func() {
-		fmt.Fprintf(s.w, "%s%s%s%s %s%s\x1b[0m",
-			carriage, eraseLine, s.accent, spinnerFrames[frame], label, elapsed)
-	})
 }
 
-// Stop collapses the spinner (erases its line) and joins the ticker goroutine.
-// Safe to call when not running or on a nil receiver.
 func (s *spinner) Stop() {
 	if s == nil {
 		return
@@ -175,12 +260,17 @@ func (s *spinner) Stop() {
 		s.mu.Unlock()
 		return
 	}
-	close(s.stop)
+	s.program.Send(spinnerQuitMsg{})
+	if s.inputClose != nil {
+		s.inputClose.Close()
+	}
+	n := s.lineCount
 	s.running = false
+	s.lineCount = 0
 	done := s.done
 	s.mu.Unlock()
 	<-done
 	writeSynced(s.w, func() {
-		fmt.Fprint(s.w, carriage+eraseLine)
+		eraseLines(s.w, n)
 	})
 }
