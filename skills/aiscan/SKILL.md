@@ -37,6 +37,7 @@ All pseudo-commands run through `bash`. They are **not** system binaries.
 - `spray`: web probing, fingerprints, common files, and crawl.
 - `zombie`: weak credential checks for supported services.
 - `neutron`: template-based POC execution.
+- `proton`: sensitive information scanning — API keys, tokens, credentials, secrets in files or piped data.
 
 Each scanner has an internal skill with detailed flags. These load automatically on invocation.
 
