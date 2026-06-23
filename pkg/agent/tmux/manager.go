@@ -5,9 +5,12 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -152,6 +155,10 @@ func (m *Manager) SetWorkDir(dir string) {
 // token matches a registered in-process Command, the command runs in a
 // goroutine-based session (CreateFunc). Otherwise it runs as a shell
 // command in a PTY session (Create).
+//
+// Pipe support: "pseudo-cmd args | shell-pipeline" is supported. The
+// pseudo-command runs in-process with its output captured to a buffer,
+// then the buffer is piped as stdin to the shell pipeline via sh -c.
 func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 	cmdLine = stripCommentsAndBlanks(cmdLine)
 	if strings.TrimSpace(cmdLine) == "" {
@@ -173,7 +180,9 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 
 	if resolve != nil && token != "" {
 		if cmd, ok := resolve(token); ok {
-			tokens, err := SplitCommandLine(cmdLine)
+			pseudoPart, shellPipeline, hasPipe := splitPipeline(cmdLine)
+
+			tokens, err := SplitCommandLine(pseudoPart)
 			if err != nil {
 				return Info{}, err
 			}
@@ -182,11 +191,17 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 					return Info{}, valErr
 				}
 			}
+
 			name := opts.Name
 			if name == "" {
 				name = token
 			}
 			args := tokens[1:]
+
+			if hasPipe && shellPipeline != "" {
+				return m.runPipedPseudo(opts.Ctx, cmd, args, shellPipeline, name, timeout, workDir, opts.Env)
+			}
+
 			return m.CreateFunc(opts.Ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
 				if m.beforeExec != nil {
 					m.beforeExec(w)
@@ -200,6 +215,46 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 	}
 
 	return m.Create(workDir, cmdLine, opts.Name, timeout, opts.Env, "")
+}
+
+// runPipedPseudo runs a pseudo-command in-process, captures its output,
+// then pipes it as stdin to a shell pipeline. Everything runs inside a
+// single CreateFunc session so the caller sees one session ID.
+func (m *Manager) runPipedPseudo(
+	ctx context.Context,
+	cmd Command, args []string,
+	pipeline string,
+	name string, timeout time.Duration,
+	workDir string, env []string,
+) (Info, error) {
+	return m.CreateFunc(ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
+		// Phase 1: run pseudo-command, capture output to buffer.
+		var buf bytes.Buffer
+		if m.beforeExec != nil {
+			m.beforeExec(&buf)
+		}
+		execErr := cmd.Execute(ctx, args)
+		if m.afterExec != nil {
+			m.afterExec()
+		}
+		if execErr != nil {
+			_, _ = w.Write(buf.Bytes())
+			return execErr
+		}
+
+		// Phase 2: pipe captured output through shell pipeline.
+		sh := exec.CommandContext(ctx, "sh", "-c", pipeline)
+		sh.Stdin = &buf
+		sh.Stdout = w
+		sh.Stderr = w
+		if workDir != "" {
+			sh.Dir = workDir
+		}
+		if len(env) > 0 {
+			sh.Env = append(os.Environ(), env...)
+		}
+		return sh.Run()
+	})
 }
 
 func stripCommentsAndBlanks(input string) string {

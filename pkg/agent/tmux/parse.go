@@ -111,6 +111,46 @@ func firstCommandToken(input string) string {
 	return sb.String()
 }
 
+// splitPipeline splits cmdLine at the first unquoted single pipe (|).
+// Double pipe (||) is not a pipe operator and is left intact.
+// Returns the left side (pseudo-command), right side (shell pipeline),
+// and whether a pipe was found.
+func splitPipeline(cmdLine string) (pseudo, pipeline string, ok bool) {
+	var quote rune
+	escaped := false
+	runes := []rune(cmdLine)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			continue
+		}
+		if r == '|' {
+			if i+1 < len(runes) && runes[i+1] == '|' {
+				i++ // skip ||
+				continue
+			}
+			return strings.TrimSpace(string(runes[:i])),
+				strings.TrimSpace(string(runes[i+1:])), true
+		}
+	}
+	return cmdLine, "", false
+}
+
 // stripShellSyntax validates tokens for in-process command execution.
 // Silently strips harmless stderr/stdout duplication (2>&1 etc).
 // Rejects pipes, command chaining, and file redirections with clear errors.

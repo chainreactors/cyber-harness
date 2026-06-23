@@ -91,6 +91,23 @@ Long-running commands auto-background after 15s, returning a session id. Increme
 
 Interactive shells (`su`, `python`, `mysql` prompts) do not work. Use "one command in → stdout out" pattern.
 
+### Pipes and Redirections
+
+Both shell commands and pseudo-commands support **single pipes** (`|`). The pipe runs the pseudo-command in-process, captures its output, then feeds it as stdin to the shell pipeline via `sh -c`:
+```bash
+# pseudo-command piped to shell filters — works natively
+found -i . -c keys | grep critical
+scan -i target -j | head -20
+spray -u http://target | grep -E "200|301" | wc -l
+gogo -i 192.168.1.0/24 | awk '{print $1}' | sort | uniq -c | sort -rn
+
+# shell-only pipes — also work (PTY path)
+cat targets.txt | grep -v "#" | sort -u
+curl -s http://target/api | jq .
+```
+
+Redirections (`>`, `>>`), logical OR (`||`), and command chaining (`&&`, `;`) are **not supported** for pseudo-commands and return an error. Use scanner-native flags for output files (`-f`, `-s`) and filtering (`--severity`, `-o json`).
+
 ## Verification Standard
 
 Scanner output is a lead, not a finding. Confirmed status requires:

@@ -29,12 +29,14 @@ func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 		return registry.Get(name)
 	})
 
+	// Single pipe (|) is now supported — pseudo-command output is piped
+	// through a shell pipeline. Only ||, redirections, and chaining are
+	// still rejected.
 	tests := []struct {
 		name     string
 		cmd      string
 		wantHint string
 	}{
-		{"pipe to head", `spray -u http://x | head -30`, "shell pipes"},
 		{"double pipe", `spray -u http://x || echo done`, "shell pipes"},
 		{"file redirection >", `spray -u http://x > out.txt`, "file redirection"},
 		{"file redirection >>", `spray -u http://x >> out.txt`, "file redirection"},
