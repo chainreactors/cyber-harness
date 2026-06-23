@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
-import { AlertCircle, Brain, ChevronRight, File, Fingerprint, Folder, FolderOpen, Globe, Link2, Network, Server } from 'lucide-react'
+import { AlertCircle, Brain, CheckCircle2, ChevronRight, Crosshair, File, Fingerprint, Folder, FolderOpen, Globe, Link2, Network, Radar, Server } from 'lucide-react'
 import type { AssetItem, ScanResult } from '../api'
 import {
+  assetItemContent,
   buildResultModel,
   buildSitemapTree,
   collectSitemapFolderIDs,
@@ -17,6 +18,7 @@ import {
   pathIdentity,
   pathSearch,
   sameTarget,
+  serviceAIStatus,
   statusCodeTone,
   tagBadges,
   type BadgeTone,
@@ -27,6 +29,7 @@ import {
 } from '../lib/scan-result'
 import { cn } from '@/lib/utils'
 import MarkdownContent from './MarkdownContent'
+import FindingsSummary from './FindingsSummary'
 
 interface AssetResultViewProps {
   result: ScanResult
@@ -58,6 +61,8 @@ export default function AssetResultView({ result }: AssetResultViewProps) {
           <Metric label="Duration" value={model.metrics.duration} />
         </div>
       </div>
+
+      <FindingsSummary result={result} />
 
       <Section title="Hosts">
         {model.hosts.length > 0 ? (
@@ -183,6 +188,7 @@ function ServiceRow({ service }: { service: ServiceNode }) {
 
 function ServiceLine({ service, expandable = false }: { service: ServiceNode; expandable?: boolean }) {
   const displayTarget = service.web ? service.asset.target : service.target
+  const aiStatus = serviceAIStatus(service)
 
   return (
     <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -202,6 +208,21 @@ function ServiceLine({ service, expandable = false }: { service: ServiceNode; ex
             <AnchorLink id={assetAnchor('service', service.id)} label={`Link to ${service.target || service.service || service.port}`} />
             {service.protocol && service.protocol !== service.service && <Badge>{service.protocol}</Badge>}
             {service.web && <Badge tone="cyan">{service.pathCount > 0 ? webCountLabel(service.pathCount) : 'web'}</Badge>}
+            {aiStatus === 'verified' && (
+              <span className="inline-flex items-center gap-1 rounded bg-green-400/10 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+                <CheckCircle2 className="h-3 w-3" />AI Verified
+              </span>
+            )}
+            {aiStatus === 'sniper' && (
+              <span className="inline-flex items-center gap-1 rounded bg-red-400/10 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-400">
+                <Crosshair className="h-3 w-3" />CVE Intel
+              </span>
+            )}
+            {aiStatus === 'deep' && (
+              <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+                <Radar className="h-3 w-3" />Deep Test
+              </span>
+            )}
             {service.title && (
               <span className="min-w-0 break-words text-xs text-muted-foreground">{service.title}</span>
             )}
@@ -307,10 +328,14 @@ function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
     { id: `kind:${item.kind}`, label: item.kind, tone: itemKindTone(item.kind) },
   ]
   const tags = tagBadges(item.tags, [...headerBadges.map((badge) => badge.label), ...itemFactValues(item)])
+  const isAI = item.source === 'verify' || item.source === 'sniper' || item.source === 'deep'
 
   return (
     <div id={anchor} className={cn(
       'scroll-mt-24 rounded-md border p-3 text-xs',
+      isAI && item.status === 'confirmed' && 'border-l-4 border-l-green-500',
+      isAI && item.source === 'sniper' && 'border-l-4 border-l-red-500',
+      isAI && item.source === 'deep' && 'border-l-4 border-l-yellow-500',
       item.kind === 'error'
         ? 'border-red-400/20 bg-red-400/10'
         : item.kind === 'loot'
@@ -322,13 +347,24 @@ function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
         {headerBadges.map((badge) => (
           <Badge key={badge.id} tone={badge.tone}>{badge.label}</Badge>
         ))}
+        <VerificationBadge source={item.source} status={item.status} />
         <AnchorLink id={anchor} label={`Link to ${title || item.kind}`} />
         {showTarget && <span className="break-all font-mono text-muted-foreground">{item.target}</span>}
       </div>
       {title && <div className="mt-1 break-words text-foreground">{title}</div>}
       <ItemFactLine item={item} className="mt-2" />
       {detail && (
-        <div className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-background/50 p-3 text-muted-foreground">
+        <div className={cn(
+          'mt-2 max-h-96 overflow-auto rounded-md p-3 text-muted-foreground',
+          isAI
+            ? 'border-l-4 border-l-cyber-400 bg-cyber-500/5'
+            : 'border border-border bg-background/50',
+        )}>
+          {isAI && (
+            <div className="mb-2 text-[10px] font-medium uppercase text-cyber-700 dark:text-cyber-400">
+              {item.source === 'verify' ? 'AI Verification' : item.source === 'sniper' ? 'CVE Intelligence' : 'Dynamic Analysis'}
+            </div>
+          )}
           {markdown ? (
             <MarkdownContent content={detail} compact muted />
           ) : (
@@ -345,6 +381,40 @@ function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
       )}
     </div>
   )
+}
+
+function VerificationBadge({ source, status }: { source?: string; status?: string }) {
+  if (source === 'verify') {
+    if (status === 'confirmed') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-green-400/10 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+          <CheckCircle2 className="h-3 w-3" />Confirmed
+        </span>
+      )
+    }
+    if (status === 'not_confirmed') {
+      return <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not Confirmed</span>
+    }
+    if (status === 'inconclusive') {
+      return <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">Inconclusive</span>
+    }
+    return <span className="inline-flex items-center gap-1 rounded bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">Info</span>
+  }
+  if (source === 'sniper') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-red-400/10 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-400">
+        <Crosshair className="h-3 w-3" />CVE Intel
+      </span>
+    )
+  }
+  if (source === 'deep') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+        <Radar className="h-3 w-3" />Deep Test
+      </span>
+    )
+  }
+  return null
 }
 
 function AnchorLink({ id, label }: { id: string; label: string }) {
@@ -390,20 +460,7 @@ function anchorSlug(value: string) {
 }
 
 function itemContent(item: AssetItem) {
-  return firstText(
-    item.detail,
-    dataText(item.data?.content),
-    dataText(item.data?.detail),
-    dataText(item.data?.markdown),
-    dataText(item.data?.narrative),
-    dataText(item.data?.evidence),
-    dataText(item.data?.response),
-    dataText(item.data?.output),
-  )
-}
-
-function dataText(value: unknown) {
-  return typeof value === 'string' ? value : ''
+  return assetItemContent(item)
 }
 
 function firstText(...values: Array<string | undefined>) {

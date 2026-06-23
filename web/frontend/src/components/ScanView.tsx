@@ -1,9 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { FileText, TableProperties } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { FileText, Shield, TableProperties } from 'lucide-react'
 import type { ScanJob, ScanResult } from '../api'
 import ScanProgress from './ScanProgress'
 import ReportView from './ReportView'
 import AssetResultView from './AssetResultView'
+import FindingsPanel from './FindingsPanel'
+import { buildFindings } from '../lib/scan-result'
 import { cn } from '@/lib/utils'
 
 interface ScanViewProps {
@@ -15,6 +17,8 @@ interface ScanViewProps {
   onToggleLog: () => void
 }
 
+type ResultTab = 'assets' | 'findings' | 'report'
+
 export default function ScanView({ scan, lines, report, result, logCollapsed, onToggleLog }: ScanViewProps) {
   const hasReport = !!report
   const hasResult = !!result
@@ -22,15 +26,26 @@ export default function ScanView({ scan, lines, report, result, logCollapsed, on
   const isRunning = scan.status === 'running'
   const verifyEnabled = !!scan.verify || (!!scan.ai && !scan.sniper)
   const sniperEnabled = !!scan.sniper || (!!scan.ai && !scan.verify)
-  const [tab, setTab] = useState<'assets' | 'report'>('assets')
+  const isAIScan = verifyEnabled || sniperEnabled || !!scan.deep
+
+  const findingsCount = useMemo(() => {
+    if (!result) return 0
+    return buildFindings(result).length
+  }, [result])
+
+  const hasFindings = findingsCount > 0
+
+  const [tab, setTab] = useState<ResultTab>('assets')
 
   useEffect(() => {
     if (!hasResult && hasMarkdown) {
       setTab('report')
+    } else if (hasResult && hasFindings && isAIScan) {
+      setTab('findings')
     } else if (hasResult) {
       setTab('assets')
     }
-  }, [hasMarkdown, hasResult, scan.id])
+  }, [hasMarkdown, hasResult, hasFindings, isAIScan, scan.id])
 
   return (
     <div className="space-y-4">
@@ -62,14 +77,25 @@ export default function ScanView({ scan, lines, report, result, logCollapsed, on
                 <TableProperties className="h-3.5 w-3.5" />
                 <span>Assets</span>
               </ResultTabButton>
+              {hasFindings && (
+                <ResultTabButton active={tab === 'findings'} onClick={() => setTab('findings')}>
+                  <Shield className="h-3.5 w-3.5" />
+                  <span>Findings</span>
+                  <span className="ml-1 rounded-full bg-red-500/20 px-1.5 py-0.5 text-[10px] font-bold text-red-600 dark:text-red-400">
+                    {findingsCount}
+                  </span>
+                </ResultTabButton>
+              )}
               <ResultTabButton active={tab === 'report'} onClick={() => setTab('report')}>
                 <FileText className="h-3.5 w-3.5" />
-                <span>Markdown</span>
+                <span>Report</span>
               </ResultTabButton>
             </div>
           )}
 
           {hasResult && tab === 'assets' && <AssetResultView result={result} />}
+
+          {hasResult && tab === 'findings' && <FindingsPanel result={result} />}
 
           {hasMarkdown && tab === 'report' && (
             <div className="animate-fade-in">

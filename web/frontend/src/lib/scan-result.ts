@@ -1,4 +1,4 @@
-import type { Asset, AssetItem, ScanResult } from '../api'
+import type { Asset, AssetItem, Loot, ScanResult } from '../api'
 
 export const assetItemKind = {
   service: 'service',
@@ -533,4 +533,181 @@ function dedupeBadges(badges: BadgeSpec[]) {
 
 function labelKey(value?: string) {
   return String(value || '').trim().toLowerCase()
+}
+
+// --- AI Findings helpers ---
+
+export const PRIORITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const
+export type FindingPriority = (typeof PRIORITY_ORDER)[number]
+
+export type FindingItem = {
+  id: string
+  kind: 'vuln' | 'weakpass' | 'fingerprint' | 'note' | 'other'
+  priority: FindingPriority
+  title: string
+  target: string
+  description?: string
+  source?: string
+  status?: string
+  tags: string[]
+  detail?: string
+  raw?: AssetItem | Loot
+}
+
+export type FindingsSummaryModel = {
+  byPriority: Record<string, FindingItem[]>
+  byStatus: Record<string, FindingItem[]>
+  aiVerifiedCount: number
+  totalFindings: number
+  topFinding?: FindingItem
+}
+
+export function serviceAIStatus(service: ServiceNode): 'verified' | 'sniper' | 'deep' | null {
+  if (service.analysisItems.some(i => i.source === 'verify' && i.status === 'confirmed')) return 'verified'
+  if (service.analysisItems.some(i => i.source === 'sniper')) return 'sniper'
+  if (service.analysisItems.some(i => i.source === 'deep')) return 'deep'
+  return null
+}
+
+export function buildFindings(result: ScanResult): FindingItem[] {
+  const findings: FindingItem[] = []
+  const seen = new Set<string>()
+
+  for (const loot of result.loots || []) {
+    const id = `loot:${loot.target}:${loot.kind}:${loot.description || ''}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    findings.push({
+      id,
+      kind: normalizeLootKind(loot.kind),
+      priority: normalizePriority(loot.priority),
+      title: loot.description || loot.kind || 'Finding',
+      target: loot.target,
+      description: loot.description,
+      tags: loot.tags || [],
+      source: undefined,
+      status: undefined,
+      detail: lootDetail(loot),
+      raw: loot,
+    })
+  }
+
+  for (const asset of result.assets || []) {
+    for (const item of asset.items || []) {
+      if (!isAnalysisItem(item)) continue
+      if (item.kind === 'error') continue
+      const id = `item:${asset.target}:${item.source}:${item.kind}:${item.title || item.summary || ''}`
+      if (seen.has(id)) continue
+      seen.add(id)
+
+      const priority = itemToPriority(item)
+      findings.push({
+        id,
+        kind: normalizeItemKind(item.kind),
+        priority,
+        title: firstText(item.summary, item.title) || item.kind,
+        target: item.target || asset.target,
+        description: item.summary || item.title,
+        source: item.source,
+        status: item.status,
+        tags: item.tags || [],
+        detail: assetItemContent(item),
+        raw: item,
+      })
+    }
+  }
+
+  findings.sort((a, b) => {
+    const pa = PRIORITY_ORDER.indexOf(a.priority)
+    const pb = PRIORITY_ORDER.indexOf(b.priority)
+    if (pa !== pb) return pa - pb
+    const av = a.source === 'verify' && a.status === 'confirmed' ? 0 : 1
+    const bv = b.source === 'verify' && b.status === 'confirmed' ? 0 : 1
+    return av - bv
+  })
+
+  return findings
+}
+
+export function buildFindingsSummary(result: ScanResult): FindingsSummaryModel | null {
+  const findings = buildFindings(result)
+  if (findings.length === 0) return null
+
+  const byPriority: Record<string, FindingItem[]> = {}
+  const byStatus: Record<string, FindingItem[]> = {}
+
+  for (const f of findings) {
+    ;(byPriority[f.priority] ||= []).push(f)
+    if (f.source) {
+      const key = f.status || 'unknown'
+      ;(byStatus[key] ||= []).push(f)
+    }
+  }
+
+  const aiVerifiedCount = findings.filter(
+    f => f.source === 'verify' && f.status === 'confirmed',
+  ).length
+
+  return {
+    byPriority,
+    byStatus,
+    aiVerifiedCount,
+    totalFindings: findings.length,
+    topFinding: findings[0],
+  }
+}
+
+function normalizeLootKind(kind?: string): FindingItem['kind'] {
+  switch (kind?.toLowerCase()) {
+    case 'vuln': return 'vuln'
+    case 'weakpass': return 'weakpass'
+    case 'fingerprint': return 'fingerprint'
+    default: return 'other'
+  }
+}
+
+function normalizeItemKind(kind?: string): FindingItem['kind'] {
+  switch (kind?.toLowerCase()) {
+    case 'loot': return 'vuln'
+    case 'note': return 'note'
+    default: return 'other'
+  }
+}
+
+function normalizePriority(priority?: string): FindingPriority {
+  const p = (priority || '').toLowerCase()
+  if (PRIORITY_ORDER.includes(p as FindingPriority)) return p as FindingPriority
+  return 'info'
+}
+
+function itemToPriority(item: AssetItem): FindingPriority {
+  const p = (item.status || '').toLowerCase()
+  if (p === 'confirmed' || p === 'critical') return 'critical'
+  if (p === 'high') return 'high'
+  if (p === 'medium' || p === 'inconclusive') return 'medium'
+  if (p === 'low') return 'low'
+  return 'info'
+}
+
+export function assetItemContent(item: AssetItem): string {
+  return firstText(
+    item.detail,
+    dataText(item.data?.content),
+    dataText(item.data?.detail),
+    dataText(item.data?.markdown),
+    dataText(item.data?.narrative),
+    dataText(item.data?.evidence),
+    dataText(item.data?.response),
+    dataText(item.data?.output),
+  )
+}
+
+function dataText(value: unknown) {
+  return typeof value === 'string' ? value : ''
+}
+
+function lootDetail(loot: Loot): string | undefined {
+  if (!loot.data) return undefined
+  const text = loot.data['detail'] || loot.data['evidence'] || loot.data['markdown'] || loot.data['narrative']
+  return typeof text === 'string' ? text : undefined
 }
