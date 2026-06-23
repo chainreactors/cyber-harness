@@ -89,7 +89,7 @@ GITLAB_TOKEN=glpat-ABCDEFGHIJKLMNOPqrst
 SLACK_TOKEN=xoxb-1234567890-abcdefghij
 
 # Payment
-STRIPE_KEY=sk_live_ABCDEFGHIJKLMNOPQRSTUVWXYZab
+STRIPE_KEY=sk_test_FAKE00000000000000000000ab
 
 # Private key
 -----BEGIN RSA PRIVATE KEY-----
@@ -139,7 +139,7 @@ func TestE2E_ProtonScanDir_MultiFile(t *testing.T) {
 	bash, dir := e2eBash(t)
 
 	writeFile(t, dir, "src/config.py", `
-API_KEY = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"
+API_KEY = "sk_test_FAKE00000000000000000000dc"
 DB = "mysql://root:toor@10.0.0.1:3306/app"
 `)
 	writeFile(t, dir, "src/utils.go", `
@@ -201,7 +201,7 @@ func TestE2E_ProtonSeverityFilter(t *testing.T) {
 	writeFile(t, dir, "mixed.txt", `
 AKIAIOSFODNN7EXAMPLE
 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
-sk_live_ABCDEFGHIJKLMNOPQRSTUVWXYZab
+sk_test_FAKE00000000000000000000ab
 `)
 
 	out := run(t, bash, "proton -i "+dir+" --severity high")
@@ -327,7 +327,7 @@ func TestE2E_Pipe_ProtonToGrep(t *testing.T) {
 	writeFile(t, dir, "mix.txt", `
 AKIAIOSFODNN7EXAMPLE
 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
-sk_live_ABCDEFGHIJKLMNOPQRSTUVWXYZab
+sk_test_FAKE00000000000000000000ab
 `)
 
 	out := run(t, bash, "proton -i "+dir+" | grep high")
@@ -357,7 +357,7 @@ func TestE2E_Pipe_ProtonToWc(t *testing.T) {
 	writeFile(t, dir, "keys.txt", `
 AKIAIOSFODNN7EXAMPLE
 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
-sk_live_ABCDEFGHIJKLMNOPQRSTUVWXYZab
+sk_test_FAKE00000000000000000000ab
 `)
 
 	out := run(t, bash, "proton -i "+dir+" -j | wc -l")
@@ -380,7 +380,7 @@ func TestE2E_Pipe_ProtonToGrepToWc(t *testing.T) {
 	writeFile(t, dir, "all.txt", `
 AKIAIOSFODNN7EXAMPLE
 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
-sk_live_ABCDEFGHIJKLMNOPQRSTUVWXYZab
+sk_test_FAKE00000000000000000000ab
 api_key="medium_severity_key_here_123"
 10.0.1.5:8080
 `)
