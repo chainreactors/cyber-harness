@@ -43,7 +43,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	if application.Provider != nil {
 		logger.Infof("LLM provider ready, AI features enabled")
 	} else {
-		logger.Warnf("no LLM provider configured, AI features disabled (set api_key in config.yaml or env)")
+		logger.Warnf("no LLM provider configured, AI features disabled (set api_key in aiscan.yaml or env)")
 	}
 
 	configFile := option.ConfigFile
@@ -261,18 +261,18 @@ func (s *webConfigStore) resolveConfigPath() (string, bool) {
 	if s.explicit != "" {
 		return s.explicit, false
 	}
-	return "config.yaml", false
+	return "aiscan.yaml", false
 }
 
 func findWebConfigFile(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if _, err := os.Stat("config.yaml"); err == nil {
-		return "config.yaml"
+	if _, err := os.Stat("aiscan.yaml"); err == nil {
+		return "aiscan.yaml"
 	}
 	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "config.yaml")
+		p := filepath.Join(filepath.Dir(exe), "aiscan.yaml")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

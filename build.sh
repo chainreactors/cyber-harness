@@ -2,7 +2,7 @@
 
 # aiscan 构建脚本
 # 用法:
-#   ./build.sh                                  # 读取 config.yaml，编译多平台可执行文件
+#   ./build.sh                                  # 读取 aiscan.yaml，编译多平台可执行文件
 #   ./build.sh -g                               # 仅打印生成的 ldflags，不编译
 #   ./build.sh -o linux/amd64                   # 快速编译单一平台
 #   ./build.sh -o "linux/amd64 darwin/arm64"    # 编译指定平台
@@ -15,7 +15,7 @@ set -euo pipefail
 
 # ─── 变量 ───────────────────────────────────────────────────────
 
-CONFIG_FILE="config.yaml"
+CONFIG_FILE="aiscan.yaml"
 OSARCH=""
 EXTRA_TAGS=""
 OUTPUT_DIR="dist"
@@ -26,7 +26,7 @@ QUICK_TARGET=""
 PROFILE="mini"
 AISCAN_BIN="aiscan"
 
-# CLI 覆盖（优先级高于 config.yaml）
+# CLI 覆盖（优先级高于 aiscan.yaml）
 OPT_PROVIDER=""
 OPT_BASE_URL=""
 OPT_API_KEY=""
@@ -97,7 +97,7 @@ aiscan 构建脚本
 用法: ./build.sh [选项]
 
 配置:
-  --config, -c FILE     配置文件路径 (默认: config.yaml)
+  --config, -c FILE     配置文件路径 (默认: aiscan.yaml)
   -g, --ldflags         仅打印生成的 ldflags，不编译
 
 构建:
@@ -108,7 +108,7 @@ aiscan 构建脚本
   --ioa                 (已废弃, ioa serve 已集成到 aiscan 主二进制)
   --profile PROFILE     构建配置: agent (~28MB), mini (默认, ~77MB), full (~123MB)
 
-LLM 覆盖（优先级高于 config.yaml）:
+LLM 覆盖（优先级高于 aiscan.yaml）:
   --llm-provider NAME
   --llm-base-url URL
   --llm-api-key KEY
@@ -133,7 +133,7 @@ Web Search:
   --verify-timeout SEC
 
 示例:
-  ./build.sh                                    # 读取 config.yaml 编译全平台
+  ./build.sh                                    # 读取 aiscan.yaml 编译全平台
   ./build.sh -o linux/amd64                     # 快速编译单平台
   ./build.sh --config prod.yaml -o linux/amd64  # 使用生产配置编译
   ./build.sh --cyberhub-url http://10.0.0.1:9000 --cyberhub-key mykey
@@ -179,7 +179,7 @@ CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" sc
 
 CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" websearch tavily_keys)")
 
-# build 段仅从 config.yaml 读取（不做 CLI 覆盖）
+# build 段仅从 aiscan.yaml 读取（不做 CLI 覆盖）
 if [ -z "$OSARCH" ]; then
     OSARCH=$(yaml_val "$CONFIG_FILE" build osarch)
 fi

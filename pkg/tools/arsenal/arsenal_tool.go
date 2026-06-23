@@ -28,7 +28,7 @@ func NewArsenalCommand() (*ArsenalCommand, error) {
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    filepath.Join(base, "bin"),
-		ConfigPath: filepath.Join(base, "config.yaml"),
+		ConfigPath: filepath.Join(base, "aiscan.yaml"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init arsenal: %w", err)

@@ -10,7 +10,7 @@ import (
 
 func writeTestConfig(t *testing.T, dir, content string) string {
 	t.Helper()
-	path := filepath.Join(dir, "config.yaml")
+	path := filepath.Join(dir, "aiscan.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ ioa:
 `)
 
 	var opt Option
-	err := LoadConfig(filepath.Join(dir, "config.yaml"), &opt)
+	err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ recon:
 `)
 
 	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "config.yaml"), &opt); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
 		t.Fatal(err)
 	}
 	if opt.ReconLimit == nil || *opt.ReconLimit != 0 {
@@ -154,7 +154,7 @@ cyberhub:
 `)
 
 	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "config.yaml"), &opt); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
 		t.Fatal(err)
 	}
 	if opt.Provider != "" {
@@ -184,7 +184,7 @@ cyberhub:
 	option.APIKey = "cli-key"
 
 	var loaded Option
-	if err := LoadConfig(filepath.Join(dir, "config.yaml"), &loaded); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
 		t.Fatal(err)
 	}
 	mergeOption(&option, &loaded)
@@ -241,7 +241,7 @@ llm:
 
 		option := Option{}
 		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "config.yaml"), &loaded); err != nil {
+		if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
 			t.Fatal(err)
 		}
 		mergeOption(&option, &loaded)
@@ -269,7 +269,7 @@ llm:
 
 		option := Option{}
 		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "config.yaml"), &loaded); err != nil {
+		if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
 			t.Fatal(err)
 		}
 		mergeOption(&option, &loaded)
@@ -293,7 +293,7 @@ search:
 `)
 
 	withDefaults(t, func() {
-		if err := loadRuntimeDefaults(filepath.Join(dir, "config.yaml")); err != nil {
+		if err := loadRuntimeDefaults(filepath.Join(dir, "aiscan.yaml")); err != nil {
 			t.Fatal(err)
 		}
 
@@ -313,7 +313,7 @@ scan:
 `)
 
 	withDefaults(t, func() {
-		if err := loadRuntimeDefaults(filepath.Join(dir, "config.yaml")); err != nil {
+		if err := loadRuntimeDefaults(filepath.Join(dir, "aiscan.yaml")); err != nil {
 			t.Fatal(err)
 		}
 
@@ -388,7 +388,7 @@ llm:
 
 func TestLoadAndApplyConfigRejectsMalformedFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
+	path := filepath.Join(dir, "aiscan.yaml")
 	if err := os.WriteFile(path, []byte("llm:\n  provider: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestInitDefaultConfig(t *testing.T) {
 
 	var opt Option
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
+	path := filepath.Join(dir, "aiscan.yaml")
 	os.WriteFile(path, []byte(content), 0o644)
 	if err := LoadConfig(path, &opt); err != nil {
 		t.Errorf("generated config should be parseable: %v", err)

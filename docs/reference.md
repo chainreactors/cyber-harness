@@ -40,11 +40,11 @@ CLI 参数 > 环境变量 > 配置文件 > 编译时默认值
 ### 配置文件
 
 ```bash
-aiscan --init          # 生成默认 config.yaml 到当前目录
-aiscan -c /path/to/config.yaml scan -i 192.168.1.0/24   # 指定配置文件
+aiscan --init          # 生成默认 aiscan.yaml 到当前目录
+aiscan -c /path/to/aiscan.yaml scan -i 192.168.1.0/24   # 指定配置文件
 ```
 
-自动搜索路径：`./config.yaml` → `~/.config/aiscan/config.yaml`
+自动搜索路径：`./aiscan.yaml` → `<二进制所在目录>/aiscan.yaml`
 
 ### 配置文件结构
 

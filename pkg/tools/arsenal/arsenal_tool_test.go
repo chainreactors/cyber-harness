@@ -39,7 +39,7 @@ func newTestCmd(t *testing.T) *ArsenalCommand {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "bin")
-	configPath := filepath.Join(dir, "config.yaml")
+	configPath := filepath.Join(dir, "aiscan.yaml")
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    binPath,

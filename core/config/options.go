@@ -79,9 +79,9 @@ type IOAOptions struct {
 }
 
 type MiscOptions struct {
-	ConfigFile string `short:"c" long:"config" description:"Path to config file (default: ./config.yaml, <binary_dir>/config.yaml)"`
+	ConfigFile string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
 	DataDir    string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
-	InitConfig bool   `long:"init" description:"Generate default config.yaml and exit"`
+	InitConfig bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
 	ViewFile   string `short:"F" long:"view" description:"View a scan record JSONL file"`
 	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
 	ViewOutput string `short:"f" long:"file" description:"Write -F output to file instead of stdout"`

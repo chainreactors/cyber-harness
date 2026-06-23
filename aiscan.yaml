@@ -1,6 +1,6 @@
 # aiscan 配置文件
 #
-# 运行时: aiscan 自动加载 ./config.yaml 或 <二进制所在目录>/config.yaml
+# 运行时: aiscan 自动加载 ./aiscan.yaml 或 <二进制所在目录>/aiscan.yaml
 # 优先级: CLI 参数 > 环境变量 > 配置文件 > 默认值
 # 生成:   aiscan --init
 #

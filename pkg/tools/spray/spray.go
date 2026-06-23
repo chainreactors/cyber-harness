@@ -61,9 +61,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 	args = c.injectProxy(args)
 	// Use a spray-specific config name so that spray never accidentally
-	// loads aiscan's own config.yaml from the agent's working directory.
-	// The aiscan config has a completely different schema, causing yaml
-	// decode errors when spray tries to unmarshal it into its Option struct.
+	// loads aiscan's own aiscan.yaml from the agent's working directory.
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), spraycore.RunOptions{
 		Output:        &buf,
 		DefaultConfig: ".spray.yaml",

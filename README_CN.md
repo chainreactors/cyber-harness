@@ -173,7 +173,7 @@ export OPENAI_API_KEY="sk-..."
 aiscan agent --provider deepseek --base-url https://api.deepseek.com --api-key sk-... --model deepseek-chat
 ```
 
-配置文件 `~/.config/aiscan/config.yaml`：
+配置文件 `aiscan.yaml`：
 
 ```yaml
 llm:

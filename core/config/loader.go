@@ -10,7 +10,7 @@ import (
 	yamldrv "github.com/gookit/config/v2/yaml"
 )
 
-const DefaultConfigName = "config.yaml"
+const DefaultConfigName = "aiscan.yaml"
 
 func init() {
 	gkcfg.WithOptions(func(opt *gkcfg.Options) {
@@ -134,6 +134,9 @@ func mergeOption(dst, src *Option) {
 	dst.IOANodeName = ResolveString(dst.IOANodeName, src.IOANodeName)
 	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {
 		dst.Space = src.Space
+	}
+	if len(dst.Providers) == 0 && len(src.Providers) > 0 {
+		dst.Providers = src.Providers
 	}
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
