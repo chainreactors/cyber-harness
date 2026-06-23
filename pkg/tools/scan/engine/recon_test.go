@@ -19,3 +19,41 @@ func TestMergeReconOptionsEmptyDoesNotOverwrite(t *testing.T) {
 		t.Fatalf("empty merge overwrote: %#v", got)
 	}
 }
+
+// FOFA simplified auth (2023+): only the API key is required. A key-only
+// credential must register fofa as available without an email.
+func TestNewUncoverEngineFofaKeyOnly(t *testing.T) {
+	t.Setenv("FOFA_EMAIL", "")
+	t.Setenv("FOFA_KEY", "")
+
+	eng := NewUncoverEngine(ReconOptions{FofaKey: "modern-api-key"}, nil)
+	if eng.keys.FofaKey != "modern-api-key" {
+		t.Fatalf("key-only creds did not backfill FofaKey: got %q", eng.keys.FofaKey)
+	}
+	if !sourceAvailable(eng, "fofa") {
+		t.Fatalf("fofa not available for key-only creds: %v", eng.Sources())
+	}
+}
+
+// Legacy "email:key" credentials must keep working.
+func TestNewUncoverEngineFofaLegacyEmailKey(t *testing.T) {
+	t.Setenv("FOFA_EMAIL", "")
+	t.Setenv("FOFA_KEY", "")
+
+	eng := NewUncoverEngine(ReconOptions{FofaEmail: "a@b.com", FofaKey: "legacykey"}, nil)
+	if eng.keys.FofaEmail != "a@b.com" || eng.keys.FofaKey != "legacykey" {
+		t.Fatalf("legacy email:key not parsed: %#v", eng.keys)
+	}
+	if !sourceAvailable(eng, "fofa") {
+		t.Fatalf("fofa not available for legacy creds: %v", eng.Sources())
+	}
+}
+
+func sourceAvailable(e *UncoverEngine, name string) bool {
+	for _, s := range e.Sources() {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
