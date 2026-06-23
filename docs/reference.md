@@ -18,6 +18,7 @@ aiscan [全局参数] <subcommand> [子命令参数]
 | `spray` | scanner | Web 探测、HTTP 指纹、常见文件、爬取和路径检查 |
 | `zombie` | scanner | 授权弱口令检测 |
 | `neutron` | scanner | 模板化 POC 检测 |
+| `proton` | scanner | 敏感信息扫描（API 密钥、令牌、凭证、密码），支持管道输入 |
 | `katana` | scanner | Web 爬虫（仅 full 版） |
 | `passive` | scanner | 网络空间搜索 FOFA/Hunter（仅 full 版） |
 | `arsenal` | tool mgr | 安全工具包管理（install/update/remove） |
@@ -267,6 +268,32 @@ aiscan neutron -u http://target.example -s critical,high
 aiscan neutron -u http://target.example --finger nginx
 aiscan neutron -l targets.txt --tags cve,rce -c 10 --rate-limit 20
 aiscan neutron -u http://target.example -t ./pocs --id shiro-detect -j
+```
+
+### proton：敏感信息扫描
+
+| 参数 | 说明 |
+| --- | --- |
+| `-i, --input` | 目标文件或目录 |
+| `-l, --list` | 包含多个目标路径的文件 |
+| `-e, --expression` | 自定义正则表达式（可重复） |
+| `-t, --templates` | 自定义模板文件或目录 |
+| `-c, --category` | 内置模板类别：keys, spray, all（默认 keys） |
+| `--id` | 按规则 ID 过滤 |
+| `--tags` | 按 tag 过滤 |
+| `-s, --severity` | 按严重性过滤 |
+| `-j, --json` | JSON Lines 输出 |
+| `-o, --output` | 输出结果到文件 |
+| `--template-list` | 列出匹配规则（不执行） |
+
+```bash
+aiscan proton -i /path/to/project
+aiscan proton -i . --tags cloud --severity high
+aiscan proton -i . -e "AKIA[0-9A-Z]{16}" -e "password\s*[:=]"
+aiscan proton --template-list -c keys
+# 管道输入
+curl -s http://target/api | aiscan proton
+cat .env | aiscan proton -c keys
 ```
 
 ### katana：Web 爬虫（仅 full 版）

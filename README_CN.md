@@ -42,7 +42,7 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 | 版本 | 说明 |
 | --- | --- |
-| **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/arsenal |
+| **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | 完整版 — 额外包含 playwright 浏览器、passive recon、katana 爬虫 |
 | **aiscan-agent** | 轻量 agent 版 — 仅 agent 运行时，适合部署为远程 worker |
 
@@ -113,6 +113,7 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 play
 - [spray](https://github.com/chainreactors/spray) — Web 探测、指纹识别、路径 fuzz
 - [zombie](https://github.com/chainreactors/zombie) — 弱口令检测
 - [neutron](https://github.com/chainreactors/neutron) — 模板化 POC 执行
+- [proton](https://github.com/chainreactors/proton) — 敏感信息扫描（API 密钥、令牌、凭证、密码）
 - [cyberhub](https://github.com/chainreactors/fingers) — 指纹和 POC 关联查询
 
 **浏览器 & 侦察**（完整版）

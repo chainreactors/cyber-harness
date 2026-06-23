@@ -42,7 +42,7 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 
 | Edition | Description |
 | --- | --- |
-| **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/arsenal |
+| **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | Full — adds playwright browser, passive recon, katana crawler |
 | **aiscan-agent** | Lightweight agent runtime, ideal for remote worker deployment |
 
@@ -113,6 +113,7 @@ go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/kat
 - [spray](https://github.com/chainreactors/spray) — web probing, fingerprinting, path fuzzing
 - [zombie](https://github.com/chainreactors/zombie) — credential testing
 - [neutron](https://github.com/chainreactors/neutron) — template-based POC execution
+- [proton](https://github.com/chainreactors/proton) — sensitive information scanning (API keys, tokens, credentials, secrets)
 - [cyberhub](https://github.com/chainreactors/fingers) — fingerprint and POC association query
 
 **Browser & Recon** (full edition)
