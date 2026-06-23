@@ -64,8 +64,7 @@ type AgentOptions struct {
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
-	Resume         bool     `long:"resume" description:"Resume from the latest saved session in .aiscan/sessions/"`
-	ResumeFile     string   `long:"resume-file" description:"Resume from a specific session file"`
+	Resume         string   `long:"resume" optional:"true" optional-value:"latest" description:"Resume session: no value = latest from .aiscan/sessions/, or specify a file path"`
 	SaveSession    bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
 }
 

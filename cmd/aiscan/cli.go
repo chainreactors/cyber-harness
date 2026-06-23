@@ -428,8 +428,7 @@ var scannerKnownFlags = []knownFlag{
 			o.Heartbeat = n
 		}
 	}},
-	{names: []string{"--resume"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.Resume = true }},
-	{names: []string{"--resume-file"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ResumeFile = v }},
+	{names: []string{"--resume"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"--save-session"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.SaveSession = true }},
 }
 

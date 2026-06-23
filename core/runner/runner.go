@@ -201,9 +201,9 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
 
-	if option.Resume || option.ResumeFile != "" {
-		path := option.ResumeFile
-		if path == "" {
+	if option.Resume != "" {
+		path := option.Resume
+		if path == "latest" {
 			path = agent.LatestSessionPath(cfg.DataSubDir("sessions"))
 		}
 		data, err := agent.LoadSession(path)

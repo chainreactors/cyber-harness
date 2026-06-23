@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.2.6 — Session 持久化 + 多模型容错 + 输出格式统一 + 命令架构重组
+
+Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片容错（三层防御：静态模型注册表 + 请求清洗 + 运行时自动恢复）；统一输出记录格式；命令架构重组为 aiscan/aiscan-agent/web 三入口。
+
+### New Features
+
+**Session 持久化**
+
+- `--save-session`：自动保存 agent 对话到 `.aiscan/sessions/`，每次 run 后持久化
+- `--resume`：恢复最近一次保存的 session
+- `--resume <path>`：从指定 session 文件恢复
+- 反射驱动的 config 生成，自动同步 CLI flag 与配置文件字段
+
+```bash
+# 自动保存对话
+aiscan agent -p "scan target" --save-session
+
+# 恢复最近 session 继续
+aiscan agent --resume -p "now check the results"
+
+# 从指定文件恢复
+aiscan agent --resume .aiscan/sessions/2026-06-22_scan.json
+```
+
+**Config 路径 Fallback 链**
+
+- 配置文件查找顺序：`-c` 指定 > 当前目录 > 二进制所在目录
+- 数据目录（`.aiscan/`）统一跟随二进制路径
+
+### Improvements
+
+**多模型图片容错（三层防御）**
+
+针对 DeepSeek、Qwen、GLM 等不支持图片的模型，解决了图片内容导致 400 错误后 session 无法恢复的问题：
+
+1. **静态预防** — 从 Claude Code 的模型注册表提取 30+ 模型族关键词，自动识别 text-only 模型（deepseek/qwen/glm/mistral/llama/kimi/minimax 等），图片在发送前 strip
+2. **请求清洗** — `sanitizeMessages` 过滤历史中的空 assistant 消息，防止旧 session 或失败 turn 的遗留消息污染上下文
+3. **运行时自动恢复** — 未知模型遇到图片相关 400 错误时，自动调用 `DisableImages()` 并重试，后续请求持久生效
+
+**输出记录格式统一**
+
+- 所有工具输出统一为 tool-named record 类型
+- 新增 loot flag 标记高价值发现
+- Agent 输出自动包装为结构化记录
+
+**命令架构重组**
+
+- 拆分为 `aiscan`（全功能）、`aiscan-agent`（最小 agent）、`web`（子命令）三入口
+- Arsenal 工具始终加载，无需额外 flag
+- 解决 passive scanner 循环导入问题
+
+### Bug Fixes
+
+- `IsRetryable` 从黑名单改为白名单（仅 429/500/502/503/529），防止 400 Bad Request 无限重试
+- 错误路径不再向 transcript 追加空 assistant 消息，防止 session 损坏
+- 统一 panic recovery 覆盖 tool 执行和 scan pipeline
+- 修复 passive scanner 包循环导入
+
+---
+
 ## v0.2.5 — Arsenal 工具管理 + TUI 重设计 + 命令接口统一 + PTY 平台整合
 
 新增 Arsenal（crtm）安全工具包管理器；Playwright 新增 `-s` 全局 session flag；TUI verbose 渲染全面重设计；命令接口统一为全局 OutputWriter；4 平台 PTY 文件整合为单一 go-pty wrapper。
