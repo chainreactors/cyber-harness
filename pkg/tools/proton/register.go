@@ -1,6 +1,7 @@
 package proton
 
 import (
+	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -13,7 +14,10 @@ func init() {
 			if logger == nil {
 				logger = telemetry.NopLogger()
 			}
-			cmd := New().WithLogger(logger)
+			cmd := New().WithLogger(logger).WithProxy(deps.ScannerProxy)
+			if rs, ok := deps.Resources.(*resources.Set); ok && rs != nil {
+				cmd.WithResourceProvider(rs.ProtonConfig)
+			}
 			cmd.SetWorkDir(deps.WorkDir)
 			reg.Register(cmd, "proton")
 		},

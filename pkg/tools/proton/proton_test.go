@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
+	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protoncmd "github.com/chainreactors/aiscan/pkg/tools/proton"
 )
@@ -26,7 +27,8 @@ func e2eBash(t *testing.T) (*commands.BashTool, string) {
 	dir := t.TempDir()
 
 	registry := commands.NewRegistry()
-	cmd := protoncmd.New()
+	rs := &resources.Set{}
+	cmd := protoncmd.New().WithResourceProvider(rs.ProtonConfig)
 	cmd.SetWorkDir(dir)
 	registry.Register(cmd, "proton")
 

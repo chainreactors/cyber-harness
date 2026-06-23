@@ -1,6 +1,7 @@
 package proton
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/neutron/operators"
@@ -24,9 +24,11 @@ import (
 )
 
 type Command struct {
-	logger    telemetry.Logger
-	workDir   string
-	stdinFile string
+	logger           telemetry.Logger
+	proxy            string
+	workDir          string
+	stdinFile        string
+	resourceProvider func(string) []byte
 }
 
 func New() *Command {
@@ -40,6 +42,17 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 	return c
 }
 
+func (c *Command) WithProxy(proxy string) *Command {
+	c.proxy = proxy
+	return c
+}
+
+func (c *Command) WithResourceProvider(provider func(string) []byte) *Command {
+	c.resourceProvider = provider
+	return c
+}
+
+func (c *Command) SetProxy(proxy string)    { c.proxy = proxy }
 func (c *Command) SetWorkDir(dir string)    { c.workDir = dir }
 func (c *Command) SetStdinFile(path string) { c.stdinFile = path }
 func (c *Command) Name() string             { return "proton" }
@@ -51,6 +64,7 @@ Usage: proton -i <path> [options]
 
 Input:
   -i, --input        Target file or directory to scan
+  -l, --list         File containing targets, one per line
   -e, --expression   Regex pattern to search directly (can specify multiple)
       --ext          File extensions for -e mode (.go,.py)
 
@@ -68,7 +82,9 @@ Templates:
 Output:
   -o, --output       Write output to file
   -j, --json         JSON Lines output
-  -q, --quiet        Only print findings, no summary
+      --stats        Include final scan statistics (default)
+      --no-stats     Disable final scan statistics
+      --silent       Only output findings, no stats
 
 Scan control:
       --bin          Include binary files (default: text-only)
@@ -82,7 +98,8 @@ Pipe usage:
 
 Examples:
   proton -i /path/to/project
-  proton -i . -s critical,high
+  proton -i . -s high
+  proton -l paths.txt -c keys,spray
   proton -i . --tags cloud --exclude-id ip-with-port
   proton -i . -e "AKIA[0-9A-Z]{16}"
   proton -t ./custom-rules -i .
@@ -90,10 +107,13 @@ Examples:
 }
 
 type protonFlags struct {
+	// Input
 	Input       string   `short:"i" long:"input" description:"target file or directory"`
+	ListFile    string   `short:"l" long:"list" description:"file containing targets, one per line"`
 	Expressions []string `short:"e" long:"expression" description:"regex pattern to search"`
 	ExtFilter   string   `long:"ext" description:"file extensions for -e mode (.go,.py)"`
 
+	// Template selection (aligned with neutron)
 	Templates       []string `short:"t" long:"templates" description:"template file or directory"`
 	Categories      []string `short:"c" long:"category" description:"builtin categories" default:"keys"`
 	TemplateIDs     []string `long:"id" description:"filter rules by ID"`
@@ -104,10 +124,14 @@ type protonFlags struct {
 	ExcludeSeverity []string `long:"exclude-severity" description:"exclude severity"`
 	TemplateList    bool     `long:"template-list" description:"list selected rules and exit"`
 
+	// Output (aligned with neutron)
 	OutputFile string `short:"o" long:"output" description:"write output to file"`
 	JSON       bool   `short:"j" long:"json" description:"JSON Lines output"`
-	Quiet      bool   `short:"q" long:"quiet" description:"only print findings"`
+	Stats      bool   `long:"stats" description:"include final scan statistics"`
+	NoStats    bool   `long:"no-stats" description:"disable final scan statistics"`
+	Silent     bool   `long:"silent" description:"only output findings, no stats"`
 
+	// Scan control
 	Bin     bool `long:"bin" description:"include binary files"`
 	Timeout int  `long:"timeout" description:"overall timeout in seconds"`
 	Debug   bool `long:"debug" description:"enable debug logging"`
@@ -140,7 +164,6 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	// --- Build engine via SDK (template loading + filtering) ---
 	cfg := sdkproton.NewConfig().
 		WithTextOnly(!flags.Bin).
-		WithResourceProvider(resources.ProtonConfig).
 		WithCategories(flags.Categories...).
 		WithTemplatePaths(flags.Templates...).
 		WithTags(flags.Tags...).
@@ -148,10 +171,14 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		WithIDs(flags.TemplateIDs...).
 		WithExcludeIDs(flags.ExcludeIDs...)
 
+	if c.resourceProvider != nil {
+		cfg.WithResourceProvider(c.resourceProvider)
+	}
+
 	if len(flags.Expressions) > 0 {
 		rule, exprErr := buildExpressionRule(flags.Expressions, flags.ExtFilter, !flags.Bin)
 		if exprErr != nil {
-			return fmt.Errorf("proton: %v", exprErr)
+			return fmt.Errorf("proton: %w", exprErr)
 		}
 		cfg.WithRules(rule)
 	}
@@ -167,21 +194,23 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 
 	// --- Template list mode ---
 	if flags.TemplateList {
-		fmt.Fprintf(commands.Output, "[proton] %d rules loaded\n", scanner.Stats.Rules)
-		return nil
+		return c.renderTemplateList(scanner, flags.JSON)
 	}
 
-	// --- Resolve input ---
-	input := c.resolveInput(flags.Input, remaining)
-	if input == "" && c.stdinFile != "" {
-		input = c.stdinFile
+	// --- Resolve inputs ---
+	inputs, err := readInputs(flags.Input, flags.ListFile, remaining)
+	if err != nil {
+		return fmt.Errorf("proton: %w", err)
+	}
+	if len(inputs) == 0 && c.stdinFile != "" {
+		inputs = append(inputs, c.stdinFile)
 		defer func() {
 			os.Remove(c.stdinFile)
 			c.stdinFile = ""
 		}()
 	}
-	if input == "" && len(flags.Expressions) == 0 {
-		return fmt.Errorf("proton: target required (-i <path>, -e <regex>, or pipe: <cmd> | proton)")
+	if len(inputs) == 0 && len(flags.Expressions) == 0 {
+		return fmt.Errorf("proton: target required (-i <path>, -l <file>, -e <regex>, or pipe: <cmd> | proton)")
 	}
 
 	// --- Scan ---
@@ -193,7 +222,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	if flags.OutputFile != "" {
 		f, fErr := os.Create(flags.OutputFile)
 		if fErr != nil {
-			return fmt.Errorf("proton: %v", fErr)
+			return fmt.Errorf("proton: %w", fErr)
 		}
 		defer f.Close()
 		fileOut = f
@@ -209,16 +238,19 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		}
 		seen[key] = true
 		atomic.AddInt64(&findingCount, 1)
-		writeFinding(commands.Output, uf, flags.JSON, input)
+		writeFinding(commands.Output, uf, flags.JSON, inputs[0])
 		if fileOut != nil {
-			writeFinding(fileOut, uf, flags.JSON, input)
+			writeFinding(fileOut, uf, flags.JSON, inputs[0])
 		}
 	}
 
-	if input != "" {
+	c.logger.Infof("proton action=scanning targets=%d rules=%d", len(inputs), scanner.Stats.Rules)
+
+	for _, input := range inputs {
 		info, statErr := os.Stat(input)
 		if statErr != nil {
-			return fmt.Errorf("proton: %v", statErr)
+			c.logger.Warnf("proton: skip %s: %v", input, statErr)
+			continue
 		}
 		if info.IsDir() {
 			walkAndScan(ctx, scanner, input, callback)
@@ -227,7 +259,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		}
 	}
 
-	if !flags.Quiet {
+	// --- Summary ---
+	statsEnabled := flags.Stats || (!flags.NoStats && !flags.Silent && !flags.JSON)
+	if statsEnabled {
 		count := atomic.LoadInt64(&findingCount)
 		fileCount := atomic.LoadInt64(&scanner.Stats.Files)
 		ruleCount := scanner.Stats.Rules
@@ -240,16 +274,74 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	return nil
 }
 
+// --- template list ---
+
+func (c *Command) renderTemplateList(scanner *file.Scanner, jsonOutput bool) error {
+	var sb strings.Builder
+	count := 0
+	for _, group := range scanner.Groups {
+		for _, ref := range group.Templates {
+			count++
+			if jsonOutput {
+				data, _ := json.Marshal(map[string]string{
+					"id":       ref.ID,
+					"name":     ref.Name,
+					"severity": ref.Severity,
+				})
+				sb.Write(data)
+				sb.WriteByte('\n')
+				continue
+			}
+			sb.WriteString(ref.ID)
+			if ref.Severity != "" {
+				sb.WriteString(" [")
+				sb.WriteString(ref.Severity)
+				sb.WriteString("]")
+			}
+			if ref.Name != "" {
+				sb.WriteString(" ")
+				sb.WriteString(ref.Name)
+			}
+			sb.WriteByte('\n')
+		}
+	}
+	fmt.Fprint(commands.Output, sb.String())
+	if !jsonOutput {
+		fmt.Fprintf(commands.Output, "\nTotal: %d rules\n", count)
+	}
+	return nil
+}
+
 // --- path resolution (same pattern as neutron) ---
 
-func (c *Command) resolveInput(input string, remaining []string) string {
-	if input == "" && len(remaining) > 0 {
-		input = remaining[0]
+func readInputs(input, listFile string, remaining []string) ([]string, error) {
+	var out []string
+	if input != "" {
+		out = append(out, input)
 	}
-	if input != "" && !filepath.IsAbs(input) && c.workDir != "" {
-		input = filepath.Join(c.workDir, input)
+	for _, r := range remaining {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			out = append(out, r)
+		}
 	}
-	return input
+	if listFile == "" {
+		return out, nil
+	}
+	f, err := os.Open(listFile)
+	if err != nil {
+		return nil, fmt.Errorf("open target list: %w", err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, sc.Err()
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
@@ -258,6 +350,7 @@ func (c *Command) resolveRelativePaths(args []string) []string {
 	}
 	fileFlags := map[string]bool{
 		"-i": true, "--input": true,
+		"-l": true, "--list": true,
 		"-o": true, "--output": true,
 		"-t": true, "--templates": true,
 	}
@@ -475,7 +568,7 @@ func buildExpressionRule(expressions []string, extFilter string, textOnly bool) 
 	}
 	req.Extractors = extractors
 	if err := req.Compile(execOpts); err != nil {
-		return sdkproton.Rule{}, err
+		return sdkproton.Rule{}, fmt.Errorf("compile expression: %w", err)
 	}
 	return sdkproton.Rule{
 		ID: "expression", Name: "Expression",
@@ -484,16 +577,34 @@ func buildExpressionRule(expressions []string, extFilter string, textOnly bool) 
 }
 
 func normalizeShortFlags(args []string) []string {
+	known := map[string]struct{}{
+		"-input": {}, "-list": {}, "-expression": {}, "-ext": {},
+		"-templates": {}, "-category": {}, "-id": {}, "-exclude-id": {},
+		"-tags": {}, "-exclude-tags": {}, "-severity": {}, "-exclude-severity": {},
+		"-template-list": {}, "-output": {}, "-json": {},
+		"-stats": {}, "-no-stats": {}, "-silent": {},
+		"-bin": {}, "-timeout": {}, "-debug": {},
+		"-etags": {}, "-eid": {}, "-es": {}, "-tl": {},
+	}
 	aliases := map[string]string{
-		"-etags": "--exclude-tags",
-		"-eid":   "--exclude-id",
-		"-es":    "--exclude-severity",
-		"-tl":    "--template-list",
+		"-etags": "-exclude-tags",
+		"-eid":   "-exclude-id",
+		"-es":    "-exclude-severity",
+		"-tl":    "-template-list",
 	}
 	out := make([]string, 0, len(args))
 	for _, arg := range args {
-		if replacement, ok := aliases[arg]; ok {
-			out = append(out, replacement)
+		key := arg
+		suffix := ""
+		if i := strings.IndexByte(arg, '='); i > 0 {
+			key = arg[:i]
+			suffix = arg[i:]
+		}
+		if replacement, ok := aliases[key]; ok {
+			key = replacement
+		}
+		if _, ok := known[key]; ok {
+			out = append(out, "-" + key + suffix)
 		} else {
 			out = append(out, arg)
 		}

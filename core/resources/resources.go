@@ -47,6 +47,7 @@ type Set struct {
 	gogoConfigs      map[string][]byte
 	sprayConfigs     map[string][]byte
 	zombieConfigs    map[string][]byte
+	protonConfigs    map[string][]byte
 }
 
 // Init loads scanner resources once for aiscan and prepares SDK configs.
@@ -74,6 +75,7 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 		gogoConfigs:   defaultGogoConfigs(),
 		sprayConfigs:  defaultSprayConfigs(),
 		zombieConfigs: defaultZombieConfigs(),
+		protonConfigs: defaultProtonConfigs(),
 	}
 
 	if set.RemoteEnabled {
@@ -197,6 +199,16 @@ func defaultZombieConfigs() map[string][]byte {
 	// When loadEmbeddedConfig returns nil (stub build), these entries are
 	// omitted so that zombie falls through to its own embedded defaults.
 	for _, key := range []string{"zombie_common", "zombie_default", "zombie_rule", "zombie_template"} {
+		if data := loadEmbeddedConfig(key); len(data) > 0 {
+			m[key] = data
+		}
+	}
+	return m
+}
+
+func defaultProtonConfigs() map[string][]byte {
+	m := make(map[string][]byte)
+	for _, key := range []string{"found_keys", "found_spray", "found_filter_ext", "found_filter_dir"} {
 		if data := loadEmbeddedConfig(key); len(data) > 0 {
 			m[key] = data
 		}
@@ -384,8 +396,13 @@ func (s *Set) ZombieConfig(name string) []byte {
 }
 
 // ProtonConfig returns proton/found template data by category name.
-// Used as ResourceProvider for sdk/proton.Config.
-func ProtonConfig(name string) []byte {
+func (s *Set) ProtonConfig(name string) []byte {
+	if s == nil {
+		return loadEmbeddedConfig(name)
+	}
+	if data := s.protonConfigs[name]; len(data) > 0 {
+		return cloneBytes(data)
+	}
 	return loadEmbeddedConfig(name)
 }
 
