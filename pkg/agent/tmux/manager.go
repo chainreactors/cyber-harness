@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -214,6 +215,31 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 		}
 	}
 
+	// Check for "shell | pseudo" pattern: first token is not a pseudo-command,
+	// but after a pipe there is one.
+	if resolve != nil {
+		leftPart, rightPart, hasPipe := splitPipeline(cmdLine)
+		if hasPipe && rightPart != "" {
+			rightToken := firstCommandToken(rightPart)
+			if cmd, ok := resolve(rightToken); ok {
+				rightTokens, err := SplitCommandLine(rightPart)
+				if err != nil {
+					return Info{}, err
+				}
+				if len(rightTokens) > 1 {
+					if _, valErr := stripShellSyntax(rightTokens[1:]); valErr != nil {
+						return Info{}, valErr
+					}
+				}
+				name := opts.Name
+				if name == "" {
+					name = rightToken
+				}
+				return m.runShellToPseudo(opts.Ctx, leftPart, cmd, rightTokens[1:], name, timeout, workDir, opts.Env)
+			}
+		}
+	}
+
 	return m.Create(workDir, cmdLine, opts.Name, timeout, opts.Env, "")
 }
 
@@ -254,6 +280,65 @@ func (m *Manager) runPipedPseudo(
 			sh.Env = append(os.Environ(), env...)
 		}
 		return sh.Run()
+	})
+}
+
+// StdinReceiver is an optional interface for pseudo-commands that can accept
+// piped input. When a "shell | pseudo" pattern is detected, RunCommand writes
+// the shell output to a temp file and calls SetStdinFile before Execute.
+type StdinReceiver interface {
+	SetStdinFile(path string)
+}
+
+// runShellToPseudo runs a shell command, captures its stdout to a temp file,
+// then passes it to the pseudo-command as a StdinFile. If the command doesn't
+// implement StdinReceiver, the temp file path is injected as -i <path>.
+func (m *Manager) runShellToPseudo(
+	ctx context.Context,
+	shellPart string,
+	cmd Command, pseudoArgs []string,
+	name string, timeout time.Duration,
+	workDir string, env []string,
+) (Info, error) {
+	return m.CreateFunc(ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
+		// Phase 1: run shell command, capture output to temp file.
+		tmpFile, err := os.CreateTemp("", "pipe-stdin-*.tmp")
+		if err != nil {
+			return fmt.Errorf("create stdin temp file: %w", err)
+		}
+		tmpPath := tmpFile.Name()
+
+		sh := exec.CommandContext(ctx, "sh", "-c", shellPart)
+		sh.Stdout = tmpFile
+		sh.Stderr = w
+		if workDir != "" {
+			sh.Dir = workDir
+		}
+		if len(env) > 0 {
+			sh.Env = append(os.Environ(), env...)
+		}
+		shellErr := sh.Run()
+		tmpFile.Close()
+		if shellErr != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("shell command failed: %w", shellErr)
+		}
+
+		// Phase 2: pass temp file to pseudo-command and execute.
+		if sr, ok := cmd.(StdinReceiver); ok {
+			sr.SetStdinFile(tmpPath)
+		} else {
+			pseudoArgs = append([]string{"-i", tmpPath}, pseudoArgs...)
+		}
+		defer os.Remove(tmpPath)
+
+		if m.beforeExec != nil {
+			m.beforeExec(w)
+		}
+		if m.afterExec != nil {
+			defer m.afterExec()
+		}
+		return cmd.Execute(ctx, pseudoArgs)
 	})
 }
 
