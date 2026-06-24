@@ -18,16 +18,12 @@ type CommandExecutor func(ctx context.Context, tokens []string) (string, error)
 
 type Command struct {
 	state         *State
-	mitmState     *MITMState
 	onProxyChange OnProxyChange
 	execCommand   CommandExecutor
 }
 
 func New(state *State) *Command {
-	return &Command{
-		state:     state,
-		mitmState: NewMITMState(),
-	}
+	return &Command{state: state}
 }
 
 func (c *Command) SetOnProxyChange(fn OnProxyChange) { c.onProxyChange = fn }
@@ -35,7 +31,7 @@ func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
 func (c *Command) Name() string                         { return "proxy" }
 
 func (c *Command) Usage() string {
-	return `proxy - Manage proxy nodes, proxy-chain execution, and MITM traffic capture
+	return `proxy - Manage proxy nodes and proxy-chain execution
 
 Usage:
   proxy <proxy-url> <command> [args...]   Run a command through the specified proxy (like proxychains)
@@ -46,15 +42,6 @@ Usage:
   proxy test [name|index]                 Test proxy node connectivity
   proxy current                           Show the current active proxy
   proxy clear                             Clear subscription and revert to original proxy
-
-MITM (man-in-the-middle) traffic capture:
-  proxy mitm start [--addr HOST:PORT]     Start MITM proxy, route engine traffic through it
-  proxy mitm stop                         Stop MITM and restore previous proxy
-  proxy mitm status                       Show MITM status and flow count
-  proxy mitm flows [--host X] [--last N]  List captured flows
-  proxy mitm flow <id>                    Show full flow details
-  proxy mitm clear                        Clear captured flows
-  proxy mitm analyze [--host X] [--last N] Format flows for AI security analysis
 
 Proxy-chain examples:
   proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
@@ -98,8 +85,6 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 			result, err = c.execCurrent()
 		case "clear":
 			result, err = c.execClear()
-		case "mitm":
-			result, err = c.execMITM(ctx, rest)
 		default:
 			if len(rest) > 0 {
 				if node, _, findErr := c.findNode(args[0]); findErr == nil {
@@ -311,16 +296,6 @@ func (c *Command) execTest(ctx context.Context, args []string) (string, error) {
 }
 
 func (c *Command) execCurrent() (string, error) {
-	if c.mitmState.IsRunning() {
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("[proxy] MITM active on %s\n", c.mitmState.ListenAddr()))
-		saved := c.mitmState.SavedProxy()
-		if saved != "" {
-			sb.WriteString(fmt.Sprintf("  Upstream: %s\n", saved))
-		}
-		sb.WriteString(fmt.Sprintf("  Flows: %d captured", c.mitmState.Store().Count()))
-		return sb.String(), nil
-	}
 	if c.state.IsAutoMode() {
 		return fmt.Sprintf("[proxy] auto mode (adaptive load balancing)\nClash URL: %s", c.state.ActiveProxy()), nil
 	}
@@ -345,167 +320,6 @@ func (c *Command) execClear() (string, error) {
 		return fmt.Sprintf("[proxy] cleared. Reverted to original proxy: %s", original), nil
 	}
 	return "[proxy] cleared. No proxy active.", nil
-}
-
-// ---------------------------------------------------------------------------
-// MITM subcommands
-// ---------------------------------------------------------------------------
-
-type mitmStartFlags struct {
-	Addr string `long:"addr" description:"Listen address for MITM proxy" default:"127.0.0.1:0"`
-}
-
-type mitmQueryFlags struct {
-	Host   string `long:"host" description:"Filter flows by host substring"`
-	Status string `long:"status" description:"Filter flows by status code (e.g. 2xx, 404, 5xx)"`
-	Type   string `long:"type" description:"Filter flows by Content-Type substring"`
-	Last   int    `long:"last" description:"Show only the last N flows"`
-}
-
-type mitmAnalyzeFlags struct {
-	Host string `long:"host" description:"Filter flows by host substring"`
-	Last int    `long:"last" description:"Analyze only the last N flows"`
-}
-
-func (c *Command) execMITM(_ context.Context, args []string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("usage: proxy mitm <start|stop|status|flows|flow|clear|analyze> [options]")
-	}
-
-	sub := strings.ToLower(args[0])
-	rest := args[1:]
-
-	switch sub {
-	case "start":
-		return c.mitmStart(rest)
-	case "stop":
-		return c.mitmStop()
-	case "status":
-		return c.mitmStatus()
-	case "flows":
-		return c.mitmFlows(rest)
-	case "flow":
-		return c.mitmFlowDetail(rest)
-	case "clear":
-		c.mitmState.Store().Clear()
-		return "[mitm] flow store cleared", nil
-	case "analyze":
-		return c.mitmAnalyze(rest)
-	default:
-		return "", fmt.Errorf("unknown mitm subcommand: %s", sub)
-	}
-}
-
-func (c *Command) mitmStart(args []string) (string, error) {
-	if c.mitmState.IsRunning() {
-		return "", fmt.Errorf("[mitm] already running on %s. Use 'proxy mitm stop' first", c.mitmState.ListenAddr())
-	}
-
-	var f mitmStartFlags
-	if _, err := parseFlags(&f, args); err != nil {
-		return "", fmt.Errorf("proxy mitm start: %w", err)
-	}
-
-	currentProxy := c.state.ActiveProxy()
-	c.mitmState.SetSavedProxy(currentProxy)
-
-	if err := c.mitmState.Start(f.Addr, currentProxy); err != nil {
-		return "", err
-	}
-
-	if c.onProxyChange != nil {
-		c.onProxyChange(c.mitmState.ProxyURL())
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[mitm] started on %s\n", c.mitmState.ListenAddr()))
-	sb.WriteString("  All engine traffic now routed through MITM proxy\n")
-	if currentProxy != "" {
-		sb.WriteString(fmt.Sprintf("  Upstream: %s\n", currentProxy))
-	}
-	sb.WriteString("  Use 'proxy mitm flows' to view captured traffic")
-	return sb.String(), nil
-}
-
-func (c *Command) mitmStop() (string, error) {
-	if !c.mitmState.IsRunning() {
-		return "[mitm] not running", nil
-	}
-
-	savedProxy := c.mitmState.SavedProxy()
-	if err := c.mitmState.Stop(); err != nil {
-		return "", fmt.Errorf("[mitm] stop error: %w", err)
-	}
-
-	if c.onProxyChange != nil {
-		c.onProxyChange(savedProxy)
-	}
-
-	flowCount := c.mitmState.Store().Count()
-	msg := fmt.Sprintf("[mitm] stopped. %d flows captured", flowCount)
-	if savedProxy != "" {
-		msg += fmt.Sprintf("\n  Restored proxy: %s", savedProxy)
-	}
-	return msg, nil
-}
-
-func (c *Command) mitmStatus() (string, error) {
-	if !c.mitmState.IsRunning() {
-		flowCount := c.mitmState.Store().Count()
-		if flowCount > 0 {
-			return fmt.Sprintf("[mitm] stopped (%d flows in store)", flowCount), nil
-		}
-		return "[mitm] not running", nil
-	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[mitm] running on %s\n", c.mitmState.ListenAddr()))
-	sb.WriteString(fmt.Sprintf("  Proxy URL: %s\n", c.mitmState.ProxyURL()))
-	sb.WriteString(fmt.Sprintf("  Flows captured: %d\n", c.mitmState.Store().Count()))
-	if saved := c.mitmState.SavedProxy(); saved != "" {
-		sb.WriteString(fmt.Sprintf("  Upstream: %s\n", saved))
-	}
-	return sb.String(), nil
-}
-
-func (c *Command) mitmFlows(args []string) (string, error) {
-	var f mitmQueryFlags
-	if _, err := parseFlags(&f, args); err != nil {
-		return "", fmt.Errorf("proxy mitm flows: %w", err)
-	}
-	flows := c.mitmState.Store().Query(QueryOpts{
-		Host:   f.Host,
-		Status: f.Status,
-		CType:  f.Type,
-		Last:   f.Last,
-	})
-	return formatFlowList(flows), nil
-}
-
-func (c *Command) mitmFlowDetail(args []string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("usage: proxy mitm flow <id>")
-	}
-	var id int
-	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-		return "", fmt.Errorf("invalid flow ID: %s", args[0])
-	}
-	f := c.mitmState.Store().Get(id)
-	if f == nil {
-		return "", fmt.Errorf("flow #%d not found", id)
-	}
-	return formatFlowDetail(f), nil
-}
-
-func (c *Command) mitmAnalyze(args []string) (string, error) {
-	var f mitmAnalyzeFlags
-	if _, err := parseFlags(&f, args); err != nil {
-		return "", fmt.Errorf("proxy mitm analyze: %w", err)
-	}
-	flows := c.mitmState.Store().Query(QueryOpts{
-		Host: f.Host,
-		Last: f.Last,
-	})
-	return formatFlowAnalysis(flows), nil
 }
 
 // ---------------------------------------------------------------------------

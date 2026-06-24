@@ -42,6 +42,10 @@ func init() {
 			cmd.SetCommandExecutor(reg.ExecuteArgs)
 			reg.Register(cmd, "proxy")
 
+			mitmCmd := NewMitmCommand(reg)
+			mitmCmd.SetCommandExecutor(reg.ExecuteArgs)
+			reg.Register(mitmCmd, "proxy")
+
 			// If --proxy / config proxy is a clash:// URL, auto-activate
 			if strings.HasPrefix(strings.ToUpper(deps.ScannerProxy), "CLASH://") {
 				u, err := url.Parse(deps.ScannerProxy)
