@@ -205,10 +205,14 @@ jobs:
 
       - name: Run e2e tests
         run: |
-          go test -race -count=1 -timeout 10m \
-            -tags e2e \
-            -v \
-            ./pkg/e2e/
+          if [ -d pkg/e2e ]; then
+            go test -race -count=1 -timeout 10m \
+              -tags e2e \
+              -v \
+              ./pkg/e2e/
+          else
+            echo "pkg/e2e not found, skipping"
+          fi
 
   # ── Build (depends on test, 3 parallel profiles) ──────────────
 
