@@ -215,11 +215,11 @@ func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
 
 	buf := make([]byte, 64)
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	n, err := conn.Read(buf)
+	n, err := io.ReadAtLeast(conn, buf, 4)
 	if err != nil {
 		t.Fatalf("expected SSH banner, got error: %v", err)
 	}
-	if n == 0 || string(buf[:4]) != "SSH-" {
+	if string(buf[:4]) != "SSH-" {
 		t.Fatalf("expected SSH banner, got %q", buf[:n])
 	}
 	if store.Count() != 0 {
