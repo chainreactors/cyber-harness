@@ -180,8 +180,9 @@ github.com/chainreactors/gogo/v2 v2.14.2-0.20260616122548-b8e5ed3b1b40 h1:ldrTpG
 github.com/chainreactors/gogo/v2 v2.14.2-0.20260616122548-b8e5ed3b1b40/go.mod h1:PWgWQ3eqfz3474PscYtDAVJDn+ksi2ijL2wJ6Rz0qYY=
 github.com/chainreactors/ioa v0.1.1-0.20260618070057-ec99736bed74 h1:3AitkeoJCh5uWG7bd/Ph/oDez4poPbfzWxeplP+hz4Q=
 github.com/chainreactors/ioa v0.1.1-0.20260618070057-ec99736bed74/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
-github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c h1:6Net2Mgo/qo6ADFBZJWWScKuMfZ0rbzLqSCVDuLKFdc=
 github.com/chainreactors/logs v0.0.0-20260508055944-c678762ed15c/go.mod h1:VrXmYPbNN5AVoo1sc5aeyPVBYqubMdb3KO/tn5rRZpo=
+github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc h1:e6rjnU8dmfhAnkFzLp/R5gta0LbFM13L27djxbC/i4I=
+github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc/go.mod h1:VrXmYPbNN5AVoo1sc5aeyPVBYqubMdb3KO/tn5rRZpo=
 github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7 h1:ejxkTDWvmayTV9neAD0j5TQepJ9epc4QjO2EKKP4eAA=
 github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7/go.mod h1:0WsfPVvIAiJ6em/5mSXrd+0zooYWl4HRLO8Gv1dYbfs=
 github.com/chainreactors/malice-network/external/readline v0.0.0-20260620124902-e62d93c864f7 h1:ygb/W+8A/56hW+dITQZdJ+qGXahPwuv+riPZ5FLf+gs=
