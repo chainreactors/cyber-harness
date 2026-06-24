@@ -30,6 +30,12 @@ func (b *syncedBuffer) String() string {
 	return b.buf.String()
 }
 
+func (b *syncedBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(s string) string {
@@ -79,7 +85,8 @@ func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 }
 
 func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -128,7 +135,8 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 }
 
 func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, false)
 
 	content := "buffered answer"
@@ -153,7 +161,8 @@ func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
 }
 
 func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewStaticAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -182,7 +191,8 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 }
 
 func TestThinkingLineShowsTokenUsage(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -206,7 +216,8 @@ func TestThinkingLineShowsTokenUsage(t *testing.T) {
 }
 
 func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
 	}, &stdout, &stderr, true)
@@ -253,7 +264,8 @@ func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
 }
 
 func TestTurnStatsShowsContextWindowUse(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
 	}, &stdout, &stderr, true)
@@ -346,7 +358,8 @@ func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 }
 
 func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
 	}, &stdout, &stderr, true)
@@ -376,7 +389,7 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 }
 
 func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 2, false)
 	reasoning := "checking target scope\nprobing admin route"
 
@@ -399,7 +412,7 @@ func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
 }
 
 func TestAgentOutputToolSummary(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{
@@ -431,7 +444,7 @@ func TestAgentOutputToolSummary(t *testing.T) {
 }
 
 func TestAgentOutputToolDebugDetails(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, true)
 
 	o.HandleEvent(agent.Event{
@@ -460,7 +473,7 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 }
 
 func TestAgentOutputToolError(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{
@@ -481,7 +494,7 @@ func TestAgentOutputToolError(t *testing.T) {
 }
 
 func TestAgentOutputWriteEditSummary(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{
@@ -504,7 +517,7 @@ func TestAgentOutputWriteEditSummary(t *testing.T) {
 }
 
 func TestAgentOutputMultiLineResult(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	result := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"
@@ -589,7 +602,7 @@ func TestExtractPseudoCommand(t *testing.T) {
 }
 
 func TestToolCallCounting(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 0, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c1", ToolName: "bash", Result: "ok"})
@@ -605,7 +618,7 @@ func TestToolCallCounting(t *testing.T) {
 }
 
 func TestTurnStartMarker(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
@@ -626,7 +639,7 @@ func TestTurnStartMarker(t *testing.T) {
 }
 
 func TestEvalEndRendering(t *testing.T) {
-	var stderr bytes.Buffer
+	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
 	o.HandleEvent(agent.Event{Type: agent.EventEvalEnd, EvalPass: true, EvalRound: 0, EvalReason: "all checks passed"})
