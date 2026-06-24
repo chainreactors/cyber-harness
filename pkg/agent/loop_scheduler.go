@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,10 +26,14 @@ const (
 
 // LoopEntry defines a single recurring task.
 //
-//   - ModeInbox requires Prompt (static content injected into inbox).
-//   - ModeIndependent requires OnFire (called each interval in a goroutine).
+// Schedule priority: Cron > Interval.
+//   - If Cron is set, it drives scheduling (Interval is ignored).
+//   - If only Interval is set, it is used as a simple ticker.
+//   - ModeInbox requires Prompt.
+//   - ModeIndependent requires OnFire.
 type LoopEntry struct {
 	Name      string
+	Cron      *CronExpr
 	Interval  time.Duration
 	Prompt    string
 	Mode      LoopMode
@@ -37,13 +42,21 @@ type LoopEntry struct {
 	CreatedAt time.Time
 }
 
+// Schedule returns a human-readable string for the schedule.
+func (e LoopEntry) Schedule() string {
+	if e.Cron != nil {
+		return e.Cron.String()
+	}
+	return e.Interval.String()
+}
+
 type LoopInfo struct {
-	Name      string        `json:"name"`
-	Prompt    string        `json:"prompt"`
-	Interval  time.Duration `json:"interval"`
-	Mode      LoopMode      `json:"mode"`
-	FireCount int           `json:"fire_count"`
-	LastFired time.Time     `json:"last_fired,omitempty"`
+	Name      string `json:"name"`
+	Prompt    string `json:"prompt"`
+	Schedule  string `json:"schedule"`
+	Mode      LoopMode `json:"mode"`
+	FireCount int      `json:"fire_count"`
+	LastFired time.Time `json:"last_fired,omitempty"`
 }
 
 type LoopScheduler struct {
@@ -78,44 +91,59 @@ func (s *LoopScheduler) SetMinInterval(d time.Duration) {
 	s.minInterval = d
 }
 
-func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) error {
-	if strings.TrimSpace(entry.Name) == "" {
-		return fmt.Errorf("loop name is required")
-	}
+func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) (string, error) {
 	if entry.Mode == ModeIndependent && entry.OnFire == nil {
-		return fmt.Errorf("OnFire callback is required for ModeIndependent")
+		return "", fmt.Errorf("OnFire callback is required for ModeIndependent")
 	}
 	if entry.Mode == ModeInbox && strings.TrimSpace(entry.Prompt) == "" {
-		return fmt.Errorf("prompt is required for ModeInbox")
+		return "", fmt.Errorf("prompt is required for ModeInbox")
+	}
+	if entry.Cron == nil && entry.Interval == 0 {
+		return "", fmt.Errorf("either Cron or Interval is required")
+	}
+	if entry.Cron == nil && entry.Interval < s.minInterval {
+		return "", fmt.Errorf("interval must be >= %s", s.minInterval)
 	}
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
+	if strings.TrimSpace(entry.Name) == "" {
+		entry.Name = autoName(entry.Prompt)
+	}
 
 	s.mu.Lock()
-	if entry.Interval < s.minInterval {
-		s.mu.Unlock()
-		return fmt.Errorf("interval must be >= %s", s.minInterval)
-	}
 	if _, exists := s.loops[entry.Name]; exists {
 		s.mu.Unlock()
-		return fmt.Errorf("loop %q already exists", entry.Name)
+		return "", fmt.Errorf("loop %q already exists", entry.Name)
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
 	state := &loopState{entry: entry, cancel: cancel}
 	s.loops[entry.Name] = state
 	s.mu.Unlock()
 
-	s.log.Importantf("loop=%s interval=%s mode=%d created", entry.Name, entry.Interval, entry.Mode)
+	s.log.Importantf("loop=%s schedule=%s mode=%d created", entry.Name, entry.Schedule(), entry.Mode)
 
 	if entry.Immediate {
 		s.fire(loopCtx, state)
 	}
 	go s.run(loopCtx, state)
-	return nil
+	return entry.Name, nil
+}
+
+func autoName(prompt string) string {
+	h := sha256.Sum256([]byte(prompt))
+	return fmt.Sprintf("loop-%x", h[:4])
 }
 
 func (s *LoopScheduler) run(ctx context.Context, state *loopState) {
+	if state.entry.Cron != nil {
+		s.runCron(ctx, state)
+	} else {
+		s.runTicker(ctx, state)
+	}
+}
+
+func (s *LoopScheduler) runTicker(ctx context.Context, state *loopState) {
 	t := time.NewTicker(state.entry.Interval)
 	defer t.Stop()
 	for {
@@ -123,6 +151,25 @@ func (s *LoopScheduler) run(ctx context.Context, state *loopState) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			s.fire(ctx, state)
+		}
+	}
+}
+
+func (s *LoopScheduler) runCron(ctx context.Context, state *loopState) {
+	for {
+		next := state.entry.Cron.Next(time.Now())
+		if next.IsZero() {
+			s.log.Warnf("loop=%s cron has no next fire time", state.entry.Name)
+			return
+		}
+		delay := time.Until(next)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
 			s.fire(ctx, state)
 		}
 	}
@@ -138,8 +185,8 @@ func (s *LoopScheduler) fire(ctx context.Context, state *loopState) {
 
 	switch entry.Mode {
 	case ModeInbox:
-		content := fmt.Sprintf("<loop_fire name=%q interval=%q fire_count=%d>\n%s\n</loop_fire>",
-			entry.Name, entry.Interval, count, entry.Prompt)
+		content := fmt.Sprintf("<loop_fire name=%q schedule=%q fire_count=%d>\n%s\n</loop_fire>",
+			entry.Name, entry.Schedule(), count, entry.Prompt)
 		msg := inbox.NewMessage(inbox.OriginSystem, "user", content)
 		msg.Priority = inbox.PriorityLow
 		msg.Meta = map[string]any{
@@ -181,7 +228,7 @@ func (s *LoopScheduler) List() []LoopInfo {
 		result = append(result, LoopInfo{
 			Name:      state.entry.Name,
 			Prompt:    state.entry.Prompt,
-			Interval:  state.entry.Interval,
+			Schedule:  state.entry.Schedule(),
 			Mode:      state.entry.Mode,
 			FireCount: state.fireCount,
 			LastFired: state.lastFired,

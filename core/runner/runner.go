@@ -166,7 +166,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	scheduler := agent.NewLoopScheduler(ib, logger)
 
 	if option.Heartbeat > 0 {
-		_ = scheduler.Add(ctx, agent.LoopEntry{
+		_, _ = scheduler.Add(ctx, agent.LoopEntry{
 			Name:     "heartbeat",
 			Interval: time.Duration(option.Heartbeat) * time.Minute,
 			Mode:     agent.ModeInbox,
@@ -205,7 +205,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}, nil
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
-	rt.App.Commands.RegisterTool(agent.NewLoopTool(scheduler))
+	rt.App.Commands.Register(agent.NewLoopCommand(scheduler), "loop")
 
 	if option.Resume != "" {
 		path := option.Resume

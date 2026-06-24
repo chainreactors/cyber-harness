@@ -852,23 +852,17 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
-			Name: "/loop", Description: "管理定时循环任务 (自然语言描述或 /loop list|stop <name>)",
+			Name: "/loop", Description: "定时循环任务 (/loop 30s <prompt> | /loop list | /loop stop <name>)",
 			Args: ArgsOptional,
-			Run: func(_ context.Context, s *Session, args []string) error {
-				text := strings.TrimSpace(strings.Join(args, " "))
-				if text == "" {
-					text = "list"
+			Run: func(ctx context.Context, s *Session, args []string) error {
+				cmd, ok := s.AppInfo.Commands.Get("loop")
+				if !ok {
+					return fmt.Errorf("loop command not registered")
 				}
-				switch text {
-				case "list":
-					return RunPrompt(s, "loop", "List all active loop tasks using the loop tool (action=list).")
-				default:
-					if strings.HasPrefix(text, "stop ") || strings.HasPrefix(text, "remove ") {
-						name := strings.TrimSpace(strings.SplitN(text, " ", 2)[1])
-						return RunPrompt(s, "loop", fmt.Sprintf("Remove the loop task named %q using the loop tool (action=remove).", name))
-					}
-					return RunPrompt(s, "loop", fmt.Sprintf("The user wants to create a recurring scheduled task. Use the loop tool (action=create) to register it. User request: %s", text))
+				if len(args) == 0 {
+					args = []string{"list"}
 				}
+				return cmd.Execute(ctx, args)
 			},
 		},
 		{

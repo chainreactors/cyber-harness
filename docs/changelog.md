@@ -1,5 +1,141 @@
 # Changelog
 
+## v0.2.7 — Proton 敏感信息扫描 + /loop 循环任务 + TUI 交互增强 + 多 Provider 配置
+
+新增 Proton 敏感信息扫描器（SDK 引擎 + 197 条内嵌规则 + 双向管道）；`/loop` 循环任务调度；TUI 交互全面增强（verbosity 切换、中断控制、文件补全、实时 token 用量）；并发工具执行 OOM 防护；多 Provider 列表配置格式；FOFA key-only 认证支持。
+
+### New Features
+
+**Proton — 敏感信息扫描器**
+
+- 内嵌 197 条 YAML 检测规则（API key、token、credential、私钥、数据库连接串等），覆盖 AWS/GitHub/Stripe/GCP 等 156+ 模板
+- 基于 SDK `proton.Engine` 构建，从硬编码规则迁移为模板引擎 + `ResourceProvider` 架构
+- 对齐 neutron CLI 模式：`-l/--list` 多目标输入、`--stats/--silent` 输出控制、`--template-list` 模板列表
+- 支持代理（`WithProxy()`/`SetProxy()`），自动接入 `deps.ScannerProxy`
+
+```bash
+# 扫描目录
+proton -i /path/to/project
+
+# 管道组合 — shell 输出 → proton
+curl http://target/api/config | proton
+cat .env.production | proton
+
+# 管道组合 — proton 输出 → shell
+proton -i . | grep critical
+
+# 指定模板标签
+spray -u http://target | proton --tags spray
+```
+
+**双向管道支持**
+
+- Pseudo-command → Shell：伪命令输出通过 buffer 管道到 `sh -c` 执行的 shell pipeline
+- Shell → Pseudo-command：shell 输出经临时文件通过 `StdinReceiver` 接口传递给伪命令
+- 安全约束：仅支持单管道 `|`，拒绝 `||`、`>`、`&&`、`;` 防止沙箱逃逸
+
+```bash
+# 双向管道示例
+scan -i target -j | head -20       # pseudo → shell
+cat targets.txt | spray -u stdin   # shell → pseudo
+```
+
+**/loop — 循环任务调度（cron 表达式）**
+
+- `loop` 作为 bash pseudo-command 注册，agent 通过 `bash(command="loop ...")` 直接调用
+- 支持标准 5 字段 cron 表达式（`*/5 * * * *`）和 Go duration 简写（`30s`/`5m`/`1h`）
+- `/loop` REPL 快捷命令直接执行，不经 LLM 中转
+- 内置 cron 解析器，支持 `*`/`*/step`/`range`/`range/step`/`list` 全部语法
+- name 自动生成，无需手动命名
+
+```bash
+# cron 表达式
+/loop */5 * * * * check scan progress         # 每 5 分钟
+/loop 0 */2 * * * review findings             # 每 2 小时
+/loop 30 9 * * 1-5 daily standup check        # 工作日 9:30
+
+# duration 简写
+/loop 30s check status
+/loop 5m monitor targets
+
+# 管理
+/loop list
+/loop stop loop-a1b2c3d4
+
+# agent 通过 bash 调用
+bash(command="loop */5 * * * * check scan progress")
+bash(command="loop list")
+```
+
+### Improvements
+
+**TUI 交互增强**
+
+- **Ctrl+O 切换 verbosity**：四级循环（quiet → default → tools → thinking），运行中动态调整
+- **Ctrl+C / Esc 中断**：Ctrl+C 中断当前任务（双击退出），Esc 中断并区分 escape 序列
+- **@ 文件补全**：基于 carapace 的 `@` 前缀文件路径自动补全
+- **Spinner 快捷键提示**：agent 执行中展示 `Esc interrupt  Ctrl+O verbosity` 提示
+- **Thinking 渲染稳定化**：reasoning/content 流分离，避免混合输出时终端闪烁
+- **Agent 实时状态统一**：`LiveStatus` 集中管理 thinking/tooling/talking 状态和并行工具追踪
+- **累计 token 用量实时展示**：显示 context window 占用百分比，跨 turn 累计 prompt/completion/total
+
+**并发工具执行 OOM 防护**
+
+- 信号量限流：`MaxParallelTools` 默认 16 并发槽位，防止无限并行导致 OOM
+- 移除 ExecParallel/ExecSequential 模式，统一为共享信号量队列
+
+**多 Provider 列表配置**
+
+- 新增 `llm.providers` 列表格式作为主要配置方式，`providers[0]` 为主 provider，其余为降级链
+- 向后兼容：单 provider 字段（provider/api_key/model）仍可使用，优先级高于列表
+- 两种格式可混用：单字段 + 列表 = 单字段为主，列表为降级备选
+
+```yaml
+# 新格式 — 多 provider 列表
+llm:
+  providers:
+    - provider: deepseek
+      api_key: sk-...
+      model: deepseek-chat
+    - provider: openai
+      api_key: sk-...
+      model: gpt-4o
+```
+
+### Refactoring
+
+**配置文件重命名**
+
+- `config.yaml` → `aiscan.yaml`，避免与其他项目的通用 config.yaml 冲突
+
+**Scanner 工具基础设施精简**
+
+- **Resources 统一**：4 套独立 config map（gogo/spray/zombie/proton）合并为单一 `configs map[string]map[string][]byte` + `Config(engine, name)` 方法
+- **toolargs 共享工具包**：提取 `ResolveRelativePaths` 和 `NormalizeFlags` 到 `toolargs/`，6 个工具共用（proton/neutron/scan/spray/zombie/katana）
+- **Deps.GetLogger()**：消除 5 个 register.go 中重复的 logger 提取模式
+- 净减 180 行代码
+
+### Bug Fixes
+
+- **FOFA key-only 认证**：FOFA 2023 年简化认证后只需 API key，但 aiscan 仍要求 email+key 双字段才注册 fofa 引擎。修复后仅 `FofaKey` 即可使用 `passive -s fofa`，同时兼容旧版 `email:key` 格式（#41）
+- 修复测试中的 Stripe key 触发 GitHub push protection（替换为假 key）
+- 修复 cumulative usage 事件发射，确保跨 turn token 统计正确
+- 修复 agent live status 渲染不一致
+- 修复并发 data race：TUI 测试 stderr buffer、zombie OutputCh、spray/logs concurrent logger
+- 清理历史重构遗留的无效引用（`Deps.Model`、已删除的 `SDKRecover` 测试）
+
+### Dependencies
+
+- **spray [v1.3.1](https://github.com/chainreactors/spray/releases/tag/v1.3.1)**：mask 表达式支持所有请求字段、`--keys` 插件内嵌 156 条 proton 模板、extract severity 分级 + 上下文捕获、修复 crawl-only 提前 drain 和 OutputCh panic
+- bump SDK、zombie、logs、utils/pty 修复上游 data race
+
+### Breaking Changes
+
+- **配置文件名变更**：`config.yaml` → `aiscan.yaml`，需手动重命名现有配置文件
+- **`/reset` 重命名为 `/clear`**
+
+---
+
 ## v0.2.6 — Session 持久化 + 多模型容错 + 输出格式统一 + 命令架构重组
 
 Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片容错（三层防御：静态模型注册表 + 请求清洗 + 运行时自动恢复）；统一输出记录格式；命令架构重组为 aiscan/aiscan-agent/web 三入口。
