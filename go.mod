@@ -18,7 +18,7 @@ require (
 	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
-	github.com/chainreactors/utils/mitmproxy v0.0.0-00010101000000-000000000000
+	github.com/chainreactors/utils/mitmproxy v0.0.0
 	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
 	github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d
 	github.com/charmbracelet/bubbles v1.0.0
