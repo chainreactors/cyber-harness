@@ -15,10 +15,10 @@ require (
 	github.com/chainreactors/proton v0.3.1-0.20260611174627-89c10c8c27e5
 	github.com/chainreactors/proxyclient v1.1.1-0.20260529172347-2a80e08d5593
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
-	github.com/chainreactors/sdk v0.3.4-0.20260616124448-4dee008baf5e
+	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
-	github.com/chainreactors/utils/pty v0.0.0-20260623065725-737b33d61c6b
+	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
 	github.com/chainreactors/zombie v1.2.3-0.20260616102212-9bcfed7622ab
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0

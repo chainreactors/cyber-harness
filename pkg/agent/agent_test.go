@@ -1447,7 +1447,7 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 	}
 
 	imgProvider.callCount.Store(0)
-	result, err = a.Run(context.Background(), "follow up")
+	_, err = a.Run(context.Background(), "follow up")
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}

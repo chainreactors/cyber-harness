@@ -73,7 +73,7 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 		defaultTag := field.Tag.Get("default")
 
 		fieldType := field.Type
-		if fieldType.Kind() == reflect.Ptr {
+		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
 		}
 

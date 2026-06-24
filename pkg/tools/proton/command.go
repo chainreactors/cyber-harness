@@ -444,7 +444,7 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 		}()
 	}
 
-	filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || ctx.Err() != nil {
 			return err
 		}

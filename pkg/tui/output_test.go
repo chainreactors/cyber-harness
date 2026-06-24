@@ -5,12 +5,30 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 )
+
+type syncedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -259,7 +277,8 @@ func TestTurnStatsShowsContextWindowUse(t *testing.T) {
 }
 
 func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -296,7 +315,8 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 }
 
 func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
 		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
 	}, &stdout, &stderr, true)
