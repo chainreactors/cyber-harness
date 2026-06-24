@@ -203,6 +203,8 @@ github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441 h1:/4a+wovLJR7
 github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441/go.mod h1:yeXckJkuO8sl/FXhEYlQ6lq1RaWIei3VzrPEAF6pA9A=
 github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158 h1:JcQ0oVS3mZybQq7qM0iD27cjs3/JnXlnOctVsdsQx6E=
 github.com/chainreactors/spray v1.3.1-0.20260622112616-712e89f96158/go.mod h1:lWxsw+RHzAUKp78rkatxBereXqNunBe22hSpRGrfbo0=
+github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b h1:Z+02o9E4Nhnv4O63PeIuqI8u6b/oLId3icx0dZvUHLY=
+github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b/go.mod h1:uh0rjqYQS0mRsMWldtbZ/+DYDTX7JpOv7ssq9l/Fuh8=
 github.com/chainreactors/utils v0.0.0-20240716182459-e85f2b01ee16/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
 github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b h1:JWciIo6GXn+QqejE8ER0oo/IxqaAAlSaIqsHhZtnoMM=
 github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
@@ -212,6 +214,8 @@ github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZ
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.2.3-0.20260616102212-9bcfed7622ab h1:tRkFEBsNwaoEvvjuEjQg4VS7PSlsKSxjYhlmzd+zxmQ=
 github.com/chainreactors/zombie v1.2.3-0.20260616102212-9bcfed7622ab/go.mod h1:pyzeAwsqkh4nmT5ceAG50nt7kAcoMjl9+jUqoQTTOmU=
+github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d h1:yUOgfmW9j362XG4c728L1uQvGnigWqIEbRexv1kVmZM=
+github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d/go.mod h1:pyzeAwsqkh4nmT5ceAG50nt7kAcoMjl9+jUqoQTTOmU=
 github.com/charlievieth/fastwalk v1.0.14 h1:3Eh5uaFGwHZd8EGwTjJnSpBkfwfsak9h6ICgnWlhAyg=
 github.com/charlievieth/fastwalk v1.0.14/go.mod h1:diVcUreiU1aQ4/Wu3NbxxH4/KYdKpLDojrQ1Bb2KgNY=
 github.com/charmbracelet/bubbles v1.0.0 h1:12J8/ak/uCZEMQ6KU7pcfwceyjLlWsDLAxB5fXonfvc=
