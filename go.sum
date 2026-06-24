@@ -206,6 +206,10 @@ github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b/go.mod h1:uh
 github.com/chainreactors/utils v0.0.0-20240716182459-e85f2b01ee16/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
 github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b h1:JWciIo6GXn+QqejE8ER0oo/IxqaAAlSaIqsHhZtnoMM=
 github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b/go.mod h1:LajXuvESQwP+qCMAvlcoSXppQCjuLlBrnQpu9XQ1HtU=
+github.com/chainreactors/utils/cert v0.0.0-20260624181253-2b3d0b35862f h1:7KonUAvkZhpmK8RDwDBCuey0qXeoqxJ7uWjoXqzL2z4=
+github.com/chainreactors/utils/cert v0.0.0-20260624181253-2b3d0b35862f/go.mod h1:xvvWMcU9Fcht6GR1cc9ceAZ3/Hl2HrkoRzpeyOzx1rQ=
+github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2 h1:9sZzzfeYX5gD64TEpCykenqY+fhej6g2s/lCzMDNNIg=
+github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e h1:KzDf08J9nGhTjyTz1pMR7aMnkbTEeagZllFcZnZuthM=
 github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=

@@ -18,7 +18,7 @@ require (
 	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
-	github.com/chainreactors/utils/mitmproxy v0.0.0
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2
 	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
 	github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d
 	github.com/charmbracelet/bubbles v1.0.0
@@ -88,7 +88,7 @@ require (
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.0.0-20260615055126-a9bbe4fc3e95 // indirect
-	github.com/chainreactors/utils/cert v0.0.0 // indirect
+	github.com/chainreactors/utils/cert v0.0.0-20260624181253-2b3d0b35862f // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
@@ -308,8 +308,6 @@ require (
 )
 
 replace (
-	github.com/chainreactors/utils/cert => ../utils/cert
-	github.com/chainreactors/utils/mitmproxy => ../utils/mitmproxy
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260620124902-e62d93c864f7
 )
