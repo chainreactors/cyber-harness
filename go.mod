@@ -88,6 +88,7 @@ require (
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.0.0-20260615055126-a9bbe4fc3e95 // indirect
+	github.com/chainreactors/utils/cert v0.0.0 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
@@ -307,6 +308,7 @@ require (
 )
 
 replace (
+	github.com/chainreactors/utils/cert => ../utils/cert
 	github.com/chainreactors/utils/mitmproxy => ../utils/mitmproxy
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260620124902-e62d93c864f7
