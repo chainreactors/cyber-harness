@@ -30,7 +30,7 @@ func startTestTarget(bodySize int) *httptest.Server {
 	}))
 }
 
-// startMITMProxy creates a MITM proxy with a CaptureAddon and returns its address.
+// startMITMProxy creates a MITM proxy with a captureAddon and returns its address.
 func startMITMProxy(t *testing.T) (*mitmproxy.Proxy, *FlowStore, string) {
 	t.Helper()
 	store := NewFlowStore(100000)
@@ -42,7 +42,7 @@ func startMITMProxy(t *testing.T) (*mitmproxy.Proxy, *FlowStore, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.AddAddon(&CaptureAddon{store: store})
+	p.AddAddon(&captureAddon{store: store})
 	addr, _, err := p.StartAsync()
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func BenchmarkMITM_HTTPProxy(b *testing.B) {
 
 	store := NewFlowStore(b.N + 100)
 	p, _ := mitmproxy.NewProxy(&mitmproxy.Options{Addr: "127.0.0.1:0", SslInsecure: true})
-	p.AddAddon(&CaptureAddon{store: store})
+	p.AddAddon(&captureAddon{store: store})
 	addr, _, _ := p.StartAsync()
 	defer p.Shutdown(context.Background())
 
@@ -281,7 +281,7 @@ func BenchmarkMITM_CONNECT(b *testing.B) {
 
 	store := NewFlowStore(b.N + 100)
 	p, _ := mitmproxy.NewProxy(&mitmproxy.Options{Addr: "127.0.0.1:0", SslInsecure: true})
-	p.AddAddon(&CaptureAddon{store: store})
+	p.AddAddon(&captureAddon{store: store})
 	addr, _, _ := p.StartAsync()
 	defer p.Shutdown(context.Background())
 
