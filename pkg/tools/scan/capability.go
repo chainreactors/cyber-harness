@@ -129,7 +129,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 			wrapRoutes(acceptsTarget(targetWeb), webSources()...),
 			capWorkers(c.engines.Capacity.Spray, flags.SprayThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth}, emit)
+				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.proxy}, emit)
 			},
 		))
 	}

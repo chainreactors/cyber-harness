@@ -29,6 +29,7 @@ type Command struct {
 }
 
 func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
+func (c *Command) SetProxy(proxy string)  { c.proxy = proxy }
 
 type flags struct {
 	Inputs          []string `short:"i" long:"input" description:"Input target: URL, IP, IP:port, or CIDR"`

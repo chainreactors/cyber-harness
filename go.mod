@@ -18,6 +18,7 @@ require (
 	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
+	github.com/chainreactors/utils/mitmproxy v0.0.0-00010101000000-000000000000
 	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
 	github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d
 	github.com/charmbracelet/bubbles v1.0.0
@@ -135,7 +136,7 @@ require (
 	github.com/gofrs/uuid/v5 v5.3.2 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/go-github v17.0.0+incompatible // indirect
 	github.com/google/go-github/v30 v30.1.0 // indirect
@@ -231,7 +232,9 @@ require (
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sashabaranov/go-openai v1.37.0 // indirect
+	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
@@ -281,6 +284,7 @@ require (
 	github.com/zmap/zcrypto v0.0.0-20240803002437-3a861682ac77 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
@@ -303,6 +307,7 @@ require (
 )
 
 replace (
+	github.com/chainreactors/utils/mitmproxy => ../utils/mitmproxy
 	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7
 	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260620124902-e62d93c864f7
 )

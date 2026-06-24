@@ -9,35 +9,33 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
+	goflags "github.com/jessevdk/go-flags"
 )
 
 type OnProxyChange func(newProxyURL string)
 
-// CommandExecutor executes a named command with args. Matches CommandRegistry.ExecuteArgs.
 type CommandExecutor func(ctx context.Context, tokens []string) (string, error)
 
 type Command struct {
 	state         *State
+	mitmState     *MITMState
 	onProxyChange OnProxyChange
 	execCommand   CommandExecutor
 }
 
 func New(state *State) *Command {
-	return &Command{state: state}
+	return &Command{
+		state:     state,
+		mitmState: NewMITMState(),
+	}
 }
 
-func (c *Command) SetOnProxyChange(fn OnProxyChange) {
-	c.onProxyChange = fn
-}
-
-func (c *Command) SetCommandExecutor(fn CommandExecutor) {
-	c.execCommand = fn
-}
-
-func (c *Command) Name() string { return "proxy" }
+func (c *Command) SetOnProxyChange(fn OnProxyChange) { c.onProxyChange = fn }
+func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
+func (c *Command) Name() string                         { return "proxy" }
 
 func (c *Command) Usage() string {
-	return `proxy - Manage proxy nodes and proxy-chain execution
+	return `proxy - Manage proxy nodes, proxy-chain execution, and MITM traffic capture
 
 Usage:
   proxy <proxy-url> <command> [args...]   Run a command through the specified proxy (like proxychains)
@@ -48,6 +46,15 @@ Usage:
   proxy test [name|index]                 Test proxy node connectivity
   proxy current                           Show the current active proxy
   proxy clear                             Clear subscription and revert to original proxy
+
+MITM (man-in-the-middle) traffic capture:
+  proxy mitm start [--addr HOST:PORT]     Start MITM proxy, route engine traffic through it
+  proxy mitm stop                         Stop MITM and restore previous proxy
+  proxy mitm status                       Show MITM status and flow count
+  proxy mitm flows [--host X] [--last N]  List captured flows
+  proxy mitm flow <id>                    Show full flow details
+  proxy mitm clear                        Clear captured flows
+  proxy mitm analyze [--host X] [--last N] Format flows for AI security analysis
 
 Proxy-chain examples:
   proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
@@ -91,6 +98,8 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 			result, err = c.execCurrent()
 		case "clear":
 			result, err = c.execClear()
+		case "mitm":
+			result, err = c.execMITM(ctx, rest)
 		default:
 			if len(rest) > 0 {
 				if node, _, findErr := c.findNode(args[0]); findErr == nil {
@@ -113,8 +122,20 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	return nil
 }
 
-// execPassthrough runs a command with a one-shot proxy override.
-// The proxy is applied before the command runs and reverted after.
+// parseFlags is a helper that wraps goflags.ParseArgs and returns remaining positional args.
+func parseFlags(f interface{}, args []string) ([]string, error) {
+	p := goflags.NewParser(f, goflags.Default&^goflags.PrintErrors&^goflags.HelpFlag)
+	remaining, err := p.ParseArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	return remaining, nil
+}
+
+// ---------------------------------------------------------------------------
+// passthrough
+// ---------------------------------------------------------------------------
+
 func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string) (string, error) {
 	if len(cmdArgs) == 0 {
 		return "", fmt.Errorf("usage: proxy <proxy-url> <command> [args...]\nexample: proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2")
@@ -122,13 +143,10 @@ func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs 
 	if c.execCommand == nil {
 		return "", fmt.Errorf("proxy passthrough not available (no command executor)")
 	}
-
-	// validate proxy URL
 	if _, err := url.Parse(proxyURL); err != nil {
 		return "", fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
-	// save current proxy, apply the one-shot proxy, restore after
 	prev := c.state.ActiveProxy()
 	if c.onProxyChange != nil {
 		c.onProxyChange(proxyURL)
@@ -142,57 +160,58 @@ func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs 
 	return c.execCommand(ctx, cmdArgs)
 }
 
+// ---------------------------------------------------------------------------
+// auto
+// ---------------------------------------------------------------------------
+
+type autoFlags struct {
+	Type     string `short:"t" long:"type" description:"Filter by protocol type (trojan,vless)"`
+	Name     string `short:"n" long:"name" description:"Filter by node name keyword"`
+	Country  string `short:"c" long:"country" description:"Filter by server IP country (HK,JP,US)"`
+	Strategy string `short:"s" long:"strategy" description:"Load balance strategy" default:"adaptive"`
+}
+
 func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: proxy auto <subscription-url> [--type trojan,vless] [--name keyword] [--country HK,JP] [--strategy adaptive]")
 	}
-	subURL := args[0]
-	strategy := "adaptive"
-	var typeFilter, nameFilter, countryFilter string
 
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "--type", "-t":
-			if i+1 < len(args) { typeFilter = args[i+1]; i++ }
-		case "--name", "-n":
-			if i+1 < len(args) { nameFilter = args[i+1]; i++ }
-		case "--country", "-c":
-			if i+1 < len(args) { countryFilter = args[i+1]; i++ }
-		case "--strategy", "-s":
-			if i+1 < len(args) { strategy = args[i+1]; i++ }
-		}
+	var f autoFlags
+	remaining, err := parseFlags(&f, args)
+	if err != nil {
+		return "", fmt.Errorf("proxy auto: %w", err)
 	}
+	if len(remaining) == 0 {
+		return "", fmt.Errorf("usage: proxy auto <subscription-url> [options]")
+	}
+	subURL := remaining[0]
 
 	q := url.Values{}
 	q.Set("url", subURL)
-	q.Set("strategy", strategy)
+	q.Set("strategy", f.Strategy)
 	q.Set("ua", "clash-verge/v2.0.0")
-	if typeFilter != "" {
-		q.Set("type", typeFilter)
+	if f.Type != "" {
+		q.Set("type", f.Type)
 	}
-	if nameFilter != "" {
-		q.Set("name", nameFilter)
+	if f.Name != "" {
+		q.Set("name", f.Name)
 	}
-	if countryFilter != "" {
-		q.Set("country", countryFilter)
+	if f.Country != "" {
+		q.Set("country", f.Country)
 	}
 	clashURL := "clash://?" + q.Encode()
 
-	// also load subscription for list/switch commands
 	sub, err := clash.FetchSubscriptionWithUA(subURL, "clash-verge/v2.0.0")
 	if err != nil {
 		return "", fmt.Errorf("fetch subscription: %w", err)
 	}
 	c.state.LoadSubscription(sub, subURL)
 
-	// create the clash:// dialer
 	u, _ := url.Parse(clashURL)
 	dial, err := proxyclient.NewClient(u)
 	if err != nil {
 		return "", fmt.Errorf("create dialer: %w", err)
 	}
-
-	// store as active proxy
 	c.state.SetAutoDial(clashURL, dial)
 
 	if c.onProxyChange != nil {
@@ -204,32 +223,33 @@ func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 	sb.WriteString("[proxy] auto mode enabled\n")
 	sb.WriteString(fmt.Sprintf("  Subscription: %s\n", subURL))
 	sb.WriteString(fmt.Sprintf("  Nodes: %d total, %d supported\n", len(sub.Nodes), len(supported)))
-	sb.WriteString(fmt.Sprintf("  Strategy: %s\n", strategy))
-	if typeFilter != "" {
-		sb.WriteString(fmt.Sprintf("  Type filter: %s\n", typeFilter))
+	sb.WriteString(fmt.Sprintf("  Strategy: %s\n", f.Strategy))
+	if f.Type != "" {
+		sb.WriteString(fmt.Sprintf("  Type filter: %s\n", f.Type))
 	}
-	if nameFilter != "" {
-		sb.WriteString(fmt.Sprintf("  Name filter: %s\n", nameFilter))
+	if f.Name != "" {
+		sb.WriteString(fmt.Sprintf("  Name filter: %s\n", f.Name))
 	}
-	if countryFilter != "" {
-		sb.WriteString(fmt.Sprintf("  Country filter: %s\n", countryFilter))
+	if f.Country != "" {
+		sb.WriteString(fmt.Sprintf("  Country filter: %s\n", f.Country))
 	}
 	sb.WriteString("  All traffic will auto-route through healthy nodes.")
 	return sb.String(), nil
 }
 
+// ---------------------------------------------------------------------------
+// subscribe / list / switch / test / current / clear
+// ---------------------------------------------------------------------------
+
 func (c *Command) execSubscribe(_ context.Context, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: proxy subscribe <clash-subscription-url>")
 	}
-	subURL := args[0]
-
-	sub, err := clash.FetchSubscriptionWithUA(subURL, "clash-verge/v2.0.0")
+	sub, err := clash.FetchSubscriptionWithUA(args[0], "clash-verge/v2.0.0")
 	if err != nil {
 		return "", fmt.Errorf("fetch subscription: %w", err)
 	}
-	c.state.LoadSubscription(sub, subURL)
-
+	c.state.LoadSubscription(sub, args[0])
 	return c.formatNodeList(sub.Nodes, ""), nil
 }
 
@@ -238,8 +258,7 @@ func (c *Command) execList() (string, error) {
 	if len(nodes) == 0 {
 		return "[proxy] no subscription loaded. Use: proxy subscribe <url>", nil
 	}
-	activeName := c.state.ActiveNodeName()
-	return c.formatNodeList(nodes, activeName), nil
+	return c.formatNodeList(nodes, c.state.ActiveNodeName()), nil
 }
 
 func (c *Command) execSwitch(args []string) (string, error) {
@@ -250,14 +269,11 @@ func (c *Command) execSwitch(args []string) (string, error) {
 	if err := c.state.Switch(nameOrIndex); err != nil {
 		return "", err
 	}
-
 	newProxy := c.state.ActiveProxy()
 	if c.onProxyChange != nil {
 		c.onProxyChange(newProxy)
 	}
-
-	nodeName := c.state.ActiveNodeName()
-	return fmt.Sprintf("[proxy] switched to %q\nProxy URL: %s", nodeName, newProxy), nil
+	return fmt.Sprintf("[proxy] switched to %q\nProxy URL: %s", c.state.ActiveNodeName(), newProxy), nil
 }
 
 func (c *Command) execTest(ctx context.Context, args []string) (string, error) {
@@ -265,8 +281,6 @@ func (c *Command) execTest(ctx context.Context, args []string) (string, error) {
 	if len(nodes) == 0 {
 		return "", fmt.Errorf("no subscription loaded")
 	}
-
-	// if no arg, test all supported nodes
 	if len(args) == 0 {
 		var sb strings.Builder
 		sb.WriteString("[proxy] testing all supported nodes...\n")
@@ -284,7 +298,6 @@ func (c *Command) execTest(ctx context.Context, args []string) (string, error) {
 		return sb.String(), nil
 	}
 
-	// find specific node
 	nameOrIndex := strings.Join(args, " ")
 	node, idx, err := c.findNode(nameOrIndex)
 	if err != nil {
@@ -298,9 +311,18 @@ func (c *Command) execTest(ctx context.Context, args []string) (string, error) {
 }
 
 func (c *Command) execCurrent() (string, error) {
+	if c.mitmState.IsRunning() {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("[proxy] MITM active on %s\n", c.mitmState.ListenAddr()))
+		saved := c.mitmState.SavedProxy()
+		if saved != "" {
+			sb.WriteString(fmt.Sprintf("  Upstream: %s\n", saved))
+		}
+		sb.WriteString(fmt.Sprintf("  Flows: %d captured", c.mitmState.Store().Count()))
+		return sb.String(), nil
+	}
 	if c.state.IsAutoMode() {
-		proxy := c.state.ActiveProxy()
-		return fmt.Sprintf("[proxy] auto mode (adaptive load balancing)\nClash URL: %s", proxy), nil
+		return fmt.Sprintf("[proxy] auto mode (adaptive load balancing)\nClash URL: %s", c.state.ActiveProxy()), nil
 	}
 	nodeName := c.state.ActiveNodeName()
 	proxy := c.state.ActiveProxy()
@@ -325,12 +347,176 @@ func (c *Command) execClear() (string, error) {
 	return "[proxy] cleared. No proxy active.", nil
 }
 
+// ---------------------------------------------------------------------------
+// MITM subcommands
+// ---------------------------------------------------------------------------
+
+type mitmStartFlags struct {
+	Addr string `long:"addr" description:"Listen address for MITM proxy" default:"127.0.0.1:0"`
+}
+
+type mitmQueryFlags struct {
+	Host   string `long:"host" description:"Filter flows by host substring"`
+	Status string `long:"status" description:"Filter flows by status code (e.g. 2xx, 404, 5xx)"`
+	Type   string `long:"type" description:"Filter flows by Content-Type substring"`
+	Last   int    `long:"last" description:"Show only the last N flows"`
+}
+
+type mitmAnalyzeFlags struct {
+	Host string `long:"host" description:"Filter flows by host substring"`
+	Last int    `long:"last" description:"Analyze only the last N flows"`
+}
+
+func (c *Command) execMITM(_ context.Context, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("usage: proxy mitm <start|stop|status|flows|flow|clear|analyze> [options]")
+	}
+
+	sub := strings.ToLower(args[0])
+	rest := args[1:]
+
+	switch sub {
+	case "start":
+		return c.mitmStart(rest)
+	case "stop":
+		return c.mitmStop()
+	case "status":
+		return c.mitmStatus()
+	case "flows":
+		return c.mitmFlows(rest)
+	case "flow":
+		return c.mitmFlowDetail(rest)
+	case "clear":
+		c.mitmState.Store().Clear()
+		return "[mitm] flow store cleared", nil
+	case "analyze":
+		return c.mitmAnalyze(rest)
+	default:
+		return "", fmt.Errorf("unknown mitm subcommand: %s", sub)
+	}
+}
+
+func (c *Command) mitmStart(args []string) (string, error) {
+	if c.mitmState.IsRunning() {
+		return "", fmt.Errorf("[mitm] already running on %s. Use 'proxy mitm stop' first", c.mitmState.ListenAddr())
+	}
+
+	var f mitmStartFlags
+	if _, err := parseFlags(&f, args); err != nil {
+		return "", fmt.Errorf("proxy mitm start: %w", err)
+	}
+
+	currentProxy := c.state.ActiveProxy()
+	c.mitmState.SetSavedProxy(currentProxy)
+
+	if err := c.mitmState.Start(f.Addr, currentProxy); err != nil {
+		return "", err
+	}
+
+	if c.onProxyChange != nil {
+		c.onProxyChange(c.mitmState.ProxyURL())
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[mitm] started on %s\n", c.mitmState.ListenAddr()))
+	sb.WriteString("  All engine traffic now routed through MITM proxy\n")
+	if currentProxy != "" {
+		sb.WriteString(fmt.Sprintf("  Upstream: %s\n", currentProxy))
+	}
+	sb.WriteString("  Use 'proxy mitm flows' to view captured traffic")
+	return sb.String(), nil
+}
+
+func (c *Command) mitmStop() (string, error) {
+	if !c.mitmState.IsRunning() {
+		return "[mitm] not running", nil
+	}
+
+	savedProxy := c.mitmState.SavedProxy()
+	if err := c.mitmState.Stop(); err != nil {
+		return "", fmt.Errorf("[mitm] stop error: %w", err)
+	}
+
+	if c.onProxyChange != nil {
+		c.onProxyChange(savedProxy)
+	}
+
+	flowCount := c.mitmState.Store().Count()
+	msg := fmt.Sprintf("[mitm] stopped. %d flows captured", flowCount)
+	if savedProxy != "" {
+		msg += fmt.Sprintf("\n  Restored proxy: %s", savedProxy)
+	}
+	return msg, nil
+}
+
+func (c *Command) mitmStatus() (string, error) {
+	if !c.mitmState.IsRunning() {
+		flowCount := c.mitmState.Store().Count()
+		if flowCount > 0 {
+			return fmt.Sprintf("[mitm] stopped (%d flows in store)", flowCount), nil
+		}
+		return "[mitm] not running", nil
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[mitm] running on %s\n", c.mitmState.ListenAddr()))
+	sb.WriteString(fmt.Sprintf("  Proxy URL: %s\n", c.mitmState.ProxyURL()))
+	sb.WriteString(fmt.Sprintf("  Flows captured: %d\n", c.mitmState.Store().Count()))
+	if saved := c.mitmState.SavedProxy(); saved != "" {
+		sb.WriteString(fmt.Sprintf("  Upstream: %s\n", saved))
+	}
+	return sb.String(), nil
+}
+
+func (c *Command) mitmFlows(args []string) (string, error) {
+	var f mitmQueryFlags
+	if _, err := parseFlags(&f, args); err != nil {
+		return "", fmt.Errorf("proxy mitm flows: %w", err)
+	}
+	flows := c.mitmState.Store().Query(QueryOpts{
+		Host:   f.Host,
+		Status: f.Status,
+		CType:  f.Type,
+		Last:   f.Last,
+	})
+	return formatFlowList(flows), nil
+}
+
+func (c *Command) mitmFlowDetail(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("usage: proxy mitm flow <id>")
+	}
+	var id int
+	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
+		return "", fmt.Errorf("invalid flow ID: %s", args[0])
+	}
+	f := c.mitmState.Store().Get(id)
+	if f == nil {
+		return "", fmt.Errorf("flow #%d not found", id)
+	}
+	return formatFlowDetail(f), nil
+}
+
+func (c *Command) mitmAnalyze(args []string) (string, error) {
+	var f mitmAnalyzeFlags
+	if _, err := parseFlags(&f, args); err != nil {
+		return "", fmt.Errorf("proxy mitm analyze: %w", err)
+	}
+	flows := c.mitmState.Store().Query(QueryOpts{
+		Host: f.Host,
+		Last: f.Last,
+	})
+	return formatFlowAnalysis(flows), nil
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
 func (c *Command) findNode(nameOrIndex string) (*clash.ProxyNode, int, error) {
 	nodes := c.state.Nodes()
 	if len(nodes) == 0 {
 		return nil, 0, fmt.Errorf("no subscription loaded")
 	}
-	// try as index
 	var idx int
 	if _, err := fmt.Sscanf(nameOrIndex, "%d", &idx); err == nil {
 		if idx < 1 || idx > len(nodes) {
@@ -339,13 +525,11 @@ func (c *Command) findNode(nameOrIndex string) (*clash.ProxyNode, int, error) {
 		return &nodes[idx-1], idx - 1, nil
 	}
 	lower := strings.ToLower(nameOrIndex)
-	// exact name match
 	for i := range nodes {
 		if strings.ToLower(nodes[i].Name) == lower {
 			return &nodes[i], i, nil
 		}
 	}
-	// substring match (first supported node containing the keyword)
 	for i := range nodes {
 		if nodes[i].Supported && strings.Contains(strings.ToLower(nodes[i].Name), lower) {
 			return &nodes[i], i, nil
@@ -365,8 +549,8 @@ func (c *Command) formatNodeList(nodes []clash.ProxyNode, activeName string) str
 		}
 	}
 	var typeSummary []string
-	for t, c := range typeCount {
-		typeSummary = append(typeSummary, fmt.Sprintf("%s:%d", t, c))
+	for t, cnt := range typeCount {
+		typeSummary = append(typeSummary, fmt.Sprintf("%s:%d", t, cnt))
 	}
 	sb.WriteString(fmt.Sprintf("[proxy] %d nodes (%d supported: %s)\n", len(nodes), supported, strings.Join(typeSummary, ", ")))
 	sb.WriteString(fmt.Sprintf("  %-4s %-24s %-10s %-30s %s\n", "#", "Name", "Type", "Server", "Status"))
