@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
-  <p align="center">Agentic Security Scanner — AI 驱动的侦察与确定性扫描融合</p>
+  <p align="center">AI 驱动的面向实战的单文件渗透 agent，内置多引擎武器库开箱即用</p>
   <p align="center"><strong>Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
 </p>
 

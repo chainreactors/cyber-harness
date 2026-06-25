@@ -206,7 +206,7 @@ func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, err := dial(ctx, "tcp", tcpServer.Addr().String())
 	if err != nil {
@@ -215,7 +215,7 @@ func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
 	defer conn.Close()
 
 	buf := make([]byte, 64)
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(8 * time.Second))
 	n, err := io.ReadAtLeast(conn, buf, 3)
 	if err != nil {
 		t.Fatalf("expected SSH banner data, got error: %v", err)

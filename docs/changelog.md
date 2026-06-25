@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.2.7 — Proton 敏感信息扫描 + /loop 循环任务 + TUI 交互增强 + 多 Provider 配置
+## v0.2.7 — MITM 流量捕获 + Proton 敏感信息扫描 + /loop 循环任务 + TUI 交互增强
 
-新增 Proton 敏感信息扫描器（SDK 引擎 + 197 条内嵌规则 + 双向管道）；`/loop` 循环任务调度；TUI 交互全面增强（verbosity 切换、中断控制、文件补全、实时 token 用量）；并发工具执行 OOM 防护；多 Provider 列表配置格式；FOFA key-only 认证支持。
+MITM 透明流量拦截（`proxy mitm` 子命令族）；Proton 敏感信息扫描器（SDK 引擎 + 197 条内嵌规则 + 双向管道）；`/loop` 循环任务调度；TUI 交互全面增强（verbosity 切换、中断控制、文件补全、实时 token 用量）；多 Provider 列表配置格式；FOFA key-only 认证支持。
 
 ### New Features
 
@@ -67,6 +67,36 @@ bash(command="loop */5 * * * * check scan progress")
 bash(command="loop list")
 ```
 
+**MITM 流量捕获**
+
+透明 HTTP/HTTPS 流量拦截，集成 utils/mitmproxy 到 proxy 命令组。扫描引擎（gogo/spray/zombie/neutron）自动路由到本地 MITM 代理；若已有外部代理（trojan/vless/clash）则作为上游透传。
+
+- `proxy mitm start [--addr]`：启动本地 MITM 代理，自动切换扫描引擎代理
+- `proxy mitm stop`：停止 MITM 并恢复之前的代理设置
+- `proxy mitm status`：查看状态和 flow 计数
+- `proxy mitm flows [--host/--status/--type/--last]`：按条件查询捕获的 HTTP 流
+- `proxy mitm flow <id>`：查看单个 flow 详情
+- `proxy mitm clear`：清空 flow 存储
+- `proxy mitm analyze [--host/--last]`：结构化输出供 AI 分析
+
+```bash
+# 启动 MITM 拦截
+proxy mitm start --addr 127.0.0.1:8888
+
+# 正常执行扫描（流量自动经过 MITM）
+scan -i target
+
+# 查看捕获的流量
+proxy mitm flows --last 20
+proxy mitm flow 42
+
+# AI 分析捕获的请求
+proxy mitm analyze --host target.com
+
+# 停止并恢复
+proxy mitm stop
+```
+
 ### Improvements
 
 **TUI 交互增强**
@@ -112,8 +142,6 @@ llm:
 
 - **Resources 统一**：4 套独立 config map（gogo/spray/zombie/proton）合并为单一 `configs map[string]map[string][]byte` + `Config(engine, name)` 方法
 - **toolargs 共享工具包**：提取 `ResolveRelativePaths` 和 `NormalizeFlags` 到 `toolargs/`，6 个工具共用（proton/neutron/scan/spray/zombie/katana）
-- **Deps.GetLogger()**：消除 5 个 register.go 中重复的 logger 提取模式
-- 净减 180 行代码
 
 ### Bug Fixes
 
@@ -127,6 +155,7 @@ llm:
 ### Dependencies
 
 - **spray [v1.3.1](https://github.com/chainreactors/spray/releases/tag/v1.3.1)**：mask 表达式支持所有请求字段、`--keys` 插件内嵌 156 条 proton 模板、extract severity 分级 + 上下文捕获、修复 crawl-only 提前 drain 和 OutputCh panic
+- **utils/cert**：集成 utils/cert 原子化证书原语（CA 生成、子证书签发、随机 Subject、PEM 工具函数），移除本地 replace
 - bump SDK、zombie、logs、utils/pty 修复上游 data race
 
 ### Breaking Changes

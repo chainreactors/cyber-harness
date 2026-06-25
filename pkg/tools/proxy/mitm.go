@@ -193,7 +193,7 @@ func (s *mitmState) start() error {
 func (s *mitmState) stop() {
 	if s.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		s.server.Shutdown(ctx)
+		_ = s.server.Shutdown(ctx)
 		cancel()
 		s.server = nil
 	}
@@ -222,7 +222,9 @@ func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
 func (a *captureAddon) Response(f *mitmproxy.Flow) {
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
-		dur = time.Since(start.(time.Time))
+		if t, ok := start.(time.Time); ok {
+			dur = time.Since(t)
+		}
 	}
 	flow := Flow{
 		Timestamp:      f.StartTime,
@@ -250,7 +252,9 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 func (a *captureAddon) RequestError(f *mitmproxy.Flow, err error) {
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
-		dur = time.Since(start.(time.Time))
+		if t, ok := start.(time.Time); ok {
+			dur = time.Since(t)
+		}
 	}
 	a.store.Add(Flow{
 		Timestamp: f.StartTime,
