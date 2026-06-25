@@ -30,28 +30,24 @@ const defaultTimeout = 120 * time.Second
 const defaultBodyReadSize = 4 * 1024 * 1024
 
 type Command struct {
-	proxy   string
-	logger  telemetry.Logger
-	workDir string
+	toolargs.Base
 }
 
-func New() *Command { return &Command{logger: telemetry.NopLogger()} }
+func New() *Command {
+	c := &Command{}
+	c.InitLogger(nil)
+	return c
+}
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	return c
 }
-
-func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 func (c *Command) Name() string { return "katana" }
 
@@ -115,9 +111,9 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	args = c.resolveRelativePaths(args)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("katana debug enabled")
+		c.Logger.Debugf("katana debug enabled")
 	}
 
 	options, err := readFlags(args)
@@ -131,8 +127,8 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	options.DisableUpdateCheck = true
 
 	// Inject proxy.
-	if options.Proxy == "" && c.proxy != "" {
-		options.Proxy = c.proxy
+	if options.Proxy == "" && c.Proxy != "" {
+		options.Proxy = c.Proxy
 	}
 
 	if err := validateOptions(options); err != nil {
@@ -197,7 +193,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			if ctx.Err() != nil {
 				return fmt.Errorf("katana: timed out")
 			}
-			c.logger.Warnf("katana: crawl %s: %v", u, crawlErr)
+			c.Logger.Warnf("katana: crawl %s: %v", u, crawlErr)
 		}
 	}
 
@@ -368,7 +364,7 @@ func validateOptions(options *katanatypes.Options) error {
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	if c.workDir == "" {
+	if c.WorkDir == "" {
 		return args
 	}
 	out := make([]string, 0, len(args))
@@ -392,10 +388,10 @@ func (c *Command) resolveRelativePaths(args []string) []string {
 }
 
 func (c *Command) resolvePathArg(value string) string {
-	if c.workDir == "" || value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
+	if c.WorkDir == "" || value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
 		return value
 	}
-	return filepath.Join(c.workDir, value)
+	return filepath.Join(c.WorkDir, value)
 }
 
 func isFileFlag(flag string) bool {

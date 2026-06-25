@@ -22,17 +22,15 @@ type Deps struct {
 	Provider     any
 	ScannerProxy string
 	ScanOpts     []any
-	Logger       any
+	Logger       telemetry.Logger
 	NodeName     string
 	NodeMeta     map[string]any
 	TavilyKeys string // comma-separated Tavily API keys (build-time fallback)
 }
 
 func (d *Deps) GetLogger() telemetry.Logger {
-	if d != nil {
-		if logger, ok := d.Logger.(telemetry.Logger); ok && logger != nil {
-			return logger
-		}
+	if d != nil && d.Logger != nil {
+		return d.Logger
 	}
 	return telemetry.NopLogger()
 }

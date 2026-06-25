@@ -15,31 +15,25 @@ import (
 )
 
 type Command struct {
-	engine  *gogo.Engine
-	logger  telemetry.Logger
-	proxy   string
-	workDir string
+	toolargs.Base
+	engine *gogo.Engine
 }
 
 func New(engine *gogo.Engine) *Command {
-	return &Command{engine: engine, logger: telemetry.NopLogger()}
+	c := &Command{engine: engine}
+	c.InitLogger(nil)
+	return c
 }
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	return c
 }
-
-func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
 
 func (c *Command) Name() string { return "gogo" }
 
@@ -52,9 +46,9 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	args = c.injectProxy(args)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("gogo debug enabled")
+		c.Logger.Debugf("gogo debug enabled")
 	}
 
 	var buf bytes.Buffer
@@ -86,13 +80,13 @@ func (c *Command) TestInjectProxy(args []string) []string {
 }
 
 func (c *Command) injectProxy(args []string) []string {
-	if c.proxy == "" {
+	if c.Proxy == "" {
 		return args
 	}
 	if toolargs.HasFlag(args, "--proxy") {
 		return args
 	}
-	return append(args, "--proxy", c.proxy)
+	return append(args, "--proxy", c.Proxy)
 }
 
 // normalizeArgs adapts common agent-generated gogo arguments before handing
@@ -139,10 +133,10 @@ func (c *Command) normalizeArgs(args []string) []string {
 }
 
 func (c *Command) resolvePathArg(value string) string {
-	if c.workDir == "" || value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
+	if c.WorkDir == "" || value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
 		return value
 	}
-	return filepath.Join(c.workDir, value)
+	return filepath.Join(c.WorkDir, value)
 }
 
 func isGogoValuelessJSONFlag(arg string, args []string, index int) bool {

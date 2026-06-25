@@ -14,31 +14,25 @@ import (
 )
 
 type Command struct {
-	engine  *spray.Engine
-	logger  telemetry.Logger
-	proxy   string
-	workDir string
+	toolargs.Base
+	engine *spray.Engine
 }
 
 func New(engine *spray.Engine) *Command {
-	return &Command{engine: engine, logger: telemetry.NopLogger()}
+	c := &Command{engine: engine}
+	c.InitLogger(nil)
+	return c
 }
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	return c
 }
-
-func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
 
 func (c *Command) Name() string { return "spray" }
 
@@ -51,9 +45,9 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
 	if debug {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("spray debug enabled")
+		c.Logger.Debugf("spray debug enabled")
 	}
 	if c.engine != nil {
 		c.engine.InstallResourceProvider()
@@ -103,13 +97,13 @@ func (c *Command) TestInjectProxy(args []string) []string {
 }
 
 func (c *Command) injectProxy(args []string) []string {
-	if c.proxy == "" {
+	if c.Proxy == "" {
 		return args
 	}
 	if toolargs.HasFlag(args, "--proxy") {
 		return args
 	}
-	return append(args, "--proxy", c.proxy)
+	return append(args, "--proxy", c.Proxy)
 }
 
 func withDefaultNoBar(args []string) []string {
@@ -145,5 +139,5 @@ var sprayFileFlags = map[string]bool{
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, sprayFileFlags, c.workDir)
+	return toolargs.ResolveRelativePaths(args, sprayFileFlags, c.WorkDir)
 }

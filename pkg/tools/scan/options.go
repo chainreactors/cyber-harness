@@ -16,15 +16,11 @@ func WithParent(a *agent.Agent) Option {
 }
 
 func WithProxy(proxy string) Option {
-	return func(c *Command) { c.proxy = proxy }
+	return func(c *Command) { c.Proxy = proxy }
 }
 
 func WithLogger(logger telemetry.Logger) Option {
-	return func(c *Command) {
-		if logger != nil {
-			c.logger = logger
-		}
-	}
+	return func(c *Command) { c.InitLogger(logger) }
 }
 
 func (c *Command) Configure(opts ...Option) {

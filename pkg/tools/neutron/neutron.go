@@ -23,14 +23,10 @@ import (
 )
 
 type Command struct {
-	engine  *sdkneutron.Engine
-	index   *association.Index
-	logger  telemetry.Logger
-	proxy   string
-	workDir string
+	toolargs.Base
+	engine *sdkneutron.Engine
+	index  *association.Index
 }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 type neutronFlags struct {
 	Inputs            []string `short:"u" long:"target" description:"Target URL, host, or ip:port (can specify multiple)"`
@@ -84,24 +80,24 @@ type neutronSummary struct {
 }
 
 func New(engine *sdkneutron.Engine, index *association.Index) *Command {
-	return &Command{engine: engine, index: index, logger: telemetry.NopLogger()}
+	c := &Command{engine: engine, index: index}
+	c.InitLogger(nil)
+	return c
 }
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	scanengine.ApplyNeutronProxy(proxy)
 	return c
 }
 
 func (c *Command) SetProxy(proxy string) {
-	c.proxy = proxy
+	c.Base.SetProxy(proxy)
 	scanengine.ApplyNeutronProxy(proxy)
 }
 
@@ -159,9 +155,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		return fmt.Errorf("neutron: %w", err)
 	}
 	if flags.Debug {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("neutron debug enabled")
+		c.Logger.Debugf("neutron debug enabled")
 	}
 	if flags.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -232,7 +228,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		return wErr
 	}
 
-	c.logger.Infof("neutron action=testing targets=%d templates=%d concurrency=%d rate_limit=%d", len(targets), len(selected), flags.Concurrency, flags.RateLimit)
+	c.Logger.Infof("neutron action=testing targets=%d templates=%d concurrency=%d rate_limit=%d", len(targets), len(selected), flags.Concurrency, flags.RateLimit)
 	summary := neutronSummary{Targets: len(targets), Templates: len(selected)}
 	var sb strings.Builder
 	jsonOutput := flags.JSON || flags.JSONL
@@ -526,7 +522,7 @@ var neutronFileFlags = map[string]bool{
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, neutronFileFlags, c.workDir)
+	return toolargs.ResolveRelativePaths(args, neutronFileFlags, c.WorkDir)
 }
 
 func appendNonEmpty(parts []string, values ...string) []string {

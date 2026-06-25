@@ -25,26 +25,24 @@ import (
 )
 
 type Command struct {
-	logger           telemetry.Logger
-	proxy            string
-	workDir          string
+	toolargs.Base
 	stdinFile        string
 	resourceProvider func(string) []byte
 }
 
 func New() *Command {
-	return &Command{logger: telemetry.NopLogger()}
+	c := &Command{}
+	c.InitLogger(nil)
+	return c
 }
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	return c
 }
 
@@ -53,8 +51,6 @@ func (c *Command) WithResourceProvider(provider func(string) []byte) *Command {
 	return c
 }
 
-func (c *Command) SetProxy(proxy string)    { c.proxy = proxy }
-func (c *Command) SetWorkDir(dir string)    { c.workDir = dir }
 func (c *Command) SetStdinFile(path string) { c.stdinFile = path }
 func (c *Command) Name() string             { return "proton" }
 
@@ -152,9 +148,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	}
 
 	if flags.Debug {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("proton debug enabled")
+		c.Logger.Debugf("proton debug enabled")
 	}
 	if flags.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -247,12 +243,12 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		}
 	}
 
-	c.logger.Infof("proton action=scanning targets=%d rules=%d", len(inputs), scanner.Stats.Rules)
+	c.Logger.Infof("proton action=scanning targets=%d rules=%d", len(inputs), scanner.Stats.Rules)
 
 	for _, input := range inputs {
 		info, statErr := os.Stat(input)
 		if statErr != nil {
-			c.logger.Warnf("proton: skip %s: %v", input, statErr)
+			c.Logger.Warnf("proton: skip %s: %v", input, statErr)
 			continue
 		}
 		if info.IsDir() {
@@ -355,7 +351,7 @@ var protonFileFlags = map[string]bool{
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, protonFileFlags, c.workDir)
+	return toolargs.ResolveRelativePaths(args, protonFileFlags, c.WorkDir)
 }
 
 // --- output ---

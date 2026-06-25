@@ -13,34 +13,25 @@ import (
 )
 
 type Command struct {
-	engine  *sdkzombie.Engine
-	logger  telemetry.Logger
-	proxy   string
-	workDir string
+	toolargs.Base
+	engine *sdkzombie.Engine
 }
 
 func New(engine *sdkzombie.Engine) *Command {
-	return &Command{engine: engine, logger: telemetry.NopLogger()}
+	c := &Command{engine: engine}
+	c.InitLogger(nil)
+	return c
 }
 
 func (c *Command) WithLogger(logger telemetry.Logger) *Command {
-	if logger != nil {
-		c.logger = logger
-	}
+	c.InitLogger(logger)
 	return c
 }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
 
 func (c *Command) WithProxy(proxy string) *Command {
-	c.proxy = proxy
+	c.Proxy = proxy
 	return c
 }
-
-// SetProxy stores the proxy URL. Note: the zombie library's RunOptions no
-// longer exposes ProxyDial, so proxy is not applied at runtime until upstream
-// re-adds support.
-func (c *Command) SetProxy(proxy string) { c.proxy = proxy }
 
 func (c *Command) Name() string { return "zombie" }
 
@@ -52,9 +43,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("zombie debug enabled")
+		c.Logger.Debugf("zombie debug enabled")
 	}
 	runOpts := zombiecore.RunOptions{Output: &buf}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
@@ -76,5 +67,5 @@ var zombieFileFlags = map[string]bool{
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, zombieFileFlags, c.workDir)
+	return toolargs.ResolveRelativePaths(args, zombieFileFlags, c.WorkDir)
 }

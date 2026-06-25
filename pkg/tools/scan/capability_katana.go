@@ -122,8 +122,8 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 			emit(targetEvent(source, wt.Raw, newWebTarget(wt.Raw, discoveredURL, wt.HostHeader)))
 		},
 	}
-	if c.proxy != "" {
-		options.Proxy = c.proxy
+	if c.Proxy != "" {
+		options.Proxy = c.Proxy
 	}
 
 	gologger.DefaultLogger.SetMaxLevel(levels.LevelSilent)

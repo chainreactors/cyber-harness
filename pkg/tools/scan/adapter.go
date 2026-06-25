@@ -23,7 +23,7 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 	if target.Ports != "" {
 		ports = target.Ports
 	}
-	c.logger.Infof("scan capability=%s target=%s ports=%s", capGogoPortscan, target.Target, ports)
+	c.Logger.Infof("scan capability=%s target=%s ports=%s", capGogoPortscan, target.Target, ports)
 	resultCh, err := engine.GogoScanStream(ctx, c.engines.Gogo, engine.GogoScanOptions{
 		Target:       target.Target,
 		Ports:        ports,
@@ -31,7 +31,7 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 		Timeout:      discovery.Timeout,
 		VersionLevel: discovery.Version,
 		Exploit:      discovery.Exploit,
-		Proxy:        c.proxy,
+		Proxy:        c.Proxy,
 		Debug:        discovery.Debug,
 		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capGogoPortscan, stats))
@@ -120,7 +120,7 @@ func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, creden
 		Top:       flags.ZombieTop,
 		Users:     credentials.Users,
 		Passwords: credentials.Passwords,
-		Proxy:     c.proxy,
+		Proxy:     c.Proxy,
 		Debug:     flags.Debug,
 		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capZombieWeakpass, stats))

@@ -96,7 +96,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		if !profile.Enabled(name) || !hasSpray(c.engines) {
 			return
 		}
-		sopts.Proxy = c.proxy
+		sopts.Proxy = c.Proxy
 		sprayBuilt = true
 		capabilities = append(capabilities, sprayCapability(c, flags, opts.Web, name, sources, sopts, c.runSprayCapability))
 	}
@@ -129,7 +129,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 			wrapRoutes(acceptsTarget(targetWeb), webSources()...),
 			capWorkers(c.engines.Capacity.Spray, flags.SprayThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.proxy}, emit)
+				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.Proxy}, emit)
 			},
 		))
 	}
@@ -168,13 +168,13 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 	}
 
 	if opts.hasDiscoveryOverrides() && !gogoBuilt {
-		c.logger.Warnf("scan capability=%s option=port status=ignored reason=engine_unavailable", capGogoPortscan)
+		c.Logger.Warnf("scan capability=%s option=port status=ignored reason=engine_unavailable", capGogoPortscan)
 	}
 	if opts.hasWebOverrides() && !sprayBuilt {
-		c.logger.Warnf("scan capability=web_probe option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable")
+		c.Logger.Warnf("scan capability=web_probe option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable")
 	}
 	if opts.hasWeakpassOverrides() && !weakpassBuilt {
-		c.logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
+		c.Logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
 	for _, builder := range extraCapabilityBuilders {

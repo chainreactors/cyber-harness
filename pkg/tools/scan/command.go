@@ -19,17 +19,12 @@ import (
 )
 
 type Command struct {
+	toolargs.Base
 	engines     *engine.Set
 	parent      *agent.Agent
 	deepBrowser DeepBrowserFunc
 	readSkill   SkillReader
-	logger      telemetry.Logger
-	proxy       string
-	workDir     string
 }
-
-func (c *Command) SetWorkDir(dir string) { c.workDir = dir }
-func (c *Command) SetProxy(proxy string)  { c.proxy = proxy }
 
 type flags struct {
 	Inputs          []string `short:"i" long:"input" description:"Input target: URL, IP, IP:port, or CIDR"`
@@ -66,7 +61,8 @@ type flags struct {
 }
 
 func New(engineSet *engine.Set, opts ...Option) *Command {
-	cmd := &Command{engines: engineSet, logger: telemetry.NopLogger()}
+	cmd := &Command{engines: engineSet}
+	cmd.InitLogger(nil)
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cmd)
@@ -163,9 +159,9 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	if flags.Debug {
 		flags.Trace = true
-		restoreDebug := telemetry.ActivateDebug(c.logger)
+		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.logger.Debugf("scan debug enabled")
+		c.Logger.Debugf("scan debug enabled")
 	}
 	profile, err := profileForMode(flags.Mode)
 	if err != nil {
@@ -239,10 +235,10 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	p.Run(seedsToEvents(seeds))
 
 	if c.parent != nil && verifyLevel != "" {
-		runVerifyPass(ctx, c.parent, c.readSkill, coll, verifyLevel, c.logger)
+		runVerifyPass(ctx, c.parent, c.readSkill, coll, verifyLevel, c.Logger)
 	}
 	if c.parent != nil && flags.Sniper {
-		runSniperPass(ctx, c.parent, c.readSkill, coll, c.logger)
+		runSniperPass(ctx, c.parent, c.readSkill, coll, c.Logger)
 	}
 
 	coll.Finish()
@@ -278,13 +274,13 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	if flags.OutputFile != "" && !flags.JSON {
 		plainOut := coll.PlainText()
 		if err := writeOutputFile(flags.OutputFile, plainOut); err != nil {
-			c.logger.Errorf("%s", err.Error())
+			c.Logger.Errorf("%s", err.Error())
 		}
 	}
 	if flags.AssetReportFile != "" {
 		assetOut := coll.AssetReport()
 		if err := writeOutputFile(flags.AssetReportFile, assetOut); err != nil {
-			c.logger.Errorf("%s", err.Error())
+			c.Logger.Errorf("%s", err.Error())
 		}
 	}
 	return out, coll.StructuredResult(), nil
@@ -298,7 +294,7 @@ var scanFileFlags = map[string]bool{
 }
 
 func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, scanFileFlags, c.workDir)
+	return toolargs.ResolveRelativePaths(args, scanFileFlags, c.WorkDir)
 }
 
 func writeOutputFile(path, content string) error {

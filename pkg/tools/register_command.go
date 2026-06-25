@@ -3,12 +3,8 @@ package tools
 import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	gogocmd "github.com/chainreactors/aiscan/pkg/tools/gogo"
-	neutroncmd "github.com/chainreactors/aiscan/pkg/tools/neutron"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
-	spraycmd "github.com/chainreactors/aiscan/pkg/tools/spray"
-	zombiecmd "github.com/chainreactors/aiscan/pkg/tools/zombie"
 )
 
 func init() {
@@ -20,8 +16,6 @@ func init() {
 			if es == nil {
 				return
 			}
-			logger := deps.GetLogger()
-			proxy := deps.ScannerProxy
 
 			var scanOpts []scan.Option
 			for _, o := range deps.ScanOpts {
@@ -29,24 +23,12 @@ func init() {
 					scanOpts = append(scanOpts, opt)
 				}
 			}
-			if proxy != "" {
-				scanOpts = append(scanOpts, scan.WithProxy(proxy))
+			if deps.ScannerProxy != "" {
+				scanOpts = append(scanOpts, scan.WithProxy(deps.ScannerProxy))
 			}
 
 			if es.Gogo != nil && es.Spray != nil {
 				reg.Register(scan.New(es, scanOpts...), "scanner")
-			}
-			if es.Gogo != nil {
-				reg.Register(gogocmd.New(es.Gogo).WithLogger(logger).WithProxy(proxy), "scanner")
-			}
-			if es.Spray != nil {
-				reg.Register(spraycmd.New(es.Spray).WithLogger(logger).WithProxy(proxy), "scanner")
-			}
-			if es.Zombie != nil {
-				reg.Register(zombiecmd.New(es.Zombie).WithLogger(logger).WithProxy(proxy), "scanner")
-			}
-			if es.Neutron != nil {
-				reg.Register(neutroncmd.New(es.Neutron, es.Index).WithLogger(logger).WithProxy(proxy), "scanner")
 			}
 		},
 	})
