@@ -232,7 +232,7 @@ func (c Config) init() Config {
 	if c.Logger == nil {
 		c.Logger = telemetry.NopLogger()
 	}
-	if c.MaxRetries == 0 {
+	if c.MaxRetries < 0 {
 		c.MaxRetries = DefaultMaxRetries
 	}
 	if c.MaxResultSize <= 0 {

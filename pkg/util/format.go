@@ -17,6 +17,9 @@ func FormatSize(bytes int) string {
 }
 
 func FormatNumber(n int) string {
+	if n < 0 {
+		return "-" + FormatNumber(-n)
+	}
 	if n < 1000 {
 		return fmt.Sprintf("%d", n)
 	}

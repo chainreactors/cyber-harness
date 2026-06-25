@@ -246,9 +246,10 @@ func summarizeChatMessage(msg agent.ChatMessage) (role string, contentLen int, t
 // ---------------------------------------------------------------------------
 
 var (
-	agentMarkdownRenderer     *glamour.TermRenderer
-	agentMarkdownRendererErr  error
-	agentMarkdownRendererOnce sync.Once
+	agentMarkdownRenderer    *glamour.TermRenderer
+	agentMarkdownRendererErr error
+	agentMarkdownRendererW   int
+	agentMarkdownRendererMu  sync.Mutex
 )
 
 func renderAgentMarkdown(content string, enabled bool) string {
@@ -275,20 +276,22 @@ func renderAgentMarkdown(content string, enabled bool) string {
 }
 
 func getAgentMarkdownRenderer() (*glamour.TermRenderer, error) {
-	agentMarkdownRendererOnce.Do(func() {
-		opts := []glamour.TermRendererOption{
-			glamour.WithAutoStyle(),
-			// Auto-detect the richest profile the terminal advertises (truecolor
-			// -> 256 -> ANSI) instead of pinning 16-color ANSI, so markdown answers
-			// render with real depth on modern terminals.
-			glamour.WithColorProfile(termenv.ColorProfile()),
-			glamour.WithEmoji(),
-		}
-		if w := terminalWidth(); w > 0 {
-			opts = append(opts, glamour.WithWordWrap(w))
-		}
-		agentMarkdownRenderer, agentMarkdownRendererErr = glamour.NewTermRenderer(opts...)
-	})
+	w := terminalWidth()
+	agentMarkdownRendererMu.Lock()
+	defer agentMarkdownRendererMu.Unlock()
+	if agentMarkdownRenderer != nil && w == agentMarkdownRendererW {
+		return agentMarkdownRenderer, agentMarkdownRendererErr
+	}
+	opts := []glamour.TermRendererOption{
+		glamour.WithAutoStyle(),
+		glamour.WithColorProfile(termenv.ColorProfile()),
+		glamour.WithEmoji(),
+	}
+	if w > 0 {
+		opts = append(opts, glamour.WithWordWrap(w))
+	}
+	agentMarkdownRenderer, agentMarkdownRendererErr = glamour.NewTermRenderer(opts...)
+	agentMarkdownRendererW = w
 	return agentMarkdownRenderer, agentMarkdownRendererErr
 }
 

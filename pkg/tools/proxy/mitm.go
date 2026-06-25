@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/proxyclient"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
 )
@@ -182,7 +180,6 @@ func (s *mitmState) start() error {
 	if err != nil {
 		return fmt.Errorf("create MITM proxy: %w", err)
 	}
-	s.store.Clear()
 	p.AddAddon(&captureAddon{store: s.store})
 	listenAddr, _, err := p.StartAsync()
 	if err != nil {
@@ -368,6 +365,7 @@ func (s *FlowStore) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.flows = s.flows[:0]
+	s.seq = 0
 }
 
 func (s *FlowStore) Count() int {
@@ -393,7 +391,7 @@ func matchStatus(code int, pattern string) bool {
 		if n, err := strconv.Atoi(p); err == nil {
 			return code == n
 		}
-		return true
+		return false
 	}
 }
 
@@ -498,21 +496,4 @@ func writeHeaders(sb *strings.Builder, h http.Header) {
 			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, v))
 		}
 	}
-}
-
-// configureUpstream sets the MITM proxy's upstream dialer if a proxy is active.
-func configureUpstream(p *mitmproxy.Proxy, proxyURL string) error {
-	if proxyURL == "" {
-		return nil
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return err
-	}
-	dial, err := proxyclient.NewClient(u)
-	if err != nil {
-		return fmt.Errorf("upstream dialer for %s: %w", u.Scheme, err)
-	}
-	p.SetDialer(dial.DialContext)
-	return nil
 }

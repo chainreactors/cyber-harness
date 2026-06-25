@@ -344,7 +344,7 @@ llm:
 	}
 
 	if path == "" {
-		t.Fatal("expected config.yaml to be found")
+		t.Fatal("expected aiscan.yaml to be found")
 	}
 	if option.Provider != "found-provider" {
 		t.Errorf("Provider: got %q, want %q", option.Provider, "found-provider")

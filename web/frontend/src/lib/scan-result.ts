@@ -682,7 +682,7 @@ function normalizePriority(priority?: string): FindingPriority {
 
 function itemToPriority(item: AssetItem): FindingPriority {
   const p = (item.status || '').toLowerCase()
-  if (p === 'confirmed' || p === 'critical') return 'critical'
+  if (p === 'critical') return 'critical'
   if (p === 'high') return 'high'
   if (p === 'medium' || p === 'inconclusive') return 'medium'
   if (p === 'low') return 'low'

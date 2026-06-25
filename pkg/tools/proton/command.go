@@ -213,10 +213,13 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	if len(inputs) == 0 && len(flags.Expressions) == 0 {
 		return fmt.Errorf("proton: target required (-i <path>, -l <file>, -e <regex>, or pipe: <cmd> | proton)")
 	}
+	if len(inputs) == 0 {
+		inputs = []string{"."}
+	}
 
 	// --- Scan ---
 	sevFilter := buildSeverityFilter(flags.Severity, flags.ExcludeSeverity)
-	seen := make(map[string]bool)
+	var seen sync.Map
 	var findingCount int64
 
 	var fileOut *os.File
@@ -234,10 +237,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 			return
 		}
 		key := uf.TemplateID + "|" + uf.FilePath
-		if seen[key] {
+		if _, loaded := seen.LoadOrStore(key, true); loaded {
 			return
 		}
-		seen[key] = true
 		atomic.AddInt64(&findingCount, 1)
 		writeFinding(commands.Output, uf, flags.JSON, inputs[0])
 		if fileOut != nil {
@@ -382,8 +384,9 @@ func writeFinding(w interface{ Write([]byte) (int, error) }, f file.Finding, jso
 }
 
 func truncate(s string, max int) string {
-	if len(s) > max {
-		return s[:max] + "..."
+	runes := []rune(s)
+	if len(runes) > max {
+		return string(runes[:max]) + "..."
 	}
 	return s
 }
@@ -444,8 +447,11 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 		}()
 	}
 
-	_ = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || ctx.Err() != nil {
+	if walkErr := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
 			return err
 		}
 		if d.IsDir() {
@@ -468,7 +474,9 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 			jobCh <- job{path: path, group: group}
 		}
 		return nil
-	})
+	}); walkErr != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "proton: walk %s: %v\n", target, walkErr)
+	}
 	close(jobCh)
 	wg.Wait()
 }

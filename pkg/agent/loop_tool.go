@@ -102,6 +102,11 @@ func (c *LoopCommand) create(ctx context.Context, args []string) error {
 // tryCronPrefix attempts to parse the first 5 args as a cron expression.
 // Returns the parsed expression, remaining args, and whether it succeeded.
 func tryCronPrefix(args []string) (*CronExpr, []string, bool) {
+	if len(args) >= 2 && strings.Contains(args[0], " ") {
+		if cron, err := ParseCron(args[0]); err == nil {
+			return cron, args[1:], true
+		}
+	}
 	if len(args) < 6 {
 		return nil, nil, false
 	}

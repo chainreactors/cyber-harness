@@ -177,7 +177,7 @@ CFG_IOA_SPACE=$(resolve "$OPT_IOA_SPACE" "$(yaml_val "$CONFIG_FILE" ioa space)")
 CFG_VERIFY=$(resolve "$OPT_VERIFY" "$(yaml_val "$CONFIG_FILE" scan verify)")
 CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" scan verify_timeout)")
 
-CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" websearch tavily_keys)")
+CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" search tavily_keys)")
 
 # build 段仅从 aiscan.yaml 读取（不做 CLI 覆盖）
 if [ -z "$OSARCH" ]; then

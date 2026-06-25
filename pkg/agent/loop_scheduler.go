@@ -70,6 +70,7 @@ type LoopScheduler struct {
 type loopState struct {
 	entry     LoopEntry
 	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 	fireCount int
 	lastFired time.Time
 }
@@ -198,7 +199,9 @@ func (s *LoopScheduler) fire(ctx context.Context, state *loopState) {
 		}
 
 	case ModeIndependent:
+		state.wg.Add(1)
 		go func() {
+			defer state.wg.Done()
 			if _, err := entry.OnFire(ctx, entry); err != nil {
 				s.log.Warnf("loop=%s fire=%d failed: %s", entry.Name, count, err)
 			}
@@ -216,6 +219,7 @@ func (s *LoopScheduler) Remove(name string) error {
 	state.cancel()
 	delete(s.loops, name)
 	s.mu.Unlock()
+	state.wg.Wait()
 	s.log.Importantf("loop=%s deleted", name)
 	return nil
 }
@@ -245,9 +249,14 @@ func (s *LoopScheduler) Active() int {
 
 func (s *LoopScheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	states := make([]*loopState, 0, len(s.loops))
 	for name, state := range s.loops {
 		state.cancel()
+		states = append(states, state)
 		delete(s.loops, name)
+	}
+	s.mu.Unlock()
+	for _, state := range states {
+		state.wg.Wait()
 	}
 }
