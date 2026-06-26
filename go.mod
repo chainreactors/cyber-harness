@@ -308,6 +308,6 @@ require (
 )
 
 replace (
-	github.com/reeflective/console => github.com/chainreactors/malice-network/external/console v0.0.0-20260620124902-e62d93c864f7
-	github.com/reeflective/readline => github.com/chainreactors/malice-network/external/readline v0.0.0-20260620124902-e62d93c864f7
+	github.com/reeflective/console => ../malice-network/external/console
+	github.com/reeflective/readline => ../malice-network/external/readline
 )

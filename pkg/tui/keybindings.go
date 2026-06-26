@@ -28,9 +28,12 @@ func configureAgentReadline(c *console.Console) {
 	_ = cfg.Set("page-completions", false)
 	_ = cfg.Set("completion-query-items", 1000)
 	_ = cfg.Set("bell-style", "none")
-	_ = cfg.Set("enable-bracketed-paste", false)
-	// Bind Tab to menu-complete so arrow keys navigate the dropdown.
+	_ = cfg.Set("enable-bracketed-paste", true)
+	backspace := inputrc.Unescape(`\C-h`)
+	deleteBackspace := inputrc.Unescape(`\C-?`)
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
+		_ = cfg.Bind(keymap, backspace, "backward-delete-char", false)
+		_ = cfg.Bind(keymap, deleteBackspace, "backward-delete-char", false)
 		_ = cfg.Bind(keymap, `\t`, "menu-complete", false)
 		_ = cfg.Bind(keymap, inputrc.Unescape(`\e[Z`), "menu-complete-backward", false)
 	}
@@ -128,6 +131,9 @@ func (r *AgentConsole) handleEscapeInterruptKey() {
 	pending := string(shell.Keys.Read())
 	if pending == "" {
 		pending = readPendingTerminalBytes(agentConsoleEscapeSequenceWait)
+	}
+	if shell.HandleBracketedPastePending(pending) {
+		return
 	}
 	keymap := string(shell.Keymap.Main())
 	if feed, ok := agentConsoleEscapeSequenceFeed(shell.Config.Binds[keymap], pending); ok {

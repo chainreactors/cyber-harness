@@ -29,6 +29,7 @@ type Session struct {
 	Agent        *agent.Agent
 	Controller   Controller
 	EvalCriteria string
+	ResolveInput func(string) (displayText string, promptText string)
 	OnEvalChange func(string)
 }
 
@@ -84,6 +85,10 @@ func SkillCommands(s *Session) []Command {
 
 // RunPrompt expands skills and submits a prompt to the controller.
 func RunPrompt(s *Session, label, input string) error {
+	displayText := input
+	if s.ResolveInput != nil {
+		displayText, input = s.ResolveInput(input)
+	}
 	prompt := skills.ExpandCommand(input, s.AppInfo.Skills)
 	var selected []string
 	if s.Option != nil {
@@ -93,7 +98,7 @@ func RunPrompt(s *Session, label, input string) error {
 	if err != nil {
 		return err
 	}
-	return s.Controller.SubmitPrompt(label, input, prompt)
+	return s.Controller.SubmitPrompt(label, displayText, prompt)
 }
 
 // StatusInfo collects current session state for display.

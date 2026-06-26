@@ -70,6 +70,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	c := console.NewWithTerminal("aiscan", t)
 	c.NewlineAfter = true
 	configureAgentReadline(c)
+	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
 	stdout := t.Out
 	stderr := t.Err
 	if output == nil {
@@ -162,6 +163,8 @@ func (r *AgentConsole) startFastInput() error {
 			return nil
 		}
 
+		line = coalesceFastInput(line, reader)
+
 		done, execErr := r.handleInputLine(line)
 		if execErr != nil {
 			if errors.Is(execErr, context.Canceled) && r.ctx.Err() != nil {
@@ -174,6 +177,28 @@ func (r *AgentConsole) startFastInput() error {
 			return nil
 		}
 	}
+}
+
+func coalesceFastInput(firstLine string, reader *bufio.Reader) string {
+	trimmed := strings.TrimSpace(firstLine)
+	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
+		return firstLine
+	}
+	lines := []string{strings.TrimRight(firstLine, "\r\n")}
+	for reader.Buffered() > 0 {
+		extra, err := reader.ReadString('\n')
+		extra = strings.TrimRight(extra, "\r\n")
+		if extra != "" {
+			lines = append(lines, extra)
+		}
+		if err != nil {
+			break
+		}
+	}
+	if len(lines) == 1 {
+		return firstLine
+	}
+	return strings.Join(lines, "\n")
 }
 
 type fastInputResult struct {
@@ -205,7 +230,7 @@ func (r *AgentConsole) startReadline() error {
 		}
 
 		r.readlineActive.Store(true)
-		line, err := r.console.Shell().Readline()
+		line, err := r.console.Readline()
 		r.readlineActive.Store(false)
 		if err != nil {
 			switch {
@@ -234,6 +259,13 @@ func (r *AgentConsole) startReadline() error {
 			return nil
 		}
 	}
+}
+
+func (r *AgentConsole) resolvePastedText(input string) (string, string) {
+	if r == nil || r.console == nil || input == "" {
+		return input, input
+	}
+	return input, r.console.ResolvePasteReferences(input)
 }
 
 func (r *AgentConsole) handleInputLine(line string) (bool, error) {
@@ -300,6 +332,7 @@ func (r *AgentConsole) replSession() *Session {
 		Agent:        r.agent,
 		Controller:   r.ensureController(),
 		EvalCriteria: r.evalCriteria,
+		ResolveInput: r.resolvePastedText,
 	}
 	s.OnEvalChange = func(criteria string) {
 		r.evalCriteria = criteria
