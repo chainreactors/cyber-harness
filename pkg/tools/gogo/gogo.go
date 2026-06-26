@@ -41,6 +41,20 @@ func (c *Command) Usage() string {
 	return gogocore.Help()
 }
 
+func (c *Command) QuickReference() string {
+	return `### gogo — host, port, service, and banner discovery
+  -i <ip/cidr>   Target (IP, CIDR, or comma-separated). NOT ip:port — use -i IP -p PORT.
+  -p <ports>     Presets: top1, top2, top100, top1000, all, - (65535), or 80,443,8080
+  -l <file>      Target file (one IP/CIDR per line)
+  -o jl          JSON Lines output (do NOT use -j for JSON output; -j is a JSON input file)
+  -e             Enable exploit/neutron scan
+  -v             Enable active fingerprint scan
+  Examples:
+    gogo -i 10.0.0.1 -p top100
+    gogo -i 10.0.0.0/24 -p 80,443,8080
+    gogo -l targets.txt -p top2 -ev`
+}
+
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	args = c.normalizeArgs(args)
 	args = c.injectProxy(args)

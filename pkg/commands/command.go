@@ -22,6 +22,13 @@ type Command interface {
 	Execute(ctx context.Context, args []string) error
 }
 
+// QuickReferencer is optionally implemented by commands that want a concise
+// multi-line reference embedded in the system prompt instead of the single
+// description line extracted from Usage().
+type QuickReferencer interface {
+	QuickReference() string
+}
+
 type AgentTool interface {
 	Name() string
 	Description() string
@@ -323,6 +330,11 @@ func normalizeNoColor(name string, args []string) []string {
 func (r *CommandRegistry) UsageDocs() string {
 	var sb strings.Builder
 	for _, cmd := range r.All() {
+		if qr, ok := cmd.(QuickReferencer); ok {
+			sb.WriteString(qr.QuickReference())
+			sb.WriteString("\n")
+			continue
+		}
 		first := cmd.Usage()
 		if idx := strings.IndexByte(first, '\n'); idx > 0 {
 			first = first[:idx]

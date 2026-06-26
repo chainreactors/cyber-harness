@@ -40,6 +40,21 @@ func (c *Command) Usage() string {
 	return spraycore.Help()
 }
 
+func (c *Command) QuickReference() string {
+	return `### spray — web probing, fingerprints, common files, and crawl
+  -u <url>       Target URL (required unless -l is used)
+  -l <file>      URL list file
+  --finger       Enable active fingerprint detection
+  --crawl        Enable web crawling
+  --active       Enable active finger path probing
+  -d <file>      Dictionary file for path discovery
+  -j             JSON output
+  Examples:
+    spray -u http://target.com
+    spray -u http://target.com --finger
+    spray -l urls.txt --finger --crawl`
+}
+
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
