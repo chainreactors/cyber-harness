@@ -9,8 +9,8 @@ import (
 	"time"
 
 	outputpkg "github.com/chainreactors/aiscan/core/output"
-	"github.com/reeflective/console"
-	"github.com/reeflective/readline/inputrc"
+	"github.com/chainreactors/tui/console"
+	"github.com/chainreactors/tui/readline/inputrc"
 )
 
 func configureAgentReadline(c *console.Console) {

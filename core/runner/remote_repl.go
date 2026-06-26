@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/utils/pty"
-	rlterm "github.com/reeflective/readline/terminal"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
 func NewRemoteREPLOpener(rt *AgentRuntime, mgr *tmux.Manager) pty.OpenFunc {

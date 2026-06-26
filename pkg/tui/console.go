@@ -19,8 +19,8 @@ import (
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	ioaclient "github.com/chainreactors/ioa/client"
-	"github.com/reeflective/console"
-	rlterm "github.com/reeflective/readline/terminal"
+	"github.com/chainreactors/tui/console"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/spf13/cobra"
 )
 

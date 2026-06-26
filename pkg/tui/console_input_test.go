@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/reeflective/readline/inputrc"
+	"github.com/chainreactors/tui/readline/inputrc"
 )
 
 func TestAgentReadlineBackspaceBindings(t *testing.T) {

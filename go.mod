@@ -17,6 +17,8 @@ require (
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
 	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
+	github.com/chainreactors/tui/console v0.0.0-00010101000000-000000000000
+	github.com/chainreactors/tui/readline v1.1.3
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2
 	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
@@ -35,8 +37,6 @@ require (
 	github.com/projectdiscovery/katana v1.6.1
 	github.com/projectdiscovery/uncover v1.2.1
 	github.com/projectdiscovery/utils v0.10.1
-	github.com/reeflective/console v0.0.0-00010101000000-000000000000
-	github.com/reeflective/readline v1.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/ysmood/gson v0.7.3
 	golang.org/x/image v0.42.0
@@ -308,6 +308,6 @@ require (
 )
 
 replace (
-	github.com/reeflective/console => ../malice-network/external/console
-	github.com/reeflective/readline => ../malice-network/external/readline
+	github.com/chainreactors/tui/console => ../tui/console
+	github.com/chainreactors/tui/readline => ../tui/readline
 )

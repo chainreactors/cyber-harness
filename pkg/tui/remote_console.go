@@ -10,7 +10,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	rlterm "github.com/reeflective/readline/terminal"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
 // RunRemoteAgentConsole runs the agent console over a byte-stream transport.
