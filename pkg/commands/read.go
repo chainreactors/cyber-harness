@@ -34,7 +34,7 @@ func NewReadTool(workDir string, readers ...VirtualFileReader) *ReadTool {
 func (t *ReadTool) Name() string { return "read" }
 
 func (t *ReadTool) Description() string {
-	return "Read the contents of a file. Returns text with line numbers, or image content for image files (PNG, JPG, GIF, WEBP). For large files, use offset and limit to paginate."
+	return "Read the contents of a file. Returns raw text content, or image content for image files (PNG, JPG, GIF, WEBP). For large files, use offset and limit to paginate."
 }
 
 type ReadArgs struct {
@@ -130,15 +130,15 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 		}
 
 		line := scanner.Text()
-		formatted := fmt.Sprintf("%d\t%s\n", lineNum, line)
 
-		if outputBytes+len(formatted) > defaultReadByteLimit && outputLines > 0 {
+		if outputBytes+len(line)+1 > defaultReadByteLimit && outputLines > 0 {
 			continue // keep counting total lines
 		}
 
-		sb.WriteString(formatted)
+		sb.WriteString(line)
+		sb.WriteByte('\n')
 		outputLines++
-		outputBytes += len(formatted)
+		outputBytes += len(line) + 1
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -218,12 +218,13 @@ func (t *ReadTool) paginateString(content, displayPath string, offset, limit int
 	outputBytes := 0
 	actualEnd := startLine - 1
 	for i := startLine - 1; i < endIdx; i++ {
-		formatted := fmt.Sprintf("%d\t%s\n", i+1, lines[i])
-		if outputBytes+len(formatted) > defaultReadByteLimit && i > startLine-1 {
+		line := lines[i]
+		if outputBytes+len(line)+1 > defaultReadByteLimit && i > startLine-1 {
 			break
 		}
-		sb.WriteString(formatted)
-		outputBytes += len(formatted)
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+		outputBytes += len(line) + 1
 		actualEnd = i + 1
 	}
 

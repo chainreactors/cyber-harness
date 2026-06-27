@@ -22,11 +22,11 @@ func TestReadSmallFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := res.Text()
-	if !strings.Contains(out, "1\tline1") {
-		t.Fatalf("expected line-numbered output, got: %s", out)
+	if !strings.Contains(out, "line1") {
+		t.Fatalf("expected line1 in output, got: %s", out)
 	}
-	if !strings.Contains(out, "2\tline2") {
-		t.Fatalf("expected line 2, got: %s", out)
+	if !strings.Contains(out, "line2") {
+		t.Fatalf("expected line2 in output, got: %s", out)
 	}
 }
 
@@ -45,13 +45,13 @@ func TestReadWithOffset(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := res.Text()
-	if !strings.Contains(out, "50\tline number 50") {
+	if !strings.Contains(out, "line number 50") {
 		t.Fatalf("expected line 50 at start, got: %s", out)
 	}
-	if !strings.Contains(out, "59\tline number 59") {
+	if !strings.Contains(out, "line number 59") {
 		t.Fatalf("expected line 59 at end, got: %s", out)
 	}
-	if strings.Contains(out, "60\t") {
+	if strings.Contains(out, "line number 60") {
 		t.Fatalf("should not contain line 60")
 	}
 	if !strings.Contains(out, "next: read with offset=60") {
