@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 import type { AgentInfo } from '../../api'
 import { cn } from '@aspect/theme'
-import { Tooltip } from '../ui/tooltip'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@aspect/ui'
 import type { PTYSession, TerminalStatus } from './terminal-utils'
 import { formatBytes, formatDateTime, positiveNumber, sessionTitle, stateLabel } from './terminal-utils'
 
@@ -101,16 +101,19 @@ function IconButton({
   onClick: () => void
 }) {
   return (
-    <Tooltip content={label} side="bottom">
-      <button
-        type="button"
-        aria-label={label}
-        title={label}
-        onClick={onClick}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        {children}
-      </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          onClick={onClick}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
   )
 }

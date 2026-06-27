@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Shield, PanelLeftClose, PanelLeft, History, Search, X } from 'lucide-react'
-import { Button, Badge, Input } from '@aspect/ui'
-import { Tooltip } from './ui/tooltip'
+import { Button, Badge, Input, Tooltip, TooltipTrigger, TooltipContent } from '@aspect/ui'
 import ScanHistory from './ScanHistory'
 import type { ScanJob } from '../api'
 
@@ -61,15 +60,18 @@ export default function Sidebar({ open, onToggle, scans, activeId, onSelectScan 
           </>
         ) : (
           <>
-            <Tooltip content="AIScan" side="right">
-              <button
-                type="button"
-                onClick={onToggle}
-                aria-label="Expand sidebar"
-                className="p-1 rounded-md hover:bg-accent transition-colors"
-              >
-                <Shield className="w-5 h-5 text-cyber-700 dark:text-cyber-400" />
-              </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  aria-label="Expand sidebar"
+                  className="p-1 rounded-md hover:bg-accent transition-colors"
+                >
+                  <Shield className="w-5 h-5 text-cyber-700 dark:text-cyber-400" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">AIScan</TooltipContent>
             </Tooltip>
           </>
         )}
@@ -116,31 +118,37 @@ export default function Sidebar({ open, onToggle, scans, activeId, onSelectScan 
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 pt-3">
-          <Tooltip content={`${scans.length} scans`} side="right">
-            <button
-              type="button"
-              onClick={onToggle}
-              aria-label={`${scans.length} scans in history`}
-              className="p-1.5 rounded-md hover:bg-accent transition-colors relative"
-            >
-              <History className="w-4 h-4 text-muted-foreground" />
-              {scans.length > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyber-600 rounded-full text-[8px] font-bold flex items-center justify-center text-white">
-                  {scans.length > 9 ? '9+' : scans.length}
-                </span>
-              )}
-            </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-label={`${scans.length} scans in history`}
+                className="p-1.5 rounded-md hover:bg-accent transition-colors relative"
+              >
+                <History className="w-4 h-4 text-muted-foreground" />
+                {scans.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyber-600 rounded-full text-[8px] font-bold flex items-center justify-center text-white">
+                    {scans.length > 9 ? '9+' : scans.length}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{`${scans.length} scans`}</TooltipContent>
           </Tooltip>
-          <Tooltip content="Expand sidebar" side="right">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggle}
-              className="h-7 w-7 text-muted-foreground"
-              aria-label="Expand sidebar"
-            >
-              <PanelLeft className="w-3.5 h-3.5" />
-            </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggle}
+                className="h-7 w-7 text-muted-foreground"
+                aria-label="Expand sidebar"
+              >
+                <PanelLeft className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Expand sidebar</TooltipContent>
           </Tooltip>
         </div>
       )}

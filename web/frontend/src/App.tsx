@@ -9,7 +9,7 @@ import ThemeToggle from './components/ThemeToggle'
 import { getStatus } from './api'
 import type { ServerStatus } from './api'
 import { useScanSession } from './hooks/useScanSession'
-import { Button } from '@aspect/ui'
+import { Button, TooltipProvider } from '@aspect/ui'
 import { cn } from '@aspect/theme'
 
 const sidebarStorageKey = 'aiscan-sidebar-open'
@@ -55,6 +55,7 @@ export default function App() {
   }, [sidebarOpen])
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="flex min-h-screen bg-background">
       <Sidebar
         open={sidebarOpen}
@@ -165,6 +166,7 @@ export default function App() {
         onClose={() => setAgentPanelOpen(false)}
       />
     </div>
+    </TooltipProvider>
   )
 }
 

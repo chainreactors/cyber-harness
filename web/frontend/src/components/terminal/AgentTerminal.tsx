@@ -6,7 +6,7 @@ import { Info, Plus, RefreshCw, Square, Terminal as TerminalIcon } from 'lucide-
 import { agentTerminalWebSocketURL } from '../../api'
 import type { AgentInfo } from '../../api'
 import { cn } from '@aspect/theme'
-import { Tooltip } from '../ui/tooltip'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@aspect/ui'
 import { SessionNavigator } from './SessionNavigator'
 import { TerminalDetails } from './TerminalDetails'
 import type { PTYSession, TerminalStatus } from './terminal-utils'
@@ -371,20 +371,23 @@ function IconButton({
   onClick: () => void
 }) {
   return (
-    <Tooltip content={label} side="bottom">
-      <button
-        type="button"
-        aria-label={label}
-        title={label}
-        disabled={disabled}
-        onClick={onClick}
-        className={cn(
-          'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
-          active && 'bg-cyber-400/10 text-cyber-700 dark:text-cyber-300',
-        )}
-      >
-        {children}
-      </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          disabled={disabled}
+          onClick={onClick}
+          className={cn(
+            'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
+            active && 'bg-cyber-400/10 text-cyber-700 dark:text-cyber-300',
+          )}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
   )
 }

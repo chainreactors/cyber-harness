@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { CheckCircle, Loader2, Settings, X } from 'lucide-react'
+import { CheckCircle, Settings, X } from 'lucide-react'
 import { getLLMConfig, saveLLMConfig } from '../api'
 import type { LLMConfig, ServerStatus } from '../api'
-import { Button, Input } from '@aspect/ui'
+import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner } from '@aspect/ui'
 
 interface LLMConfigPanelProps {
   open: boolean
@@ -89,33 +89,39 @@ export default function LLMConfigPanel({ open, status, onClose, onSaved }: LLMCo
 
         <div className="space-y-4 p-4">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <StatusPill active={!!status?.llm_available} label={status?.llm_available ? 'LLM Ready' : 'LLM Offline'} />
-            <StatusPill active={!!config.config_loaded} label={config.config_loaded ? 'Config Loaded' : 'Config Missing'} />
-            <StatusPill active={!!config.api_key_configured} label={config.api_key_configured ? 'API Key Set' : 'API Key Empty'} />
+            <Badge variant={status?.llm_available ? 'success' : 'warning'} className="text-xs">
+              {status?.llm_available ? 'LLM Ready' : 'LLM Offline'}
+            </Badge>
+            <Badge variant={config.config_loaded ? 'success' : 'warning'} className="text-xs">
+              {config.config_loaded ? 'Config Loaded' : 'Config Missing'}
+            </Badge>
+            <Badge variant={config.api_key_configured ? 'success' : 'warning'} className="text-xs">
+              {config.api_key_configured ? 'API Key Set' : 'API Key Empty'}
+            </Badge>
           </div>
 
           {loading ? (
             <div className="flex h-48 items-center justify-center text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Spinner className="mr-2 h-4 w-4" />
               Loading
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Provider">
-                <select
-                  value={config.provider}
-                  onChange={(event) => update('provider', event.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="">Select provider</option>
-                  <option value="deepseek">deepseek</option>
-                  <option value="openai">openai</option>
-                  <option value="openrouter">openrouter</option>
-                  <option value="ollama">ollama</option>
-                  <option value="groq">groq</option>
-                  <option value="moonshot">moonshot</option>
-                  <option value="anthropic">anthropic</option>
-                </select>
+                <Select value={config.provider} onValueChange={(value) => update('provider', value)}>
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="deepseek">deepseek</SelectItem>
+                    <SelectItem value="openai">openai</SelectItem>
+                    <SelectItem value="openrouter">openrouter</SelectItem>
+                    <SelectItem value="ollama">ollama</SelectItem>
+                    <SelectItem value="groq">groq</SelectItem>
+                    <SelectItem value="moonshot">moonshot</SelectItem>
+                    <SelectItem value="anthropic">anthropic</SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
 
               <Field label="Model">
@@ -173,7 +179,7 @@ export default function LLMConfigPanel({ open, status, onClose, onSaved }: LLMCo
             Close
           </Button>
           <Button type="submit" disabled={loading || saving} className="bg-cyber-600 text-white hover:bg-cyber-500">
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving && <Spinner className="h-4 w-4" />}
             Save
           </Button>
         </div>
@@ -188,19 +194,5 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
-  )
-}
-
-function StatusPill({ active, label }: { active: boolean; label: string }) {
-  return (
-    <span
-      className={`rounded-full border px-2.5 py-1 ${
-        active
-          ? 'border-cyber-400/30 bg-cyber-400/10 text-cyber-700 dark:text-cyber-300'
-          : 'border-yellow-400/30 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300'
-      }`}
-    >
-      {label}
-    </span>
   )
 }

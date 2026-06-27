@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Circle, Loader2, Monitor, RefreshCw, X } from 'lucide-react'
+import { Circle, Monitor, RefreshCw, X } from 'lucide-react'
 import { listAgents } from '../api'
 import type { AgentInfo } from '../api'
 import AgentTerminal from './terminal'
 import { cn } from '@aspect/theme'
+import { Spinner } from '@aspect/ui'
 
 interface AgentPanelProps {
   open: boolean
@@ -47,7 +48,7 @@ export default function AgentPanel({ open, onClose }: AgentPanelProps) {
         <div className="min-h-0 flex-1">
           {loading ? (
             <div className="flex h-32 items-center justify-center text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <Spinner className="h-5 w-5" />
             </div>
           ) : error ? (
             <div className="m-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

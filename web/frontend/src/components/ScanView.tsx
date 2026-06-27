@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FileText, Shield, TableProperties } from 'lucide-react'
 import type { ScanJob, ScanResult } from '../api'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@aspect/ui'
 import ScanProgress from './ScanProgress'
 import ReportView from './ReportView'
 import AssetResultView from './AssetResultView'
 import FindingsPanel from './FindingsPanel'
 import { buildFindings } from '../lib/scan-result'
-import { cn } from '@aspect/theme'
 
 interface ScanViewProps {
   scan: ScanJob
@@ -71,63 +71,44 @@ export default function ScanView({ scan, lines, report, result, logCollapsed, on
 
       {hasMarkdown && (
         <div className="space-y-3">
-          {hasResult && hasMarkdown && (
-            <div className="inline-flex items-center rounded-md border border-input bg-secondary/50 p-0.5">
-              <ResultTabButton active={tab === 'assets'} onClick={() => setTab('assets')}>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as ResultTab)}>
+            <TabsList>
+              <TabsTrigger value="assets">
                 <TableProperties className="h-3.5 w-3.5" />
-                <span>Assets</span>
-              </ResultTabButton>
+                Assets
+              </TabsTrigger>
               {hasFindings && (
-                <ResultTabButton active={tab === 'findings'} onClick={() => setTab('findings')}>
+                <TabsTrigger value="findings">
                   <Shield className="h-3.5 w-3.5" />
-                  <span>Findings</span>
+                  Findings
                   <span className="ml-1 rounded-full bg-red-500/20 px-1.5 py-0.5 text-[10px] font-bold text-red-600 dark:text-red-400">
                     {findingsCount}
                   </span>
-                </ResultTabButton>
+                </TabsTrigger>
               )}
-              <ResultTabButton active={tab === 'report'} onClick={() => setTab('report')}>
+              <TabsTrigger value="report">
                 <FileText className="h-3.5 w-3.5" />
-                <span>Report</span>
-              </ResultTabButton>
-            </div>
-          )}
+                Report
+              </TabsTrigger>
+            </TabsList>
 
-          {hasResult && tab === 'assets' && <AssetResultView result={result} />}
-
-          {hasResult && tab === 'findings' && <FindingsPanel result={result} />}
-
-          {hasMarkdown && tab === 'report' && (
-            <div className="animate-fade-in">
-              <ReportView scan={scan} report={report} result={result} />
-            </div>
-          )}
+            <TabsContent value="assets">
+              {hasResult && <AssetResultView result={result} />}
+            </TabsContent>
+            {hasFindings && (
+              <TabsContent value="findings">
+                {hasResult && <FindingsPanel result={result} />}
+              </TabsContent>
+            )}
+            <TabsContent value="report">
+              <div className="animate-fade-in">
+                <ReportView scan={scan} report={report} result={result} />
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </div>
-  )
-}
-
-function ResultTabButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean
-  children: ReactNode
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-medium transition-all',
-        active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {children}
-    </button>
   )
 }
 
