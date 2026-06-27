@@ -3,7 +3,7 @@ import { Circle, Loader2, Monitor, RefreshCw, X } from 'lucide-react'
 import { listAgents } from '../api'
 import type { AgentInfo } from '../api'
 import AgentTerminal from './terminal'
-import { cn } from '../lib/utils'
+import { cn } from '@aspect/theme'
 
 interface AgentPanelProps {
   open: boolean

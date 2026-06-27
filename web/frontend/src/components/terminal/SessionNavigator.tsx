@@ -1,5 +1,5 @@
 import { Circle } from 'lucide-react'
-import { cn } from '../../lib/utils'
+import { cn } from '@aspect/theme'
 import type { PTYSession } from './terminal-utils'
 import { sessionDetails, sessionMeta, sessionTitle, stateColor, stateLabel, stateTextColor } from './terminal-utils'
 

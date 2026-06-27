@@ -1,10 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Brain, Crosshair, Loader2, Play, Radar, Search } from 'lucide-react'
 import type { ScanOptions } from '../api'
-import { Input } from './ui/input'
-import { Button } from './ui/button'
-import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
-import { cn } from '@/lib/utils'
+import { Input, Button, ToggleGroup, ToggleGroupItem } from '@aspect/ui'
+import { cn } from '@aspect/theme'
 
 interface ScanFormProps {
   onSubmit: (target: string, mode: string, options: ScanOptions) => void

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
-import { Button } from './ui/button'
+import { Button } from '@aspect/ui'
 import { Tooltip } from './ui/tooltip'
 
 type Theme = 'light' | 'dark'

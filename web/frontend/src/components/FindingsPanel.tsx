@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, Crosshair, Key, Radar, Shield } from 'lucide-react'
 import type { ScanResult } from '../api'
 import { buildFindings, PRIORITY_ORDER, type FindingItem, type FindingPriority } from '../lib/scan-result'
-import { cn } from '@/lib/utils'
+import { cn } from '@aspect/theme'
 import MarkdownContent from './MarkdownContent'
 
 interface FindingsPanelProps {

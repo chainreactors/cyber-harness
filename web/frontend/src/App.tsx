@@ -9,8 +9,8 @@ import ThemeToggle from './components/ThemeToggle'
 import { getStatus } from './api'
 import type { ServerStatus } from './api'
 import { useScanSession } from './hooks/useScanSession'
-import { Button } from './components/ui/button'
-import { cn } from './lib/utils'
+import { Button } from '@aspect/ui'
+import { cn } from '@aspect/theme'
 
 const sidebarStorageKey = 'aiscan-sidebar-open'
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 import type { AgentInfo } from '../../api'
-import { cn } from '../../lib/utils'
+import { cn } from '@aspect/theme'
 import { Tooltip } from '../ui/tooltip'
 import type { PTYSession, TerminalStatus } from './terminal-utils'
 import { formatBytes, formatDateTime, positiveNumber, sessionTitle, stateLabel } from './terminal-utils'

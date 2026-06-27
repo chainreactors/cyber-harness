@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Shield, PanelLeftClose, PanelLeft, History, Search, X } from 'lucide-react'
-import { Button } from './ui/button'
+import { Button, Badge, Input } from '@aspect/ui'
 import { Tooltip } from './ui/tooltip'
-import { Badge } from './ui/badge'
-import { Input } from './ui/input'
 import ScanHistory from './ScanHistory'
 import type { ScanJob } from '../api'
 

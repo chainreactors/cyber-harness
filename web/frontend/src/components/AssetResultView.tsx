@@ -27,7 +27,7 @@ import {
   type SitemapNode,
   type ViewAsset,
 } from '../lib/scan-result'
-import { cn } from '@/lib/utils'
+import { cn } from '@aspect/theme'
 import MarkdownContent from './MarkdownContent'
 import FindingsSummary from './FindingsSummary'
 

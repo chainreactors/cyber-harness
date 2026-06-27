@@ -2,8 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { CheckCircle, Loader2, Settings, X } from 'lucide-react'
 import { getLLMConfig, saveLLMConfig } from '../api'
 import type { LLMConfig, ServerStatus } from '../api'
-import { Button } from './ui/button'
-import { Input } from './ui/input'
+import { Button, Input } from '@aspect/ui'
 
 interface LLMConfigPanelProps {
   open: boolean

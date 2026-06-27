@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Link2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn } from '@aspect/theme'
 
 interface MarkdownContentProps {
   content: string

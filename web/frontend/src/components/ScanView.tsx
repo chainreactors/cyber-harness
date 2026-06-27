@@ -6,7 +6,7 @@ import ReportView from './ReportView'
 import AssetResultView from './AssetResultView'
 import FindingsPanel from './FindingsPanel'
 import { buildFindings } from '../lib/scan-result'
-import { cn } from '@/lib/utils'
+import { cn } from '@aspect/theme'
 
 interface ScanViewProps {
   scan: ScanJob

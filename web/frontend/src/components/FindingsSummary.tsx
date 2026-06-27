@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, HelpCircle, Info, ShieldCheck, XCircle } f
 import type { ScanResult } from '../api'
 import { buildFindingsSummary, PRIORITY_ORDER, type FindingsSummaryModel } from '../lib/scan-result'
 import { useMemo } from 'react'
-import { cn } from '@/lib/utils'
+import { cn } from '@aspect/theme'
 
 interface FindingsSummaryProps {
   result: ScanResult
