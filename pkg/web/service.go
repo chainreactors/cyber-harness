@@ -834,11 +834,7 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 		if result.Error != "" {
 			return nil, fmt.Errorf("agent upload error: %s", result.Error)
 		}
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type: "system",
-			Role: "system",
-			Content: fmt.Sprintf("File uploaded: %s → %s", filename, result.Path),
-		})
+		s.broadcastSystemMessage(sessionID, fmt.Sprintf("File uploaded: %s → %s", filename, result.Path))
 		return &result, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()

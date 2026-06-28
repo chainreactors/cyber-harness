@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +164,98 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	svc := NewService(ServiceConfig{Store: store})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
+
+	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil))
+	defer srv.Close()
+
+	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, webproto.AgentIdentity{
+		NodeID:   "node-upload-agent",
+		NodeName: "upload-agent",
+		Provider: "openai",
+		Model:    "test-model",
+	})
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	agents := pool.List()
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+
+	ctx := context.Background()
+	session, err := svc.CreateSession(ctx, agents[0].ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var msg WSMessage
+		if err := conn.ReadJSON(&msg); err != nil {
+			t.Errorf("read upload message: %v", err)
+			return
+		}
+		if msg.Type != "upload" || msg.TaskID == "" || msg.DataB64 == "" {
+			t.Errorf("unexpected upload message: %+v", msg)
+			return
+		}
+		var payload webproto.FileUploadPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Errorf("decode upload payload: %v", err)
+			return
+		}
+		result := webproto.FileUploadResult{
+			Filename: payload.Filename,
+			Path:     `C:\tmp\note.txt`,
+			Size:     payload.FileSize,
+		}
+		if err := conn.WriteJSON(WSMessage{
+			Type:    "complete",
+			TaskID:  msg.TaskID,
+			Data:    result.Path,
+			Payload: mustJSON(result),
+		}); err != nil {
+			t.Errorf("write upload completion: %v", err)
+		}
+	}()
+
+	result, err := svc.HandleFileUpload(ctx, session.ID, "note.txt", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != `C:\tmp\note.txt` || result.Size != 5 {
+		t.Fatalf("unexpected upload result: %+v", result)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for agent upload reply")
+	}
+
+	msgs, err := store.ListMessages(ctx, session.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 persisted message, got %d", len(msgs))
+	}
+	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "File uploaded: note.txt") || !strings.Contains(msgs[0].Content, result.Path) {
+		t.Fatalf("unexpected persisted upload message: %+v", msgs[0])
 	}
 }
 
