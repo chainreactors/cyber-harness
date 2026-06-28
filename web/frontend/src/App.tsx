@@ -1,40 +1,50 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { AlertTriangle, CheckCircle2, History, Monitor, Settings, Shield, X } from 'lucide-react'
-import Sidebar from './components/Sidebar'
-import ScanForm from './components/ScanForm'
-import ScanView from './components/ScanView'
-import LLMConfigPanel from './components/LLMConfigPanel'
+import { AlertTriangle, CheckCircle2, MessageSquare, Monitor, Settings } from 'lucide-react'
+import SessionList from './components/SessionList'
+import ChatPanel from './components/ChatPanel'
+import DetailPanel from './components/DetailPanel'
+import ScanWorkspace from './components/ScanWorkspace'
+import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
-import ThemeToggle from './components/ThemeToggle'
+import AgentTerminal from './components/terminal'
+import { ThemeToggle } from '@aspect/ui'
+import { ThemeProvider } from '@aspect/theme'
 import { getStatus } from './api'
-import type { ServerStatus } from './api'
+import type { ScanJob, ServerStatus } from './api'
 import { useScanSession } from './hooks/useScanSession'
-import { Button, TooltipProvider } from '@aspect/ui'
+import { useChatSession } from './hooks/useChatSession'
+import { parseRoute, sessionRoutePath } from './lib/scan-route'
+import { TooltipProvider } from '@aspect/ui'
 import { cn } from '@aspect/theme'
 
 const sidebarStorageKey = 'aiscan-sidebar-open'
 
+type AppView = 'chat' | 'scan'
+
 function getInitialSidebarOpen() {
-  if (typeof window === 'undefined') {
-    return true
-  }
-  if (window.matchMedia('(max-width: 767px)').matches) {
-    return false
-  }
+  if (typeof window === 'undefined') return true
+  if (window.matchMedia('(max-width: 767px)').matches) return false
   const stored = window.localStorage.getItem(sidebarStorageKey)
-  if (stored === 'true' || stored === 'false') {
-    return stored === 'true'
-  }
+  if (stored === 'true' || stored === 'false') return stored === 'true'
   return window.matchMedia('(min-width: 1024px)').matches
 }
 
+function getInitialView(): AppView {
+  if (typeof window === 'undefined') return 'chat'
+  return parseRoute(window.location.pathname).kind === 'scan' ? 'scan' : 'chat'
+}
+
 export default function App() {
+  const chat = useChatSession()
   const scanSession = useScanSession()
   const [analysisAvailable, setAnalysisAvailable] = useState(true)
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
-  const [llmConfigOpen, setLLMConfigOpen] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
+  const [detailOpen, setDetailOpen] = useState(true)
+  const [terminalAgentID, setTerminalAgentID] = useState<string | null>(null)
+  const [view, setView] = useState<AppView>(getInitialView)
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -54,123 +64,177 @@ export default function App() {
     window.localStorage.setItem(sidebarStorageKey, String(sidebarOpen))
   }, [sidebarOpen])
 
+  useEffect(() => {
+    const syncViewFromRoute = () => {
+      const route = parseRoute(window.location.pathname)
+      setView(route.kind === 'scan' ? 'scan' : 'chat')
+      if (route.kind !== 'scan') {
+        setAgentPanelOpen(false)
+      }
+    }
+    syncViewFromRoute()
+    window.addEventListener('popstate', syncViewFromRoute)
+    return () => window.removeEventListener('popstate', syncViewFromRoute)
+  }, [])
+
+  const detailResult = chat.detailScanID ? chat.scanResults.get(chat.detailScanID) ?? null : null
+  const showDetail = detailOpen && !!chat.detailScanID && !!detailResult
+  const terminalAgent = terminalAgentID ? chat.agents.find((a) => a.id === terminalAgentID) ?? null : null
+
+  function handleOpenTerminal(agentID: string) {
+    setTerminalAgentID(agentID)
+    chat.selectAgent(agentID)
+  }
+
+  function handleSelectSession(id: string) {
+    setTerminalAgentID(null)
+    chat.selectSession(id)
+  }
+
+  function handleCreateSession(agentID: string) {
+    setTerminalAgentID(null)
+    chat.createSession(agentID)
+  }
+
+  function handleOpenScanWorkspace() {
+    setTerminalAgentID(null)
+    setView('scan')
+  }
+
+  function handleOpenChatWorkspace() {
+    setTerminalAgentID(null)
+    setView('chat')
+    const path = chat.activeSessionID ? sessionRoutePath(chat.activeSessionID) : '/'
+    window.history.pushState({}, '', path)
+  }
+
+  function handleSelectScan(scan: ScanJob) {
+    setTerminalAgentID(null)
+    setView('scan')
+    scanSession.selectScan(scan)
+  }
+
   return (
+    <ThemeProvider initial="dark" storageKey="aiscan-theme">
     <TooltipProvider delayDuration={300}>
-    <div className="flex min-h-screen bg-background">
-      <Sidebar
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        scans={scanSession.scans}
-        activeId={scanSession.activeScan?.id}
-        onSelectScan={scanSession.selectScan}
-      />
+      <div className="flex h-screen bg-background">
+        {view === 'scan' ? (
+          <>
+            <main className="flex min-h-0 min-w-0 flex-1">
+              <ScanWorkspace
+                scans={scanSession.scans}
+                activeScan={scanSession.activeScan}
+                lines={scanSession.progressLines}
+                report={scanSession.report}
+                result={scanSession.result}
+                scanning={scanSession.scanning}
+                error={scanSession.error}
+                logCollapsed={scanSession.logCollapsed}
+                analysisAvailable={analysisAvailable}
+                onSubmit={scanSession.submit}
+                onSelectScan={handleSelectScan}
+                onRefreshScans={scanSession.refreshScans}
+                onToggleLog={scanSession.toggleLog}
+                onClearError={scanSession.clearError}
+                status={<StatusPill active={analysisAvailable} />}
+                actions={
+                  <>
+                    <HeaderIconButton label="Open chat workspace" onClick={handleOpenChatWorkspace}>
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    </HeaderIconButton>
+                    <ScanAgentsButton count={serverStatus?.agents ?? chat.agents.length} onClick={() => setAgentPanelOpen(true)} />
+                    <HeaderIconButton label="Open settings" onClick={() => setConfigOpen(true)}>
+                      <Settings className="h-3.5 w-3.5" />
+                    </HeaderIconButton>
+                    <ThemeToggle />
+                  </>
+                }
+              />
+            </main>
 
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Header with form */}
-        <div className="sticky top-0 z-20 border-b border-border bg-card/85 p-3 shadow-sm backdrop-blur-sm sm:p-4">
-          <ScanForm
-            onSubmit={scanSession.submit}
-            disabled={scanSession.scanning}
-            analysisAvailable={analysisAvailable}
-            status={<StatusPill active={analysisAvailable} />}
-            actions={
-              <>
-                <AgentsPill count={serverStatus?.agents ?? 0} onClick={() => setAgentPanelOpen(true)} />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setLLMConfigOpen(true)}
-                  className="h-10 w-10 shrink-0 px-0 sm:w-auto sm:px-3"
-                  aria-label="Open LLM configuration"
-                >
-                  <Settings className="h-4 w-4" />
-                  <span className="hidden sm:inline">LLM</span>
-                </Button>
-                <ThemeToggle />
-              </>
-            }
-          />
-        </div>
-
-        {/* Error */}
-        {scanSession.error && (
-          <div
-            role="alert"
-            className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive animate-fade-in"
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{scanSession.error}</span>
-            <button
-              type="button"
-              aria-label="Dismiss error"
-              onClick={scanSession.clearError}
-              className="rounded p-0.5 text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Content */}
-        {scanSession.activeScan ? (
-          <div className="flex-1 p-4 overflow-auto">
-            <ScanView
-              scan={scanSession.activeScan}
-              lines={scanSession.progressLines}
-              report={scanSession.report}
-              result={scanSession.result}
-              logCollapsed={scanSession.logCollapsed}
-              onToggleLog={scanSession.toggleLog}
+            <AgentPanel
+              open={agentPanelOpen}
+              onClose={() => setAgentPanelOpen(false)}
             />
-          </div>
+          </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center space-y-4">
-              <Shield className="w-16 h-16 mx-auto text-muted-foreground/10" strokeWidth={1} />
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">No active scan</p>
-                <p className="text-xs text-muted-foreground">Ready for a target</p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                <EmptyStateMetric icon={<History className="h-3.5 w-3.5" />} label="History" value={scanSession.scans.length} />
-                <EmptyStateMetric
-                  icon={<Monitor className="h-3.5 w-3.5" />}
-                  label="Agents"
-                  value={serverStatus?.agents ?? 0}
-                  tone={(serverStatus?.agents ?? 0) > 0 ? 'ready' : 'warning'}
+          <>
+            <SessionList
+              open={sidebarOpen}
+              onToggle={() => setSidebarOpen(!sidebarOpen)}
+              agents={chat.agents}
+              sessions={chat.sessions}
+              activeSessionID={chat.activeSessionID}
+              selectedAgentID={chat.selectedAgentID}
+              terminalAgentID={terminalAgentID}
+              onSelectAgent={chat.selectAgent}
+              onSelectSession={handleSelectSession}
+              onCreateSession={handleCreateSession}
+              onDeleteSession={chat.deleteSession}
+              onOpenTerminal={handleOpenTerminal}
+            />
+
+            {terminalAgent ? (
+              <section className="relative min-h-0 min-w-0 flex-1">
+                <div className="absolute inset-0 flex flex-col">
+                  <AgentTerminal agent={terminalAgent} />
+                </div>
+              </section>
+            ) : (
+              <>
+                <ChatPanel
+                  timeline={chat.timeline}
+                  streamingText={chat.streamingText}
+                  streamingAgent={chat.streamingAgent}
+                  scanResults={chat.scanResults}
+                  isThinking={chat.isThinking}
+                  error={chat.error}
+                  hasActiveSession={chat.activeSessionID !== null}
+                  onSend={chat.sendMessage}
+                  onClearError={chat.clearError}
+                  onShowScanDetail={(scanID) => {
+                    chat.showScanDetail(scanID)
+                    setDetailOpen(true)
+                  }}
+                  detailOpen={showDetail}
+                  onToggleDetail={() => setDetailOpen(!detailOpen)}
+                  onOpenConfig={() => setConfigOpen(true)}
+                  onOpenScan={handleOpenScanWorkspace}
+                  agentsPill={<AgentsPill count={chat.agents.length} />}
                 />
-                <EmptyStateMetric
-                  icon={analysisAvailable ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                  label="LLM"
-                  value={analysisAvailable ? 'Ready' : 'Offline'}
-                  tone={analysisAvailable ? 'ready' : 'warning'}
-                />
-                <EmptyStateMetric
-                  icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-                  label="Config"
-                  value={serverStatus?.config_loaded ? 'Loaded' : 'Default'}
-                />
-              </div>
-            </div>
-          </div>
+
+                <div
+                  className={cn(
+                    'shrink-0 transition-[width,opacity] duration-200 ease-in-out overflow-hidden',
+                    showDetail ? 'w-full lg:w-[28rem] opacity-100' : 'w-0 opacity-0',
+                  )}
+                >
+                  {showDetail && (
+                    <DetailPanel
+                      scanID={chat.detailScanID!}
+                      result={detailResult}
+                      onClose={() => setDetailOpen(false)}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </>
         )}
-      </main>
-      <LLMConfigPanel
-        open={llmConfigOpen}
+      </div>
+
+      <ConfigPanel
+        open={configOpen}
         status={serverStatus}
-        onClose={() => setLLMConfigOpen(false)}
+        onClose={() => setConfigOpen(false)}
         onSaved={refreshStatus}
       />
-      <AgentPanel
-        open={agentPanelOpen}
-        onClose={() => setAgentPanelOpen(false)}
-      />
-    </div>
     </TooltipProvider>
+    </ThemeProvider>
   )
 }
 
-function AgentsPill({ count, onClick }: { count: number; onClick: () => void }) {
+function ScanAgentsButton({ count, onClick }: { count: number; onClick: () => void }) {
   const active = count > 0
   return (
     <button
@@ -178,16 +242,46 @@ function AgentsPill({ count, onClick }: { count: number; onClick: () => void }) 
       onClick={onClick}
       title={active ? `${count} agent(s) connected` : 'No agents connected'}
       className={cn(
-        'h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium inline-flex cursor-pointer transition-colors hover:opacity-80',
+        'inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium transition-colors hover:opacity-80',
         active
-          ? 'border-cyber-400/30 bg-cyber-400/10 text-cyber-700 dark:text-cyber-300'
+          ? 'border-primary/30 bg-primary/10 text-primary'
           : 'border-yellow-400/30 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300',
       )}
     >
-      <Monitor className="h-3.5 w-3.5" />
-      <span className="hidden sm:inline">Agents</span>
+      <Monitor className="h-3 w-3" />
       <span className="font-mono">{count}</span>
     </button>
+  )
+}
+
+function HeaderIconButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+}
+
+function AgentsPill({ count }: { count: number }) {
+  const active = count > 0
+  return (
+    <span
+      className={cn(
+        'h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium inline-flex',
+        active
+          ? 'border-primary/30 bg-primary/10 text-primary'
+          : 'border-yellow-400/30 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300',
+      )}
+    >
+      <Monitor className="h-3 w-3" />
+      <span className="font-mono">{count}</span>
+    </span>
   )
 }
 
@@ -196,41 +290,14 @@ function StatusPill({ active }: { active: boolean }) {
     <span
       title={active ? 'LLM Ready' : 'LLM Offline'}
       className={cn(
-        'hidden h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium lg:inline-flex',
+        'hidden h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium lg:inline-flex',
         active
-          ? 'border-cyber-400/30 bg-cyber-400/10 text-cyber-700 dark:text-cyber-300'
+          ? 'border-primary/30 bg-primary/10 text-primary'
           : 'border-yellow-400/30 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300',
       )}
     >
-      {active ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+      {active ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
       {active ? 'LLM Ready' : 'LLM Offline'}
     </span>
-  )
-}
-
-function EmptyStateMetric({
-  icon,
-  label,
-  value,
-  tone = 'muted',
-}: {
-  icon: ReactNode
-  label: string
-  value: string | number
-  tone?: 'muted' | 'ready' | 'warning'
-}) {
-  return (
-    <div
-      className={cn(
-        'inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs',
-        tone === 'ready' && 'border-cyber-400/25 bg-cyber-400/10 text-cyber-700 dark:text-cyber-300',
-        tone === 'warning' && 'border-yellow-400/25 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300',
-        tone === 'muted' && 'border-border bg-card/60 text-muted-foreground',
-      )}
-    >
-      {icon}
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-foreground">{value}</span>
-    </div>
   )
 }

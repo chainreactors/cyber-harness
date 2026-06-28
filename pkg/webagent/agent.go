@@ -28,6 +28,16 @@ import (
 )
 
 func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
+	if option.WebURL != "" {
+		remoteOpt, err := cfg.FetchRemoteConfig(option.WebURL)
+		if err != nil {
+			logger.Warnf("fetch remote config from %s: %s (continuing with local config)", option.WebURL, err)
+		} else {
+			logger.Infof("fetched remote config from %s", option.WebURL)
+			cfg.MergeRemoteOption(option, remoteOpt)
+		}
+	}
+
 	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
 		NoOutput:         true,
 		IOA:              remoteIOAConfig(option),
@@ -241,6 +251,21 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 					taskMu.Unlock()
 				}()
 				execCommand(tCtx, m.TaskID, m.Data, reg, send)
+			}(msg, taskCtx, cancel)
+
+		case "chat":
+			taskCtx, cancel := context.WithCancel(ctx)
+			taskMu.Lock()
+			tasks[msg.TaskID] = cancel
+			taskMu.Unlock()
+			go func(m webproto.Message, tCtx context.Context, tCancel context.CancelFunc) {
+				defer tCancel()
+				defer func() {
+					taskMu.Lock()
+					delete(tasks, m.TaskID)
+					taskMu.Unlock()
+				}()
+				runChatPrompt(tCtx, m.TaskID, m.Data, rt, send)
 			}(msg, taskCtx, cancel)
 
 		case "cancel":
@@ -462,6 +487,32 @@ func execCommand(ctx context.Context, taskID, cmdLine string, reg *commands.Comm
 		return
 	}
 	send(webproto.Message{Type: "complete", TaskID: taskID, Data: out})
+}
+
+func runChatPrompt(ctx context.Context, taskID, prompt string, rt *runner.AgentRuntime, send func(webproto.Message)) {
+	if rt == nil || rt.App == nil || rt.App.Provider == nil {
+		send(webproto.Message{
+			Type:   "error",
+			TaskID: taskID,
+			Data:   "LLM provider is not configured on this agent; configure aiscan.yaml and restart the agent, or prefix commands with !",
+		})
+		return
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		send(webproto.Message{Type: "error", TaskID: taskID, Data: "empty prompt"})
+		return
+	}
+	result, err := agent.NewAgent(rt.Config.WithSystemPrompt(rt.SystemPrompt).WithStream(true)).Run(ctx, prompt)
+	if err != nil {
+		send(webproto.Message{Type: "error", TaskID: taskID, Data: err.Error()})
+		return
+	}
+	if result == nil {
+		send(webproto.Message{Type: "complete", TaskID: taskID})
+		return
+	}
+	send(webproto.Message{Type: "complete", TaskID: taskID, Data: result.Output})
 }
 
 type agentStatsTracker struct {

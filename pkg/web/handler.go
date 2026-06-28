@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 type Handler struct {
@@ -23,9 +25,19 @@ func NewHandler(service *Service, agents *AgentPool, ioaHandler http.Handler, st
 	mux.HandleFunc("GET /api/scans/{id}/events", h.scanEvents)
 	mux.HandleFunc("GET /api/scans/{id}/report", h.scanReport)
 	mux.HandleFunc("GET /api/status", h.serviceStatus)
-	mux.HandleFunc("GET /api/config/llm", h.getLLMConfig)
-	mux.HandleFunc("PUT /api/config/llm", h.saveLLMConfig)
+	mux.HandleFunc("GET /api/config", h.getConfig)
+	mux.HandleFunc("PUT /api/config", h.saveConfig)
+	mux.HandleFunc("GET /api/config/distribute", h.getDistributeConfig)
 	mux.HandleFunc("GET /api/agents", h.listAgents)
+
+	// Chat session routes
+	mux.HandleFunc("POST /api/chat/sessions", h.createSession)
+	mux.HandleFunc("GET /api/chat/sessions", h.listSessions)
+	mux.HandleFunc("GET /api/chat/sessions/{id}", h.getSession)
+	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.deleteSession)
+	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.sendMessage)
+	mux.HandleFunc("GET /api/chat/sessions/{id}/messages", h.listMessages)
+	mux.HandleFunc("GET /api/chat/sessions/{id}/events", h.sessionEvents)
 
 	if agents != nil {
 		mux.HandleFunc("/api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -81,24 +93,33 @@ func (h *handlerImpl) listAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.agents.List())
 }
 
-func (h *handlerImpl) getLLMConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := h.service.GetLLMConfig(r.Context())
+func (h *handlerImpl) getConfig(w http.ResponseWriter, r *http.Request) {
+	cs, err := h.service.GetConfigStatus(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+	writeJSON(w, http.StatusOK, cs)
 }
 
-func (h *handlerImpl) saveLLMConfig(w http.ResponseWriter, r *http.Request) {
-	var req LLMConfig
+func (h *handlerImpl) saveConfig(w http.ResponseWriter, r *http.Request) {
+	var req webproto.DistributeConfig
 	if err := decodeJSON(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	cfg, err := h.service.SaveLLMConfig(r.Context(), req)
+	cs, err := h.service.SaveConfig(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cs)
+}
+
+func (h *handlerImpl) getDistributeConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.service.GetDistributeConfig(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
@@ -154,7 +175,7 @@ func (h *handlerImpl) scanEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "scan not found")
 		return
 	}
-	ServeSSE(w, r, h.service.Hub(), id)
+	ServeSSE(w, r, h.service.Hub(), id, "complete", "error")
 }
 
 func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +191,93 @@ func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, report) //nolint:gosec // Content-Type is text/markdown, not HTML
+}
+
+// --- Chat session handlers ---
+
+func (h *handlerImpl) createSession(w http.ResponseWriter, r *http.Request) {
+	var req CreateSessionRequest
+	if r.ContentLength > 0 {
+		_ = decodeJSON(r.Body, &req)
+	}
+	if req.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	session, err := h.service.CreateSession(r.Context(), req.AgentID, req.Title)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, session)
+}
+
+func (h *handlerImpl) listSessions(w http.ResponseWriter, r *http.Request) {
+	sessions, err := h.service.ListSessions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sessions == nil {
+		sessions = []*ChatSession{}
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (h *handlerImpl) getSession(w http.ResponseWriter, r *http.Request) {
+	session, err := h.service.GetSession(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (h *handlerImpl) deleteSession(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.DeleteSession(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
+	var req SendMessageRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	msg, err := h.service.HandleUserMessage(r.Context(), r.PathValue("id"), req.Content)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {
+	msgs, err := h.service.GetMessages(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []*ChatMessage{}
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := h.service.GetSession(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	ServeSSE(w, r, h.service.Hub(), sessionTopic(id), "_never")
 }
 
 func pathSegments(path string) []string {

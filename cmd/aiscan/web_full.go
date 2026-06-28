@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/web"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -35,7 +36,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	}
 	defer store.Close()
 
-	application, err := initWebApp(ctx, option.ConfigFile, logger)
+	application, err := initWebApp(ctx, option, logger)
 	if err != nil {
 		return fmt.Errorf("init aiscan: %s", err)
 	}
@@ -47,11 +48,12 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	}
 
 	configFile := option.ConfigFile
+	appOption := *option
 	service := web.NewService(web.ServiceConfig{
 		Store:         store,
 		App:           application,
 		ConfigStore:   &webConfigStore{explicit: configFile},
-		AppFactory:    func(ctx context.Context) (*runner.App, error) { return initWebApp(ctx, configFile, logger) },
+		AppFactory:    func(ctx context.Context) (*runner.App, error) { return initWebApp(ctx, &appOption, logger) },
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
@@ -116,10 +118,10 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebApp(ctx context.Context, configFile string, logger telemetry.Logger) (*runner.App, error) {
+func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*runner.App, error) {
 	option := cfg.Option{}
-	if configFile != "" {
-		option.ConfigFile = configFile
+	if baseOption != nil {
+		option = *baseOption
 	}
 	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
 	if err != nil {
@@ -150,107 +152,68 @@ func initWebApp(ctx context.Context, configFile string, logger telemetry.Logger)
 }
 
 // ---------------------------------------------------------------------------
-// LLM config file store for web UI settings page
+// Config file store for web UI settings page
 // ---------------------------------------------------------------------------
-
-type webYAMLConfig struct {
-	LLM struct {
-		Provider string `yaml:"provider"`
-		BaseURL  string `yaml:"base_url"`
-		APIKey   string `yaml:"api_key"`
-		Model    string `yaml:"model"`
-		Proxy    string `yaml:"proxy"`
-	} `yaml:"llm"`
-	Cyberhub struct {
-		URL   string `yaml:"url"`
-		Key   string `yaml:"key"`
-		Mode  string `yaml:"mode"`
-		Proxy string `yaml:"proxy"`
-	} `yaml:"cyberhub"`
-	Scan struct {
-		Verify        string `yaml:"verify"`
-		VerifyTimeout int    `yaml:"verify_timeout"`
-	} `yaml:"scan"`
-	Search struct {
-		TavilyKeys string `yaml:"tavily_keys"`
-	} `yaml:"search"`
-}
 
 type webConfigStore struct {
 	explicit string
 	mu       sync.Mutex
 }
 
-func (s *webConfigStore) GetLLMConfig(ctx context.Context) (web.LLMConfig, error) {
+func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, webproto.DistributeConfig, error) {
 	if err := ctx.Err(); err != nil {
-		return web.LLMConfig{}, err
+		return "", false, webproto.DistributeConfig{}, err
 	}
 	p, loaded := s.resolveConfigPath()
-	c := webYAMLConfig{}
-	if loaded {
-		c = loadWebYAML(p)
+	if !loaded {
+		return p, false, webproto.DistributeConfig{}, nil
 	}
-	return web.LLMConfig{
-		ConfigPath:       p,
-		ConfigLoaded:     loaded,
-		Provider:         c.LLM.Provider,
-		BaseURL:          c.LLM.BaseURL,
-		APIKeyConfigured: strings.TrimSpace(c.LLM.APIKey) != "",
-		Model:            c.LLM.Model,
-		Proxy:            c.LLM.Proxy,
-	}, nil
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return p, false, webproto.DistributeConfig{}, err
+	}
+	var dc webproto.DistributeConfig
+	_ = yaml.Unmarshal(data, &dc)
+	return p, true, dc, nil
 }
 
-func (s *webConfigStore) SaveLLMConfig(ctx context.Context, llmCfg web.LLMConfig) (web.LLMConfig, error) {
+func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) error {
 	if err := ctx.Err(); err != nil {
-		return web.LLMConfig{}, err
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	p, loaded := s.resolveConfigPath()
-	var data []byte
+	var current webproto.DistributeConfig
 	if loaded {
-		current, err := os.ReadFile(p)
-		if err != nil {
-			return web.LLMConfig{}, err
+		if data, err := os.ReadFile(p); err == nil {
+			_ = yaml.Unmarshal(data, &current)
 		}
-		data = current
 	}
 
-	current := webYAMLConfig{}
-	if len(data) > 0 {
-		_ = yaml.Unmarshal(data, &current)
-	}
-	apiKey := strings.TrimSpace(llmCfg.APIKey)
-	if apiKey == "" {
-		apiKey = current.LLM.APIKey
-	}
+	// Preserve existing secrets when incoming value is empty.
+	preserveSecret(&incoming.LLM.APIKey, current.LLM.APIKey)
+	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
+	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
+	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)
+	preserveSecret(&incoming.Recon.HunterAPIKey, current.Recon.HunterAPIKey)
+	preserveSecret(&incoming.Search.TavilyKeys, current.Search.TavilyKeys)
+	preserveSecret(&incoming.IOA.Token, current.IOA.Token)
 
-	current.LLM.Provider = strings.TrimSpace(llmCfg.Provider)
-	current.LLM.BaseURL = strings.TrimSpace(llmCfg.BaseURL)
-	current.LLM.APIKey = apiKey
-	current.LLM.Model = strings.TrimSpace(llmCfg.Model)
-	current.LLM.Proxy = strings.TrimSpace(llmCfg.Proxy)
-	next, _ := yaml.Marshal(&current)
+	next, _ := yaml.Marshal(&incoming)
 	if dir := filepath.Dir(p); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return web.LLMConfig{}, err
+			return err
 		}
 	}
-	if err := os.WriteFile(p, next, 0600); err != nil {
-		return web.LLMConfig{}, err
+	return os.WriteFile(p, next, 0600)
+}
+
+func preserveSecret(incoming *string, existing string) {
+	if strings.TrimSpace(*incoming) == "" {
+		*incoming = existing
 	}
-	saved := loadWebYAML(p)
-	return web.LLMConfig{
-		ConfigPath:       p,
-		ConfigLoaded:     true,
-		Provider:         saved.LLM.Provider,
-		BaseURL:          saved.LLM.BaseURL,
-		APIKeyConfigured: strings.TrimSpace(saved.LLM.APIKey) != "",
-		Model:            saved.LLM.Model,
-		Proxy:            saved.LLM.Proxy,
-	}, nil
 }
 
 func (s *webConfigStore) resolveConfigPath() (string, bool) {
@@ -280,15 +243,3 @@ func findWebConfigFile(explicit string) string {
 	return ""
 }
 
-func loadWebYAML(path string) webYAMLConfig {
-	var c webYAMLConfig
-	if path == "" {
-		return c
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return c
-	}
-	_ = yaml.Unmarshal(data, &c)
-	return c
-}

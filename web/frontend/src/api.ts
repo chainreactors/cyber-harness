@@ -144,15 +144,28 @@ export interface AgentStats {
   last_event?: string;
 }
 
-export interface LLMConfig {
+// ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
+export interface ConfigStatus {
   config_path?: string;
   config_loaded: boolean;
-  provider: string;
-  base_url: string;
-  api_key?: string;
-  api_key_configured: boolean;
-  model: string;
-  proxy: string;
+  llm: { provider: string; base_url: string; api_key_configured: boolean; model: string; proxy: string };
+  cyberhub: { url: string; key_configured: boolean; mode: string; proxy: string };
+  recon: { fofa_email: string; fofa_key_configured: boolean; hunter_token_configured: boolean; hunter_api_key_configured: boolean; proxy: string; limit?: number };
+  scan: { verify: string; verify_timeout: number };
+  search: { tavily_keys_configured: boolean };
+  ioa: { url: string; token_configured: boolean; node_name: string; space: string };
+  agent: { tools: string[]; timeout: number; save_session: boolean };
+}
+
+// DistributeConfig — PUT /api/config request body (with secret values)
+export interface DistributeConfig {
+  llm: { provider: string; base_url: string; api_key: string; model: string; proxy: string };
+  cyberhub: { url: string; key: string; mode: string; proxy: string };
+  recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number };
+  scan: { verify: string; verify_timeout: number };
+  search: { tavily_keys: string };
+  ioa: { url: string; token: string; node_name: string; space: string };
+  agent: { tools: string[]; timeout: number; save_session: boolean };
 }
 
 export interface TerminalMessage {
@@ -172,12 +185,12 @@ export async function listAgents(): Promise<AgentInfo[]> {
   return apiJSON('/api/agents', 'Failed to list agents');
 }
 
-export async function getLLMConfig(): Promise<LLMConfig> {
-  return apiJSON('/api/config/llm', 'Failed to load LLM config');
+export async function getConfigStatus(): Promise<ConfigStatus> {
+  return apiJSON('/api/config', 'Failed to load config');
 }
 
-export async function saveLLMConfig(config: LLMConfig): Promise<LLMConfig> {
-  return apiJSON('/api/config/llm', 'Failed to save LLM config', {
+export async function saveConfig(config: DistributeConfig): Promise<ConfigStatus> {
+  return apiJSON('/api/config', 'Failed to save config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -258,6 +271,125 @@ export function subscribeScanEvents(
   es.addEventListener('output', handler('output'));
 
   return () => es.close();
+}
+
+// --- Chat session types ---
+
+export interface ChatSession {
+  id: string
+  agent_id: string
+  agent_name?: string
+  title: string
+  status: 'active' | 'archived'
+  scan_ids?: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMessage {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant' | 'system' | 'tool_call' | 'tool_result'
+  agent_id?: string
+  agent_name?: string
+  content: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type ChatEventType =
+  | 'message' | 'message_start' | 'message_delta' | 'message_end'
+  | 'tool_call' | 'tool_result' | 'thinking'
+  | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
+  | 'agent_joined' | 'error'
+
+export interface ChatEvent {
+  type: ChatEventType
+  session_id: string
+  message_id?: string
+  role?: ChatMessage['role']
+  agent_id?: string
+  agent_name?: string
+  turn?: number
+  content?: string
+  delta?: string
+  tool_name?: string
+  tool_args?: string
+  tool_call_id?: string
+  scan_id?: string
+  result?: ScanResult
+  data?: string
+  error?: string
+}
+
+// --- Chat session API ---
+
+export async function createChatSession(agentID: string, title?: string): Promise<ChatSession> {
+  return apiJSON('/api/chat/sessions', 'Failed to create session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id: agentID, title: title || '' }),
+  })
+}
+
+export async function listChatSessions(): Promise<ChatSession[]> {
+  return apiJSON('/api/chat/sessions', 'Failed to list sessions')
+}
+
+export async function getChatSession(id: string): Promise<ChatSession> {
+  return apiJSON(`/api/chat/sessions/${encodeURIComponent(id)}`, 'Session not found')
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  await apiJSON(`/api/chat/sessions/${encodeURIComponent(id)}`, 'Failed to delete session', {
+    method: 'DELETE',
+  })
+}
+
+export async function sendChatMessage(sessionID: string, content: string): Promise<ChatMessage> {
+  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to send message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
+  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to list messages')
+}
+
+export function subscribeChatEvents(
+  sessionID: string,
+  onEvent: (event: ChatEvent) => void,
+): () => void {
+  const url = `/api/chat/sessions/${encodeURIComponent(sessionID)}/events`
+  const es = new EventSource(url)
+
+  const eventTypes: ChatEventType[] = [
+    'message', 'message_start', 'message_delta', 'message_end',
+    'tool_call', 'tool_result', 'thinking',
+    'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
+    'agent_joined', 'error',
+  ]
+
+  for (const type of eventTypes) {
+    es.addEventListener(type, (e: Event) => {
+      const data = 'data' in e ? (e as MessageEvent).data : undefined
+      if (typeof data !== 'string' || data === '') return
+      try {
+        const parsed = JSON.parse(data)
+        onEvent({ ...parsed, type })
+      } catch {
+        onEvent({ type, session_id: sessionID, data } as ChatEvent)
+      }
+    })
+  }
+
+  es.addEventListener('error', () => {
+    // EventSource auto-reconnects; no action needed.
+  })
+
+  return () => es.close()
 }
 
 export function agentTerminalWebSocketURL(agentID: string): string {

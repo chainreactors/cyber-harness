@@ -13,17 +13,18 @@ import (
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-type LLMConfigStore interface {
-	GetLLMConfig(ctx context.Context) (LLMConfig, error)
-	SaveLLMConfig(ctx context.Context, cfg LLMConfig) (LLMConfig, error)
+type ConfigStore interface {
+	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg webproto.DistributeConfig, err error)
+	SaveDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) error
 }
 
 type ServiceConfig struct {
 	Store         Store
 	App           *runner.App
-	ConfigStore   LLMConfigStore
+	ConfigStore   ConfigStore
 	AppFactory    func(ctx context.Context) (*runner.App, error)
 	AgentPool     *AgentPool
 	MaxConcurrent int
@@ -34,15 +35,16 @@ type Service struct {
 	store   Store
 	appMu   sync.RWMutex
 	app     *runner.App
-	config  LLMConfigStore
+	config  ConfigStore
 	reload  func(ctx context.Context) (*runner.App, error)
 	agents  *AgentPool
 	hub     *Hub
 	sem     chan struct{}
 	timeout time.Duration
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu           sync.Mutex
+	cancels      map[string]context.CancelFunc
+	taskSessions map[string]string // taskID → sessionID
 }
 
 func NewService(cfg ServiceConfig) *Service {
@@ -54,23 +56,29 @@ func NewService(cfg ServiceConfig) *Service {
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	return &Service{
-		store:   cfg.Store,
-		app:     cfg.App,
-		config:  cfg.ConfigStore,
-		reload:  cfg.AppFactory,
-		agents:  cfg.AgentPool,
-		hub:     NewHub(),
-		sem:     make(chan struct{}, maxConcurrent),
-		timeout: timeout,
-		cancels: make(map[string]context.CancelFunc),
+	svc := &Service{
+		store:        cfg.Store,
+		app:          cfg.App,
+		config:       cfg.ConfigStore,
+		reload:       cfg.AppFactory,
+		agents:       cfg.AgentPool,
+		hub:          NewHub(),
+		sem:          make(chan struct{}, maxConcurrent),
+		timeout:      timeout,
+		cancels:      make(map[string]context.CancelFunc),
+		taskSessions: make(map[string]string),
 	}
+	if cfg.AgentPool != nil {
+		cfg.AgentPool.SetSessionLookup(svc)
+	}
+	return svc
 }
 
 func (s *Service) Hub() *Hub { return s.hub }
 
 func (s *Service) SetAgentPool(pool *AgentPool) {
 	s.agents = pool
+	pool.SetSessionLookup(s)
 }
 
 func (s *Service) Close() {
@@ -97,50 +105,56 @@ func (s *Service) Status() ServiceStatus {
 		status.LLMAPIKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
 	}
 	if s.config != nil {
-		if cfg, err := s.config.GetLLMConfig(context.Background()); err == nil {
-			status.ConfigPath = cfg.ConfigPath
-			status.ConfigLoaded = cfg.ConfigLoaded
+		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
+			status.ConfigPath = path
+			status.ConfigLoaded = loaded
 			if status.LLMProvider == "" {
-				status.LLMProvider = cfg.Provider
+				status.LLMProvider = dc.LLM.Provider
 			}
 			if status.LLMModel == "" {
-				status.LLMModel = cfg.Model
+				status.LLMModel = dc.LLM.Model
 			}
-			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || cfg.APIKeyConfigured
+			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || dc.LLM.APIKey != ""
 		}
 	}
 	return status
 }
 
-func (s *Service) GetLLMConfig(ctx context.Context) (LLMConfig, error) {
+func (s *Service) GetConfigStatus(ctx context.Context) (ConfigStatus, error) {
 	if s.config == nil {
-		return LLMConfig{}, fmt.Errorf("LLM config store is not configured")
+		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
-	cfg, err := s.config.GetLLMConfig(ctx)
+	path, loaded, dc, err := s.config.GetDistributeConfig(ctx)
 	if err != nil {
-		return LLMConfig{}, err
+		return ConfigStatus{}, err
 	}
-	cfg.APIKey = ""
-	return cfg, nil
+	return ConfigStatusFromDistribute(&dc, path, loaded), nil
 }
 
-func (s *Service) SaveLLMConfig(ctx context.Context, cfg LLMConfig) (LLMConfig, error) {
+func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig) (ConfigStatus, error) {
 	if s.config == nil {
-		return LLMConfig{}, fmt.Errorf("LLM config store is not configured")
+		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
-	saved, err := s.config.SaveLLMConfig(ctx, cfg)
-	if err != nil {
-		return LLMConfig{}, err
+	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
+		return ConfigStatus{}, err
 	}
 	if s.reload != nil {
 		app, err := s.reload(ctx)
 		if err != nil {
-			return saved, fmt.Errorf("reload aiscan runtime: %w", err)
+			cs, _ := s.GetConfigStatus(ctx)
+			return cs, fmt.Errorf("reload aiscan runtime: %w", err)
 		}
 		s.swapApp(app)
 	}
-	saved.APIKey = ""
-	return saved, nil
+	return s.GetConfigStatus(ctx)
+}
+
+func (s *Service) GetDistributeConfig(ctx context.Context) (webproto.DistributeConfig, error) {
+	if s.config == nil {
+		return webproto.DistributeConfig{}, fmt.Errorf("config store is not configured")
+	}
+	_, _, dc, err := s.config.GetDistributeConfig(ctx)
+	return dc, err
 }
 
 func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*ScanJob, error) {
@@ -302,6 +316,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		Type: "complete",
 		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
 	})
+	s.broadcastScanComplete(job.ID, result)
 }
 
 func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
@@ -334,6 +349,7 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 		Type: "complete",
 		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
 	})
+	s.broadcastScanComplete(job.ID, result)
 }
 
 func (s *Service) failJob(job *ScanJob, errMsg string) {
@@ -686,4 +702,437 @@ func lastOutputLine(output string) string {
 		}
 	}
 	return ""
+}
+
+// --- Chat session service methods ---
+
+func sessionTopic(id string) string {
+	return "session:" + id
+}
+
+func (s *Service) TaskSession(taskID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sid, ok := s.taskSessions[taskID]
+	return sid, ok
+}
+
+func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*ChatSession, error) {
+	var agentName string
+	if s.agents != nil {
+		if info := s.agents.get(agentID); info != nil {
+			agentName = info.name
+		}
+	}
+	now := time.Now()
+	session := &ChatSession{
+		ID:        generateID(),
+		AgentID:   agentID,
+		AgentName: agentName,
+		Title:     title,
+		Status:    SessionActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.store.CreateSession(ctx, session); err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+	return session, nil
+}
+
+func (s *Service) GetSession(ctx context.Context, id string) (*ChatSession, error) {
+	return s.store.GetSession(ctx, id)
+}
+
+func (s *Service) ListSessions(ctx context.Context) ([]*ChatSession, error) {
+	return s.store.ListSessions(ctx, 100)
+}
+
+func (s *Service) DeleteSession(ctx context.Context, id string) error {
+	return s.store.DeleteSession(ctx, id)
+}
+
+func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMessage, error) {
+	return s.store.ListMessages(ctx, sessionID, 500)
+}
+
+func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
+	event.SessionID = sessionID
+	if !event.Transient {
+		s.persistRuntimeChatEvent(sessionID, event)
+	}
+	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
+		Type: event.Type,
+		Data: mustJSON(event),
+	})
+}
+
+func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
+	if s == nil || s.store == nil || sessionID == "" {
+		return
+	}
+
+	now := time.Now()
+	msg := &ChatMessage{
+		ID:        generateID(),
+		SessionID: sessionID,
+		AgentID:   event.AgentID,
+		AgentName: event.AgentName,
+		CreatedAt: now,
+	}
+	metadata := map[string]any{
+		"event_type": event.Type,
+	}
+	if event.Turn > 0 {
+		metadata["turn"] = event.Turn
+	}
+
+	switch event.Type {
+	case ChatEventThinking:
+		msg.Role = "system"
+		msg.Content = strings.TrimSpace(event.Content)
+		if msg.Content == "" {
+			msg.Content = "thinking"
+		}
+
+	case ChatEventAgentJoined:
+		msg.Role = "system"
+		msg.Content = strings.TrimSpace(event.AgentName + " joined")
+
+	case ChatEventToolCall:
+		msg.Role = "tool_call"
+		msg.Content = event.ToolArgs
+		metadata["tool_call_id"] = event.ToolCallID
+		metadata["tool_name"] = event.ToolName
+		metadata["tool_args"] = event.ToolArgs
+
+	case ChatEventToolResult:
+		msg.Role = "tool_result"
+		msg.Content = event.Content
+		metadata["tool_call_id"] = event.ToolCallID
+
+	default:
+		return
+	}
+
+	if data, err := json.Marshal(metadata); err == nil {
+		msg.Metadata = data
+	}
+	_ = s.store.AddMessage(context.Background(), msg)
+}
+
+func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string) (*ChatMessage, error) {
+	now := time.Now()
+	msg := &ChatMessage{
+		ID:        generateID(),
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   content,
+		CreatedAt: now,
+	}
+	if err := s.store.AddMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("store message: %w", err)
+	}
+
+	// Update session timestamp and auto-title from first message.
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err == nil {
+		session.UpdatedAt = now
+		if session.Title == "" {
+			title := content
+			if len(title) > 60 {
+				title = title[:60] + "..."
+			}
+			session.Title = title
+		}
+		_ = s.store.UpdateSession(ctx, session)
+	}
+
+	go s.dispatchUserMessage(sessionID, msg)
+
+	return msg, nil
+}
+
+func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage) {
+	content := strings.TrimSpace(msg.Content)
+
+	switch {
+	case strings.HasPrefix(content, "/scan "):
+		s.handleScanCommand(sessionID, content[6:])
+
+	case strings.HasPrefix(content, "/help"):
+		s.broadcastSystemMessage(sessionID, "Available commands:\n- Free text — chat with an LLM-enabled agent\n- `/scan <target>` — start a scan from the web server\n- `/status` — show system status\n- `/agents` — list connected agents\n- `!<command>` — execute a command on a connected agent")
+
+	case strings.HasPrefix(content, "/status"):
+		status := s.Status()
+		text := fmt.Sprintf("LLM: %s %s (available: %v)\nAgents: %d\nConfig: %v",
+			status.LLMProvider, status.LLMModel, status.LLMAvailable,
+			status.Agents, status.ConfigLoaded)
+		s.broadcastSystemMessage(sessionID, text)
+
+	case strings.HasPrefix(content, "/agents"):
+		s.handleAgentsCommand(sessionID)
+
+	case strings.HasPrefix(content, "!"):
+		s.handleShellCommand(sessionID, content[1:])
+
+	default:
+		s.handleChatMessage(sessionID, content)
+	}
+}
+
+func (s *Service) handleScanCommand(sessionID, args string) {
+	ctx := context.Background()
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type:  ChatEventError,
+			Error: "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]",
+		})
+		return
+	}
+
+	target := parts[0]
+	mode := "quick"
+	var verify, sniper, deep bool
+	for _, p := range parts[1:] {
+		switch p {
+		case "--mode":
+			// next arg handled below
+		case "full":
+			mode = "full"
+		case "--verify":
+			verify = true
+		case "--sniper":
+			sniper = true
+		case "--deep":
+			deep = true
+		}
+	}
+	for i, p := range parts {
+		if p == "--mode" && i+1 < len(parts) {
+			mode = parts[i+1]
+		}
+	}
+
+	job, err := s.SubmitScan(ctx, target, mode, verify, sniper, deep)
+	if err != nil {
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type:  ChatEventError,
+			Error: fmt.Sprintf("scan failed: %s", err),
+		})
+		return
+	}
+
+	_ = s.store.LinkScanToSession(ctx, sessionID, job.ID)
+
+	s.mu.Lock()
+	s.taskSessions[job.ID] = sessionID
+	s.mu.Unlock()
+
+	s.BroadcastChatEvent(sessionID, ChatEvent{
+		Type:   ChatEventScanStarted,
+		ScanID: job.ID,
+		Data:   fmt.Sprintf("Scan started: %s (%s)", target, mode),
+	})
+}
+
+func (s *Service) handleAgentsCommand(sessionID string) {
+	if s.agents == nil || s.agents.Count() == 0 {
+		s.broadcastSystemMessage(sessionID, "No agents connected.")
+		return
+	}
+	agents := s.agents.List()
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%d agent(s) connected:\n", len(agents)))
+	for _, a := range agents {
+		status := "idle"
+		if a.Busy {
+			status = "busy"
+		}
+		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", a.Name, a.ID[:8], status))
+		if a.Identity.Model != "" {
+			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Identity.Provider, a.Identity.Model))
+		}
+		sb.WriteString("\n")
+	}
+	s.broadcastSystemMessage(sessionID, sb.String())
+}
+
+func (s *Service) sessionAgent(sessionID string) *remoteAgent {
+	session, err := s.store.GetSession(context.Background(), sessionID)
+	if err != nil || session.AgentID == "" {
+		return nil
+	}
+	if s.agents == nil {
+		return nil
+	}
+	return s.agents.get(session.AgentID)
+}
+
+func (s *Service) handleShellCommand(sessionID, command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return
+	}
+
+	agent := s.sessionAgent(sessionID)
+	if agent == nil {
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type:  ChatEventError,
+			Error: "agent is not connected",
+		})
+		return
+	}
+
+	taskID := generateID()
+	s.mu.Lock()
+	s.taskSessions[taskID] = sessionID
+	s.mu.Unlock()
+
+	s.BroadcastChatEvent(sessionID, ChatEvent{
+		Type:      ChatEventAgentJoined,
+		AgentID:   agent.id,
+		AgentName: agent.name,
+	})
+
+	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, command)
+	if err != nil {
+		s.mu.Lock()
+		delete(s.taskSessions, taskID)
+		s.mu.Unlock()
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type:  ChatEventError,
+			Error: err.Error(),
+		})
+		return
+	}
+
+	go func() {
+		res, ok := <-resultCh
+		s.mu.Lock()
+		delete(s.taskSessions, taskID)
+		s.mu.Unlock()
+		if !ok {
+			s.BroadcastChatEvent(sessionID, ChatEvent{
+				Type:  ChatEventError,
+				Error: "agent disconnected",
+			})
+			return
+		}
+		content := res.Output
+		if res.Err != "" {
+			content = "Error: " + res.Err
+		}
+		s.persistAssistantMessage(sessionID, agent.id, agent.name, content, res.Turn)
+	}()
+}
+
+func (s *Service) handleChatMessage(sessionID, content string) {
+	agent := s.sessionAgent(sessionID)
+	if agent == nil {
+		s.broadcastSystemMessage(sessionID, "Agent is not connected. Reconnect the agent to continue chatting.")
+		return
+	}
+
+	taskID := generateID()
+	s.mu.Lock()
+	s.taskSessions[taskID] = sessionID
+	s.mu.Unlock()
+
+	s.BroadcastChatEvent(sessionID, ChatEvent{
+		Type:      ChatEventAgentJoined,
+		AgentID:   agent.id,
+		AgentName: agent.name,
+	})
+
+	resultCh, err := s.agents.DispatchChat(agent.id, taskID, content)
+	if err != nil {
+		s.mu.Lock()
+		delete(s.taskSessions, taskID)
+		s.mu.Unlock()
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type:  ChatEventError,
+			Error: err.Error(),
+		})
+		return
+	}
+
+	go func() {
+		res, ok := <-resultCh
+		s.mu.Lock()
+		delete(s.taskSessions, taskID)
+		s.mu.Unlock()
+		if !ok {
+			return
+		}
+		reply := res.Output
+		if res.Err != "" {
+			reply = "Error: " + res.Err
+		}
+		s.persistAssistantMessage(sessionID, agent.id, agent.name, reply, res.Turn)
+	}()
+}
+
+func (s *Service) broadcastSystemMessage(sessionID, content string) {
+	now := time.Now()
+	msg := &ChatMessage{
+		ID:        generateID(),
+		SessionID: sessionID,
+		Role:      "system",
+		Content:   content,
+		CreatedAt: now,
+	}
+	_ = s.store.AddMessage(context.Background(), msg)
+	s.BroadcastChatEvent(sessionID, ChatEvent{
+		Type:      ChatEventMessage,
+		MessageID: msg.ID,
+		Role:      "system",
+		Content:   content,
+	})
+}
+
+func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
+	s.mu.Lock()
+	sid, ok := s.taskSessions[scanID]
+	if ok {
+		delete(s.taskSessions, scanID)
+	}
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.BroadcastChatEvent(sid, ChatEvent{
+		Type:   ChatEventScanComplete,
+		ScanID: scanID,
+		Result: result,
+	})
+}
+
+func (s *Service) persistAssistantMessage(sessionID, agentID, agentName, content string, turn int) {
+	now := time.Now()
+	msg := &ChatMessage{
+		ID:        generateID(),
+		SessionID: sessionID,
+		Role:      "assistant",
+		AgentID:   agentID,
+		AgentName: agentName,
+		Content:   content,
+		CreatedAt: now,
+	}
+	if turn > 0 {
+		if data, err := json.Marshal(map[string]any{"turn": turn}); err == nil {
+			msg.Metadata = data
+		}
+	}
+	_ = s.store.AddMessage(context.Background(), msg)
+	s.BroadcastChatEvent(sessionID, ChatEvent{
+		Type:      ChatEventMessage,
+		MessageID: msg.ID,
+		Role:      "assistant",
+		AgentID:   agentID,
+		AgentName: agentName,
+		Turn:      turn,
+		Content:   content,
+	})
 }
