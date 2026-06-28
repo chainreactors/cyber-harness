@@ -360,6 +360,27 @@ export async function cancelChatSession(sessionID: string): Promise<void> {
   })
 }
 
+export interface FileUploadResult {
+  filename: string
+  path: string
+  size: number
+  error?: string
+}
+
+export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!resp.ok) {
+    const body = await resp.text()
+    throw new Error(body || `Upload failed: ${resp.status}`)
+  }
+  return resp.json()
+}
+
 export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
   return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to list messages')
 }

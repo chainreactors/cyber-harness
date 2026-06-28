@@ -24,7 +24,9 @@ import {
   MessageBubble as ChatMessageBubble,
   ToolCallDisplay as ChatToolCall,
   summarizeArgs,
+  type ChatAttachment,
 } from '@aspect/viewer'
+import { uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult } from '../api'
 import type { AssistantResponseState, TimelineItem } from '../hooks/useChatSession'
 import ScanProgressInline from './chat/ScanProgressInline'
@@ -43,6 +45,7 @@ interface Props {
   isBusy: boolean
   error: string
   hasActiveSession: boolean
+  activeSessionID: string | null
   onSend: (content: string) => void
   onPause: () => void
   onClearError: () => void
@@ -62,6 +65,7 @@ export default function ChatPanel({
   isThinking,
   isBusy,
   error,
+  activeSessionID,
   hasActiveSession,
   onSend,
   onPause,
@@ -85,6 +89,28 @@ export default function ChatPanel({
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [timeline.length, streamingText, isThinking])
+
+  async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
+    if (!attachments?.length) {
+      onSend(content)
+      return
+    }
+    const contextParts: string[] = []
+    for (const a of attachments) {
+      if (a.mode === 'context') {
+        const text = await a.file.text()
+        contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
+      } else if (a.mode === 'upload' && activeSessionID) {
+        try {
+          await uploadChatFile(activeSessionID, a.file)
+        } catch { /* upload error shown via SSE system message */ }
+      }
+    }
+    const fullContent = contextParts.length > 0
+      ? `${contextParts.join('\n')}\n\n${content}`
+      : content
+    if (fullContent.trim()) onSend(fullContent)
+  }
 
   function handleScroll() {
     const el = scrollRef.current
@@ -198,9 +224,10 @@ export default function ChatPanel({
 
         {hasActiveSession && (
           <ChatInput
-            onSend={onSend}
+            onSend={handleSendWithAttachments}
             onPause={onPause}
             busy={isBusy}
+            enableAttachments={!!activeSessionID}
           />
         )}
       </main>

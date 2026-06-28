@@ -3,9 +3,11 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -774,6 +776,73 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	}
 	s.broadcastSystemMessage(sessionID, "Paused.")
 	return nil
+}
+
+func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*webproto.FileUploadResult, error) {
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+	if s.agents == nil {
+		return nil, fmt.Errorf("no agent pool available")
+	}
+	agentID := session.AgentID
+	if agentID == "" {
+		return nil, fmt.Errorf("session has no assigned agent")
+	}
+
+	payload := webproto.FileUploadPayload{
+		Filename:  filename,
+		FileSize:  int64(len(data)),
+		MimeType:  http.DetectContentType(data),
+		SessionID: sessionID,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+
+	taskID := generateID()
+	msg := WSMessage{
+		Type:    "upload",
+		TaskID:  taskID,
+		DataB64: base64.StdEncoding.EncodeToString(data),
+		Payload: payloadJSON,
+	}
+
+	resultCh, err := s.agents.dispatchMessage(agentID, taskID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("agent dispatch failed: %w", err)
+	}
+
+	select {
+	case res, ok := <-resultCh:
+		if !ok {
+			return nil, fmt.Errorf("agent disconnected during upload")
+		}
+		var result webproto.FileUploadResult
+		if len(res.Result) > 0 {
+			if err := json.Unmarshal(res.Result, &result); err != nil {
+				return &webproto.FileUploadResult{
+					Filename: filename,
+					Path:     res.Output,
+					Size:     int64(len(data)),
+				}, nil
+			}
+		} else {
+			result.Filename = filename
+			result.Path = res.Output
+			result.Size = int64(len(data))
+		}
+		if result.Error != "" {
+			return nil, fmt.Errorf("agent upload error: %s", result.Error)
+		}
+		s.BroadcastChatEvent(sessionID, ChatEvent{
+			Type: "system",
+			Role: "system",
+			Content: fmt.Sprintf("File uploaded: %s → %s", filename, result.Path),
+		})
+		return &result, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*ChatSession, error) {

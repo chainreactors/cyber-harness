@@ -58,6 +58,20 @@ type AgentStats struct {
 	LastEvent        string `json:"last_event,omitempty"`
 }
 
+type FileUploadPayload struct {
+	Filename  string `json:"filename"`
+	FileSize  int64  `json:"file_size"`
+	MimeType  string `json:"mime_type,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type FileUploadResult struct {
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Error    string `json:"error,omitempty"`
+}
+
 type PTYPayload struct {
 	SessionID string      `json:"session_id,omitempty"`
 	Data      string      `json:"data,omitempty"`

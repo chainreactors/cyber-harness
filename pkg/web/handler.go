@@ -37,6 +37,7 @@ func NewHandler(service *Service, agents *AgentPool, ioaHandler http.Handler, st
 	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.deleteSession)
 	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.sendMessage)
 	mux.HandleFunc("POST /api/chat/sessions/{id}/cancel", h.cancelSession)
+	mux.HandleFunc("POST /api/chat/sessions/{id}/upload", h.uploadFile)
 	mux.HandleFunc("GET /api/chat/sessions/{id}/messages", h.listMessages)
 	mux.HandleFunc("GET /api/chat/sessions/{id}/events", h.sessionEvents)
 
@@ -266,6 +267,34 @@ func (h *handlerImpl) cancelSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
+}
+
+const maxUploadSize = 50 << 20 // 50 MB
+
+func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file field")
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read file")
+		return
+	}
+
+	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), header.Filename, data)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {

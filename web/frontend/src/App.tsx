@@ -190,6 +190,7 @@ export default function App() {
                   isThinking={chat.isThinking}
                   isBusy={chat.busy}
                   error={chat.error}
+                  activeSessionID={chat.activeSessionID}
                   hasActiveSession={chat.activeSessionID !== null}
                   onSend={chat.sendMessage}
                   onPause={chat.cancelMessage}

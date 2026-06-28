@@ -3,11 +3,13 @@ package webagent
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"os/user"
 	"runtime"
 	"strings"
@@ -269,6 +271,9 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 				}()
 				runChatPrompt(tCtx, m, rt, chatRuntime, send)
 			}(msg, taskCtx, cancel)
+
+		case "upload":
+			go handleFileUpload(msg, send)
 
 		case "cancel":
 			taskMu.Lock()
@@ -584,6 +589,55 @@ func chatSessionID(msg webproto.Message) string {
 		return strings.TrimSpace(payload.SessionID)
 	}
 	return ""
+}
+
+func handleFileUpload(msg webproto.Message, send func(webproto.Message)) {
+	var payload webproto.FileUploadPayload
+	if len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &payload)
+	}
+	if payload.Filename == "" {
+		payload.Filename = "upload"
+	}
+
+	data, err := base64.StdEncoding.DecodeString(msg.DataB64)
+	if err != nil {
+		send(webproto.Message{
+			Type:    "complete",
+			TaskID:  msg.TaskID,
+			Payload: mustJSON(webproto.FileUploadResult{Filename: payload.Filename, Error: "decode failed: " + err.Error()}),
+		})
+		return
+	}
+
+	dir := filepath.Join(os.TempDir(), "aiscan-uploads")
+	_ = os.MkdirAll(dir, 0o755)
+	dest := filepath.Join(dir, payload.Filename)
+
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		send(webproto.Message{
+			Type:    "complete",
+			TaskID:  msg.TaskID,
+			Payload: mustJSON(webproto.FileUploadResult{Filename: payload.Filename, Error: "write failed: " + err.Error()}),
+		})
+		return
+	}
+
+	send(webproto.Message{
+		Type:   "complete",
+		TaskID: msg.TaskID,
+		Data:   dest,
+		Payload: mustJSON(webproto.FileUploadResult{
+			Filename: payload.Filename,
+			Path:     dest,
+			Size:     int64(len(data)),
+		}),
+	})
+}
+
+func mustJSON(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
 }
 
 func isREPLCommand(prompt string) bool {
