@@ -31,6 +31,7 @@
     "cyber-ui/packages/ui/src",
     "cyber-ui/packages/theme/src",
     "cyber-ui/packages/markdown/src",
+    "cyber-ui/packages/viewer/src",
     "cyber-ui/packages/terminal/src"
   ]
 }

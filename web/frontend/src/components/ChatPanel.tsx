@@ -14,21 +14,19 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { Button, ThemeToggle } from '@aspect/ui'
+import { cn, useTheme } from '@aspect/theme'
+import { MarkdownContent } from '@aspect/markdown'
 import {
   AssistantResponse,
-  Button,
+  ChatInput,
   ChatThinking,
   MessageBubble as ChatMessageBubble,
-  ThemeToggle,
   ToolCallDisplay as ChatToolCall,
   summarizeArgs,
-} from '@aspect/ui'
-import { cn } from '@aspect/theme'
-import { useTheme } from '@aspect/theme'
-import { MarkdownContent } from '@aspect/markdown'
+} from '@aspect/viewer'
 import type { ChatMessage, ScanResult } from '../api'
 import type { AssistantResponseState, TimelineItem } from '../hooks/useChatSession'
-import ChatInput from './chat/ChatInput'
 import ScanProgressInline from './chat/ScanProgressInline'
 import ScanSummaryCard from './chat/ScanSummaryCard'
 
@@ -203,7 +201,6 @@ export default function ChatPanel({
             onSend={onSend}
             onPause={onPause}
             busy={isBusy}
-            formClassName={inputFormClass}
           />
         )}
       </main>
