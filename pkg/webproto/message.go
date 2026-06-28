@@ -147,6 +147,9 @@ func FrameToMessage(frame pty.Frame) Message {
 		encodePayloadData(&payload, frame.Data)
 		msg.Payload = mustMarshal(payload)
 	case pty.FrameOutput:
+		if frame.SessionID != "" {
+			msg.Payload = mustMarshal(map[string]any{"session_id": frame.SessionID})
+		}
 		encodeMessageData(&msg, frame.Data)
 	case pty.FrameError:
 		if frame.Error != "" {

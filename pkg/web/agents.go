@@ -32,6 +32,7 @@ type taskResult struct {
 	Output string
 	Result json.RawMessage
 	Err    string
+	Turn   int
 }
 
 type remoteAgent struct {
@@ -46,6 +47,7 @@ type remoteAgent struct {
 
 	mu    sync.Mutex
 	tasks map[string]chan taskResult
+	turns map[string]int
 	done  chan struct{}
 }
 
@@ -63,11 +65,18 @@ func (a *remoteAgent) info() AgentInfo {
 	}
 }
 
+// SessionLookup resolves a task ID to its owning chat session.
+type SessionLookup interface {
+	TaskSession(taskID string) (sessionID string, ok bool)
+	BroadcastChatEvent(sessionID string, event ChatEvent)
+}
+
 // AgentPool manages connected remote aiscan agents via WebSocket.
 type AgentPool struct {
 	mu             sync.RWMutex
 	agents         map[string]*remoteAgent
 	hub            *Hub
+	sessions       SessionLookup
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan WSMessage
 	ptyDrops       atomic.Int64
@@ -81,6 +90,10 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 		ptySubs:        make(map[string]chan WSMessage),
 		allowedOrigins: allowedOrigins,
 	}
+}
+
+func (p *AgentPool) SetSessionLookup(sl SessionLookup) {
+	p.sessions = sl
 }
 
 func (p *AgentPool) register(a *remoteAgent) {
@@ -145,8 +158,41 @@ func (p *AgentPool) Pick() *remoteAgent {
 	return fallback
 }
 
+// PickChat selects an idle LLM-capable agent, or any LLM-capable agent if all
+// are busy.
+func (p *AgentPool) PickChat() *remoteAgent {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var fallback *remoteAgent
+	for _, a := range p.agents {
+		a.mu.Lock()
+		busy := len(a.tasks) > 0
+		chatCapable := a.identity.Provider != ""
+		a.mu.Unlock()
+		if !chatCapable {
+			continue
+		}
+		if !busy {
+			return a
+		}
+		if fallback == nil {
+			fallback = a
+		}
+	}
+	return fallback
+}
+
 // DispatchCommand sends a command to an agent and returns a channel for the result.
 func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan taskResult, error) {
+	return p.dispatch(agentID, taskID, "exec", command)
+}
+
+// DispatchChat sends a natural-language prompt to an LLM-capable agent.
+func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
+	return p.dispatch(agentID, taskID, "chat", prompt)
+}
+
+func (p *AgentPool) dispatch(agentID, taskID, typ, data string) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
@@ -154,13 +200,15 @@ func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan tas
 	ch := make(chan taskResult, 1)
 	a.mu.Lock()
 	a.tasks[taskID] = ch
+	a.turns[taskID] = 0
 	a.mu.Unlock()
 
 	select {
-	case a.sendCh <- WSMessage{Type: "exec", TaskID: taskID, Data: command}:
+	case a.sendCh <- WSMessage{Type: typ, TaskID: taskID, Data: data}:
 	default:
 		a.mu.Lock()
 		delete(a.tasks, taskID)
+		delete(a.turns, taskID)
 		a.mu.Unlock()
 		close(ch)
 		return nil, fmt.Errorf("agent %s send channel full", agentID)
@@ -359,6 +407,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		identity:  info.Identity,
 		stats:     info.Stats,
 		tasks:     make(map[string]chan taskResult),
+		turns:     make(map[string]int),
 		done:      make(chan struct{}),
 	}
 	p.register(agent)
@@ -429,17 +478,24 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 				Type: "progress",
 				Data: mustJSON(map[string]string{"scan_id": msg.TaskID, "data": data}),
 			})
+			p.forwardToSession(a, msg.TaskID, ChatEvent{
+				Type:   ChatEventScanProgress,
+				ScanID: msg.TaskID,
+				Data:   data,
+			})
 		}
 
 	case "complete":
 		a.mu.Lock()
 		ch, ok := a.tasks[msg.TaskID]
+		turn := a.turns[msg.TaskID]
 		if ok {
 			delete(a.tasks, msg.TaskID)
+			delete(a.turns, msg.TaskID)
 		}
 		a.mu.Unlock()
 		if ok && ch != nil {
-			res := taskResult{Output: msg.Data, Result: msg.Payload}
+			res := taskResult{Output: msg.Data, Result: msg.Payload, Turn: turn}
 			ch <- res
 			close(ch)
 		}
@@ -448,18 +504,19 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 	case "error":
 		a.mu.Lock()
 		ch, ok := a.tasks[msg.TaskID]
+		turn := a.turns[msg.TaskID]
 		if ok {
 			delete(a.tasks, msg.TaskID)
+			delete(a.turns, msg.TaskID)
 		}
 		a.mu.Unlock()
 		if ok && ch != nil {
-			ch <- taskResult{Err: msg.Data}
+			ch <- taskResult{Err: msg.Data, Turn: turn}
 			close(ch)
 		}
 
 	default:
-		// Agent events (agent.*, log.*, scanner.*) are shown in the same
-		// progress stream as scanner output for the task that produced them.
+		// Backward-compat: flatten agent events into scan progress stream.
 		if p.hub != nil && msg.TaskID != "" {
 			raw, _ := json.Marshal(map[string]string{
 				"scan_id": msg.TaskID,
@@ -467,6 +524,8 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			})
 			p.hub.Broadcast(msg.TaskID, HubEvent{Type: "progress", Data: raw})
 		}
+		// Enriched: map agent events to typed ChatEvents for session SSE.
+		p.forwardAgentEvent(a, msg)
 	}
 }
 
@@ -486,6 +545,177 @@ func (p *AgentPool) recordScanResultStats(a *remoteAgent, payload json.RawMessag
 		a.stats.Loots += len(result.Loots)
 	}
 	a.mu.Unlock()
+}
+
+func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEvent) {
+	if p.sessions == nil || taskID == "" {
+		return
+	}
+	sid, ok := p.sessions.TaskSession(taskID)
+	if !ok {
+		return
+	}
+	if event.AgentID == "" {
+		event.AgentID = a.id
+	}
+	if event.AgentName == "" {
+		event.AgentName = a.name
+	}
+	p.sessions.BroadcastChatEvent(sid, event)
+}
+
+func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
+	if p.sessions == nil || msg.TaskID == "" {
+		return
+	}
+
+	turn := agentEventTurn(msg.Payload)
+	var event ChatEvent
+	switch msg.Type {
+	case "agent.turn_start":
+		event = ChatEvent{Type: ChatEventThinking, Turn: turn, Transient: true}
+	case "agent.message_start":
+		role, content, _, ok := agentMessageFromPayload(msg.Payload)
+		if !ok || role != "assistant" {
+			return
+		}
+		event = ChatEvent{
+			Type:    ChatEventMessageStart,
+			Role:    role,
+			Content: content,
+			Turn:    turn,
+		}
+	case "agent.message_update":
+		role, content, reasoning, ok := agentMessageFromPayload(msg.Payload)
+		if !ok || role != "assistant" {
+			return
+		}
+		if reasoning != "" {
+			p.forwardToSession(a, msg.TaskID, ChatEvent{
+				Type:      ChatEventThinking,
+				Role:      role,
+				Content:   reasoning,
+				Turn:      turn,
+				Transient: true,
+			})
+		}
+		if content == "" {
+			return
+		}
+		event = ChatEvent{
+			Type:    ChatEventMessageDelta,
+			Role:    role,
+			Content: content,
+			Turn:    turn,
+		}
+	case "agent.message_end":
+		role, content, reasoning, ok := agentMessageFromPayload(msg.Payload)
+		if !ok || role != "assistant" {
+			return
+		}
+		if reasoning != "" {
+			p.forwardToSession(a, msg.TaskID, ChatEvent{
+				Type:    ChatEventThinking,
+				Role:    role,
+				Content: reasoning,
+				Turn:    turn,
+			})
+		}
+		if content == "" {
+			return
+		}
+		event = ChatEvent{
+			Type:    ChatEventMessageEnd,
+			Role:    role,
+			Content: content,
+			Turn:    turn,
+		}
+	case "agent.tool_execution_start":
+		var payload struct {
+			ToolName   string `json:"tool_name"`
+			ToolCallID string `json:"tool_call_id"`
+			Arguments  string `json:"arguments"`
+			Turn       int    `json:"turn"`
+		}
+		if msg.Payload != nil {
+			_ = json.Unmarshal(msg.Payload, &payload)
+		}
+		if payload.Turn != 0 {
+			turn = payload.Turn
+		}
+		event = ChatEvent{
+			Type:       ChatEventToolCall,
+			ToolName:   payload.ToolName,
+			ToolArgs:   payload.Arguments,
+			ToolCallID: payload.ToolCallID,
+			Turn:       turn,
+		}
+	case "agent.tool_execution_end":
+		var payload struct {
+			ToolCallID string `json:"tool_call_id"`
+			Result     string `json:"result"`
+			Turn       int    `json:"turn"`
+		}
+		if msg.Payload != nil {
+			_ = json.Unmarshal(msg.Payload, &payload)
+		}
+		if payload.Turn != 0 {
+			turn = payload.Turn
+		}
+		event = ChatEvent{
+			Type:       ChatEventToolResult,
+			ToolCallID: payload.ToolCallID,
+			Content:    payload.Result,
+			Turn:       turn,
+		}
+	default:
+		return
+	}
+
+	if turn > 0 {
+		a.mu.Lock()
+		if _, ok := a.tasks[msg.TaskID]; ok {
+			a.turns[msg.TaskID] = turn
+		}
+		a.mu.Unlock()
+	}
+
+	p.forwardToSession(a, msg.TaskID, event)
+}
+
+func agentEventTurn(payload json.RawMessage) int {
+	if len(payload) == 0 {
+		return 0
+	}
+	var event struct {
+		Turn int `json:"turn"`
+	}
+	_ = json.Unmarshal(payload, &event)
+	return event.Turn
+}
+
+func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning string, ok bool) {
+	if len(payload) == 0 {
+		return "", "", "", false
+	}
+	var event struct {
+		Message *struct {
+			Role             string  `json:"role"`
+			Content          *string `json:"content"`
+			ReasoningContent *string `json:"reasoning_content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || event.Message == nil {
+		return "", "", "", false
+	}
+	role = event.Message.Role
+	if event.Message.Content != nil {
+		content = *event.Message.Content
+	}
+	if event.Message.ReasoningContent != nil {
+		reasoning = *event.Message.ReasoningContent
+	}
+	return role, content, reasoning, role != ""
 }
 
 func formatTelemetryProgress(msg WSMessage) string {

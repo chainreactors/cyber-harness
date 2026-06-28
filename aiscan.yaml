@@ -1,129 +1,16 @@
-# aiscan 配置文件
-#
-# 运行时: aiscan 自动加载 ./aiscan.yaml 或 <二进制所在目录>/aiscan.yaml
-# 优先级: CLI 参数 > 环境变量 > 配置文件 > 默认值
-# 生成:   aiscan --init
-#
-# 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
-#
-# LLM 配置支持两种格式:
-#   格式一 — 单 provider 简写（兼容旧配置）:
-#     llm:
-#       provider: deepseek
-#       api_key: sk-...
-#       model: deepseek-chat
-#
-#   格式二 — providers 列表（第一个为主 provider，其余为 fallback）:
-#     llm:
-#       providers:
-#         - provider: deepseek
-#           api_key: sk-...
-#           model: deepseek-chat
-#         - provider: openai
-#           api_key: sk-...
-#           model: gpt-4o
-#
-#   两种可混用：单字段设为主 provider，providers 列表设为 fallback
-
-# LLM Options
 llm:
-  # LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot
-  provider: ""
-  # LLM API base URL (leave empty to use provider default)
-  base_url: ""
-  # LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)
-  api_key: ""
-  # LLM model name
-  model: ""
-  # Proxy for LLM API requests
-  proxy: ""
-  # Additional LLM providers for fallback or multi-model routing
-  # providers:
-  #   - provider: ""
-  #     base_url: ""
-  #     api_key: ""
-  #     model: ""
-  #     proxy: ""
-  #     timeout: 0
-  #     images: ""
-
-# Scanner Options
+    provider: deepseek
+    base_url: https://api.deepseek.com
+    api_key: REMOVED_CREDENTIAL
+    model: deepseek-v4-pro
+    proxy: ""
 cyberhub:
-  # Cyberhub server URL for loading fingers/templates
-  url: ""
-  # Cyberhub API key
-  key: ""
-  # Cyberhub resource mode: merge or override
-  mode: ""
-  # Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)
-  proxy: ""
-
-# Agent Options
-agent:
-  # Optional tool groups to enable (search, browser). Arsenal is always loaded
-  # tools: []
-  # Overall timeout in seconds
-  timeout: 3600
-  # Goal evaluation criteria — an independent LLM evaluates whether the task was achieved
-  eval_criteria: ""
-  # Model for goal evaluation (defaults to main model)
-  eval_model: ""
-  # Max goal evaluation retry rounds
-  eval_retries: 3
-  # AIScan web server URL for remote REPL and PTY access
-  web_url: ""
-  # Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)
-  save_session: false
-
-# IOA Options
-ioa:
-  # IOA server URL (supports http://token@host:port for auth)
-  url: ""
-  # IOA server access key (for 'ioa serve'; auto-generated if empty)
-  token: ""
-  # IOA node name when auto-registering
-  node_name: ""
-  # IOA space name
-  space: "default"
-
-# Recon Options
-recon:
-  # FOFA account email for passive recon (or set env FOFA_EMAIL)
-  fofa_email: ""
-  # FOFA API key for passive recon (or set env FOFA_KEY)
-  fofa_key: ""
-  # Hunter web token (rarely needed; prefer hunter-api-key)
-  hunter_token: ""
-  # Hunter API key (64-hex from console) (or env HUNTER_API_KEY)
-  hunter_api_key: ""
-  # Outbound proxy for passive recon (socks5://host:port for hunter via mainland)
-  proxy: ""
-  # Per-query asset limit for passive recon (0 = unlimited)
-  limit: 0
-
-# Miscellaneous Options
-misc:
-  # Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)
-  data_dir: ""
-  # Enable debug logging
-  debug: false
-  # Quiet mode — only show final result
-  quiet: false
-  # Disable ANSI colors in scanner output
-  no_color: false
-
+    url: ""
+    key: ""
+    mode: ""
+    proxy: ""
 scan:
-  verify: ""
-  verify_timeout: 0
-
-
-# 搜索
+    verify: ""
+    verify_timeout: 0
 search:
-  # Tavily API keys (逗号分隔，留空则 fallback 到 DuckDuckGo)
-  tavily_keys: ""
-
-# 以下仅 build.sh 使用
-build:
-  osarch: ""
-  tags: ""
-  output: dist
+    tavily_keys: ""

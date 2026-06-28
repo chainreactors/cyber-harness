@@ -1,17 +1,37 @@
-const scanRouteBase = 'scans'
-
 export type RouteMode = 'none' | 'push' | 'replace'
 
-export function scanIdFromPath(pathname: string) {
+export type RouteTarget =
+  | { kind: 'root' }
+  | { kind: 'session'; id: string }
+  | { kind: 'scan'; id: string }
+
+export function parseRoute(pathname: string): RouteTarget {
   const segments = pathname.split('/').filter(Boolean)
-  if (segments.length < 2 || segments[0] !== scanRouteBase) {
-    return null
+  if (segments.length >= 2 && segments[0] === 'sessions') {
+    try {
+      return { kind: 'session', id: decodeURIComponent(segments[1]) }
+    } catch {
+      return { kind: 'session', id: segments[1] }
+    }
   }
-  try {
-    return decodeURIComponent(segments[1])
-  } catch {
-    return segments[1]
+  if (segments.length >= 2 && segments[0] === 'scans') {
+    try {
+      return { kind: 'scan', id: decodeURIComponent(segments[1]) }
+    } catch {
+      return { kind: 'scan', id: segments[1] }
+    }
   }
+  return { kind: 'root' }
+}
+
+export function scanIdFromPath(pathname: string) {
+  const route = parseRoute(pathname)
+  return route.kind === 'scan' ? route.id : null
+}
+
+export function sessionIdFromPath(pathname: string) {
+  const route = parseRoute(pathname)
+  return route.kind === 'session' ? route.id : null
 }
 
 export function isRootPath(pathname: string) {
@@ -19,11 +39,19 @@ export function isRootPath(pathname: string) {
 }
 
 export function scanRoutePath(id: string) {
-  return `/${scanRouteBase}/${encodeURIComponent(id)}`
+  return `/scans/${encodeURIComponent(id)}`
+}
+
+export function sessionRoutePath(id: string) {
+  return `/sessions/${encodeURIComponent(id)}`
 }
 
 export function setScanRoute(id: string, mode: RouteMode) {
   setBrowserRoute(scanRoutePath(id), mode)
+}
+
+export function setSessionRoute(id: string, mode: RouteMode) {
+  setBrowserRoute(sessionRoutePath(id), mode)
 }
 
 function setBrowserRoute(path: string, mode: RouteMode) {

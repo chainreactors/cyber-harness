@@ -121,6 +121,20 @@ func findMessage(msgs []WSMessage, typ string) (WSMessage, bool) {
 	return WSMessage{}, false
 }
 
+func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
+	t.Helper()
+	if _, err := page.Timeout(500*time.Millisecond).ElementR("button", "Terminal"); err != nil {
+		if toggle, err := page.Timeout(500 * time.Millisecond).Element("button[aria-label='Expand sidebar']"); err == nil {
+			toggle.MustClick()
+			time.Sleep(200 * time.Millisecond)
+			page.MustWaitStable()
+		}
+	}
+	page.MustElementR("button", "Terminal").MustClick()
+	time.Sleep(500 * time.Millisecond)
+	page.MustWaitStable()
+}
+
 func TestE2ETerminalOpenAndType(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping e2e test in short mode")
@@ -137,10 +151,7 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	browser := launchBrowser(t)
 	page := browser.MustPage(srv.URL).MustWaitStable()
 
-	// Click the Agents pill — title contains "agent(s) connected"
-	page.MustElement("button[title*='connected']").MustClick()
-	time.Sleep(500 * time.Millisecond)
-	page.MustWaitStable()
+	openFirstAgentTerminal(t, page)
 
 	// Two WebSocket terminals connect (ReplTerminal + TaskPTYPanel).
 	// Drain all initial messages from the agent: pty.open (repl), pty.list (tasks)
@@ -229,9 +240,7 @@ func TestE2ETerminalResize(t *testing.T) {
 	browser := launchBrowser(t)
 	page := browser.MustPage(srv.URL).MustWaitStable()
 
-	page.MustElement("button[title*='connected']").MustClick()
-	time.Sleep(500 * time.Millisecond)
-	page.MustWaitStable()
+	openFirstAgentTerminal(t, page)
 
 	// Drain initial messages and reply
 	initial := drainAgentMessages(agentConn, time.Second)

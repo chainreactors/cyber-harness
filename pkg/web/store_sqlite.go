@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -29,7 +30,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 }
 
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS scans (
 			id         TEXT PRIMARY KEY,
 			target     TEXT NOT NULL,
@@ -46,52 +47,120 @@ func migrate(db *sql.DB) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS chat_sessions (
+			id         TEXT PRIMARY KEY,
+			agent_id   TEXT NOT NULL DEFAULT '',
+			agent_name TEXT NOT NULL DEFAULT '',
+			title      TEXT NOT NULL DEFAULT '',
+			status     TEXT NOT NULL DEFAULT 'active',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS chat_messages (
+			id         TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			role       TEXT NOT NULL,
+			agent_id   TEXT NOT NULL DEFAULT '',
+			agent_name TEXT NOT NULL DEFAULT '',
+			content    TEXT NOT NULL DEFAULT '',
+			metadata   TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS session_scans (
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			scan_id    TEXT NOT NULL,
+			PRIMARY KEY (session_id, scan_id)
+		);
+	`); err != nil {
+		return err
+	}
+
+	for _, column := range []sqliteColumnMigration{
+		{table: "scans", name: "mode", definition: "TEXT NOT NULL DEFAULT 'quick'"},
+		{table: "scans", name: "ai", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{table: "scans", name: "verify", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{table: "scans", name: "sniper", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{table: "scans", name: "deep", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{table: "scans", name: "progress", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "scans", name: "report", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "scans", name: "result", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "scans", name: "error", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_sessions", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_sessions", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_sessions", name: "title", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_sessions", name: "status", definition: "TEXT NOT NULL DEFAULT 'active'"},
+		{table: "chat_messages", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_messages", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_messages", name: "metadata", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := ensureSQLiteColumn(db, column); err != nil {
+			return err
+		}
+	}
+
+	_, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
+		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
 	`)
-	if err != nil {
-		return err
-	}
-	if err := ensureColumn(db, "scans", "result", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureColumn(db, "scans", "ai", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := ensureColumn(db, "scans", "verify", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := ensureColumn(db, "scans", "sniper", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	return ensureColumn(db, "scans", "deep", "INTEGER NOT NULL DEFAULT 0")
+	return err
 }
 
-func ensureColumn(db *sql.DB, table, column, definition string) error {
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+type sqliteColumnMigration struct {
+	table      string
+	name       string
+	definition string
+}
+
+func ensureSQLiteColumn(db *sql.DB, column sqliteColumnMigration) error {
+	exists, err := sqliteColumnExists(db, column.table, column.name)
 	if err != nil {
 		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf(
+		"ALTER TABLE %s ADD COLUMN %s %s",
+		quoteSQLiteIdent(column.table),
+		quoteSQLiteIdent(column.name),
+		column.definition,
+	))
+	return err
+}
+
+func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", quoteSQLiteIdent(table)))
+	if err != nil {
+		return false, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return err
+		var (
+			cid          int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			pk           int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
 		}
 		if name == column {
-			return rows.Err()
+			return true, nil
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
+	return false, rows.Err()
+}
 
-	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
+func quoteSQLiteIdent(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (s *SQLiteStore) Close() error {
@@ -220,4 +289,137 @@ func scanRow(row *sql.Row) (*ScanJob, error) {
 
 func scanRows(rows *sql.Rows) (*ScanJob, error) {
 	return scanFromScanner(rows)
+}
+
+// --- Chat session CRUD ---
+
+func (s *SQLiteStore) CreateSession(ctx context.Context, session *ChatSession) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO chat_sessions (id, agent_id, agent_name, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.AgentID, session.AgentName, session.Title, session.Status,
+		session.CreatedAt.Format(time.RFC3339Nano), session.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*ChatSession, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, agent_id, agent_name, title, status, created_at, updated_at FROM chat_sessions WHERE id = ?`, id)
+	var cs ChatSession
+	var createdAt, updatedAt string
+	if err := row.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	scanIDs, _ := s.SessionScanIDs(ctx, id)
+	cs.ScanIDs = scanIDs
+	return &cs, nil
+}
+
+func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*ChatSession, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, agent_id, agent_name, title, status, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []*ChatSession
+	for rows.Next() {
+		var cs ChatSession
+		var createdAt, updatedAt string
+		if err := rows.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		sessions = append(sessions, &cs)
+	}
+	return sessions, rows.Err()
+}
+
+func (s *SQLiteStore) UpdateSession(ctx context.Context, session *ChatSession) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE chat_sessions SET title=?, status=?, updated_at=? WHERE id=?`,
+		session.Title, session.Status, session.UpdatedAt.Format(time.RFC3339Nano), session.ID,
+	)
+	return err
+}
+
+func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_sessions WHERE id=?`, id)
+	return err
+}
+
+// --- Chat message CRUD ---
+
+func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
+	metadata := ""
+	if msg.Metadata != nil {
+		metadata = string(msg.Metadata)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO chat_messages (id, session_id, role, agent_id, agent_name, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.SessionID, msg.Role, msg.AgentID, msg.AgentName, msg.Content, metadata,
+		msg.CreatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, session_id, role, agent_id, agent_name, content, metadata, created_at
+		 FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?`, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var msgs []*ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		var metadata, createdAt string
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.AgentID, &m.AgentName, &m.Content, &metadata, &createdAt); err != nil {
+			return nil, err
+		}
+		if metadata != "" {
+			m.Metadata = json.RawMessage(metadata)
+		}
+		m.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		msgs = append(msgs, &m)
+	}
+	return msgs, rows.Err()
+}
+
+// --- Session-scan association ---
+
+func (s *SQLiteStore) LinkScanToSession(ctx context.Context, sessionID, scanID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO session_scans (session_id, scan_id) VALUES (?, ?)`,
+		sessionID, scanID,
+	)
+	return err
+}
+
+func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT scan_id FROM session_scans WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

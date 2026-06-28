@@ -52,6 +52,33 @@ func TestPTYResponsePayloadRoundTripPreservesAttachedSession(t *testing.T) {
 	}
 }
 
+func TestPTYOutputPreservesSessionID(t *testing.T) {
+	msg := FrameToMessage(pty.Frame{
+		Type:      pty.FrameOutput,
+		StreamID:  "term-1",
+		SessionID: "session-1",
+		Data:      []byte("hello\n"),
+	})
+	if msg.Data != "hello\n" {
+		t.Fatalf("output data = %q", msg.Data)
+	}
+	var payload PTYPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.SessionID != "session-1" {
+		t.Fatalf("session id lost: %+v", payload)
+	}
+
+	frame, err := MessageToFrame(msg)
+	if err != nil {
+		t.Fatalf("MessageToFrame: %v", err)
+	}
+	if frame.SessionID != "session-1" || string(frame.Data) != "hello\n" {
+		t.Fatalf("round-trip lost output fields: %+v data=%q", frame, frame.Data)
+	}
+}
+
 func TestDecodePTYPayloadError(t *testing.T) {
 	if _, err := DecodePTYPayload(json.RawMessage(`{invalid`)); err == nil {
 		t.Fatal("expected error for malformed JSON")

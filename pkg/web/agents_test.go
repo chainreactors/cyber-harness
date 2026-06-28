@@ -13,6 +13,14 @@ import (
 )
 
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
+	return dialAgentWithIdentity(t, srv, name, commands, webproto.AgentIdentity{
+		NodeID:   "node-" + name,
+		NodeName: name,
+		Space:    "case-test",
+	})
+}
+
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, identity webproto.AgentIdentity) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -25,12 +33,8 @@ func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []strin
 	reg, _ := json.Marshal(webproto.RegisterPayload{
 		Name:     name,
 		Commands: commands,
-		Identity: webproto.AgentIdentity{
-			NodeID:   "node-" + name,
-			NodeName: name,
-			Space:    "case-test",
-		},
-		Stats: webproto.AgentStats{TotalTokens: 42},
+		Identity: identity,
+		Stats:    webproto.AgentStats{TotalTokens: 42},
 	})
 	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
 	var ack WSMessage
@@ -119,6 +123,56 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+func TestWSDispatchChatUsesChatMessage(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, webproto.AgentIdentity{
+		NodeID:   "node-chat-worker",
+		NodeName: "chat-worker",
+		Space:    "case-test",
+		Provider: "openai",
+		Model:    "test-model",
+	})
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	agent := pool.PickChat()
+	if agent == nil {
+		t.Fatal("expected chat-capable agent")
+	}
+
+	resultCh, err := pool.DispatchChat(agent.id, "task-chat", "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cmd WSMessage
+	conn.ReadJSON(&cmd)
+	if cmd.Type != "chat" || cmd.Data != "hello" {
+		t.Fatalf("unexpected: %+v", cmd)
+	}
+
+	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-chat", Data: "hi"})
+	select {
+	case res := <-resultCh:
+		if res.Err != "" || res.Output != "hi" {
+			t.Fatalf("unexpected result: %+v", res)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWSPickChatIgnoresAgentsWithoutProvider(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	conn := dialAgent(t, srv, "command-worker", []string{"scan"})
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	if got := pool.PickChat(); got != nil {
+		t.Fatalf("PickChat() = %#v, want nil", got)
 	}
 }
 
@@ -420,4 +474,3 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	}
 	t.Logf("received %d/%d messages under buffer pressure", received, 100)
 }
-

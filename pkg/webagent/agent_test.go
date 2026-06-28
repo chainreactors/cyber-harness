@@ -138,6 +138,83 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 	<-done
 }
 
+func TestRunConnectionChatWithoutRuntimeReturnsClearError(t *testing.T) {
+	var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	registered := make(chan struct{})
+	var registeredOnce sync.Once
+	messages := make(chan webproto.Message, 4)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agent/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		var reg webproto.Message
+		if err := conn.ReadJSON(&reg); err != nil {
+			t.Errorf("register read: %v", err)
+			return
+		}
+		ack, _ := json.Marshal(map[string]string{"agent_id": "agent-1"})
+		if err := conn.WriteJSON(webproto.Message{Type: "connected", Payload: ack}); err != nil {
+			t.Errorf("ack write: %v", err)
+			return
+		}
+		registeredOnce.Do(func() { close(registered) })
+
+		if err := conn.WriteJSON(webproto.Message{Type: "chat", TaskID: "task-chat", Data: "hello"}); err != nil {
+			t.Errorf("chat write: %v", err)
+			return
+		}
+		for {
+			var msg webproto.Message
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			messages <- msg
+			if msg.Type == "error" {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg := commands.NewRegistry()
+	reg.Register(webConnectionTestCommand{}, "test")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunConnection(ctx, srv.URL, "worker", reg, nil)
+	}()
+
+	select {
+	case <-registered:
+	case <-time.After(time.Second):
+		t.Fatal("web agent connection did not register")
+	}
+
+	select {
+	case msg := <-messages:
+		if msg.Type != "error" || msg.TaskID != "task-chat" || !strings.Contains(msg.Data, "LLM provider is not configured") {
+			t.Fatalf("unexpected message: %+v", msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for chat error")
+	}
+
+	cancel()
+	<-done
+}
+
 func TestRunConnectionPTYRoundTrip(t *testing.T) {
 	var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	registered := make(chan struct{})

@@ -71,7 +71,7 @@ func (h *Hub) Broadcast(id string, event HubEvent) {
 	}
 }
 
-func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string) {
+func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, terminalEvents ...string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -104,11 +104,23 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string) {
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
 			flusher.Flush()
-			if event.Type == "complete" || event.Type == "error" {
+			if isTerminalEvent(event.Type, terminalEvents) {
 				return
 			}
 		}
 	}
+}
+
+func isTerminalEvent(eventType string, terminalEvents []string) bool {
+	if len(terminalEvents) == 0 {
+		return eventType == "complete" || eventType == "error"
+	}
+	for _, t := range terminalEvents {
+		if eventType == t {
+			return true
+		}
+	}
+	return false
 }
 
 // mustJSON marshals v to json.RawMessage. Panics on error (should never

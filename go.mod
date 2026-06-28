@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/alecthomas/chroma/v2 v2.14.0
-	github.com/carapace-sh/carapace v1.7.1
+	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260615064219-7e07a99c93e0
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260616122548-b8e5ed3b1b40
@@ -18,7 +18,7 @@ require (
 	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
 	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
 	github.com/chainreactors/tui/console v0.0.0-00010101000000-000000000000
-	github.com/chainreactors/tui/readline v1.1.3
+	github.com/chainreactors/tui/readline v1.2.2
 	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2
 	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
@@ -84,7 +84,7 @@ require (
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
 	github.com/brianvoe/gofakeit/v7 v7.2.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
-	github.com/carapace-sh/carapace-shlex v1.0.1 // indirect
+	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.0.0-20260615055126-a9bbe4fc3e95 // indirect
@@ -240,7 +240,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stangelandcl/ppmd v0.1.0 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/streadway/amqp v1.1.0 // indirect
@@ -292,7 +292,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+	golang.org/x/exp v0.0.0-20260529124908-c761662dc8c9 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
@@ -304,7 +304,7 @@ require (
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	mvdan.cc/sh/v3 v3.11.0 // indirect
+	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
 replace (
