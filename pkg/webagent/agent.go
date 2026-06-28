@@ -22,6 +22,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
@@ -211,6 +212,7 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 
 	ptyRouter := newPTYRouter(reg, rt)
 	defer ptyRouter.Close()
+	chatRuntime := newChatRuntimeManager(rt)
 	if mgr := registryPTYManager(reg); mgr != nil {
 		unsub := subscribePTYSessions(ctx, mgr, ptyRouter, send)
 		defer unsub()
@@ -265,7 +267,7 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 					delete(tasks, m.TaskID)
 					taskMu.Unlock()
 				}()
-				runChatPrompt(tCtx, m.TaskID, m.Data, rt, send)
+				runChatPrompt(tCtx, m, rt, chatRuntime, send)
 			}(msg, taskCtx, cancel)
 
 		case "cancel":
@@ -489,30 +491,148 @@ func execCommand(ctx context.Context, taskID, cmdLine string, reg *commands.Comm
 	send(webproto.Message{Type: "complete", TaskID: taskID, Data: out})
 }
 
-func runChatPrompt(ctx context.Context, taskID, prompt string, rt *runner.AgentRuntime, send func(webproto.Message)) {
-	if rt == nil || rt.App == nil || rt.App.Provider == nil {
+type chatRequestPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type chatRuntimeManager struct {
+	rt       *runner.AgentRuntime
+	mu       sync.Mutex
+	sessions map[string]*agent.Agent
+}
+
+func newChatRuntimeManager(rt *runner.AgentRuntime) *chatRuntimeManager {
+	return &chatRuntimeManager{
+		rt:       rt,
+		sessions: make(map[string]*agent.Agent),
+	}
+}
+
+func (m *chatRuntimeManager) agentFor(sessionID string) (*agent.Agent, error) {
+	if m == nil || m.rt == nil || m.rt.App == nil {
+		return nil, fmt.Errorf("agent runtime is not configured")
+	}
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ag := m.sessions[sessionID]; ag != nil {
+		return ag, nil
+	}
+	ag := agent.NewAgent(m.rt.Config.WithSystemPrompt(m.rt.SystemPrompt).WithStream(true))
+	m.sessions[sessionID] = ag
+	return ag, nil
+}
+
+func runChatPrompt(ctx context.Context, msg webproto.Message, rt *runner.AgentRuntime, sessions *chatRuntimeManager, send func(webproto.Message)) {
+	prompt := strings.TrimSpace(msg.Data)
+	if prompt == "" {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
+		return
+	}
+	if rt == nil || rt.App == nil {
 		send(webproto.Message{
 			Type:   "error",
-			TaskID: taskID,
+			TaskID: msg.TaskID,
 			Data:   "LLM provider is not configured on this agent; configure aiscan.yaml and restart the agent, or prefix commands with !",
 		})
 		return
 	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		send(webproto.Message{Type: "error", TaskID: taskID, Data: "empty prompt"})
+
+	sessionID := chatSessionID(msg)
+	ag, err := sessions.agentFor(sessionID)
+	if err != nil {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
 		return
 	}
-	result, err := agent.NewAgent(rt.Config.WithSystemPrompt(rt.SystemPrompt).WithStream(true)).Run(ctx, prompt)
+
+	if isREPLCommand(prompt) {
+		out, err := runChatREPLLine(ctx, prompt, rt, ag)
+		if err != nil {
+			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+			return
+		}
+		send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: out})
+		return
+	}
+
+	if rt.App.Provider == nil {
+		send(webproto.Message{
+			Type:   "error",
+			TaskID: msg.TaskID,
+			Data:   "LLM provider is not configured on this agent; configure aiscan.yaml and restart the agent, or prefix commands with !",
+		})
+		return
+	}
+
+	result, err := ag.Run(ctx, prompt)
 	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: taskID, Data: err.Error()})
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
 		return
 	}
 	if result == nil {
-		send(webproto.Message{Type: "complete", TaskID: taskID})
+		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 		return
 	}
-	send(webproto.Message{Type: "complete", TaskID: taskID, Data: result.Output})
+	send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: trimChatOutput(result.Output)})
+}
+
+func chatSessionID(msg webproto.Message) string {
+	var payload chatRequestPayload
+	if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &payload) == nil {
+		return strings.TrimSpace(payload.SessionID)
+	}
+	return ""
+}
+
+func isREPLCommand(prompt string) bool {
+	return strings.HasPrefix(prompt, "/") || strings.HasPrefix(prompt, "!")
+}
+
+func runChatREPLLine(ctx context.Context, line string, rt *runner.AgentRuntime, ag *agent.Agent) (string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	option := rt.Option
+	if option != nil {
+		copy := *option
+		copy.NoColor = true
+		option = &copy
+	}
+	appInfo := tui.AppInfo{
+		Provider:          rt.App.Provider,
+		ProviderConfig:    rt.App.ProviderConfig,
+		ProviderFallbacks: rt.App.ProviderFallbacks,
+		Commands:          rt.App.Commands,
+		Skills:            rt.App.Skills,
+		OnProviderChange: func(provider agent.Provider, providerConfig agent.ProviderConfig) {
+			rt.App.Provider = provider
+			rt.App.ProviderConfig = providerConfig
+			rt.Config.Provider = provider
+			rt.Config.Model = providerConfig.Model
+		},
+	}
+	console := tui.NewAgentConsoleWithWriters(ctx, option, appInfo, ag, &stdout, &stderr, rt.Bus)
+	_, err := console.ExecuteLineAndWait(line)
+	out := trimChatOutput(output.StripANSI(stdout.String()))
+	errOut := trimChatOutput(output.StripANSI(stderr.String()))
+	if err != nil {
+		if errOut != "" {
+			return "", fmt.Errorf("%s: %w", errOut, err)
+		}
+		return "", err
+	}
+	if out == "" {
+		return errOut, nil
+	}
+	if errOut == "" {
+		return out, nil
+	}
+	return trimChatOutput(out + "\n" + errOut), nil
+}
+
+func trimChatOutput(value string) string {
+	return strings.TrimRight(value, " \t\r\n")
 }
 
 type agentStatsTracker struct {

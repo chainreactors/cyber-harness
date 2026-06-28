@@ -14,16 +14,18 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { Button, ThemeToggle } from '@aspect/ui'
-import { cn } from '@aspect/theme'
-import { MarkdownContent } from '@aspect/markdown'
 import {
   AssistantResponse,
+  Button,
   ChatThinking,
   MessageBubble as ChatMessageBubble,
+  ThemeToggle,
   ToolCallDisplay as ChatToolCall,
   summarizeArgs,
-} from '@aspect/viewer'
+} from '@aspect/ui'
+import { cn } from '@aspect/theme'
+import { useTheme } from '@aspect/theme'
+import { MarkdownContent } from '@aspect/markdown'
 import type { ChatMessage, ScanResult } from '../api'
 import type { AssistantResponseState, TimelineItem } from '../hooks/useChatSession'
 import ChatInput from './chat/ChatInput'
@@ -40,9 +42,11 @@ interface Props {
   streamingAgent: string | null
   scanResults: Map<string, ScanResult>
   isThinking: boolean
+  isBusy: boolean
   error: string
   hasActiveSession: boolean
   onSend: (content: string) => void
+  onPause: () => void
   onClearError: () => void
   onShowScanDetail: (scanID: string) => void
   detailOpen: boolean
@@ -58,9 +62,11 @@ export default function ChatPanel({
   streamingAgent,
   scanResults,
   isThinking,
+  isBusy,
   error,
   hasActiveSession,
   onSend,
+  onPause,
   onClearError,
   onShowScanDetail,
   detailOpen,
@@ -72,6 +78,7 @@ export default function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const { isDark, toggle: toggleTheme } = useTheme()
   const inputFormClass = cn(contentOffsetClass, !detailOpen && threadOffsetClass)
   const hasAssistantResponse = timeline.some((item) => item.kind === 'assistant_response')
 
@@ -103,7 +110,7 @@ export default function ChatPanel({
           <Button variant="ghost" size="icon" onClick={onOpenConfig} className="h-7 w-7 text-muted-foreground" aria-label="LLM Config">
             <Settings className="h-3.5 w-3.5" />
           </Button>
-          <ThemeToggle />
+          <ThemeToggle isDark={isDark} onToggle={toggleTheme} size="sm" />
           <Button
             variant="ghost"
             size="icon"
@@ -194,7 +201,8 @@ export default function ChatPanel({
         {hasActiveSession && (
           <ChatInput
             onSend={onSend}
-            containerClassName={workspaceClass}
+            onPause={onPause}
+            busy={isBusy}
             formClassName={inputFormClass}
           />
         )}
@@ -253,7 +261,7 @@ function StreamingEntry({
         actorName={agentName || undefined}
         streaming
       >
-        {text ? <MarkdownContent content={text} compact /> : null}
+        {text ? <MarkdownContent content={trimDisplayContent(text)} compact /> : null}
       </ChatMessageBubble>
     </TimelineRow>
   )
@@ -304,7 +312,7 @@ function timelineContent(
             timestamp={item.message.created_at}
           >
             {item.message.content ? (
-              <MarkdownContent content={item.message.content} compact={role !== 'system'} />
+              <MarkdownContent content={trimDisplayContent(item.message.content)} compact={role !== 'system'} />
             ) : null}
           </ChatMessageBubble>
         )
@@ -347,7 +355,7 @@ function timelineContent(
     case 'thinking':
       return (
         <ChatThinking actorName={item.agentName}>
-          {item.content?.trim() ? <MarkdownContent content={item.content} compact muted /> : null}
+          {item.content?.trim() ? <MarkdownContent content={trimDisplayContent(item.content)} compact muted /> : null}
         </ChatThinking>
       )
 
@@ -378,7 +386,7 @@ function AssistantResponseEntry({ response }: { response: AssistantResponseState
       actorName={response.agentName || message?.agent_name}
       timestamp={message?.created_at}
       streaming={response.streaming}
-      thinking={hasThinking ? <MarkdownContent content={response.thinking || ''} compact muted /> : undefined}
+      thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
       tools={response.tools.length > 0 ? (
         <div className="space-y-2">
           {response.tools.map((tool) => (
@@ -392,7 +400,7 @@ function AssistantResponseEntry({ response }: { response: AssistantResponseState
           ))}
         </div>
       ) : undefined}
-      response={hasResponse ? <MarkdownContent content={message?.content || ''} compact /> : undefined}
+      response={hasResponse ? <MarkdownContent content={trimDisplayContent(message?.content || '')} compact /> : undefined}
       labels={{ tools: response.tools.length === 1 ? 'Tool' : 'Tools' }}
     />
   )
@@ -594,3 +602,6 @@ function previewText(value: string, max: number): string {
   return `${compact.slice(0, Math.max(0, max - 1))}...`
 }
 
+function trimDisplayContent(value: string): string {
+  return value.replace(/[ \t\r\n]+$/g, '')
+}

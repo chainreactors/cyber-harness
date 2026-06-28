@@ -189,10 +189,24 @@ func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan tas
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
 func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.dispatch(agentID, taskID, "chat", prompt)
+	return p.DispatchChatSession(agentID, taskID, "", prompt)
+}
+
+// DispatchChatSession sends chat input to an agent and scopes the remote
+// agent-side conversation state to the web chat session.
+func (p *AgentPool) DispatchChatSession(agentID, taskID, sessionID, prompt string) (<-chan taskResult, error) {
+	var payload json.RawMessage
+	if sessionID != "" {
+		payload = mustJSON(map[string]string{"session_id": sessionID})
+	}
+	return p.dispatchPayload(agentID, taskID, "chat", prompt, payload)
 }
 
 func (p *AgentPool) dispatch(agentID, taskID, typ, data string) (<-chan taskResult, error) {
+	return p.dispatchPayload(agentID, taskID, typ, data, nil)
+}
+
+func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
@@ -204,7 +218,7 @@ func (p *AgentPool) dispatch(agentID, taskID, typ, data string) (<-chan taskResu
 	a.mu.Unlock()
 
 	select {
-	case a.sendCh <- WSMessage{Type: typ, TaskID: taskID, Data: data}:
+	case a.sendCh <- WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload}:
 	default:
 		a.mu.Lock()
 		delete(a.tasks, taskID)

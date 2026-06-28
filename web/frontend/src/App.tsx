@@ -8,7 +8,7 @@ import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
 import AgentTerminal from './components/terminal'
 import { ThemeToggle } from '@aspect/ui'
-import { ThemeProvider } from '@aspect/theme'
+import { ThemeProvider, useTheme } from '@aspect/theme'
 import { getStatus } from './api'
 import type { ScanJob, ServerStatus } from './api'
 import { useScanSession } from './hooks/useScanSession'
@@ -146,7 +146,7 @@ export default function App() {
                     <HeaderIconButton label="Open settings" onClick={() => setConfigOpen(true)}>
                       <Settings className="h-3.5 w-3.5" />
                     </HeaderIconButton>
-                    <ThemeToggle />
+                    <ConnectedThemeToggle />
                   </>
                 }
               />
@@ -188,9 +188,11 @@ export default function App() {
                   streamingAgent={chat.streamingAgent}
                   scanResults={chat.scanResults}
                   isThinking={chat.isThinking}
+                  isBusy={chat.busy}
                   error={chat.error}
                   hasActiveSession={chat.activeSessionID !== null}
                   onSend={chat.sendMessage}
+                  onPause={chat.cancelMessage}
                   onClearError={chat.clearError}
                   onShowScanDetail={(scanID) => {
                     chat.showScanDetail(scanID)
@@ -232,6 +234,11 @@ export default function App() {
     </TooltipProvider>
     </ThemeProvider>
   )
+}
+
+function ConnectedThemeToggle() {
+  const { isDark, toggle } = useTheme()
+  return <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
 }
 
 function ScanAgentsButton({ count, onClick }: { count: number; onClick: () => void }) {

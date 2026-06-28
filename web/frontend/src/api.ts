@@ -354,6 +354,12 @@ export async function sendChatMessage(sessionID: string, content: string): Promi
   })
 }
 
+export async function cancelChatSession(sessionID: string): Promise<void> {
+  await apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/cancel`, 'Failed to pause response', {
+    method: 'POST',
+  })
+}
+
 export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
   return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to list messages')
 }

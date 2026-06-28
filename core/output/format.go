@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
-var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+var ansiPattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[PX^_].*?\x1b\\|[@-_])`)
 
 func StripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")

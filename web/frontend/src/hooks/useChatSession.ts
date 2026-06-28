@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  cancelChatSession,
   createChatSession,
   deleteChatSession,
   getChatSession,
@@ -65,12 +66,18 @@ export function useChatSession() {
   const [scanResults, setScanResults] = useState<Map<string, ScanResult>>(() => new Map())
   const [detailScanID, setDetailScanID] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
+  const [pendingResponse, setPendingResponse] = useState(false)
   const [error, setError] = useState('')
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
   const userMsgIdsRef = useRef<Set<string>>(new Set())
   const scanLinesRef = useRef<Map<string, string[]>>(new Map())
   const activeTurnRef = useRef<string | null>(null)
+  const activeSessionRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    activeSessionRef.current = activeSessionID
+  }, [activeSessionID])
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -111,6 +118,7 @@ export function useChatSession() {
     setScanResults(new Map())
     setDetailScanID(null)
     setIsThinking(false)
+    setPendingResponse(false)
     setError('')
     userMsgIdsRef.current = new Set()
     scanLinesRef.current = new Map()
@@ -294,12 +302,14 @@ export function useChatSession() {
         if ((event.role || 'assistant') === 'assistant') {
           if (!activeTurnRef.current && isDuplicateAssistantResponse(event.content)) {
             setIsThinking(false)
+            setPendingResponse(false)
             setStreamingText(null)
             setStreamingAgent(null)
             break
           }
           setAssistantResponseMessage(event, event.content, false, now)
           setIsThinking(false)
+          setPendingResponse(false)
           setStreamingText(null)
           setStreamingAgent(null)
           break
@@ -315,6 +325,7 @@ export function useChatSession() {
         }
         appendMessage(msg, now)
         setIsThinking(false)
+        setPendingResponse(false)
         break
       }
 
@@ -359,6 +370,7 @@ export function useChatSession() {
           upsertAssistantResponse((response) => ({ ...response, streaming: false }), event, now)
         }
         setIsThinking(false)
+        setPendingResponse(false)
         break
       }
 
@@ -435,10 +447,12 @@ export function useChatSession() {
             scanResult: event.result,
           })
         }
+        setPendingResponse(false)
         break
 
       case 'scan_error':
         if (event.error) setError(event.error)
+        setPendingResponse(false)
         break
 
       case 'agent_joined':
@@ -447,6 +461,7 @@ export function useChatSession() {
 
       case 'error':
         if (event.error) setError(event.error)
+        setPendingResponse(false)
         break
     }
   }
@@ -660,7 +675,8 @@ export function useChatSession() {
   }
 
   async function handleSendMessage(content: string) {
-    if (!activeSessionID) return
+    const sessionID = activeSessionRef.current
+    if (!sessionID) return
     const trimmed = content.trim()
     if (!trimmed) return
 
@@ -670,7 +686,7 @@ export function useChatSession() {
 
     const optimistic: ChatMessage = {
       id: msgID,
-      session_id: activeSessionID,
+      session_id: sessionID,
       role: 'user',
       content: trimmed,
       created_at: new Date().toISOString(),
@@ -683,13 +699,35 @@ export function useChatSession() {
       message: optimistic,
     })
     setError('')
+    setPendingResponse(true)
 
     try {
-      const serverMsg = await sendChatMessage(activeSessionID, trimmed)
+      const serverMsg = await sendChatMessage(sessionID, trimmed)
       userMsgIdsRef.current.add(serverMsg.id)
       await refreshSessions()
     } catch (err: any) {
+      setPendingResponse(false)
       setError(err.message || 'Failed to send message')
+    }
+  }
+
+  async function handleCancelMessage() {
+    const sessionID = activeSessionRef.current
+    if (!sessionID) return
+    setTimelineItems((prev) => prev.map((item) => (
+      item.kind === 'assistant_response' && item.assistantResponse
+        ? { ...item, assistantResponse: { ...item.assistantResponse, streaming: false } }
+        : item
+    )))
+    setIsThinking(false)
+    setPendingResponse(false)
+    setStreamingText(null)
+    setStreamingAgent(null)
+    try {
+      await cancelChatSession(sessionID)
+      await refreshSessions()
+    } catch (err: any) {
+      setError(err.message || 'Failed to pause response')
     }
   }
 
@@ -728,12 +766,16 @@ export function useChatSession() {
     scanResults,
     detailScanID,
     isThinking,
+    busy: pendingResponse || isThinking || streamingText !== null || timeline.some((item) => (
+      item.kind === 'assistant_response' && item.assistantResponse?.streaming
+    )),
     error,
     selectAgent: (id: string) => setSelectedAgentID(id),
     createSession: handleCreateSession,
     selectSession: (id: string) => activateSession(id, 'push'),
     deleteSession: handleDeleteSession,
     sendMessage: handleSendMessage,
+    cancelMessage: handleCancelMessage,
     showScanDetail: (scanID: string) => setDetailScanID(scanID),
     hideDetail: () => setDetailScanID(null),
     clearError: () => setError(''),

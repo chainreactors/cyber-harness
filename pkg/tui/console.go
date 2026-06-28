@@ -3,6 +3,7 @@ package tui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -130,6 +131,32 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	menu.Command = repl.rootCommand()
 	c.SwitchMenu("agent")
 	return repl
+}
+
+// NewAgentConsoleWithWriters builds a non-interactive console that executes
+// individual REPL lines against the same command implementation as the TUI.
+func NewAgentConsoleWithWriters(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, stdout, stderr io.Writer, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = stdout
+	}
+	control := rlterm.NewControl(false, 80, 24)
+	terminal := rlterm.Stream(strings.NewReader(""), stdout, stderr, control)
+	output := NewStaticAgentOutputWithWriters(option, stdout, stderr, false)
+	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, terminal, bus...)
+}
+
+// ExecuteLineAndWait runs one REPL input line and waits for any async agent run
+// started by that line. It is used by the web chat bridge so slash and bang
+// commands do not drift from the interactive console behavior.
+func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
+	done, err := r.handleInputLine(line)
+	if r.controller != nil {
+		r.controller.Wait()
+	}
+	return done, err
 }
 
 func (r *AgentConsole) Start() error {
@@ -355,6 +382,15 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 		Use: agentPromptCommandName, Hidden: true, Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return RunPrompt(r.replSession(), "prompt", args[0])
+		},
+	})
+	root.AddCommand(&cobra.Command{
+		Use:                "!",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		Args:               cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			return r.executeBashDirect(c.Context(), args[0])
 		},
 	})
 	for _, name := range r.pseudoCommandNames() {
@@ -817,6 +853,21 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 	r.setDirectCancel(cancel)
 	defer r.setDirectCancel(nil)
 
+	if tool, ok := reg.GetTool("bash"); ok {
+		payload, err := json.Marshal(map[string]string{"command": cmdLine})
+		if err != nil {
+			return err
+		}
+		result, err := tool.Execute(directCtx, string(payload))
+		if err != nil {
+			return err
+		}
+		if text := result.Text(); text != "" {
+			fmt.Fprint(r.stdout, text)
+		}
+		return nil
+	}
+
 	result, err := reg.Execute(directCtx, cmdLine)
 	if err != nil {
 		if errors.Is(err, context.Canceled) && directCtx.Err() != nil && ctx.Err() == nil {
@@ -852,11 +903,7 @@ func AgentConsoleArgsForLine(line string) ([]string, error) {
 		if rest == "" {
 			return nil, nil
 		}
-		cmd, args, _ := strings.Cut(rest, " ")
-		if args == "" {
-			return []string{"!" + cmd}, nil
-		}
-		return []string{"!" + cmd, strings.TrimSpace(args)}, nil
+		return []string{"!", rest}, nil
 	}
 	if !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "/skill:") {
 		return []string{agentPromptCommandName, text}, nil

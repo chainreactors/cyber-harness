@@ -45,6 +45,8 @@ type Service struct {
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
 	taskSessions map[string]string // taskID → sessionID
+	taskAgents   map[string]string // taskID → agentID
+	taskCanceled map[string]bool
 }
 
 func NewService(cfg ServiceConfig) *Service {
@@ -67,6 +69,8 @@ func NewService(cfg ServiceConfig) *Service {
 		timeout:      timeout,
 		cancels:      make(map[string]context.CancelFunc),
 		taskSessions: make(map[string]string),
+		taskAgents:   make(map[string]string),
+		taskCanceled: make(map[string]bool),
 	}
 	if cfg.AgentPool != nil {
 		cfg.AgentPool.SetSessionLookup(svc)
@@ -717,6 +721,61 @@ func (s *Service) TaskSession(taskID string) (string, bool) {
 	return sid, ok
 }
 
+func (s *Service) registerSessionTask(taskID, sessionID, agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskSessions[taskID] = sessionID
+	if agentID != "" {
+		s.taskAgents[taskID] = agentID
+	}
+	delete(s.taskCanceled, taskID)
+}
+
+func (s *Service) finishSessionTask(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	canceled := s.taskCanceled[taskID]
+	delete(s.taskSessions, taskID)
+	delete(s.taskAgents, taskID)
+	delete(s.taskCanceled, taskID)
+	return canceled
+}
+
+func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
+	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+		return err
+	}
+
+	type activeTask struct {
+		taskID  string
+		agentID string
+	}
+	var tasks []activeTask
+	s.mu.Lock()
+	for taskID, sid := range s.taskSessions {
+		if sid != sessionID {
+			continue
+		}
+		tasks = append(tasks, activeTask{taskID: taskID, agentID: s.taskAgents[taskID]})
+		s.taskCanceled[taskID] = true
+	}
+	s.mu.Unlock()
+
+	if len(tasks) == 0 {
+		s.broadcastSystemMessage(sessionID, "No running task.")
+		return nil
+	}
+	if s.agents != nil {
+		for _, task := range tasks {
+			if task.agentID != "" {
+				s.agents.CancelTask(task.agentID, task.taskID)
+			}
+		}
+	}
+	s.broadcastSystemMessage(sessionID, "Paused.")
+	return nil
+}
+
 func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*ChatSession, error) {
 	var agentName string
 	if s.agents != nil {
@@ -855,30 +914,7 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 
 func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage) {
 	content := strings.TrimSpace(msg.Content)
-
-	switch {
-	case strings.HasPrefix(content, "/scan "):
-		s.handleScanCommand(sessionID, content[6:])
-
-	case strings.HasPrefix(content, "/help"):
-		s.broadcastSystemMessage(sessionID, "Available commands:\n- Free text — chat with an LLM-enabled agent\n- `/scan <target>` — start a scan from the web server\n- `/status` — show system status\n- `/agents` — list connected agents\n- `!<command>` — execute a command on a connected agent")
-
-	case strings.HasPrefix(content, "/status"):
-		status := s.Status()
-		text := fmt.Sprintf("LLM: %s %s (available: %v)\nAgents: %d\nConfig: %v",
-			status.LLMProvider, status.LLMModel, status.LLMAvailable,
-			status.Agents, status.ConfigLoaded)
-		s.broadcastSystemMessage(sessionID, text)
-
-	case strings.HasPrefix(content, "/agents"):
-		s.handleAgentsCommand(sessionID)
-
-	case strings.HasPrefix(content, "!"):
-		s.handleShellCommand(sessionID, content[1:])
-
-	default:
-		s.handleChatMessage(sessionID, content)
-	}
+	s.handleChatMessage(sessionID, content)
 }
 
 func (s *Service) handleScanCommand(sessionID, args string) {
@@ -926,9 +962,7 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 	_ = s.store.LinkScanToSession(ctx, sessionID, job.ID)
 
-	s.mu.Lock()
-	s.taskSessions[job.ID] = sessionID
-	s.mu.Unlock()
+	s.registerSessionTask(job.ID, sessionID, "")
 
 	s.BroadcastChatEvent(sessionID, ChatEvent{
 		Type:   ChatEventScanStarted,
@@ -986,9 +1020,7 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 	}
 
 	taskID := generateID()
-	s.mu.Lock()
-	s.taskSessions[taskID] = sessionID
-	s.mu.Unlock()
+	s.registerSessionTask(taskID, sessionID, agent.id)
 
 	s.BroadcastChatEvent(sessionID, ChatEvent{
 		Type:      ChatEventAgentJoined,
@@ -998,9 +1030,7 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 
 	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, command)
 	if err != nil {
-		s.mu.Lock()
-		delete(s.taskSessions, taskID)
-		s.mu.Unlock()
+		s.finishSessionTask(taskID)
 		s.BroadcastChatEvent(sessionID, ChatEvent{
 			Type:  ChatEventError,
 			Error: err.Error(),
@@ -1010,14 +1040,15 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 
 	go func() {
 		res, ok := <-resultCh
-		s.mu.Lock()
-		delete(s.taskSessions, taskID)
-		s.mu.Unlock()
+		canceled := s.finishSessionTask(taskID)
 		if !ok {
 			s.BroadcastChatEvent(sessionID, ChatEvent{
 				Type:  ChatEventError,
 				Error: "agent disconnected",
 			})
+			return
+		}
+		if canceled {
 			return
 		}
 		content := res.Output
@@ -1036,9 +1067,7 @@ func (s *Service) handleChatMessage(sessionID, content string) {
 	}
 
 	taskID := generateID()
-	s.mu.Lock()
-	s.taskSessions[taskID] = sessionID
-	s.mu.Unlock()
+	s.registerSessionTask(taskID, sessionID, agent.id)
 
 	s.BroadcastChatEvent(sessionID, ChatEvent{
 		Type:      ChatEventAgentJoined,
@@ -1046,11 +1075,9 @@ func (s *Service) handleChatMessage(sessionID, content string) {
 		AgentName: agent.name,
 	})
 
-	resultCh, err := s.agents.DispatchChat(agent.id, taskID, content)
+	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, sessionID, content)
 	if err != nil {
-		s.mu.Lock()
-		delete(s.taskSessions, taskID)
-		s.mu.Unlock()
+		s.finishSessionTask(taskID)
 		s.BroadcastChatEvent(sessionID, ChatEvent{
 			Type:  ChatEventError,
 			Error: err.Error(),
@@ -1060,10 +1087,11 @@ func (s *Service) handleChatMessage(sessionID, content string) {
 
 	go func() {
 		res, ok := <-resultCh
-		s.mu.Lock()
-		delete(s.taskSessions, taskID)
-		s.mu.Unlock()
+		canceled := s.finishSessionTask(taskID)
 		if !ok {
+			return
+		}
+		if canceled {
 			return
 		}
 		reply := res.Output
@@ -1095,11 +1123,11 @@ func (s *Service) broadcastSystemMessage(sessionID, content string) {
 func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	s.mu.Lock()
 	sid, ok := s.taskSessions[scanID]
-	if ok {
-		delete(s.taskSessions, scanID)
-	}
 	s.mu.Unlock()
 	if !ok {
+		return
+	}
+	if s.finishSessionTask(scanID) {
 		return
 	}
 	s.BroadcastChatEvent(sid, ChatEvent{
@@ -1110,6 +1138,7 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 }
 
 func (s *Service) persistAssistantMessage(sessionID, agentID, agentName, content string, turn int) {
+	content = strings.TrimRight(content, " \t\r\n")
 	now := time.Now()
 	msg := &ChatMessage{
 		ID:        generateID(),

@@ -36,6 +36,7 @@ func NewHandler(service *Service, agents *AgentPool, ioaHandler http.Handler, st
 	mux.HandleFunc("GET /api/chat/sessions/{id}", h.getSession)
 	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.deleteSession)
 	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.sendMessage)
+	mux.HandleFunc("POST /api/chat/sessions/{id}/cancel", h.cancelSession)
 	mux.HandleFunc("GET /api/chat/sessions/{id}/messages", h.listMessages)
 	mux.HandleFunc("GET /api/chat/sessions/{id}/events", h.sessionEvents)
 
@@ -257,6 +258,14 @@ func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (h *handlerImpl) cancelSession(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.CancelSession(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
 }
 
 func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {

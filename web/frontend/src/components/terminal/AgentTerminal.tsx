@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { Info, Plus, RefreshCw, Square } from 'lucide-react'
@@ -40,8 +40,10 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
   const seenActivityRef = useRef<Record<string, number>>({})
   const activityReadyRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const [terminalReadySeq, setTerminalReadySeq] = useState(0)
 
   const replSession = useMemo(() => {
     return sessions.find((s) => s.kind === 'repl' && (s.name === REPL_NAME || !s.name))
@@ -68,11 +70,11 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
   useEffect(() => { activeRef.current = activeID }, [activeID])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
 
-  function handleTerminalReady(term: XTerm, fit: FitAddon) {
+  const handleTerminalReady = useCallback((term: XTerm, fit: FitAddon) => {
     termRef.current = term
     fitRef.current = fit
-    connectWebSocket(term, fit)
-  }
+    setTerminalReadySeq((seq) => seq + 1)
+  }, [])
 
   function connectWebSocket(term: XTerm, fit: FitAddon) {
     setStatus('connecting')
@@ -169,15 +171,27 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
       ws.close()
       resizeDisposable.dispose()
       dataDisposable.dispose()
-      wsRef.current = null
+      if (wsRef.current === ws) wsRef.current = null
     }
   }
 
   useEffect(() => {
-    if (!termRef.current || !fitRef.current) return
-    const cleanup = connectWebSocket(termRef.current, fitRef.current)
-    return cleanup
-  }, [agent.id])
+    if (terminalReadySeq === 0) return
+    const term = termRef.current
+    const fit = fitRef.current
+    if (!term || !fit) return
+
+    cleanupRef.current?.()
+    const cleanup = connectWebSocket(term, fit)
+    cleanupRef.current = cleanup
+
+    return () => {
+      if (cleanupRef.current === cleanup) {
+        cleanupRef.current = null
+        cleanup()
+      }
+    }
+  }, [agent.id, terminalReadySeq])
 
   function send(message: Record<string, unknown>) {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(message))
