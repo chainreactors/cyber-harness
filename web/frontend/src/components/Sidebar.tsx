@@ -43,9 +43,9 @@ export default function Sidebar({ open, onToggle, scans, activeId, onSelectScan 
       <div className={`flex items-center border-b border-border ${open ? 'p-3 gap-3' : 'p-2 flex-col gap-2'}`}>
         {open ? (
           <>
-            <Shield className="w-5 h-5 text-cyber-400 shrink-0" />
+            <Shield className="w-5 h-5 text-primary shrink-0" />
             <div className="flex-1 min-w-0">
-              <h1 className="text-sm font-bold text-cyber-700 dark:text-cyber-400">AIScan</h1>
+              <h1 className="text-sm font-bold text-primary">AIScan</h1>
               <div className="text-[10px] text-muted-foreground">Web console</div>
             </div>
             <Button
@@ -68,7 +68,7 @@ export default function Sidebar({ open, onToggle, scans, activeId, onSelectScan 
                   aria-label="Expand sidebar"
                   className="p-1 rounded-md hover:bg-accent transition-colors"
                 >
-                  <Shield className="w-5 h-5 text-cyber-700 dark:text-cyber-400" />
+                  <Shield className="w-5 h-5 text-primary" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">AIScan</TooltipContent>
@@ -128,7 +128,7 @@ export default function Sidebar({ open, onToggle, scans, activeId, onSelectScan 
               >
                 <History className="w-4 h-4 text-muted-foreground" />
                 {scans.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-cyber-600 rounded-full text-[8px] font-bold flex items-center justify-center text-white">
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary rounded-full text-[8px] font-bold flex items-center justify-center text-white">
                     {scans.length > 9 ? '9+' : scans.length}
                   </span>
                 )}

@@ -43,7 +43,7 @@ export default function ScanForm({ onSubmit, disabled, analysisAvailable, status
       key: 'verify',
       label: 'Verify',
       icon: <Brain className="h-4 w-4" />,
-      activeClass: 'border-cyber-500/40 bg-cyber-500/15 text-cyber-700 dark:text-cyber-300',
+      activeClass: 'border-primary/40 bg-primary/15 text-primary',
     },
     {
       key: 'sniper',
@@ -73,7 +73,7 @@ export default function ScanForm({ onSubmit, disabled, analysisAvailable, status
           disabled={disabled}
           autoFocus
           aria-label="Scan target"
-          className="pl-9 h-10 font-mono text-sm bg-secondary/50 border-border focus-visible:ring-cyber-500/50"
+          className="pl-9 h-10 font-mono text-sm bg-secondary/50 border-border focus-visible:ring-primary/50"
         />
       </div>
 
@@ -113,7 +113,7 @@ export default function ScanForm({ onSubmit, disabled, analysisAvailable, status
           type="submit"
           disabled={disabled || !target.trim()}
           aria-label={disabled ? 'Scanning target' : 'Start scan'}
-          className="h-10 w-10 shrink-0 px-0 bg-cyber-600 text-white hover:bg-cyber-500 sm:w-auto sm:px-5"
+          className="h-10 w-10 shrink-0 px-0 bg-primary text-white hover:bg-primary sm:w-auto sm:px-5"
         >
           {disabled ? (
             <Loader2 className="w-4 h-4 animate-spin" />

@@ -1,4 +1,4 @@
-import MarkdownContent from './MarkdownContent'
+import { MarkdownContent } from '@aspect/markdown'
 import type { ScanJob, ScanResult } from '../api'
 import { buildMarkdownReport } from '../lib/markdown-report'
 

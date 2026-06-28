@@ -53,7 +53,7 @@ export default function ScanView({ scan, lines, report, result, logCollapsed, on
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-mono text-sm text-foreground">{scan.target}</span>
         <span className="text-xs text-muted-foreground px-2 py-0.5 rounded bg-secondary">{scan.mode}</span>
-        {verifyEnabled && <span className="text-xs text-cyber-700 dark:text-cyber-300 px-2 py-0.5 rounded bg-cyber-500/10">Verify</span>}
+        {verifyEnabled && <span className="text-xs text-primary px-2 py-0.5 rounded bg-primary/10">Verify</span>}
         {sniperEnabled && <span className="text-xs text-red-700 dark:text-red-300 px-2 py-0.5 rounded bg-red-400/10">Sniper</span>}
         {scan.deep && <span className="text-xs text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded bg-yellow-400/10">Deep</span>}
         <StatusIndicator status={scan.status} />
@@ -116,9 +116,9 @@ function StatusIndicator({ status }: { status: string }) {
   const config: Record<string, { label: string; className: string }> = {
     queued: { label: 'Queued', className: 'text-gray-600 bg-gray-400/10 dark:text-gray-400' },
     running: { label: 'Running', className: 'text-blue-700 bg-blue-400/10 dark:text-blue-400 animate-pulse' },
-    completed: { label: 'Completed', className: 'text-cyber-700 bg-cyber-400/10 dark:text-cyber-400' },
+    completed: { label: 'Completed', className: 'text-primary bg-primary/10' },
     failed: { label: 'Failed', className: 'text-red-700 bg-red-400/10 dark:text-red-400' },
-    canceled: { label: 'Canceled', className: 'text-yellow-700 bg-yellow-400/10 dark:text-yellow-400' },
+    canceled: { label: 'Canceled', className: 'text-yellow-700 bg-yellow-400/10 dark:text-warning' },
   }
   const { label, className } = config[status] || config.queued
   return (

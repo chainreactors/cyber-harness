@@ -22,7 +22,7 @@ export default function AgentPanel({ open, onClose }: AgentPanelProps) {
       <div className="flex h-full w-full max-w-7xl flex-col border-l border-border bg-card shadow-xl">
         <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
           <div className="flex min-w-0 items-center gap-3">
-            <Monitor className="h-4 w-4 shrink-0 text-cyber-400" />
+            <Monitor className="h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="text-sm font-medium text-foreground">Agent Console</span>
@@ -154,14 +154,14 @@ function AgentList({
             className={cn(
               'mb-1 flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
               selectedID === agent.id
-                ? 'bg-cyber-400/10 text-foreground'
+                ? 'bg-primary/10 text-foreground'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >
             <Circle
               className={cn(
                 'mt-1 h-2.5 w-2.5 shrink-0 fill-current',
-                agent.busy ? 'text-yellow-400' : 'text-cyber-400',
+                agent.busy ? 'text-warning' : 'text-primary',
               )}
             />
             <span className="min-w-0 flex-1">

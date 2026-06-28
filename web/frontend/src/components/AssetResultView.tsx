@@ -28,7 +28,7 @@ import {
   type ViewAsset,
 } from '../lib/scan-result'
 import { cn } from '@aspect/theme'
-import MarkdownContent from './MarkdownContent'
+import { MarkdownContent } from '@aspect/markdown'
 import FindingsSummary from './FindingsSummary'
 
 interface AssetResultViewProps {
@@ -99,7 +99,7 @@ function HostPanel({ host }: { host: HostGroup }) {
     >
       <summary className="flex cursor-pointer list-none items-start gap-2 [&::-webkit-details-marker]:hidden">
         <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-        <Network className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyber-700 dark:text-cyber-300" />
+        <Network className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="break-all font-mono text-sm font-semibold text-foreground">{host.host}</span>
@@ -219,7 +219,7 @@ function ServiceLine({ service, expandable = false }: { service: ServiceNode; ex
               </span>
             )}
             {aiStatus === 'deep' && (
-              <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+              <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-warning">
                 <Radar className="h-3 w-3" />Deep Test
               </span>
             )}
@@ -238,7 +238,7 @@ function ServiceLine({ service, expandable = false }: { service: ServiceNode; ex
             ))}
             <FingerChips fingers={service.fingers} />
             {service.analysisItems.length > 0 && (
-              <span className="text-cyber-700 dark:text-cyber-300">{service.analysisItems.length} analysis</span>
+              <span className="text-primary">{service.analysisItems.length} analysis</span>
             )}
           </div>
         </div>
@@ -250,7 +250,7 @@ function ServiceLine({ service, expandable = false }: { service: ServiceNode; ex
 
 function ServiceIcon({ service }: { service: ServiceNode }) {
   if (service.web) {
-    return <Globe className="h-3.5 w-3.5 shrink-0 text-cyber-700 dark:text-cyber-300" />
+    return <Globe className="h-3.5 w-3.5 shrink-0 text-primary" />
   }
   if (service.fingers.length > 0) {
     return <Fingerprint className="h-3.5 w-3.5 shrink-0 text-yellow-700 dark:text-yellow-300" />
@@ -357,11 +357,11 @@ function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
         <div className={cn(
           'mt-2 max-h-96 overflow-auto rounded-md p-3 text-muted-foreground',
           isAI
-            ? 'border-l-4 border-l-cyber-400 bg-cyber-500/5'
+            ? 'border-l-4 border-l-primary bg-primary/5'
             : 'border border-border bg-background/50',
         )}>
           {isAI && (
-            <div className="mb-2 text-[10px] font-medium uppercase text-cyber-700 dark:text-cyber-400">
+            <div className="mb-2 text-[10px] font-medium uppercase text-primary">
               {item.source === 'verify' ? 'AI Verification' : item.source === 'sniper' ? 'CVE Intelligence' : 'Dynamic Analysis'}
             </div>
           )}
@@ -396,7 +396,7 @@ function VerificationBadge({ source, status }: { source?: string; status?: strin
       return <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not Confirmed</span>
     }
     if (status === 'inconclusive') {
-      return <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">Inconclusive</span>
+      return <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-warning">Inconclusive</span>
     }
     return <span className="inline-flex items-center gap-1 rounded bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">Info</span>
   }
@@ -409,7 +409,7 @@ function VerificationBadge({ source, status }: { source?: string; status?: strin
   }
   if (source === 'deep') {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+      <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-warning">
         <Radar className="h-3 w-3" />Deep Test
       </span>
     )
@@ -472,7 +472,7 @@ function ItemIcon({ kind }: { kind: string }) {
     return <AlertCircle className="h-3.5 w-3.5 text-red-700 dark:text-red-300" />
   }
   if (kind === 'note' || kind === 'response') {
-    return <Brain className="h-3.5 w-3.5 text-cyber-700 dark:text-cyber-300" />
+    return <Brain className="h-3.5 w-3.5 text-primary" />
   }
   if (kind === 'fingerprint') {
     return <Fingerprint className="h-3.5 w-3.5 text-yellow-700 dark:text-yellow-300" />
@@ -558,9 +558,9 @@ function SitemapTreeNode({
             isOpen && 'rotate-90',
           )} />
           {isOpen ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-cyber-700 dark:text-cyber-300" />
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
           ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-cyber-700 dark:text-cyber-300" />
+            <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
           )}
           <span className="min-w-0 flex-1 truncate font-mono text-foreground">{node.name}</span>
           <span className="shrink-0 text-muted-foreground">{count}</span>
@@ -620,12 +620,12 @@ function SourceChips({ sources, className }: { sources: string[]; className?: st
   const hidden = sources.length - visible.length
 
   return (
-    <span className={cn('inline-flex min-w-0 flex-wrap items-center gap-1 text-cyber-700 dark:text-cyber-300', className)} title="Sources">
+    <span className={cn('inline-flex min-w-0 flex-wrap items-center gap-1 text-primary', className)} title="Sources">
       <Server className="h-3 w-3 shrink-0" />
       {visible.map((source) => (
-        <span key={`source:${source}`} className="rounded bg-cyber-500/10 px-1.5 py-0.5 text-[10px]">{source}</span>
+        <span key={`source:${source}`} className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px]">{source}</span>
       ))}
-      {hidden > 0 && <span className="rounded bg-cyber-500/10 px-1.5 py-0.5 text-[10px]">+{hidden}</span>}
+      {hidden > 0 && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px]">+{hidden}</span>}
     </span>
   )
 }
@@ -664,7 +664,7 @@ function IconButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="inline-flex h-6 w-6 items-center justify-center rounded border border-border bg-background text-muted-foreground hover:border-cyber-400/30 hover:text-foreground"
+      className="inline-flex h-6 w-6 items-center justify-center rounded border border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
     >
       {children}
     </button>
@@ -689,8 +689,8 @@ function TabChip({
       className={cn(
         'rounded border px-2 py-1 text-[10px] font-medium transition-colors',
         active
-          ? 'border-cyber-400/40 bg-cyber-500/15 text-cyber-800 dark:text-cyber-200'
-          : 'border-border bg-background text-muted-foreground hover:border-cyber-400/30 hover:text-foreground',
+          ? 'border-primary/40 bg-primary/15 text-primary'
+          : 'border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
       )}
     >
       {label}
@@ -716,7 +716,7 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-card/50">
-      <div className="border-b border-border px-4 py-2 text-sm font-medium text-cyber-700 dark:text-cyber-400">{title}</div>
+      <div className="border-b border-border px-4 py-2 text-sm font-medium text-primary">{title}</div>
       <div className="p-4">{children}</div>
     </div>
   )
@@ -727,7 +727,7 @@ function Badge({ children, tone = 'muted' }: { children: ReactNode; tone?: Badge
     <span
       className={cn(
         'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
-        tone === 'cyan' && 'bg-cyber-500/10 text-cyber-700 dark:text-cyber-300',
+        tone === 'cyan' && 'bg-primary/10 text-primary',
         tone === 'yellow' && 'bg-yellow-400/10 text-yellow-700 dark:text-yellow-300',
         tone === 'green' && 'bg-green-400/10 text-green-700 dark:text-green-300',
         tone === 'red' && 'bg-red-400/10 text-red-700 dark:text-red-300',

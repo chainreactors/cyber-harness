@@ -18,8 +18,13 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@aspect/ui": ["./cyber-ui/packages/ui/src"],
+      "@aspect/theme": ["./cyber-ui/packages/theme/src"],
+      "@aspect/markdown": ["./cyber-ui/packages/markdown/src"],
+      "@aspect/viewer": ["./cyber-ui/packages/viewer/src"],
+      "@aspect/terminal": ["./cyber-ui/packages/terminal/src"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "cyber-ui/packages/*/src"]
 }

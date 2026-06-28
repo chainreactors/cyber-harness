@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Crosshair, Key, Radar, Shield } from 'lucide
 import type { ScanResult } from '../api'
 import { buildFindings, PRIORITY_ORDER, type FindingItem, type FindingPriority } from '../lib/scan-result'
 import { cn } from '@aspect/theme'
-import MarkdownContent from './MarkdownContent'
+import { MarkdownContent } from '@aspect/markdown'
 
 interface FindingsPanelProps {
   result: ScanResult
@@ -14,7 +14,7 @@ type FilterValue = 'all' | FindingPriority | 'ai_verified'
 const PRIORITY_STYLE = {
   critical: { bg: 'bg-red-500/15', text: 'text-red-600 dark:text-red-400', border: 'border-red-500/30', dot: 'bg-red-500' },
   high: { bg: 'bg-orange-500/15', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-500/30', dot: 'bg-orange-500' },
-  medium: { bg: 'bg-yellow-500/15', text: 'text-yellow-600 dark:text-yellow-400', border: 'border-yellow-500/30', dot: 'bg-yellow-500' },
+  medium: { bg: 'bg-yellow-500/15', text: 'text-yellow-600 dark:text-warning', border: 'border-yellow-500/30', dot: 'bg-yellow-500' },
   low: { bg: 'bg-green-500/15', text: 'text-green-600 dark:text-green-400', border: 'border-green-500/30', dot: 'bg-green-500' },
   info: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/30', dot: 'bg-blue-500' },
 } as const
@@ -124,15 +124,15 @@ function FindingCard({ item }: { item: FindingItem }) {
           {!expanded ? (
             <button
               type="button"
-              className="text-[11px] text-cyber-700 dark:text-cyber-400 hover:underline"
+              className="text-[11px] text-primary hover:underline"
               onClick={() => setExpanded(true)}
             >
               Show AI Analysis
             </button>
           ) : (
-            <div className="mt-1 rounded-md border-l-4 border-l-cyber-400 bg-cyber-500/5 p-3">
+            <div className="mt-1 rounded-md border-l-4 border-l-primary bg-primary/5 p-3">
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-medium uppercase text-cyber-700 dark:text-cyber-400">
+                <span className="text-[10px] font-medium uppercase text-primary">
                   {item.source === 'verify' ? 'AI Verification' : item.source === 'sniper' ? 'CVE Intelligence' : 'Analysis'}
                 </span>
                 <button
@@ -158,7 +158,7 @@ function FindingKindIcon({ kind }: { kind: FindingItem['kind'] }) {
   switch (kind) {
     case 'vuln': return <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" />
     case 'weakpass': return <Key className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-600 dark:text-orange-400" />
-    case 'fingerprint': return <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-yellow-600 dark:text-yellow-400" />
+    case 'fingerprint': return <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-yellow-600 dark:text-warning" />
     default: return <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
   }
 }
@@ -175,7 +175,7 @@ function FindingSourceBadge({ source, status }: { source?: string; status?: stri
     return <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not Confirmed</span>
   }
   if (source === 'verify' && status === 'inconclusive') {
-    return <span className="rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">Inconclusive</span>
+    return <span className="rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-warning">Inconclusive</span>
   }
   if (source === 'sniper') {
     return (
@@ -186,7 +186,7 @@ function FindingSourceBadge({ source, status }: { source?: string; status?: stri
   }
   if (source === 'deep') {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-yellow-400">
+      <span className="inline-flex items-center gap-1 rounded bg-yellow-400/10 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:text-warning">
         <Radar className="h-3 w-3" />Deep Test
       </span>
     )
@@ -202,8 +202,8 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
         active
-          ? 'border-cyber-400/40 bg-cyber-500/15 text-cyber-800 dark:text-cyber-200'
-          : 'border-border bg-background text-muted-foreground hover:border-cyber-400/30 hover:text-foreground',
+          ? 'border-primary/40 bg-primary/15 text-primary'
+          : 'border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
       )}
     >
       {children}

@@ -35,7 +35,7 @@ export default function ScanHistory({ scans, activeId, onSelect, emptyMessage = 
             aria-label={`${scan.target}, ${scan.status}, ${scan.mode}, ${assetCount} assets, ${lootCount} loots`}
             className={`w-full text-left px-2.5 py-2 rounded-md transition-colors ${
               scan.id === activeId
-                ? 'bg-accent border border-cyber-600/30'
+                ? 'bg-accent border border-primary/30'
                 : 'hover:bg-accent/50 border border-transparent'
             }`}
           >
@@ -53,7 +53,7 @@ export default function ScanHistory({ scans, activeId, onSelect, emptyMessage = 
                     icon={<Layers className="h-3 w-3" />}
                     value={assetCount}
                     label="assets"
-                    className="text-cyber-700 dark:text-cyber-300"
+                    className="text-primary"
                   />
                   <HistoryMetric
                     icon={<ShieldAlert className="h-3 w-3" />}
@@ -63,7 +63,7 @@ export default function ScanHistory({ scans, activeId, onSelect, emptyMessage = 
                   />
                 </>
               )}
-              {verifyEnabled && <span className="text-[10px] text-cyber-700 dark:text-cyber-300">Verify</span>}
+              {verifyEnabled && <span className="text-[10px] text-primary">Verify</span>}
               {sniperEnabled && <span className="text-[10px] text-red-700 dark:text-red-300">Sniper</span>}
               {scan.deep && <span className="text-[10px] text-yellow-700 dark:text-yellow-300">Deep</span>}
               <span className="text-[10px] text-muted-foreground/60">{formatTime(scan.created_at)}</span>

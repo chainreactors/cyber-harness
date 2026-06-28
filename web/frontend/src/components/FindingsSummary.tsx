@@ -11,7 +11,7 @@ interface FindingsSummaryProps {
 const PRIORITY_CONFIG = {
   critical: { label: 'Critical', bg: 'bg-red-500/15', text: 'text-red-600 dark:text-red-400', border: 'border-red-500/30' },
   high: { label: 'High', bg: 'bg-orange-500/15', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-500/30' },
-  medium: { label: 'Medium', bg: 'bg-yellow-500/15', text: 'text-yellow-600 dark:text-yellow-400', border: 'border-yellow-500/30' },
+  medium: { label: 'Medium', bg: 'bg-yellow-500/15', text: 'text-yellow-600 dark:text-warning', border: 'border-yellow-500/30' },
   low: { label: 'Low', bg: 'bg-green-500/15', text: 'text-green-600 dark:text-green-400', border: 'border-green-500/30' },
   info: { label: 'Info', bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/30' },
 } as const
@@ -23,7 +23,7 @@ export default function FindingsSummary({ result }: FindingsSummaryProps) {
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-4 space-y-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-cyber-700 dark:text-cyber-400">
+      <div className="flex items-center gap-2 text-sm font-medium text-primary">
         <ShieldCheck className="h-4 w-4" />
         <span>AI Analysis Summary</span>
       </div>
@@ -104,7 +104,7 @@ function VerificationStats({ summary }: { summary: FindingsSummaryModel }) {
           </span>
         )}
         {inconclusive > 0 && (
-          <span className="inline-flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
+          <span className="inline-flex items-center gap-1 text-yellow-600 dark:text-warning">
             <HelpCircle className="h-3 w-3" />{inconclusive} inconclusive
           </span>
         )}
