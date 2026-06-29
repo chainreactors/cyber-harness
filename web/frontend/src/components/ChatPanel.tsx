@@ -1,21 +1,15 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import {
-  Activity,
   AlertTriangle,
   Bot,
-  CheckCircle2,
   CircleDashed,
   GitBranch,
   MessageSquare,
-  PanelRight,
-  PanelRightClose,
-  Settings,
   User,
   Wrench,
   X,
 } from 'lucide-react'
-import { Button, ThemeToggle } from '@aspect/ui'
-import { cn, useTheme } from '@aspect/theme'
+import { cn } from '@aspect/theme'
 import { MarkdownContent } from '@aspect/markdown'
 import {
   AssistantResponse,
@@ -23,14 +17,15 @@ import {
   ChatThinking,
   MessageBubble as ChatMessageBubble,
   ToolCallDisplay as ChatToolCall,
+  resolveTimelineRenderer,
   summarizeArgs,
   type ChatAttachment,
+  type ExtensionTimelineItem,
 } from '@aspect/viewer'
 import { uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult } from '../api'
 import type { AssistantResponseState, TimelineItem } from '../hooks/useChatSession'
-import ScanProgressInline from './chat/ScanProgressInline'
-import ScanSummaryCard from './chat/ScanSummaryCard'
+import { toViewerTimeline } from '../lib/timeline-mapper'
 
 const workspaceClass = 'mx-auto w-full max-w-[96rem] px-4 sm:px-5 lg:px-6'
 const contentOffsetClass = 'xl:ml-[10.75rem]'
@@ -51,10 +46,6 @@ interface Props {
   onClearError: () => void
   onShowScanDetail: (scanID: string) => void
   detailOpen: boolean
-  onToggleDetail: () => void
-  onOpenConfig: () => void
-  onOpenScan: () => void
-  agentsPill: ReactNode
 }
 
 export default function ChatPanel({
@@ -72,15 +63,10 @@ export default function ChatPanel({
   onClearError,
   onShowScanDetail,
   detailOpen,
-  onToggleDetail,
-  onOpenConfig,
-  onOpenScan,
-  agentsPill,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
-  const { isDark, toggle: toggleTheme } = useTheme()
   const inputFormClass = cn(contentOffsetClass, !detailOpen && threadOffsetClass)
   const hasAssistantResponse = timeline.some((item) => item.kind === 'assistant_response')
 
@@ -121,32 +107,6 @@ export default function ChatPanel({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-card/85 px-3 backdrop-blur-sm">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <MessageSquare className="h-4 w-4 text-primary" />
-          Chat
-        </div>
-        <div className="flex items-center gap-1">
-          {agentsPill}
-          <Button variant="ghost" size="icon" onClick={onOpenScan} className="h-7 w-7 text-muted-foreground" aria-label="Open scan workspace">
-            <Activity className="h-3.5 w-3.5" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onOpenConfig} className="h-7 w-7 text-muted-foreground" aria-label="LLM Config">
-            <Settings className="h-3.5 w-3.5" />
-          </Button>
-          <ThemeToggle isDark={isDark} onToggle={toggleTheme} size="sm" />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleDetail}
-            className={cn('h-7 w-7 text-muted-foreground', detailOpen && 'bg-primary/10 text-primary')}
-            aria-label={detailOpen ? 'Hide detail panel' : 'Show detail panel'}
-          >
-            {detailOpen ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRight className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-      </div>
-
       {error && (
         <div
           role="alert"
@@ -358,23 +318,16 @@ function timelineContent(
       )
 
     case 'scan_started':
-      return (
-        <ScanProgressInline
-          scanID={item.scanID || ''}
-          lines={item.scanLines || []}
-          complete={item.scanID ? scanResults.has(item.scanID) : false}
-        />
-      )
-
-    case 'scan_complete':
-      if (!item.scanResult || !item.scanID) return null
-      return (
-        <ScanSummaryCard
-          scanID={item.scanID}
-          result={item.scanResult}
-          onViewDetails={onShowScanDetail}
-        />
-      )
+    case 'scan_progress':
+    case 'scan_complete': {
+      const mapped = toViewerTimeline([item])
+      const ext = mapped[0] as ExtensionTimelineItem | undefined
+      if (!ext || ext.kind !== 'extension') return null
+      const config = resolveTimelineRenderer(ext.extensionType)
+      if (!config) return null
+      const Renderer = config.renderer
+      return <Renderer item={ext} context={{ scanResults, onShowScanDetail }} />
+    }
 
     case 'thinking':
       return (
@@ -383,17 +336,15 @@ function timelineContent(
         </ChatThinking>
       )
 
-    case 'agent_joined':
-      return (
-        <div className="flex items-center justify-center gap-2 py-1">
-          <div className="h-px flex-1 bg-border" />
-          <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Bot className="h-3 w-3" />
-            {item.agentName} joined
-          </span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-      )
+    case 'agent_joined': {
+      const mapped = toViewerTimeline([item])
+      const ext = mapped[0] as ExtensionTimelineItem | undefined
+      if (!ext || ext.kind !== 'extension') return null
+      const config = resolveTimelineRenderer(ext.extensionType)
+      if (!config) return null
+      const AgentRenderer = config.renderer
+      return <AgentRenderer item={ext} context={{}} />
+    }
 
     default:
       return null
@@ -539,20 +490,26 @@ function describeTimelineItem(item: TimelineItem): TimelineDescriptor | null {
       }
 
     case 'scan_started':
-      return {
-        label: 'Scan',
-        time,
-        icon: <Activity className="h-3 w-3 text-blue-500" />,
-        dotClass: 'border-blue-400 bg-blue-400',
-      }
-
+    case 'scan_progress':
     case 'scan_complete':
-      return {
-        label: 'Complete',
-        time,
-        icon: <CheckCircle2 className="h-3 w-3 text-emerald-500" />,
-        dotClass: 'border-emerald-400 bg-emerald-400',
+    case 'agent_joined': {
+      const mapped = toViewerTimeline([item])
+      const ext = mapped[0] as ExtensionTimelineItem | undefined
+      if (!ext || ext.kind !== 'extension') return null
+      const config = resolveTimelineRenderer(ext.extensionType)
+      if (config?.mark) {
+        const markLabel = typeof config.mark.label === 'function'
+          ? config.mark.label(ext) : (config.mark.label || item.kind)
+        const MarkIcon = config.mark.icon
+        return {
+          label: markLabel,
+          time,
+          icon: MarkIcon ? <MarkIcon className="h-3 w-3" /> : null,
+          dotClass: config.mark.dotClass || 'border-border bg-muted-foreground/60',
+        }
       }
+      return null
+    }
 
     case 'thinking':
       return {
@@ -560,14 +517,6 @@ function describeTimelineItem(item: TimelineItem): TimelineDescriptor | null {
         time,
         icon: <CircleDashed className="h-3 w-3 animate-spin text-primary" />,
         dotClass: 'border-primary bg-background',
-      }
-
-    case 'agent_joined':
-      return {
-        label: item.agentName || 'Agent',
-        time,
-        icon: <Bot className="h-3 w-3 text-primary" />,
-        dotClass: 'border-primary bg-primary',
       }
 
     default:
