@@ -363,7 +363,7 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 }
 
 func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
-	recs := runner.ResultToRecords(scanID, agentID, result)
+	recs := resultToRecords(scanID, agentID, result)
 	if len(recs) > 0 {
 		_ = s.store.InsertRecords(context.Background(), recs)
 	}

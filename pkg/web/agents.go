@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/gorilla/websocket"
 )
@@ -777,7 +776,7 @@ func (p *AgentPool) persistAgentRecord(a *remoteAgent, msg WSMessage) {
 	if p.records == nil {
 		return
 	}
-	rec := runner.WSPayloadToRecord(msg.Type, msg.TaskID, a.id, msg.Payload)
+	rec := wsPayloadToRecord(msg.Type, msg.TaskID, a.id, msg.Payload)
 	if p.sessions != nil && msg.TaskID != "" {
 		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
 			rec.SessionID = sid
@@ -794,10 +793,100 @@ func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload 
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return
 	}
-	recs := runner.ResultToRecords(taskID, a.id, &result)
+	recs := resultToRecords(taskID, a.id, &result)
 	if len(recs) > 0 {
 		_ = p.records.InsertRecords(context.Background(), recs)
 	}
+}
+
+func wsPayloadToRecord(msgType, taskID, agentID string, payload json.RawMessage) *output.Record {
+	rec := &output.Record{
+		Timestamp: time.Now(),
+		Data:      payload,
+		ID:        generateID(),
+		ScanID:    taskID,
+		AgentID:   agentID,
+	}
+	var meta struct {
+		Turn     int    `json:"turn"`
+		ToolName string `json:"tool_name"`
+	}
+	if len(payload) > 0 {
+		_ = json.Unmarshal(payload, &meta)
+	}
+	rec.Turn = meta.Turn
+	rec.Source = meta.ToolName
+
+	switch msgType {
+	case "agent.tool_execution_start":
+		rec.Type = output.TypeToolCall
+		rec.Summary = meta.ToolName
+	case "agent.tool_execution_end":
+		rec.Type = output.TypeToolResult
+		rec.Summary = meta.ToolName
+	case "agent.message_end":
+		rec.Type = output.TypeMessage
+		rec.Source = "agent"
+	case "agent.turn_end":
+		rec.Type = output.TypeTurnEnd
+		rec.Source = "agent"
+	case "agent.llm_request":
+		rec.Type = output.TypeLLMRequest
+		rec.Source = "agent"
+	default:
+		rec.Type = output.TypeAgent
+		rec.Source = "agent"
+	}
+	return rec
+}
+
+func resultToRecords(scanID, agentID string, result *output.Result) []*output.Record {
+	if result == nil {
+		return nil
+	}
+	var recs []*output.Record
+	now := time.Now()
+	for _, loot := range result.Loots {
+		rec := &output.Record{
+			Timestamp: now,
+			Loot:      true,
+			ID:        generateID(),
+			ScanID:    scanID,
+			AgentID:   agentID,
+			Source:    loot.Kind,
+			Target:    loot.Target,
+			Priority:  loot.Priority,
+			Summary:   loot.Description,
+			Tags:      loot.Tags,
+		}
+		switch loot.Kind {
+		case output.LootVuln:
+			rec.Type = output.TypeNeutron
+		case output.LootWeakpass:
+			rec.Type = output.TypeZombie
+		case output.LootFingerprint:
+			rec.Type = output.TypeGogo
+		default:
+			rec.Type = output.RecordType(loot.Kind)
+		}
+		data, _ := json.Marshal(loot)
+		rec.Data = data
+		recs = append(recs, rec)
+	}
+	for _, e := range result.Errors {
+		data, _ := json.Marshal(e)
+		recs = append(recs, &output.Record{
+			Type:      output.TypeError,
+			Timestamp: now,
+			Data:      data,
+			ID:        generateID(),
+			ScanID:    scanID,
+			AgentID:   agentID,
+			Source:    e.Source,
+			Summary:   e.Message,
+		})
+	}
+	return recs
 }
 
 func formatTelemetryProgress(msg WSMessage) string {
