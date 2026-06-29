@@ -108,7 +108,6 @@ func (p *AgentPool) SetRecordStore(rs RecordStore) {
 	p.records = rs
 }
 
-
 func (p *AgentPool) register(a *remoteAgent) {
 	p.mu.Lock()
 	p.agents[a.id] = a
@@ -685,41 +684,41 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			Turn:    turn,
 		}
 	case "agent.tool_execution_start":
-		var payload struct {
+		var ev struct {
 			ToolName   string `json:"tool_name"`
 			ToolCallID string `json:"tool_call_id"`
 			Arguments  string `json:"arguments"`
 			Turn       int    `json:"turn"`
 		}
-		if msg.Payload != nil {
-			_ = json.Unmarshal(msg.Payload, &payload)
+		if data := extractEventData(msg.Payload); len(data) > 0 {
+			_ = json.Unmarshal(data, &ev)
 		}
-		if payload.Turn != 0 {
-			turn = payload.Turn
+		if ev.Turn != 0 {
+			turn = ev.Turn
 		}
 		event = ChatEvent{
 			Type:       ChatEventToolCall,
-			ToolName:   payload.ToolName,
-			ToolArgs:   payload.Arguments,
-			ToolCallID: payload.ToolCallID,
+			ToolName:   ev.ToolName,
+			ToolArgs:   ev.Arguments,
+			ToolCallID: ev.ToolCallID,
 			Turn:       turn,
 		}
 	case "agent.tool_execution_end":
-		var payload struct {
+		var ev struct {
 			ToolCallID string `json:"tool_call_id"`
 			Result     string `json:"result"`
 			Turn       int    `json:"turn"`
 		}
-		if msg.Payload != nil {
-			_ = json.Unmarshal(msg.Payload, &payload)
+		if data := extractEventData(msg.Payload); len(data) > 0 {
+			_ = json.Unmarshal(data, &ev)
 		}
-		if payload.Turn != 0 {
-			turn = payload.Turn
+		if ev.Turn != 0 {
+			turn = ev.Turn
 		}
 		event = ChatEvent{
 			Type:       ChatEventToolResult,
-			ToolCallID: payload.ToolCallID,
-			Content:    payload.Result,
+			ToolCallID: ev.ToolCallID,
+			Content:    ev.Result,
 			Turn:       turn,
 		}
 	default:
@@ -737,19 +736,36 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 	p.forwardToSession(a, msg.TaskID, event)
 }
 
-func agentEventTurn(payload json.RawMessage) int {
+// extractEventData unwraps the agent event data from a WS payload.
+// The payload is a Record whose Data field contains the serialized agent.Event.
+func extractEventData(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
+		return nil
+	}
+	var rec struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(payload, &rec) == nil && len(rec.Data) > 0 {
+		return rec.Data
+	}
+	return payload
+}
+
+func agentEventTurn(payload json.RawMessage) int {
+	data := extractEventData(payload)
+	if len(data) == 0 {
 		return 0
 	}
 	var event struct {
 		Turn int `json:"turn"`
 	}
-	_ = json.Unmarshal(payload, &event)
+	_ = json.Unmarshal(data, &event)
 	return event.Turn
 }
 
 func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning string, ok bool) {
-	if len(payload) == 0 {
+	data := extractEventData(payload)
+	if len(data) == 0 {
 		return "", "", "", false
 	}
 	var event struct {
@@ -759,7 +775,7 @@ func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning 
 			ReasoningContent *string `json:"reasoning_content"`
 		} `json:"message"`
 	}
-	if err := json.Unmarshal(payload, &event); err != nil || event.Message == nil {
+	if err := json.Unmarshal(data, &event); err != nil || event.Message == nil {
 		return "", "", "", false
 	}
 	role = event.Message.Role
@@ -773,16 +789,22 @@ func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning 
 }
 
 func (p *AgentPool) persistAgentRecord(a *remoteAgent, msg WSMessage) {
-	if p.records == nil {
+	if p.records == nil || len(msg.Payload) == 0 {
 		return
 	}
-	rec := wsPayloadToRecord(msg.Type, msg.TaskID, a.id, msg.Payload)
+	var rec output.Record
+	if err := json.Unmarshal(msg.Payload, &rec); err != nil {
+		return
+	}
+	rec.ID = generateID()
+	rec.ScanID = msg.TaskID
+	rec.AgentID = a.id
 	if p.sessions != nil && msg.TaskID != "" {
 		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
 			rec.SessionID = sid
 		}
 	}
-	_ = p.records.InsertRecord(context.Background(), rec)
+	_ = p.records.InsertRecord(context.Background(), &rec)
 }
 
 func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {
@@ -797,47 +819,6 @@ func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload 
 	if len(recs) > 0 {
 		_ = p.records.InsertRecords(context.Background(), recs)
 	}
-}
-
-func wsPayloadToRecord(msgType, taskID, agentID string, payload json.RawMessage) *output.Record {
-	rec := &output.Record{
-		Timestamp: time.Now(),
-		Data:      payload,
-		ID:        generateID(),
-		ScanID:    taskID,
-		AgentID:   agentID,
-	}
-	var meta struct {
-		Turn     int    `json:"turn"`
-		ToolName string `json:"tool_name"`
-	}
-	if len(payload) > 0 {
-		_ = json.Unmarshal(payload, &meta)
-	}
-	rec.Turn = meta.Turn
-	rec.Source = meta.ToolName
-
-	switch msgType {
-	case "agent.tool_execution_start":
-		rec.Type = output.TypeToolCall
-		rec.Summary = meta.ToolName
-	case "agent.tool_execution_end":
-		rec.Type = output.TypeToolResult
-		rec.Summary = meta.ToolName
-	case "agent.message_end":
-		rec.Type = output.TypeMessage
-		rec.Source = "agent"
-	case "agent.turn_end":
-		rec.Type = output.TypeTurnEnd
-		rec.Source = "agent"
-	case "agent.llm_request":
-		rec.Type = output.TypeLLMRequest
-		rec.Source = "agent"
-	default:
-		rec.Type = output.TypeAgent
-		rec.Source = "agent"
-	}
-	return rec
 }
 
 func resultToRecords(scanID, agentID string, result *output.Result) []*output.Record {

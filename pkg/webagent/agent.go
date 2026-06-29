@@ -189,7 +189,8 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 				statsPayload, _ := json.Marshal(next)
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
 			}
-			payload, _ := json.Marshal(e)
+			rec := output.NewRecord(output.TypeAgent, e)
+			payload, _ := json.Marshal(rec)
 			data := agentEventSummary(e)
 			if data == "" {
 				data = string(payload)

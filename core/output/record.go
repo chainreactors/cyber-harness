@@ -21,14 +21,7 @@ const (
 	TypeAgent     RecordType = "agent"
 	TypeScanEnd   RecordType = "scan_end"
 
-	TypeToolCall   RecordType = "tool_call"
-	TypeToolResult RecordType = "tool_result"
-	TypeMessage    RecordType = "message"
-	TypeMetric     RecordType = "metric"
-	TypeLLMRequest RecordType = "llm_request"
-	TypeTurnEnd    RecordType = "turn_end"
-	TypeAgentEnd   RecordType = "agent_end"
-	TypeError      RecordType = "error"
+	TypeError RecordType = "error"
 )
 
 type Record struct {
@@ -47,7 +40,6 @@ type Record struct {
 	Summary   string          `json:"summary,omitempty"`
 	Tags      []string        `json:"tags,omitempty"`
 }
-
 
 type RecordFilter struct {
 	ScanID    string
