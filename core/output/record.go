@@ -41,28 +41,6 @@ type Record struct {
 	Tags      []string        `json:"tags,omitempty"`
 }
 
-type RecordFilter struct {
-	ScanID    string
-	SessionID string
-	AgentID   string
-	Type      RecordType
-	Types     []RecordType
-	Source    string
-	Target    string
-	Priority  string
-	LootOnly  bool
-	Tags      []string
-	Limit     int
-	Offset    int
-}
-
-type RecordSummary struct {
-	Total      int            `json:"total"`
-	ByType     map[string]int `json:"by_type"`
-	ByPriority map[string]int `json:"by_priority"`
-	BySource   map[string]int `json:"by_source"`
-}
-
 func NewRecord(t RecordType, data interface{}) Record {
 	raw, _ := json.Marshal(data)
 	return Record{

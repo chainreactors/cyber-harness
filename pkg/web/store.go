@@ -32,6 +32,4 @@ type Store interface {
 	// Records
 	InsertRecord(ctx context.Context, rec *output.Record) error
 	InsertRecords(ctx context.Context, recs []*output.Record) error
-	ListRecords(ctx context.Context, filter output.RecordFilter) ([]*output.Record, error)
-	AggregateRecords(ctx context.Context, filter output.RecordFilter) (*output.RecordSummary, error)
 }
