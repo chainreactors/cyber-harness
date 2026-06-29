@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/gorilla/websocket"
 )
@@ -71,12 +73,19 @@ type SessionLookup interface {
 	BroadcastChatEvent(sessionID string, event ChatEvent)
 }
 
+// RecordStore is the subset of Store needed for record persistence.
+type RecordStore interface {
+	InsertRecord(ctx context.Context, rec *output.Record) error
+	InsertRecords(ctx context.Context, recs []*output.Record) error
+}
+
 // AgentPool manages connected remote aiscan agents via WebSocket.
 type AgentPool struct {
 	mu             sync.RWMutex
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
+	records        RecordStore
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan WSMessage
 	ptyDrops       atomic.Int64
@@ -95,6 +104,11 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 func (p *AgentPool) SetSessionLookup(sl SessionLookup) {
 	p.sessions = sl
 }
+
+func (p *AgentPool) SetRecordStore(rs RecordStore) {
+	p.records = rs
+}
+
 
 func (p *AgentPool) register(a *remoteAgent) {
 	p.mu.Lock()
@@ -538,6 +552,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			close(ch)
 		}
 		p.recordScanResultStats(a, msg.Payload)
+		p.persistResultRecords(a, msg.TaskID, msg.Payload)
 
 	case "error":
 		a.mu.Lock()
@@ -564,6 +579,8 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		}
 		// Enriched: map agent events to typed ChatEvents for session SSE.
 		p.forwardAgentEvent(a, msg)
+		// Persist: write agent event as a record.
+		p.persistAgentRecord(a, msg)
 	}
 }
 
@@ -754,6 +771,33 @@ func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning 
 		reasoning = *event.Message.ReasoningContent
 	}
 	return role, content, reasoning, role != ""
+}
+
+func (p *AgentPool) persistAgentRecord(a *remoteAgent, msg WSMessage) {
+	if p.records == nil {
+		return
+	}
+	rec := runner.WSPayloadToRecord(msg.Type, msg.TaskID, a.id, msg.Payload)
+	if p.sessions != nil && msg.TaskID != "" {
+		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
+			rec.SessionID = sid
+		}
+	}
+	_ = p.records.InsertRecord(context.Background(), rec)
+}
+
+func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {
+	if p.records == nil || len(payload) == 0 {
+		return
+	}
+	var result output.Result
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return
+	}
+	recs := runner.ResultToRecords(taskID, a.id, &result)
+	if len(recs) > 0 {
+		_ = p.records.InsertRecords(context.Background(), recs)
+	}
 }
 
 func formatTelemetryProgress(msg WSMessage) string {

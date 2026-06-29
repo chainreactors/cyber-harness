@@ -65,6 +65,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	} else {
 		pool = web.NewAgentPool(service.Hub())
 	}
+	pool.SetRecordStore(store)
 	service.SetAgentPool(pool)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")

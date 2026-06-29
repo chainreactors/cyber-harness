@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	_ "modernc.org/sqlite"
 )
 
@@ -101,11 +102,36 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS records (
+			id         TEXT PRIMARY KEY,
+			type       TEXT NOT NULL,
+			scan_id    TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			agent_id   TEXT NOT NULL DEFAULT '',
+			source     TEXT NOT NULL DEFAULT '',
+			target     TEXT NOT NULL DEFAULT '',
+			turn       INTEGER NOT NULL DEFAULT 0,
+			priority   TEXT NOT NULL DEFAULT '',
+			summary    TEXT NOT NULL DEFAULT '',
+			loot       INTEGER NOT NULL DEFAULT 0,
+			tags       TEXT NOT NULL DEFAULT '',
+			data       TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		);
+	`); err != nil {
+		return err
+	}
+
 	_, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
+		CREATE INDEX IF NOT EXISTS idx_records_scan ON records(scan_id, type, created_at);
+		CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_id, type);
+		CREATE INDEX IF NOT EXISTS idx_records_type ON records(type, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_records_priority ON records(priority, type);
 	`)
 	return err
 }
@@ -422,4 +448,209 @@ func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]s
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// --- Records ---
+
+func (s *SQLiteStore) InsertRecord(ctx context.Context, rec *output.Record) error {
+	tagsJSON, _ := json.Marshal(rec.Tags)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO records (id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, string(rec.Type), rec.ScanID, rec.SessionID, rec.AgentID,
+		rec.Source, rec.Target, rec.Turn, rec.Priority, rec.Summary,
+		boolToInt(rec.Loot), string(tagsJSON), string(rec.Data),
+		rec.Timestamp.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT OR IGNORE INTO records (id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, rec := range recs {
+		tagsJSON, _ := json.Marshal(rec.Tags)
+		if _, err := stmt.ExecContext(ctx,
+			rec.ID, string(rec.Type), rec.ScanID, rec.SessionID, rec.AgentID,
+			rec.Source, rec.Target, rec.Turn, rec.Priority, rec.Summary,
+			boolToInt(rec.Loot), string(tagsJSON), string(rec.Data),
+			rec.Timestamp.Format(time.RFC3339Nano),
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ListRecords(ctx context.Context, filter output.RecordFilter) ([]*output.Record, error) {
+	query, args := buildRecordQuery("SELECT id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at FROM records", filter)
+	query += " ORDER BY created_at DESC"
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query += fmt.Sprintf(" LIMIT %d", limit)
+	if filter.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET %d", filter.Offset)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var recs []*output.Record
+	for rows.Next() {
+		rec, err := scanRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, rec)
+	}
+	return recs, rows.Err()
+}
+
+func (s *SQLiteStore) AggregateRecords(ctx context.Context, filter output.RecordFilter) (*output.RecordSummary, error) {
+	summary := &output.RecordSummary{
+		ByType:     make(map[string]int),
+		ByPriority: make(map[string]int),
+		BySource:   make(map[string]int),
+	}
+
+	countQuery, args := buildRecordQuery("SELECT COUNT(*) FROM records", filter)
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&summary.Total); err != nil {
+		return nil, err
+	}
+
+	typeQuery, typeArgs := buildRecordQuery("SELECT type, COUNT(*) FROM records", filter)
+	typeQuery += " GROUP BY type"
+	typeRows, err := s.db.QueryContext(ctx, typeQuery, typeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer typeRows.Close()
+	for typeRows.Next() {
+		var t string
+		var c int
+		if err := typeRows.Scan(&t, &c); err != nil {
+			return nil, err
+		}
+		summary.ByType[t] = c
+	}
+
+	priQuery, priArgs := buildRecordQuery("SELECT priority, COUNT(*) FROM records", filter)
+	priQuery += " AND priority != '' GROUP BY priority"
+	priRows, err := s.db.QueryContext(ctx, priQuery, priArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer priRows.Close()
+	for priRows.Next() {
+		var p string
+		var c int
+		if err := priRows.Scan(&p, &c); err != nil {
+			return nil, err
+		}
+		summary.ByPriority[p] = c
+	}
+
+	srcQuery, srcArgs := buildRecordQuery("SELECT source, COUNT(*) FROM records", filter)
+	srcQuery += " AND source != '' GROUP BY source"
+	srcRows, err := s.db.QueryContext(ctx, srcQuery, srcArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer srcRows.Close()
+	for srcRows.Next() {
+		var src string
+		var c int
+		if err := srcRows.Scan(&src, &c); err != nil {
+			return nil, err
+		}
+		summary.BySource[src] = c
+	}
+
+	return summary, nil
+}
+
+func buildRecordQuery(base string, filter output.RecordFilter) (string, []any) {
+	var conds []string
+	var args []any
+	conds = append(conds, "1=1")
+
+	if filter.ScanID != "" {
+		conds = append(conds, "scan_id = ?")
+		args = append(args, filter.ScanID)
+	}
+	if filter.SessionID != "" {
+		conds = append(conds, "session_id = ?")
+		args = append(args, filter.SessionID)
+	}
+	if filter.AgentID != "" {
+		conds = append(conds, "agent_id = ?")
+		args = append(args, filter.AgentID)
+	}
+	if filter.Type != "" {
+		conds = append(conds, "type = ?")
+		args = append(args, string(filter.Type))
+	}
+	if len(filter.Types) > 0 {
+		placeholders := make([]string, len(filter.Types))
+		for i, t := range filter.Types {
+			placeholders[i] = "?"
+			args = append(args, string(t))
+		}
+		conds = append(conds, "type IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if filter.Source != "" {
+		conds = append(conds, "source = ?")
+		args = append(args, filter.Source)
+	}
+	if filter.Target != "" {
+		conds = append(conds, "target = ?")
+		args = append(args, filter.Target)
+	}
+	if filter.Priority != "" {
+		conds = append(conds, "priority = ?")
+		args = append(args, filter.Priority)
+	}
+	if filter.LootOnly {
+		conds = append(conds, "loot = 1")
+	}
+	return base + " WHERE " + strings.Join(conds, " AND "), args
+}
+
+func scanRecord(sc scanner) (*output.Record, error) {
+	var rec output.Record
+	var recType, tagsJSON, dataJSON, createdAt string
+	var loot int
+	if err := sc.Scan(&rec.ID, &recType, &rec.ScanID, &rec.SessionID, &rec.AgentID,
+		&rec.Source, &rec.Target, &rec.Turn, &rec.Priority, &rec.Summary,
+		&loot, &tagsJSON, &dataJSON, &createdAt,
+	); err != nil {
+		return nil, err
+	}
+	rec.Type = output.RecordType(recType)
+	rec.Loot = loot != 0
+	if tagsJSON != "" && tagsJSON != "null" {
+		_ = json.Unmarshal([]byte(tagsJSON), &rec.Tags)
+	}
+	if dataJSON != "" {
+		rec.Data = json.RawMessage(dataJSON)
+	}
+	rec.Timestamp, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return &rec, nil
 }

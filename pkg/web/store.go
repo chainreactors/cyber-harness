@@ -1,6 +1,10 @@
 package web
 
-import "context"
+import (
+	"context"
+
+	"github.com/chainreactors/aiscan/core/output"
+)
 
 type Store interface {
 	// Scan CRUD
@@ -24,4 +28,10 @@ type Store interface {
 	// Session-scan association
 	LinkScanToSession(ctx context.Context, sessionID, scanID string) error
 	SessionScanIDs(ctx context.Context, sessionID string) ([]string, error)
+
+	// Records
+	InsertRecord(ctx context.Context, rec *output.Record) error
+	InsertRecords(ctx context.Context, recs []*output.Record) error
+	ListRecords(ctx context.Context, filter output.RecordFilter) ([]*output.Record, error)
+	AggregateRecords(ctx context.Context, filter output.RecordFilter) (*output.RecordSummary, error)
 }

@@ -318,6 +318,8 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	job.UpdatedAt = time.Now()
 	_ = s.store.Update(ctx, job)
 
+	s.persistResultRecords(job.ID, agent.id, result)
+
 	s.hub.Broadcast(job.ID, HubEvent{
 		Type: "complete",
 		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
@@ -351,11 +353,20 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 	job.UpdatedAt = time.Now()
 	_ = s.store.Update(ctx, job)
 
+	s.persistResultRecords(job.ID, "", result)
+
 	s.hub.Broadcast(job.ID, HubEvent{
 		Type: "complete",
 		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
 	})
 	s.broadcastScanComplete(job.ID, result)
+}
+
+func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
+	recs := runner.ResultToRecords(scanID, agentID, result)
+	if len(recs) > 0 {
+		_ = s.store.InsertRecords(context.Background(), recs)
+	}
 }
 
 func (s *Service) failJob(job *ScanJob, errMsg string) {
