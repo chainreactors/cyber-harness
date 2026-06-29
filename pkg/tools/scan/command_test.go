@@ -25,7 +25,7 @@ import (
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -1675,4 +1675,49 @@ func TestPipelineRouteDedupPreventsRedundantWork(t *testing.T) {
 	if consumerRuns != 1 {
 		t.Fatalf("consumer runs = %d, want 1 (dedup should suppress duplicates)", consumerRuns)
 	}
+}
+
+func TestCleanupGogoTempFilesRemovesSockLock(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	filename := filepath.Join(dir, engine.GogoTempLogFile)
+	if err := os.WriteFile(filename, []byte("temp"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.CleanupGogoTempFiles()
+
+	if _, err := os.Stat(filename); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be removed, stat error = %v", filename, err)
+	}
+}
+
+func TestCleanupGogoTempFilesIgnoresMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	engine.CleanupGogoTempFiles()
 }

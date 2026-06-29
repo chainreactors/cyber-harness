@@ -2,11 +2,23 @@ package tui
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/tui/readline/inputrc"
 )
+
+func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
+	got, err := AgentConsoleArgsForLine("!echo chat_pass")
+	if err != nil {
+		t.Fatalf("AgentConsoleArgsForLine returned error: %v", err)
+	}
+	want := []string{"!", "echo chat_pass"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AgentConsoleArgsForLine = %#v, want %#v", got, want)
+	}
+}
 
 func TestAgentReadlineBackspaceBindings(t *testing.T) {
 	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)

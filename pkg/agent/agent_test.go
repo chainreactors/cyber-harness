@@ -3,28 +3,20 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"reflect"
+	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
-
-	"github.com/chainreactors/aiscan/core/eventbus"
+	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/skills"
 )
-
-func testBus(handler func(Event)) *eventbus.Bus[Event] {
-	b := eventbus.New[Event]()
-	if handler != nil {
-		b.Subscribe(handler)
-	}
-	return b
-}
 
 func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 	tools := commands.NewRegistry()
@@ -104,67 +96,6 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	}
 }
 
-func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
-	llm := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(ChatMessage{
-				Role: "assistant",
-				ToolCalls: []ToolCall{{
-					ID:   "call-1",
-					Type: "function",
-					Function: FunctionCall{
-						Name:      "echo",
-						Arguments: `{"value":"x"}`,
-					},
-				}},
-			}),
-			chatResponse(NewTextMessage("assistant", "final")),
-		},
-	}
-
-	var events []EventType
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Bus: testBus(func(event Event) {
-			events = append(events, event.Type)
-		}),
-	})).Run(context.Background(), "use tool")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Turns != 2 {
-		t.Fatalf("turns = %d, want 2", result.Turns)
-	}
-
-	want := []EventType{
-		EventAgentStart,
-		EventTurnStart,
-		EventMessageStart,
-		EventMessageEnd,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventToolExecutionStart,
-		EventToolExecutionEnd,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventTurnStart,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventAgentEnd,
-	}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("events = %#v, want %#v", events, want)
-	}
-}
-
 func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{}
@@ -228,40 +159,6 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 	}
 }
 
-func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(NewTextMessage("assistant", "one")),
-			chatResponse(NewTextMessage("assistant", "two")),
-		},
-	}
-	a := NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		TransformContext: func(messages []ChatMessage) []ChatMessage {
-			if len(messages) <= 1 {
-				return messages
-			}
-			return messages[len(messages)-1:]
-		},
-	})
-	if _, err := a.Run(context.Background(), "one"); err != nil {
-		t.Fatalf("first prompt error = %v", err)
-	}
-	if _, err := a.Run(context.Background(), "two"); err != nil {
-		t.Fatalf("second prompt error = %v", err)
-	}
-	requests := llm.requestsSnapshot()
-	if len(requests[1].Messages) != 1 || *requests[1].Messages[0].Content != "two" {
-		t.Fatalf("transform not applied to request: %#v", requests[1].Messages)
-	}
-	if got := len(a.state.Messages); got != 4 {
-		t.Fatalf("agent state messages = %d, want 4", got)
-	}
-}
-
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
@@ -309,143 +206,6 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	}
 }
 
-func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
-	llm := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(ChatMessage{
-				Role: "assistant",
-				ToolCalls: []ToolCall{{
-					ID:   "call-1",
-					Type: "function",
-					Function: FunctionCall{
-						Name:      "echo",
-						Arguments: `{"value":"x"}`,
-					},
-				}},
-			}),
-			chatResponse(NewTextMessage("assistant", "should not be called")),
-		},
-	}
-
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		MaxTurns: 1,
-	})).Run(context.Background(), "use tool")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Turns != 1 {
-		t.Fatalf("turns = %d, want 1", result.Turns)
-	}
-	if got := len(llm.requestsSnapshot()); got != 1 {
-		t.Fatalf("provider calls = %d, want 1", got)
-	}
-}
-
-func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &scriptedProvider{
-		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("hel")}},
-			{Delta: ChatMessageDelta{Content: strPtr("lo")}},
-			{Done: true},
-		},
-	}
-	var updates int
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate {
-				updates++
-			}
-		}),
-	})).Run(context.Background(), "stream")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Output != "hello" {
-		t.Fatalf("output = %q, want hello", result.Output)
-	}
-	if updates == 0 {
-		t.Fatal("expected message_update events")
-	}
-}
-
-func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &scriptedProvider{
-		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("done")}},
-			{Done: true, Usage: &Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}},
-		},
-	}
-	var updateUsage *Usage
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && event.Usage != nil {
-				updateUsage = event.Usage
-			}
-		}),
-	})).Run(context.Background(), "stream")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Output != "done" {
-		t.Fatalf("output = %q, want done", result.Output)
-	}
-	if updateUsage == nil || updateUsage.TotalTokens != 12 {
-		t.Fatalf("message_update usage = %#v, want total 12", updateUsage)
-	}
-}
-
-func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &scriptedProvider{
-		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("hel")}},
-			{Delta: ChatMessageDelta{Content: strPtr("lo")}},
-			{Done: true},
-		},
-	}
-	var sawUpdate bool
-	a := NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && messageContent(event.Message) != "" {
-				sawUpdate = true
-			}
-		}),
-	})
-
-	result, err := a.Run(context.Background(), "stream")
-	if err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-	if result.Output != "hello" {
-		t.Fatalf("output = %q, want hello", result.Output)
-	}
-	if !sawUpdate {
-		t.Fatal("no message_update event during streaming")
-	}
-}
-
 func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &blockingProvider{started: make(chan struct{}), release: make(chan struct{})}
@@ -472,753 +232,6 @@ func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("first Prompt() error = %v", err)
 	}
-}
-
-func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
-	tools := commands.NewRegistry()
-	echo := &recordingTool{name: "echo", output: "ok"}
-	tools.RegisterTool(echo)
-	llm := &scriptedProvider{
-		streamEventBatches: [][]ChatCompletionStreamEvent{
-			{
-				{Delta: ChatMessageDelta{Role: "assistant"}},
-				{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-					Index: 0,
-					ID:    "call-1",
-					Type:  "function",
-					Function: FunctionCallDelta{
-						Name:      "echo",
-						Arguments: `{"value":`,
-					},
-				}}}},
-				{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-					Index:    0,
-					Function: FunctionCallDelta{Arguments: `"x"}`},
-				}}}},
-				{Done: true},
-			},
-			{
-				{Delta: ChatMessageDelta{Role: "assistant"}},
-				{Delta: ChatMessageDelta{Content: strPtr("final")}},
-				{Done: true},
-			},
-		},
-	}
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Stream:   true,
-	})).Run(context.Background(), "stream tool")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Output != "final" {
-		t.Fatalf("result = %q, want final", result.Output)
-	}
-	if got := echo.callsSnapshot(); !reflect.DeepEqual(got, []string{`{"value":"x"}`}) {
-		t.Fatalf("tool calls = %#v", got)
-	}
-}
-
-func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
-	tools := commands.NewRegistry()
-	echo := &recordingTool{name: "echo", output: "raw"}
-	tools.RegisterTool(echo)
-	llm := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(ChatMessage{
-				Role: "assistant",
-				ToolCalls: []ToolCall{{
-					ID:   "call-1",
-					Type: "function",
-					Function: FunctionCall{
-						Name:      "echo",
-						Arguments: `{"value":"blocked"}`,
-					},
-				}},
-			}),
-		},
-	}
-	rewritten := "rewritten result"
-	isError := false
-
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
-			return &BeforeToolCallResult{Block: true, Reason: "blocked by test"}, nil
-		},
-		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
-			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Flow: ToolFlowTerminate}, nil
-		},
-	})).Run(context.Background(), "use tool")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if got := echo.callsSnapshot(); len(got) != 0 {
-		t.Fatalf("tool calls = %#v, want blocked", got)
-	}
-	if len(llm.requestsSnapshot()) != 1 {
-		t.Fatalf("provider calls = %d, want 1", len(llm.requestsSnapshot()))
-	}
-	if !hasToolMessage(result.Messages, "call-1", rewritten) {
-		t.Fatalf("result messages missing rewritten tool result: %#v", result.Messages)
-	}
-}
-
-type recordingTool struct {
-	name   string
-	output string
-
-	mu    sync.Mutex
-	calls []string
-}
-
-func (t *recordingTool) Name() string { return t.name }
-
-func (t *recordingTool) Description() string { return "recording tool" }
-
-func (t *recordingTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Type: "function",
-		Function: FunctionDefinition{
-			Name:        t.name,
-			Description: t.Description(),
-			Parameters:  map[string]any{"type": "object"},
-		},
-	}
-}
-
-func (t *recordingTool) Execute(_ context.Context, arguments string) (commands.ToolResult, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.calls = append(t.calls, arguments)
-	if strings.Contains(arguments, "fail") {
-		return commands.ToolResult{}, fmt.Errorf("failed")
-	}
-	return commands.TextResult(t.output), nil
-}
-
-func (t *recordingTool) callsSnapshot() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return append([]string(nil), t.calls...)
-}
-
-func TestFinishToolTerminatesLoop(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(NewFinishTool())
-
-	llm := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(ChatMessage{
-				Role: "assistant",
-				ToolCalls: []ToolCall{{
-					ID: "call_1", Type: "function",
-					Function: FunctionCall{Name: "finish", Arguments: `{"summary":"all done"}`},
-				}},
-			}),
-		},
-	}
-
-	result, err := NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Bus:      testBus(nil),
-	}).Run(context.Background(), "do something")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Stop != StopReasonTerminated {
-		t.Fatalf("stop = %q, want %q", result.Stop, StopReasonTerminated)
-	}
-}
-
-type scriptedProvider struct {
-	mu                 sync.Mutex
-	responses          []*ChatCompletionResponse
-	err                error
-	streamEvents       []ChatCompletionStreamEvent
-	streamEventBatches [][]ChatCompletionStreamEvent
-	requests           []*ChatCompletionRequest
-}
-
-type blockingProvider struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-
-	mu       sync.Mutex
-	requests []*ChatCompletionRequest
-}
-
-func (p *blockingProvider) Name() string { return "blocking" }
-
-func (p *blockingProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	p.mu.Lock()
-	p.requests = append(p.requests, cloneRequest(req))
-	p.mu.Unlock()
-	p.once.Do(func() { close(p.started) })
-	select {
-	case <-p.release:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	return chatResponse(NewTextMessage("assistant", "done")), nil
-}
-
-func (p *scriptedProvider) Name() string { return "scripted" }
-
-func (p *scriptedProvider) ChatCompletion(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.requests = append(p.requests, cloneRequest(req))
-	if p.err != nil {
-		return nil, p.err
-	}
-	if len(p.responses) == 0 {
-		return nil, fmt.Errorf("no scripted response left")
-	}
-	resp := p.responses[0]
-	p.responses = p.responses[1:]
-	return resp, nil
-}
-
-func (p *scriptedProvider) ChatCompletionStream(ctx context.Context, req *ChatCompletionRequest) (<-chan ChatCompletionStreamEvent, error) {
-	p.mu.Lock()
-	p.requests = append(p.requests, cloneRequest(req))
-	events := append([]ChatCompletionStreamEvent(nil), p.streamEvents...)
-	if len(p.streamEventBatches) > 0 {
-		events = append([]ChatCompletionStreamEvent(nil), p.streamEventBatches[0]...)
-		p.streamEventBatches = p.streamEventBatches[1:]
-	}
-	p.mu.Unlock()
-
-	ch := make(chan ChatCompletionStreamEvent)
-	go func() {
-		defer close(ch)
-		for _, event := range events {
-			select {
-			case ch <- event:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return ch, nil
-}
-
-func (p *scriptedProvider) requestsSnapshot() []*ChatCompletionRequest {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]*ChatCompletionRequest, 0, len(p.requests))
-	for _, req := range p.requests {
-		out = append(out, cloneRequest(req))
-	}
-	return out
-}
-
-func chatResponse(msg ChatMessage) *ChatCompletionResponse {
-	return &ChatCompletionResponse{
-		Choices: []Choice{{Message: msg}},
-	}
-}
-
-func cloneRequest(req *ChatCompletionRequest) *ChatCompletionRequest {
-	cloned := *req
-	cloned.Messages = append([]ChatMessage(nil), req.Messages...)
-	cloned.Tools = append([]ToolDefinition(nil), req.Tools...)
-	return &cloned
-}
-
-func hasToolMessage(messages []ChatMessage, toolCallID, contains string) bool {
-	for _, msg := range messages {
-		if msg.Role != "tool" || msg.ToolCallID != toolCallID || msg.Content == nil {
-			continue
-		}
-		if strings.Contains(*msg.Content, contains) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsEvent(events []EventType, want EventType) bool {
-	for _, event := range events {
-		if event == want {
-			return true
-		}
-	}
-	return false
-}
-
-func eventTypes(events []Event) []EventType {
-	out := make([]EventType, 0, len(events))
-	for _, event := range events {
-		out = append(out, event.Type)
-	}
-	return out
-}
-
-func lastEvent(events []Event) Event {
-	if len(events) == 0 {
-		return Event{}
-	}
-	return events[len(events)-1]
-}
-
-func strPtr(s string) *string {
-	return &s
-}
-
-func TestRetryOnTransientError(t *testing.T) {
-	tools := commands.NewRegistry()
-	callCount := 0
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			callCount++
-			if callCount == 1 {
-				return nil, fmt.Errorf("API error (502): bad gateway")
-			}
-			return chatResponse(NewTextMessage("assistant", "recovered")), nil
-		},
-	}
-
-	result, err := (NewAgent(Config{
-		Provider:   llm,
-		Tools:      tools,
-		Model:      "test",
-		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v, want success after retry", err)
-	}
-	if result.Output != "recovered" {
-		t.Fatalf("result = %q, want recovered", result.Output)
-	}
-	if callCount != 2 {
-		t.Fatalf("call count = %d, want 2", callCount)
-	}
-}
-
-func TestNoRetryOnAuthError(t *testing.T) {
-	tools := commands.NewRegistry()
-	callCount := 0
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			callCount++
-			return nil, fmt.Errorf("API error (401): invalid_api_key")
-		},
-	}
-
-	_, err := (NewAgent(Config{
-		Provider:   llm,
-		Tools:      tools,
-		Model:      "test",
-		MaxRetries: 3,
-	})).Run(context.Background(), "hello")
-	if err == nil {
-		t.Fatal("Run() error = nil, want auth error")
-	}
-	if callCount != 1 {
-		t.Fatalf("call count = %d, want 1 (no retry for auth errors)", callCount)
-	}
-}
-
-func TestRetryExhaustedReturnsLastError(t *testing.T) {
-	tools := commands.NewRegistry()
-	callCount := 0
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			callCount++
-			return nil, fmt.Errorf("API error (503): service unavailable")
-		},
-	}
-
-	_, err := (NewAgent(Config{
-		Provider:   llm,
-		Tools:      tools,
-		Model:      "test",
-		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
-	if err == nil {
-		t.Fatal("Run() error = nil, want error after retries exhausted")
-	}
-	if callCount != 3 {
-		t.Fatalf("call count = %d, want 3 (1 initial + 2 retries)", callCount)
-	}
-}
-
-func TestRetryableProviderTimeoutAndStallErrors(t *testing.T) {
-	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrCallTimeout)) {
-		t.Fatal("ErrCallTimeout should be retryable")
-	}
-	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrStreamStalled)) {
-		t.Fatal("ErrStreamStalled should be retryable")
-	}
-	if !isRetryableError(retryableTimeoutError{}) {
-		t.Fatal("network timeout should be retryable")
-	}
-	if isRetryableError(fmt.Errorf("wrapped: %w", context.Canceled)) {
-		t.Fatal("context.Canceled should not be retryable")
-	}
-	if isRetryableError(fmt.Errorf("wrapped: %w", context.DeadlineExceeded)) {
-		t.Fatal("context.DeadlineExceeded should not be retryable")
-	}
-}
-
-func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, _, err := streamAssistantMessageWithUsage(ctx,
-		&scriptedProvider{},
-		&ChatCompletionRequest{Model: "test"},
-		newEmitter(eventbus.New[Event](), "test", ""),
-		telemetry.NopLogger(),
-		1,
-	)
-	if err != context.Canceled {
-		t.Fatalf("streamAssistantMessageWithUsage() error = %v, want context.Canceled", err)
-	}
-}
-
-func TestTokenBudgetWarning(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 700, CompletionTokens: 200, TotalTokens: 900},
-			}, nil
-		},
-	}
-
-	var sawWarning bool
-	_, err := (NewAgent(Config{
-		Provider:    llm,
-		Tools:       tools,
-		Model:       "test",
-		TokenBudget: 1000,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTokenBudgetWarning {
-				sawWarning = true
-			}
-		}),
-	})).Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if !sawWarning {
-		t.Fatal("expected token_budget_warning event at 90% usage")
-	}
-}
-
-func TestTokenBudgetExceeded(t *testing.T) {
-	tools := commands.NewRegistry()
-	turn := 0
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			turn++
-			if turn == 1 {
-				return &ChatCompletionResponse{
-					Choices: []Choice{{Message: ChatMessage{
-						Role: "assistant",
-						ToolCalls: []ToolCall{{
-							ID:       "call-1",
-							Type:     "function",
-							Function: FunctionCall{Name: "echo", Arguments: `{}`},
-						}},
-					}}},
-					Usage: &Usage{TotalTokens: 600},
-				}, nil
-			}
-			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{TotalTokens: 500},
-			}, nil
-		},
-	}
-	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
-
-	result, err := (NewAgent(Config{
-		Provider:    llm,
-		Tools:       tools,
-		Model:       "test",
-		TokenBudget: 1000,
-	})).Run(context.Background(), "hello")
-	if err == nil {
-		t.Fatal("Run() error = nil, want budget exceeded error")
-	}
-	if !strings.Contains(err.Error(), "token budget exhausted") {
-		t.Fatalf("error = %v, want token budget exhausted", err)
-	}
-	if result == nil || result.TotalUsage.TotalTokens == 0 {
-		t.Fatal("result should contain accumulated usage")
-	}
-}
-
-func TestTruncateResultIncludesSize(t *testing.T) {
-	large := strings.Repeat("x\n", DefaultMaxResultSize) // lines of 2 bytes each
-	tr := truncate.Head(large, truncate.Options{MaxBytes: DefaultMaxResultSize})
-	if !tr.Truncated {
-		t.Fatal("expected truncation")
-	}
-	msg := fmt.Sprintf("%d/%d lines", tr.OutputLines, tr.TotalLines)
-	if tr.OutputLines >= tr.TotalLines {
-		t.Fatalf("expected output lines < total lines, got %d/%d", tr.OutputLines, tr.TotalLines)
-	}
-	_ = msg // message format validated by field presence
-}
-
-func TestResultIncludesTotalUsage(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
-			}, nil
-		},
-	}
-
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-	})).Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.TotalUsage.TotalTokens != 150 {
-		t.Fatalf("TotalUsage.TotalTokens = %d, want 150", result.TotalUsage.TotalTokens)
-	}
-}
-
-func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
-
-	turn := 0
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			turn++
-			if turn == 1 {
-				return &ChatCompletionResponse{
-					Choices: []Choice{{Message: ChatMessage{
-						Role: "assistant",
-						ToolCalls: []ToolCall{{
-							ID: "call-1", Type: "function",
-							Function: FunctionCall{Name: "echo", Arguments: `{}`},
-						}},
-					}}},
-					Usage: &Usage{PromptTokens: 200, CompletionTokens: 30, TotalTokens: 230},
-				}, nil
-			}
-			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 280, CompletionTokens: 20, TotalTokens: 300},
-			}, nil
-		},
-	}
-
-	result, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-	})).Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-
-	if len(result.TurnUsages) != 2 {
-		t.Fatalf("TurnUsages length = %d, want 2", len(result.TurnUsages))
-	}
-	if result.TurnUsages[0].Turn != 1 || result.TurnUsages[0].TotalTokens != 230 {
-		t.Errorf("TurnUsages[0] = %+v, want turn=1 total=230", result.TurnUsages[0])
-	}
-	if result.TurnUsages[1].Turn != 2 || result.TurnUsages[1].TotalTokens != 300 {
-		t.Errorf("TurnUsages[1] = %+v, want turn=2 total=300", result.TurnUsages[1])
-	}
-	if result.TotalUsage.TotalTokens != 530 {
-		t.Errorf("TotalUsage.TotalTokens = %d, want 530", result.TotalUsage.TotalTokens)
-	}
-	if result.TotalUsage.PromptTokens != 480 {
-		t.Errorf("TotalUsage.PromptTokens = %d, want 480", result.TotalUsage.PromptTokens)
-	}
-	if result.ContextTokens != 280 {
-		t.Errorf("ContextTokens = %d, want 280 (last turn prompt tokens)", result.ContextTokens)
-	}
-}
-
-func TestTurnEndEventCarriesUsage(t *testing.T) {
-	tools := commands.NewRegistry()
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 500, CompletionTokens: 40, TotalTokens: 540},
-			}, nil
-		},
-	}
-
-	var turnEndUsage *Usage
-	var turnEndContext int
-	_, err := (NewAgent(Config{
-		Provider: llm,
-		Tools:    tools,
-		Model:    "test",
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTurnEnd {
-				turnEndUsage = event.Usage
-				turnEndContext = event.ContextTokens
-			}
-		}),
-	})).Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if turnEndUsage == nil {
-		t.Fatal("EventTurnEnd.Usage is nil")
-	}
-	if turnEndUsage.TotalTokens != 540 {
-		t.Errorf("EventTurnEnd Usage.TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
-	}
-	if turnEndContext != 500 {
-		t.Errorf("EventTurnEnd ContextTokens = %d, want 500", turnEndContext)
-	}
-}
-
-type callbackProvider struct {
-	fn func(context.Context, *ChatCompletionRequest) (*ChatCompletionResponse, error)
-}
-
-func (p *callbackProvider) Name() string { return "callback" }
-
-func (p *callbackProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	return p.fn(ctx, req)
-}
-
-type retryableTimeoutError struct{}
-
-func (retryableTimeoutError) Error() string   { return "timeout awaiting response headers" }
-func (retryableTimeoutError) Timeout() bool   { return true }
-func (retryableTimeoutError) Temporary() bool { return true }
-
-func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
-	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "invalid api key"}}
-	fallback := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(NewTextMessage("assistant", "from fallback")),
-		},
-	}
-
-	a := NewAgent(Config{
-		Provider:   primary,
-		Model:      "primary-model",
-		Fallbacks:  []ProviderEntry{{Provider: fallback, Model: "fallback-model"}},
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	result, err := a.Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil (fallback should succeed)", err)
-	}
-	if result.Output != "from fallback" {
-		t.Fatalf("Output = %q, want 'from fallback'", result.Output)
-	}
-	if len(fallback.requestsSnapshot()) == 0 {
-		t.Fatal("fallback provider was never called")
-	}
-}
-
-func TestProviderFallbackAllExhausted(t *testing.T) {
-	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "bad key"}}
-	fallback := &scriptedProvider{err: &APIError{StatusCode: 403, Message: "forbidden"}}
-
-	a := NewAgent(Config{
-		Provider:   primary,
-		Model:      "primary-model",
-		Fallbacks:  []ProviderEntry{{Provider: fallback, Model: "fallback-model"}},
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	_, err := a.Run(context.Background(), "hello")
-	if err == nil {
-		t.Fatal("Run() error = nil, want error when all providers exhausted")
-	}
-}
-
-func TestNoFallbackWhenPrimarySucceeds(t *testing.T) {
-	primary := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(NewTextMessage("assistant", "from primary")),
-		},
-	}
-	fallback := &scriptedProvider{
-		responses: []*ChatCompletionResponse{
-			chatResponse(NewTextMessage("assistant", "from fallback")),
-		},
-	}
-
-	a := NewAgent(Config{
-		Provider:   primary,
-		Fallbacks:  []ProviderEntry{{Provider: fallback, Model: "fallback-model"}},
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	result, err := a.Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Output != "from primary" {
-		t.Fatalf("Output = %q, want 'from primary'", result.Output)
-	}
-	if len(fallback.requestsSnapshot()) != 0 {
-		t.Fatal("fallback provider should not be called when primary succeeds")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Error recovery & fault tolerance tests
-// ---------------------------------------------------------------------------
-
-// imageErrorProvider simulates a provider that returns 400 "image_url" errors
-// until DisableImages is called, then succeeds.
-type imageErrorProvider struct {
-	imagesDisabled atomic.Bool
-	callCount      atomic.Int32
-}
-
-func (p *imageErrorProvider) Name() string { return "image-error" }
-
-func (p *imageErrorProvider) DisableImages() {
-	p.imagesDisabled.Store(true)
-}
-
-func (p *imageErrorProvider) ChatCompletion(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	p.callCount.Add(1)
-	if p.imagesDisabled.Load() || !messagesContainImages(req.Messages) {
-		return chatResponse(NewTextMessage("assistant", "success without images")), nil
-	}
-	return nil, &APIError{StatusCode: 400, Message: "Invalid parameter: messages[5].content[1].type is not supported, unknown type: image_url"}
-}
-
-func messagesContainImages(msgs []ChatMessage) bool {
-	for _, m := range msgs {
-		for _, p := range m.ContentParts {
-			if p.Type == "image_url" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func TestSessionContinuesAfterLLMError(t *testing.T) {
@@ -1291,219 +304,913 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 	a.Run(context.Background(), "retry")
 }
 
-func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
-	var captured []*ChatCompletionRequest
-	llm := &callbackProvider{
-		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
-			captured = append(captured, cloneRequest(req))
-			return chatResponse(NewTextMessage("assistant", "ok")), nil
+// --- Scanner integration tests ---
+
+func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+
+	scanOutput := "[scan.summary] completed inputs 1 services 1"
+
+	dir := t.TempDir()
+
+	registry := commands.NewRegistry()
+	registry.Register(&stubPseudoCommand{name: "scan", output: scanOutput}, "")
+
+	bash := commands.NewBashTool(dir, 5)
+	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
+		return registry.Get(name)
+	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
+	bash.Manager().SetWorkDir(dir)
+	registry.RegisterTool(bash)
+
+	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
+	registry.Register(tmuxCmd, "core")
+
+	llm := &scriptedProvider{
+		responses: []*ChatCompletionResponse{
+			chatResponse(ChatMessage{
+				Role: "assistant",
+				ToolCalls: []ToolCall{
+					{
+						ID:   "call-1",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: scannerBashArgs("scan -i 127.0.0.1 --mode quick"),
+						},
+					},
+				},
+			}),
+			chatResponse(NewTextMessage("assistant", "final report")),
 		},
 	}
 
-	a := NewAgent(Config{
-		Provider:   llm,
-		Model:      "test",
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
+	systemPrompt := buildTestSystemPrompt(registry, nil)
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "first question"),
-		NewTextMessage("assistant", "first answer"),
-		NewTextMessage("user", "second question"),
-		NewTextMessage("assistant", ""), // stale error message from old session
-	})
-
-	result, err := a.Run(context.Background(), "continue")
+	result, err := (NewAgent(Config{
+		Provider:     llm,
+		Tools:        registry,
+		SystemPrompt: systemPrompt,
+		Model:        "test-model",
+	})).Run(context.Background(), "scan 127.0.0.1")
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Output != "ok" {
-		t.Fatalf("output = %q, want 'ok'", result.Output)
+	if result.Output != "final report" {
+		t.Fatalf("result = %q", result.Output)
 	}
-	if len(captured) == 0 {
-		t.Fatal("no requests captured")
+
+	requests := llm.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(requests))
 	}
-	for _, msg := range captured[0].Messages {
-		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
-			t.Error("empty assistant message was NOT filtered from LLM request")
+	if !hasToolMessage(requests[1].Messages, "call-1", "[scan.summary]") {
+		t.Fatalf("second request missing scan output")
+	}
+}
+
+func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
+	registry := commands.NewRegistry()
+	store, diagnostics := skills.LoadEmbeddedStore()
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	registry.RegisterTool(commands.NewReadTool(t.TempDir(), store))
+
+	llm := &scriptedProvider{
+		responses: []*ChatCompletionResponse{
+			chatResponse(NewTextMessage("assistant", "done")),
+		},
+	}
+	systemPrompt := buildTestSystemPrompt(registry, store.Skills)
+	task := skills.ExpandCommand("/skill:scan scan 127.0.0.1", store)
+
+	result, err := (NewAgent(Config{
+		Provider:     llm,
+		Tools:        registry,
+		SystemPrompt: systemPrompt,
+		Model:        "test-model",
+	})).Run(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "done" {
+		t.Fatalf("result = %q", result.Output)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(requests))
+	}
+	system := requests[0].Messages[0]
+	if system.Role != "system" || system.Content == nil || !strings.Contains(*system.Content, "<available_skills>") {
+		t.Fatalf("system prompt missing skills")
+	}
+	user := requests[0].Messages[1]
+	if user.Role != "user" || user.Content == nil || !strings.Contains(*user.Content, `<skill name="scan"`) {
+		t.Fatalf("user prompt missing expanded skill")
+	}
+}
+
+// --- Tmux integration tests ---
+
+func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+
+	dir := t.TempDir()
+	registry := commands.NewRegistry()
+	bash := commands.NewBashTool(dir, 30)
+	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
+		return registry.Get(name)
+	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
+	bash.Manager().SetWorkDir(dir)
+	registry.RegisterTool(bash)
+	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
+	registry.Register(tmuxCmd, "core")
+	t.Cleanup(bash.Close)
+
+	var capturedRequests []*ChatCompletionRequest
+
+	turnIndex := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			capturedRequests = append(capturedRequests, cloneRequest(req))
+			turnIndex++
+
+			switch turnIndex {
+			case 1:
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-1", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux new -d -s worker "sh"`),
+						},
+					}},
+				}), nil
+
+			case 2:
+				assertToolResult(t, req, "call-1", "detached")
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-2", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t worker "echo HELLO_FROM_LLM" Enter`),
+						},
+					}},
+				}), nil
+
+			case 3:
+				assertToolResult(t, req, "call-2", "sent")
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-3", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux capture-pane -t worker --new`),
+						},
+					}},
+				}), nil
+
+			case 4:
+				assertToolResult(t, req, "call-3", "HELLO_FROM_LLM")
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-4", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t worker "MY_VAR=42" Enter`),
+						},
+					}},
+				}), nil
+
+			case 5:
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-5", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t worker "echo VAR_IS_$MY_VAR" Enter`),
+						},
+					}},
+				}), nil
+
+			case 6:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-6", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux capture-pane -t worker --new`),
+						},
+					}},
+				}), nil
+
+			case 7:
+				assertToolResult(t, req, "call-6", "VAR_IS_42")
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-7", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t worker "exit" Enter`),
+						},
+					}},
+				}), nil
+
+			case 8:
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "call-8", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux ls`),
+						},
+					}},
+				}), nil
+
+			case 9:
+				return chatResponse(NewTextMessage("assistant",
+					"Interactive session completed. Verified: echo output, shell variable persistence, and clean exit.")), nil
+
+			default:
+				t.Fatalf("unexpected turn %d", turnIndex)
+				return nil, nil
+			}
+		},
+	}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    registry,
+		Model:    "test",
+	}).Run(context.Background(), "Start an interactive shell session using tmux, test multi-round interaction")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Interactive session completed") {
+		t.Fatalf("unexpected final output: %q", result.Output)
+	}
+	if turnIndex != 9 {
+		t.Fatalf("expected 9 turns, got %d", turnIndex)
+	}
+	t.Logf("Agent completed %d turns of tmux interaction successfully", turnIndex)
+}
+
+func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+
+	dir := t.TempDir()
+	registry := commands.NewRegistry()
+	bash := commands.NewBashTool(dir, 30)
+	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
+		return registry.Get(name)
+	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
+	bash.Manager().SetWorkDir(dir)
+	registry.RegisterTool(bash)
+	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
+	registry.Register(tmuxCmd, "core")
+	t.Cleanup(bash.Close)
+
+	turnIndex := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			turnIndex++
+			switch turnIndex {
+			case 1:
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "c1", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux new -d -s runner "sh"`),
+						},
+					}},
+				}), nil
+			case 2:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "c2", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t runner "sleep 999" Enter`),
+						},
+					}},
+				}), nil
+			case 3:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "c3", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t runner C-c`),
+						},
+					}},
+				}), nil
+			case 4:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "c4", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t runner "echo RECOVERED" Enter`),
+						},
+					}},
+				}), nil
+			case 5:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "c5", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux capture-pane -t runner --new`),
+						},
+					}},
+				}), nil
+			case 6:
+				assertToolResult(t, req, "c5", "RECOVERED")
+				return chatResponse(NewTextMessage("assistant", "Ctrl-C interrupt and recovery verified.")), nil
+			default:
+				t.Fatalf("unexpected turn %d", turnIndex)
+				return nil, nil
+			}
+		},
+	}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    registry,
+		Model:    "test",
+	}).Run(context.Background(), "Test Ctrl-C interrupt in tmux session")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.Output, "Ctrl-C interrupt") {
+		t.Fatalf("unexpected output: %q", result.Output)
+	}
+	t.Logf("Ctrl-C interrupt test passed in %d turns", turnIndex)
+}
+
+func TestAgentTmuxInteractiveProgram(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not found")
+	}
+
+	dir := t.TempDir()
+	registry := commands.NewRegistry()
+	bash := commands.NewBashTool(dir, 30)
+	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
+		return registry.Get(name)
+	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
+	bash.Manager().SetWorkDir(dir)
+	registry.RegisterTool(bash)
+	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
+	registry.Register(tmuxCmd, "core")
+	t.Cleanup(bash.Close)
+
+	turnIndex := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			turnIndex++
+			switch turnIndex {
+			case 1:
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p1", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux new -d -s pyrepl "python3 -u -i"`),
+						},
+					}},
+				}), nil
+			case 2:
+				time.Sleep(800 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p2", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t pyrepl "print(2**10)" Enter`),
+						},
+					}},
+				}), nil
+			case 3:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p3", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux capture-pane -t pyrepl --new`),
+						},
+					}},
+				}), nil
+			case 4:
+				assertToolResult(t, req, "p3", "1024")
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p4", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t pyrepl "print('hello' + ' ' + 'world')" Enter`),
+						},
+					}},
+				}), nil
+			case 5:
+				time.Sleep(500 * time.Millisecond)
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p5", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux capture-pane -t pyrepl --new`),
+						},
+					}},
+				}), nil
+			case 6:
+				assertToolResult(t, req, "p5", "hello world")
+				return chatResponse(ChatMessage{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "p6", Type: "function",
+						Function: FunctionCall{
+							Name:      "bash",
+							Arguments: bashArgs(`tmux send -t pyrepl "exit()" Enter`),
+						},
+					}},
+				}), nil
+			case 7:
+				return chatResponse(NewTextMessage("assistant",
+					"Python REPL interaction verified: 2^10=1024, string concat, clean exit.")), nil
+			default:
+				t.Fatalf("unexpected turn %d", turnIndex)
+				return nil, nil
+			}
+		},
+	}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    registry,
+		Model:    "test",
+	}).Run(context.Background(), "Use python3 REPL via tmux to do calculations")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.Output, "Python REPL") {
+		t.Fatalf("unexpected output: %q", result.Output)
+	}
+	t.Logf("Python REPL interaction test passed in %d turns", turnIndex)
+}
+
+func TestLiveLLMTmuxInteraction(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only test")
+	}
+
+	baseURL := envOr("LIVE_TEST_BASE_URL", "https://api.deepseek.com")
+	apiKey := os.Getenv("LIVE_TEST_API_KEY")
+	model := envOr("LIVE_TEST_MODEL", "deepseek-chat")
+
+	if apiKey == "" {
+		t.Skip("no LIVE_TEST_API_KEY set; skipping live LLM test")
+	}
+
+	llm, err := NewProvider(&ProviderConfig{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Model:   model,
+		Timeout: 120,
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	dir := t.TempDir()
+	registry := commands.NewRegistry()
+	bash := commands.NewBashTool(dir, 60)
+	bash.Manager().SetCommands(func(name string) (tmuxpkg.Command, bool) {
+		return registry.Get(name)
+	})
+	bash.Manager().SetWorkDir(dir)
+	registry.RegisterTool(bash)
+	tmuxCmd := commands.NewTmuxCommand(bash.Manager())
+	registry.Register(tmuxCmd, "core")
+	t.Cleanup(bash.Close)
+
+	systemPrompt := buildTmuxTestPrompt(registry)
+
+	var events []string
+	handleEvent := func(event Event) {
+		switch event.Type {
+		case EventToolExecutionStart:
+			events = append(events, fmt.Sprintf("[TOOL] %s → %s", event.ToolName, event.Arguments))
+		case EventToolExecutionEnd:
+			result := event.Result
+			if len(result) > 300 {
+				result = result[:300] + "..."
+			}
+			events = append(events, fmt.Sprintf("[RESULT] %s", result))
+		case EventTurnStart:
+			events = append(events, fmt.Sprintf("--- Turn %d ---", event.Turn))
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	result, err := NewAgent(Config{
+		Provider:     llm,
+		Tools:        registry,
+		Model:        model,
+		SystemPrompt: systemPrompt,
+		Bus:          testBus(handleEvent),
+		MaxRetries:   2,
+	}).Run(ctx, `Perform the following multi-round interactive test using tmux (via the bash tool).
+
+Execute these steps IN ORDER, one bash tool call per step:
+
+Step 1: tmux new -d -s test_sess "sh"
+Step 2: sleep 0.3
+Step 3: tmux send -t test_sess "echo HELLO_WORLD" Enter
+Step 4: sleep 0.3
+Step 5: tmux capture-pane -t test_sess --new
+        → You should see HELLO_WORLD in the output
+Step 6: tmux send -t test_sess "MY_VAR=MAGIC_42" Enter
+Step 7: sleep 0.2
+Step 8: tmux send -t test_sess "echo RESULT_IS_$MY_VAR" Enter
+Step 9: sleep 0.3
+Step 10: tmux capture-pane -t test_sess --new
+         → You should see RESULT_IS_MAGIC_42 in the output
+Step 11: tmux send -t test_sess "exit" Enter
+Step 12: sleep 0.3
+Step 13: tmux ls
+         → Session should show as completed
+
+Report what you observed at each step. Confirm the test passed or report failures.`)
+
+	t.Log("\n=== Event Log ===")
+	for _, e := range events {
+		t.Log(e)
+	}
+	if result != nil {
+		t.Log("\n=== LLM Final Output ===")
+		t.Log(result.Output)
+		t.Logf("Turns: %d, Total tokens: %d", result.Turns, result.TotalUsage.TotalTokens)
+	}
+
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	combinedLog := strings.Join(events, "\n")
+	if result != nil {
+		combinedLog += "\n" + result.Output
+	}
+
+	for _, want := range []string{"HELLO_WORLD", "MAGIC_42"} {
+		if !strings.Contains(combinedLog, want) {
+			t.Errorf("expected %q in output/events but not found", want)
 		}
 	}
 }
 
-func TestImageErrorAutoRecovery(t *testing.T) {
-	imgProvider := &imageErrorProvider{}
+// --- Cache/Config tests ---
 
-	a := NewAgent(Config{
-		Provider:   imgProvider,
-		Model:      "test",
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "take screenshot"),
-		{
-			Role: "assistant",
-			ToolCalls: []ToolCall{{
-				ID: "tc1", Type: "function",
-				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
-			}},
+func TestCacheConfigInheritance(t *testing.T) {
+	llm := &scriptedProvider{
+		responses: []*ChatCompletionResponse{
+			chatResponse(NewTextMessage("assistant", "done")),
 		},
-		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("Screenshot captured"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
-		},
-	})
+	}
 
-	result, err := a.Run(context.Background(), "analyze this")
+	parentCfg := Config{
+		Provider:       llm,
+		Tools:          commands.NewRegistry(),
+		Model:          "test",
+		SystemPrompt:   "sys",
+		CacheRetention: CacheShort,
+		SessionID:      "parent-session-123",
+	}
+
+	child := NewAgent(parentCfg).Derive()
+
+	if child.Cfg.CacheRetention != CacheShort {
+		t.Errorf("child CacheRetention = %q, want %q", child.Cfg.CacheRetention, CacheShort)
+	}
+	if child.Cfg.SessionID == "" {
+		t.Error("child SessionID should be auto-generated, got empty")
+	}
+	if child.Cfg.SessionID == "parent-session-123" {
+		t.Error("child SessionID should differ from parent")
+	}
+
+	_, err := child.Run(context.Background(), "hello")
 	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "success") {
-		t.Fatalf("output = %q, want 'success without images'", result.Output)
+
+	reqs := llm.requestsSnapshot()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
 	}
-	if !imgProvider.imagesDisabled.Load() {
-		t.Fatal("DisableImages() was not called")
+	if reqs[0].CacheRetention != CacheShort {
+		t.Errorf("request CacheRetention = %q, want %q", reqs[0].CacheRetention, CacheShort)
+	}
+	if reqs[0].SessionID != child.Cfg.SessionID {
+		t.Errorf("request SessionID = %q, want child SessionID %q", reqs[0].SessionID, child.Cfg.SessionID)
 	}
 }
 
-func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
-	imgProvider := &imageErrorProvider{}
-
-	a := NewAgent(Config{
-		Provider:   imgProvider,
-		Model:      "test",
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "take screenshot"),
-		{
-			Role: "assistant",
-			ToolCalls: []ToolCall{{
-				ID: "tc1", Type: "function",
-				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
-			}},
-		},
-		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("Screenshot taken"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
-		},
-	})
-
-	result, err := a.Run(context.Background(), "analyze the screenshot")
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil (image error should auto-recover)", err)
+func TestSessionIDAutoGeneration(t *testing.T) {
+	cfg := Config{
+		CacheRetention: CacheShort,
 	}
-	if result.Output != "success without images" {
-		t.Fatalf("output = %q, want 'success without images'", result.Output)
+	initialized := cfg.init()
+
+	if initialized.SessionID == "" {
+		t.Error("expected auto-generated SessionID, got empty")
 	}
-	if !imgProvider.imagesDisabled.Load() {
-		t.Fatal("DisableImages() was not called on provider")
+	if len(initialized.SessionID) != 16 {
+		t.Errorf("SessionID length = %d, want 16 hex chars, got %q", len(initialized.SessionID), initialized.SessionID)
 	}
-	if got := imgProvider.callCount.Load(); got != 2 {
-		t.Fatalf("provider call count = %d, want 2 (initial + retry)", got)
+
+	cfg2 := Config{CacheRetention: CacheNone}
+	initialized2 := cfg2.init()
+	if initialized2.SessionID == "" {
+		t.Error("CacheNone should still generate SessionID for event tracking")
 	}
 }
 
-func TestMultiTurnAfterImageError(t *testing.T) {
-	imgProvider := &imageErrorProvider{}
+// --- Live cache integration tests ---
 
-	a := NewAgent(Config{
-		Provider:   imgProvider,
-		Model:      "test",
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
+func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
+	cfg, prov := skipUnlessLive(t)
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "screenshot"),
-		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("img"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
-		},
-	})
+	systemPrompt := "You are a math tutor. " +
+		strings.Repeat("You always answer arithmetic questions with just the numeric result. ", 30)
 
-	result, err := a.Run(context.Background(), "analyze")
+	var events []Event
+	handler := func(e Event) {
+		events = append(events, e)
+	}
+
+	tools := commands.NewRegistry()
+
+	agentCfg := Config{
+		Provider:       prov,
+		Tools:          tools,
+		Model:          cfg.Model,
+		SystemPrompt:   systemPrompt,
+		CacheRetention: CacheShort,
+		Bus:            testBus(func(e Event) { handler(e) }),
+		Logger:         telemetry.NopLogger(),
+		MaxRetries:     1,
+	}
+
+	result1, err := NewAgent(agentCfg).Run(context.Background(), "What is 10+20? Just the number.")
 	if err != nil {
-		t.Fatalf("first Run() error = %v", err)
+		t.Fatalf("turn 1 failed: %v", err)
 	}
-	if result.Output != "success without images" {
-		t.Fatalf("first output = %q", result.Output)
+	t.Logf("Turn 1 output: %s", result1.Output)
+	t.Logf("Turn 1 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
+		result1.TotalUsage.PromptTokens, result1.TotalUsage.CompletionTokens,
+		result1.TotalUsage.CacheReadTokens, result1.TotalUsage.CacheWriteTokens)
+
+	if result1.Turns < 1 {
+		t.Fatalf("expected at least 1 turn, got %d", result1.Turns)
+	}
+	if result1.TotalUsage.PromptTokens == 0 {
+		t.Fatal("expected non-zero prompt tokens")
 	}
 
-	imgProvider.callCount.Store(0)
-	_, err = a.Run(context.Background(), "follow up")
+	events = nil
+	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(
+		context.Background(),
+		"What is 30+40? Just the number.",
+	)
 	if err != nil {
-		t.Fatalf("second Run() error = %v", err)
+		t.Fatalf("turn 2 failed: %v", err)
 	}
-	if got := imgProvider.callCount.Load(); got != 1 {
-		t.Fatalf("second run call count = %d, want 1 (no retry needed)", got)
+	t.Logf("Turn 2 output: %s", result2.Output)
+	t.Logf("Turn 2 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
+		result2.TotalUsage.PromptTokens, result2.TotalUsage.CompletionTokens,
+		result2.TotalUsage.CacheReadTokens, result2.TotalUsage.CacheWriteTokens)
+
+	if result2.TotalUsage.PromptTokens <= result1.TotalUsage.PromptTokens {
+		t.Errorf("turn 2 prompt tokens (%d) should exceed turn 1 (%d) due to accumulated context",
+			result2.TotalUsage.PromptTokens, result1.TotalUsage.PromptTokens)
+	}
+
+	allMessages := append(result1.Messages, result2.NewMessages...)
+	events = nil
+	result3, err := NewAgent(agentCfg.WithMessages(allMessages)).Run(
+		context.Background(),
+		"What is the sum of all three answers you gave? Just the number.",
+	)
+	if err != nil {
+		t.Fatalf("turn 3 failed: %v", err)
+	}
+	t.Logf("Turn 3 output: %s", result3.Output)
+	t.Logf("Turn 3 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
+		result3.TotalUsage.PromptTokens, result3.TotalUsage.CompletionTokens,
+		result3.TotalUsage.CacheReadTokens, result3.TotalUsage.CacheWriteTokens)
+
+	if result3.TotalUsage.PromptTokens <= result2.TotalUsage.PromptTokens {
+		t.Errorf("turn 3 prompt tokens (%d) should exceed turn 2 (%d)",
+			result3.TotalUsage.PromptTokens, result2.TotalUsage.PromptTokens)
+	}
+
+	t.Logf("\n=== Multi-Turn Cache Summary ===")
+	for i, r := range []*Result{result1, result2, result3} {
+		ratio := 0.0
+		if r.TotalUsage.PromptTokens > 0 {
+			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		}
+		t.Logf("Turn %d: output=%q prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
+			i+1, truncateOutput(r.Output, 40),
+			r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+	}
+
+	totalCacheRead := result2.TotalUsage.CacheReadTokens + result3.TotalUsage.CacheReadTokens
+	if totalCacheRead == 0 {
+		t.Error("expected cache_read > 0 in turn 2 or 3, got 0 for both — caching may not be working")
 	}
 }
 
-func TestInferImageSupportModelRegistry(t *testing.T) {
-	tests := []struct {
-		provider string
-		model    string
-		want     bool
-	}{
-		{"openai", "claude-sonnet-4-20250514", true},
-		{"openai", "gemini-2.5-pro", true},
-		{"openai", "gpt-4o-2024-05-13", true},
-		{"openai", "gpt-4-turbo-2024-04-09", true},
-		{"openai", "pixtral-large-2411", true},
-		{"openai", "qwen-vl-plus", true},
+func TestMultiTurnStreamingCache(t *testing.T) {
+	cfg, prov := skipUnlessLive(t)
 
-		{"openai", "deepseek-v4-pro", false},
-		{"openai", "deepseek-v4-flash", false},
-		{"openai", "Qwen3-235B-A22B", false},
-		{"openai", "glm-4.7", false},
-		{"openai", "mistral-large-2411", false},
-		{"openai", "llama-3.3-70b-instruct", false},
-		{"openai", "grok-3", false},
-		{"openai", "kimi-k2-thinking", false},
-		{"openai", "minimax-m2.7", false},
-		{"openai", "nemotron-3-super-120b", false},
-		{"openai", "o3-mini", false},
-		{"openai", "gpt-oss-120b", false},
-		{"openai", "codestral-latest", false},
-		{"openai", "devstral-2512", false},
-		{"openai", "mimo-v2-flash", false},
-		{"openai", "command-r-plus-08-2024", false},
+	systemPrompt := "You are a translator. " +
+		strings.Repeat("You translate English to French. Always respond with just the translation, nothing else. ", 30)
 
-		{"anthropic", "some-unknown-model", true},
-		{"openai", "some-random-model", false},
+	tools := commands.NewRegistry()
+
+	agentCfg := Config{
+		Provider:       prov,
+		Tools:          tools,
+		Model:          cfg.Model,
+		SystemPrompt:   systemPrompt,
+		Stream:         true,
+		CacheRetention: CacheShort,
+		Logger:         telemetry.NopLogger(),
+		MaxRetries:     1,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
-			cfg := &ProviderConfig{
-				Provider: tt.provider,
-				Model:    tt.model,
-				APIKey:   "test-key",
-			}
-			resolved, err := ResolveProvider(cfg)
-			if err != nil {
-				t.Fatalf("Resolve() error = %v", err)
-			}
-			if got := *resolved.Images; got != tt.want {
-				t.Errorf("inferImageSupport(%q, %q) = %v, want %v", tt.provider, tt.model, got, tt.want)
-			}
-		})
+	result1, err := NewAgent(agentCfg).Run(context.Background(), "Hello")
+	if err != nil {
+		t.Fatalf("stream turn 1 failed: %v", err)
+	}
+	t.Logf("Stream Turn 1: output=%q prompt=%d cache_read=%d",
+		truncateOutput(result1.Output, 40), result1.TotalUsage.PromptTokens, result1.TotalUsage.CacheReadTokens)
+
+	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(context.Background(), "Goodbye")
+	if err != nil {
+		t.Fatalf("stream turn 2 failed: %v", err)
+	}
+	t.Logf("Stream Turn 2: output=%q prompt=%d cache_read=%d",
+		truncateOutput(result2.Output, 40), result2.TotalUsage.PromptTokens, result2.TotalUsage.CacheReadTokens)
+
+	allMsgs := append(result1.Messages, result2.NewMessages...)
+	result3, err := NewAgent(agentCfg.WithMessages(allMsgs)).Run(context.Background(), "Thank you")
+	if err != nil {
+		t.Fatalf("stream turn 3 failed: %v", err)
+	}
+	t.Logf("Stream Turn 3: output=%q prompt=%d cache_read=%d",
+		truncateOutput(result3.Output, 40), result3.TotalUsage.PromptTokens, result3.TotalUsage.CacheReadTokens)
+
+	t.Logf("\n=== Streaming Cache Summary ===")
+	for i, r := range []*Result{result1, result2, result3} {
+		ratio := 0.0
+		if r.TotalUsage.PromptTokens > 0 {
+			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		}
+		t.Logf("Turn %d: prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
+			i+1, r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+	}
+}
+
+func TestMultiTurnWithToolCallsCache(t *testing.T) {
+	cfg, prov := skipUnlessLive(t)
+
+	systemPrompt := "You are a calculator agent. " +
+		strings.Repeat("When asked to compute something, use the calculate tool. Always call the tool, never compute yourself. ", 25)
+
+	tools := commands.NewRegistry()
+	calcTool := &recordingTool{name: "calculate", output: "42"}
+	tools.RegisterTool(calcTool)
+
+	var turnEndEvents []Event
+	handler := func(e Event) {
+		if e.Type == EventTurnEnd {
+			turnEndEvents = append(turnEndEvents, e)
+		}
+	}
+
+	agentCfg := Config{
+		Provider:       prov,
+		Tools:          tools,
+		Model:          cfg.Model,
+		SystemPrompt:   systemPrompt,
+		CacheRetention: CacheShort,
+		Bus:            testBus(func(e Event) { handler(e) }),
+		Logger:         telemetry.NopLogger(),
+		MaxRetries:     1,
+	}
+
+	result, err := NewAgent(agentCfg).Run(context.Background(),
+		"Use the calculate tool to compute 6*7. Then tell me the result.")
+	if err != nil {
+		t.Fatalf("tool call run failed: %v", err)
+	}
+
+	t.Logf("Tool-call output: %s", truncateOutput(result.Output, 80))
+	t.Logf("Total turns: %d", result.Turns)
+	t.Logf("Tool calls recorded: %d", len(calcTool.callsSnapshot()))
+
+	t.Logf("\n=== Per-Turn Usage (with tool calls) ===")
+	for _, tu := range result.TurnUsages {
+		ratio := 0.0
+		if tu.PromptTokens > 0 {
+			ratio = float64(tu.CacheReadTokens) / float64(tu.PromptTokens) * 100
+		}
+		t.Logf("  turn %d: prompt=%d completion=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
+			tu.Turn, tu.PromptTokens, tu.CompletionTokens,
+			tu.CacheReadTokens, tu.CacheWriteTokens, ratio)
+	}
+
+	t.Logf("Total usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
+		result.TotalUsage.PromptTokens, result.TotalUsage.CompletionTokens,
+		result.TotalUsage.CacheReadTokens, result.TotalUsage.CacheWriteTokens)
+
+	if result.Turns < 2 {
+		t.Logf("WARNING: expected >= 2 turns for tool call flow, got %d (model may have answered without tool)", result.Turns)
+	}
+
+	if result.Turns >= 2 && len(result.TurnUsages) >= 2 {
+		laterCacheRead := result.TurnUsages[len(result.TurnUsages)-1].CacheReadTokens
+		if laterCacheRead == 0 {
+			t.Logf("WARNING: last turn cache_read=0 — provider may not support automatic prefix caching")
+		} else {
+			t.Logf("Cache working: last turn cache_read=%d", laterCacheRead)
+		}
+	}
+
+	for i, e := range turnEndEvents {
+		if e.Usage != nil {
+			t.Logf("TurnEnd event %d: prompt=%d cache_read=%d cache_write=%d",
+				i, e.Usage.PromptTokens, e.Usage.CacheReadTokens, e.Usage.CacheWriteTokens)
+		}
 	}
 }

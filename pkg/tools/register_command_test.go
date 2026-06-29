@@ -10,14 +10,67 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tools/gogo"
 	"github.com/chainreactors/aiscan/pkg/tools/neutron"
+	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	_ "github.com/chainreactors/aiscan/pkg/tools/search"
 	"github.com/chainreactors/aiscan/pkg/tools/spray"
 	"github.com/chainreactors/aiscan/pkg/tools/zombie"
+	fingerslib "github.com/chainreactors/fingers/fingers"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/proxyclient"
+	sdkfingers "github.com/chainreactors/sdk/fingers"
+	sdkgogo "github.com/chainreactors/sdk/gogo"
+	sdkspray "github.com/chainreactors/sdk/spray"
 )
+
+func buildRegistry(engineSet *engine.Set) *commands.CommandRegistry {
+	reg := commands.NewRegistry()
+	deps := &commands.Deps{
+		EngineSet: engineSet,
+		Resources: engineSet.Resources,
+	}
+	commands.BuildAll(deps, reg)
+	return reg
+}
+
+func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
+	gogoEng, _ := sdkgogo.NewEngine(nil)
+	sprayEng, _ := sdkspray.NewEngine(nil)
+	engineSet := &engine.Set{
+		Gogo:  gogoEng,
+		Spray: sprayEng,
+	}
+	reg := buildRegistry(engineSet)
+
+	for _, name := range []string{"scan", "gogo", "spray"} {
+		if !reg.Has(name) {
+			t.Fatalf("expected %q to be registered", name)
+		}
+	}
+	if reg.Has("neutron") {
+		t.Fatal("neutron should not be registered without templates")
+	}
+}
+
+func TestRegisterAllRegistersSearchWithResources(t *testing.T) {
+	engineSet := &engine.Set{
+		Resources: &resources.Set{
+			FingersConfig: sdkfingers.NewConfig().WithFingers(fingerslib.Fingers{{Name: "nginx", Protocol: "http"}}),
+		},
+	}
+	reg := buildRegistry(engineSet)
+
+	if !reg.Has("cyberhub") {
+		t.Fatal("expected cyberhub search command to be registered")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy tests
+// ---------------------------------------------------------------------------
 
 // startSOCKS5CountingProxy starts a minimal SOCKS5 server that counts
 // connection attempts. It returns the proxy URL and a function to read
