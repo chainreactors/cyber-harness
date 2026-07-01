@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 

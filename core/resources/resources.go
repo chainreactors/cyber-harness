@@ -10,7 +10,6 @@ import (
 	"time"
 
 	fingerslib "github.com/chainreactors/fingers/fingers"
-	fingerresources "github.com/chainreactors/fingers/resources"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/neutron"
@@ -23,6 +22,8 @@ const (
 	ModeMerge    = "merge"
 	ModeOverride = "override"
 )
+
+var PortPreset *utils.PortPreset
 
 // Options controls aiscan-owned scanner resource loading.
 type Options struct {
@@ -216,14 +217,11 @@ func installLocalPortPreset() error {
 	if len(content) == 0 {
 		return nil
 	}
-	fingerresources.PortData = cloneBytes(content)
 	var ports []*utils.PortConfig
 	if err := yaml.Unmarshal(content, &ports); err != nil {
 		return err
 	}
-	preset := utils.NewPortPreset(ports)
-	utils.PrePort = preset
-	fingerresources.PrePort = preset
+	PortPreset = utils.NewPortPreset(ports)
 	return nil
 }
 

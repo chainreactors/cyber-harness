@@ -100,7 +100,7 @@ func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 
 func (c *CyberhubSearch) Execute(_ context.Context, args []string) error {
 	if c.index == nil {
-		return fmt.Errorf("search cyberhub: association index not available")
+		return fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (CYBERHUB_URL, CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
 	}
 
 	var opts cyberhubFlags

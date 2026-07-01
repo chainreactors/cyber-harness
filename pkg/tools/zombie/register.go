@@ -14,7 +14,7 @@ func init() {
 				return
 			}
 			reg.Register(
-				New(es.Zombie).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy),
+				New(es.Zombie).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus),
 				"scanner",
 			)
 		},

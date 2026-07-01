@@ -17,12 +17,12 @@ func init() {
 	commands.RegisterFactory(commands.Factory{
 		Group: "scanner",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			es, _ := deps.EngineSet.(*engine.Set)
-			if es == nil || es.Uncover == nil {
-				return
+			var unc *engine.UncoverEngine
+			if es, ok := deps.EngineSet.(*engine.Set); ok && es != nil {
+				unc = es.Uncover
 			}
 			logger := deps.GetLogger()
-			reg.Register(New(es.Uncover).WithLogger(logger), "scanner")
+			reg.Register(New(unc).WithLogger(logger), "scanner")
 		},
 	})
 }

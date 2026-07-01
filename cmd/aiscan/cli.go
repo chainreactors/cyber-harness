@@ -417,6 +417,7 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaKey = v }},
 	{names: []string{"--hunter-token"}, arity: 1, apply: func(o *cfg.Option, v string) { o.HunterToken = v }},
 	{names: []string{"--hunter-api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.HunterAPIKey = v }},
+	{names: []string{"--tavily-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TavilyKey = v }},
 	{names: []string{"--recon-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ReconProxy = v }},
 	{names: []string{"--recon-limit"}, arity: 1, apply: func(o *cfg.Option, v string) {
 		if n, e := strconv.Atoi(v); e == nil {

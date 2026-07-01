@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 )
 
 // RecordsToResult converts parsed records into a Result for asset report rendering.

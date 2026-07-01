@@ -7,7 +7,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/gogo"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )

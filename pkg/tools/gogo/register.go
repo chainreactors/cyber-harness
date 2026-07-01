@@ -14,7 +14,7 @@ func init() {
 				return
 			}
 			reg.Register(
-				New(es.Gogo).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy),
+				New(es.Gogo).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus),
 				"scanner",
 			)
 		},

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
 )

@@ -115,6 +115,11 @@ func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
 			option.HunterAPIKey = v
 		}
 	}
+	if strings.TrimSpace(explicit.TavilyKey) == "" {
+		if v := firstEnv(lookup, "TAVILY_API_KEY", "TAVILY_API_KEYS"); v != "" {
+			option.TavilyKey = v
+		}
+	}
 	if strings.TrimSpace(explicit.ReconProxy) == "" {
 		if v := firstEnv(lookup, "RECON_PROXY"); v != "" {
 			option.ReconProxy = v

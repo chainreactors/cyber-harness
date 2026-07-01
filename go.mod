@@ -6,23 +6,23 @@ require (
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
-	github.com/chainreactors/fingers v1.2.2-0.20260615064219-7e07a99c93e0
-	github.com/chainreactors/gogo/v2 v2.14.2-0.20260616122548-b8e5ed3b1b40
-	github.com/chainreactors/ioa v0.1.1-0.20260618070057-ec99736bed74
+	github.com/chainreactors/fingers v1.2.2-0.20260629103336-467eef72e53e
+	github.com/chainreactors/gogo/v2 v2.14.2-0.20260629062248-238b8dcab915
+	github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
-	github.com/chainreactors/neutron v0.0.0-20260615055126-a9bbe4fc3e95
-	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe
-	github.com/chainreactors/proton v0.3.1-0.20260611174627-89c10c8c27e5
+	github.com/chainreactors/neutron v0.1.1-0.20260629055246-979be130dcaa
+	github.com/chainreactors/proton v0.3.1
 	github.com/chainreactors/proxyclient v1.1.1-0.20260529172347-2a80e08d5593
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
-	github.com/chainreactors/sdk v0.3.4-0.20260624031614-b16da9a87441
-	github.com/chainreactors/spray v1.3.2-0.20260624034433-890630649b2b
-	github.com/chainreactors/tui/console v0.0.0-00010101000000-000000000000
-	github.com/chainreactors/tui/readline v1.2.2
-	github.com/chainreactors/utils v0.0.0-20260623065725-737b33d61c6b
-	github.com/chainreactors/utils/mitmproxy v0.0.0-20260624182357-8d5cad72d8f2
-	github.com/chainreactors/utils/pty v0.0.0-20260624031611-9aadeae3fb0e
-	github.com/chainreactors/zombie v1.2.3-0.20260624041317-6bf4579de29d
+	github.com/chainreactors/sdk v0.3.4-0.20260701052449-3d899ae2ef28
+	github.com/chainreactors/spray v1.3.3-0.20260629055610-b618acf15bb6
+	github.com/chainreactors/tui/console v0.0.0-20260701051656-c5b85e7256a9
+	github.com/chainreactors/tui/readline v0.0.0-20260626181537-7c0eb4b933cd
+	github.com/chainreactors/utils v0.0.0-20260630095004-c4fb7a13ed39
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260630095004-c4fb7a13ed39
+	github.com/chainreactors/utils/parsers v0.0.0-20260630095004-c4fb7a13ed39
+	github.com/chainreactors/utils/pty v0.0.0-20260630095004-c4fb7a13ed39
+	github.com/chainreactors/zombie v1.3.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/go-rod/rod v0.116.2
@@ -87,7 +87,8 @@ require (
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
-	github.com/chainreactors/neutron/operators/full v0.0.0-20260615055126-a9bbe4fc3e95 // indirect
+	github.com/chainreactors/neutron/operators/full v0.1.0 // indirect
+	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
 	github.com/chainreactors/utils/cert v0.0.0-20260624181253-2b3d0b35862f // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
@@ -159,7 +160,9 @@ require (
 	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
 	github.com/huin/asn1ber v0.0.0-20120622192748-af09f62e6358 // indirect
 	github.com/iangcarroll/cookiemonster v1.6.0 // indirect
+	github.com/icholy/digest v1.1.0 // indirect
 	github.com/icodeface/tls v0.0.0-20230910023335-34df9250cd12 // indirect
+	github.com/imroc/req/v3 v3.57.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/itchyny/gojq v0.12.19 // indirect
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
@@ -222,6 +225,7 @@ require (
 	github.com/projectdiscovery/retryablehttp-go v1.3.10 // indirect
 	github.com/projectdiscovery/wappalyzergo v0.2.79 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
+	github.com/quic-go/quic-go v0.57.1 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/remeh/sizedwaitgroup v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -305,9 +309,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
-)
-
-replace (
-	github.com/chainreactors/tui/console => ../tui/console
-	github.com/chainreactors/tui/readline => ../tui/readline
 )

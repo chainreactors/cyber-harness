@@ -69,9 +69,15 @@ func parseLine(line []byte) (TimelineEntry, bool) {
 	return TimelineEntry{}, false
 }
 
+type lootView struct{ Loot }
+
+func (l *lootView) writeMarkdown(sb *strings.Builder, _ *renderContext) {
+	sb.WriteString(fmt.Sprintf("  - **%s** `%s` %s\n", l.Kind, l.Target, l.Description))
+}
+
 func parseRecordData(rec Record) timelineItem {
 	if rec.Loot {
-		return unmarshalItem[Loot](rec.Data)
+		return unmarshalItem[lootView](rec.Data)
 	}
 	switch rec.Type {
 	case TypeScanStart:
@@ -279,10 +285,6 @@ func (w *webView) writeMarkdown(sb *strings.Builder, _ *renderContext) {
 		fingers = " [" + strings.Join(names, ", ") + "]"
 	}
 	sb.WriteString(fmt.Sprintf("  - **web** `%s` %d %s%s\n", w.URL, w.Status, w.Title, fingers))
-}
-
-func (l *Loot) writeMarkdown(sb *strings.Builder, _ *renderContext) {
-	sb.WriteString(fmt.Sprintf("  - **%s** `%s` %s\n", l.Kind, l.Target, l.Description))
 }
 
 func (d *ScanEnd) writeMarkdown(sb *strings.Builder, _ *renderContext) {

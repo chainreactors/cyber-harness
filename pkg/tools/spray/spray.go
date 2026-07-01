@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
+	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/spray"
 	spraycore "github.com/chainreactors/spray/core"
 )
@@ -31,6 +34,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 
 func (c *Command) WithProxy(proxy string) *Command {
 	c.Proxy = proxy
+	return c
+}
+
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
 	return c
 }
 
@@ -68,9 +76,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		c.engine.InstallResourceProvider()
 	}
 	args = c.injectProxy(args)
-	// Use a spray-specific config name so that spray never accidentally
-	// loads aiscan's own aiscan.yaml from the agent's working directory.
-	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), spraycore.RunOptions{
+	runOpts := spraycore.RunOptions{
 		Output:        &buf,
 		DefaultConfig: ".spray.yaml",
 		BeforePrepare: func(option *spraycore.Option) error {
@@ -98,7 +104,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			}
 			return nil
 		},
-	}); err != nil {
+		OnResult: func(r *parsers.SprayResult) {
+			c.EmitData("spray", output.ToolDataWeb, r.UrlString, r)
+		},
+	}
+	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), runOpts); err != nil {
 		fmt.Fprint(commands.Output, buf.String())
 		return fmt.Errorf("spray: %w", err)
 	}

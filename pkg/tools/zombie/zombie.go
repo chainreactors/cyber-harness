@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
@@ -33,6 +35,11 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
+	return c
+}
+
 func (c *Command) Name() string { return "zombie" }
 
 func (c *Command) Usage() string {
@@ -47,7 +54,9 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		defer restoreDebug()
 		c.Logger.Debugf("zombie debug enabled")
 	}
-	runOpts := zombiecore.RunOptions{Output: &buf}
+	runOpts := zombiecore.RunOptions{
+		Output: &buf,
+	}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		if buf.Len() > 0 {
 			fmt.Fprint(commands.Output, buf.String())
@@ -57,7 +66,6 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	fmt.Fprint(commands.Output, buf.String())
 	return nil
 }
-
 
 var zombieFileFlags = map[string]bool{
 	"-I": true, "--IP": true, "-U": true, "--USER": true,

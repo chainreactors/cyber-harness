@@ -65,5 +65,5 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (commands
 		}
 	}
 
-	return commands.ToolResult{}, fmt.Errorf("web_search: no search backend available")
+	return commands.ToolResult{}, fmt.Errorf("web_search: no search backend available. Configure Tavily API key via --tavily-key flag, env (TAVILY_API_KEY), or config file (search.tavily_keys). Do not retry until configured")
 }

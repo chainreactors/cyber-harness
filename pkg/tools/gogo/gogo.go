@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
+	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/gogo"
 )
 
@@ -32,6 +35,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 
 func (c *Command) WithProxy(proxy string) *Command {
 	c.Proxy = proxy
+	return c
+}
+
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
 	return c
 }
 
@@ -66,7 +74,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 
 	var buf bytes.Buffer
-	if err := gogocore.RunWithArgs(ctx, args, gogocore.RunOptions{
+	opts := gogocore.RunOptions{
 		Output: &buf,
 		BeforeInit: func() error {
 			if c.engine != nil {
@@ -80,7 +88,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			}
 			return c.engine.Init()
 		},
-	}); err != nil {
+		OnResult: func(r *parsers.GOGOResult) {
+			c.EmitData("gogo", output.ToolDataService, r.GetTarget(), r)
+		},
+	}
+	if err := gogocore.RunWithArgs(ctx, args, opts); err != nil {
 		fmt.Fprint(commands.Output, buf.String())
 		return err
 	}

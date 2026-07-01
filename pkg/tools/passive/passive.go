@@ -99,7 +99,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 
 func (c *Command) runQuery(ctx context.Context, src string, args []string) (string, error) {
 	if c.engine == nil {
-		return "", fmt.Errorf("passive: uncover engine not initialized — set recon credentials")
+		return "", fmt.Errorf("passive: no recon credentials configured. Set via flags (--fofa-key, --hunter-api-key), env (FOFA_KEY, HUNTER_API_KEY), or config file (recon.fofa_key, recon.hunter_api_key). Do not retry until credentials are provided")
 	}
 	query, err := parseQueryArgs(args)
 	if err != nil {

@@ -2,7 +2,7 @@ package scan
 
 import (
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func verificationLabel(status string) string {

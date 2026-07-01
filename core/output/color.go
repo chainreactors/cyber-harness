@@ -2,7 +2,7 @@ package output
 
 import (
 	"github.com/chainreactors/logs"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 )
 
 const (

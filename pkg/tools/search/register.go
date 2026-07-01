@@ -22,9 +22,7 @@ func init() {
 				tavily.SetProxy(deps.ScannerProxy)
 			}
 
-			if p != nil {
-				reg.RegisterTool(NewWebSearchTool(p, tavily))
-			}
+			reg.RegisterTool(NewWebSearchTool(p, tavily))
 			reg.Register(NewFetchCommand(), "search")
 
 			var idx *association.Index
@@ -38,9 +36,7 @@ func init() {
 					idx.BuildWithFingers(full.Fingers(), full.Aliases(), nil)
 				}
 			}
-			if idx != nil {
-				reg.Register(NewCyberhubSearch(idx), "search")
-			}
+			reg.Register(NewCyberhubSearch(idx), "search")
 		},
 	})
 }

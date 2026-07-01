@@ -42,7 +42,7 @@ func AppConfig(option *Option, features RuntimeFeatures, logger telemetry.Logger
 		Tools: ToolConfig{
 			Enabled:       features.ToolsEnabled,
 			BashTimeout:   300,
-			TavilyKeys:    DefaultTavilyKeys,
+			TavilyKeys:    resolveTavilyKeys(option.TavilyKey, DefaultTavilyKeys),
 			OptionalTools: option.Tools,
 		},
 		Logger:        logger,
@@ -69,4 +69,16 @@ func intOptionValue(p *int) int {
 		return *p
 	}
 	return 0
+}
+
+func resolveTavilyKeys(flagKey, configKeys string) string {
+	flagKey = strings.TrimSpace(flagKey)
+	configKeys = strings.TrimSpace(configKeys)
+	if flagKey != "" && configKeys != "" {
+		return flagKey + "," + configKeys
+	}
+	if flagKey != "" {
+		return flagKey
+	}
+	return configKeys
 }

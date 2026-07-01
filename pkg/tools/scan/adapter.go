@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
-	"github.com/chainreactors/parsers"
+	"github.com/chainreactors/utils/parsers"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"

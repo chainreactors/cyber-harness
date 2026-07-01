@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.2.8 — 外部 API 工具错误治理 + 文件上传 + Agent 提示优化
+
+### New Features
+
+**文件上传**
+
+- 支持通过 agent 通道直接上传文件
+
+**`--tavily-key` flag**
+
+- Tavily web search 现在可通过 CLI flag 配置，不再仅限 config 文件和环境变量
+
+```bash
+aiscan agent --tavily-key tvly-xxx -p "search CVE-2024-1234"
+```
+
+### Improvements
+
+**外部 API 工具错误治理**
+
+未配置 API key 时，`passive`、`web_search`、`search cyberhub` 等工具之前要么不注册（agent 看不到），要么返回模糊错误导致 agent 反复重试。现在统一为：始终注册，缺 key 时返回一次性明确错误，列出所有配置方式（flag / env / config），agent 不会再重复调用。
+
+```
+passive: no recon credentials configured.
+  Set via flags (--fofa-key, --hunter-api-key),
+  env (FOFA_KEY, HUNTER_API_KEY),
+  or config file (recon.fofa_key, recon.hunter_api_key).
+  Do not retry until credentials are provided
+```
+
+**Agent 工具调用准确率提升**
+
+- 将 quick-reference 文档嵌入 system prompt，减少 agent 对扫描工具的试错调用
+- read tool 输出移除冗余行号前缀，降低 token 消耗
+
+### Bug Fixes
+
+- 修复 CI 构建失败：移除 go.mod 中 `tui/console` 和 `tui/readline` 的本地 `replace` 指令，改用远程发布版本
+
+### Dependencies
+
+- **zombie** `v1.2.3` → [`v1.3.0`](https://github.com/chainreactors/zombie/releases/tag/v1.3.0)
+- **spray** `v1.3.2` → `v1.3.3`
+- **proton** → `v0.3.1`
+- **ioa** `v0.1.1` → `v0.1.2`
+- **tui/console**、**tui/readline** — 迁移到 chainreactors/tui，替代 reeflective fork
+- **utils** 全子模块升级到 `20260630`，新增 `utils/parsers` 子模块
+- 所有 chainreactors 依赖升级到 master 最新
+
+---
+
 ## v0.2.7 — MITM 流量捕获 + Proton 敏感信息扫描 + /loop 循环任务 + TUI 交互增强
 
 MITM 透明流量拦截（`proxy mitm` 子命令族）；Proton 敏感信息扫描器（SDK 引擎 + 197 条内嵌规则 + 双向管道）；`/loop` 循环任务调度；TUI 交互全面增强（verbosity 切换、中断控制、文件补全、实时 token 用量）；多 Provider 列表配置格式；FOFA key-only 认证支持。
