@@ -13,25 +13,37 @@ import (
 )
 
 // ---- wire types (host <-> wasm) --------------------------------------------
+//
+// Field names match the CyberHub Copilot host (src/offscreen/wasm-agent.ts):
+// camelCase, `task` for the new user message, a nested `context` blob passed
+// verbatim to the tool bridge, and a `{output, messages, turns, stop}` result.
 
-// runPayload is the JSON argument to aiscanRunAgent. It carries the task, the
-// prior transcript to hydrate, and the tool schemas the host can execute.
+// runPayload is the JSON argument to runAgent.
 type runPayload struct {
-	RunID            string              `json:"run_id"`
-	Prompt           string              `json:"prompt"`
-	SystemPrompt     string              `json:"system_prompt"`
-	Model            string              `json:"model"`
-	Messages         []agent.ChatMessage `json:"messages"`
-	Tools            []toolSchema        `json:"tools"`
-	MaxTurns         int                 `json:"max_turns"`
-	MaxParallelTools int                 `json:"max_parallel_tools"`
-	MaxTokens        int                 `json:"max_tokens"`
-	Temperature      *float64            `json:"temperature"`
-	TokenBudget      int                 `json:"token_budget"`
-	Eval             *evalSpec           `json:"eval"`
+	Task         string              `json:"task"`
+	SystemPrompt string              `json:"systemPrompt"`
+	Model        string              `json:"model"`
+	MaxTurns     int                 `json:"maxTurns"`
+	Messages     []agent.ChatMessage `json:"messages"`
+	Tools        []toolSchema        `json:"tools"`
+	// context is threaded, untouched, to __aiscanTool so the host can target the
+	// right tab and observe the right abort signal. Kept raw to avoid re-shaping.
+	Context json.RawMessage `json:"context"`
+	// Optional knobs (not sent by the current host; supported for completeness).
+	MaxParallelTools int       `json:"maxParallelTools"`
+	MaxTokens        int       `json:"maxTokens"`
+	Temperature      *float64  `json:"temperature"`
+	TokenBudget      int       `json:"tokenBudget"`
+	Eval             *evalSpec `json:"eval"`
 }
 
-// toolSchema is a host-executed tool advertised to the LLM. The wasm only holds
+// runContext is the subset of `context` the wasm itself needs (the run id, used
+// as the cancellation key and session id).
+type runContext struct {
+	RunID string `json:"runId"`
+}
+
+// toolSchema is a host-executed tool advertised to the LLM. The wasm holds only
 // the schema; execution is delegated to the JS host via __aiscanTool.
 type toolSchema struct {
 	Name        string                 `json:"name"`
@@ -53,19 +65,30 @@ func (t toolSchema) definition() agent.ToolDefinition {
 // evalSpec enables the evaluator (Goal) loop when Criteria is non-empty.
 type evalSpec struct {
 	Criteria  string `json:"criteria"`
-	MaxRounds int    `json:"max_rounds"`
+	MaxRounds int    `json:"maxRounds"`
 }
 
-// runResult is the JSON the run Promise resolves with.
+// runResult is the JSON the run Promise resolves with. Matches what
+// WasmAgentConversation.send() reads: output / messages / turns / stop.
 type runResult struct {
-	Output        string              `json:"output"`
-	Messages      []agent.ChatMessage `json:"messages"`
-	NewMessages   []agent.ChatMessage `json:"new_messages,omitempty"`
-	Turns         int                 `json:"turns"`
-	Stop          string              `json:"stop"`
-	Usage         agent.Usage         `json:"usage"`
-	ContextTokens int                 `json:"context_tokens,omitempty"`
-	Error         string              `json:"error,omitempty"`
+	Output   string              `json:"output"`
+	Messages []agent.ChatMessage `json:"messages"`
+	Turns    int                 `json:"turns"`
+	Stop     string              `json:"stop"`
+	Usage    agent.Usage         `json:"usage"`
+	Error    string              `json:"error,omitempty"`
+}
+
+// mapStop projects aiscan's richer StopReason set onto the host's vocabulary
+// ("completed" | "terminated" | "max_turns" | "error"). A user-cancelled run is
+// detected host-side via the abort signal, so its exact stop string is moot.
+func mapStop(s agent.StopReason) string {
+	switch s {
+	case agent.StopReasonStopped, agent.StopReasonBudget:
+		return "max_turns"
+	default:
+		return string(s)
+	}
 }
 
 func marshalResult(result *agent.Result, runErr error) (string, error) {
@@ -73,17 +96,18 @@ func marshalResult(result *agent.Result, runErr error) (string, error) {
 	if result != nil {
 		out.Output = result.Output
 		out.Messages = result.Messages
-		out.NewMessages = result.NewMessages
 		out.Turns = result.Turns
-		out.Stop = string(result.Stop)
+		out.Stop = mapStop(result.Stop)
 		out.Usage = result.TotalUsage
-		out.ContextTokens = result.ContextTokens
 		if result.Err != nil {
 			out.Error = result.Err.Error()
 		}
 	}
 	if runErr != nil && out.Error == "" {
 		out.Error = runErr.Error()
+	}
+	if out.Error != "" && (out.Stop == "" || out.Stop == "completed") {
+		out.Stop = "error"
 	}
 	data, err := json.Marshal(out)
 	if err != nil {

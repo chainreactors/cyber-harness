@@ -1,8 +1,8 @@
 # cmd/wasm — aiscan agent-core as js/wasm
 
-The **承重 spike (GATE)** for RFC [#189](https://github.com/chainreactors/CyberHub/issues/189)
-方案 A: run aiscan's `pkg/agent` loop/evaluator as the *brain* inside a browser
-extension, with the JS host owning every side effect.
+RFC [#189](https://github.com/chainreactors/CyberHub/issues/189) 方案 A: run
+aiscan's `pkg/agent` loop/evaluator as the *brain* inside a browser extension,
+with the JS host owning every side effect. **One brain, shared with the CLI.**
 
 > **要单一化的是"脑（harness）"，不是"手（浏览器操作）"。** The loop makes every
 > decision; go-rod / playwright / os-exec never enter the wasm. Browser tools are
@@ -10,27 +10,28 @@ extension, with the JS host owning every side effect.
 > on the user's real logged-in tab via `chrome.scripting`.
 
 ```
-   brain (this wasm)            seam (syscall/js, JSON)          hand (JS host)
- ┌────────────────────┐      ┌──────────────────────────┐     ┌────────────────────┐
- │ agent-core          │ LLM │ __aiscanLLM(reqJSON)      │ --> │ real provider      │
- │  loop / evaluator   │────▶│ __aiscanTool(name, args)  │ --> │ chrome.scripting   │
- │  (agent.wasm)       │◀────│ onEvent(eventJSON)        │ <-- │ UI / progress      │
- └────────────────────┘      └──────────────────────────┘     └────────────────────┘
+   brain (this wasm)              seam (syscall/js, JSON)              hand (JS host)
+ ┌────────────────────┐      ┌────────────────────────────┐     ┌────────────────────┐
+ │ agent-core          │ LLM │ __aiscanLLM(reqJSON)        │ --> │ real provider      │
+ │  loop / evaluator   │────▶│ __aiscanTool(name,args,ctx) │ --> │ chrome.scripting   │
+ │  (agent.wasm)       │◀────│ onEvent(eventJSON)          │ <-- │ UI / progress      │
+ └────────────────────┘      └────────────────────────────┘     └────────────────────┘
 ```
 
-## GATE result (this spike)
+The host is CyberHub Copilot's `src/offscreen/wasm-agent.ts`
+(`WasmAgentConversation`); this module's wire protocol matches it exactly, so the
+built `agent.wasm` drops straight into `public/wasm/`.
 
-| check | result |
-|---|---|
-| `pkg/agent` (+ evaluator, provider, commands) compiles `GOOS=js GOARCH=wasm` | ✅ **as-is, no strip needed** — it imports `pkg/commands`, never `pkg/tools` |
-| runs end-to-end (LLM ↔ tool ↔ event ↔ cancel) | ✅ `testdata/smoke.mjs` — 21/21 |
-| size, stripped (`-s -w`) | **~17 MB** |
-| size, stripped + `gzip -9` | **~4.2 MB** |
-| baseline: `finger.wasm` already shipping in the extension | 29 MB |
+## Status
 
-Standard Go wasm already lands **under** the fingerprint wasm the extension ships
-today, so "体积可接受" holds without TinyGo. TinyGo (to shrink further) is a
-follow-up, not a blocker — its `encoding/json` reflection is the known snag.
+- ✅ `pkg/agent` (+ evaluator, provider, commands) compiles `GOOS=js GOARCH=wasm`
+  **as-is** — it imports `pkg/commands`, never `pkg/tools`. No strip needed.
+- ✅ End-to-end verified two ways: `testdata/smoke.mjs` (23/23) against the built
+  module, and the extension's own real-host test (`WasmAgentConversation` +
+  this `agent.wasm` + the real `finish` tool + multi-turn).
+- ✅ Size (standard Go, stripped `-s -w`): **~17 MB** / **~4.2 MB** gzipped —
+  *under* the `finger.wasm` (29 MB) the extension already ships. TinyGo (further
+  shrink) is a follow-up, not a blocker.
 
 ## Build
 
@@ -38,9 +39,9 @@ follow-up, not a blocker — its `encoding/json` reflection is the known snag.
 make agent-wasm        # -> dist/wasm/{agent.wasm, agent.wasm.gz, wasm_exec.js} + size
 ```
 
-Needs the matching `wasm_exec.js` (copied by the target from
-`$(go env GOROOT)/lib/wasm/wasm_exec.js`) — it must come from the **same Go
-version** that built the module.
+`wasm_exec.js` must come from the **same Go version** that built the module
+(the target copies it from `$(go env GOROOT)/lib/wasm/wasm_exec.js`). Ship it as
+`wasm_exec.agent.js` in the extension's `public/wasm/`.
 
 ## Smoke test
 
@@ -49,56 +50,56 @@ make agent-wasm
 node cmd/wasm/testdata/smoke.mjs dist/wasm/agent.wasm dist/wasm/wasm_exec.js
 ```
 
-## Wire protocol
+## Wire protocol (matches wasm-agent.ts)
 
-The host installs two function globals and passes a per-run event callback:
+Host installs two function globals; the event sink is a per-run argument:
 
 - `__aiscanLLM(reqJSON) -> Promise<respJSON>` — `reqJSON` is an OpenAI-shaped
   `ChatCompletionRequest`; resolve a `ChatCompletionResponse` JSON string. The
   host owns provider choice, keys, caching and fallback.
-- `__aiscanTool(name, argsJSON) -> Promise<result>` — `result` is either a
-  string (result text) or `{ text, is_error, terminate }`.
+- `__aiscanTool(name, argsJSON, ctxJSON) -> Promise<result>` — `ctxJSON` is the
+  run's context blob, threaded verbatim. `result` is a JSON string
+  `{ content, isError, terminate }` (a plain string or object is also accepted).
 
 Exports (installed by `main`, gated on `aiscanAgentReady === true`):
 
-- `aiscanRunAgent(payloadJSON, onEvent?) -> Promise<resultJSON>`
-- `aiscanCancelAgent(runId) -> bool` — aborts an in-flight run by `run_id`.
+- `runAgent(payloadJSON, onEvent) -> Promise<resultJSON>` — the name the host calls
+- `aiscanRunAgent(...)` — alias of `runAgent`
+- `aiscanCancelAgent(runId) -> bool` — aborts an in-flight run by `context.runId`
 
-`onEvent(eventJSON)` receives each `agent.Event` (see `pkg/agent/event_json.go`).
+`onEvent(eventJSON)` receives each `agent.Event` verbatim (see
+`pkg/agent/event_json.go`); the host's `mapEvent()` translates it.
 
 ### payload
 
 ```jsonc
 {
-  "run_id": "abc",                 // key for aiscanCancelAgent
-  "prompt": "task...",
-  "system_prompt": "...",
+  "task": "the new user message",
+  "systemPrompt": "...",
   "model": "...",
+  "maxTurns": 25,
   "messages": [ /* prior transcript to hydrate */ ],
   "tools": [ { "name": "...", "description": "...", "parameters": { /* JSON schema */ } } ],
-  "max_turns": 20,
-  "max_parallel_tools": 4,
-  "max_tokens": 0,
-  "temperature": 0.0,
-  "token_budget": 0,
-  "eval": { "criteria": "acceptance criteria", "max_rounds": 3 }  // omit for plain loop
+  "context": { "tabId": 12, "url": "https://…", "runId": "r1" },
+  // optional: "temperature", "maxParallelTools", "maxTokens", "tokenBudget",
+  //           "eval": { "criteria": "…", "maxRounds": 3 }   // enables the Goal loop
 }
 ```
 
 ### result
 
 ```jsonc
-{ "output": "...", "messages": [...], "turns": 2, "stop": "completed",
-  "usage": { "total_tokens": 41, ... }, "error": "" }
+{ "output": "...", "messages": [...], "turns": 2, "stop": "completed" }
+// stop ∈ completed | terminated | max_turns | error   (+ "usage", "error" when relevant)
 ```
 
 A mid-flight failure still **resolves** with `error` + partial transcript; only a
-malformed payload rejects.
+malformed payload rejects. Transcript hydration is via `messages` in/out.
 
-## Scope / not in this spike
+## Scope / not in this module
 
-- **Plugin host side** (`agent-manager.js`, tool dispatcher, `buildDomTree.js`
-  perception, security guardrails) — CyberHubCopilot repo, next step.
-- **Session persistence host-out** — `session.go`'s `os`/`filepath` compile under
-  wasm but do nothing; the host hydrates via `messages` in/out instead.
+- **Host side** lives in CyberHubCopilot (`src/offscreen/`, `allTools()`, browser
+  tools). This module is only the brain.
+- **Session persistence** — `session.go`'s `os`/`filepath` compile under wasm but
+  do nothing; the host hydrates via `messages`.
 - **TinyGo** size pass.
