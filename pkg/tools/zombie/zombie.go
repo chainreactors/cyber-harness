@@ -46,7 +46,8 @@ func (c *Command) Usage() string {
 	return zombiecore.Help()
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("zombie", &err)
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {

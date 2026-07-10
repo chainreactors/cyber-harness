@@ -73,7 +73,8 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("passive", &err)
 	src, rest, help, err := splitSource(args)
 	if err != nil {
 		return err

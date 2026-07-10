@@ -16,6 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -237,7 +238,8 @@ Examples:
 }
 
 // Execute dispatches to the appropriate sub-command.
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("playwright", &err)
 	if len(args) == 0 {
 		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}

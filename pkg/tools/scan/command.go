@@ -133,7 +133,8 @@ Examples:
   scan -l targets.txt --mode full --zombie-top 5`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("scan", &err)
 	out, _, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
 	if err != nil {
 		return err

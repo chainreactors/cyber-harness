@@ -108,6 +108,7 @@ Examples:
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("katana", &err)
 	args = c.resolveRelativePaths(args)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {

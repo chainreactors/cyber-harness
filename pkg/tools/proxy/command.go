@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 	goflags "github.com/jessevdk/go-flags"
@@ -56,7 +57,8 @@ Auto mode options:
   --strategy,-s adaptive      Load balance strategy (adaptive, url-test, round-robin, random)`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("proxy", &err)
 	if len(args) == 0 {
 		fmt.Fprint(commands.Output, c.Usage())
 		return nil
@@ -65,7 +67,6 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 	rest := args[1:]
 
 	var result string
-	var err error
 
 	if strings.Contains(args[0], "://") {
 		result, err = c.execPassthrough(ctx, args[0], rest)

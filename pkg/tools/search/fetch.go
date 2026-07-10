@@ -14,6 +14,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 const (
@@ -158,7 +159,8 @@ func NewFetchCommand() *FetchCommand {
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
 
-func (c *FetchCommand) Execute(ctx context.Context, args []string) error {
+func (c *FetchCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("fetch", &err)
 	rawURL, extract, err := parseFetchArgs(args)
 	if err != nil {
 		return err

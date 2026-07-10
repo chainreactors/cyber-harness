@@ -64,6 +64,7 @@ func (c *Command) QuickReference() string {
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("gogo", &err)
 	args = c.normalizeArgs(args)
 	args = c.injectProxy(args)
 

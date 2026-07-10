@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -96,7 +97,8 @@ nodes     Show nodes in the current space
 topics    Show root messages (conversation starters) in the current space`
 }
 
-func (c *spaceCommand) Execute(ctx context.Context, args []string) error {
+func (c *spaceCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("ioa_space", &err)
 	sub := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
 		sub = args[0]
@@ -245,7 +247,8 @@ Options:
   --status          Verification status: confirmed, not_confirmed, info, inconclusive (checkpoint)`
 }
 
-func (c *sendCommand) Execute(ctx context.Context, args []string) error {
+func (c *sendCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("ioa_send", &err)
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join first")
@@ -345,7 +348,8 @@ Options:
   --id              Message ID for thread context`
 }
 
-func (c *readCommand) Execute(ctx context.Context, args []string) error {
+func (c *readCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("ioa_read", &err)
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa_space join first")

@@ -134,7 +134,8 @@ type protonFlags struct {
 	Debug   bool `long:"debug" description:"enable debug logging"`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("proton", &err)
 	args = c.resolveRelativePaths(args)
 	var flags protonFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)

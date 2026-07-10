@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
 )
@@ -55,14 +56,14 @@ Examples:
   mitm analyze --host example.com`
 }
 
-func (c *MitmCommand) Execute(ctx context.Context, args []string) error {
+func (c *MitmCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("mitm", &err)
 	if len(args) == 0 {
 		fmt.Fprint(commands.Output, c.Usage())
 		return nil
 	}
 
 	var result string
-	var err error
 
 	switch args[0] {
 	case "flows":

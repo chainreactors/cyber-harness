@@ -142,11 +142,12 @@ Examples:
   neutron -u http://target.com -t ./pocs --id shiro-detect -j -o loots.jsonl`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("neutron", &err)
 	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
-	_, err := parser.ParseArgs(normalizeNucleiStyleArgs(args))
+	_, err = parser.ParseArgs(normalizeNucleiStyleArgs(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			fmt.Fprint(commands.Output, c.Usage()+"\n")

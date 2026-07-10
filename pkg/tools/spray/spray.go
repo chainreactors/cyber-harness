@@ -64,6 +64,7 @@ func (c *Command) QuickReference() string {
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("spray", &err)
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
