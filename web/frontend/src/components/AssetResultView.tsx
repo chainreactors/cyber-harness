@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, Brain, CheckCircle2, ChevronRight, CornerDownRight, Crosshair, File, FileCode2, Fingerprint, Folder, FolderOpen, Globe, Link2, Network, Radar, Server } from 'lucide-react'
 import type { AssetItem, ScanResult } from '../api'
@@ -36,6 +36,8 @@ import { badgeToneClass } from '../lib/tones'
 import { Badge as UIBadge, Button, EmptyState, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
 import { AiPanel } from '@/components/AiPanel'
 
+const AnchorPrefixContext = createContext('')
+
 interface AssetResultViewProps {
   result: ScanResult
   anchorPrefix?: string
@@ -54,30 +56,33 @@ export default function AssetResultView({ result, anchorPrefix = '' }: AssetResu
   const model = useMemo(() => buildResultModel(result), [result])
 
   return (
-    <div>
-      <Section title={t('hosts')}>
-        {model.hosts.length > 0 ? (
-          <HostList hosts={model.hosts} anchorPrefix={anchorPrefix} />
-        ) : (
-          <EmptyState compact title={t('noHosts')} />
-        )}
-      </Section>
-    </div>
+    <AnchorPrefixContext.Provider value={anchorPrefix}>
+      <div>
+        <Section title={t('hosts')}>
+          {model.hosts.length > 0 ? (
+            <HostList hosts={model.hosts} />
+          ) : (
+            <EmptyState compact title={t('noHosts')} />
+          )}
+        </Section>
+      </div>
+    </AnchorPrefixContext.Provider>
   )
 }
 
-function HostList({ hosts, anchorPrefix }: { hosts: HostGroup[]; anchorPrefix: string }) {
+function HostList({ hosts }: { hosts: HostGroup[] }) {
   return (
     <div className="divide-y divide-border/70">
       {hosts.map((host) => (
-        <HostPanel key={host.id} host={host} anchorPrefix={anchorPrefix} />
+        <HostPanel key={host.id} host={host} />
       ))}
     </div>
   )
 }
 
-function HostPanel({ host, anchorPrefix }: { host: HostGroup; anchorPrefix: string }) {
+function HostPanel({ host }: { host: HostGroup }) {
   const { t } = useTranslation('findings')
+  const anchorPrefix = useContext(AnchorPrefixContext)
   const [open, setOpen] = useState(true)
   const anchor = assetAnchor(anchorPrefix, 'host', host.id)
 
@@ -100,25 +105,26 @@ function HostPanel({ host, anchorPrefix }: { host: HostGroup; anchorPrefix: stri
       </summary>
 
       <div className="ml-6 mt-3 border-l border-border/70 pl-3">
-        <ServiceList services={host.services} anchorPrefix={anchorPrefix} />
+        <ServiceList services={host.services} />
       </div>
     </details>
   )
 }
 
-function ServiceList({ services, anchorPrefix }: { services: ServiceNode[]; anchorPrefix: string }) {
+function ServiceList({ services }: { services: ServiceNode[] }) {
   return (
     <div className="divide-y divide-border/60">
       {services.map((service) => (
-        <ServiceRow key={service.id} service={service} anchorPrefix={anchorPrefix} />
+        <ServiceRow key={service.id} service={service} />
       ))}
     </div>
   )
 }
 
-function ServiceRow({ service, anchorPrefix }: { service: ServiceNode; anchorPrefix: string }) {
+function ServiceRow({ service }: { service: ServiceNode }) {
   const { t } = useTranslation('findings')
-  const panels = useMemo(() => servicePanels(service, anchorPrefix), [service, anchorPrefix])
+  const anchorPrefix = useContext(AnchorPrefixContext)
+  const panels = useMemo(() => servicePanels(service), [service])
   const [open, setOpen] = useState(true)
   const [activePanelID, setActivePanelID] = useState(() => defaultPanelID(panels))
   const activePanel = panels.find((panel) => panel.id === activePanelID) || panels[0]
@@ -141,7 +147,7 @@ function ServiceRow({ service, anchorPrefix }: { service: ServiceNode; anchorPre
   if (panels.length === 0) {
     return (
       <div id={anchor} className="scroll-mt-24 py-3 first:pt-0 last:pb-0">
-        <ServiceLine service={service} anchorPrefix={anchorPrefix} />
+        <ServiceLine service={service} />
       </div>
     )
   }
@@ -154,7 +160,7 @@ function ServiceRow({ service, anchorPrefix }: { service: ServiceNode; anchorPre
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <ServiceLine service={service} anchorPrefix={anchorPrefix} expandable />
+        <ServiceLine service={service} expandable />
       </summary>
 
       {showPanelTabs && (
@@ -190,14 +196,13 @@ function ServiceRow({ service, anchorPrefix }: { service: ServiceNode; anchorPre
 
 function ServiceLine({
   service,
-  anchorPrefix,
   expandable = false,
 }: {
   service: ServiceNode
-  anchorPrefix: string
   expandable?: boolean
 }) {
   const { t } = useTranslation('findings')
+  const anchorPrefix = useContext(AnchorPrefixContext)
   const displayTarget = service.web ? service.asset.target : service.target
   const aiStatus = serviceAIStatus(service)
   const port = service.port && service.port.toLowerCase() !== (service.service || service.protocol).toLowerCase()
@@ -262,7 +267,7 @@ function ServiceIcon({ service }: { service: ServiceNode }) {
   return <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 }
 
-function servicePanels(service: ServiceNode, anchorPrefix: string): AssetPanel[] {
+function servicePanels(service: ServiceNode): AssetPanel[] {
   const panels: AssetPanel[] = []
   if (service.paths.length > 0) {
     panels.push({
@@ -278,7 +283,7 @@ function servicePanels(service: ServiceNode, anchorPrefix: string): AssetPanel[]
       id: 'analysis',
       labelKey: 'analysis',
       count: service.analysisItems.length,
-      render: () => <AssetItemsBlock asset={service.asset} items={service.analysisItems} anchorPrefix={anchorPrefix} />,
+      render: () => <AssetItemsBlock asset={service.asset} items={service.analysisItems} />,
     })
   }
   return panels
@@ -307,18 +312,19 @@ function ItemFactLine({ item, search, className }: { item: AssetItem; search?: s
   )
 }
 
-function AssetItemsBlock({ asset, items, anchorPrefix }: { asset: ViewAsset; items: AssetItem[]; anchorPrefix: string }) {
+function AssetItemsBlock({ asset, items }: { asset: ViewAsset; items: AssetItem[] }) {
   return (
     <div className="space-y-2">
       {items.map((item, idx) => (
-        <AssetItemRow key={`${item.kind}-${item.source}-${item.target}-${item.title}-${idx}`} item={item} asset={asset} anchorPrefix={anchorPrefix} />
+        <AssetItemRow key={`${item.kind}-${item.source}-${item.target}-${item.title}-${idx}`} item={item} asset={asset} />
       ))}
     </div>
   )
 }
 
-function AssetItemRow({ item, asset, anchorPrefix }: { item: AssetItem; asset: ViewAsset; anchorPrefix: string }) {
+function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
   const { t } = useTranslation('findings')
+  const anchorPrefix = useContext(AnchorPrefixContext)
   const markdown = isAnalysisItem(item)
   const title = markdown ? firstText(item.summary, item.title) : itemTitle(item)
   const detail = itemContent(item)

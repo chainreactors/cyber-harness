@@ -13,52 +13,28 @@ interface Props {
   result: ScanResult
 }
 
-type ReportState = {
-  key: string
-  status: 'idle' | 'loading' | 'loaded'
-  content: string
-}
-
 export default function ScanSummaryCard({ scanID, result }: Props) {
   const { t } = useTranslation('scan')
   const { t: tf, i18n } = useTranslation('findings')
   const findingsCount = useMemo(() => buildFindings(result).length, [result])
   const [tab, setTab] = useState('assets')
-  const [report, setReport] = useState<ReportState>({ key: '', status: 'idle', content: '' })
+  const [reportMd, setReportMd] = useState('')
+  const [reportLoadedKey, setReportLoadedKey] = useState('')
   const s = result.summary
   const lang = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'
   const reportKey = `${scanID}:${lang}`
 
-  const selectTab = (value: string) => {
-    setTab(value)
-    if (value !== 'report') return
-    setReport((current) => (
-      current.key === reportKey && current.status === 'loaded' && current.content
-        ? current
-        : { key: reportKey, status: 'loading', content: '' }
-    ))
-  }
-
   useEffect(() => {
-    if (tab === 'report' && report.key !== reportKey) {
-      setReport({ key: reportKey, status: 'loading', content: '' })
-    }
-  }, [tab, report.key, reportKey])
-
-  useEffect(() => {
-    if (report.key !== reportKey || report.status !== 'loading') return
+    if (tab !== 'report' || reportLoadedKey === reportKey) return
+    setReportMd('')
     let cancelled = false
     fetchScanReport(scanID, lang)
-      .then((content) => {
-        if (!cancelled) setReport({ key: reportKey, status: 'loaded', content })
-      })
-      .catch(() => {
-        if (!cancelled) setReport({ key: reportKey, status: 'loaded', content: '' })
-      })
+      .then((md) => { if (!cancelled) { setReportMd(md); setReportLoadedKey(reportKey) } })
+      .catch(() => { if (!cancelled) { setReportMd(''); setReportLoadedKey(reportKey) } })
     return () => { cancelled = true }
-  }, [report.key, report.status, reportKey, scanID, lang])
+  }, [tab, scanID, lang, reportKey, reportLoadedKey])
 
-  const reportLoading = report.key !== reportKey || report.status !== 'loaded'
+  const reportLoading = tab === 'report' && reportLoadedKey !== reportKey
 
   return (
     <section className="overflow-hidden rounded-lg border border-border/80 bg-card">
@@ -80,7 +56,7 @@ export default function ScanSummaryCard({ scanID, result }: Props) {
         )}
       </header>
 
-      <Tabs value={tab} onValueChange={selectTab}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto w-full justify-start rounded-none border-y border-border/60 bg-transparent px-4 py-0">
           <ResultTab value="assets">{tf('assets')}</ResultTab>
           {findingsCount > 0 && (
@@ -105,7 +81,7 @@ export default function ScanSummaryCard({ scanID, result }: Props) {
             <div role="status" className="py-4 text-sm text-muted-foreground">{tf('loadingReport')}</div>
           ) : (
             <div className="prose prose-sm max-w-none dark:prose-invert">
-              <MarkdownContent content={report.content || tf('noReportAvailable')} />
+              <MarkdownContent content={reportMd || tf('noReportAvailable')} />
             </div>
           )}
         </TabsContent>
