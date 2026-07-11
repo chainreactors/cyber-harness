@@ -18,9 +18,13 @@ export interface ScanJob {
   updated_at: string;
 }
 
+import type { SCONode } from './sco_gen';
+export type { SCONode };
+
 export interface ScanResult {
   summary: ScanResultSummary;
   assets?: Asset[];
+  nodes?: SCONode[];
   services?: unknown[];
   web_probes?: unknown[];
   loots?: Loot[];

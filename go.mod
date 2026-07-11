@@ -94,6 +94,7 @@ require (
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
 	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
+	github.com/chainreactors/utils/cstx v0.0.0-20260711105548-08bcf60b7278 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
