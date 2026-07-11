@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/utils/parsers"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
+	"github.com/chainreactors/utils/parsers"
 )
 
 var firstURLPattern = regexp.MustCompile(`https?://[^\s"'<>]+`)
@@ -59,6 +59,18 @@ func AggregateStructuredResult(result *output.Result) []output.Asset {
 	}
 	for _, err := range result.Errors {
 		builder.addError(err)
+	}
+	// Older stored results may already contain AI notes/responses. Rebuilding the
+	// service/path buckets should not discard those supplemental items.
+	for _, asset := range result.Assets {
+		for _, item := range asset.Items {
+			switch item.Kind {
+			case output.AssetItemService, output.AssetItemPath, output.AssetItemFingerprint, output.AssetItemLoot, output.AssetItemError:
+				continue
+			}
+			target := output.FirstNonEmpty(item.Target, asset.Target, "Scan")
+			builder.addItem(target, targetKeys(asset.Key, asset.Target, item.Target), itemIdentity(item), item)
+		}
 	}
 	return builder.assets()
 }
@@ -121,6 +133,8 @@ func (b *assetBuilder) addWebProbe(probe *sdktypes.SprayResult) {
 		"status", probe.Status,
 		"length", probe.BodyLength,
 		"title", probe.Title,
+		"content_type", probe.ContentType,
+		"redirect_url", probe.RedirectURL,
 		"fingers", fingerNames,
 		"validated", isSprayValidated(sourceName),
 	)
@@ -358,9 +372,6 @@ func addTargetKeys(keys map[string]struct{}, value string) {
 	if origin := urlOrigin(withoutHost); origin != "" {
 		addCanonicalKey(keys, origin)
 	}
-	if host := urlHost(withoutHost); host != "" {
-		addCanonicalKey(keys, host)
-	}
 	if normalized := normalizedURL(withoutHost); normalized != "" {
 		addCanonicalKey(keys, normalized)
 	}
@@ -403,14 +414,6 @@ func urlOrigin(value string) string {
 		return ""
 	}
 	return strings.ToLower(parsed.Scheme + "://" + stripDefaultPort(parsed))
-}
-
-func urlHost(value string) string {
-	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.Host == "" {
-		return ""
-	}
-	return strings.ToLower(stripDefaultPort(parsed))
 }
 
 func stripDefaultPort(u *url.URL) string {
