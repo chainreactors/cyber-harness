@@ -197,7 +197,6 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		Mode:      mode,
 		Verify:    verify,
 		Sniper:    sniper,
-		AI:        verify || sniper,
 		Deep:      deep,
 		Status:    StatusQueued,
 		CreatedAt: now,
@@ -389,6 +388,9 @@ func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string,
 	job.UpdatedAt = time.Now()
 	_ = s.store.Update(ctx, job)
 	s.persistResultRecords(job.ID, agentID, result)
+	if len(result.Nodes) > 0 {
+		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
+	}
 	s.hub.Broadcast(job.ID, HubEvent{
 		Type:     "complete",
 		Data:     mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),

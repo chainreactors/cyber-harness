@@ -256,27 +256,7 @@ func (p *AgentPool) DispatchChatSession(agentID, taskID, sessionID, prompt strin
 }
 
 func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {
-	a := p.get(agentID)
-	if a == nil {
-		return nil, fmt.Errorf("agent %s not connected", agentID)
-	}
-	ch := make(chan taskResult, 1)
-	a.mu.Lock()
-	a.tasks[taskID] = ch
-	a.turns[taskID] = 0
-	a.mu.Unlock()
-
-	select {
-	case a.sendCh <- WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload}:
-	default:
-		a.mu.Lock()
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		a.mu.Unlock()
-		close(ch)
-		return nil, fmt.Errorf("agent %s send channel full", agentID)
-	}
-	return ch, nil
+	return p.dispatchMessage(agentID, taskID, WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload})
 }
 
 func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-chan taskResult, error) {

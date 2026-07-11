@@ -7,8 +7,6 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
-	sdktypes "github.com/chainreactors/sdk/pkg/types"
-	"github.com/chainreactors/utils/parsers"
 )
 
 type scanJSONLWriter struct {
@@ -109,8 +107,3 @@ func capabilityRecordType(source string) output.RecordType {
 		return output.RecordType(source)
 	}
 }
-
-type ServiceResult = parsers.GOGOResult
-type SprayResult = parsers.SprayResult
-type ZombieResult = parsers.ZombieResult
-type VulnResult = sdktypes.TemplateResult

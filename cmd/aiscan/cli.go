@@ -208,7 +208,6 @@ func parseCLI(args []string) (parsedCLI, error) {
 	}
 
 	option := cli.Option
-	option.ApplyDeprecatedAliases()
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}

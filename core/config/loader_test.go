@@ -309,7 +309,6 @@ func TestLoadScanDefaults(t *testing.T) {
 	writeTestConfig(t, dir, `
 scan:
   verify: critical
-  verify_timeout: 90
 `)
 
 	withDefaults(t, func() {
@@ -319,9 +318,6 @@ scan:
 
 		if DefaultVerify != "critical" {
 			t.Errorf("DefaultVerify: got %q, want %q", DefaultVerify, "critical")
-		}
-		if DefaultVerifyTimeout != "90" {
-			t.Errorf("DefaultVerifyTimeout: got %q, want %q", DefaultVerifyTimeout, "90")
 		}
 	})
 }
@@ -781,7 +777,7 @@ func withDefaults(t *testing.T, fn func()) {
 	saved := []*string{
 		&DefaultProvider, &DefaultBaseURL, &DefaultAPIKey, &DefaultModel,
 		&DefaultScannerProxy, &DefaultCyberhubURL, &DefaultCyberhubKey,
-		&DefaultCyberhubMode, &DefaultVerify, &DefaultVerifyTimeout,
+		&DefaultCyberhubMode, &DefaultVerify,
 		&DefaultTavilyKeys, &DefaultIOAURL, &DefaultIOANodeID,
 		&DefaultIOANodeName, &DefaultSpace,
 	}

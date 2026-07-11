@@ -12,15 +12,10 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-func TestScanRequestAnalysisOptions(t *testing.T) {
-	verify, sniper, deep := ScanRequest{Verify: true, Deep: true}.AnalysisOptions()
-	if !verify || sniper || !deep {
-		t.Fatalf("new analysis options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
-	}
-
-	verify, sniper, deep = ScanRequest{AI: true}.AnalysisOptions()
-	if !verify || !sniper || deep {
-		t.Fatalf("legacy AI options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
+func TestScanRequestFields(t *testing.T) {
+	req := ScanRequest{Verify: true, Deep: true}
+	if !req.Verify || req.Sniper || !req.Deep {
+		t.Fatalf("scan request = verify:%v sniper:%v deep:%v", req.Verify, req.Sniper, req.Deep)
 	}
 }
 

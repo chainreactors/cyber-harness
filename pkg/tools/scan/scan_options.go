@@ -43,12 +43,9 @@ type credentialOptions struct {
 
 func resolveScanOptions(flags flags) scanOptions {
 	ports := defaultDiscoveryPorts(flags.Mode)
-	explicitDiscovery := flags.Ports != "" || flags.Port != ""
+	explicitDiscovery := flags.Ports != ""
 	if flags.Ports != "" {
 		ports = flags.Ports
-	}
-	if flags.Port != "" {
-		ports = flags.Port
 	}
 	return scanOptions{
 		Discovery: discoveryOptions{

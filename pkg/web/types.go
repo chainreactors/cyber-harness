@@ -24,7 +24,6 @@ type ScanJob struct {
 	Mode      string         `json:"mode"`
 	Verify    bool           `json:"verify,omitempty"`
 	Sniper    bool           `json:"sniper,omitempty"`
-	AI        bool           `json:"ai,omitempty"`
 	Deep      bool           `json:"deep,omitempty"`
 	Status    ScanStatus     `json:"status"`
 	Progress  string         `json:"progress,omitempty"`
@@ -40,17 +39,7 @@ type ScanRequest struct {
 	Mode   string `json:"mode"`
 	Verify bool   `json:"verify,omitempty"`
 	Sniper bool   `json:"sniper,omitempty"`
-	AI     bool   `json:"ai,omitempty"`
 	Deep   bool   `json:"deep,omitempty"`
-}
-
-func (r ScanRequest) AnalysisOptions() (verify, sniper, deep bool) {
-	verify, sniper, deep = r.Verify, r.Sniper, r.Deep
-	if r.AI && !verify && !sniper {
-		verify = true
-		sniper = true
-	}
-	return verify, sniper, deep
 }
 
 type ServiceStatus struct {
@@ -92,8 +81,7 @@ type ConfigStatus struct {
 		Limit                  *int   `json:"limit,omitempty"`
 	} `json:"recon"`
 	Scan struct {
-		Verify        string `json:"verify"`
-		VerifyTimeout int    `json:"verify_timeout"`
+		Verify string `json:"verify"`
 	} `json:"scan"`
 	Search struct {
 		TavilyKeysConfigured bool `json:"tavily_keys_configured"`
@@ -132,7 +120,6 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.Recon.Proxy = d.Recon.Proxy
 	cs.Recon.Limit = d.Recon.Limit
 	cs.Scan.Verify = d.Scan.Verify
-	cs.Scan.VerifyTimeout = d.Scan.VerifyTimeout
 	cs.Search.TavilyKeysConfigured = d.Search.TavilyKeys != ""
 	cs.IOA.URL = d.IOA.URL
 	cs.IOA.TokenConfigured = d.IOA.Token != ""

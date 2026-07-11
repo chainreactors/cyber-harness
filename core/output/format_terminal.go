@@ -1,80 +1,37 @@
 package output
 
 import (
-	"encoding/json"
-	"strconv"
+	"fmt"
+	"strings"
+
+	"github.com/chainreactors/utils/parsers"
 )
 
-// serviceView handles both old record.Service format and new parsers.GOGOResult format.
-type serviceView struct {
-	Target   string `json:"target"`
-	Ip       string `json:"ip"`
-	Port     any    `json:"port"`
-	Protocol string `json:"protocol"`
-	Banner   string `json:"banner"`
-	Midware  string `json:"midware"`
+func writeGogoMarkdown(sb *strings.Builder, r *parsers.GOGOResult) {
+	line := fmt.Sprintf("  - **service** `%s`", r.GetTarget())
+	if r.Protocol != "" {
+		line += " " + r.Protocol
+	}
+	if r.Midware != "" {
+		line += " — " + TruncateStr(r.Midware, 60)
+	}
+	sb.WriteString(line + "\n")
 }
 
-func (s serviceView) displayTarget() string {
-	if s.Target != "" {
-		return s.Target
-	}
-	if s.Ip != "" {
-		if p := anyToString(s.Port); p != "" {
-			return s.Ip + ":" + p
+func writeSprayMarkdown(sb *strings.Builder, r *parsers.SprayResult) {
+	var names []string
+	for _, f := range r.Frameworks {
+		if f.Name != "" {
+			names = append(names, f.Name)
 		}
-		return s.Ip
 	}
-	return ""
+	fingers := ""
+	if len(names) > 0 {
+		fingers = " [" + strings.Join(names, ", ") + "]"
+	}
+	sb.WriteString(fmt.Sprintf("  - **web** `%s` %d %s%s\n", r.UrlString, r.Status, r.Title, fingers))
 }
 
-func (s serviceView) displayBanner() string {
-	if s.Banner != "" {
-		return s.Banner
-	}
-	return s.Midware
-}
-
-// webView handles both old record.Web format and new parsers.SprayResult format.
-type webView struct {
-	URL        string          `json:"url"`
-	Status     int             `json:"status"`
-	Title      string          `json:"title"`
-	Fingers    []string        `json:"fingers"`
-	ContentLen int             `json:"content_len"`
-	BodyLength int             `json:"body_length"`
-	Frameworks json.RawMessage `json:"frameworks"`
-}
-
-func (v webView) fingerNames() []string {
-	if len(v.Fingers) > 0 {
-		return v.Fingers
-	}
-	if len(v.Frameworks) == 0 {
-		return nil
-	}
-	var frames []struct {
-		Name string `json:"name"`
-	}
-	if json.Unmarshal(v.Frameworks, &frames) == nil {
-		var names []string
-		for _, f := range frames {
-			if f.Name != "" {
-				names = append(names, f.Name)
-			}
-		}
-		return names
-	}
-	return nil
-}
-
-func anyToString(v any) string {
-	switch p := v.(type) {
-	case string:
-		return p
-	case float64:
-		return strconv.Itoa(int(p))
-	default:
-		return ""
-	}
+func writeLootMarkdown(sb *strings.Builder, l *parsers.Loot) {
+	sb.WriteString(fmt.Sprintf("  - **%s** `%s` %s\n", l.Kind, l.Target, l.Description))
 }

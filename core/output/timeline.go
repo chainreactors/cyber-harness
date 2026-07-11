@@ -12,24 +12,17 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
+	"github.com/chainreactors/utils/parsers"
 )
 
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
 
-type timelineItem interface {
-	writeMarkdown(sb *strings.Builder, ctx *renderContext)
-}
-
 type TimelineEntry struct {
 	Timestamp time.Time
 	Type      string
-	Data      timelineItem
-}
-
-type renderContext struct {
-	startTS time.Time
+	Data      any
 }
 
 // ---------------------------------------------------------------------------
@@ -69,23 +62,17 @@ func parseLine(line []byte) (TimelineEntry, bool) {
 	return TimelineEntry{}, false
 }
 
-type lootView struct{ Loot }
-
-func (l *lootView) writeMarkdown(sb *strings.Builder, _ *renderContext) {
-	sb.WriteString(fmt.Sprintf("  - **%s** `%s` %s\n", l.Kind, l.Target, l.Description))
-}
-
-func parseRecordData(rec Record) timelineItem {
+func parseRecordData(rec Record) any {
 	if rec.Loot {
-		return unmarshalItem[lootView](rec.Data)
+		return unmarshalItem[parsers.Loot](rec.Data)
 	}
 	switch rec.Type {
 	case TypeScanStart:
 		return unmarshalItem[ScanStart](rec.Data)
 	case TypeGogo:
-		return unmarshalItem[serviceView](rec.Data)
+		return unmarshalItem[parsers.GOGOResult](rec.Data)
 	case TypeSpray:
-		return unmarshalItem[webView](rec.Data)
+		return unmarshalItem[parsers.SprayResult](rec.Data)
 	case TypeAgent:
 		return unmarshalItem[AgentEvent](rec.Data)
 	case TypeScanEnd:
@@ -121,9 +108,21 @@ func BuildTimelineMarkdown(entries []TimelineEntry) string {
 	sess := collectSessionMeta(entries)
 	writeHeader(&sb, &sess)
 
-	ctx := &renderContext{startTS: sess.startTS}
 	for _, e := range entries {
-		e.Data.writeMarkdown(&sb, ctx)
+		switch d := e.Data.(type) {
+		case *ScanStart:
+			d.writeMarkdown(&sb)
+		case *parsers.GOGOResult:
+			writeGogoMarkdown(&sb, d)
+		case *parsers.SprayResult:
+			writeSprayMarkdown(&sb, d)
+		case *parsers.Loot:
+			writeLootMarkdown(&sb, d)
+		case *AgentEvent:
+			d.writeMarkdown(&sb)
+		case *ScanEnd:
+			d.writeMarkdown(&sb)
+		}
 	}
 	return sb.String()
 }
@@ -158,7 +157,7 @@ func writeHeader(sb *strings.Builder, sess *sessionMeta) {
 }
 
 // ---------------------------------------------------------------------------
-// AgentEvent implements timelineItem
+// AgentEvent
 // ---------------------------------------------------------------------------
 
 type AgentEvent struct {
@@ -207,7 +206,7 @@ type agentToolCall struct {
 	} `json:"function"`
 }
 
-func (ev *AgentEvent) writeMarkdown(sb *strings.Builder, _ *renderContext) {
+func (ev *AgentEvent) writeMarkdown(sb *strings.Builder) {
 	switch ev.Type {
 	case "turn_start":
 		sb.WriteString(fmt.Sprintf("## Turn %d\n\n", ev.Turn))
@@ -261,33 +260,14 @@ func (ev *AgentEvent) writeMarkdown(sb *strings.Builder, _ *renderContext) {
 }
 
 // ---------------------------------------------------------------------------
-// Scan types implement timelineItem
+// Scan types
 // ---------------------------------------------------------------------------
 
-func (d *ScanStart) writeMarkdown(sb *strings.Builder, _ *renderContext) {
+func (d *ScanStart) writeMarkdown(sb *strings.Builder) {
 	sb.WriteString(fmt.Sprintf("- **scan** targets=%s mode=%s\n", strings.Join(d.Targets, ", "), d.Mode))
 }
 
-func (s *serviceView) writeMarkdown(sb *strings.Builder, _ *renderContext) {
-	line := fmt.Sprintf("  - **service** `%s`", s.displayTarget())
-	if s.Protocol != "" {
-		line += " " + s.Protocol
-	}
-	if b := s.displayBanner(); b != "" {
-		line += " — " + TruncateStr(b, 60)
-	}
-	sb.WriteString(line + "\n")
-}
-
-func (w *webView) writeMarkdown(sb *strings.Builder, _ *renderContext) {
-	fingers := ""
-	if names := w.fingerNames(); len(names) > 0 {
-		fingers = " [" + strings.Join(names, ", ") + "]"
-	}
-	sb.WriteString(fmt.Sprintf("  - **web** `%s` %d %s%s\n", w.URL, w.Status, w.Title, fingers))
-}
-
-func (d *ScanEnd) writeMarkdown(sb *strings.Builder, _ *renderContext) {
+func (d *ScanEnd) writeMarkdown(sb *strings.Builder) {
 	sb.WriteString(fmt.Sprintf("\n> **scan done** %.1fs — %d services, %d webs, %d loots\n\n",
 		d.Duration, d.Services, d.Webs, d.Loots))
 }

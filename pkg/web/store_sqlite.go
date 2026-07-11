@@ -103,19 +103,6 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	// Re-home existing chat sessions onto the agent's stable identity. The hub
-	// historically keyed connected agents by a per-connection random id and froze
-	// that id into the session, so any agent reconnect stranded the session as
-	// "not connected". The pool now keys by the stable node name (== agent_name);
-	// align legacy rows onto it. Idempotent — new sessions store agent_id ==
-	// agent_name — so this is a no-op once converged.
-	if _, err := db.Exec(
-		`UPDATE chat_sessions SET agent_id = agent_name
-		   WHERE agent_name != '' AND agent_id != agent_name`,
-	); err != nil {
-		return err
-	}
-
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS records (
 			id         TEXT PRIMARY KEY,
@@ -219,12 +206,11 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) Create(ctx context.Context, job *ScanJob) error {
-	normalizeJobAnalysis(job)
 	resultJSON := marshalResult(job)
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO scans (id, target, mode, ai, verify, sniper, deep, status, progress, report, result, error, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.Target, job.Mode, boolToInt(job.AI), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		job.ID, job.Target, job.Mode, boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
 		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
 		job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano),
 	)
@@ -262,11 +248,10 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*ScanJob, error) {
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
-	normalizeJobAnalysis(job)
 	resultJSON := marshalResult(job)
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=? WHERE id=?`,
-		boolToInt(job.AI), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
 		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
 		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
 	)
@@ -291,11 +276,10 @@ func scanFromScanner(sc scanner) (*ScanJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	job.AI = ai != 0
+	_ = ai
 	job.Verify = verify != 0
 	job.Sniper = sniper != 0
 	job.Deep = deep != 0
-	normalizeJobAnalysis(&job)
 	job.Status = ScanStatus(status)
 	if resultJSON != "" {
 		_ = json.Unmarshal([]byte(resultJSON), &job.Result)
@@ -310,17 +294,6 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-func normalizeJobAnalysis(job *ScanJob) {
-	if job == nil {
-		return
-	}
-	if job.AI && !job.Verify && !job.Sniper {
-		job.Verify = true
-		job.Sniper = true
-	}
-	job.AI = job.Verify || job.Sniper
 }
 
 func marshalResult(job *ScanJob) string {

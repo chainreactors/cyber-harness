@@ -415,9 +415,9 @@ func TestParseCLIAgentWebURL(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"agent",
 		"--web-url", "http://127.0.0.1:8080",
-		"--ioa-url", "http://token@127.0.0.1:8080/ioa",
+		"--server-url", "http://token@127.0.0.1:8080/ioa",
 		"--space", "case-1",
-		"--ioa-node-name", "worker-1",
+		"--node-name", "worker-1",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
@@ -487,7 +487,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"ioa",
 		"serve",
-		"--ioa-url", "http://127.0.0.1:9999",
+		"--server-url", "http://127.0.0.1:9999",
 		"--timeout", "10",
 	})
 	if err != nil {
@@ -572,7 +572,6 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		cfg.DefaultCyberhubURL = "http://hub:8080"
 		cfg.DefaultCyberhubKey = "HUBKEY"
 		cfg.DefaultCyberhubMode = "override"
-		cfg.DefaultVerifyTimeout = "77"
 		cfg.DefaultTavilyKeys = "BUILTIN_TAVILY"
 		cfg.DefaultIOAURL = "http://ioa:8765"
 		cfg.DefaultIOANodeID = "node-1"
@@ -589,7 +588,7 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		if appCfg.Scanner.CyberhubURL != cfg.DefaultCyberhubURL || appCfg.Scanner.CyberhubKey != cfg.DefaultCyberhubKey || appCfg.Scanner.CyberhubMode != cfg.DefaultCyberhubMode {
 			t.Fatalf("scanner cyberhub config = %#v", appCfg.Scanner)
 		}
-		if !appCfg.Scanner.AIEnabled || appCfg.Scanner.AITimeout != 77 {
+		if !appCfg.Scanner.AIEnabled {
 			t.Fatalf("scanner AI config = %#v", appCfg.Scanner)
 		}
 		if appCfg.Tools.TavilyKeys != cfg.DefaultTavilyKeys {
@@ -619,7 +618,6 @@ func withDefaults(t *testing.T, fn func()) {
 		{&cfg.DefaultCyberhubKey, cfg.DefaultCyberhubKey},
 		{&cfg.DefaultCyberhubMode, cfg.DefaultCyberhubMode},
 		{&cfg.DefaultVerify, cfg.DefaultVerify},
-		{&cfg.DefaultVerifyTimeout, cfg.DefaultVerifyTimeout},
 		{&cfg.DefaultTavilyKeys, cfg.DefaultTavilyKeys},
 		{&cfg.DefaultIOAURL, cfg.DefaultIOAURL},
 		{&cfg.DefaultIOANodeID, cfg.DefaultIOANodeID},

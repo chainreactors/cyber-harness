@@ -197,8 +197,7 @@ func (h *handlerImpl) createScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	verify, sniper, deep := req.AnalysisOptions()
-	job, err := h.service.SubmitScan(r.Context(), req.Target, req.Mode, verify, sniper, deep)
+	job, err := h.service.SubmitScan(r.Context(), req.Target, req.Mode, req.Verify, req.Sniper, req.Deep)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return

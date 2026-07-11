@@ -14,8 +14,7 @@ var (
 	DefaultCyberhubKey  = ""
 	DefaultCyberhubMode = "merge"
 
-	DefaultVerify        = "auto"
-	DefaultVerifyTimeout = ""
+	DefaultVerify = "auto"
 
 	DefaultIOAURL      = ""
 	DefaultIOANodeID   = ""

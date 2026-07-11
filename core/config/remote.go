@@ -66,8 +66,7 @@ func distributeToOption(d *webproto.DistributeConfig) *Option {
 			Space:       d.IOA.Space,
 		},
 		ScanConfig: ScanConfigOptions{
-			Verify:        d.Scan.Verify,
-			VerifyTimeout: d.Scan.VerifyTimeout,
+			Verify: d.Scan.Verify,
 		},
 	}
 	opt.FofaEmail = d.Recon.FofaEmail

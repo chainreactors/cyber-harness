@@ -22,8 +22,7 @@ type Option struct {
 }
 
 type ScanConfigOptions struct {
-	Verify        string `config:"verify"`
-	VerifyTimeout int    `config:"verify_timeout"`
+	Verify string `config:"verify"`
 }
 
 type LLMOptions struct {
@@ -74,21 +73,8 @@ type IOAOptions struct {
 	IOAToken    string `long:"server-token" config:"token" description:"Server access key (auto-generated if empty)"`
 	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
 	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`
-	Space       string `long:"space" config:"space" description:"Space name" default:"default"`
-	IOAJSON     bool   `long:"json" description:"Output query results in JSON format"`
-
-	// Deprecated aliases (hidden from --help, still accepted for backward compatibility)
-	DeprecatedIOAURL      string `long:"ioa-url" hidden:"true"`
-	DeprecatedIOAToken    string `long:"ioa-token" hidden:"true"`
-	DeprecatedIOANodeID   string `long:"ioa-node-id" hidden:"true"`
-	DeprecatedIOANodeName string `long:"ioa-node-name" hidden:"true"`
-}
-
-func (o *IOAOptions) ApplyDeprecatedAliases() {
-	o.IOAURL = ResolveString(o.IOAURL, o.DeprecatedIOAURL)
-	o.IOAToken = ResolveString(o.IOAToken, o.DeprecatedIOAToken)
-	o.IOANodeID = ResolveString(o.IOANodeID, o.DeprecatedIOANodeID)
-	o.IOANodeName = ResolveString(o.IOANodeName, o.DeprecatedIOANodeName)
+	Space   string `long:"space" config:"space" description:"Space name" default:"default"`
+	IOAJSON bool   `long:"json" description:"Output query results in JSON format"`
 }
 
 type MiscOptions struct {
