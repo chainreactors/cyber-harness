@@ -12,9 +12,13 @@ import (
 )
 
 // jsProvider implements agent.Provider by bridging every ChatCompletion to the
-// JS global __aiscanLLM(reqJSON) -> Promise<respJSON>. The host owns provider
-// selection, keys, caching and fallback; the brain just asks for a completion.
-type jsProvider struct{}
+// JS global __aiscanLLM(reqJSON, ctxJSON) -> Promise<respJSON>. The host owns
+// provider selection, keys, caching and fallback; the brain just asks for a
+// completion. ctxJSON is the same per-run context used by tools, so the host can
+// bind LLM fetch cancellation to the right run.
+type jsProvider struct {
+	ctxJSON string
+}
 
 func (p *jsProvider) Name() string { return "wasm-host" }
 
@@ -29,7 +33,7 @@ func (p *jsProvider) ChatCompletion(ctx context.Context, req *agent.ChatCompleti
 		return nil, fmt.Errorf("host LLM bridge %q is not defined", globalLLMFn)
 	}
 
-	val, err := awaitValue(ctx, fn.Invoke(string(reqJSON)))
+	val, err := awaitValue(ctx, fn.Invoke(string(reqJSON), p.ctxJSON))
 	if err != nil {
 		return nil, err
 	}

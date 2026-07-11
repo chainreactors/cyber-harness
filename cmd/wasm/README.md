@@ -26,7 +26,7 @@ built `agent.wasm` drops straight into `public/wasm/`.
 
 - ✅ `pkg/agent` (+ evaluator, provider, commands) compiles `GOOS=js GOARCH=wasm`
   **as-is** — it imports `pkg/commands`, never `pkg/tools`. No strip needed.
-- ✅ End-to-end verified two ways: `testdata/smoke.mjs` (23/23) against the built
+- ✅ End-to-end verified two ways: `testdata/smoke.mjs` (24/24) against the built
   module, and the extension's own real-host test (`WasmAgentConversation` +
   this `agent.wasm` + the real `finish` tool + multi-turn).
 - ✅ Size (standard Go, stripped `-s -w`): **~17 MB** / **~4.2 MB** gzipped —
@@ -54,9 +54,11 @@ node cmd/wasm/testdata/smoke.mjs dist/wasm/agent.wasm dist/wasm/wasm_exec.js
 
 Host installs two function globals; the event sink is a per-run argument:
 
-- `__aiscanLLM(reqJSON) -> Promise<respJSON>` — `reqJSON` is an OpenAI-shaped
-  `ChatCompletionRequest`; resolve a `ChatCompletionResponse` JSON string. The
-  host owns provider choice, keys, caching and fallback.
+- `__aiscanLLM(reqJSON, ctxJSON) -> Promise<respJSON>` — `reqJSON` is an
+  OpenAI-shaped `ChatCompletionRequest`; `ctxJSON` is the run context
+  `{tabId,url,runId}` so the host can bind cancellation. Resolve a
+  `ChatCompletionResponse` JSON string. The host owns provider choice, keys,
+  caching and fallback.
 - `__aiscanTool(name, argsJSON, ctxJSON) -> Promise<result>` — `ctxJSON` is the
   run's context blob, threaded verbatim. `result` is a JSON string
   `{ content, isError, terminate }` (a plain string or object is also accepted).

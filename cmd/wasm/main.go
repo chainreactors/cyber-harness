@@ -7,7 +7,7 @@
 //
 //	brain (this wasm)          seam (syscall/js)                 hand (JS host)
 //	----------------           -----------------                 --------------
-//	agent.Config.Provider  ->  __aiscanLLM(reqJSON)          ->  real OpenAI/Anthropic provider
+//	agent.Config.Provider  ->  __aiscanLLM(reqJSON, ctxJSON) ->  real OpenAI/Anthropic provider
 //	commands.Registry      ->  __aiscanTool(name,args,ctx)   ->  chrome.scripting on the real tab
 //	eventbus.Bus[Event]    ->  onEvent(eventJSON)            ->  UI / progress stream
 //
@@ -144,7 +144,7 @@ func doRun(payloadJSON string, onEvent js.Value) (string, error) {
 	}
 
 	cfg := agent.Config{
-		Provider:         &jsProvider{},
+		Provider:         &jsProvider{ctxJSON: ctxJSON},
 		Tools:            reg,
 		Model:            p.Model,
 		SystemPrompt:     p.SystemPrompt,

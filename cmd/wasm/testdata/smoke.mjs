@@ -40,12 +40,14 @@ vm.runInThisContext(readFileSync(wasmExecPath, 'utf8'), { filename: wasmExecPath
 
 // ---- host seams (stubs mirroring wasm-agent.ts) ----------------------------
 const llmRequests = [];
+const llmContexts = [];
 const toolCalls = [];
 let llmCall = 0;
 
-globalThis.__aiscanLLM = async (reqJSON) => {
+globalThis.__aiscanLLM = async (reqJSON, ctxJSON) => {
   const req = JSON.parse(reqJSON);
   llmRequests.push(req);
+  llmContexts.push(JSON.parse(ctxJSON || '{}'));
   llmCall++;
   if (llmCall === 1) {
     // Turn 1: instruct the brain to call the echo tool.
@@ -123,6 +125,7 @@ check(
   (llmRequests[0].tools || []).some((t) => t.function?.name === 'echo'),
   'tool schema was advertised to the LLM',
 );
+check(llmContexts[0]?.runId === 'r1', 'LLM received the run context (runId)');
 check(llmRequests[0].messages?.[0]?.role === 'system', 'system prompt reached the provider');
 check(result.stop === 'completed', `run stop=completed (got ${result.stop})`);
 check(result.turns === 2, `run took 2 turns (got ${result.turns})`);
@@ -137,8 +140,9 @@ for (const t of ['agent_start', 'llm_request', 'tool_execution_start', 'tool_exe
 // ---- phase 2: multi-turn continuation (transcript hydration) ---------------
 llmCall = 0;
 toolCalls.length = 0;
-globalThis.__aiscanLLM = async (reqJSON) => {
+globalThis.__aiscanLLM = async (reqJSON, ctxJSON) => {
   llmRequests.push(JSON.parse(reqJSON));
+  llmContexts.push(JSON.parse(ctxJSON || '{}'));
   return JSON.stringify({
     id: 'wasm',
     choices: [{ message: { role: 'assistant', content: 'second turn ok' }, finish_reason: 'stop' }],
