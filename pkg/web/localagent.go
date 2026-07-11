@@ -33,9 +33,10 @@ type localProc struct {
 // like any node. The hub holds the only handle to these processes, so StopAll
 // kills them on shutdown rather than leaving orphans.
 type LocalAgents struct {
-	webURL string     // hub loopback address children dial (derived from web --addr)
-	ioaURL string     // hub IOA endpoint carrying the embedded access token
-	pool   *AgentPool // live pool, for registration/busy cross-reference
+	webURL     string     // hub loopback address children dial (derived from web --addr)
+	webAuthURL string     // same base with the access token as userinfo, for /api/agent/ws auth
+	ioaURL     string     // hub IOA endpoint carrying the embedded access token
+	pool       *AgentPool // live pool, for registration/busy cross-reference
 
 	mu    sync.Mutex
 	procs []*localProc
@@ -47,10 +48,27 @@ type LocalAgents struct {
 // URL. Children are launched from the current aiscan executable.
 func NewLocalAgents(hubURL, ioaToken string, pool *AgentPool) *LocalAgents {
 	return &LocalAgents{
-		webURL: hubURL,
-		ioaURL: nodeIOAURL(hubURL, ioaToken),
-		pool:   pool,
+		webURL:     hubURL,
+		webAuthURL: webURLWithToken(hubURL, ioaToken),
+		ioaURL:     nodeIOAURL(hubURL, ioaToken),
+		pool:       pool,
 	}
+}
+
+// webURLWithToken embeds the access token as userinfo on the hub's loopback web
+// URL (http://<token>@host), so a launched agent can authenticate its
+// /api/agent/ws pool connection — the hub gates /api/* behind that key. An empty
+// token or unparseable hubURL yields hubURL unchanged.
+func webURLWithToken(hubURL, token string) string {
+	if hubURL == "" || token == "" {
+		return hubURL
+	}
+	u, err := url.Parse(strings.TrimRight(hubURL, "/"))
+	if err != nil {
+		return hubURL
+	}
+	u.User = url.User(token)
+	return u.String()
 }
 
 // nodeIOAURL embeds the access token as userinfo and points at the /ioa path,
@@ -91,7 +109,7 @@ func (l *LocalAgents) Launch(ctx context.Context) (*LocalAgentView, error) {
 	l.mu.Unlock()
 
 	cmd := exec.Command(bin, "agent",
-		"--web-url", l.webURL,
+		"--web-url", l.webAuthURL,
 		"--server-url", l.ioaURL,
 		"--space", "default",
 		"--node-name", name,

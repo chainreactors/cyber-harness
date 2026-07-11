@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/user"
@@ -124,8 +125,18 @@ func runConnectionOnce(ctx context.Context, serverURL, name string, reg *command
 	if reg == nil {
 		return fmt.Errorf("command registry is nil")
 	}
-	wsURL := httpToWS(serverURL) + "/api/agent/ws"
-	conn, wsResp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	// The hub gates /api/* behind an access key (see pkg/web/auth.go). The key
+	// rides in the serverURL userinfo (http://<key>@host, set by the local-agent
+	// launcher). gorilla/websocket ignores URL userinfo, so lift the key out and
+	// present it as a Bearer token, dialing a userinfo-free URL. With no key the
+	// header stays nil and behaviour is unchanged (auth-disabled hub / tests).
+	dialURL, accessKey := splitAccessKey(serverURL)
+	wsURL := httpToWS(dialURL) + "/api/agent/ws"
+	var reqHeader http.Header
+	if accessKey != "" {
+		reqHeader = http.Header{"Authorization": {"Bearer " + accessKey}}
+	}
+	conn, wsResp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, reqHeader)
 	if wsResp != nil && wsResp.Body != nil {
 		wsResp.Body.Close()
 	}
@@ -1131,6 +1142,19 @@ func remoteIOAConfig(option *cfg.Option) *cfg.IOAConfig {
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan", "transport": "web-agent"},
 	}
+}
+
+// splitAccessKey lifts the access token out of a URL's userinfo
+// (http://<token>@host…), returning a userinfo-free URL plus the token. A URL
+// without userinfo (or an unparseable one) comes back unchanged with an empty token.
+func splitAccessKey(rawURL string) (dialURL, token string) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.User == nil {
+		return rawURL, ""
+	}
+	token = u.User.Username()
+	u.User = nil
+	return u.String(), token
 }
 
 func httpToWS(rawURL string) string {
