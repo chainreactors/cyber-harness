@@ -187,6 +187,45 @@ func TestEvalEventPersistsVerdictMetadata(t *testing.T) {
 	}
 }
 
+func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+
+	// A completed scan must leave a durable marker so its inline card survives a
+	// timeline rebuild (reload / session switch). The heavy Result is intentionally
+	// not stored — only the scan_id, which the client re-hydrates via scan_ids.
+	svc.BroadcastChatEvent("sess-scan", ChatEvent{
+		Type:   ChatEventScanComplete,
+		ScanID: "scan-123",
+	})
+
+	msgs, err := store.ListMessages(context.Background(), "sess-scan", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(msgs))
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(msgs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json: %v", err)
+	}
+	if metadata["event_type"] != ChatEventScanComplete || metadata["scan_id"] != "scan-123" {
+		t.Fatalf("scan marker metadata = %#v", metadata)
+	}
+
+	// A marker with no scan id is meaningless — it must not create a phantom row.
+	svc.BroadcastChatEvent("sess-scan-empty", ChatEvent{Type: ChatEventScanComplete})
+	empty, _ := store.ListMessages(context.Background(), "sess-scan-empty", 100)
+	if len(empty) != 0 {
+		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))
+	}
+}
+
 func drainEventTypes(ch <-chan HubEvent) []string {
 	var out []string
 	for len(ch) > 0 {

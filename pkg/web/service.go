@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -213,11 +214,29 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 }
 
 func (s *Service) GetScan(ctx context.Context, id string) (*ScanJob, error) {
-	return s.store.Get(ctx, id)
+	job, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	refreshStructuredAssets(job)
+	return job, nil
 }
 
 func (s *Service) ListScans(ctx context.Context) ([]*ScanJob, error) {
-	return s.store.List(ctx, 100)
+	jobs, err := s.store.List(ctx, 100)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
+		refreshStructuredAssets(job)
+	}
+	return jobs, nil
+}
+
+func refreshStructuredAssets(job *ScanJob) {
+	if job != nil && job.Result != nil && (len(job.Result.Services) > 0 || len(job.Result.WebProbes) > 0) {
+		job.Result.Assets = scantool.AggregateStructuredResult(job.Result)
+	}
 }
 
 func (s *Service) CancelScan(id string) error {
@@ -240,10 +259,17 @@ func (s *Service) CancelScan(id string) error {
 	return nil
 }
 
-func (s *Service) GetReport(ctx context.Context, id string) (string, error) {
-	job, err := s.store.Get(ctx, id)
+// GetReport re-renders the report in the requested language from the stored
+// structured result, so a zh user gets a zh report even though the scan ran
+// once. It falls back to the report frozen at scan time when the structured
+// result is no longer around.
+func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error) {
+	job, err := s.GetScan(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	if job.Result != nil {
+		return buildMarkdownReport(job.Target, job.Mode, job.Result, lang), nil
 	}
 	return job.Report, nil
 }
@@ -358,7 +384,7 @@ func (s *Service) persistResultRecords(scanID, agentID string, result *output.Re
 
 func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) {
 	job.Status = StatusCompleted
-	job.Report = buildMarkdownReport(job.Target, job.Mode, result)
+	job.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
 	job.Result = result
 	job.UpdatedAt = time.Now()
 	_ = s.store.Update(ctx, job)
@@ -499,62 +525,237 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func buildMarkdownReport(target, mode string, result *output.Result) string {
+// defaultReportLang is the language the report is frozen in at scan time; the
+// stored copy is only a fallback — GetReport re-renders per request language.
+const defaultReportLang = "zh"
+
+// reportLang narrows a UI locale down to the two languages the report speaks.
+func reportLang(lang string) string {
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return "zh"
+	}
+	return "en"
+}
+
+// tr picks the zh or en variant for the (already normalised) report language.
+func tr(lang, zh, en string) string {
+	if lang == "zh" {
+		return zh
+	}
+	return en
+}
+
+func reportModeName(lang, mode string) string {
+	if strings.EqualFold(mode, "full") {
+		return tr(lang, "全面侦察", "Full recon")
+	}
+	return tr(lang, "快速侦察", "Quick recon")
+}
+
+// buildMarkdownReport renders a scan result as an operator-facing recon report.
+// It reads like something a human wrote — a prose overview instead of a raw
+// metric dump, no internal scanner names (gogo_portscan / check) leaking into
+// the prose, and bare live hosts (an icmp echo, say) folded into a trailing
+// list rather than each claiming a full section.
+func buildMarkdownReport(target, mode string, result *output.Result, lang string) string {
+	lang = reportLang(lang)
 	var sb strings.Builder
-	sb.WriteString("# Penetration Test Report\n\n")
-	sb.WriteString(fmt.Sprintf("**Target:** `%s`  \n", target))
-	sb.WriteString(fmt.Sprintf("**Mode:** %s  \n", mode))
-	sb.WriteString(fmt.Sprintf("**Date:** %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
+
+	heading := output.FirstNonEmpty(target, tr(lang, "目标", "target"))
+	fmt.Fprintf(&sb, "# %s%s\n\n", tr(lang, "侦察报告 · ", "Recon report · "), heading)
+	fmt.Fprintf(&sb, "%s `%s`  ·  %s  ·  %s\n\n",
+		tr(lang, "目标", "Target"), target,
+		reportModeName(lang, mode),
+		time.Now().Format("2006-01-02 15:04:05"))
 	sb.WriteString("---\n\n")
 
 	if result == nil {
-		sb.WriteString("No structured result was returned.\n")
+		sb.WriteString(tr(lang, "本次扫描未返回结构化结果。\n", "No structured result was returned.\n"))
 		return sb.String()
 	}
 
-	sb.WriteString("## Summary\n\n")
-	sb.WriteString("| Metric | Value |\n|---|---:|\n")
-	sb.WriteString(fmt.Sprintf("| Targets | %d |\n", result.Summary.Targets))
-	sb.WriteString(fmt.Sprintf("| Services | %d |\n", result.Summary.Services))
-	sb.WriteString(fmt.Sprintf("| Web | %d |\n", result.Summary.Webs))
-	sb.WriteString(fmt.Sprintf("| Probes | %d |\n", result.Summary.Probes))
-	sb.WriteString(fmt.Sprintf("| Fingerprints | %d |\n", resultFingerprintCount(result)))
-	sb.WriteString(fmt.Sprintf("| Loots | %d |\n", result.Summary.Loots))
-	sb.WriteString(fmt.Sprintf("| Errors | %d |\n", result.Summary.Errors))
-	if result.Summary.Duration != "" {
-		sb.WriteString(fmt.Sprintf("| Duration | %s |\n", result.Summary.Duration))
-	}
-	sb.WriteString("\n")
+	sb.WriteString("## " + tr(lang, "概述", "Overview") + "\n\n")
+	sb.WriteString(reportOverview(lang, result))
+	sb.WriteString("\n\n")
 
-	if len(result.Assets) == 0 {
-		return sb.String()
+	rich, bare := splitReportAssets(result.Assets)
+	if len(rich) > 0 {
+		sb.WriteString("## " + tr(lang, "资产明细", "Assets") + "\n\n")
+		for _, asset := range rich {
+			writeAssetReport(&sb, lang, asset)
+		}
 	}
-
-	sb.WriteString("## Assets\n\n")
-	for _, asset := range result.Assets {
-		title := output.FirstNonEmpty(asset.Title, asset.Target, asset.Key, "Asset")
-		sb.WriteString(fmt.Sprintf("### %s\n\n", title))
-		if asset.Target != "" && asset.Target != title {
-			sb.WriteString(fmt.Sprintf("- **Target:** %s\n", markdownCode(asset.Target)))
+	if len(bare) > 0 {
+		sb.WriteString("## " + tr(lang, "其他存活主机", "Other live hosts") + "\n\n")
+		for _, asset := range bare {
+			writeBareAsset(&sb, asset)
 		}
-		if asset.Status != "" {
-			sb.WriteString(fmt.Sprintf("- **State:** %s\n", markdownCode(asset.Status)))
-		}
-		writeMarkdownList(&sb, "Services", assetServiceFacts(asset.Items))
-		writeMarkdownList(&sb, "HTTP", assetHTTPStatuses(asset.Items))
-		writeMarkdownList(&sb, "Fingers", assetFingers(asset.Items))
-		writeMarkdownList(&sb, "Sources", assetSources(asset.Items))
-		if paths := assetPathCount(asset.Items); paths > 0 {
-			sb.WriteString(fmt.Sprintf("- **Paths:** %d\n", paths))
-		}
-		writeAssetLootMarkdown(&sb, asset.Items)
 		sb.WriteString("\n")
 	}
 
 	return sb.String()
 }
 
-func writeMarkdownList(sb *strings.Builder, label string, values []string) {
+// reportOverview is the executive summary — one flowing paragraph that names
+// only the numbers that are actually present, so a clean scan reads like a
+// sentence rather than a table full of zeros.
+func reportOverview(lang string, result *output.Result) string {
+	s := result.Summary
+	hosts := reportHostCount(result.Assets)
+	fingers := resultFingerprintCount(result)
+	var b strings.Builder
+
+	if lang == "zh" {
+		fmt.Fprintf(&b, "本次侦察共识别 %d 台主机、%d 个开放服务", hosts, s.Services)
+		if s.Webs > 0 {
+			fmt.Fprintf(&b, "（含 %d 个 Web 站点）", s.Webs)
+		}
+		b.WriteString("。")
+		if s.Probes > 0 {
+			fmt.Fprintf(&b, "累计探测 %d 条路径", s.Probes)
+			if fingers > 0 {
+				fmt.Fprintf(&b, "、命中 %d 项 Web 指纹", fingers)
+			}
+			b.WriteString("。")
+		} else if fingers > 0 {
+			fmt.Fprintf(&b, "命中 %d 项 Web 指纹。", fingers)
+		}
+		if s.Loots > 0 {
+			fmt.Fprintf(&b, "**发现 %d 项需优先复核的安全发现（凭证 / 弱口令 / 漏洞）。**", s.Loots)
+		}
+		if s.Errors > 0 {
+			fmt.Fprintf(&b, "另有 %d 处探测报错。", s.Errors)
+		}
+		if s.Duration != "" {
+			fmt.Fprintf(&b, "全程耗时 %s。", s.Duration)
+		}
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "The pass identified %s across %s", plural(hosts, "host", "hosts"), plural(s.Services, "open service", "open services"))
+	if s.Webs > 0 {
+		fmt.Fprintf(&b, " (%s)", plural(s.Webs, "web site", "web sites"))
+	}
+	b.WriteString(". ")
+	if s.Probes > 0 {
+		fmt.Fprintf(&b, "It probed %s", plural(s.Probes, "path", "paths"))
+		if fingers > 0 {
+			fmt.Fprintf(&b, " and matched %s", plural(fingers, "fingerprint", "fingerprints"))
+		}
+		b.WriteString(". ")
+	} else if fingers > 0 {
+		fmt.Fprintf(&b, "It matched %s. ", plural(fingers, "fingerprint", "fingerprints"))
+	}
+	if s.Loots > 0 {
+		fmt.Fprintf(&b, "**%s surfaced (credentials / weak passwords / vulnerabilities) — review these first.** ", plural(s.Loots, "security finding", "security findings"))
+	}
+	if s.Errors > 0 {
+		fmt.Fprintf(&b, "%s occurred during probing. ", plural(s.Errors, "error", "errors"))
+	}
+	if s.Duration != "" {
+		fmt.Fprintf(&b, "The scan took %s.", s.Duration)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// reportHostCount collapses assets down to distinct hosts, so an IP that has
+// both an icmp echo and a web service counts once, not twice.
+func reportHostCount(assets []output.Asset) int {
+	seen := make(map[string]struct{})
+	for _, a := range assets {
+		if h := assetHost(a); h != "" {
+			seen[h] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return len(assets)
+	}
+	return len(seen)
+}
+
+func assetHost(a output.Asset) string {
+	v := output.FirstNonEmpty(a.Target, a.Key, a.Title)
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if strings.Count(v, ":") == 1 { // host:port — drop the port, leave IPv6 alone
+		v = v[:strings.LastIndex(v, ":")]
+	}
+	return v
+}
+
+func splitReportAssets(assets []output.Asset) (rich, bare []output.Asset) {
+	for _, a := range assets {
+		if assetIsBare(a) {
+			bare = append(bare, a)
+		} else {
+			rich = append(rich, a)
+		}
+	}
+	return rich, bare
+}
+
+// assetIsBare is true for a live host that only answered with non-web services
+// (an icmp echo, a bare tcp port) — nothing worth its own section.
+func assetIsBare(a output.Asset) bool {
+	hasService := false
+	for _, item := range a.Items {
+		if item.Kind != output.AssetItemService {
+			return false
+		}
+		hasService = true
+		svc := strings.ToLower(output.AssetDataString(item.Data, "service") + " " + output.AssetDataString(item.Data, "protocol"))
+		if strings.Contains(svc, "http") {
+			return false
+		}
+	}
+	return hasService
+}
+
+func writeAssetReport(sb *strings.Builder, lang string, asset output.Asset) {
+	title := output.FirstNonEmpty(asset.Title, asset.Target, asset.Key, tr(lang, "资产", "Asset"))
+	if asset.Target != "" && asset.Target != title {
+		fmt.Fprintf(sb, "### %s — `%s`\n\n", title, asset.Target)
+	} else {
+		fmt.Fprintf(sb, "### %s\n\n", title)
+	}
+
+	writeReportFact(sb, lang, tr(lang, "开放服务", "Services"), assetServiceFacts(asset.Items))
+	writeReportFact(sb, lang, tr(lang, "HTTP 响应", "HTTP"), assetHTTPStatuses(asset.Items))
+	writeReportFact(sb, lang, tr(lang, "Web 指纹", "Fingerprints"), assetFingers(asset.Items))
+	if paths := assetPathCount(asset.Items); paths > 0 {
+		fmt.Fprintf(sb, "- %s%s%s\n", tr(lang, "已探测路径", "Paths"), labelSep(lang), tr(lang, fmt.Sprintf("%d 条", paths), fmt.Sprintf("%d", paths)))
+	}
+	if asset.Status != "" {
+		fmt.Fprintf(sb, "- %s%s%s\n", tr(lang, "状态", "State"), labelSep(lang), markdownCode(asset.Status))
+	}
+	sb.WriteString("\n")
+
+	writeAssetLootMarkdown(sb, lang, asset.Items)
+}
+
+func writeBareAsset(sb *strings.Builder, asset output.Asset) {
+	host := output.FirstNonEmpty(asset.Target, asset.Title, asset.Key)
+	if services := assetServiceFacts(asset.Items); len(services) > 0 {
+		fmt.Fprintf(sb, "- `%s` · %s\n", host, strings.Join(services, ", "))
+	} else {
+		fmt.Fprintf(sb, "- `%s`\n", host)
+	}
+}
+
+func labelSep(lang string) string { return tr(lang, "：", ": ") }
+
+func writeReportFact(sb *strings.Builder, lang, label string, values []string) {
 	if len(values) == 0 {
 		return
 	}
@@ -562,10 +763,10 @@ func writeMarkdownList(sb *strings.Builder, label string, values []string) {
 	for _, value := range values {
 		coded = append(coded, markdownCode(value))
 	}
-	sb.WriteString(fmt.Sprintf("- **%s:** %s\n", label, strings.Join(coded, ", ")))
+	fmt.Fprintf(sb, "- %s%s%s\n", label, labelSep(lang), strings.Join(coded, tr(lang, "、", ", ")))
 }
 
-func writeAssetLootMarkdown(sb *strings.Builder, items []output.AssetItem) {
+func writeAssetLootMarkdown(sb *strings.Builder, lang string, items []output.AssetItem) {
 	wrote := false
 	for _, item := range items {
 		switch item.Kind {
@@ -575,19 +776,14 @@ func writeAssetLootMarkdown(sb *strings.Builder, items []output.AssetItem) {
 			if summary == "" && detail == "" {
 				continue
 			}
-			prefix := output.FirstNonEmpty(item.Source, item.Kind)
-			if item.Status != "" {
-				prefix += ":" + item.Status
-			}
 			if !wrote {
-				sb.WriteString("\n#### Analysis\n\n")
+				sb.WriteString("#### " + tr(lang, "分析研判", "Analysis") + "\n\n")
 				wrote = true
 			}
 			if summary == "" {
 				summary = firstMarkdownLine(detail)
 			}
-			sb.WriteString(fmt.Sprintf("##### %s\n\n", markdownHeading(summary)))
-			sb.WriteString(fmt.Sprintf("**Source:** %s\n\n", markdownCode(prefix)))
+			fmt.Fprintf(sb, "##### %s\n\n", markdownHeading(summary))
 			if detail != "" && !sameMarkdownText(summary, detail) {
 				writeMarkdownBlock(sb, detail)
 			} else if detail == "" && summary != "" {
@@ -660,14 +856,6 @@ func assetFingers(items []output.AssetItem) []string {
 	return output.CompactStrings(values...)
 }
 
-func assetSources(items []output.AssetItem) []string {
-	var values []string
-	for _, item := range items {
-		values = append(values, item.Source)
-	}
-	return output.CompactStrings(values...)
-}
-
 func assetPathCount(items []output.AssetItem) int {
 	count := 0
 	for _, item := range items {
@@ -710,7 +898,6 @@ func generateID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
-
 
 func lastOutputLine(s string) string {
 	lines := strings.Split(s, "\n")
@@ -993,6 +1180,21 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 		metadata["eval_round"] = event.EvalRound
 		metadata["eval_pass"] = event.EvalPass
 		metadata["eval_reason"] = event.EvalReason
+
+	case ChatEventScanComplete:
+		// Persist a lightweight marker so the inline scan card survives a reload /
+		// session switch. The heavy Result payload is NOT stored here — it stays
+		// reloadable via the session_scans link (getScan), and the client fills the
+		// card from its scanResults map keyed by this scan_id. Without this marker
+		// the scan is invisible to any timeline rebuilt from messages (a page
+		// reload, an SSE reconnect, or a session switch that revalidates against
+		// the store), even though the result itself is still fetchable.
+		if event.ScanID == "" {
+			return
+		}
+		msg.Role = "system"
+		msg.Content = "scan complete"
+		metadata["scan_id"] = event.ScanID
 
 	default:
 		return

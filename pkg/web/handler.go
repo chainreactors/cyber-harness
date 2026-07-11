@@ -239,7 +239,7 @@ func (h *handlerImpl) scanEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
-	report, err := h.service.GetReport(r.Context(), r.PathValue("id"))
+	report, err := h.service.GetReport(r.Context(), r.PathValue("id"), r.URL.Query().Get("lang"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "scan not found")
 		return
