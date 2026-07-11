@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS Safari auto-zooms the whole page whenever a focused control's font-size is
+   below 16px. The composer (text-[15px]) and the compact settings/eval fields
+   (text-xs) would each trip it, so tapping any of them on a phone yanks the page
+   into a jarring zoom. Floor text-entry controls to 16px at phone widths only —
+   desktop keeps its tuned compact sizes. Left UNLAYERED on purpose: an unlayered
+   rule outranks every @layer, so it wins over Tailwind's text-* utilities (which
+   a @layer base rule could not). */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 /*
   AIScan — "Clean recon deck" (white + blue, minimal)
   --------------------------------------------------------------------------
@@ -122,7 +137,9 @@
 
   html,
   body {
-    min-height: 100vh;
+    min-height: 100vh; /* fallback for browsers without dvh */
+    min-height: 100dvh; /* dynamic vh — excludes the mobile browser toolbar so
+                           the bottom-pinned composer is never hidden behind it */
     background-color: hsl(var(--background));
   }
 
@@ -274,6 +291,13 @@
     font-size: 13px;
     letter-spacing: 0.08em;
   }
+
+  /* Safe-area padding — clears the iOS home indicator / notch when the browser
+     runs edge-to-edge (needs viewport-fit=cover, which index.html sets). env() is
+     0 in an ordinary browser tab, so these are no-ops there and only take effect
+     on notched devices whose browser chrome is hidden / in a standalone PWA. */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
 
   /* subtle top-lit surface gradient for elevated panels/cards */
   .surface-raised {

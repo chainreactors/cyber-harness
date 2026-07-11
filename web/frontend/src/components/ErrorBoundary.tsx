@@ -42,7 +42,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }) {
   const { t } = useTranslation('app')
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+    <div className="flex h-[100dvh] flex-col items-center justify-center gap-4 bg-background p-6 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-destructive/30 bg-destructive/10 text-destructive">
         <AlertTriangle className="h-7 w-7" />
       </div>

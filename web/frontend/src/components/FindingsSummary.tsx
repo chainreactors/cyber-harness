@@ -40,7 +40,7 @@ export default function FindingsSummary({ result }: FindingsSummaryProps) {
 function PriorityGrid({ summary }: { summary: FindingsSummaryModel }) {
   const { t } = useTranslation('findings')
   return (
-    <div className="grid grid-cols-5 gap-2">
+    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
       {PRIORITY_ORDER.map((priority) => {
         const tone = severityTone[priority]
         const count = summary.byPriority[priority]?.length || 0

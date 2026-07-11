@@ -310,7 +310,7 @@ export default function ChatInput({
         </div>
       )}
 
-      <div className="px-4 py-3">
+      <div className="px-3 py-2 md:px-4 md:py-3">
         {/* The composer WELL — one lifted surface (bg-card + shadow-lifted) that
             holds the Goal strip, the attachment chips and the input row, so
             file-upload and Goal read as *parts of* the composer instead of
@@ -395,7 +395,7 @@ export default function ChatInput({
               // the pill owns the border, fill and focus ring. A ~2-line floor
               // (min-h) gives the empty composer real presence; it auto-grows to a
               // cap (max-h) then scrolls. text-[15px] = a comfortable compose size.
-              'block max-h-[200px] min-h-[3.25rem] w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed text-foreground',
+              'block max-h-[200px] min-h-[2.5rem] w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-2.5 pb-1 text-[15px] leading-relaxed text-foreground md:min-h-[3.25rem] md:pt-3.5',
               'placeholder:text-muted-foreground/60',
               'focus:outline-none focus:ring-0',
               'disabled:cursor-not-allowed disabled:opacity-50',
@@ -404,7 +404,7 @@ export default function ChatInput({
           />
 
           {/* action bar — left cluster: tools (Goal toggle) + attach; right: send/pause */}
-          <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-0.5">
+          <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5 md:pb-2.5">
             <div className="flex min-w-0 items-center gap-1">
               {leading}
 
@@ -422,7 +422,7 @@ export default function ChatInput({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={disabled}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 md:h-10 md:w-10"
                     aria-label="Attach files"
                   >
                     <Paperclip className="h-[18px] w-[18px]" />
@@ -438,7 +438,7 @@ export default function ChatInput({
               className={cn(
                 // Codex send = filled circle + up-arrow. Neutral when idle so an
                 // empty composer reads as "nothing to send" rather than a live blue.
-                'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-150',
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-150 md:h-10 md:w-10',
                 canPause
                   ? 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90'
                   : canSend

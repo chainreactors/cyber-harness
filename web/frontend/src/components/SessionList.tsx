@@ -87,7 +87,10 @@ export default function SessionList({
           'surface-raised flex flex-col border-r border-border bg-card/95 backdrop-blur-sm transition-all duration-200 ease-in-out shrink-0 md:bg-card/50',
           open
             ? 'fixed inset-y-0 left-0 z-40 w-72 shadow-elevated md:relative md:inset-auto md:z-auto md:shadow-none'
-            : 'w-12',
+            // Collapsed: a 48px icon rail on desktop, but fully hidden on phones —
+            // there the drawer opens from the header's menu button, so the chat
+            // gets the full width instead of a stub rail down the left edge.
+            : 'w-12 max-md:hidden',
         )}
       >
         {/* Header — fleet roster identity + live node count */}
@@ -338,7 +341,11 @@ function SessionItem({
         variant="ghost"
         size="icon-xs"
         onClick={(e) => { e.stopPropagation(); onDelete() }}
-        className="invisible h-6 w-6 shrink-0 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible"
+        // Touch devices have no hover, so a hover-only reveal would make delete
+        // permanently unreachable there. Keep it visible by default; only tuck it
+        // behind row-hover on pointers that actually hover (desktop). Larger hit
+        // box on touch (h-8) meets the tap-target floor.
+        className="h-8 w-8 shrink-0 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive [@media(hover:hover)]:invisible [@media(hover:hover)]:h-6 [@media(hover:hover)]:w-6 [@media(hover:hover)]:group-hover:visible"
         aria-label={t('deleteSession')}
       >
         <Trash2 className="h-3 w-3" />

@@ -141,10 +141,25 @@ export default function QuickConnect({ ioaURL, version }: Props) {
       </Tooltip>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[36rem] max-w-[90vw] rounded-lg border border-border bg-popover p-3 shadow-lg">
-          <div className="mb-3 flex items-center justify-between">
+        <div
+          className={cn(
+            'z-50 rounded-lg border border-border bg-popover p-3 shadow-lg',
+            // Phone: a right-aligned dropdown spills off the LEFT edge here. The
+            // trigger sits mid-header (settings / language / theme sit to its
+            // right), so pinning the panel's right edge to the trigger and giving
+            // it 90vw pushes its left edge well past the screen. Anchor it to the
+            // viewport just under the header instead, and let it scroll if the
+            // commands run tall in landscape.
+            'fixed inset-x-3 top-[calc(env(safe-area-inset-top)+3.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto',
+            // ≥md: enough width for the 36rem panel to sit right-anchored under the
+            // trigger without its left edge clipping — revert to the dropdown. (At
+            // sm the panel would still overflow left, so hold the pinned layout.)
+            'md:absolute md:inset-x-auto md:right-0 md:top-full md:mt-2 md:max-h-none md:w-[36rem] md:max-w-[90vw] md:overflow-visible',
+          )}
+        >
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-xs font-medium text-foreground">{t('quickConnectTitle')}</span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {OS_OPTIONS.map((o) => (
                 <button
                   key={o.value}
