@@ -9,7 +9,7 @@ export default {
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
-    // The cyber-ui submodule is consumed as source (vite aliases @aspect/* to
+    // The cyber-ui submodule is consumed as source (vite aliases @cyber/* to
     // its packages), so Tailwind must scan it too. Without this, utilities used
     // ONLY inside cyber-ui — e.g. the DisclosureCard `grid-rows-[0fr]/[1fr]`
     // collapse animation — are never generated and silently no-op (the

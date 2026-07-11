@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@aspect/ui'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cyber/ui'
 import { fetchScanReport, type ScanResult } from '../../api'
 import { buildFindings } from '../../lib/scan-result'
 import { MarkdownContent } from '@/markdown'

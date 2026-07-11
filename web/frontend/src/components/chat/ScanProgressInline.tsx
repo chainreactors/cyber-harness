@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, CheckCircle2 } from 'lucide-react'
-import { cn } from '@aspect/theme'
-import { DisclosureCard, Badge } from '@aspect/ui'
+import { cn } from '@cyber/theme'
+import { DisclosureCard, Badge } from '@cyber/ui'
 
 interface Props {
   scanID: string

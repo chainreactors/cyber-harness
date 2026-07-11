@@ -9,8 +9,8 @@ import {
 import {
   Button, Callout, Tooltip, TooltipTrigger, TooltipContent,
   Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot,
-} from '@aspect/ui'
-import { cn } from '@aspect/theme'
+} from '@cyber/ui'
+import { cn } from '@cyber/theme'
 import { launchLocalAgent, listLocalAgents, stopLocalAgent } from '../api'
 import type { AgentInfo, ChatSession, LocalAgentView } from '../api'
 import { agentActivity } from '../lib/agentActivity'

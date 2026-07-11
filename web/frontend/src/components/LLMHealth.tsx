@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, StatusDot, Tooltip, TooltipContent, TooltipTrigger, type StatusKind } from '@aspect/ui'
+import { Button, StatusDot, Tooltip, TooltipContent, TooltipTrigger, type StatusKind } from '@cyber/ui'
 import { getConfigStatus, testLLM } from '../api'
 
 type Phase = 'checking' | 'ok' | 'error' | 'unconfigured'

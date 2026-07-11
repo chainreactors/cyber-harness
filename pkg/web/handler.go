@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent/probe"
@@ -33,6 +34,11 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	mux.HandleFunc("POST /api/config/llm/models", h.listLLMModels)
 	mux.HandleFunc("POST /api/config/{section}/test", h.testConn)
 	mux.HandleFunc("GET /api/agents", h.listAgents)
+
+	mux.HandleFunc("GET /api/sco/nodes", h.listSCONodes)
+	mux.HandleFunc("GET /api/sco/nodes/{id}", h.getSCONode)
+	mux.HandleFunc("GET /api/sco/stats", h.scoNodeStats)
+	mux.HandleFunc("DELETE /api/sco/nodes", h.deleteSCONodes)
 
 	// Chat session routes
 	mux.HandleFunc("POST /api/chat/sessions", h.createSession)
@@ -388,6 +394,62 @@ func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ServeSSE(w, r, h.service.Hub(), sessionTopic(id), "_never")
+}
+
+// ── SCO Nodes ──
+
+func (h *handlerImpl) listSCONodes(w http.ResponseWriter, r *http.Request) {
+	nodeType := r.URL.Query().Get("type")
+	scanID := r.URL.Query().Get("scan_id")
+	limit := 500
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	nodes, err := h.service.store.ListSCONodesByScanID(r.Context(), scanID, nodeType, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if nodes == nil {
+		nodes = []json.RawMessage{}
+	}
+	writeJSON(w, http.StatusOK, nodes)
+}
+
+func (h *handlerImpl) getSCONode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	node, err := h.service.store.GetSCONode(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(node)
+}
+
+func (h *handlerImpl) scoNodeStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.service.store.SCONodeStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (h *handlerImpl) deleteSCONodes(w http.ResponseWriter, r *http.Request) {
+	scanID := r.URL.Query().Get("scan_id")
+	if scanID == "" {
+		writeError(w, http.StatusBadRequest, "scan_id required")
+		return
+	}
+	if err := h.service.store.DeleteSCONodesByScan(r.Context(), scanID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func pathSegments(path string) []string {

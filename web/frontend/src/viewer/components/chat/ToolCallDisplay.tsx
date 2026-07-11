@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -8,16 +8,34 @@ import {
   Terminal,
   Wrench,
 } from 'lucide-react'
-import { cn } from '@aspect/theme'
-import { DisclosureCard, Badge } from '@aspect/ui'
+import { cn } from '@cyber/theme'
+import { DisclosureCard, Badge } from '@cyber/ui'
 import { CodeBlock } from '@/markdown'
 import { stripAnsiControl, formatArgs, summarizeArgs } from '../../lib/tool-utils'
+import { listSCONodes } from '@/api'
+import { EasmResultFromNodes } from '@cyber/cstx-easm'
+import type { SCONode } from '@cyber/cstx-easm'
+
+const SCANNER_COMMANDS = new Set(['gogo', 'spray', 'zombie', 'neutron', 'katana', 'proton', 'scan'])
+
+function extractPseudoCommand(toolName: string, toolArgs: string): string | undefined {
+  if (toolName !== 'bash') return undefined
+  try {
+    const parsed = JSON.parse(toolArgs)
+    const cmd = (parsed.command || '').trim()
+    const first = cmd.split(/\s+/)[0]
+    return SCANNER_COMMANDS.has(first) ? first : undefined
+  } catch {
+    return undefined
+  }
+}
 
 export interface ToolCallDisplayProps {
   toolName: string
   toolArgs?: string
   result?: string
   pending?: boolean
+  toolCallId?: string
   defaultExpanded?: boolean
   className?: string
 }
@@ -27,17 +45,32 @@ export default function ToolCallDisplay({
   toolArgs = '',
   result,
   pending = false,
+  toolCallId,
   defaultExpanded = false,
   className,
 }: ToolCallDisplayProps) {
   const summary = summarizeArgs(toolArgs)
   const formattedArgs = formatArgs(toolArgs)
   const displayResult = result === undefined ? undefined : stripAnsiControl(result)
+  const scannerCmd = extractPseudoCommand(toolName, toolArgs)
+
+  const [scoNodes, setScoNodes] = useState<SCONode[] | null>(null)
+  const [scoLoading, setScoLoading] = useState(false)
+
+  useEffect(() => {
+    if (!scannerCmd || !toolCallId || pending) return
+    setScoLoading(true)
+    listSCONodes({ scanId: toolCallId }).then((nodes) => {
+      setScoNodes(nodes.length > 0 ? nodes : null)
+    }).catch(() => {
+      setScoNodes(null)
+    }).finally(() => setScoLoading(false))
+  }, [scannerCmd, toolCallId, pending])
 
   return (
     <DisclosureCard
       animated
-      defaultExpanded={defaultExpanded}
+      defaultExpanded={defaultExpanded || (!!scannerCmd && !pending)}
       className={cn(
         'transition-colors duration-200',
         pending ? 'border-warning/30' : 'border-border',
@@ -56,7 +89,7 @@ export default function ToolCallDisplay({
             size="sm"
             className="shrink-0 bg-muted/40 font-mono font-medium text-foreground"
           >
-            {toolName || 'tool'}
+            {scannerCmd || toolName || 'tool'}
           </Badge>
           <span
             className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
@@ -73,17 +106,23 @@ export default function ToolCallDisplay({
       }
     >
       <div className="border-t border-border">
-        {toolArgs && (
-          <div className="bg-muted/30 px-3 py-2">
-            <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              Arguments
-            </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded font-mono text-xs text-foreground">
-              {formattedArgs}
-            </pre>
+        {/* SCO structured view for scanner tools */}
+        {scoNodes && scoNodes.length > 0 && (
+          <div className="p-3">
+            <EasmResultFromNodes nodes={scoNodes} />
           </div>
         )}
-        {displayResult !== undefined && (
+
+        {/* Loading state for SCO fetch */}
+        {scoLoading && (
+          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Loading structured results...</span>
+          </div>
+        )}
+
+        {/* Raw text fallback (always shown for non-scanner or when no SCO data) */}
+        {displayResult !== undefined && (!scoNodes || scoNodes.length === 0) && (
           <div className="border-t border-border px-3 py-2">
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Result
@@ -92,6 +131,18 @@ export default function ToolCallDisplay({
               {displayResult}
             </pre>
           </div>
+        )}
+
+        {/* For scanner tools with SCO data, show raw output in a collapsible section */}
+        {scoNodes && scoNodes.length > 0 && displayResult !== undefined && (
+          <details className="border-t border-border">
+            <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
+              Raw Output
+            </summary>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-xs text-muted-foreground">
+              {displayResult}
+            </pre>
+          </details>
         )}
       </div>
     </DisclosureCard>

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { cn } from '@aspect/theme'
+import { cn } from '@cyber/theme'
 
 export interface AgentVoiceCardProps extends React.HTMLAttributes<HTMLDivElement> {
   /** While the turn is live, the border shifts to primary. */

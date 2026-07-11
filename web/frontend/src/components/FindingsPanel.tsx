@@ -4,8 +4,8 @@ import { AlertCircle, CheckCircle2, Crosshair, ExternalLink, Key, Radar, Shield 
 import type { ScanResult } from '../api'
 import { buildFindings, findingTargetURL, PRIORITY_ORDER, type FindingItem, type FindingPriority } from '../lib/scan-result'
 import { severityTone } from '../lib/tones'
-import { cn } from '@aspect/theme'
-import { Badge, Chip, EmptyState } from '@aspect/ui'
+import { cn } from '@cyber/theme'
+import { Badge, Chip, EmptyState } from '@cyber/ui'
 import { AiPanel } from '@/components/AiPanel'
 import { MarkdownContent } from '@/markdown'
 

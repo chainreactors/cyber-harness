@@ -1,7 +1,7 @@
 import { useMemo, type ComponentType, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { cn } from '@aspect/theme'
+import { cn } from '@cyber/theme'
 
 declare const require: any
 

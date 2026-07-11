@@ -10,7 +10,7 @@ func init() {
 		Group: "proton",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger := deps.GetLogger()
-			cmd := New().WithLogger(logger).WithProxy(deps.ScannerProxy)
+			cmd := New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
 			if rs, ok := deps.Resources.(*resources.Set); ok && rs != nil {
 				cmd.WithResourceProvider(rs.ProtonConfig)
 			}

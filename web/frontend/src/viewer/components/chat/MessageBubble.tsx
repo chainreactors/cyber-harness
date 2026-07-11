@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { cn } from '@aspect/theme'
+import { cn } from '@cyber/theme'
 import { formatTime } from '../../../lib/format'
 import { AgentVoiceCard } from './AgentVoiceCard'
 

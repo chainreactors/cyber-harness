@@ -137,11 +137,26 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS sco_nodes (
+			cstx_id    TEXT PRIMARY KEY,
+			cstx_type  TEXT NOT NULL,
+			data       TEXT NOT NULL,
+			scan_id    TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`); err != nil {
+		return err
+	}
+
 	_, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
+		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
+		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
 	`)
 	return err
 }
@@ -503,4 +518,107 @@ func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) 
 		}
 	}
 	return tx.Commit()
+}
+
+// ── SCO Nodes ──
+
+func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, scanID string, nodes []json.RawMessage) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT OR REPLACE INTO sco_nodes (cstx_id, cstx_type, data, scan_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM sco_nodes WHERE cstx_id = ?), ?), ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().Format(time.RFC3339Nano)
+	for _, raw := range nodes {
+		var header struct {
+			Type string `json:"cstx_type"`
+			ID   string `json:"cstx_id"`
+		}
+		if json.Unmarshal(raw, &header) != nil || header.ID == "" {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx,
+			header.ID, header.Type, string(raw), scanID, header.ID, now, now,
+		); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ListSCONodes(ctx context.Context, nodeType string, limit int) ([]json.RawMessage, error) {
+	return s.ListSCONodesByScanID(ctx, "", nodeType, limit)
+}
+
+func (s *SQLiteStore) ListSCONodesByScanID(ctx context.Context, scanID, nodeType string, limit int) ([]json.RawMessage, error) {
+	var where []string
+	var args []any
+	if scanID != "" {
+		where = append(where, "scan_id = ?")
+		args = append(args, scanID)
+	}
+	if nodeType != "" {
+		where = append(where, "cstx_type = ?")
+		args = append(args, nodeType)
+	}
+	query := "SELECT data FROM sco_nodes"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY updated_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var nodes []json.RawMessage
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, json.RawMessage(data))
+	}
+	return nodes, rows.Err()
+}
+
+func (s *SQLiteStore) GetSCONode(ctx context.Context, cstxID string) (json.RawMessage, error) {
+	var data string
+	err := s.db.QueryRowContext(ctx, `SELECT data FROM sco_nodes WHERE cstx_id = ?`, cstxID).Scan(&data)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
+func (s *SQLiteStore) DeleteSCONodesByScan(ctx context.Context, scanID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sco_nodes WHERE scan_id = ?`, scanID)
+	return err
+}
+
+func (s *SQLiteStore) SCONodeStats(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT cstx_type, COUNT(*) FROM sco_nodes GROUP BY cstx_type`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stats := make(map[string]int)
+	for rows.Next() {
+		var t string
+		var c int
+		if err := rows.Scan(&t, &c); err != nil {
+			return nil, err
+		}
+		stats[t] = c
+	}
+	return stats, rows.Err()
 }

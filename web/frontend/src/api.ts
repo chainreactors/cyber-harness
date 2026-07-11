@@ -694,6 +694,25 @@ export function agentTerminalWebSocketURL(agentID: string): string {
   return authURL(base);
 }
 
+// ── SCO Nodes ──
+
+export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
+  const params = new URLSearchParams();
+  if (opts?.type) params.set('type', opts.type);
+  if (opts?.scanId) params.set('scan_id', opts.scanId);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return apiJSON(`/api/sco/nodes${qs ? '?' + qs : ''}`, 'Failed to load SCO nodes');
+}
+
+export async function getSCONode(id: string): Promise<SCONode> {
+  return apiJSON(`/api/sco/nodes/${encodeURIComponent(id)}`, 'SCO node not found');
+}
+
+export async function getSCOStats(): Promise<Record<string, number>> {
+  return apiJSON('/api/sco/stats', 'Failed to load SCO stats');
+}
+
 function getAccessKey(): string {
   return (window as any).__AISCAN_ACCESS_KEY__ || ''
 }

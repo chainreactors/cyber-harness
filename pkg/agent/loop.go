@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -323,9 +324,10 @@ type toolExecution struct {
 }
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, turn int) toolExecution {
-	execution := beforeToolCall(ctx, cfg, assistantMsg, tc)
+	toolCtx := output.ContextWithCallID(ctx, tc.ID)
+	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
-		toolResult, execErr := cfg.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments)
+		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Function.Name, tc.Function.Arguments)
 		execution.result = toolResult.Text()
 		execution.err = execErr
 		execution.isError = execErr != nil || toolResult.IsError
@@ -348,7 +350,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 			"\n\n[truncated: showing %d/%d lines (%s of %s). Refine your query or use filter/parse tools to access specific parts.]",
 			tr.OutputLines, tr.TotalLines, truncate.FormatSize(tr.OutputBytes), truncate.FormatSize(tr.TotalBytes))
 	}
-	return afterToolCall(ctx, cfg, assistantMsg, tc, execution)
+	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution)
 }
 
 func (e toolExecution) eventResult() string {

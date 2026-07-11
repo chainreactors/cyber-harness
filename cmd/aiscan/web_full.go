@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -60,6 +61,16 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
 	defer service.Close()
+
+	if application.SCOSidecar != nil {
+		application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
+			scanID := callID
+			if scanID == "" {
+				scanID = "standalone"
+			}
+			_ = store.UpsertSCONodes(context.Background(), scanID, nodes)
+		}
+	}
 
 	var pool *web.AgentPool
 	if option.Debug {

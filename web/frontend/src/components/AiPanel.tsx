@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cn } from '@aspect/theme'
+import { cn } from '@cyber/theme'
 
 export interface AiPanelProps {
   /** Cortex-blue mono eyebrow — the analysis source (验证 / CVE 情报 / 研判). */
@@ -18,7 +18,7 @@ export interface AiPanelProps {
  * mono eyebrow over an analysis body (markdown or text). The signature the
  * findings / asset views hand-rolled per call site (`border-l-4 border-l-ai
  * bg-ai/5` + `mono-label text-ai`). Kept aiscan-local because it leans on the
- * app-local `ai` role token, which isn't in the shared `@aspect/theme`.
+ * app-local `ai` role token, which isn't in the shared `@cyber/theme`.
  */
 export function AiPanel({ label, action, className, bodyClassName, children }: AiPanelProps) {
   return (

@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
-import { Button } from '@aspect/ui'
+import { Button } from '@cyber/ui'
 
 interface Props {
   children: ReactNode

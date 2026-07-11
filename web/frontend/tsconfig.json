@@ -19,15 +19,19 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@aspect/ui": ["./cyber-ui/packages/ui/src"],
-      "@aspect/theme": ["./cyber-ui/packages/theme/src"],
-      "@aspect/terminal": ["./cyber-ui/packages/terminal/src"]
+      "@cyber/ui": ["./cyber-ui/packages/ui/src"],
+      "@cyber/theme": ["./cyber-ui/packages/theme/src"],
+      "@cyber/terminal": ["./cyber-ui/packages/terminal/src"],
+      "@cyber/cstx": ["./cyber-ui/packages/cstx/src"],
+      "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"]
     }
   },
   "include": [
     "src",
     "cyber-ui/packages/ui/src",
     "cyber-ui/packages/theme/src",
-    "cyber-ui/packages/terminal/src"
+    "cyber-ui/packages/terminal/src",
+    "cyber-ui/packages/cstx/src",
+    "cyber-ui/packages/cstx-easm/src"
   ]
 }

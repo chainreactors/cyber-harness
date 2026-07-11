@@ -13,9 +13,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@aspect/ui': path.resolve(cyberUI, 'ui/src'),
-      '@aspect/theme': path.resolve(cyberUI, 'theme/src'),
-      '@aspect/terminal': path.resolve(cyberUI, 'terminal/src'),
+      '@cyber/ui': path.resolve(cyberUI, 'ui/src'),
+      '@cyber/theme': path.resolve(cyberUI, 'theme/src'),
+      '@cyber/terminal': path.resolve(cyberUI, 'terminal/src'),
+      '@cyber/cstx': path.resolve(cyberUI, 'cstx/src'),
+      '@cyber/cstx-easm': path.resolve(cyberUI, 'cstx-easm/src'),
     },
   },
   server: {

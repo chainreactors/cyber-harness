@@ -14,7 +14,7 @@ func init() {
 				return
 			}
 			reg.Register(
-				New(es.Neutron, es.Index).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy),
+				New(es.Neutron, es.Index).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus),
 				"scanner",
 			)
 		},

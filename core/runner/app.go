@@ -8,6 +8,8 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -27,6 +29,8 @@ type App struct {
 	SkillDiagnostics  []skills.Diagnostic
 	IOAClient         protocols.ClientAPI
 	IOAStreamClient   ioaclient.StreamAPI
+	DataBus           *eventbus.Bus[output.ToolDataEvent]
+	SCOSidecar        *output.SCOSidecar
 	enginesReady      chan struct{}
 }
 
@@ -36,6 +40,9 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
+
+	a.DataBus = eventbus.New[output.ToolDataEvent]()
+	a.SCOSidecar = output.NewSCOSidecar(a.DataBus, output.CSTXTransform)
 
 	store, diagnostics := skills.LoadAll(rc.CLISkillPaths)
 	a.Skills = store
@@ -98,6 +105,9 @@ func (a *App) WaitEngines(ctx context.Context) error {
 func (a *App) Close() {
 	if a == nil {
 		return
+	}
+	if a.SCOSidecar != nil {
+		a.SCOSidecar.Close()
 	}
 	if a.Commands != nil {
 		for _, t := range a.Commands.Tools() {

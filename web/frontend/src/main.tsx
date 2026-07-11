@@ -6,12 +6,12 @@ import './i18n'
 import { useTranslation } from 'react-i18next'
 import { registerChatExtensions } from './lib/chat-extensions'
 import ErrorBoundary from './components/ErrorBoundary'
-import { ConfirmProvider } from '@aspect/ui'
+import { ConfirmProvider } from '@cyber/ui'
 import './index.css'
 
 registerChatExtensions()
 
-// @aspect/ui's ConfirmDialog is i18n-agnostic (no react-i18next dependency): it
+// @cyber/ui's ConfirmDialog is i18n-agnostic (no react-i18next dependency): it
 // defaults to English and takes localised strings via `labels`. Inject aiscan's
 // translations here so the shared atom speaks the app's language without the
 // library having to know about our i18n setup.

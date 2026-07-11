@@ -90,7 +90,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			return c.engine.Init()
 		},
 		OnResult: func(r *parsers.GOGOResult) {
-			c.EmitData("gogo", output.ToolDataService, r.GetTarget(), r)
+			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, r.GetTarget(), r)
 		},
 	}
 	if err := gogocore.RunWithArgs(ctx, args, opts); err != nil {

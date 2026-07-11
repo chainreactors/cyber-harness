@@ -5,7 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { Info, Plus, RefreshCw, Square } from 'lucide-react'
 import { agentTerminalWebSocketURL } from '../../api'
 import type { AgentInfo } from '../../api'
-import { Button, Tooltip, TooltipTrigger, TooltipContent } from '@aspect/ui'
+import { Button, Tooltip, TooltipTrigger, TooltipContent } from '@cyber/ui'
 import {
   type PTYSession,
   type TerminalStatus,
@@ -19,8 +19,8 @@ import {
   stringPayload,
   upsertSession,
   writeTerminalData,
-} from '@aspect/terminal'
-import { TerminalView, TerminalHeader, SessionNavigator, SessionButton, sessionDetails } from '@aspect/terminal'
+} from '@cyber/terminal'
+import { TerminalView, TerminalHeader, SessionNavigator, SessionButton, sessionDetails } from '@cyber/terminal'
 import { TerminalDetails } from './TerminalDetails'
 
 const REPL_NAME = 'main-repl'

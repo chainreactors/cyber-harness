@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, RefreshCw } from 'lucide-react'
-import { Button, Input, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
-import { cn } from '@aspect/theme'
+import { Button, Input, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
+import { cn } from '@cyber/theme'
 
 interface ModelComboboxProps {
   value: string

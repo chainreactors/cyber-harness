@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type CSSProperties } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { cn } from '@aspect/theme'
+import { cn } from '@cyber/theme'
 
 declare const require: any
 

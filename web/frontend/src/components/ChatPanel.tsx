@@ -18,8 +18,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { cn } from '@aspect/theme'
-import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
+import { cn } from '@cyber/theme'
+import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import BrandMark from './brand/BrandMark'
 import { MarkdownContent } from '@/markdown'
 import {
@@ -558,6 +558,7 @@ function timelineContent(
           toolArgs={item.toolCall.toolArgs}
           result={item.toolCall.result}
           pending={item.toolCall.pending}
+          toolCallId={item.toolCall.id}
         />
       )
 
@@ -672,6 +673,7 @@ function AssistantResponseEntry({ response }: { response: AssistantResponseState
               toolArgs={tool.toolArgs}
               result={tool.result}
               pending={tool.pending}
+              toolCallId={tool.id}
             />
           ))}
         </div>

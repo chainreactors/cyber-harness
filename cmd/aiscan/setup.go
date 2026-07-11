@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/runner"
@@ -37,7 +39,7 @@ func init() {
 func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
-	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, logger)
+	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, a.DataBus, logger)
 }
 
 func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -63,7 +65,7 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, logger telemetry.Logger) {
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
 	var scanOpts []any
 	if scanCfg.AIEnabled && llmProvider != nil {
 		scanOpts = append(scanOpts, scan.WithParent(agent.NewAgent(agent.Config{
@@ -97,6 +99,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 		ScanOpts:     scanOpts,
 		Logger:       logger,
 		TavilyKeys:   toolCfg.TavilyKeys,
+		DataBus:      dataBus,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources

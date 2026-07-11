@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
@@ -93,6 +95,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 func (c *Command) WithProxy(proxy string) *Command {
 	c.Proxy = proxy
 	scanengine.ApplyNeutronProxy(proxy)
+	return c
+}
+
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
 	return c
 }
 
@@ -256,6 +263,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			record := neutronResultFromExecution(target, result)
 			if record.Matched {
 				summary.Matched++
+				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
 				sb.WriteString(formatNeutronResult(record, jsonOutput))

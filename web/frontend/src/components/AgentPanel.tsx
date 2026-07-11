@@ -16,7 +16,7 @@ import {
   SheetDescription,
   SheetTitle,
   StatusDot,
-} from '@aspect/ui'
+} from '@cyber/ui'
 
 interface AgentPanelProps {
   open: boolean

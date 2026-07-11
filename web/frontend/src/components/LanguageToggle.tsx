@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
-import { cn } from '@aspect/theme'
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
+import { cn } from '@cyber/theme'
 
 interface LanguageToggleProps {
   className?: string
