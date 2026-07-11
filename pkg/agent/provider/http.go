@@ -81,7 +81,7 @@ func (r *apiRequest) do(ctx context.Context, method, endpoint string, body []byt
 		return nil, wrapReadError(parentCtx, callTimedOut.Load(), r.timeout, "read response", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(data)}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(data), Header: resp.Header.Clone()}
 	}
 	return data, nil
 }
@@ -146,7 +146,7 @@ func streamSSE(
 		if readErr != nil {
 			return nil, wrapReadError(ctx, timedOut, timeout, "read response", readErr)
 		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody), Header: resp.Header.Clone()}
 	}
 
 	var stallDetected atomic.Bool

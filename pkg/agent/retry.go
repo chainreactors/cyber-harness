@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,12 @@ type imageDisabler interface {
 }
 
 var errEmptyResponse = errors.New("empty response from LLM")
+
+const (
+	baseRetryDelay     = 500 * time.Millisecond
+	maxRetryDelay      = 32 * time.Second
+	retryJitterFactor  = 0.25
+)
 
 func isRetryableError(err error) bool {
 	if err == nil {
@@ -73,10 +81,65 @@ func isRetryableByMessage(err error) bool {
 	return false
 }
 
+// RetryDelay returns the backoff duration for the given attempt index (0-based).
+// It keeps the original conservative policy (1s·2^attempt, capped at 10s) for
+// backward compatibility with external callers such as runner and webagent
+// reconnect logic.
 func RetryDelay(attempt int) time.Duration {
 	delay := time.Second << uint(attempt)
 	if delay > 10*time.Second {
 		delay = 10 * time.Second
+	}
+	return delay
+}
+
+// retryDelayFor computes the backoff for an LLM call retry. It honors a
+// Retry-After header when the error carries one (server directive wins and
+// bypasses both the backoff formula and the cap); otherwise it falls back to
+// exponential backoff with additive jitter: min(base·2^attempt, maxDelay) + jitter.
+func retryDelayFor(attempt int, err error) time.Duration {
+	if after := retryAfterFromError(err); after > 0 {
+		return after
+	}
+	return computeRetryDelay(attempt, rand.Float64())
+}
+
+// retryAfterFromError parses a Retry-After header (integer seconds form) from
+// an APIError, if present. Returns 0 when absent or unparseable.
+func retryAfterFromError(err error) time.Duration {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return 0
+	}
+	if apiErr.Header == nil {
+		return 0
+	}
+	val := strings.TrimSpace(apiErr.Header.Get("Retry-After"))
+	if val == "" {
+		return 0
+	}
+	secs, perr := strconv.Atoi(val)
+	if perr != nil || secs < 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// computeRetryDelay is the exponential backoff + additive jitter core used by
+// the LLM retry loop. Formula: min(baseRetryDelay·2^attempt, maxRetryDelay),
+// then add random jitter in [0, retryJitterFactor·delay).
+func computeRetryDelay(attempt int, jitterFrac float64) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	// baseDelay·2^attempt, capped at maxDelay
+	delay := baseRetryDelay << uint(attempt)
+	if delay > maxRetryDelay || delay <= 0 {
+		delay = maxRetryDelay
+	}
+	if jitterFrac > 0 {
+		// additive jitter: delay += random·[0, jitterFactor·delay)
+		delay += time.Duration(jitterFrac * retryJitterFactor * float64(delay))
 	}
 	return delay
 }
@@ -89,7 +152,7 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			delay := RetryDelay(attempt - 1)
+			delay := retryDelayFor(attempt-1, lastErr)
 			cfg.Logger.Warnf("retrying LLM call (attempt %d/%d) after %s: %v", attempt+1, maxAttempts, delay, lastErr)
 			select {
 			case <-time.After(delay):
