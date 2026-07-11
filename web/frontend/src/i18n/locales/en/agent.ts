@@ -63,6 +63,6 @@ export default {
   tdTools: 'Tools',
   tdTokens: 'Tokens',
   tdAssets: 'Assets',
-  tdLoots: 'Loots',
+  tdLoots: 'Findings',
   tdLast: 'Last',
 }

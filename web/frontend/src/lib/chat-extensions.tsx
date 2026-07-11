@@ -25,12 +25,19 @@ export function registerChatExtensions() {
 
   registerTimelineRenderer('scan_complete', {
     renderer: ({ item, context }) => {
-      const onShowScanDetail = context.onShowScanDetail as ((id: string) => void) | undefined
+      const scanID = item.data.scanID as string
+      // A live scan_complete event carries the Result inline; a card rebuilt from
+      // a persisted marker (page reload / session switch) does not, so fall back to
+      // the scanResults map the session loads from its scan_ids. Until that map
+      // resolves the result is absent — render nothing rather than an empty card;
+      // the row re-renders and the card appears once the map fills.
+      const scanResults = context.scanResults as Map<string, ScanResult> | undefined
+      const result = (item.data.result as ScanResult) ?? scanResults?.get(scanID)
+      if (!result) return null
       return (
         <ScanSummaryCard
-          scanID={item.data.scanID as string}
-          result={item.data.result as ScanResult}
-          onViewDetails={onShowScanDetail ?? (() => {})}
+          scanID={scanID}
+          result={result}
         />
       )
     },

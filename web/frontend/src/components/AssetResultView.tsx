@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, Brain, CheckCircle2, ChevronRight, Crosshair, File, Fingerprint, Folder, FolderOpen, Globe, Link2, Network, Radar, Server } from 'lucide-react'
+import { AlertCircle, Brain, CheckCircle2, ChevronRight, CornerDownRight, Crosshair, File, FileCode2, Fingerprint, Folder, FolderOpen, Globe, Link2, Network, Radar, Server } from 'lucide-react'
 import type { AssetItem, ScanResult } from '../api'
 import {
   assetItemContent,
   buildResultModel,
   buildSitemapTree,
   collectSitemapFolderIDs,
+  contentToken,
   defaultOpenSitemapNodes,
   endpointFileName,
-  formatCount,
+  findingTargetURL,
   itemFactValues,
   itemFacts,
   itemKindTone,
@@ -18,6 +19,7 @@ import {
   isAnalysisItem,
   pathIdentity,
   pathSearch,
+  redirectTarget,
   sameTarget,
   serviceAIStatus,
   statusCodeTone,
@@ -31,12 +33,12 @@ import {
 import { cn } from '@aspect/theme'
 import { MarkdownContent } from '@/markdown'
 import { badgeToneClass } from '../lib/tones'
-import { Badge as UIBadge, Button, Card, CardContent, CardHeader, Chip, EmptyState, StatTile, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
+import { Badge as UIBadge, Button, EmptyState, Tooltip, TooltipContent, TooltipTrigger } from '@aspect/ui'
 import { AiPanel } from '@/components/AiPanel'
-import FindingsSummary from './FindingsSummary'
 
 interface AssetResultViewProps {
   result: ScanResult
+  anchorPrefix?: string
 }
 
 type AssetPanel = {
@@ -47,31 +49,15 @@ type AssetPanel = {
   render: () => ReactNode
 }
 
-export default function AssetResultView({ result }: AssetResultViewProps) {
+export default function AssetResultView({ result, anchorPrefix = '' }: AssetResultViewProps) {
   const { t } = useTranslation('findings')
   const model = useMemo(() => buildResultModel(result), [result])
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <Card className="bg-card/50 p-4">
-        <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-9">
-          <StatTile label={t('hosts')} value={model.metrics.hosts} />
-          <StatTile label={t('assets')} value={model.metrics.assets} />
-          <StatTile label={t('services')} value={model.metrics.services} />
-          <StatTile label={t('web')} value={model.metrics.web} />
-          <StatTile label={t('probes')} value={model.metrics.probes} />
-          <StatTile label={t('fingers')} value={model.metrics.fingers} />
-          <StatTile label={t('loots')} value={model.metrics.loots} />
-          <StatTile label={t('errors')} value={model.metrics.errors} />
-          <StatTile label={t('duration')} value={model.metrics.duration} />
-        </div>
-      </Card>
-
-      <FindingsSummary result={result} />
-
+    <div>
       <Section title={t('hosts')}>
         {model.hosts.length > 0 ? (
-          <HostList hosts={model.hosts} />
+          <HostList hosts={model.hosts} anchorPrefix={anchorPrefix} />
         ) : (
           <EmptyState compact title={t('noHosts')} />
         )}
@@ -80,21 +66,20 @@ export default function AssetResultView({ result }: AssetResultViewProps) {
   )
 }
 
-function HostList({ hosts }: { hosts: HostGroup[] }) {
+function HostList({ hosts, anchorPrefix }: { hosts: HostGroup[]; anchorPrefix: string }) {
   return (
     <div className="divide-y divide-border/70">
       {hosts.map((host) => (
-        <HostPanel key={host.id} host={host} />
+        <HostPanel key={host.id} host={host} anchorPrefix={anchorPrefix} />
       ))}
     </div>
   )
 }
 
-function HostPanel({ host }: { host: HostGroup }) {
+function HostPanel({ host, anchorPrefix }: { host: HostGroup; anchorPrefix: string }) {
   const { t } = useTranslation('findings')
   const [open, setOpen] = useState(true)
-  const webCount = host.services.filter((service) => service.web).length
-  const anchor = assetAnchor('host', host.id)
+  const anchor = assetAnchor(anchorPrefix, 'host', host.id)
 
   return (
     <details
@@ -110,36 +95,35 @@ function HostPanel({ host }: { host: HostGroup }) {
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="break-all font-mono text-sm font-semibold text-foreground">{host.host}</span>
             <AnchorLink id={anchor} label={t('linkTo', { name: host.host })} />
-            <Badge>{formatCount(host.services.length, 'service')}</Badge>
-            {webCount > 0 && <Badge tone="cyan">{t('webCount', { count: webCount })}</Badge>}
           </div>
         </div>
       </summary>
 
       <div className="ml-6 mt-3 border-l border-border/70 pl-3">
-        <ServiceList services={host.services} />
+        <ServiceList services={host.services} anchorPrefix={anchorPrefix} />
       </div>
     </details>
   )
 }
 
-function ServiceList({ services }: { services: ServiceNode[] }) {
+function ServiceList({ services, anchorPrefix }: { services: ServiceNode[]; anchorPrefix: string }) {
   return (
     <div className="divide-y divide-border/60">
       {services.map((service) => (
-        <ServiceRow key={service.id} service={service} />
+        <ServiceRow key={service.id} service={service} anchorPrefix={anchorPrefix} />
       ))}
     </div>
   )
 }
 
-function ServiceRow({ service }: { service: ServiceNode }) {
+function ServiceRow({ service, anchorPrefix }: { service: ServiceNode; anchorPrefix: string }) {
   const { t } = useTranslation('findings')
-  const panels = useMemo(() => servicePanels(service), [service])
-  const [open, setOpen] = useState(false)
+  const panels = useMemo(() => servicePanels(service, anchorPrefix), [service, anchorPrefix])
+  const [open, setOpen] = useState(true)
   const [activePanelID, setActivePanelID] = useState(() => defaultPanelID(panels))
   const activePanel = panels.find((panel) => panel.id === activePanelID) || panels[0]
-  const anchor = assetAnchor('service', service.id)
+  const showPanelTabs = panels.length > 1
+  const anchor = assetAnchor(anchorPrefix, 'service', service.id)
 
   useEffect(() => {
     if (!panels.some((panel) => panel.id === activePanelID)) {
@@ -157,7 +141,7 @@ function ServiceRow({ service }: { service: ServiceNode }) {
   if (panels.length === 0) {
     return (
       <div id={anchor} className="scroll-mt-24 py-3 first:pt-0 last:pb-0">
-        <ServiceLine service={service} />
+        <ServiceLine service={service} anchorPrefix={anchorPrefix} />
       </div>
     )
   }
@@ -170,8 +154,11 @@ function ServiceRow({ service }: { service: ServiceNode }) {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <ServiceLine service={service} expandable />
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <ServiceLine service={service} anchorPrefix={anchorPrefix} expandable />
+      </summary>
+
+      {showPanelTabs && (
+        <div className="mt-2 flex flex-wrap gap-4 border-b border-border/50 sm:ml-6">
           {panels.map((panel) => (
             <TabChip
               key={panel.id}
@@ -182,10 +169,18 @@ function ServiceRow({ service }: { service: ServiceNode }) {
             />
           ))}
         </div>
-      </summary>
+      )}
 
       {activePanel && (
-        <div className="mt-3">
+        <div className="mt-3 sm:ml-6">
+          {!showPanelTabs && (
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+              <span>{t(activePanel.labelKey)}</span>
+              {typeof activePanel.count === 'number' && activePanel.count > 0 && (
+                <span className="tabular-nums text-muted-foreground/70">{activePanel.count}</span>
+              )}
+            </div>
+          )}
           {activePanel.render()}
         </div>
       )}
@@ -193,29 +188,40 @@ function ServiceRow({ service }: { service: ServiceNode }) {
   )
 }
 
-function ServiceLine({ service, expandable = false }: { service: ServiceNode; expandable?: boolean }) {
+function ServiceLine({
+  service,
+  anchorPrefix,
+  expandable = false,
+}: {
+  service: ServiceNode
+  anchorPrefix: string
+  expandable?: boolean
+}) {
   const { t } = useTranslation('findings')
   const displayTarget = service.web ? service.asset.target : service.target
   const aiStatus = serviceAIStatus(service)
+  const port = service.port && service.port.toLowerCase() !== (service.service || service.protocol).toLowerCase()
+    ? service.port
+    : '—'
 
   return (
-    <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+    <div className="min-w-0">
       <div className="flex min-w-0 items-start gap-2">
         {expandable ? (
           <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open/service:rotate-90" />
         ) : (
           <span className="h-3.5 w-3.5 shrink-0" />
         )}
-        <span className="w-[4.75rem] shrink-0 break-words font-mono text-sm font-semibold leading-5 text-foreground">
-          {service.port || '-'}
+        <span className="w-12 shrink-0 break-words font-mono text-sm font-semibold leading-5 text-foreground">
+          {port}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ServiceIcon service={service} />
             <span className="font-medium text-foreground">{service.service || service.protocol || 'service'}</span>
-            <AnchorLink id={assetAnchor('service', service.id)} label={t('linkTo', { name: service.target || service.service || service.port })} />
+            <AnchorLink id={assetAnchor(anchorPrefix, 'service', service.id)} label={t('linkTo', { name: service.target || service.service || service.port })} />
             {service.protocol && service.protocol !== service.service && <Badge>{service.protocol}</Badge>}
-            {service.web && <Badge tone="cyan">{service.pathCount > 0 ? t('webCount', { count: service.pathCount }) : t('web')}</Badge>}
+            {service.web && service.pathCount === 0 && <span className="text-[11px] text-muted-foreground">{t('web')}</span>}
             {aiStatus === 'verified' && (
               <UIBadge size="sm" variant="success"><CheckCircle2 className="h-3 w-3" />{t('aiVerified')}</UIBadge>
             )}
@@ -232,20 +238,16 @@ function ServiceLine({ service, expandable = false }: { service: ServiceNode; ex
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             {displayTarget && <span className="break-all font-mono">{displayTarget}</span>}
             {service.summary && <span className="break-words">{service.summary}</span>}
-            {service.statuses.slice(0, 5).map((status) => (
+            {service.pathCount === 0 && service.statuses.slice(0, 5).map((status) => (
               <Badge key={`http:${status}`} tone={statusCodeTone(status)}>{status}</Badge>
             ))}
             {service.states.slice(0, 3).map((state) => (
               <Badge key={`state:${state}`} tone={itemStateTone(state)}>{state}</Badge>
             ))}
             <FingerChips fingers={service.fingers} />
-            {service.analysisItems.length > 0 && (
-              <span className="text-primary">{t('analysisCount', { count: service.analysisItems.length })}</span>
-            )}
           </div>
         </div>
       </div>
-      <SourceChips sources={service.sources} className="justify-start sm:justify-end" />
     </div>
   )
 }
@@ -260,7 +262,7 @@ function ServiceIcon({ service }: { service: ServiceNode }) {
   return <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 }
 
-function servicePanels(service: ServiceNode): AssetPanel[] {
+function servicePanels(service: ServiceNode, anchorPrefix: string): AssetPanel[] {
   const panels: AssetPanel[] = []
   if (service.paths.length > 0) {
     panels.push({
@@ -276,7 +278,7 @@ function servicePanels(service: ServiceNode): AssetPanel[] {
       id: 'analysis',
       labelKey: 'analysis',
       count: service.analysisItems.length,
-      render: () => <AssetItemsBlock asset={service.asset} items={service.analysisItems} />,
+      render: () => <AssetItemsBlock asset={service.asset} items={service.analysisItems} anchorPrefix={anchorPrefix} />,
     })
   }
   return panels
@@ -288,7 +290,7 @@ function defaultPanelID(panels: AssetPanel[]) {
 
 function ItemFactLine({ item, search, className }: { item: AssetItem; search?: string; className?: string }) {
   const facts = itemFacts(item)
-  if (facts.statuses.length === 0 && facts.states.length === 0 && facts.fingers.length === 0 && facts.sources.length === 0 && !search) {
+  if (facts.statuses.length === 0 && facts.states.length === 0 && facts.fingers.length === 0 && !search) {
     return null
   }
   return (
@@ -300,28 +302,27 @@ function ItemFactLine({ item, search, className }: { item: AssetItem; search?: s
         <Badge key={`state:${state}`} tone={itemStateTone(state)}>{state}</Badge>
       ))}
       <FingerChips fingers={facts.fingers} />
-      <SourceChips sources={facts.sources} />
       {search && <span className="break-all font-mono text-muted-foreground">{search}</span>}
     </div>
   )
 }
 
-function AssetItemsBlock({ asset, items }: { asset: ViewAsset; items: AssetItem[] }) {
+function AssetItemsBlock({ asset, items, anchorPrefix }: { asset: ViewAsset; items: AssetItem[]; anchorPrefix: string }) {
   return (
     <div className="space-y-2">
       {items.map((item, idx) => (
-        <AssetItemRow key={`${item.kind}-${item.source}-${item.target}-${item.title}-${idx}`} item={item} asset={asset} />
+        <AssetItemRow key={`${item.kind}-${item.source}-${item.target}-${item.title}-${idx}`} item={item} asset={asset} anchorPrefix={anchorPrefix} />
       ))}
     </div>
   )
 }
 
-function AssetItemRow({ item, asset }: { item: AssetItem; asset: ViewAsset }) {
+function AssetItemRow({ item, asset, anchorPrefix }: { item: AssetItem; asset: ViewAsset; anchorPrefix: string }) {
   const { t } = useTranslation('findings')
   const markdown = isAnalysisItem(item)
   const title = markdown ? firstText(item.summary, item.title) : itemTitle(item)
   const detail = itemContent(item)
-  const anchor = assetAnchor('item', itemAnchorValue(item, asset))
+  const anchor = assetAnchor(anchorPrefix, 'item', itemAnchorValue(item, asset))
   const showTarget = item.target && !sameTarget(item.target, asset.target)
   const headerBadges = [
     { id: `kind:${item.kind}`, label: item.kind, tone: itemKindTone(item.kind) },
@@ -422,8 +423,8 @@ function AnchorLink({ id, label }: { id: string; label: string }) {
   )
 }
 
-function assetAnchor(prefix: string, value: string) {
-  return `asset-${prefix}-${anchorSlug(value)}`
+function assetAnchor(namespace: string, prefix: string, value: string) {
+  return ['asset', namespace && anchorSlug(namespace), prefix, anchorSlug(value)].filter(Boolean).join('-')
 }
 
 function itemAnchorValue(item: AssetItem, asset: ViewAsset) {
@@ -494,9 +495,9 @@ function SitemapBlock({ items }: { items: AssetItem[] }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-background/30">
+    <div className="overflow-hidden rounded-md border border-border/60 bg-muted/10">
       {folderIDs.length > 0 && (
-        <div className="flex items-center justify-end gap-1 border-b border-border/70 px-2 py-1">
+        <div className="flex items-center justify-end gap-1 border-b border-border/60 px-2 py-1">
           <IconButton label={t('expandAll')} onClick={() => setOpenIDs(new Set(folderIDs))}>
             <FolderOpen className="h-3.5 w-3.5" />
           </IconButton>
@@ -505,7 +506,7 @@ function SitemapBlock({ items }: { items: AssetItem[] }) {
           </IconButton>
         </div>
       )}
-      <div role="tree" aria-label={t('sitemap')}>
+      <div>
         {tree.map((node) => (
           <SitemapTreeNode
             key={node.id}
@@ -533,14 +534,15 @@ function SitemapTreeNode({
 }) {
   const isFolder = node.children.length > 0
   const isOpen = openIDs.has(node.id)
-  const paddingLeft = `${0.6 + depth * 1.15}rem`
+  const paddingLeft = `${0.6 + Math.min(depth, 4) * 1.15}rem`
   const count = node.children.length + node.items.length
 
   if (isFolder) {
     return (
-      <div role="treeitem" aria-expanded={isOpen}>
+      <div>
         <button
           type="button"
+          aria-expanded={isOpen}
           className="flex w-full items-center gap-2 py-1.5 pr-3 text-left text-xs hover:bg-secondary/40"
           style={{ paddingLeft }}
           onClick={() => onToggle(node.id)}
@@ -550,15 +552,15 @@ function SitemapTreeNode({
             isOpen && 'rotate-90',
           )} />
           {isOpen ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
           ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
           <span className="min-w-0 flex-1 truncate font-mono text-foreground">{node.name}</span>
           <span className="shrink-0 text-muted-foreground">{count}</span>
         </button>
         {isOpen && (
-          <div role="group">
+          <div>
             {node.items.map((item, idx) => (
               <EndpointFile key={`${pathIdentity(item)}:${idx}`} item={item} depth={depth + 1} />
             ))}
@@ -587,45 +589,89 @@ function SitemapTreeNode({
 }
 
 function EndpointFile({ item, depth }: { item: AssetItem; depth: number }) {
-  const paddingLeft = `${0.6 + depth * 1.15}rem`
-  const filename = endpointFileName(item)
+  const { t } = useTranslation('findings')
+  const paddingLeft = `${0.6 + Math.min(depth, 4) * 1.15}rem`
+  // endpointFileName folds the query onto the basename; strip it so the search
+  // string can render dimmed on its own, matching the deck's sitemap tree.
+  const filename = endpointFileName(item).split('?')[0] || '/'
   const search = pathSearch(item)
+  const status = pathStatus(item)
+  const token = contentToken(item)
+  const redirect = redirectTarget(item)
+  const url = findingTargetURL(item.target) || findingTargetURL(endpointDataURL(item))
+  const isJS = token === 'JS'
 
-  return (
-    <div role="treeitem" className="py-1.5 pr-3 text-xs hover:bg-secondary/30" style={{ paddingLeft }}>
-      <div className="flex flex-wrap items-center gap-2">
+  const body = (
+    <>
+      {isJS ? (
+        <FileCode2 className="h-3.5 w-3.5 shrink-0 text-warning" />
+      ) : (
         <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="break-all font-mono text-foreground">{filename}</span>
-        {item.title && <span className="text-muted-foreground">{item.title}</span>}
-      </div>
-      <ItemFactLine item={item} search={search} className="mt-1 pl-5" />
+      )}
+      <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+        {filename}
+        {search && <span className="text-muted-foreground">{search}</span>}
+      </span>
+      {item.title && <span className="hidden min-w-0 truncate text-muted-foreground sm:inline">{item.title}</span>}
+      {redirect && (
+        <span title={`→ ${redirect}`} className="shrink-0 text-muted-foreground/60">
+          <CornerDownRight className="h-3 w-3" />
+          <span className="sr-only">{t('redirectsTo', { url: redirect })}</span>
+        </span>
+      )}
+      {token && (
+        <span className={cn(
+          'shrink-0 rounded-[3px] px-1 py-px font-mono text-[10px] font-semibold uppercase',
+          token === 'JS'
+            ? 'bg-warning/15 text-warning'
+            : token === 'JSON' || token === 'XML'
+              ? 'bg-info/15 text-info'
+              : 'bg-secondary text-muted-foreground',
+        )}>
+          {token}
+        </span>
+      )}
+      {status && (
+        <span className={cn('shrink-0 rounded-[3px] px-1 py-px font-mono text-[10px] font-semibold', badgeToneClass[statusCodeTone(status)])}>
+          {status}
+        </span>
+      )}
+    </>
+  )
+
+  const rowClass = 'flex items-center gap-2 py-1.5 pr-3 text-xs hover:bg-secondary/30'
+  if (url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        title={t('openTargetUrl', { url })}
+        className={rowClass}
+        style={{ paddingLeft }}
+      >
+        {body}
+      </a>
+    )
+  }
+  return (
+    <div className={rowClass} style={{ paddingLeft }}>
+      {body}
     </div>
   )
 }
 
-function SourceChips({ sources, className }: { sources: string[]; className?: string }) {
-  const { t } = useTranslation('findings')
-  if (sources.length === 0) {
-    return null
-  }
+function pathStatus(item: AssetItem): string {
+  if (item.status) return item.status
+  const raw = item.data?.status
+  if (typeof raw === 'string') return raw
+  if (typeof raw === 'number' && raw > 0) return String(raw)
+  return ''
+}
 
-  const visible = sources.slice(0, 5)
-  const hidden = sources.length - visible.length
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn('inline-flex min-w-0 flex-wrap items-center gap-1 text-primary', className)}>
-          <Server className="h-3 w-3 shrink-0" />
-          {visible.map((source) => (
-            <Badge key={`source:${source}`} tone="cyan">{source}</Badge>
-          ))}
-          {hidden > 0 && <Badge tone="cyan">+{hidden}</Badge>}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{t('sources')}</TooltipContent>
-    </Tooltip>
-  )
+function endpointDataURL(item: AssetItem): string | undefined {
+  const raw = item.data?.url
+  return typeof raw === 'string' ? raw : undefined
 }
 
 function FingerChips({ fingers }: { fingers: string[] }) {
@@ -667,11 +713,11 @@ function IconButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="icon-xs"
           aria-label={label}
           onClick={onClick}
-          className="border-border text-muted-foreground"
+          className="text-muted-foreground"
         >
           {children}
         </Button>
@@ -693,19 +739,29 @@ function TabChip({
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
 }) {
   return (
-    <Chip active={active} onClick={onClick} className="gap-1 rounded px-2 text-[10px]">
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        '-mb-px inline-flex items-center gap-1 border-b-2 px-0 py-1.5 text-[11px] font-medium transition-colors',
+        active
+          ? 'border-primary text-foreground'
+          : 'border-transparent text-muted-foreground hover:text-foreground',
+      )}
+    >
       {label}
       {typeof count === 'number' && count > 0 && <span className="opacity-70">{count}</span>}
-    </Chip>
+    </button>
   )
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="bg-card/50">
-      <CardHeader className="border-b border-border px-4 py-2 text-sm font-medium text-primary">{title}</CardHeader>
-      <CardContent className="p-4">{children}</CardContent>
-    </Card>
+    <section>
+      <h4 className="border-b border-border/60 pb-2 text-xs font-semibold text-foreground">{title}</h4>
+      <div className="pt-1">{children}</div>
+    </section>
   )
 }
 

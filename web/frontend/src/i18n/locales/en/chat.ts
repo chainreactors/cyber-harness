@@ -11,6 +11,20 @@ export default {
   ready: 'Ready',
   readyHintBefore: 'Type a message or use ',
   readyHintAfter: ' to start scanning',
+  // Mobile greeting empty state + capability cards (mobile only; desktop keeps InstrumentIdle)
+  mobileGreetingTitle: "Hi, I'm AIScan",
+  mobileGreetingSubtitle: 'Name a target, or pick one below',
+  cardScanTitle: 'Run a scan',
+  cardScanSub: 'Ports + web fingerprint',
+  cardVerifyTitle: 'Verify a finding',
+  cardVerifySub: 'Re-check known issues',
+  cardVerifySeed: 'Re-verify this finding: ',
+  cardAssetsTitle: 'Asset roundup',
+  cardAssetsSub: 'Roll into inventory',
+  cardAssetsSeed: 'Roll the latest scan results into an asset inventory',
+  cardSwarmTitle: 'Fleet sweep',
+  cardSwarmSub: 'Parallel agents',
+  cardSwarmSeed: 'Dispatch multiple agents to reproduce these findings in parallel: ',
   you: 'You',
   system: 'System',
   scan: 'Scan',
@@ -50,8 +64,8 @@ export default {
   agentOfflineBanner: 'The bound agent is offline — reconnect it to continue chatting (/help and /agents still work).',
   deleteSessionConfirm: 'Delete this session? Its transcript is removed and the live connection is closed. This cannot be undone.',
   // Screen-reader-only turn status (polite live region).
-  a11yThinking: 'Cortex is working',
-  a11yResponding: 'Cortex is responding',
+  a11yThinking: 'AIScan is working',
+  a11yResponding: 'AIScan is responding',
   a11yTurnDone: 'Response complete',
   // Backend system messages (localized by code; English here is also the fallback).
   // Mirrors the Sys* codes in pkg/web.

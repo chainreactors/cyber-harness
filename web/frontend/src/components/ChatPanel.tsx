@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import {
@@ -6,8 +6,12 @@ import {
   CheckCircle2,
   FileText,
   GitBranch,
+  Layers,
   Loader2,
   MessageSquare,
+  Network,
+  Radar,
+  RefreshCw,
   Sparkles,
   Target,
   User,
@@ -90,8 +94,6 @@ interface Props {
   onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
   onPause: () => void
   onClearError: () => void
-  onShowScanDetail: (scanID: string) => void
-  detailOpen: boolean
 }
 
 export default function ChatPanel({
@@ -109,8 +111,6 @@ export default function ChatPanel({
   onSend,
   onPause,
   onClearError,
-  onShowScanDetail,
-  detailOpen,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -121,11 +121,10 @@ export default function ChatPanel({
   const hasAssistantResponse = timeline.some((item) => item.kind === 'assistant_response')
   // The right rail carries IOA thread notes, which only a fraction of turns emit.
   // Reserve its 6rem column only when the transcript actually has one — otherwise
-  // the empty rail just steals horizontal space from the conversation. (When the
-  // scan-detail drawer is open the rail is already suppressed.)
+  // the empty rail just steals horizontal space from the conversation.
   const hasThreadNotes = useMemo(
-    () => !detailOpen && timeline.some((item) => describeIOAThreadItem(item, t) !== null),
-    [timeline, detailOpen, t],
+    () => timeline.some((item) => describeIOAThreadItem(item, t) !== null),
+    [timeline, t],
   )
   const inputFormClass = cn(contentOffsetClass, hasThreadNotes && threadOffsetClass)
   const [persist, setPersist] = useState(false)
@@ -142,6 +141,20 @@ export default function ChatPanel({
   // (a live region on the growing text would restart the reader on every delta).
   const [liveStatus, setLiveStatus] = useState('')
   const wasActiveRef = useRef(false)
+
+  // Composer seed — the mobile greeting's capability cards push a starter prompt
+  // into the composer through ChatInput's injectText (nonce-guarded append). Own
+  // the nonce here so each card tap reliably re-injects; still fold in an external
+  // injectText if one ever arrives (the asset-pool source is gone, so it's inert).
+  const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number }>(
+    () => injectText ?? { text: '', nonce: 0 },
+  )
+  useEffect(() => {
+    if (injectText && injectText.nonce > 0) setComposerSeed(injectText)
+  }, [injectText])
+  const seedComposer = useCallback((text: string) => {
+    setComposerSeed((s) => ({ text, nonce: s.nonce + 1 }))
+  }, [])
 
   function sendOpts() {
     if (!persist) return undefined
@@ -309,7 +322,7 @@ export default function ChatPanel({
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
           <div className={cn(workspaceClass, 'space-y-3 py-4')}>
             {!hasActiveSession && timeline.length === 0 && (
@@ -323,13 +336,21 @@ export default function ChatPanel({
             )}
             {hasActiveSession && timeline.length === 0 && !isThinking && (
               <div className={inputFormClass}>
-                <EmptyState
-                  eyebrow={t('readyEyebrow')}
-                  title={t('ready')}
-                  subtitle={
-                    <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
-                  }
-                />
+                {/* Desktop keeps the idle "instrument" empty state; phones get the
+                    Doubao-style greeting + capability cards (mobile-only, so the
+                    deck's identity is untouched at md+). */}
+                <div className="hidden md:block">
+                  <EmptyState
+                    eyebrow={t('readyEyebrow')}
+                    title={t('ready')}
+                    subtitle={
+                      <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
+                    }
+                  />
+                </div>
+                <div className="md:hidden">
+                  <MobileChatGreeting onSeed={seedComposer} />
+                </div>
               </div>
             )}
 
@@ -339,7 +360,6 @@ export default function ChatPanel({
                 item={item}
                 scanResults={scanResults}
                 hasThreadNotes={hasThreadNotes}
-                onShowScanDetail={onShowScanDetail}
               />
             ))}
 
@@ -361,7 +381,7 @@ export default function ChatPanel({
         </div>
 
         {hasActiveSession && (
-          <div ref={footerRef} className="bg-background/95 backdrop-blur-sm">
+          <div ref={footerRef} className="bg-background/95 pb-safe backdrop-blur-sm">
             {agentOffline && (
               <div className={cn(workspaceClass, 'pt-2')}>
                 <div className={inputFormClass}>
@@ -420,7 +440,7 @@ export default function ChatPanel({
                           variant="ghost"
                           active={persist}
                           onClick={() => setPersist((v) => !v)}
-                          className={cn('h-10 shrink-0 gap-1.5 rounded-full px-3.5 text-xs', !persist && 'text-muted-foreground')}
+                          className={cn('h-9 shrink-0 gap-1.5 rounded-full px-3 text-xs md:h-10 md:px-3.5', !persist && 'text-muted-foreground')}
                         >
                           <Target className="h-3.5 w-3.5" />
                           {t('persistMode')}
@@ -434,7 +454,7 @@ export default function ChatPanel({
                   busy={isBusy}
                   commands={chatCommands}
                   mentionables={mentionables}
-                  injectText={injectText}
+                  injectText={composerSeed}
                   placeholder={t('typeMessageWithCommands')}
                   enableAttachments={!!activeSessionID}
                 />
@@ -452,20 +472,18 @@ export default function ChatPanel({
 // changes. Without memo, timeline.map re-renders EVERY settled entry each token
 // — and each MessageBubble re-parses its markdown (remark) from scratch, so a
 // 40-message transcript re-parses 40 docs per token. A shallow prop compare lets
-// unchanged entries bail out; it holds only because `onShowScanDetail` is now a
-// stable useCallback in App and `scanResults`/`detailOpen` don't change mid-stream.
+// unchanged entries bail out because settled item references and the scan-results
+// map stay stable while an unrelated response streams.
 const TimelineEntry = memo(function TimelineEntry({
   item,
   scanResults,
   hasThreadNotes,
-  onShowScanDetail,
 }: {
   item: TimelineItem
   scanResults: Map<string, ScanResult>
   hasThreadNotes: boolean
-  onShowScanDetail: (scanID: string) => void
 }) {
-  const content = timelineContent(item, scanResults, onShowScanDetail)
+  const content = timelineContent(item, scanResults)
   if (!content) return null
 
   return (
@@ -506,7 +524,6 @@ function TimelineRow({
 function timelineContent(
   item: TimelineItem,
   scanResults: Map<string, ScanResult>,
-  onShowScanDetail: (scanID: string) => void,
 ): ReactNode {
   switch (item.kind) {
     case 'message':
@@ -547,12 +564,13 @@ function timelineContent(
     case 'scan_started':
     case 'scan_progress':
     case 'scan_complete': {
+      if (item.kind !== 'scan_complete' && item.scanID && scanResults.has(item.scanID)) return null
       const ext = toExtensionItem(item) as ExtensionTimelineItem | null
       if (!ext) return null
       const config = resolveTimelineRenderer(ext.extensionType)
       if (!config) return null
       const Renderer = config.renderer
-      return <Renderer item={ext} context={{ scanResults, onShowScanDetail }} />
+      return <Renderer item={ext} context={{ scanResults }} />
     }
 
     case 'thinking':
@@ -710,6 +728,43 @@ function IOAThreadNote({ item }: { item: TimelineItem }) {
 
 function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: ReactNode }) {
   return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} className="py-16" />
+}
+
+// Phone-only greeting for a fresh, empty session: an AIScan hello + a 2×2 grid of
+// capability cards, each seeding the composer with a starter prompt (Doubao's
+// home pattern). Kept in AIScan's own skin — blue accent, warm reserved for
+// severity, no mascot. The scan card seeds the real "/scan " command; the others
+// seed editable natural-language templates the operator completes.
+function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
+  const { t } = useTranslation('chat')
+  const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
+    { key: 'scan', Icon: Radar, seed: '/scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
+    { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
+    { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
+    { key: 'swarm', Icon: Network, seedKey: 'cardSwarmSeed', titleKey: 'cardSwarmTitle', subKey: 'cardSwarmSub' },
+  ]
+  return (
+    <div className="px-1 pb-2 pt-8">
+      <h2 className="text-balance text-[1.35rem] font-bold leading-tight tracking-tight text-foreground">{t('mobileGreetingTitle')}</h2>
+      <p className="mb-5 mt-1 text-sm text-muted-foreground">{t('mobileGreetingSubtitle')}</p>
+      <div className="grid grid-cols-2 gap-2.5">
+        {cards.map(({ key, Icon, seed, seedKey, titleKey, subKey }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onSeed(seed ?? t(seedKey!))}
+            className="flex flex-col gap-2 rounded-[0.7rem] border border-border/75 bg-card p-3.5 text-left shadow-soft transition-transform active:scale-[0.98]"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-primary">
+              <Icon className="h-[18px] w-[18px]" />
+            </span>
+            <span className="text-sm font-semibold text-foreground">{t(titleKey)}</span>
+            <span className="text-[11.5px] leading-snug text-muted-foreground">{t(subKey)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 interface TimelineDescriptor {

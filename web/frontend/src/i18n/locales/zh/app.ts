@@ -34,4 +34,6 @@ export default {
   llmChecking: '检测中…',
   llmUnreachable: 'LLM 不可达',
   llmHealthSettings: '点击打开设置',
+  // 手机端会话抽屉（顶栏汉堡打开）
+  openSessions: '对话历史',
 }

@@ -63,6 +63,6 @@ export default {
   tdTools: '工具',
   tdTokens: 'Token',
   tdAssets: '资产',
-  tdLoots: '战利品',
+  tdLoots: '发现项',
   tdLast: '最近事件',
 }

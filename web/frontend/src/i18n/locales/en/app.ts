@@ -34,4 +34,6 @@ export default {
   llmChecking: 'Checking…',
   llmUnreachable: 'LLM unreachable',
   llmHealthSettings: 'Click to open settings',
+  // Mobile session drawer (opened from the header menu button)
+  openSessions: 'Chat history',
 }

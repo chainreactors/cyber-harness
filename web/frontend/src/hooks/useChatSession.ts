@@ -105,7 +105,6 @@ interface SessionSnapshot {
   messages: ChatMessage[]
   timeline: TimelineItem[]
   scanResults: Map<string, ScanResult>
-  detailScanID: string | null
 }
 
 // A node's stable identity across reconnects. The hub mints a fresh transient
@@ -149,7 +148,6 @@ export function useChatSession() {
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const timelineRef = useRef<TimelineItem[]>([])
   const [scanResults, setScanResults] = useState<Map<string, ScanResult>>(() => new Map())
-  const [detailScanID, setDetailScanID] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
   const [pendingResponse, setPendingResponse] = useState(false)
   const [error, setError] = useState('')
@@ -185,8 +183,8 @@ export function useChatSession() {
   // never file the incoming session's state under the outgoing session's key.
   useEffect(() => {
     if (!activeSessionID) return
-    sessionCacheRef.current.set(activeSessionID, { messages, timeline, scanResults, detailScanID })
-  }, [activeSessionID, messages, timeline, scanResults, detailScanID])
+    sessionCacheRef.current.set(activeSessionID, { messages, timeline, scanResults })
+  }, [activeSessionID, messages, timeline, scanResults])
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -255,7 +253,6 @@ export function useChatSession() {
     timelineRef.current = []
     setTimeline([])
     setScanResults(new Map())
-    setDetailScanID(null)
     resetTransientState()
   }
 
@@ -267,7 +264,6 @@ export function useChatSession() {
     timelineRef.current = snap.timeline
     setTimeline(snap.timeline)
     setScanResults(snap.scanResults)
-    setDetailScanID(snap.detailScanID)
     resetTransientState()
   }
 
@@ -582,7 +578,6 @@ export function useChatSession() {
             next.set(event.scan_id!, event.result!)
             return next
           })
-          setDetailScanID((current) => current || event.scan_id!)
           appendTimeline({
             id: `scanres-${event.scan_id}`,
             kind: 'scan_complete',
@@ -783,6 +778,23 @@ export function useChatSession() {
         continue
       }
 
+      if (eventType === 'scan_complete') {
+        beginNextEvalRound()
+        const scanID = metadataString(msg.metadata, 'scan_id')
+        if (!scanID) continue
+        // The heavy Result isn't persisted in the message — the card pulls it from
+        // the scanResults map (loaded from the session's scan_ids on activation),
+        // so this item only needs to carry the scan_id. Same id as the live append
+        // so a rebuild that races the live event upserts instead of duplicating.
+        built.push({
+          id: `scanres-${scanID}`,
+          kind: 'scan_complete',
+          timestamp,
+          scanID,
+        })
+        continue
+      }
+
       if (eventType === 'eval') {
         beginNextEvalRound()
         const pass = metadataBool(msg.metadata, 'eval_pass')
@@ -913,7 +925,7 @@ export function useChatSession() {
         )
         // A session switch during scan loading bumps activationRef; discard
         // these stale results instead of writing them into the new session's
-        // scanResults map (which would also mis-point detailScanID).
+        // scanResults map.
         if (activation !== activationRef.current) return
         const withResult = loaded.filter((e) => e.result)
         if (withResult.length) {
@@ -922,7 +934,6 @@ export function useChatSession() {
             for (const e of withResult) next.set(e.scanID, e.result!)
             return next
           })
-          setDetailScanID((current) => current || withResult[0].scanID)
         }
       }
     } catch {}
@@ -1155,9 +1166,6 @@ export function useChatSession() {
     }
   }, [])
 
-  // Stable identities so memoized consumers (ChatPanel's TimelineEntry) aren't
-  // busted every render by a fresh closure. setState setters are already stable.
-  const showScanDetail = useCallback((scanID: string) => setDetailScanID(scanID), [])
   const clearError = useCallback(() => setError(''), [])
 
   return {
@@ -1167,7 +1175,6 @@ export function useChatSession() {
     activeSessionID,
     timeline,
     scanResults,
-    detailScanID,
     isThinking,
     busy: pendingResponse || isThinking || timeline.some((item) => (
       item.kind === 'assistant_response' && item.assistantResponse?.streaming
@@ -1188,7 +1195,6 @@ export function useChatSession() {
     startReportSession,
     batchQuickDispatch,
     cancelMessage: handleCancelMessage,
-    showScanDetail,
     clearError,
   }
 }

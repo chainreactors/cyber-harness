@@ -25,7 +25,6 @@ export default {
   // ScanHistory
   noScansYet: 'No scans yet.',
   assets: 'assets',
-  loots: 'loots',
 
   // ScanWorkspace
   hideDetails: 'Hide details',
@@ -43,11 +42,6 @@ export default {
 
   // chat/ScanSummaryCard
   scanComplete: 'Scan Complete',
-  assetsLabel: 'Assets',
-  servicesLabel: 'Services',
-  lootsLabel: 'Loots',
-  errorsLabel: 'Errors',
-  viewDetails: 'View Details',
 
   // analysis option badges (ScanForm / ScanView / ScanHistory)
   optVerify: 'Verify',

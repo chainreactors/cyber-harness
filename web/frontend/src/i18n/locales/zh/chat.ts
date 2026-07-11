@@ -11,6 +11,20 @@ export default {
   ready: '就绪',
   readyHintBefore: '输入消息，或使用 ',
   readyHintAfter: ' 开始扫描',
+  // 手机端问候空状态 + 能力卡（仅移动端；桌面仍用 InstrumentIdle）
+  mobileGreetingTitle: '嗨，我是 AIScan',
+  mobileGreetingSubtitle: '说个目标，或从下面挑一个开始',
+  cardScanTitle: '发起扫描',
+  cardScanSub: '端口 + Web 指纹',
+  cardVerifyTitle: '复测漏洞',
+  cardVerifySub: '重新验证发现',
+  cardVerifySeed: '复测一下这个发现：',
+  cardAssetsTitle: '资产梳理',
+  cardAssetsSub: '并成资产清单',
+  cardAssetsSeed: '把本次扫描结果整理成一张资产清单',
+  cardSwarmTitle: '机群协同',
+  cardSwarmSub: '多 Agent 并行',
+  cardSwarmSeed: '派多个 Agent 并行复现这些发现：',
   you: '你',
   system: '系统',
   scan: '扫描',
@@ -50,8 +64,8 @@ export default {
   agentOfflineBanner: '绑定的 agent 已离线，重连后可继续对话（/help、/agents 命令仍可用）。',
   deleteSessionConfirm: '确定删除该会话？其对话记录将被移除、实时连接会断开，此操作不可撤销。',
   // 仅供屏幕阅读器的回合状态（polite live region）。
-  a11yThinking: 'Cortex 正在处理',
-  a11yResponding: 'Cortex 正在回复',
+  a11yThinking: 'AIScan 正在处理',
+  a11yResponding: 'AIScan 正在回复',
   a11yTurnDone: '回复完成',
   // 后端系统消息(按 code 本地化;英文原文仅作兜底)。与 pkg/web 的 Sys* 常量一一对应。
   sys: {

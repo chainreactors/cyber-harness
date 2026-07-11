@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, lazy, Suspense, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Monitor, Settings } from 'lucide-react'
+import { Menu, Monitor, Settings } from 'lucide-react'
 import LanguageToggle from './components/LanguageToggle'
 import SessionList from './components/SessionList'
 import ChatPanel from './components/ChatPanel'
-import DetailPanel from './components/DetailPanel'
 import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
 import LLMHealth from './components/LLMHealth'
@@ -58,21 +57,12 @@ export default function App() {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
   const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
-  const [detailOpen, setDetailOpen] = useState(true)
   // Bumped after a settings save so the header LLM health dot re-probes.
   const [healthNonce, setHealthNonce] = useState(0)
   // Track the terminal target by the node's STABLE key, not its transient agent
   // id: the hub mints a fresh id on every reconnect, so keying on id would drop
   // the terminal (and never restore it) when a node bounces to reload config.
   const [terminalNodeKey, setTerminalNodeKey] = useState<string | null>(null)
-
-  // Stable so ChatPanel's memoized TimelineEntry rows aren't re-rendered on every
-  // streamed token. chat.showScanDetail is itself a stable useCallback. Scan
-  // detail here is an agent-run scan surfaced inside the conversation.
-  const handleShowScanDetail = useCallback((scanID: string) => {
-    chat.showScanDetail(scanID)
-    setDetailOpen(true)
-  }, [chat.showScanDetail])
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -93,8 +83,6 @@ export default function App() {
     window.localStorage.setItem(sidebarStorageKey, String(sidebarOpen))
   }, [sidebarOpen])
 
-  const detailResult = chat.detailScanID ? chat.scanResults.get(chat.detailScanID) ?? null : null
-  const showDetail = detailOpen && !!chat.detailScanID && !!detailResult
   const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
 
   const model = serverStatus?.llm_model || chat.agents.find((a) => a.identity?.model)?.identity?.model || 'cortex'
@@ -104,20 +92,32 @@ export default function App() {
   // can't be dispatched until it reconnects — surface that in the chat panel.
   const activeAgentOffline = !!activeSession && !isSessionAgentOnline(activeSession, chat.agents)
 
+  // On phones the sidebar is an overlay drawer (see SessionList); entering a
+  // conversation or terminal should dismiss it so the content isn't left covered.
+  // No-op at md+ where the sidebar is a docked rail that shares the row.
+  function closeSidebarOnMobile() {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      setSidebarOpen(false)
+    }
+  }
+
   function handleOpenTerminal(agentID: string) {
     const a = chat.agents.find((x) => x.id === agentID)
     setTerminalNodeKey(a ? agentNodeKey(a) : agentID)
     chat.selectAgent(agentID)
+    closeSidebarOnMobile()
   }
 
   function handleSelectSession(id: string) {
     setTerminalNodeKey(null)
     chat.selectSession(id)
+    closeSidebarOnMobile()
   }
 
   function handleCreateSession(agentID: string) {
     setTerminalNodeKey(null)
     chat.createSession(agentID)
+    closeSidebarOnMobile()
   }
 
   // Deleting a session also tears down its live subscription, so confirm first —
@@ -142,12 +142,23 @@ export default function App() {
   return (
     <ThemeProvider initial={getInitialTheme()} storageKey="aiscan-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen flex-col overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4">
-          <div className="flex items-center gap-2">
+      <div className="flex h-[100dvh] flex-col overflow-hidden">
+        <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 pt-safe sm:px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* Phone-only drawer opener — the collapsed sidebar is hidden below md,
+                so the session history opens from here (Doubao-style). */}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setSidebarOpen(true)}
+              aria-label={t('openSessions')}
+              className="-ml-1 shrink-0 text-muted-foreground md:hidden"
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
             <BrandLogo size={22} />
-            <span className="text-sm font-semibold tracking-tight text-foreground">AIScan</span>
-            <span className="ml-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{model}</span>
+            <span className="truncate text-sm font-semibold tracking-tight text-foreground">AIScan</span>
+            <span className="ml-1 hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">{model}</span>
             <LLMHealth onOpenSettings={() => setConfigOpen(true)} reloadSignal={healthNonce} />
           </div>
           <div className="flex items-center gap-2">
@@ -186,43 +197,22 @@ export default function App() {
               </div>
             </section>
           ) : (
-            <>
-              <ChatPanel
-                timeline={chat.timeline}
-                scanResults={chat.scanResults}
-                isThinking={chat.isThinking}
-                isBusy={chat.busy}
-                error={chat.error}
-                activeSessionID={chat.activeSessionID}
-                hasActiveSession={chat.activeSessionID !== null}
-                agentOffline={activeAgentOffline}
-                agentName={activeSession?.agent_name}
-                mentionables={NO_MENTIONABLES}
-                injectText={NO_SEED}
-                onSend={chat.sendMessage}
-                onPause={chat.cancelMessage}
-                onClearError={chat.clearError}
-                onShowScanDetail={handleShowScanDetail}
-                detailOpen={showDetail}
-              />
-
-              {/* Agent-run scans surface a result card in the transcript; clicking
-                  it opens this detail drawer. */}
-              <div
-                className={cn(
-                  'shrink-0 transition-[width,opacity] duration-200 ease-in-out overflow-hidden',
-                  showDetail ? 'w-full lg:w-[28rem] opacity-100' : 'w-0 opacity-0',
-                )}
-              >
-                {showDetail && (
-                  <DetailPanel
-                    scanID={chat.detailScanID!}
-                    result={detailResult}
-                    onClose={() => setDetailOpen(false)}
-                  />
-                )}
-              </div>
-            </>
+            <ChatPanel
+              timeline={chat.timeline}
+              scanResults={chat.scanResults}
+              isThinking={chat.isThinking}
+              isBusy={chat.busy}
+              error={chat.error}
+              activeSessionID={chat.activeSessionID}
+              hasActiveSession={chat.activeSessionID !== null}
+              agentOffline={activeAgentOffline}
+              agentName={activeSession?.agent_name}
+              mentionables={NO_MENTIONABLES}
+              injectText={NO_SEED}
+              onSend={chat.sendMessage}
+              onPause={chat.cancelMessage}
+              onClearError={chat.clearError}
+            />
           )}
         </div>
       </div>

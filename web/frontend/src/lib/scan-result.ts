@@ -23,13 +23,11 @@ export type BadgeSpec = {
 }
 
 export type ResultMetrics = {
-  assets: number
   hosts: number
   services: number
   web: number
   probes: number
   fingers: number
-  loots: number
   errors: number
   duration: string
 }
@@ -55,7 +53,6 @@ export type ServiceNode = {
   target: string
   title: string
   summary: string
-  sources: string[]
   states: string[]
   statuses: string[]
   fingers: string[]
@@ -88,13 +85,11 @@ export function buildResultModel(result: ScanResult): ResultModel {
   return {
     hosts,
     metrics: {
-      assets: assets.length,
       hosts: hosts.length,
       services: result.summary.services,
       web: result.summary.webs,
       probes: result.summary.probes,
       fingers: countFingerprints(assets),
-      loots: result.summary.loots || result.loots?.length || countLootItems(assets),
       errors: result.summary.errors,
       duration: result.summary.duration,
     },
@@ -164,7 +159,6 @@ export function serviceNode(asset: ViewAsset): ServiceNode {
     target,
     title,
     summary,
-    sources: sourceValues(asset.items),
     states: stateValues(asset.items),
     statuses: statusCodeValues(paths),
     fingers: fingerprintValues(asset.items),
@@ -256,6 +250,31 @@ export function pathSearch(item: AssetItem) {
   return idx >= 0 ? path.slice(idx) : ''
 }
 
+// Short content-type token for an endpoint (JS / JSON / CSS / …), derived from
+// the probe's content_type header, falling back to the URL extension so it
+// still flags JS bundles etc. on scans that don't surface the header. HTML —
+// the default page type — deliberately returns '' so it never adds noise.
+export function contentToken(item: AssetItem): string {
+  const ct = dataString(item, 'content_type').toLowerCase()
+  const pathname = (dataString(item, 'path') || webPath(item.target)).split('?')[0].toLowerCase()
+  const ext = pathname.includes('.') ? pathname.slice(pathname.lastIndexOf('.') + 1) : ''
+  if (ct.includes('json') || ext === 'json') return 'JSON'
+  if (ct.includes('javascript') || /^m?jsx?$/.test(ext)) return 'JS'
+  if (ct.includes('css') || ext === 'css') return 'CSS'
+  if (ct.includes('xml') || ext === 'xml') return 'XML'
+  if (ct.includes('html')) return ''
+  if (ct.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'bmp'].includes(ext)) return 'IMG'
+  if (ct.includes('font') || ['woff', 'woff2', 'ttf', 'otf', 'eot'].includes(ext)) return 'FONT'
+  if (ct.includes('pdf') || ext === 'pdf') return 'PDF'
+  if (ct.startsWith('text/plain') || ['txt', 'log', 'map'].includes(ext)) return 'TXT'
+  return ''
+}
+
+// Redirect destination for an endpoint (empty when the probe was not a redirect).
+export function redirectTarget(item: AssetItem): string {
+  return dataString(item, 'redirect_url')
+}
+
 export function pathIdentity(item: AssetItem) {
   return `${canonicalKey(dataString(item, 'url') || item.target || dataString(item, 'path'))}|host=${dataString(item, 'host_header')}`
 }
@@ -343,10 +362,6 @@ export function statusCodeTone(status?: string): BadgeTone {
   return 'muted'
 }
 
-export function formatCount(count: number, singular: string) {
-  return `${count} ${count === 1 ? singular : `${singular}s`}`
-}
-
 function serviceTitle(asset: ViewAsset, serviceItem: AssetItem | undefined, service: string) {
   const assetTitle = firstText(asset.title)
   if (assetTitle && assetTitle !== asset.target && labelKey(assetTitle) !== labelKey(service)) {
@@ -364,14 +379,6 @@ function serviceSummary(asset: ViewAsset, serviceItem: AssetItem | undefined, ti
   return firstText(...values.filter((value) => labelKey(value) !== labelKey(title) && labelKey(value) !== labelKey(service)))
 }
 
-function countLootItems(assets: ViewAsset[]) {
-  return assets.reduce((sum, asset) => (
-    sum + asset.items.filter((item) => (
-      item.kind === assetItemKind.loot && dataString(item, 'kind').toLowerCase() !== 'fingerprint'
-    )).length
-  ), 0)
-}
-
 function countFingerprints(assets: ViewAsset[]) {
   return uniqueStrings(assets.flatMap((asset) => fingerprintValues(asset.items))).length
 }
@@ -379,6 +386,9 @@ function countFingerprints(assets: ViewAsset[]) {
 function serviceSort(a: ServiceNode, b: ServiceNode) {
   const ap = Number.parseInt(a.port, 10)
   const bp = Number.parseInt(b.port, 10)
+  if (Number.isFinite(ap) !== Number.isFinite(bp)) {
+    return Number.isFinite(ap) ? -1 : 1
+  }
   if (Number.isFinite(ap) && Number.isFinite(bp) && ap !== bp) {
     return ap - bp
   }

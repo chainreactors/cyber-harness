@@ -25,7 +25,6 @@ export default {
   // ScanHistory
   noScansYet: '暂无扫描记录',
   assets: '资产',
-  loots: '战利品',
 
   // ScanWorkspace
   hideDetails: '隐藏详情',
@@ -43,11 +42,6 @@ export default {
 
   // chat/ScanSummaryCard
   scanComplete: '扫描完成',
-  assetsLabel: '资产',
-  servicesLabel: '服务',
-  lootsLabel: '战利品',
-  errorsLabel: '错误',
-  viewDetails: '查看详情',
 
   // analysis option badges (ScanForm / ScanView / ScanHistory)
   optVerify: '验证',
