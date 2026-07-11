@@ -22,19 +22,8 @@ export type BadgeSpec = {
   tone?: BadgeTone
 }
 
-export type ResultMetrics = {
-  hosts: number
-  services: number
-  web: number
-  probes: number
-  fingers: number
-  errors: number
-  duration: string
-}
-
 export type ResultModel = {
   hosts: HostGroup[]
-  metrics: ResultMetrics
 }
 
 export type HostGroup = {
@@ -84,15 +73,6 @@ export function buildResultModel(result: ScanResult): ResultModel {
 
   return {
     hosts,
-    metrics: {
-      hosts: hosts.length,
-      services: result.summary.services,
-      web: result.summary.webs,
-      probes: result.summary.probes,
-      fingers: countFingerprints(assets),
-      errors: result.summary.errors,
-      duration: result.summary.duration,
-    },
   }
 }
 
@@ -379,10 +359,6 @@ function serviceSummary(asset: ViewAsset, serviceItem: AssetItem | undefined, ti
   return firstText(...values.filter((value) => labelKey(value) !== labelKey(title) && labelKey(value) !== labelKey(service)))
 }
 
-function countFingerprints(assets: ViewAsset[]) {
-  return uniqueStrings(assets.flatMap((asset) => fingerprintValues(asset.items))).length
-}
-
 function serviceSort(a: ServiceNode, b: ServiceNode) {
   const ap = Number.parseInt(a.port, 10)
   const bp = Number.parseInt(b.port, 10)
@@ -568,14 +544,6 @@ export type FindingItem = {
   raw?: AssetItem | Loot
 }
 
-export type FindingsSummaryModel = {
-  byPriority: Record<string, FindingItem[]>
-  byStatus: Record<string, FindingItem[]>
-  aiVerifiedCount: number
-  totalFindings: number
-  topFinding?: FindingItem
-}
-
 export function serviceAIStatus(service: ServiceNode): 'verified' | 'sniper' | 'deep' | null {
   if (service.analysisItems.some(i => i.source === 'verify' && i.status === 'confirmed')) return 'verified'
   if (service.analysisItems.some(i => i.source === 'sniper')) return 'sniper'
@@ -659,34 +627,6 @@ export function buildFindings(result: ScanResult): FindingItem[] {
   })
 
   return findings
-}
-
-export function buildFindingsSummary(result: ScanResult): FindingsSummaryModel | null {
-  const findings = buildFindings(result)
-  if (findings.length === 0) return null
-
-  const byPriority: Record<string, FindingItem[]> = {}
-  const byStatus: Record<string, FindingItem[]> = {}
-
-  for (const f of findings) {
-    ;(byPriority[f.priority] ||= []).push(f)
-    if (f.source) {
-      const key = f.status || 'unknown'
-      ;(byStatus[key] ||= []).push(f)
-    }
-  }
-
-  const aiVerifiedCount = findings.filter(
-    f => f.source === 'verify' && f.status === 'confirmed',
-  ).length
-
-  return {
-    byPriority,
-    byStatus,
-    aiVerifiedCount,
-    totalFindings: findings.length,
-    topFinding: findings[0],
-  }
 }
 
 function normalizeLootKind(kind?: string): FindingItem['kind'] {
