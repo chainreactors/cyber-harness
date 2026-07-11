@@ -128,13 +128,23 @@ func newSPAFileServer(fsys fs.FS, accessKey string) http.HandlerFunc {
 		if name != "" {
 			if f, err := fsys.Open(name); err == nil {
 				f.Close()
+				// Vite fingerprints every asset (index-<hash>.js), so a given
+				// filename's bytes never change — cache it forever. A rebuild
+				// mints new filenames, so this never serves stale content.
+				if strings.HasPrefix(name, "assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}
 		}
-		// Serve injected index.html for SPA routes
+		// Serve injected index.html for SPA routes. Never cache it: it's the one
+		// unfingerprinted document, it carries the per-start access key, and it
+		// points at the current asset hashes — a cached shell would keep loading a
+		// stale bundle (or a dead access key after a restart) until a hard refresh.
 		if len(indexBytes) > 0 {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(indexBytes)
 			return
