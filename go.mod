@@ -9,6 +9,7 @@ require (
 	github.com/chainreactors/fingers v1.2.2-0.20260704073236-3e22b6a528b9
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226
 	github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645
+	github.com/chainreactors/libcstx/go v0.0.0-20260712071832-ae9c68219d9d
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260710171341-456d36779ab2
 	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
@@ -94,7 +95,6 @@ require (
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
 	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
-	github.com/chainreactors/utils/cstx v0.0.0-20260711105548-08bcf60b7278 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect

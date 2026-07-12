@@ -5,7 +5,7 @@ package output
 import (
 	"encoding/json"
 
-	"github.com/chainreactors/utils/cstx"
+	"github.com/chainreactors/libcstx/go"
 )
 
 func CSTXTransform(tool string, data any) ([]json.RawMessage, error) {

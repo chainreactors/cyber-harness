@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/utils/cstx"
+	"github.com/chainreactors/libcstx/go"
 )
 
 func buildSCONodes(result *output.Result) []json.RawMessage {

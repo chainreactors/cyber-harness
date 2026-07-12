@@ -180,6 +180,8 @@ github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226 h1:f/9CjN
 github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226/go.mod h1:pCbDa+HwfjKCGOD4PJ0puFa/FJkE/kiy29tkX0OIw70=
 github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645 h1:uNVPsxHycN17wCxB1HFS5vaklSs0q8eO6XK8orFiIGw=
 github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
+github.com/chainreactors/libcstx/go v0.0.0-20260712071832-ae9c68219d9d h1:vZjvtM6i32vrflPJMvX/Z+a8SMbnhBXcGywNe6OuXvU=
+github.com/chainreactors/libcstx/go v0.0.0-20260712071832-ae9c68219d9d/go.mod h1:YQNpUU90e8tw9k1VNEUF7smIY8kSI0J3T0/zp8ri85Y=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc h1:e6rjnU8dmfhAnkFzLp/R5gta0LbFM13L27djxbC/i4I=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc/go.mod h1:VrXmYPbNN5AVoo1sc5aeyPVBYqubMdb3KO/tn5rRZpo=
 github.com/chainreactors/neutron v0.1.1-0.20260710171341-456d36779ab2 h1:u0gNplhf4avPGO6fowTIAl8VrXE+hKccbbrFt8ETjm4=
@@ -213,8 +215,6 @@ github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863 h1:jfuZD+vg3/K
 github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863/go.mod h1:xwbUlFoSSxLHujyb8D48o1s2DqmEAxUNfxIy0DVUmcg=
 github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 h1:41tvJzi9t1NUlM/CzVdl8OG+W6PMFChsDOChohI2VeU=
 github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863/go.mod h1:xvvWMcU9Fcht6GR1cc9ceAZ3/Hl2HrkoRzpeyOzx1rQ=
-github.com/chainreactors/utils/cstx v0.0.0-20260711105548-08bcf60b7278 h1:u26sD1MSCIdka3KUNADOHpYf5S51D6zHQ4HpGjv4EyM=
-github.com/chainreactors/utils/cstx v0.0.0-20260711105548-08bcf60b7278/go.mod h1:iV/b/L5ekamExZgTgPMPx0xyRaHmoG31SDHG0McpE8Q=
 github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863 h1:r6UUUUQt4r/0SL6vgrwoq6ynidAkN3auSZsvzZ5BBRE=
 github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/parsers v0.0.3-0.20260707181750-8aa6ca296863 h1:u9cXebLoVtKwN0KkpGFfrjANUYo+93MijB//X9qONeY=
