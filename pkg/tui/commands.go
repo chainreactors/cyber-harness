@@ -214,7 +214,7 @@ func redactURLUserinfoFallback(raw string) string {
 // Run-control commands (/stop, /followup, /eval, /loop, /exit) are excluded
 // because the web expresses those through UI controls, not slash text.
 func WebMenuSpecs(cmds []Command) []webproto.CommandSpec {
-	hidden := map[string]bool{"/stop": true, "/followup": true, "/eval": true, "/loop": true, "/exit": true}
+	hidden := map[string]bool{"/stop": true, "/continue": true, "/followup": true, "/eval": true, "/loop": true, "/exit": true}
 	var specs []webproto.CommandSpec
 	for _, c := range cmds {
 		if c.Hidden || hidden[c.Name] {

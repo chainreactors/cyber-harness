@@ -107,7 +107,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 	commands.BuildGroup("scanner", deps, cmdReg)
 	commands.BuildGroup("proxy", deps, cmdReg)
 	commands.BuildGroup("ioa", deps, cmdReg)
-	logger.Infof("scanner commands ready: %v", cmdReg.GroupNames("scanner"))
+	logger.Infof("%s", telemetry.StartupOK("scanner", strings.Join(cmdReg.GroupNames("scanner"), ",")))
 }
 
 // ---------------------------------------------------------------------------
@@ -246,4 +246,3 @@ func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option,
 		return fmt.Errorf("unknown server mode: %s", mode)
 	}
 }
-

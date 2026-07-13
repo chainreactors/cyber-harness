@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/probe"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -26,6 +28,7 @@ import (
 )
 
 const agentPromptCommandName = "__prompt"
+const agentConsoleCompleteCommandName = "aiscan-complete"
 const agentConsoleInterruptCommandName = "aiscan-interrupt"
 const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
 const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
@@ -54,6 +57,7 @@ type AgentConsole struct {
 	// an IOA-unavailable degradation warning). Set by the caller before Start.
 	startupNotice string
 	evalCriteria  string
+	sessionDir    string
 
 	directMu     sync.Mutex
 	directCancel context.CancelFunc
@@ -111,9 +115,6 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		stderr:   stderr,
 	}
 	menu.Prompt().Primary = func() string {
-		if repl.pendingExit.Load() {
-			return ""
-		}
 		return agentPromptString(output)
 	}
 	if len(bus) > 0 && bus[0] != nil {
@@ -124,6 +125,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	}
 	repl.controller = newInteractiveRunController(ctx, repl.agent, output)
 	repl.controller.SetOnFinish(repl.refreshPromptAfterAsyncRun)
+	repl.configureCompletionKey()
 	repl.configureInterruptKey()
 	repl.configureCtrlCKey()
 	repl.configureVerbosityToggleKey()
@@ -176,7 +178,9 @@ func (r *AgentConsole) startFastInput() error {
 		}
 
 		fmt.Fprint(r.stderr, r.promptString())
+		r.setReadlineActive(true)
 		line, err := readFastInputLine(r.ctx, reader)
+		r.setReadlineActive(false)
 		if err != nil && !errors.Is(err, io.EOF) {
 			if errors.Is(err, context.Canceled) {
 				fmt.Fprintln(r.stdout)
@@ -256,9 +260,9 @@ func (r *AgentConsole) startReadline() error {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
 
-		r.readlineActive.Store(true)
+		r.setReadlineActive(true)
 		line, err := r.console.Readline()
-		r.readlineActive.Store(false)
+		r.setReadlineActive(false)
 		if err != nil {
 			switch {
 			case errors.Is(err, io.EOF):
@@ -285,6 +289,16 @@ func (r *AgentConsole) startReadline() error {
 		if done {
 			return nil
 		}
+	}
+}
+
+func (r *AgentConsole) setReadlineActive(active bool) {
+	if r == nil {
+		return
+	}
+	r.readlineActive.Store(active)
+	if r.output != nil {
+		r.output.SetInteractiveInputActive(active && (r.controller == nil || !r.controller.Running()))
 	}
 }
 
@@ -470,6 +484,25 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
+			Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)",
+			Args: ArgsOptional,
+			Run: func(_ context.Context, _ *Session, args []string) error {
+				raw := strings.TrimSpace(strings.Join(args, " "))
+				if raw == "" {
+					return r.pickResumeSession()
+				}
+				if raw == "list" {
+					sessions, err := r.renderSessions()
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, sessions)
+					return nil
+				}
+				return r.resumeSession(raw)
+			},
+		},
+		{
 			Name: "/stop", Description: "停止当前正在运行的任务",
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
@@ -477,6 +510,16 @@ func (r *AgentConsole) builtinCommands() []Command {
 					fmt.Fprintln(r.stderr, "No running task.")
 				}
 				return nil
+			},
+		},
+		{
+			Name: "/continue", Description: "继续当前会话",
+			Args: ArgsNone,
+			Run: func(_ context.Context, s *Session, _ []string) error {
+				if s.Controller == nil {
+					return fmt.Errorf("agent controller is not configured")
+				}
+				return s.Controller.Continue()
 			},
 		},
 		{
@@ -557,6 +600,33 @@ func (r *AgentConsole) providerCommands() []Command {
 					fmt.Fprintf(r.stderr, "unknown subcommand: %s (use: list, set)\n", fields[0])
 				}
 				return nil
+			},
+		},
+		{
+			Name:        "/model",
+			Description: "查看/切换当前 provider 的模型",
+			Args:        ArgsOptional,
+			Run: func(ctx context.Context, _ *Session, args []string) error {
+				fields := splitArgs(args)
+				if len(fields) == 0 {
+					return r.pickModel(ctx)
+				}
+				if len(fields) == 1 && fields[0] == "list" {
+					models, err := r.renderModels(ctx)
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, models)
+					return nil
+				}
+				switch fields[0] {
+				case "set", "use":
+					fields = fields[1:]
+				}
+				if len(fields) != 1 {
+					return fmt.Errorf("usage: /model [list|<model>|#index]")
+				}
+				return r.configureModel(ctx, fields[0])
 			},
 		},
 	}
@@ -783,6 +853,7 @@ func (r *AgentConsole) configureProvider(args []string) error {
 	}
 
 	pc := r.appInfo.ProviderConfig
+	modelChanged := false
 	for i := 0; i < len(args); i++ {
 		key := args[i]
 		value := ""
@@ -805,20 +876,320 @@ func (r *AgentConsole) configureProvider(args []string) error {
 			pc.APIKey = value
 		case "model":
 			pc.Model = value
+			modelChanged = true
 		case "proxy":
 			pc.Proxy = value
 		default:
 			return fmt.Errorf("unknown provider option: %s", key)
 		}
 	}
+	if modelChanged {
+		pc.Images = nil
+	}
 
-	resolved, err := agent.ResolveProvider(&pc)
+	resolved, err := r.applyProviderConfig(pc)
 	if err != nil {
 		return err
 	}
-	prov, err := agent.NewProviderFromResolved(resolved)
+	if resolved.Model != "" {
+		fmt.Fprintf(r.stdout, "Provider ready: %s / %s\n", resolved.Provider, resolved.Model)
+	} else {
+		fmt.Fprintf(r.stdout, "Provider ready: %s\n", resolved.Provider)
+	}
+	return nil
+}
+
+const modelListTimeout = 10 * time.Second
+
+func (r *AgentConsole) resumeSession(path string) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot resume while a task is running")
+	}
+	if r.agent == nil {
+		return fmt.Errorf("agent session is not configured")
+	}
+	path, err := r.resolveSessionSelection(path)
 	if err != nil {
 		return err
+	}
+	data, err := agent.LoadSession(path)
+	if err != nil {
+		return err
+	}
+	r.agent.LoadMessages(data.Messages)
+	fmt.Fprintf(r.stdout, "Resumed %d messages from %s\n", len(data.Messages), path)
+	return nil
+}
+
+func (r *AgentConsole) pickResumeSession() error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot resume while a task is running")
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return err
+	}
+	if len(sessions) == 0 {
+		fmt.Fprintln(r.stdout, "No saved sessions.")
+		return nil
+	}
+	if !r.canUsePicker() {
+		rendered, err := r.renderSessions()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, rendered)
+		return nil
+	}
+	cols, rows := r.terminal.Control.Size()
+	selected, ok, err := runChoicePicker("Select session", sessionChoices(sessions), "", cols, rows)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(r.stdout, "Session unchanged.")
+		return nil
+	}
+	return r.resumeSession(selected)
+}
+
+func (r *AgentConsole) renderSessions() (string, error) {
+	colorEnabled := r.output != nil && r.output.color.Enabled
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return "", err
+	}
+	if len(sessions) == 0 {
+		return r.renderPanel("sessions", renderHelpRows([]helpRow{
+			{Command: "sessions", Detail: "none saved"},
+		}, colorEnabled), colorEnabled), nil
+	}
+	rows := make([]helpRow, 0, len(sessions))
+	for i, session := range sessions {
+		rows = append(rows, helpRow{
+			Command: fmt.Sprintf("#%d", i+1),
+			Detail:  filepath.Base(session.Path) + "  " + sessionDetail(session),
+		})
+	}
+	return r.renderPanel("sessions", renderHelpRows(rows, colorEnabled), colorEnabled), nil
+}
+
+func (r *AgentConsole) listSavedSessions() ([]agent.SessionInfo, error) {
+	dir := r.sessionDir
+	if dir == "" {
+		dir = cfg.DataSubDir("sessions")
+	}
+	return agent.ListSessions(dir)
+}
+
+func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) {
+	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
+	if selector == "" {
+		return "", fmt.Errorf("usage: /resume [list|<path>|#index]")
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return "", err
+	}
+	if idx, err := strconv.Atoi(selector); err == nil {
+		if idx < 1 || idx > len(sessions) {
+			return "", fmt.Errorf("session index out of range: %d", idx)
+		}
+		return sessions[idx-1].Path, nil
+	}
+	for _, session := range sessions {
+		if selector == session.Path || selector == filepath.Base(session.Path) {
+			return session.Path, nil
+		}
+	}
+	return selector, nil
+}
+
+func sessionChoices(sessions []agent.SessionInfo) []choiceItem {
+	choices := make([]choiceItem, 0, len(sessions))
+	for _, session := range sessions {
+		choices = append(choices, choiceItem{
+			value: session.Path,
+			title: filepath.Base(session.Path),
+			desc:  sessionDetail(session),
+		})
+	}
+	return choices
+}
+
+func sessionDetail(session agent.SessionInfo) string {
+	parts := make([]string, 0, 4)
+	if ts := session.SortTime(); !ts.IsZero() {
+		parts = append(parts, ts.Local().Format("2006-01-02 15:04:05"))
+	}
+	model := strings.Trim(strings.TrimSpace(session.Provider)+"/"+strings.TrimSpace(session.Model), "/")
+	if model != "" {
+		parts = append(parts, model)
+	}
+	parts = append(parts, fmt.Sprintf("%d messages", session.Messages))
+	return strings.Join(parts, "  ")
+}
+
+func (r *AgentConsole) renderModels(ctx context.Context) (string, error) {
+	colorEnabled := r.output != nil && r.output.color.Enabled
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(models) == 0 {
+		return r.renderPanel("models", renderHelpRows([]helpRow{
+			{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + r.appInfo.ProviderConfig.Model},
+			{Command: "models", Detail: "none returned"},
+		}, colorEnabled), colorEnabled), nil
+	}
+
+	current := strings.TrimSpace(r.appInfo.ProviderConfig.Model)
+	rows := []helpRow{
+		{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + valueOrDash(current)},
+	}
+	for i, model := range models {
+		command := fmt.Sprintf("#%d", i+1)
+		detail := model
+		if model == current {
+			detail += "  active"
+		}
+		rows = append(rows, helpRow{Command: command, Detail: detail})
+	}
+	return r.renderPanel("models", renderHelpRows(rows, colorEnabled), colorEnabled), nil
+}
+
+func (r *AgentConsole) pickModel(ctx context.Context) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change model while a task is running")
+	}
+	if !r.canUsePicker() {
+		models, err := r.renderModels(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, models)
+		return nil
+	}
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		fmt.Fprintln(r.stdout, "No models returned.")
+		return nil
+	}
+	cols, rows := r.terminal.Control.Size()
+	selected, ok, err := runModelPicker(models, strings.TrimSpace(r.appInfo.ProviderConfig.Model), cols, rows)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(r.stdout, "Model unchanged.")
+		return nil
+	}
+	return r.applyModel(selected)
+}
+
+func (r *AgentConsole) canUsePicker() bool {
+	if r == nil || r.terminal == nil || r.terminal.Control == nil || !r.terminal.Control.IsTerminal() {
+		return false
+	}
+	return r.terminal.In == os.Stdin && r.terminal.Out == os.Stdout
+}
+
+func (r *AgentConsole) configureModel(ctx context.Context, selector string) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change model while a task is running")
+	}
+	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
+	if selector == "" {
+		return fmt.Errorf("usage: /model [list|<model>|#index]")
+	}
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return err
+	}
+	model, err := resolveModelSelection(models, selector)
+	if err != nil {
+		return err
+	}
+
+	return r.applyModel(model)
+}
+
+func (r *AgentConsole) applyModel(model string) error {
+	pc := r.appInfo.ProviderConfig
+	pc.Model = model
+	pc.Images = nil
+	resolved, err := r.applyProviderConfig(pc)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.stdout, "Model ready: %s / %s\n", resolved.Provider, resolved.Model)
+	return nil
+}
+
+func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error) {
+	pc := r.appInfo.ProviderConfig
+	if strings.TrimSpace(pc.Provider) == "" && strings.TrimSpace(pc.BaseURL) == "" {
+		return nil, fmt.Errorf("provider not configured")
+	}
+	req := probe.LLMProbeRequest{
+		Provider: pc.Provider,
+		BaseURL:  pc.BaseURL,
+		APIKey:   pc.APIKey,
+		Proxy:    pc.Proxy,
+	}
+	listCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
+	defer cancel()
+	result, err := probe.ListLLMModels(listCtx, req, "")
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		if strings.TrimSpace(result.Error) == "" {
+			return nil, fmt.Errorf("list models failed")
+		}
+		return nil, fmt.Errorf("list models: %s", result.Error)
+	}
+	return result.Models, nil
+}
+
+func resolveModelSelection(models []string, selector string) (string, error) {
+	if idx, err := strconv.Atoi(selector); err == nil {
+		if idx < 1 || idx > len(models) {
+			return "", fmt.Errorf("model index out of range: %d", idx)
+		}
+		return models[idx-1], nil
+	}
+	for _, model := range models {
+		if model == selector {
+			return model, nil
+		}
+	}
+	for _, model := range models {
+		if strings.EqualFold(model, selector) {
+			return model, nil
+		}
+	}
+	return "", fmt.Errorf("model %q is not in the provider model list", selector)
+}
+
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.ProviderConfig, error) {
+	resolved, err := agent.ResolveProvider(&pc)
+	if err != nil {
+		return agent.ProviderConfig{}, err
+	}
+	prov, err := agent.NewProviderFromResolved(resolved)
+	if err != nil {
+		return agent.ProviderConfig{}, err
 	}
 
 	r.appInfo.Provider = prov
@@ -836,12 +1207,7 @@ func (r *AgentConsole) configureProvider(args []string) error {
 	}
 	r.syncEvalToController()
 
-	if resolved.Model != "" {
-		fmt.Fprintf(r.stdout, "Provider ready: %s / %s\n", resolved.Provider, resolved.Model)
-	} else {
-		fmt.Fprintf(r.stdout, "Provider ready: %s\n", resolved.Provider)
-	}
-	return nil
+	return *resolved, nil
 }
 
 func (r *AgentConsole) pseudoCommandNames() []string {

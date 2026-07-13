@@ -253,7 +253,7 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 	slots := make([]toolCallSlot, len(toolCalls))
 
 	for i, tc := range toolCalls {
-		cfg.Logger.Infof("[turn %d] tool_call id=%s name=%s args=%q", turn, tc.ID, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
+		cfg.Logger.Infof("[turn %d] tool_call name=%s args=%q", turn, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
 		bus.Emit(Event{
 			Type:       EventToolExecutionStart,
 			Turn:       turn,
@@ -293,7 +293,7 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			Err:        s.result.err,
 			StartedAt:  s.startedAt,
 		})
-		cfg.Logger.Debugf("[turn %d] tool_result id=%s name=%s bytes=%d", turn, s.tc.ID, s.tc.Function.Name, len(s.result.result))
+		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Function.Name, len(s.result.result))
 		toolMsg := toolResultToMessage(s.tc.ID, s.result)
 		bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: toolMsg})
 		bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: toolMsg})
@@ -333,7 +333,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
 			execution.result = fmt.Sprintf("error: %s", execErr.Error())
-			cfg.Logger.Warnf("[turn %d] tool_error id=%s name=%s error=%q", turn, tc.ID, tc.Function.Name, execErr.Error())
+			cfg.Logger.Warnf("[turn %d] tool_error name=%s error=%q", turn, tc.Function.Name, execErr.Error())
 		}
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate

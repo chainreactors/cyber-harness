@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/probe"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -58,6 +59,7 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 		} else {
 			a.Provider = llmProvider
 			a.ProviderConfig = *resolved
+			logLLMProbeStatus(ctx, *resolved, logger)
 		}
 		for _, fbCfg := range rc.Provider.Fallbacks {
 			fbProvider, fbResolved, err := initProvider(fbCfg, logger)
@@ -137,6 +139,46 @@ func initProvider(provCfg agent.ProviderConfig, logger telemetry.Logger) (agent.
 		return nil, nil, err
 	}
 	return llmProvider, resolved, nil
+}
+
+const startupLLMProbeTimeout = 5 * time.Second
+
+func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger telemetry.Logger) {
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, startupLLMProbeTimeout)
+	defer cancel()
+
+	result, err := probe.TestLLM(probeCtx, probe.LLMProbeRequest{
+		Provider: provCfg.Provider,
+		BaseURL:  provCfg.BaseURL,
+		APIKey:   provCfg.APIKey,
+		Model:    provCfg.Model,
+		Proxy:    provCfg.Proxy,
+	}, "")
+	if err != nil {
+		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %s", llmConfigLabel(provCfg.Provider, provCfg.Model), err.Error())))
+		return
+	}
+	if !result.OK {
+		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %dms · %s", llmConfigLabel(result.Provider, result.Model), result.LatencyMs, result.Error)))
+		return
+	}
+
+	logger.Infof("%s", telemetry.StartupOK("llm", fmt.Sprintf("%s · %dms", llmConfigLabel(result.Provider, result.Model), result.LatencyMs)))
+}
+
+func llmConfigLabel(providerName, model string) string {
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	if providerName == "" {
+		providerName = "unknown"
+	}
+	if model == "" {
+		return providerName
+	}
+	return providerName + "/" + model
 }
 
 // optionalToolGroups lists all selectable tool groups that can be enabled via

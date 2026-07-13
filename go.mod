@@ -97,9 +97,9 @@ require (
 	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
-	github.com/charmbracelet/bubbletea v1.3.10 // indirect
+	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/lipgloss v1.1.0 // indirect
+	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -237,6 +237,7 @@ require (
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/sagernet/sing v0.7.6 // indirect
 	github.com/sagernet/sing-vmess v0.2.7 // indirect
+	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

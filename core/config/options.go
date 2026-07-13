@@ -64,7 +64,7 @@ type AgentOptions struct {
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
-	Resume         string   `long:"resume" optional:"true" optional-value:"latest" description:"Resume session: no value = latest from .aiscan/sessions/, or specify a file path"`
+	Resume         string   `long:"resume" description:"Resume session from a saved session file path"`
 	SaveSession    bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
 }
 
@@ -73,8 +73,8 @@ type IOAOptions struct {
 	IOAToken    string `long:"server-token" config:"token" description:"Server access key (auto-generated if empty)"`
 	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
 	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`
-	Space   string `long:"space" config:"space" description:"Space name" default:"default"`
-	IOAJSON bool   `long:"json" description:"Output query results in JSON format"`
+	Space       string `long:"space" config:"space" description:"Space name" default:"default"`
+	IOAJSON     bool   `long:"json" description:"Output query results in JSON format"`
 }
 
 type MiscOptions struct {

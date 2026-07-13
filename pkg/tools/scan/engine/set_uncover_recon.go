@@ -2,7 +2,11 @@
 
 package engine
 
-import "github.com/chainreactors/aiscan/pkg/telemetry"
+import (
+	"strings"
+
+	"github.com/chainreactors/aiscan/pkg/telemetry"
+)
 
 func (e *Set) SetupUncover(opts ReconOptions, logger telemetry.Logger) {
 	if logger == nil {
@@ -17,7 +21,7 @@ func (e *Set) SetupUncover(opts ReconOptions, logger telemetry.Logger) {
 		_ = e.Uncover.Close()
 	}
 	e.Uncover = eng
-	logger.Infof("engine=uncover status=ready sources=%v", e.Uncover.Sources())
+	logger.Infof("%s", telemetry.StartupOK("uncover", strings.Join(e.Uncover.Sources(), ",")))
 }
 
 func mergeReconOptions(base, next ReconOptions) ReconOptions {

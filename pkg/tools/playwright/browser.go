@@ -271,7 +271,6 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 
 	var result string
-	var err error
 
 	switch sub {
 	// --- Unified URL/session commands (Playwright-aligned) ---

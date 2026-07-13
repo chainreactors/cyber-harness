@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +17,16 @@ type SessionData struct {
 	Model     string        `json:"model,omitempty"`
 	Provider  string        `json:"provider,omitempty"`
 	Messages  []ChatMessage `json:"messages"`
+}
+
+type SessionInfo struct {
+	Path      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ModTime   time.Time
+	Model     string
+	Provider  string
+	Messages  int
 }
 
 const sessionVersion = 1
@@ -43,10 +54,6 @@ func SaveSession(dir string, data *SessionData) error {
 		return fmt.Errorf("write session file: %w", err)
 	}
 
-	latestPath := filepath.Join(dir, "latest.json")
-	if err := os.WriteFile(latestPath, raw, 0o644); err != nil {
-		return fmt.Errorf("write latest session: %w", err)
-	}
 	return nil
 }
 
@@ -62,8 +69,62 @@ func LoadSession(path string) (*SessionData, error) {
 	return &data, nil
 }
 
-func LatestSessionPath(dir string) string {
-	return filepath.Join(dir, "latest.json")
+func ListSessions(dir string) ([]SessionInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session dir: %w", err)
+	}
+	sessions := make([]SessionInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if matched, _ := filepath.Match("session-*.json", entry.Name()); !matched {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := LoadSession(path)
+		if err != nil {
+			return nil, err
+		}
+		info, _ := entry.Info()
+		modTime := time.Time{}
+		if info != nil {
+			modTime = info.ModTime()
+		}
+		sessions = append(sessions, SessionInfo{
+			Path:      path,
+			CreatedAt: data.CreatedAt,
+			UpdatedAt: data.UpdatedAt,
+			ModTime:   modTime,
+			Model:     data.Model,
+			Provider:  data.Provider,
+			Messages:  len(data.Messages),
+		})
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		left := sessions[i].SortTime()
+		right := sessions[j].SortTime()
+		if left.Equal(right) {
+			return sessions[i].Path > sessions[j].Path
+		}
+		return left.After(right)
+	})
+	return sessions, nil
+}
+
+func (s SessionInfo) SortTime() time.Time {
+	switch {
+	case !s.UpdatedAt.IsZero():
+		return s.UpdatedAt
+	case !s.CreatedAt.IsZero():
+		return s.CreatedAt
+	default:
+		return s.ModTime
+	}
 }
 
 func sanitizeMessagesForSave(messages []ChatMessage) []ChatMessage {

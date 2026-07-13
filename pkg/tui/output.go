@@ -48,9 +48,10 @@ type AgentOutput struct {
 	toolErrorCount int
 
 	// Transient UI.
-	mode RenderMode
-	tty  bool
-	live *LiveStatus
+	mode                   RenderMode
+	tty                    bool
+	interactiveInputActive bool
+	live                   *LiveStatus
 }
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
@@ -300,6 +301,18 @@ func (o *AgentOutput) EnsureStreamNewline() {
 	o.stream.EnsureNewline()
 }
 
+func (o *AgentOutput) SetInteractiveInputActive(active bool) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.interactiveInputActive = active
+	if active {
+		o.stopLive()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Event handling
 // ---------------------------------------------------------------------------
@@ -422,7 +435,7 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) canAnimate() bool {
-	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0
+	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0 && !o.interactiveInputActive
 }
 
 func (o *AgentOutput) renderToolLine(ev agent.Event) string {

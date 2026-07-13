@@ -133,7 +133,7 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got := logs.String(); !strings.Contains(got, "[debug] spray debug enabled") {
+	if got := logs.String(); !strings.Contains(got, "● spray debug enabled") {
 		t.Fatalf("debug logs = %q", got)
 	}
 }

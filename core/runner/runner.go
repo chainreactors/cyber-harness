@@ -228,9 +228,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 
 	if option.Resume != "" {
 		path := option.Resume
-		if path == "latest" {
-			path = agent.LatestSessionPath(cfg.DataSubDir("sessions"))
-		}
 		data, err := agent.LoadSession(path)
 		if err != nil {
 			return nil, fmt.Errorf("resume session: %w", err)
@@ -395,6 +392,12 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 		ProviderFallbacks: rt.App.ProviderFallbacks,
 		Commands:          rt.App.Commands,
 		Skills:            rt.App.Skills,
+		OnProviderChange: func(provider agent.Provider, providerConfig agent.ProviderConfig) {
+			rt.App.Provider = provider
+			rt.App.ProviderConfig = providerConfig
+			rt.Config.Provider = provider
+			rt.Config.Model = providerConfig.Model
+		},
 	}, session, rt.Output, rt.Bus)
 	if setInterrupt != nil {
 		setInterrupt(repl.InterruptCurrentRun)

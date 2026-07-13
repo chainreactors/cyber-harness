@@ -61,12 +61,12 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 	for _, s := range svc.SessionMenu("no-such-session") {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"/scan", "/agents", "/help", "/status", "/provider"} {
+	for _, want := range []string{"/scan", "/agents", "/help", "/status", "/provider", "/model"} {
 		if !names[want] {
 			t.Errorf("SessionMenu missing %q", want)
 		}
 	}
-	for _, absent := range []string{"/stop", "/eval", "/followup", "/loop"} {
+	for _, absent := range []string{"/stop", "/continue", "/eval", "/followup", "/loop"} {
 		if names[absent] {
 			t.Errorf("SessionMenu leaked run-control command %q", absent)
 		}
@@ -128,7 +128,7 @@ func TestSessionCommandsRoute(t *testing.T) {
 	for _, s := range specs {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"/scan", "/help", "/status"} {
+	for _, want := range []string{"/scan", "/help", "/status", "/model"} {
 		if !names[want] {
 			t.Errorf("/commands response missing %q (got %d specs)", want, len(specs))
 		}

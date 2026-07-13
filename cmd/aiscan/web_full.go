@@ -44,10 +44,8 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		return fmt.Errorf("init aiscan: %s", err)
 	}
 
-	if application.Provider != nil {
-		logger.Infof("LLM provider ready, AI features enabled")
-	} else {
-		logger.Warnf("no LLM provider configured, AI features disabled (set api_key in aiscan.yaml or env)")
+	if application.Provider == nil {
+		logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in aiscan.yaml or env"))
 	}
 
 	configFile := option.ConfigFile

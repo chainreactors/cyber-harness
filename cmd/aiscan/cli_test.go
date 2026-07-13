@@ -103,7 +103,7 @@ func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
 		t.Fatalf("RunDirectScannerMode() error = %v", err)
 	}
 	logText := logBuf.String()
-	if !strings.Contains(logText, "engine=fingers status=ready") || !strings.Contains(logText, "scanner commands ready") {
+	if !strings.Contains(logText, "ok   fingers") || !strings.Contains(logText, "ok   scanner") {
 		t.Fatalf("debug scanner logs missing init detail:\n%s", logText)
 	}
 }
@@ -443,6 +443,7 @@ func TestAgentConsoleArgsForLine(t *testing.T) {
 		{name: "help", input: "/help", wantArgs: []string{"/help"}},
 		{name: "reset", input: "/reset", wantArgs: []string{"/reset"}},
 		{name: "continue", input: "/continue", wantArgs: []string{"/continue"}},
+		{name: "resume", input: "/resume 1", wantArgs: []string{"/resume", "1"}},
 		{name: "exit", input: "/exit", wantArgs: []string{"/exit"}},
 		{name: "quit", input: "/quit", wantArgs: []string{"/quit"}},
 		{name: "skill slash command preserves prompt", input: `/scan explain "scan result"`, wantArgs: []string{"/scan", `explain "scan result"`}},

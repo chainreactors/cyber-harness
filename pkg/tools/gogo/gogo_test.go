@@ -45,7 +45,7 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got := logs.String(); !strings.Contains(got, "[debug] gogo debug enabled") {
+	if got := logs.String(); !strings.Contains(got, "● gogo debug enabled") {
 		t.Fatalf("debug logs = %q", got)
 	}
 }
@@ -84,4 +84,3 @@ func TestNormalizeArgsConvertsValuelessJSONFlag(t *testing.T) {
 		t.Fatalf("normalizeArgs() = %#v, want %#v", got, want)
 	}
 }
-

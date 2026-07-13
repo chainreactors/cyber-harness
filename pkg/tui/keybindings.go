@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -34,7 +33,7 @@ func configureAgentReadline(c *console.Console) {
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
 		_ = cfg.Bind(keymap, backspace, "backward-delete-char", false)
 		_ = cfg.Bind(keymap, deleteBackspace, "backward-delete-char", false)
-		_ = cfg.Bind(keymap, `\t`, "menu-complete", false)
+		_ = cfg.Bind(keymap, `\t`, "complete", false)
 		_ = cfg.Bind(keymap, inputrc.Unescape(`\e[Z`), "menu-complete-backward", false)
 	}
 }
@@ -52,6 +51,26 @@ func (r *AgentConsole) configureInterruptKey() {
 	escape := inputrc.Unescape(`\e`)
 	for _, keymap := range []string{"emacs", "emacs-standard"} {
 		_ = shell.Config.Bind(keymap, escape, agentConsoleInterruptCommandName, false)
+	}
+}
+
+func (r *AgentConsole) configureCompletionKey() {
+	if r == nil || r.console == nil || r.console.Shell() == nil {
+		return
+	}
+	shell := r.console.Shell()
+	shell.Keymap.Register(map[string]func(){
+		agentConsoleCompleteCommandName: func() {
+			if string(shell.Keymap.Local()) == "" && r.completeAtReferenceFuzzy() {
+				return
+			}
+			if complete := shell.Keymap.Commands()["complete"]; complete != nil {
+				complete()
+			}
+		},
+	})
+	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
+		_ = shell.Config.Bind(keymap, `\t`, agentConsoleCompleteCommandName, false)
 	}
 }
 
@@ -79,14 +98,31 @@ func (r *AgentConsole) handleCtrlC() {
 		os.Exit(0)
 	}
 	r.pendingExit.Store(true)
-	fmt.Fprintf(r.stderr, " Press Ctrl+C again to exit\n")
+	r.clearReadlineInput()
+	r.printCtrlCExitHint()
 	go func() {
 		time.Sleep(3 * time.Second)
 		r.pendingExit.Store(false)
 	}()
+}
+
+func (r *AgentConsole) clearReadlineInput() {
+	if r == nil || r.console == nil || r.console.Shell() == nil {
+		return
+	}
 	shell := r.console.Shell()
-	shell.Display.AcceptLine()
-	shell.History.Accept(false, false, errors.New(os.Interrupt.String()))
+	shell.Line().Set()
+	shell.Cursor().Set(0)
+}
+
+func (r *AgentConsole) printCtrlCExitHint() {
+	if r != nil && r.console != nil && r.console.Shell() != nil {
+		_, _ = r.console.Shell().Printf("Press Ctrl+C again to exit")
+		return
+	}
+	if r != nil && r.stderr != nil {
+		fmt.Fprintln(r.stderr, "Press Ctrl+C again to exit")
+	}
 }
 
 func (r *AgentConsole) configureVerbosityToggleKey() {
