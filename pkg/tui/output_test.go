@@ -352,6 +352,33 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	}
 }
 
+func TestAssistantToolCallMessageEndStopsLiveStatus(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type: agent.EventMessageEnd,
+		Turn: 1,
+		Message: agent.ChatMessage{
+			Role: "assistant",
+			ToolCalls: []agent.ToolCall{{
+				ID: "call-1",
+				Function: agent.FunctionCall{
+					Name:      "bash",
+					Arguments: `{"command":"echo hi"}`,
+				},
+			}},
+		},
+	})
+
+	if liveRunning(o.live) {
+		t.Fatal("assistant tool-call message end should stop live status before logger output")
+	}
+}
+
 func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer

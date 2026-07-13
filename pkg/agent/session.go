@@ -69,6 +69,14 @@ func LoadSession(path string) (*SessionData, error) {
 	return &data, nil
 }
 
+type sessionMeta struct {
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Model     string            `json:"model,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	Messages  []json.RawMessage `json:"messages"`
+}
+
 func ListSessions(dir string) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -86,23 +94,27 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		data, err := LoadSession(path)
+		raw, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		info, _ := entry.Info()
+		var meta sessionMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			continue
+		}
+		fi, _ := entry.Info()
 		modTime := time.Time{}
-		if info != nil {
-			modTime = info.ModTime()
+		if fi != nil {
+			modTime = fi.ModTime()
 		}
 		sessions = append(sessions, SessionInfo{
 			Path:      path,
-			CreatedAt: data.CreatedAt,
-			UpdatedAt: data.UpdatedAt,
+			CreatedAt: meta.CreatedAt,
+			UpdatedAt: meta.UpdatedAt,
 			ModTime:   modTime,
-			Model:     data.Model,
-			Provider:  data.Provider,
-			Messages:  len(data.Messages),
+			Model:     meta.Model,
+			Provider:  meta.Provider,
+			Messages:  len(meta.Messages),
 		})
 	}
 	sort.Slice(sessions, func(i, j int) bool {

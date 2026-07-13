@@ -49,6 +49,12 @@ func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
 func TestAgentReadlineBackspaceBindings(t *testing.T) {
 	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)
 	shell := repl.console.Shell()
+	if !shell.Config.GetBool("menu-complete-display-prefix") {
+		t.Fatal("menu-complete-display-prefix should stay enabled so completion replaces the typed prefix")
+	}
+	if shell.Config.GetBool("autocomplete-select") {
+		t.Fatal("autocomplete-select should stay disabled so typing does not hijack arrow keys before Tab")
+	}
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
 		for _, seq := range []string{inputrc.Unescape(`\C-h`), inputrc.Unescape(`\C-?`)} {
 			bind, ok := shell.Config.Binds[keymap][seq]
@@ -63,8 +69,8 @@ func TestAgentReadlineBackspaceBindings(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s missing bind for tab", keymap)
 		}
-		if tabBind.Action != agentConsoleCompleteCommandName {
-			t.Fatalf("%s tab action = %q, want %s", keymap, tabBind.Action, agentConsoleCompleteCommandName)
+		if tabBind.Action != "menu-complete" {
+			t.Fatalf("%s tab action = %q, want menu-complete", keymap, tabBind.Action)
 		}
 	}
 }
@@ -96,23 +102,33 @@ func TestAgentReadlinePendingMultilinePasteReference(t *testing.T) {
 	}
 }
 
-func TestAgentAtFileCompletionFuzzyUniqueMatch(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "abcdef"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
+func TestFuzzySubsequenceMatching(t *testing.T) {
+	tests := []struct {
+		query, value string
+		want         bool
+	}{
+		{"af", "abcdef", true},
+		{"abc", "abcdef", true},
+		{"adf", "abcdef", true},
+		{"xyz", "abcdef", false},
+		{"AF", "abcdef", true},
+		{"", "anything", true},
 	}
-	t.Chdir(dir)
-
-	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)
-	shell := repl.console.Shell()
-	shell.Line().Set([]rune("@af")...)
-	shell.Cursor().Set(3)
-
-	if !repl.completeAtReferenceFuzzy() {
-		t.Fatal("fuzzy completion did not match")
+	for _, tt := range tests {
+		if got := fuzzySubsequence(tt.query, tt.value); got != tt.want {
+			t.Errorf("fuzzySubsequence(%q, %q) = %v, want %v", tt.query, tt.value, got, tt.want)
+		}
 	}
-	if got := string(*shell.Line()); got != "@abcdef" {
-		t.Fatalf("line = %q, want @abcdef", got)
+}
+
+func TestSplitCompletionPath(t *testing.T) {
+	dir, query, _ := splitCompletionPath("src/ma")
+	if dir != "src/" || query != "ma" {
+		t.Fatalf("splitCompletionPath(\"src/ma\") = %q, %q", dir, query)
+	}
+	dir, query, _ = splitCompletionPath("ab")
+	if dir != "" || query != "ab" {
+		t.Fatalf("splitCompletionPath(\"ab\") = %q, %q", dir, query)
 	}
 }
 

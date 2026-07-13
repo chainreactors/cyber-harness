@@ -19,22 +19,9 @@ func StartupLine(status, component, detail string) string {
 	if component == "" {
 		component = "-"
 	}
-	line := fmt.Sprintf("%-4s %-12s", startupStatusToken(status), component)
+	line := fmt.Sprintf("%-4s %-12s", status, component)
 	if detail != "" {
 		line += " " + detail
 	}
 	return line
-}
-
-func startupStatusToken(status string) string {
-	switch strings.ToLower(status) {
-	case "ok", "ready":
-		return "ok"
-	case "fail", "error":
-		return "fail"
-	case "skip", "warn":
-		return "skip"
-	default:
-		return status
-	}
 }

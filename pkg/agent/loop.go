@@ -254,6 +254,9 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 
 	for i, tc := range toolCalls {
 		cfg.Logger.Infof("[turn %d] tool_call name=%s args=%q", turn, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
+		slots[i] = toolCallSlot{tc: tc}
+	}
+	for _, tc := range toolCalls {
 		bus.Emit(Event{
 			Type:       EventToolExecutionStart,
 			Turn:       turn,
@@ -261,7 +264,6 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			ToolName:   tc.Function.Name,
 			Arguments:  tc.Function.Arguments,
 		})
-		slots[i] = toolCallSlot{tc: tc}
 	}
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)

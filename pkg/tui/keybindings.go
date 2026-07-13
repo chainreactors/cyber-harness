@@ -28,12 +28,13 @@ func configureAgentReadline(c *console.Console) {
 	_ = cfg.Set("completion-query-items", 1000)
 	_ = cfg.Set("bell-style", "none")
 	_ = cfg.Set("enable-bracketed-paste", true)
+	_ = cfg.Set("autocomplete-select", false)
 	backspace := inputrc.Unescape(`\C-h`)
 	deleteBackspace := inputrc.Unescape(`\C-?`)
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
 		_ = cfg.Bind(keymap, backspace, "backward-delete-char", false)
 		_ = cfg.Bind(keymap, deleteBackspace, "backward-delete-char", false)
-		_ = cfg.Bind(keymap, `\t`, "complete", false)
+		_ = cfg.Bind(keymap, `\t`, "menu-complete", false)
 		_ = cfg.Bind(keymap, inputrc.Unescape(`\e[Z`), "menu-complete-backward", false)
 	}
 }
@@ -55,23 +56,7 @@ func (r *AgentConsole) configureInterruptKey() {
 }
 
 func (r *AgentConsole) configureCompletionKey() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
-		return
-	}
-	shell := r.console.Shell()
-	shell.Keymap.Register(map[string]func(){
-		agentConsoleCompleteCommandName: func() {
-			if string(shell.Keymap.Local()) == "" && r.completeAtReferenceFuzzy() {
-				return
-			}
-			if complete := shell.Keymap.Commands()["complete"]; complete != nil {
-				complete()
-			}
-		},
-	})
-	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
-		_ = shell.Config.Bind(keymap, `\t`, agentConsoleCompleteCommandName, false)
-	}
+	wrapCompleterForFuzzyAt(r.console.Shell())
 }
 
 func (r *AgentConsole) configureCtrlCKey() {
@@ -107,28 +92,20 @@ func (r *AgentConsole) handleCtrlC() {
 }
 
 func (r *AgentConsole) clearReadlineInput() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
-		return
-	}
 	shell := r.console.Shell()
 	shell.Line().Set()
 	shell.Cursor().Set(0)
 }
 
 func (r *AgentConsole) printCtrlCExitHint() {
-	if r != nil && r.console != nil && r.console.Shell() != nil {
-		_, _ = r.console.Shell().Printf("Press Ctrl+C again to exit")
+	if shell := r.console.Shell(); shell != nil {
+		_, _ = shell.Printf("Press Ctrl+C again to exit")
 		return
 	}
-	if r != nil && r.stderr != nil {
-		fmt.Fprintln(r.stderr, "Press Ctrl+C again to exit")
-	}
+	fmt.Fprintln(r.stderr, "Press Ctrl+C again to exit")
 }
 
 func (r *AgentConsole) configureVerbosityToggleKey() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
-		return
-	}
 	shell := r.console.Shell()
 	shell.Keymap.Register(map[string]func(){
 		agentConsoleToggleVerbosityCommandName: func() {
@@ -160,10 +137,10 @@ func (r *AgentConsole) handleToggleVerbosity() {
 }
 
 func (r *AgentConsole) handleEscapeInterruptKey() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
+	shell := r.console.Shell()
+	if shell == nil {
 		return
 	}
-	shell := r.console.Shell()
 	pending := string(shell.Keys.Read())
 	if pending == "" {
 		pending = readPendingTerminalBytes(agentConsoleEscapeSequenceWait)

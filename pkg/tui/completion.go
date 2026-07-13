@@ -3,39 +3,32 @@ package tui
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/carapace-sh/carapace"
+	"github.com/chainreactors/tui/readline"
 )
 
-func (r *AgentConsole) completeAtReferenceFuzzy() bool {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
-		return false
+// wrapCompleterForFuzzyAt wraps the shell's Completer so that when the word
+// under the cursor starts with '@', the PREFIX is shortened to just '@'. This
+// prevents readline's FilterPrefix from discarding fuzzy (non-prefix) matches
+// produced by atFuzzyFileAction.
+func wrapCompleterForFuzzyAt(shell *readline.Shell) {
+	if shell == nil || shell.Completer == nil {
+		return
 	}
-	shell := r.console.Shell()
-	line := []rune(string(*shell.Line()))
-	start, end := tokenBounds(line, shell.Cursor().Pos())
-	if start < 0 || end <= start || line[start] != '@' {
-		return false
+	inner := shell.Completer
+	shell.Completer = func(line []rune, cursor int) readline.Completions {
+		comps := inner(line, cursor)
+		if wordAtCursorIsAtRef(line, cursor) {
+			comps.PREFIX = "@"
+		}
+		return comps
 	}
-	token := string(line[start:end])
-	completed, ok := fuzzyAtFileCompletion(token)
-	if !ok || completed == token {
-		return false
-	}
-	next := append([]rune{}, line[:start]...)
-	next = append(next, []rune(completed)...)
-	next = append(next, line[end:]...)
-	shell.Line().Set(next...)
-	shell.Cursor().Set(start + len([]rune(completed)))
-	shell.Refresh()
-	return true
 }
 
-func tokenBounds(line []rune, cursor int) (int, int) {
-	if cursor < 0 {
-		cursor = 0
-	}
+func wordAtCursorIsAtRef(line []rune, cursor int) bool {
 	if cursor > len(line) {
 		cursor = len(line)
 	}
@@ -43,45 +36,32 @@ func tokenBounds(line []rune, cursor int) (int, int) {
 	for start > 0 && !unicode.IsSpace(line[start-1]) {
 		start--
 	}
-	end := cursor
-	for end < len(line) && !unicode.IsSpace(line[end]) {
-		end++
-	}
-	return start, end
+	return start < cursor && line[start] == '@'
 }
 
-func fuzzyAtFileCompletion(token string) (string, bool) {
-	raw := strings.TrimPrefix(token, "@")
-	if raw == "" {
-		return "", false
-	}
-	dirPart, query, sep := splitCompletionPath(raw)
-	if query == "" {
-		return "", false
-	}
-	dir := dirPart
-	if dir == "" {
-		dir = "."
-	}
-	entries, err := os.ReadDir(filepath.FromSlash(dir))
-	if err != nil {
-		return "", false
-	}
-	var matches []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if fuzzySubsequence(query, name) {
-			if entry.IsDir() {
-				name += sep
-			}
-			matches = append(matches, "@"+dirPart+name)
+func atFuzzyFileAction(raw string) carapace.Action {
+	return carapace.ActionCallback(func(_ carapace.Context) carapace.Action {
+		dirPart, query, sep := splitCompletionPath(raw)
+		dir := dirPart
+		if dir == "" {
+			dir = "."
 		}
-	}
-	sort.Strings(matches)
-	if len(matches) != 1 {
-		return "", false
-	}
-	return matches[0], true
+		entries, err := os.ReadDir(filepath.FromSlash(dir))
+		if err != nil {
+			return carapace.ActionValues()
+		}
+		var values []string
+		for _, entry := range entries {
+			name := entry.Name()
+			if query == "" || fuzzySubsequence(query, name) {
+				if entry.IsDir() {
+					name += sep
+				}
+				values = append(values, "@"+dirPart+name)
+			}
+		}
+		return carapace.ActionValues(values...).NoSpace()
+	})
 }
 
 func splitCompletionPath(raw string) (dir, query, sep string) {

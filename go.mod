@@ -315,3 +315,8 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
+
+replace (
+	github.com/chainreactors/tui/console => ../tui/console
+	github.com/chainreactors/tui/readline => ../tui/readline
+)

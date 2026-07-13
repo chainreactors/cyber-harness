@@ -19,7 +19,9 @@ type choiceItem struct {
 func (i choiceItem) FilterValue() string {
 	return strings.TrimSpace(i.title + " " + i.desc + " " + i.value)
 }
+
 func (i choiceItem) Title() string { return i.title }
+
 func (i choiceItem) Description() string {
 	if i.current {
 		if i.desc == "" {
@@ -57,10 +59,10 @@ func newChoicePicker(title string, choices []choiceItem, current string, width, 
 	styles := list.NewDefaultItemStyles()
 	styles.SelectedTitle = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color("212")).
-		Foreground(lipgloss.Color("212")).
+		BorderForeground(lipgloss.Color("6")).
+		Foreground(lipgloss.Color("6")).
 		Padding(0, 0, 0, 1)
-	styles.SelectedDesc = styles.SelectedTitle.Foreground(lipgloss.Color("42"))
+	styles.SelectedDesc = styles.SelectedTitle.Foreground(lipgloss.Color("2"))
 	delegate.Styles = styles
 
 	if width <= 0 {
@@ -84,7 +86,7 @@ func newModelPicker(models []string, current string, width, height int) modelPic
 	for _, model := range models {
 		choices = append(choices, choiceItem{value: model, title: model})
 	}
-	return newChoicePicker("Select model", choices, current, width, height)
+	return newChoicePicker("models", choices, current, width, height)
 }
 
 func (m choicePicker) Init() tea.Cmd {
@@ -146,7 +148,7 @@ func runModelPicker(models []string, current string, width, height int) (string,
 	for _, model := range models {
 		choices = append(choices, choiceItem{value: model, title: model})
 	}
-	selected, ok, err := runChoicePicker("Select model", choices, current, width, height)
+	selected, ok, err := runChoicePicker("models", choices, current, width, height)
 	if err != nil {
 		return "", false, fmt.Errorf("model picker: %w", err)
 	}
