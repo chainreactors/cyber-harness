@@ -177,6 +177,8 @@ func (r *AgentConsole) startFastInput() error {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
 
+		r.promptCompactIfNeeded()
+
 		fmt.Fprint(r.stderr, r.promptString())
 		r.setReadlineActive(true)
 		line, err := readFastInputLine(r.ctx, reader)
@@ -259,6 +261,8 @@ func (r *AgentConsole) startReadline() error {
 		if r.ctx.Err() != nil {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
+
+		r.promptCompactIfNeeded()
 
 		r.setReadlineActive(true)
 		line, err := r.console.Readline()
@@ -489,7 +493,15 @@ func (r *AgentConsole) builtinCommands() []Command {
 			Run: func(_ context.Context, _ *Session, args []string) error {
 				raw := strings.TrimSpace(strings.Join(args, " "))
 				if raw == "" {
-					return r.pickResumeSession()
+					if r.interactivePickerEnabled() {
+						return r.resumeSessionInteractive()
+					}
+					sessions, err := r.renderSessions()
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, sessions)
+					return nil
 				}
 				if raw == "list" {
 					sessions, err := r.renderSessions()
@@ -558,6 +570,29 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
+			Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])",
+			Args: ArgsOptional,
+			Run: func(ctx context.Context, s *Session, args []string) error {
+				if s.Controller != nil && s.Controller.Running() {
+					return fmt.Errorf("task is running — use /stop first")
+				}
+				if len(s.Agent.MessagesSnapshot()) < 4 {
+					fmt.Fprintln(r.stdout, "Nothing to compact (too few messages).")
+					return nil
+				}
+				instructions := strings.TrimSpace(strings.Join(args, " "))
+				result, err := s.Agent.Compact(ctx, agent.CompactConfig{
+					CustomInstructions: instructions,
+				})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(r.stdout, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
+					result.TokensBefore, result.TokensAfter, result.KeptMessages)
+				return nil
+			},
+		},
+		{
 			Name: "/loop", Description: "定时循环任务 (/loop 30s <prompt> | /loop list | /loop stop <name>)",
 			Args: ArgsOptional,
 			Run: func(ctx context.Context, s *Session, args []string) error {
@@ -609,7 +644,15 @@ func (r *AgentConsole) providerCommands() []Command {
 			Run: func(ctx context.Context, _ *Session, args []string) error {
 				fields := splitArgs(args)
 				if len(fields) == 0 {
-					return r.pickModel(ctx)
+					if r.interactivePickerEnabled() {
+						return r.configureModelInteractive(ctx)
+					}
+					models, err := r.renderModels(ctx)
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, models)
+					return nil
 				}
 				if len(fields) == 1 && fields[0] == "list" {
 					models, err := r.renderModels(ctx)
@@ -780,6 +823,39 @@ func (r *AgentConsole) refreshPromptAfterAsyncRun() {
 	r.console.Shell().Refresh()
 }
 
+func (r *AgentConsole) promptCompactIfNeeded() {
+	c := r.controller
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	ctxTokens, ctxWindow := c.compactContextTokens, c.compactContextWindow
+	c.compactContextTokens, c.compactContextWindow = 0, 0
+	c.mu.Unlock()
+	if ctxTokens == 0 {
+		return
+	}
+
+	fmt.Fprintf(r.stderr,
+		"\n⚠ Context usage: %d%% (%dK/%dK tokens). Compact now? [y/N] ",
+		ctxTokens*100/ctxWindow, ctxTokens/1000, ctxWindow/1000)
+
+	answer := ""
+	if r.terminal != nil && r.terminal.In != nil {
+		line, _ := bufio.NewReader(r.terminal.In).ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(line))
+	}
+	if answer == "y" || answer == "yes" {
+		result, err := r.agent.Compact(r.ctx, agent.CompactConfig{})
+		if err != nil {
+			fmt.Fprintf(r.stderr, "Compact failed: %s\n", err)
+		} else {
+			fmt.Fprintf(r.stderr, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
+				result.TokensBefore, result.TokensAfter, result.KeptMessages)
+		}
+	}
+}
+
 func (r *AgentConsole) setDirectCancel(fn context.CancelFunc) {
 	r.directMu.Lock()
 	r.directCancel = fn
@@ -853,7 +929,6 @@ func (r *AgentConsole) configureProvider(args []string) error {
 	}
 
 	pc := r.appInfo.ProviderConfig
-	modelChanged := false
 	for i := 0; i < len(args); i++ {
 		key := args[i]
 		value := ""
@@ -876,15 +951,11 @@ func (r *AgentConsole) configureProvider(args []string) error {
 			pc.APIKey = value
 		case "model":
 			pc.Model = value
-			modelChanged = true
 		case "proxy":
 			pc.Proxy = value
 		default:
 			return fmt.Errorf("unknown provider option: %s", key)
 		}
-	}
-	if modelChanged {
-		pc.Images = nil
 	}
 
 	resolved, err := r.applyProviderConfig(pc)
@@ -921,38 +992,6 @@ func (r *AgentConsole) resumeSession(path string) error {
 	return nil
 }
 
-func (r *AgentConsole) pickResumeSession() error {
-	if r.controller != nil && r.controller.Running() {
-		return fmt.Errorf("cannot resume while a task is running")
-	}
-	sessions, err := r.listSavedSessions()
-	if err != nil {
-		return err
-	}
-	if len(sessions) == 0 {
-		fmt.Fprintln(r.stdout, "No saved sessions.")
-		return nil
-	}
-	if !r.canUsePicker() {
-		rendered, err := r.renderSessions()
-		if err != nil {
-			return err
-		}
-		fmt.Fprint(r.stdout, rendered)
-		return nil
-	}
-	cols, rows := r.terminal.Control.Size()
-	selected, ok, err := runChoicePicker("Select session", sessionChoices(sessions), "", cols, rows)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		fmt.Fprintln(r.stdout, "Session unchanged.")
-		return nil
-	}
-	return r.resumeSession(selected)
-}
-
 func (r *AgentConsole) renderSessions() (string, error) {
 	colorEnabled := r.output != nil && r.output.color.Enabled
 	sessions, err := r.listSavedSessions()
@@ -982,6 +1021,45 @@ func (r *AgentConsole) listSavedSessions() ([]agent.SessionInfo, error) {
 	return agent.ListSessions(dir)
 }
 
+func (r *AgentConsole) resumeSessionInteractive() error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot resume while a task is running")
+	}
+	if r.agent == nil {
+		return fmt.Errorf("agent session is not configured")
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return err
+	}
+	if len(sessions) == 0 {
+		rendered, err := r.renderSessions()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, rendered)
+		return nil
+	}
+
+	choices := make([]choiceItem, 0, len(sessions))
+	for _, session := range sessions {
+		choices = append(choices, choiceItem{
+			value: session.Path,
+			title: filepath.Base(session.Path),
+			desc:  sessionDetail(session),
+		})
+	}
+	width, height := r.pickerSize()
+	selected, ok, err := runChoicePicker("sessions", choices, "", width, height)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return r.resumeSession(selected)
+}
+
 func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) {
 	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
 	if selector == "" {
@@ -1003,18 +1081,6 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 		}
 	}
 	return selector, nil
-}
-
-func sessionChoices(sessions []agent.SessionInfo) []choiceItem {
-	choices := make([]choiceItem, 0, len(sessions))
-	for _, session := range sessions {
-		choices = append(choices, choiceItem{
-			value: session.Path,
-			title: filepath.Base(session.Path),
-			desc:  sessionDetail(session),
-		})
-	}
-	return choices
 }
 
 func sessionDetail(session agent.SessionInfo) string {
@@ -1058,45 +1124,6 @@ func (r *AgentConsole) renderModels(ctx context.Context) (string, error) {
 	return r.renderPanel("models", renderHelpRows(rows, colorEnabled), colorEnabled), nil
 }
 
-func (r *AgentConsole) pickModel(ctx context.Context) error {
-	if r.controller != nil && r.controller.Running() {
-		return fmt.Errorf("cannot change model while a task is running")
-	}
-	if !r.canUsePicker() {
-		models, err := r.renderModels(ctx)
-		if err != nil {
-			return err
-		}
-		fmt.Fprint(r.stdout, models)
-		return nil
-	}
-	models, err := r.listProviderModels(ctx)
-	if err != nil {
-		return err
-	}
-	if len(models) == 0 {
-		fmt.Fprintln(r.stdout, "No models returned.")
-		return nil
-	}
-	cols, rows := r.terminal.Control.Size()
-	selected, ok, err := runModelPicker(models, strings.TrimSpace(r.appInfo.ProviderConfig.Model), cols, rows)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		fmt.Fprintln(r.stdout, "Model unchanged.")
-		return nil
-	}
-	return r.applyModel(selected)
-}
-
-func (r *AgentConsole) canUsePicker() bool {
-	if r == nil || r.terminal == nil || r.terminal.Control == nil || !r.terminal.Control.IsTerminal() {
-		return false
-	}
-	return r.terminal.In == os.Stdin && r.terminal.Out == os.Stdout
-}
-
 func (r *AgentConsole) configureModel(ctx context.Context, selector string) error {
 	if r.controller != nil && r.controller.Running() {
 		return fmt.Errorf("cannot change model while a task is running")
@@ -1117,10 +1144,36 @@ func (r *AgentConsole) configureModel(ctx context.Context, selector string) erro
 	return r.applyModel(model)
 }
 
+func (r *AgentConsole) configureModelInteractive(ctx context.Context) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change model while a task is running")
+	}
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		rendered, err := r.renderModels(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, rendered)
+		return nil
+	}
+	width, height := r.pickerSize()
+	selected, ok, err := runModelPicker(models, r.appInfo.ProviderConfig.Model, width, height)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return r.applyModel(selected)
+}
+
 func (r *AgentConsole) applyModel(model string) error {
 	pc := r.appInfo.ProviderConfig
 	pc.Model = model
-	pc.Images = nil
 	resolved, err := r.applyProviderConfig(pc)
 	if err != nil {
 		return err
@@ -1182,7 +1235,40 @@ func valueOrDash(value string) string {
 	return value
 }
 
+func (r *AgentConsole) interactivePickerEnabled() bool {
+	return r != nil &&
+		r.terminal != nil &&
+		r.terminal.Control != nil &&
+		r.terminal.Control.IsTerminal() &&
+		r.terminal.In == os.Stdin &&
+		r.terminal.Out == os.Stdout
+}
+
+func (r *AgentConsole) pickerSize() (int, int) {
+	width, height := 80, 18
+	if r == nil || r.terminal == nil || r.terminal.Control == nil {
+		return width, height
+	}
+	cols, rows := r.terminal.Control.Size()
+	if cols > 0 {
+		width = cols
+	}
+	if rows > 0 {
+		height = rows - 4
+	}
+	if height < 10 {
+		height = 10
+	}
+	if height > 24 {
+		height = 24
+	}
+	return width, height
+}
+
 func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.ProviderConfig, error) {
+	if pc.Model != r.appInfo.ProviderConfig.Model {
+		pc.Images = nil
+	}
 	resolved, err := agent.ResolveProvider(&pc)
 	if err != nil {
 		return agent.ProviderConfig{}, err
@@ -1296,8 +1382,9 @@ func (r *AgentConsole) atCompleteAction(c carapace.Context) carapace.Action {
 	if !strings.HasPrefix(c.Value, "@") {
 		return carapace.ActionValues()
 	}
-	c.Value = c.Value[1:]
-	fileAction := carapace.ActionFiles().Invoke(c).Prefix("@").ToA().NoSpace()
+	raw := c.Value[1:]
+	fileAction := atFuzzyFileAction(raw)
+	c.Value = raw
 	nodeAction := r.atNodeCompleteAction(c)
 	return carapace.Batch(fileAction, nodeAction).ToA()
 }

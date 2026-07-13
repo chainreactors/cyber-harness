@@ -802,6 +802,21 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			EvalPass:   ev.EvalPass,
 			EvalReason: reason,
 		}
+	case "agent.compact_end", "agent.compact_error":
+		var ev struct {
+			CompactTokensBefore int `json:"compact_tokens_before"`
+			CompactTokensAfter  int `json:"compact_tokens_after"`
+			CompactKeptMessages int `json:"compact_kept_messages"`
+		}
+		if len(data) > 0 {
+			_ = json.Unmarshal(data, &ev)
+		}
+		event = ChatEvent{
+			Type:                ChatEventCompact,
+			CompactTokensBefore: ev.CompactTokensBefore,
+			CompactTokensAfter:  ev.CompactTokensAfter,
+			CompactKeptMessages: ev.CompactKeptMessages,
+		}
 	default:
 		return
 	}

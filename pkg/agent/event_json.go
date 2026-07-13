@@ -39,6 +39,10 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		EvalPass   bool   `json:"eval_pass,omitempty"`
 		EvalReason string `json:"eval_reason,omitempty"`
 		EvalError  string `json:"eval_error,omitempty"`
+
+		CompactTokensBefore int `json:"compact_tokens_before,omitempty"`
+		CompactTokensAfter  int `json:"compact_tokens_after,omitempty"`
+		CompactKeptMessages int `json:"compact_kept_messages,omitempty"`
 	}{
 		Timestamp:       ts.UTC().Format(time.RFC3339Nano),
 		Type:            e.Type,
@@ -56,6 +60,10 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		EvalPass:        e.EvalPass,
 		EvalReason:      e.EvalReason,
 		EvalError:       e.EvalError,
+
+		CompactTokensBefore: e.CompactTokensBefore,
+		CompactTokensAfter:  e.CompactTokensAfter,
+		CompactKeptMessages: e.CompactKeptMessages,
 	}
 
 	if e.Err != nil {

@@ -70,8 +70,14 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 		}
 
 		if !verdict.InheritContext {
-			cfg.Evaluator.cfg.Logger.Importantf("evaluate: resetting context (round %d)", attempt+1)
-			a.Reset()
+			cfg.Evaluator.cfg.Logger.Importantf("evaluate: compacting context (round %d)", attempt+1)
+			if _, err := a.Compact(ctx, agent.CompactConfig{
+				Provider: cfg.Evaluator.cfg.Provider,
+				Model:    cfg.Evaluator.cfg.Model,
+			}); err != nil {
+				cfg.Evaluator.cfg.Logger.Warnf("compact failed, falling back to reset: %s", err)
+				a.Reset()
+			}
 		}
 
 		cfg.Evaluator.cfg.Logger.Importantf("evaluate: injecting feedback (round %d): %s", attempt+1, feedback)

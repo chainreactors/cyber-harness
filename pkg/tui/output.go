@@ -361,6 +361,11 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 			o.live.MessageUpdate(event, contentDelta)
 		}
 
+	case agent.EventMessageEnd:
+		if event.Message.Role == "assistant" && len(event.Message.ToolCalls) > 0 {
+			o.stopLive()
+		}
+
 	case agent.EventToolExecutionStart:
 		if o.canAnimate() {
 			if !o.live.HasTools() {
@@ -427,6 +432,15 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 	case agent.EventEvalError:
 		o.stopLive()
 		o.evalError(event)
+	case agent.EventCompactStart:
+		o.stopLive()
+		o.compactStart(event)
+	case agent.EventCompactEnd:
+		o.stopLive()
+		o.compactEnd(event)
+	case agent.EventCompactError:
+		o.stopLive()
+		o.compactError(event)
 	}
 }
 
@@ -768,6 +782,38 @@ func (o *AgentOutput) evalError(event agent.Event) {
 		detail = event.EvalError
 	}
 	fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(detail+", continuing..."))
+}
+
+func (o *AgentOutput) compactStart(_ agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("⋯", output.ANSICyan)+" "+o.bold("compact")+"  "+o.dim("compacting context..."))
+}
+
+func (o *AgentOutput) compactEnd(event agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("✓", output.ANSIGreen)+" "+o.bold("compact")+"  "+
+			o.dim(fmt.Sprintf("~%d → ~%d tokens (%d messages kept)",
+				event.CompactTokensBefore, event.CompactTokensAfter, event.CompactKeptMessages)))
+}
+
+func (o *AgentOutput) compactError(_ agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("⚠", output.ANSIYellow)+" "+o.bold("compact")+"  "+o.dim("failed"))
 }
 
 func (o *AgentOutput) renderUserIntent(body string) {

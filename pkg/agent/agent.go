@@ -29,7 +29,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (*Result, error) {
 
 	cfg := a.configSnapshot()
 	cfg = cfg.init()
-	cfg.Messages = a.messagesSnapshot()
+	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
@@ -57,7 +57,7 @@ func (a *Agent) Continue(ctx context.Context) (*Result, error) {
 
 	cfg := a.configSnapshot()
 	cfg = cfg.init()
-	cfg.Messages = a.messagesSnapshot()
+	cfg.Messages = a.MessagesSnapshot()
 	result, runErr := runLoop(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr
@@ -176,7 +176,7 @@ func (a *Agent) finishRun() {
 	a.running = false
 }
 
-func (a *Agent) messagesSnapshot() []ChatMessage {
+func (a *Agent) MessagesSnapshot() []ChatMessage {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]ChatMessage(nil), a.state.Messages...)

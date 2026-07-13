@@ -176,6 +176,7 @@ const (
 	ChatEventAgentJoined    = "agent_joined"
 	ChatEventSessionCleared = "session_cleared"
 	ChatEventEval           = "eval"
+	ChatEventCompact        = "compact"
 	ChatEventError          = "error"
 )
 
@@ -216,7 +217,12 @@ type ChatEvent struct {
 	EvalRound  int    `json:"eval_round,omitempty"`
 	EvalPass   bool   `json:"eval_pass,omitempty"`
 	EvalReason string `json:"eval_reason,omitempty"`
-	Transient  bool   `json:"-"`
+
+	CompactTokensBefore int `json:"compact_tokens_before,omitempty"`
+	CompactTokensAfter  int `json:"compact_tokens_after,omitempty"`
+	CompactKeptMessages int `json:"compact_kept_messages,omitempty"`
+
+	Transient bool `json:"-"`
 }
 
 type SendMessageRequest struct {

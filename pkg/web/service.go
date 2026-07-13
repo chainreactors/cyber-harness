@@ -1094,7 +1094,7 @@ func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 		// Terminal events must never be dropped (see isTerminalChatEvent). Eval
 		// verdicts are rare, non-terminal, but each one is a discrete round marker
 		// the client can't reconstruct if lost under backpressure — send reliably.
-		Reliable: isTerminalChatEvent(event.Type) || event.Type == ChatEventEval,
+		Reliable: isTerminalChatEvent(event.Type) || event.Type == ChatEventEval || event.Type == ChatEventCompact,
 	})
 }
 
@@ -1184,6 +1184,13 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 		metadata["eval_round"] = event.EvalRound
 		metadata["eval_pass"] = event.EvalPass
 		metadata["eval_reason"] = event.EvalReason
+
+	case ChatEventCompact:
+		msg.Role = "system"
+		msg.Content = fmt.Sprintf("context compacted: ~%d → ~%d tokens", event.CompactTokensBefore, event.CompactTokensAfter)
+		metadata["compact_tokens_before"] = event.CompactTokensBefore
+		metadata["compact_tokens_after"] = event.CompactTokensAfter
+		metadata["compact_kept_messages"] = event.CompactKeptMessages
 
 	case ChatEventScanComplete:
 		// Persist a lightweight marker so the inline scan card survives a reload /
