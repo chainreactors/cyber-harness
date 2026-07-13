@@ -39,7 +39,7 @@ func TestLogLLMProbeStatusReady(t *testing.T) {
 	}, logger)
 
 	logText := logBuf.String()
-	if !strings.Contains(logText, "● ok   llm") ||
+	if !strings.Contains(logText, "● llm") ||
 		!strings.Contains(logText, "openai/gpt-test") ||
 		!strings.Contains(logText, "ms") {
 		t.Fatalf("missing ready probe log:\n%s", logText)

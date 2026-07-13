@@ -7,8 +7,13 @@ import (
 
 func TestStartupLineUsesTextStatus(t *testing.T) {
 	got := StartupOK("llm", "openai/gpt-test")
-	if !strings.HasPrefix(got, "ok   llm") {
+	if !strings.HasPrefix(got, "llm") {
 		t.Fatalf("StartupOK() = %q", got)
+	}
+
+	got = StartupLine("ok", "llm", "openai/gpt-test")
+	if !strings.HasPrefix(got, "llm") {
+		t.Fatalf("StartupLine(ok) = %q", got)
 	}
 
 	got = StartupLine("fail", "llm", "unauthorized")

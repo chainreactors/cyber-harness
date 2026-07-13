@@ -71,10 +71,10 @@ func TestLoggerColorStylesOnlyMarker(t *testing.T) {
 	logger.Infof("ready")
 
 	got := buf.String()
-	if !strings.Contains(got, "\x1b[0;36m●\x1b[0m ready") {
+	if !strings.Contains(got, "\x1b[0;32m●\x1b[0m ready") {
 		t.Fatalf("colored marker missing: %q", got)
 	}
-	if strings.Contains(got, "\x1b[0;36m● ready") {
+	if strings.Contains(got, "\x1b[0;32m● ready") {
 		t.Fatalf("entire line appears colored: %q", got)
 	}
 }

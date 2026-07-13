@@ -55,7 +55,7 @@ func logFormatter(color bool) map[logs.Level]string {
 	importantMark := logMark
 	if color {
 		debugMark = darkGray(logMark)
-		infoMark = logs.Cyan(logMark)
+		infoMark = logs.Green(logMark)
 		warnMark = logs.YellowBold(logMark)
 		errorMark = logs.RedBold(logMark)
 		importantMark = logs.PurpleBold(logMark)

@@ -103,7 +103,7 @@ func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
 		t.Fatalf("RunDirectScannerMode() error = %v", err)
 	}
 	logText := logBuf.String()
-	if !strings.Contains(logText, "ok   fingers") || !strings.Contains(logText, "ok   scanner") {
+	if !strings.Contains(logText, "fingers") || !strings.Contains(logText, "scanner") {
 		t.Fatalf("debug scanner logs missing init detail:\n%s", logText)
 	}
 }
