@@ -45,10 +45,14 @@ func New(eng *engine.UncoverEngine) *Command {
 }
 
 func (c *Command) WithLogger(l telemetry.Logger) *Command {
+	c.InitLogger(l)
+	return c
+}
+
+func (c *Command) InitLogger(l telemetry.Logger) {
 	if l != nil {
 		c.logger = l
 	}
-	return c
 }
 
 func (c *Command) Name() string { return "passive" }

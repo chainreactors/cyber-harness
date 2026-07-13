@@ -21,6 +21,7 @@ import (
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -62,6 +63,8 @@ type AgentConsole struct {
 	directMu     sync.Mutex
 	directCancel context.CancelFunc
 	pendingExit  atomic.Bool
+
+	split *SplitTerminal
 }
 
 func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
@@ -72,24 +75,56 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	if t == nil {
 		t = rlterm.Local()
 	}
-	c := console.NewWithTerminal("aiscan", t)
-	c.NewlineAfter = true
+
+	// Determine whether to activate the split-pane layout. When enabled,
+	// readline uses an input-area writer (serialised via the same mutex)
+	// while all agent output routes to the upper scroll region.
+	var split *SplitTerminal
+	isTerminal := t.Control != nil && t.Control.IsTerminal()
+	useSplit := isTerminal && splitEnabled(int(os.Stdout.Fd()), resolveRenderMode())
+
+	var consoleTerminal *rlterm.Terminal
+	if useSplit {
+		split = NewSplitTerminal(t.Out, int(os.Stdout.Fd()))
+		// Readline gets a terminal whose Out/Err go through the split
+		// input writer so that prompt rendering is serialised with output.
+		consoleTerminal = rlterm.Stream(t.In, split.InputWriter(), split.InputWriter(), t.Control)
+	} else {
+		consoleTerminal = t
+	}
+
+	c := console.NewWithTerminal("aiscan", consoleTerminal)
+	if useSplit {
+		c.NewlineAfter = false
+	} else {
+		c.NewlineAfter = true
+	}
 	configureAgentReadline(c)
 	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
+
 	stdout := t.Out
 	stderr := t.Err
 	if output == nil {
 		if t.Control == nil {
 			output = NewAgentOutput(option)
 		} else {
-			output = NewAgentOutputWithWriters(option, stdout, stderr, t.Control.IsTerminal())
+			output = NewAgentOutputWithWriters(option, stdout, stderr, isTerminal)
 		}
 	}
-	if stdout == nil {
-		stdout = output.Stdout()
-	}
-	if stderr == nil {
-		stderr = output.Stderr()
+
+	// In split mode, redirect AgentOutput into the scroll region and
+	// point console stdout/stderr there too.
+	if split != nil {
+		output.SetSplitMode(split)
+		stdout = split.OutputWriter()
+		stderr = split.OutputWriter()
+	} else {
+		if stdout == nil {
+			stdout = output.Stdout()
+		}
+		if stderr == nil {
+			stderr = output.Stderr()
+		}
 	}
 
 	menu := c.NewMenu("agent")
@@ -113,6 +148,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		output:   output,
 		stdout:   stdout,
 		stderr:   stderr,
+		split:    split,
 	}
 	menu.Prompt().Primary = func() string {
 		return agentPromptString(output)
@@ -162,12 +198,38 @@ func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
 }
 
 func (r *AgentConsole) Start() error {
+	if r.split != nil {
+		r.split.Setup()
+		r.activateSplitLogger()
+		defer r.split.Teardown()
+	}
 	r.renderBanner()
 	defer r.stopController()
 	if r.fastInputEnabled() {
 		return r.startFastInput()
 	}
 	return r.startReadline()
+}
+
+func (r *AgentConsole) activateSplitLogger() {
+	if r == nil || r.split == nil {
+		return
+	}
+	splitLogger := telemetry.GlobalLogger(telemetry.LogConfig{
+		Debug:  r.option != nil && r.option.Debug,
+		Quiet:  r.option != nil && r.option.Quiet,
+		Output: r.stderr,
+		Color:  r.option == nil || !r.option.NoColor,
+	})
+	if r.appInfo.OnLoggerChange != nil {
+		r.appInfo.OnLoggerChange(splitLogger)
+	}
+	if r.agent != nil {
+		r.agent.SetLogger(splitLogger)
+	}
+	if r.appInfo.Commands != nil {
+		r.appInfo.Commands.SetLogger(splitLogger)
+	}
 }
 
 func (r *AgentConsole) startFastInput() error {
@@ -263,6 +325,10 @@ func (r *AgentConsole) startReadline() error {
 		}
 
 		r.promptCompactIfNeeded()
+
+		if r.split != nil {
+			r.split.PrepareInputArea()
+		}
 
 		r.setReadlineActive(true)
 		line, err := r.console.Readline()

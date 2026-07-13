@@ -52,6 +52,7 @@ type AgentOutput struct {
 	tty                    bool
 	interactiveInputActive bool
 	live                   *LiveStatus
+	split                  *SplitTerminal
 }
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
@@ -124,6 +125,21 @@ func (o *AgentOutput) Stdout() io.Writer { return o.stream.stdout }
 
 // Markdown returns whether markdown rendering is enabled.
 func (o *AgentOutput) Markdown() bool { return o.stream.markdown }
+
+// SetSplitMode redirects all output through the split terminal's scroll region
+// and wires the live status into the fixed status bar.
+func (o *AgentOutput) SetSplitMode(st *SplitTerminal) {
+	if o == nil || st == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.split = st
+	outW := st.OutputWriter()
+	o.stream.stdout = outW
+	o.stream.stderr = outW
+	o.live.view.SetSplitTerminal(st)
+}
 
 // ---------------------------------------------------------------------------
 // Verbosity
@@ -308,7 +324,9 @@ func (o *AgentOutput) SetInteractiveInputActive(active bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.interactiveInputActive = active
-	if active {
+	// In split mode the live status renders to a separate area, so we
+	// never need to stop it when readline becomes active.
+	if active && o.split == nil {
 		o.stopLive()
 	}
 }
@@ -449,7 +467,15 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) canAnimate() bool {
-	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0 && !o.interactiveInputActive
+	if o == nil || o.mode != ModeInteractive || !o.tty || o.verbosity < 0 {
+		return false
+	}
+	// In split mode the status bar never overlaps the input area, so
+	// animation can continue while readline is active.
+	if o.split != nil {
+		return true
+	}
+	return !o.interactiveInputActive
 }
 
 func (o *AgentOutput) renderToolLine(ev agent.Event) string {

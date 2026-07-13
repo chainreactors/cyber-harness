@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type ToolDefinition = provider.ToolDefinition
@@ -39,6 +40,10 @@ type WorkDirAware interface {
 	SetWorkDir(dir string)
 }
 
+type LoggerAware interface {
+	InitLogger(telemetry.Logger)
+}
+
 type CommandRegistry struct {
 	mu      sync.RWMutex
 	items   map[string]Command
@@ -55,6 +60,21 @@ func (r *CommandRegistry) SetOutput(w io.Writer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.output = w
+}
+
+func (r *CommandRegistry) SetLogger(logger telemetry.Logger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, cmd := range r.items {
+		if aware, ok := cmd.(LoggerAware); ok {
+			aware.InitLogger(logger)
+		}
+	}
+	for _, tool := range r.tools {
+		if aware, ok := tool.(LoggerAware); ok {
+			aware.InitLogger(logger)
+		}
+	}
 }
 
 func NewRegistry() *CommandRegistry {

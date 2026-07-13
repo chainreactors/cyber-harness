@@ -71,12 +71,27 @@ type loopState struct {
 const DefaultMinLoopInterval = 10 * time.Second
 
 func NewLoopScheduler(ib inbox.Inbox, logger telemetry.Logger) *LoopScheduler {
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
 	return &LoopScheduler{
 		loops:       make(map[string]*loopState),
 		inbox:       ib,
 		log:         logger,
 		minInterval: DefaultMinLoopInterval,
 	}
+}
+
+func (s *LoopScheduler) SetLogger(logger telemetry.Logger) {
+	if s == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	s.mu.Lock()
+	s.log = logger
+	s.mu.Unlock()
 }
 
 func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) (string, error) {

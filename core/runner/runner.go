@@ -91,6 +91,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			}
 		}
 	}
+	if rt.App != nil {
+		rt.App.SetLogger(logger)
+		logger = rt.App.Logger()
+	}
 
 	nodeName := ResolveIOANodeName(option)
 	rt.NodeName = nodeName
@@ -277,6 +281,26 @@ func (rt *AgentRuntime) Close() {
 	}
 }
 
+func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
+	if rt == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	if rt.App != nil {
+		rt.App.SetLogger(logger)
+		logger = rt.App.Logger()
+	}
+	rt.Config.Logger = logger
+	if rt.Config.LoopScheduler != nil {
+		rt.Config.LoopScheduler.SetLogger(logger)
+	}
+	if rt.Config.Tools != nil {
+		rt.Config.Tools.SetLogger(logger)
+	}
+}
+
 // ReloadProvider rebuilds the LLM provider from option and hot-swaps it into the
 // running runtime: rt.App (used by the REPL and scan paths) and rt.Config (the
 // template every new chat agent is cloned from). It returns the live provider
@@ -398,6 +422,7 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 			rt.Config.Provider = provider
 			rt.Config.Model = providerConfig.Model
 		},
+		OnLoggerChange: rt.SetLogger,
 	}, session, rt.Output, rt.Bus)
 	if setInterrupt != nil {
 		setInterrupt(repl.InterruptCurrentRun)

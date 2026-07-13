@@ -78,6 +78,9 @@ var defaultFrames = bspinner.Dot
 // LiveView manages a transient, animated region on the terminal. Lines
 // containing spinnerSentinel get the current animation frame injected on each
 // tick. Stop erases the region cleanly.
+//
+// When split is non-nil the view renders into the split terminal's status bar
+// instead of using inline cursor-up/erase tricks.
 type LiveView struct {
 	w      io.Writer
 	accent string // ANSI color for spinner frames
@@ -90,10 +93,26 @@ type LiveView struct {
 	rendered int
 	stop     chan struct{}
 	done     chan struct{}
+
+	split *SplitTerminal // set once; safe to read without mu
 }
 
 func NewLiveView(w io.Writer, accent string) *LiveView {
 	return &LiveView{w: w, accent: accent}
+}
+
+// SetSplitTerminal puts the view into split mode: status is rendered to the
+// split terminal's fixed status bar instead of inline. Must be called before
+// Start and never changed afterwards.
+func (v *LiveView) SetSplitTerminal(st *SplitTerminal) {
+	if v == nil {
+		return
+	}
+	v.split = st
+	// Redirect the fallback writer into the scroll region so any code
+	// path that writes to v.w directly can never leak into the raw
+	// terminal (which would appear in the input area).
+	v.w = st.OutputWriter()
 }
 
 func (v *LiveView) Update(lines []string) {
@@ -151,6 +170,10 @@ func (v *LiveView) render(frame string) {
 
 func (v *LiveView) renderLocked(frame string) {
 	v.frame = frame
+	if v.split != nil {
+		v.renderSplitLocked(frame)
+		return
+	}
 	if v.hidden {
 		return
 	}
@@ -184,8 +207,30 @@ func (v *LiveView) renderLocked(frame string) {
 	v.rendered = len(lines)
 }
 
+// renderSplitLocked renders the first status line to the split terminal's
+// status bar. Tool-progress lines are omitted (they appear permanently in
+// the output area when completed).
+func (v *LiveView) renderSplitLocked(frame string) {
+	lines := v.lines
+	if len(lines) == 0 {
+		v.split.UpdateStatus("")
+		return
+	}
+	marker := v.accent + frame + "\x1b[0m"
+	text := strings.Replace(lines[0], spinnerSentinel, marker, 1)
+	v.split.UpdateStatus(" " + text)
+}
+
 func (v *LiveView) WithHidden(fn func()) {
 	if v == nil {
+		if fn != nil {
+			fn()
+		}
+		return
+	}
+	// In split mode output and status areas don't overlap; no need to
+	// hide the status bar while writing content to the scroll region.
+	if v.split != nil {
 		if fn != nil {
 			fn()
 		}
@@ -235,8 +280,13 @@ func (v *LiveView) Stop() {
 	n := v.rendered
 	v.rendered = 0
 	done := v.done
+	isSplit := v.split != nil
 	v.mu.Unlock()
 	<-done
+	if isSplit {
+		v.split.ClearStatus()
+		return
+	}
 	if n > 0 {
 		writeSynced(v.w, func() {
 			eraseLines(v.w, n)

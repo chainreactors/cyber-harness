@@ -70,3 +70,24 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 		t.Fatalf("missing unready probe log:\n%s", logText)
 	}
 }
+
+func TestAppLoggerCanBeRetargeted(t *testing.T) {
+	var first, second bytes.Buffer
+	app := &App{}
+	app.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &first}))
+	logger := app.Logger()
+
+	logger.Infof("before")
+	app.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &second}))
+	logger.Infof("after")
+
+	if !strings.Contains(first.String(), "before") {
+		t.Fatalf("initial logger missing: %q", first.String())
+	}
+	if strings.Contains(first.String(), "after") {
+		t.Fatalf("retargeted log went to old writer: %q", first.String())
+	}
+	if !strings.Contains(second.String(), "after") {
+		t.Fatalf("retargeted logger missing: %q", second.String())
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type Agent struct {
@@ -81,6 +82,25 @@ func (a *Agent) SetMaxTurns(n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Cfg.MaxTurns = n
+}
+
+func (a *Agent) SetLogger(logger telemetry.Logger) {
+	if a == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	a.mu.Lock()
+	a.Cfg.Logger = logger
+	if a.Cfg.LoopScheduler != nil {
+		a.Cfg.LoopScheduler.SetLogger(logger)
+	}
+	tools := a.Cfg.Tools
+	a.mu.Unlock()
+	if tools != nil {
+		tools.SetLogger(logger)
+	}
 }
 
 // configSnapshot copies Cfg under the lock so a concurrent SetProvider can't

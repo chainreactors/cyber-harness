@@ -7,14 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -67,6 +67,13 @@ func New(engineSet *engine.Set, opts ...Option) *Command {
 		}
 	}
 	return cmd
+}
+
+func (c *Command) InitLogger(logger telemetry.Logger) {
+	c.Base.InitLogger(logger)
+	if c.parent != nil {
+		c.parent.Cfg.Logger = c.Logger
+	}
 }
 
 func (c *Command) Name() string { return "scan" }

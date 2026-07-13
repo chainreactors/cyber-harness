@@ -9,6 +9,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/aiscan/skills"
 )
@@ -21,6 +22,7 @@ type AppInfo struct {
 	Commands          *commands.CommandRegistry
 	Skills            *skills.Store
 	OnProviderChange  func(agent.Provider, agent.ProviderConfig)
+	OnLoggerChange    func(telemetry.Logger)
 }
 
 // Session holds the dependencies commands need to operate on.

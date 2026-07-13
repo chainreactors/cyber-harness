@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
@@ -33,6 +34,8 @@ type App struct {
 	DataBus           *eventbus.Bus[output.ToolDataEvent]
 	SCOSidecar        *output.SCOSidecar
 	enginesReady      chan struct{}
+	loggerMu          sync.RWMutex
+	logger            telemetry.Logger
 }
 
 func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
@@ -41,6 +44,8 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
+	a.logger = logger
+	logger = a.Logger()
 
 	a.DataBus = eventbus.New[output.ToolDataEvent]()
 	a.SCOSidecar = output.NewSCOSidecar(a.DataBus, output.CSTXTransform)
@@ -93,6 +98,53 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 	}
 
 	return a, nil
+}
+
+func (a *App) Logger() telemetry.Logger {
+	return appLogger{app: a}
+}
+
+func (a *App) SetLogger(logger telemetry.Logger) {
+	if a == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	if proxy, ok := logger.(appLogger); ok && proxy.app == a {
+		return
+	}
+	a.loggerMu.Lock()
+	a.logger = logger
+	a.loggerMu.Unlock()
+	if a.Commands != nil {
+		a.Commands.SetLogger(a.Logger())
+	}
+}
+
+func (a *App) currentLogger() telemetry.Logger {
+	if a == nil {
+		return telemetry.NopLogger()
+	}
+	a.loggerMu.RLock()
+	logger := a.logger
+	a.loggerMu.RUnlock()
+	if logger == nil {
+		return telemetry.NopLogger()
+	}
+	return logger
+}
+
+type appLogger struct {
+	app *App
+}
+
+func (l appLogger) Debugf(format string, args ...any) { l.app.currentLogger().Debugf(format, args...) }
+func (l appLogger) Infof(format string, args ...any)  { l.app.currentLogger().Infof(format, args...) }
+func (l appLogger) Warnf(format string, args ...any)  { l.app.currentLogger().Warnf(format, args...) }
+func (l appLogger) Errorf(format string, args ...any) { l.app.currentLogger().Errorf(format, args...) }
+func (l appLogger) Importantf(format string, args ...any) {
+	l.app.currentLogger().Importantf(format, args...)
 }
 
 func (a *App) WaitEngines(ctx context.Context) error {

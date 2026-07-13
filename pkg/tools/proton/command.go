@@ -508,7 +508,7 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 		}
 		return nil
 	}); walkErr != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "proton: walk %s: %v\n", target, walkErr)
+		fmt.Fprintf(commands.Output, "proton: walk %s: %v\n", target, walkErr)
 	}
 	close(jobCh)
 	wg.Wait()
