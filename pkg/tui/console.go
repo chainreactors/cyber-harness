@@ -63,6 +63,7 @@ type AgentConsole struct {
 	directMu     sync.Mutex
 	directCancel context.CancelFunc
 	pendingExit  atomic.Bool
+	onExit       func()
 
 	split *SplitTerminal
 }
@@ -948,6 +949,18 @@ func (r *AgentConsole) stopController() {
 	if r.controller != nil {
 		r.controller.StopAndWait()
 	}
+}
+
+func (r *AgentConsole) SetOnExit(fn func()) {
+	r.onExit = fn
+}
+
+func (r *AgentConsole) forceExit() {
+	r.stopController()
+	if r.onExit != nil {
+		r.onExit()
+	}
+	os.Exit(0)
 }
 
 func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {

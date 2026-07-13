@@ -424,6 +424,7 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 		},
 		OnLoggerChange: rt.SetLogger,
 	}, session, rt.Output, rt.Bus)
+	repl.SetOnExit(rt.Close)
 	if setInterrupt != nil {
 		setInterrupt(repl.InterruptCurrentRun)
 	}

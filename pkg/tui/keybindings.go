@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -76,11 +75,17 @@ func (r *AgentConsole) configureCtrlCKey() {
 }
 
 func (r *AgentConsole) handleCtrlC() {
-	if r.InterruptCurrentRun() {
+	if r.pendingExit.Load() {
+		r.forceExit()
 		return
 	}
-	if r.pendingExit.Load() {
-		os.Exit(0)
+	if r.InterruptCurrentRun() {
+		r.pendingExit.Store(true)
+		go func() {
+			time.Sleep(5 * time.Second)
+			r.pendingExit.Store(false)
+		}()
+		return
 	}
 	r.pendingExit.Store(true)
 	r.clearReadlineInput()

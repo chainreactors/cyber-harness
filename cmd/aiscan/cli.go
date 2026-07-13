@@ -35,10 +35,10 @@ type webCommand struct {
 
 type cliOptions struct {
 	cfg.Option
-	Agent struct{}       `command:"agent" description:"Run the LLM agent"`
-	Serve serveCommand   `command:"serve" description:"Run the standalone agent server"`
-	Web   webCommand     `command:"web" description:"Start the web UI server (includes agent server)"`
-	IOA   ioaCommand     `command:"ioa" description:"Server management commands" hidden:"true"`
+	Agent struct{}     `command:"agent" description:"Run the LLM agent"`
+	Serve serveCommand `command:"serve" description:"Run the standalone agent server"`
+	Web   webCommand   `command:"web" description:"Start the web UI server (includes agent server)"`
+	IOA   ioaCommand   `command:"ioa" description:"Server management commands" hidden:"true"`
 	cfg.ScannerCommands
 }
 
@@ -673,8 +673,9 @@ func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *sig
 				}
 				fmt.Fprintf(os.Stderr, "\nPress Ctrl+C again to exit\n")
 			case 2:
-				logger.Warnf("signal=shutdown action=finish_current_turn")
+				logger.Warnf("signal=shutdown action=force_exit")
 				cancel()
+				os.Exit(130)
 			default:
 				logger.Warnf("signal=shutdown action=force_exit")
 				os.Exit(1)
