@@ -26,20 +26,32 @@ const runModeWeb cfg.RunMode = "web"
 var webServeFunc func(ctx context.Context, option *cfg.Option, web webCommand, logger telemetry.Logger) error
 
 type webCommand struct {
-	Addr        string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
-	DB          string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
-	MaxScans    int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
-	ScanTimeout int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
-	Token       string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
+	DB                 string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
+	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
+	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
+	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	cfg.LLMOptions     `group:"LLM Options"`
+	cfg.ScannerOptions `group:"Scanner Options"`
+	cfg.IOAOptions     `group:"Server Options"`
+	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 type cliOptions struct {
-	cfg.Option
-	Agent struct{}     `command:"agent" description:"Run the LLM agent"`
-	Serve serveCommand `command:"serve" description:"Run the standalone agent server"`
-	Web   webCommand   `command:"web" description:"Start the web UI server (includes agent server)"`
-	IOA   ioaCommand   `command:"ioa" description:"Server management commands" hidden:"true"`
+	cfg.MiscOptions `group:"Miscellaneous Options"`
+	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
+	Serve           serveCommand `command:"serve" description:"Run the standalone agent server"`
+	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
+	IOA             ioaCommand   `command:"ioa" description:"Server management commands" hidden:"true"`
 	cfg.ScannerCommands
+}
+
+type agentCommand struct {
+	cfg.LLMOptions     `group:"LLM Options"`
+	cfg.ScannerOptions `group:"Scanner Options"`
+	cfg.AgentOptions   `group:"Agent Options"`
+	cfg.IOAOptions     `group:"Server Options"`
+	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 type serveCommand struct {
@@ -48,11 +60,12 @@ type serveCommand struct {
 }
 
 type ioaCommand struct {
-	Serve    struct{}       `command:"serve" description:"Run the standalone agent server"`
-	Spaces   struct{}       `command:"spaces" description:"List all spaces"`
-	Messages ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context  ioaContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes    ioaNodesCmd    `command:"nodes" description:"List nodes"`
+	cfg.IOAOptions `group:"Server Options"`
+	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
+	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
+	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
+	Context        ioaContextCmd  `command:"context" description:"View message thread/context"`
+	Nodes          ioaNodesCmd    `command:"nodes" description:"List nodes"`
 }
 
 type ioaMessagesCmd struct {
@@ -196,7 +209,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
-				option := cli.Option
+				option := cfg.Option{MiscOptions: cli.MiscOptions}
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
@@ -207,12 +220,13 @@ func parseCLI(args []string) (parsedCLI, error) {
 		return parsedCLI{}, err
 	}
 
-	option := cli.Option
 	if cli.Version {
-		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
+		return parsedCLI{Option: cfg.Option{MiscOptions: cli.MiscOptions}, Mode: cfg.RunModeNoCommand}, nil
 	}
 
 	mode := selectedMode(parser)
+	option := buildOption(&cli, parser)
+
 	if mode == cfg.RunModeNoCommand {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
@@ -266,7 +280,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 		return parsedCLI{}, err
 	}
 
-	option := cli.Option
+	option := cfg.Option{MiscOptions: cli.MiscOptions}
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -320,6 +334,34 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	if len(manual.Skills) > 0 {
 		option.Skills = append(option.Skills, manual.Skills...)
 	}
+}
+
+func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
+	var opt cfg.Option
+	opt.MiscOptions = cli.MiscOptions
+
+	active := parser.Active
+	if active == nil {
+		return opt
+	}
+
+	switch active.Name {
+	case "agent":
+		opt.LLMOptions = cli.Agent.LLMOptions
+		opt.ScannerOptions = cli.Agent.ScannerOptions
+		opt.AgentOptions = cli.Agent.AgentOptions
+		opt.IOAOptions = cli.Agent.IOAOptions
+		opt.ReconOptions = cli.Agent.ReconOptions
+	case "web":
+		opt.LLMOptions = cli.Web.LLMOptions
+		opt.ScannerOptions = cli.Web.ScannerOptions
+		opt.IOAOptions = cli.Web.IOAOptions
+		opt.ReconOptions = cli.Web.ReconOptions
+	case "ioa":
+		opt.IOAOptions = cli.IOA.IOAOptions
+	}
+
+	return opt
 }
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {

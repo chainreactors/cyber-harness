@@ -388,8 +388,8 @@ func TestScannerAIIntentInjectsCommandSkill(t *testing.T) {
 func TestParseCLIAgentIOAFlag(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--debug",
-		"--cyberhub-mode", "override",
 		"agent",
+		"--cyberhub-mode", "override",
 		"-p", "scan localhost",
 		"-s", "aiscan",
 		"--space", "case-1",
@@ -489,7 +489,6 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 		"ioa",
 		"serve",
 		"--server-url", "http://127.0.0.1:9999",
-		"--timeout", "10",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
@@ -498,8 +497,8 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeIOAServe)
 	}
 	opt := parsed.Option
-	if opt.IOAURL != "http://127.0.0.1:9999" || opt.Timeout != 10 {
-		t.Fatalf("option = %#v", opt)
+	if opt.IOAURL != "http://127.0.0.1:9999" {
+		t.Fatalf("option.IOAURL = %q, want %q", opt.IOAURL, "http://127.0.0.1:9999")
 	}
 }
 
