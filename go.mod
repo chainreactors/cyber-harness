@@ -9,7 +9,7 @@ require (
 	github.com/chainreactors/fingers v1.2.2-0.20260704073236-3e22b6a528b9
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226
 	github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645
-	github.com/chainreactors/libcstx/go v0.0.0-20260712071832-ae9c68219d9d
+	github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260710171341-456d36779ab2
 	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
@@ -87,7 +87,6 @@ require (
 	github.com/bodgit/sevenzip v1.6.4 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
-	github.com/brianvoe/gofakeit/v7 v7.2.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
@@ -152,8 +151,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gookit/goutil v0.7.5 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gosimple/slug v1.15.0 // indirect
-	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/gosnmp/gosnmp v1.43.2 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/happyhackingspace/dit v0.0.14 // indirect
@@ -161,10 +158,8 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/hdm/jarm-go v0.0.7 // indirect
 	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
 	github.com/huin/asn1ber v0.0.0-20120622192748-af09f62e6358 // indirect
-	github.com/iangcarroll/cookiemonster v1.6.0 // indirect
 	github.com/icholy/digest v1.1.0 // indirect
 	github.com/icodeface/tls v0.0.0-20230910023335-34df9250cd12 // indirect
 	github.com/imroc/req/v3 v3.57.0 // indirect
@@ -173,7 +168,6 @@ require (
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
 	github.com/jlaffaye/ftp v0.2.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kataras/jwt v0.1.8 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
@@ -218,9 +212,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/projectdiscovery/blackrock v0.0.1 // indirect
-	github.com/projectdiscovery/dsl v0.8.17 // indirect
 	github.com/projectdiscovery/fastdialer v0.5.6 // indirect
-	github.com/projectdiscovery/gostruct v0.0.2 // indirect
 	github.com/projectdiscovery/hmap v0.0.100 // indirect
 	github.com/projectdiscovery/mapcidr v1.1.97 // indirect
 	github.com/projectdiscovery/networkpolicy v0.1.37 // indirect
@@ -241,7 +233,6 @@ require (
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
-	github.com/sashabaranov/go-openai v1.37.0 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -272,7 +263,6 @@ require (
 	github.com/valyala/fasthttp v1.71.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/vbauerster/mpb/v8 v8.12.1 // indirect
-	github.com/vulncheck-oss/go-exploit v1.51.0 // indirect
 	github.com/wasilibs/go-re2 v1.11.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
 	github.com/weppos/publicsuffix-go v0.50.3-0.20260104170930-90713dec78f2 // indirect
@@ -320,3 +310,5 @@ replace (
 	github.com/chainreactors/tui/console => ../tui/console
 	github.com/chainreactors/tui/readline => ../tui/readline
 )
+
+replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2

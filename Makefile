@@ -20,9 +20,9 @@ AGENT_BIN ?= $(BIN_DIR)/aiscan-agent$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 
 # Keep the local feature tiers aligned with the release workflow.
-STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
+STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo cstx_native
 AGENT_TAGS := forceposix emptytemplates noembed osusergo netgo
-FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite
+FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite cstx_native katana_slim
 BUILD_FLAGS := -trimpath -ldflags "-s -w" -buildvcs=false
 
 .PHONY: help prepare frontend standard agent full web-build web-run web all clean
@@ -48,7 +48,7 @@ frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
 standard: prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
+	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 agent: prepare
@@ -57,7 +57,7 @@ agent: prepare
 
 # The full binary embeds web/static, so frontend must finish first.
 full: frontend prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
 web-build: full
