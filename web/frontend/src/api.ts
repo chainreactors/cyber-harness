@@ -18,7 +18,7 @@ export interface ScanJob {
   updated_at: string;
 }
 
-import type { SCONode } from './sco_gen';
+import type { SCONode } from '@cyber/cstx-easm';
 export type { SCONode };
 
 export interface ScanResult {

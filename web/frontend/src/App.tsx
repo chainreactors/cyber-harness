@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback, lazy, Suspense, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Menu, Monitor, Settings } from 'lucide-react'
+import { Box, Menu, Monitor, Settings } from 'lucide-react'
 import LanguageToggle from './components/LanguageToggle'
 import SessionList from './components/SessionList'
 import ChatPanel from './components/ChatPanel'
 import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
+import AssetPanel, { assetMentionables } from './components/AssetPanel'
 import LLMHealth from './components/LLMHealth'
 import QuickConnect from './components/QuickConnect'
 import BrandLogo from './components/brand/BrandLogo'
@@ -14,8 +15,9 @@ import BrandLogo from './components/brand/BrandLogo'
 const AgentTerminal = lazy(() => import('./components/terminal'))
 import { Button, ThemeToggle, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider, useTheme } from '@cyber/theme'
-import { getStatus } from './api'
+import { getStatus, listSCONodes } from './api'
 import type { ServerStatus } from './api'
+import type { SCONode } from '@cyber/cstx-easm'
 import { useChatSession, agentNodeKey } from './hooks/useChatSession'
 import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
@@ -23,11 +25,7 @@ import { cn } from '@cyber/theme'
 
 const sidebarStorageKey = 'aiscan-sidebar-open'
 
-// Stable empty props so ChatPanel's memoized rows aren't re-created every render.
-// The asset-pool @-mention source and composer seeding were scan-deck features;
-// with the deck gone the chat composer just runs free-text.
-const NO_MENTIONABLES: { target: string; label?: string; source?: string }[] = []
-const NO_SEED = { text: '', nonce: 0 }
+const EMPTY_SEED = { text: '', nonce: 0 }
 
 // Respect a previously-chosen theme on boot. ThemeProvider's own initializer is
 // short-circuited by the `initial` prop (it returns `initial` before ever reading
@@ -55,6 +53,7 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false)
   const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
@@ -82,6 +81,27 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(sidebarStorageKey, String(sidebarOpen))
   }, [sidebarOpen])
+
+  // SCO nodes for @-mention in chat input
+  const [scoNodes, setScoNodes] = useState<SCONode[]>([])
+  const [composerSeed, setComposerSeed] = useState(EMPTY_SEED)
+
+  const refreshSCONodes = useCallback(async () => {
+    try {
+      const data = await listSCONodes({ limit: 2000 })
+      setScoNodes(data)
+    } catch { /* non-critical */ }
+  }, [])
+
+  useEffect(() => { void refreshSCONodes() }, [refreshSCONodes])
+  // Refresh mentionables when scans finish (timeline changes often signal new results)
+  useEffect(() => { void refreshSCONodes() }, [chat.timeline.length, refreshSCONodes])
+
+  const mentionables = useMemo(() => assetMentionables(scoNodes), [scoNodes])
+
+  const handleAssetSendToChat = useCallback((text: string) => {
+    setComposerSeed({ text, nonce: Date.now() })
+  }, [])
 
   const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
 
@@ -162,6 +182,7 @@ export default function App() {
             <LLMHealth onOpenSettings={() => setConfigOpen(true)} reloadSignal={healthNonce} />
           </div>
           <div className="flex items-center gap-2">
+            <AssetPoolButton count={scoNodes.length} onClick={() => setAssetPanelOpen(true)} />
             <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
             <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
             <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
@@ -207,8 +228,8 @@ export default function App() {
               hasActiveSession={chat.activeSessionID !== null}
               agentOffline={activeAgentOffline}
               agentName={activeSession?.agent_name}
-              mentionables={NO_MENTIONABLES}
-              injectText={NO_SEED}
+              mentionables={mentionables}
+              injectText={composerSeed}
               onSend={chat.sendMessage}
               onPause={chat.cancelMessage}
               onClearError={chat.clearError}
@@ -230,6 +251,12 @@ export default function App() {
         focusAgentID={agentPanelFocusID ?? undefined}
         onClose={() => setAgentPanelOpen(false)}
       />
+
+      <AssetPanel
+        open={assetPanelOpen}
+        onClose={() => setAssetPanelOpen(false)}
+        onSendToChat={handleAssetSendToChat}
+      />
     </TooltipProvider>
     </ThemeProvider>
   )
@@ -238,6 +265,35 @@ export default function App() {
 function ConnectedThemeToggle() {
   const { isDark, toggle } = useTheme()
   return <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
+}
+
+function AssetPoolButton({ count, onClick }: { count: number; onClick: () => void }) {
+  const { t } = useTranslation('assets')
+  const active = count > 0
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          active={active}
+          onClick={onClick}
+          aria-label={t('openAssets')}
+          className={cn(
+            'h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border hover:opacity-80',
+            active
+              ? 'border-primary/30'
+              : 'border-border bg-secondary/50 text-muted-foreground hover:bg-secondary/50 hover:text-muted-foreground',
+          )}
+        >
+          <Box className="h-3 w-3" aria-hidden="true" />
+          <span className="font-mono" aria-hidden="true">{count}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t('openAssets')}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 function AgentsButton({ count, onClick }: { count: number; onClick: () => void }) {

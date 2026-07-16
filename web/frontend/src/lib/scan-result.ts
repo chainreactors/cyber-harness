@@ -1,4 +1,7 @@
 import type { Asset, AssetItem, Loot, ScanResult } from '../api'
+import type { SCONode } from '@cyber/cstx-easm'
+import { buildSCOModel } from '@cyber/cstx-easm'
+import type { SCOResultModel } from '@cyber/cstx-easm'
 
 export const assetItemKind = {
   service: 'service',
@@ -67,7 +70,17 @@ export type SitemapNode = {
   items: AssetItem[]
 }
 
-export function buildResultModel(result: ScanResult): ResultModel {
+export type { SCOResultModel, SCOHostGroup, SCOPortNode, SCOMetrics } from '@cyber/cstx-easm'
+
+export function isSCOModel(model: ResultModel | SCOResultModel): model is SCOResultModel {
+  return 'metrics' in model && 'ips' in (model as SCOResultModel).metrics
+}
+
+export function buildResultModel(result: ScanResult): ResultModel | SCOResultModel {
+  if (result.nodes && result.nodes.length > 0) {
+    return buildSCOModel(result.nodes, result.summary?.duration || '')
+  }
+
   const assets = normalizeAssets(result.assets || [])
   const hosts = buildHostGroups(assets)
 
