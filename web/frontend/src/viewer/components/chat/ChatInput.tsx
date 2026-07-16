@@ -26,6 +26,12 @@ export interface Mentionable {
   source?: string
 }
 
+export interface MentionPopupApi {
+  query: string
+  onSelect: (targets: string[]) => void
+  onDismiss: () => void
+}
+
 export interface ChatInputProps {
   onSend: (content: string, attachments?: ChatAttachment[]) => void
   onPause?: () => void
@@ -34,6 +40,10 @@ export interface ChatInputProps {
   placeholder?: string
   commands?: CommandHint[]
   mentionables?: Mentionable[]
+  // Replace the default @-mention dropdown with a custom renderer (e.g. a
+  // CSTXTable picker that supports multi-select). When provided, the built-in
+  // simple list is skipped entirely.
+  renderMentionPopup?: (api: MentionPopupApi) => ReactNode
   // Append-and-focus signal: bump `nonce` (with the text to insert) to push
   // text into the composer from outside — e.g. an asset-pool "reference" click.
   injectText?: { text: string; nonce: number }
@@ -78,6 +88,7 @@ export default function ChatInput({
   placeholder,
   commands = [],
   mentionables = [],
+  renderMentionPopup,
   injectText,
   enableAttachments = false,
   contextSizeLimit = 10240,
@@ -177,10 +188,15 @@ export default function ChatInput({
   // Splice the asset in place of the "@frag" under the caret (mentions can be
   // mid-message), leaving the caret right after the inserted "@target ".
   function insertMention(target: string) {
+    insertMentions([target])
+  }
+
+  function insertMentions(targets: string[]) {
+    if (targets.length === 0) return
     const el = textareaRef.current
     const caret = el?.selectionStart ?? draft.length
     const start = mention ? mention.start : caret
-    const token = `@${target} `
+    const token = targets.map((t) => `@${t}`).join(' ') + ' '
     const next = draft.slice(0, start) + token + draft.slice(caret)
     setDraft(next)
     setMention(null)
@@ -289,9 +305,17 @@ export default function ChatInput({
         </div>
       )}
 
-      {/* @-mention popup — asset-pool references; mirrors the command popup but
-          is driven by the caret token (mentionAt) so it works mid-message. */}
-      {mention && matchingMentions.length > 0 && (
+      {/* @-mention popup — custom renderer or built-in simple list */}
+      {mention && renderMentionPopup && (
+        <div className="absolute bottom-full left-0 right-0 border-t border-border bg-card shadow-lg animate-in fade-in slide-in-from-bottom-1 duration-150">
+          {renderMentionPopup({
+            query: mention.query,
+            onSelect: insertMentions,
+            onDismiss: () => setMention(null),
+          })}
+        </div>
+      )}
+      {mention && !renderMentionPopup && matchingMentions.length > 0 && (
         <div className="absolute bottom-full left-0 right-0 border-t border-border bg-card shadow-lg animate-in fade-in slide-in-from-bottom-1 duration-150">
           <div className="max-h-52 overflow-y-auto px-4 py-1.5">
             {matchingMentions.map((m) => (

@@ -61,7 +61,7 @@ export default function ToolCallDisplay({
     if (!scannerCmd || !toolCallId || pending) return
     setScoLoading(true)
     listSCONodes({ scanId: toolCallId }).then((nodes) => {
-      setScoNodes(nodes.length > 0 ? nodes : null)
+      setScoNodes(nodes.length > 0 ? nodes as unknown as SCONode[] : null)
     }).catch(() => {
       setScoNodes(null)
     }).finally(() => setScoLoading(false))

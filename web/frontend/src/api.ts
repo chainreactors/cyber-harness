@@ -713,6 +713,27 @@ export async function getSCOStats(): Promise<Record<string, number>> {
   return apiJSON('/api/sco/stats', 'Failed to load SCO stats');
 }
 
+export async function getSupportedArtifacts(): Promise<string[]> {
+  return apiJSON('/api/sco/artifacts', 'Failed to load artifacts');
+}
+
+export async function importSCOData(
+  file: File,
+  artifact: string,
+  scanId = 'import',
+): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('artifact', artifact);
+  form.append('scan_id', scanId);
+  const resp = await fetch('/api/sco/import', { method: 'POST', body: form });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error(err.error || `Import failed: ${resp.status}`);
+  }
+  return resp.json();
+}
+
 function getAccessKey(): string {
   return (window as any).__AISCAN_ACCESS_KEY__ || ''
 }

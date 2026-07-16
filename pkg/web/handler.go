@@ -39,6 +39,8 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	mux.HandleFunc("GET /api/sco/nodes/{id}", h.getSCONode)
 	mux.HandleFunc("GET /api/sco/stats", h.scoNodeStats)
 	mux.HandleFunc("DELETE /api/sco/nodes", h.deleteSCONodes)
+	mux.HandleFunc("POST /api/sco/import", h.importSCONodes)
+	mux.HandleFunc("GET /api/sco/artifacts", h.listSupportedArtifacts)
 
 	// Chat session routes
 	mux.HandleFunc("POST /api/chat/sessions", h.createSession)

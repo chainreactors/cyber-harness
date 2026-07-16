@@ -15,6 +15,7 @@ import {
   Sparkles,
   Target,
   User,
+  Terminal,
   Wrench,
   X,
 } from 'lucide-react'
@@ -34,6 +35,7 @@ import {
   type CommandHint,
   type ExtensionTimelineItem,
   type Mentionable,
+  type ChatInputProps,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
@@ -88,9 +90,13 @@ interface Props {
   hasActiveSession: boolean
   activeSessionID: string | null
   mentionables?: Mentionable[]
+  renderMentionPopup?: ChatInputProps['renderMentionPopup']
   injectText?: { text: string; nonce: number }
   agentOffline?: boolean
   agentName?: string
+  agents?: { id: string; name?: string }[]
+  onCreateSession?: (agentID: string) => void
+  onOpenTerminal?: (agentID: string) => void
   onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
   onPause: () => void
   onClearError: () => void
@@ -105,9 +111,13 @@ export default function ChatPanel({
   activeSessionID,
   hasActiveSession,
   mentionables,
+  renderMentionPopup,
   injectText,
   agentOffline,
   agentName,
+  agents = [],
+  onCreateSession,
+  onOpenTerminal,
   onSend,
   onPause,
   onClearError,
@@ -327,11 +337,42 @@ export default function ChatPanel({
           <div className={cn(workspaceClass, 'space-y-3 py-4')}>
             {!hasActiveSession && timeline.length === 0 && (
               <div className={inputFormClass}>
-                <EmptyState
+                <InstrumentIdle
                   eyebrow={t('consoleReady')}
                   title={t('startConversation')}
-                  subtitle={t('createSession')}
-                />
+                  className="py-16"
+                >
+                  {agents.length > 0 && (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {agents.map((a) => (
+                        <div key={a.id} className="flex gap-1">
+                          {onCreateSession && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onCreateSession(a.id)}
+                              className="gap-1.5"
+                            >
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              {a.name || 'Chat'}
+                            </Button>
+                          )}
+                          {onOpenTerminal && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onOpenTerminal(a.id)}
+                              className="gap-1.5 text-muted-foreground"
+                            >
+                              <Terminal className="h-3.5 w-3.5" />
+                              Terminal
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </InstrumentIdle>
               </div>
             )}
             {hasActiveSession && timeline.length === 0 && !isThinking && (
@@ -454,6 +495,7 @@ export default function ChatPanel({
                   busy={isBusy}
                   commands={chatCommands}
                   mentionables={mentionables}
+                  renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
                   placeholder={t('typeMessageWithCommands')}
                   enableAttachments={!!activeSessionID}

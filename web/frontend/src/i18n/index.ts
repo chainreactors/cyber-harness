@@ -16,6 +16,8 @@ import enAgent from './locales/en/agent'
 import zhAgent from './locales/zh/agent'
 import enConfig from './locales/en/config'
 import zhConfig from './locales/zh/config'
+import enAssets from './locales/en/assets'
+import zhAssets from './locales/zh/assets'
 
 export const STORAGE_KEY = 'aiscan-locale'
 export const SUPPORTED_LOCALES = ['en', 'zh'] as const
@@ -31,6 +33,7 @@ export const resources = {
     chat: enChat,
     agent: enAgent,
     config: enConfig,
+    assets: enAssets,
   },
   zh: {
     app: zhApp,
@@ -40,6 +43,7 @@ export const resources = {
     chat: zhChat,
     agent: zhAgent,
     config: zhConfig,
+    assets: zhAssets,
   },
 } as const
 
@@ -60,7 +64,7 @@ void i18n
     fallbackLng: 'en',
     supportedLngs: SUPPORTED_LOCALES as unknown as string[],
     nonExplicitSupportedLngs: true,
-    ns: ['app', 'sidebar', 'scan', 'findings', 'chat', 'agent', 'config'],
+    ns: ['app', 'sidebar', 'scan', 'findings', 'chat', 'agent', 'config', 'assets'],
     defaultNS,
     interpolation: { escapeValue: false },
     detection: {

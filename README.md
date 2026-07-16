@@ -74,6 +74,16 @@ go build -o aiscan ./cmd/aiscan                          # standard
 go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/katana/passive)
 ```
 
+The Makefile mirrors the three release editions. The full target builds the
+frontend first so the latest `web/static` assets are embedded into the binary:
+
+```bash
+make                                                      # standard edition
+make agent                                                # lightweight agent edition
+make full                                                 # frontend + full edition
+make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
+```
+
 ---
 
 ## Features

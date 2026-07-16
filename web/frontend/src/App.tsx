@@ -7,6 +7,7 @@ import ChatPanel from './components/ChatPanel'
 import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
 import AssetPanel, { assetMentionables } from './components/AssetPanel'
+import AssetMentionPicker from './components/AssetMentionPicker'
 import LLMHealth from './components/LLMHealth'
 import QuickConnect from './components/QuickConnect'
 import BrandLogo from './components/brand/BrandLogo'
@@ -102,6 +103,13 @@ export default function App() {
   const handleAssetSendToChat = useCallback((text: string) => {
     setComposerSeed({ text, nonce: Date.now() })
   }, [])
+
+  const renderMentionPopup = useMemo(() => {
+    if (scoNodes.length === 0) return undefined
+    return (api: { query: string; onSelect: (targets: string[]) => void; onDismiss: () => void }) => (
+      <AssetMentionPicker {...api} nodes={scoNodes} />
+    )
+  }, [scoNodes])
 
   const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
 
@@ -228,7 +236,11 @@ export default function App() {
               hasActiveSession={chat.activeSessionID !== null}
               agentOffline={activeAgentOffline}
               agentName={activeSession?.agent_name}
+              agents={chat.agents.map((a) => ({ id: a.id, name: a.identity?.node_name }))}
+              onCreateSession={handleCreateSession}
+              onOpenTerminal={handleOpenTerminal}
               mentionables={mentionables}
+              renderMentionPopup={renderMentionPopup}
               injectText={composerSeed}
               onSend={chat.sendMessage}
               onPause={chat.cancelMessage}

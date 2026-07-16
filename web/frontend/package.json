@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-context-menu": "^2.3.3",
     "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-dropdown-menu": "^2.1.0",
     "@radix-ui/react-popover": "^1.1.0",
@@ -19,10 +20,12 @@
     "@radix-ui/react-switch": "^1.1.0",
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.0",
+    "@tanstack/react-table": "^8.21.3",
     "@types/node": "^26.0.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.11.1",
+    "chroma-js": "^3.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "i18next": "^26.3.3",
@@ -33,11 +36,13 @@
     "react-i18next": "^17.0.8",
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
+    "recharts": "^2.15.4",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.15",
+    "@types/chroma-js": "^2.4.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/react-syntax-highlighter": "^15.5.13",
