@@ -34,11 +34,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install libre2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libre2-dev g++
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
-          args: --timeout=5m
+          args: --timeout=5m --build-tags re2_cgo
 
   tidy:
     runs-on: ubuntu-22.04
@@ -89,12 +92,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install libre2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libre2-dev g++
+
       - name: Generate embedded resources
         run: go generate ./core/resources/...
 
       - name: Run unit tests with coverage
         run: |
-          go test -race -count=1 -timeout 5m \
+          go test -tags re2_cgo -race -count=1 -timeout 5m \
             -coverprofile=coverage.out \
             -covermode=atomic \
             ./...
@@ -136,26 +142,29 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install libre2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libre2-dev g++
+
       - name: Run proxy tool tests
         run: |
-          go test -race -count=1 -timeout 5m -v \
+          go test -tags re2_cgo -race -count=1 -timeout 5m -v \
             ./pkg/tools/proxy/
 
       - name: Run tmux command tests
         run: |
-          go test -race -count=1 -timeout 5m -v \
+          go test -tags re2_cgo -race -count=1 -timeout 5m -v \
             -run 'Tmux|BashProxy' \
             ./pkg/commands/
 
       - name: Run PTY interactive session tests
         run: |
-          go test -race -count=1 -timeout 5m -v \
+          go test -tags re2_cgo -race -count=1 -timeout 5m -v \
             -run 'MultiRound|SendCtrlC' \
             ./pkg/agent/tmux/
 
       - name: Run agent tmux integration tests
         run: |
-          go test -race -count=1 -timeout 5m -v \
+          go test -tags re2_cgo -race -count=1 -timeout 5m -v \
             -run 'AgentTmux' \
             ./pkg/agent/
 
@@ -177,12 +186,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install libre2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libre2-dev g++
+
       - name: Run go generate for templates
         run: go generate ./core/resources/...
 
       - name: Run resources tests
         run: |
-          go test -race -count=1 -timeout 5m \
+          go test -tags re2_cgo -race -count=1 -timeout 5m \
             ./core/resources/...
 
   # ── E2E tests (depends on test) ───────────────────────────────
@@ -203,11 +215,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install libre2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libre2-dev g++
+
       - name: Run e2e tests
         run: |
           if [ -d pkg/e2e ]; then
             go test -race -count=1 -timeout 10m \
-              -tags e2e \
+              -tags "e2e re2_cgo" \
               -v \
               ./pkg/e2e/
           else
