@@ -899,8 +899,8 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 }
 
 func TestE2ETerminalResize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping e2e test in short mode")
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("skipping e2e browser test (requires interactive terminal)")
 	}
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "resize-agent")

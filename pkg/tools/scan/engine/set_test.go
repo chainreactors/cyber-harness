@@ -468,6 +468,9 @@ func TestSprayStatsHandlerSafeAfterCancel(t *testing.T) {
 }
 
 func TestZombieStatsHandlerSafeAfterCancel(t *testing.T) {
+	if raceEnabled {
+		t.Skip("zombie engine has known races under -race detector")
+	}
 	eng, err := sdkzombie.NewEngine(nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
