@@ -2,11 +2,13 @@ package webagent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -19,6 +21,88 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/gorilla/websocket"
 )
+
+func TestRunConnectionFileRoundTrip(t *testing.T) {
+	var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "nested", "runner.bin")
+	want := []byte{0, 1, 2, 3, 0xfe, 0xff, 'o', 'k'}
+	result := make(chan error, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		defer conn.Close()
+
+		var reg webproto.Message
+		if err := conn.ReadJSON(&reg); err != nil {
+			result <- err
+			return
+		}
+		if err := conn.WriteJSON(webproto.Message{Type: "connected"}); err != nil {
+			result <- err
+			return
+		}
+
+		payload := webproto.MustJSON(webproto.FileRPCPayload{Path: target})
+		if err := conn.WriteJSON(webproto.Message{
+			Type: "file.write", TaskID: "write-1", DataB64: base64.StdEncoding.EncodeToString(want), Payload: payload,
+		}); err != nil {
+			result <- err
+			return
+		}
+		var writeRes webproto.Message
+		if err := conn.ReadJSON(&writeRes); err != nil {
+			result <- err
+			return
+		}
+		if writeRes.Type != "complete" || writeRes.TaskID != "write-1" {
+			result <- fmt.Errorf("unexpected write response: %+v", writeRes)
+			return
+		}
+
+		if err := conn.WriteJSON(webproto.Message{Type: "file.read", TaskID: "read-1", Payload: payload}); err != nil {
+			result <- err
+			return
+		}
+		var readRes webproto.Message
+		if err := conn.ReadJSON(&readRes); err != nil {
+			result <- err
+			return
+		}
+		got, err := base64.StdEncoding.DecodeString(readRes.DataB64)
+		if err != nil {
+			result <- err
+			return
+		}
+		if readRes.Type != "complete" || readRes.TaskID != "read-1" || string(got) != string(want) {
+			result <- fmt.Errorf("unexpected read response: type=%s task=%s data=%v", readRes.Type, readRes.TaskID, got)
+			return
+		}
+		result <- nil
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reg := commands.NewRegistry()
+	done := make(chan error, 1)
+	go func() { done <- RunConnection(ctx, srv.URL, "worker", reg, nil) }()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("timeout waiting for file round trip")
+	}
+	cancel()
+	<-done
+}
 
 type webConnectionTestCommand struct {
 	bus *eventbus.Bus[agent.Event]

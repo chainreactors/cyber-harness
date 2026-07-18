@@ -20,6 +20,16 @@ type Message struct {
 	Payload  json.RawMessage `json:"payload,omitempty"`
 }
 
+// ExecPayload carries structured parameters for an "exec" message.
+// When Payload is populated, Command/Cwd/Timeout/Env are used instead of
+// the legacy Data field. If Payload is empty, Data is treated as the command.
+type ExecPayload struct {
+	Command string            `json:"command"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Timeout int               `json:"timeout,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
 // CommandSpec is the surface-neutral description of one user-facing "/verb" command.
 type CommandSpec struct {
 	Name        string   `json:"name"`
@@ -37,9 +47,9 @@ type RegisterPayload struct {
 	// menu-visible commands it can run, plus one per loaded skill. The hub merges
 	// these with its own hub-scope commands to drive the web "/" menu and /help,
 	// so the surfaces never drift.
-	CommandsMenu []CommandSpec  `json:"commands_menu,omitempty"`
-	Identity      AgentIdentity `json:"identity,omitempty"`
-	Stats         AgentStats    `json:"stats,omitempty"`
+	CommandsMenu []CommandSpec `json:"commands_menu,omitempty"`
+	Identity     AgentIdentity `json:"identity,omitempty"`
+	Stats        AgentStats    `json:"stats,omitempty"`
 }
 
 type AgentIdentity struct {
@@ -96,6 +106,14 @@ type FileUploadResult struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 	Error    string `json:"error,omitempty"`
+}
+
+// FileRPCPayload carries the target path for Cairn runner file operations.
+// The file bytes travel in Message.DataB64 so the webagent transport remains
+// JSON-only even when the Cairn side uses binary WebSocket frames.
+type FileRPCPayload struct {
+	Path string `json:"path"`
+	Size int64  `json:"size,omitempty"`
 }
 
 type PTYPayload struct {

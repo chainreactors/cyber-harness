@@ -84,6 +84,10 @@ make full                                                 # frontend + full edit
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
 ```
 
+On Windows amd64, `make` and `make full` use the bundled static RE2 backend
+and statically link the MinGW runtime, producing a single executable without
+RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
+
 ---
 
 ## Features

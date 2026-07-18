@@ -20,8 +20,8 @@ require (
 	github.com/chainreactors/sdk/spray v0.0.0-20260708104745-dcad8620f5e9
 	github.com/chainreactors/sdk/zombie v0.0.0-20260708104745-dcad8620f5e9
 	github.com/chainreactors/spray v1.3.3-0.20260704194611-7ce7b850d447
-	github.com/chainreactors/tui/console v0.0.0-20260701051656-c5b85e7256a9
-	github.com/chainreactors/tui/readline v0.0.0-20260626181537-7c0eb4b933cd
+	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
+	github.com/chainreactors/tui/readline v0.0.0-20260712082522-2ba36ad7841f
 	github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/parsers v0.0.3-0.20260707181750-8aa6ca296863
@@ -306,11 +306,6 @@ require (
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
-replace (
-	github.com/chainreactors/tui/console => ../tui/console
-	github.com/chainreactors/tui/readline => ../tui/readline
-)
-
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
-replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260716082604-8121b6cd261e
+replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260716152604-8121b6cd261e

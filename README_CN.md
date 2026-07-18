@@ -84,6 +84,10 @@ make full                                                 # 前端 + Full 完整
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
 ```
 
+在 Windows amd64 上，`make` 和 `make full` 会使用内置的静态 RE2 后端，
+并静态链接 MinGW 运行库，最终只需发布一个 EXE，不再附带 RE2、Abseil、
+libstdc++、libgcc 或 winpthread DLL。
+
 ---
 
 ## Features
