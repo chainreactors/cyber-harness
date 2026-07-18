@@ -29,7 +29,6 @@ import (
 )
 
 const agentPromptCommandName = "__prompt"
-const agentConsoleCompleteCommandName = "aiscan-complete"
 const agentConsoleInterruptCommandName = "aiscan-interrupt"
 const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
 const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"

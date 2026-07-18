@@ -11,7 +11,7 @@ import (
 
 func (h *handlerImpl) importSCONodes(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
+	if err := r.ParseMultipartForm(50 << 20); err != nil { //nolint:gosec // bounded by MaxBytesReader above
 		writeError(w, http.StatusBadRequest, "parse form: "+err.Error())
 		return
 	}
