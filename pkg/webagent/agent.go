@@ -6,36 +6,26 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/node"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/utils/pty"
-	"github.com/gorilla/websocket"
 )
 
 func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
 	if option.WebURL != "" {
-		remoteOpt, err := cfg.FetchRemoteConfig(option.WebURL)
+		remoteOpt, err := fetchRemoteConfig(option.WebURL)
 		if err != nil {
 			logger.Warnf("fetch remote config from %s: %s (continuing with local config)", option.WebURL, err)
 		} else {
@@ -54,12 +44,38 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 	}
 	defer rt.Close()
 
+	chatHandler := &chatAgentHandler{
+		rt:        rt,
+		chatMgr:   newChatRuntimeManager(rt),
+		serverURL: option.WebURL,
+	}
+
 	connectionDone := make(chan struct{})
 	go func() {
 		defer close(connectionDone)
 		_ = rt.App.WaitEngines(ctx)
 		logger.Debugf("web agent connection to %s", option.WebURL)
-		_ = RunConnectionRuntime(ctx, option.WebURL, rt.NodeName, rt)
+
+		var extraPTYOpeners map[string]pty.OpenFunc
+		if mgr := node.RegistryPTYManager(rt.App.Commands); mgr != nil {
+			extraPTYOpeners = map[string]pty.OpenFunc{
+				"repl": runner.NewRemoteREPLOpener(rt, mgr),
+			}
+		}
+
+		_ = node.Connect(ctx, node.ConnectConfig{
+			ServerURL:       option.WebURL,
+			Name:            rt.NodeName,
+			Registry:        rt.App.Commands,
+			AgentBus:        rt.Bus,
+			DataBus:         rt.App.DataBus,
+			SCO:             rt.App.SCOSidecar,
+			Logger:          logger,
+			Chat:            chatHandler,
+			Identity:        func() webproto.AgentIdentity { return agentIdentity(rt) },
+			Menu:            func() []webproto.CommandSpec { return agentCommandCatalog(rt) },
+			ExtraPTYOpeners: extraPTYOpeners,
+		})
 	}()
 
 	if rt.App.Provider == nil {
@@ -87,670 +103,79 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 	return err
 }
 
-func RunConnection(ctx context.Context, serverURL, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event]) error {
-	return runConnection(ctx, serverURL, defaultWSPath, name, reg, bus, nil)
+// ---------------------------------------------------------------------------
+// chatAgentHandler implements node.ChatHandler
+// ---------------------------------------------------------------------------
+
+type chatAgentHandler struct {
+	rt        *runner.AgentRuntime
+	chatMgr   *chatRuntimeManager
+	serverURL string
 }
 
-func RunConnectionWithPath(ctx context.Context, serverURL, wsPath, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event]) error {
-	return runConnection(ctx, serverURL, wsPath, name, reg, bus, nil)
-}
-
-// ConnectionConfig provides extended options for RunConnectionWithPathEx.
-type ConnectionConfig struct {
-	ServerURL string
-	WSPath    string
-	Name      string
-	Registry  *commands.CommandRegistry
-	AgentBus  *eventbus.Bus[agent.Event]
-	DataBus   *eventbus.Bus[output.ToolDataEvent]
-	SCO       *output.SCOSidecar
-}
-
-// RunConnectionWithPathEx connects with full data pipeline support — ToolDataEvents
-// and SCO nodes are forwarded over the WebSocket as "tool.data" and "tool.sco" messages.
-func RunConnectionWithPathEx(ctx context.Context, cc ConnectionConfig) error {
-	if cc.WSPath == "" {
-		cc.WSPath = defaultWSPath
-	}
-	pipeline := buildDataPipeline(cc.DataBus, cc.SCO)
-	attempt := 0
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		err := runConnectionOnceWithPipeline(ctx, cc.ServerURL, cc.WSPath, cc.Name, cc.Registry, cc.AgentBus, nil, pipeline)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			delay := agent.RetryDelay(attempt)
-			attempt++
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(delay):
-			}
-		} else {
-			attempt = 0
-		}
-	}
-}
-
-// dataPipeline subscribes to DataBus/SCO and forwards events over WS.
-type dataPipeline struct {
-	dataBus *eventbus.Bus[output.ToolDataEvent]
-	sco     *output.SCOSidecar
-	unsub   func()
-}
-
-func buildDataPipeline(db *eventbus.Bus[output.ToolDataEvent], sco *output.SCOSidecar) *dataPipeline {
-	if db == nil && sco == nil {
-		return nil
-	}
-	return &dataPipeline{dataBus: db, sco: sco}
-}
-
-func (p *dataPipeline) attach(send func(webproto.Message)) {
-	if p == nil {
-		return
-	}
-	if p.dataBus != nil {
-		p.unsub = p.dataBus.Subscribe(func(ev output.ToolDataEvent) {
-			payload, _ := json.Marshal(ev)
-			send(webproto.Message{Type: "tool.data", Payload: payload})
-		})
-	}
-	if p.sco != nil {
-		p.sco.OnNodes = func(callID string, nodes []json.RawMessage) {
-			payload, _ := json.Marshal(map[string]any{"call_id": callID, "nodes": nodes})
-			send(webproto.Message{Type: "tool.sco", Payload: payload})
-		}
-	}
-}
-
-func (p *dataPipeline) detach() {
-	if p == nil {
-		return
-	}
-	if p.unsub != nil {
-		p.unsub()
-		p.unsub = nil
-	}
-	if p.sco != nil {
-		p.sco.OnNodes = nil
-	}
-}
-
-func RunConnectionRuntime(ctx context.Context, serverURL, name string, rt *runner.AgentRuntime) error {
-	if rt == nil || rt.App == nil {
-		return fmt.Errorf("agent runtime is not configured")
-	}
-	return runConnection(ctx, serverURL, defaultWSPath, name, rt.App.Commands, rt.Bus, rt)
-}
-
-const defaultWSPath = "/api/agent/ws"
-
-func runConnection(ctx context.Context, serverURL, wsPath, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event], rt *runner.AgentRuntime) error {
-	attempt := 0
-	for {
-		if ctx.Err() != nil {
-			return nil //nolint:nilerr // intentional: suppress error on context cancellation
-		}
-		err := runConnectionOnceWithPath(ctx, serverURL, wsPath, name, reg, bus, rt)
-		if ctx.Err() != nil {
-			return nil //nolint:nilerr // intentional: suppress error on context cancellation
-		}
-		if err != nil {
-			delay := agent.RetryDelay(attempt)
-			attempt++
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(delay):
-			}
-		} else {
-			attempt = 0
-		}
-	}
-}
-
-func runConnectionOnceWithPath(ctx context.Context, serverURL, wsPath, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event], rt *runner.AgentRuntime) error {
-	return runConnectionOnceWithPipeline(ctx, serverURL, wsPath, name, reg, bus, rt, nil)
-}
-
-func runConnectionOnceWithPipeline(ctx context.Context, serverURL, wsPath, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event], rt *runner.AgentRuntime, pipeline *dataPipeline) error {
-	if reg == nil {
-		return fmt.Errorf("command registry is nil")
-	}
-	dialURL, accessKey := splitAccessKey(serverURL)
-	wsURL := httpToWS(dialURL) + wsPath
-	var reqHeader http.Header
-	if accessKey != "" {
-		reqHeader = http.Header{"Authorization": {"Bearer " + accessKey}}
-	}
-	conn, wsResp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, reqHeader)
-	if wsResp != nil && wsResp.Body != nil {
-		wsResp.Body.Close()
-	}
-	if err != nil {
-		return fmt.Errorf("ws dial: %w", err)
-	}
-	defer conn.Close()
-
-	sendCh := make(chan webproto.Message, 64)
-	done := make(chan struct{})
-	defer close(done)
-
-	send := func(m webproto.Message) {
-		select {
-		case sendCh <- m:
-		case <-done:
-		}
-	}
-
-	stats := newAgentStatsTracker()
-	regPayload, _ := json.Marshal(agentRegisterPayload(name, reg, rt, stats.Snapshot()))
-	if err := conn.WriteJSON(webproto.Message{Type: "register", Payload: regPayload}); err != nil {
-		return fmt.Errorf("register: %w", err)
-	}
-
-	var ack webproto.Message
-	if err := conn.ReadJSON(&ack); err != nil || ack.Type != "connected" {
-		return fmt.Errorf("expected connected ack")
-	}
-
-	if pipeline != nil {
-		pipeline.attach(send)
-		defer pipeline.detach()
-	}
-
-	go func() {
-		for {
-			select {
-			case msg, ok := <-sendCh:
-				if !ok {
-					return
-				}
-				_ = conn.WriteJSON(msg)
-			case <-ctx.Done():
-				_ = conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				return
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			conn.Close()
-		case <-done:
-		}
-	}()
-
-	var mu sync.Mutex
-	execTasks := make(map[string]context.CancelFunc)   // tmux-managed exec tasks
-	chatCancels := make(map[string]context.CancelFunc) // active chat messageID → cancel
-	eventRoute := make(map[string]string)              // agent SessionID → messageID for event routing
-	if bus != nil {
-		unsub := bus.Subscribe(func(e agent.Event) {
-			if next, ok := stats.Observe(e); ok {
-				statsPayload, _ := json.Marshal(next)
-				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
-			}
-			rec := output.NewRecord(output.TypeAgent, e)
-			payload, _ := json.Marshal(rec)
-			data := agentEventSummary(e)
-			if data == "" {
-				data = string(payload)
-			}
-			mu.Lock()
-			msgID := eventRoute[e.SessionID]
-			if msgID == "" && e.ParentSessionID != "" {
-				msgID = eventRoute[e.ParentSessionID]
-				if msgID != "" {
-					eventRoute[e.SessionID] = msgID
-				}
-			}
-			var targets []string
-			if msgID != "" {
-				targets = []string{msgID}
-			} else {
-				for tid := range execTasks {
-					targets = append(targets, tid)
-				}
-			}
-			mu.Unlock()
-			for _, id := range targets {
-				send(webproto.Message{
-					Type:    "agent." + string(e.Type),
-					TaskID:  id,
-					Data:    data,
-					Payload: payload,
-				})
-			}
-		})
-		defer unsub()
-	}
-
-	ptyRouter := newPTYRouter(reg, rt)
-	defer ptyRouter.Close()
-	chatRuntime := newChatRuntimeManager(rt)
-	if mgr := registryPTYManager(reg); mgr != nil {
-		unsub := subscribePTYSessions(ctx, mgr, ptyRouter, send)
-		defer unsub()
-	}
-
-	for {
-		var msg webproto.Message
-		if err := conn.ReadJSON(&msg); err != nil {
-			return err
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-
-		if strings.HasPrefix(msg.Type, "pty.") {
-			frame, err := webproto.MessageToFrame(msg)
-			if err != nil {
-				send(webproto.Message{Type: "pty.error", StreamID: msg.StreamID, Data: err.Error()})
-				continue
-			}
-			ptyRouter.Handle(ctx, frame, func(out pty.Frame) {
-				send(webproto.FrameToMessage(out))
-			})
-			continue
-		}
-
-		switch msg.Type {
-		case "exec":
-			taskCtx, cancel := context.WithCancel(ctx)
-			mu.Lock()
-			execTasks[msg.TaskID] = cancel
-			mu.Unlock()
-			go func(m webproto.Message, tCtx context.Context, tCancel context.CancelFunc) {
-				defer tCancel()
-				defer func() {
-					mu.Lock()
-					delete(execTasks, m.TaskID)
-					mu.Unlock()
-				}()
-				execCommand(tCtx, m, reg, send)
-			}(msg, taskCtx, cancel)
-
-		case "chat":
-			chatOpts := parseChatPayload(msg)
-			webSessionID := chatOpts.SessionID
-			ag, agErr := chatRuntime.agentFor(webSessionID)
-			if agErr != nil {
-				send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: agErr.Error()})
-				continue
-			}
-
-			prompt := strings.TrimSpace(msg.Data)
-			if prompt == "" {
-				send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
-				continue
-			}
-
-			// Always route future events to the latest message.
-			mu.Lock()
-			eventRoute[ag.Cfg.SessionID] = msg.TaskID
-			mu.Unlock()
-
-			if ag.IsRunning() {
-				// Agent is busy — append to inbox; the loop picks it up. Leave any
-				// pending upload notes queued so they ride the next idle turn rather
-				// than being drained into a steer that may not surface them.
-				ag.SteerUserMessage(prompt)
-				send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
-				continue
-			}
-
-			// Idle turn: fold in files uploaded to this session since the last turn so
-			// the agent learns their absolute on-disk paths and can read them. REPL/`!`
-			// lines are left untouched so a note never corrupts a command; the note
-			// stays queued for the next natural-language turn.
-			if !isREPLCommand(prompt) {
-				if note := chatRuntime.takePendingUploads(webSessionID); note != "" {
-					msg.Data = note + "\n\n" + prompt
-				}
-			}
-
-			// Agent is idle — start a new run with this message.
-			chatCtx, chatCancel := context.WithCancel(ctx)
-			mu.Lock()
-			chatCancels[msg.TaskID] = chatCancel
-			mu.Unlock()
-			go func(m webproto.Message, cCtx context.Context, cCancel context.CancelFunc) {
-				defer cCancel()
-				defer func() {
-					mu.Lock()
-					delete(chatCancels, m.TaskID)
-					for sid, mid := range eventRoute {
-						if mid == m.TaskID {
-							delete(eventRoute, sid)
-						}
-					}
-					mu.Unlock()
-				}()
-				runChatWithAgent(cCtx, m, chatOpts, ag, rt, send)
-			}(msg, chatCtx, chatCancel)
-
-		case "upload":
-			go handleFileUpload(msg, send, chatRuntime)
-
-		case "file.read":
-			go handleFileRead(msg, send)
-
-		case "file.write":
-			go handleFileWrite(msg, send)
-
-		case "config":
-			// Hub pushed a config change (LLM provider/model/key). Re-fetch and
-			// hot-swap the provider off the read loop so a slow fetch never
-			// stalls it; reloadProvider serializes concurrent pushes. On success,
-			// re-announce identity so the hub/UI reflect the swapped provider/model —
-			// identity is otherwise sent only once, at registration, so its badge
-			// would keep showing the pre-reload model.
-			go func() {
-				if provider, model, ok := reloadAgentConfig(serverURL, rt, chatRuntime); ok {
-					payload, _ := json.Marshal(webproto.AgentIdentity{Provider: provider.Name(), Model: model})
-					send(webproto.Message{Type: "agent.identity", Payload: payload})
-				}
-			}()
-
-		case "cancel":
-			mu.Lock()
-			if cancel, ok := execTasks[msg.TaskID]; ok {
-				cancel()
-			} else if cancel, ok := chatCancels[msg.TaskID]; ok {
-				cancel()
-			}
-			mu.Unlock()
-		}
-	}
-}
-
-func newPTYRouter(reg *commands.CommandRegistry, rt *runner.AgentRuntime) *pty.Router {
-	mgr := registryPTYManager(reg)
-	var baseMgr *pty.Manager
-	if mgr != nil {
-		baseMgr = mgr.Manager
-	}
-	openers := pty.DefaultOpeners(baseMgr, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	if rt != nil {
-		openers["repl"] = runner.NewRemoteREPLOpener(rt, mgr)
-	}
-	return pty.NewRouter(baseMgr, pty.WithOpeners(openers))
-}
-
-func registryPTYManager(reg *commands.CommandRegistry) *tmux.Manager {
-	if reg == nil {
-		return nil
-	}
-	tool, ok := reg.GetTool("bash")
-	if !ok {
-		return nil
-	}
-	manager, ok := tool.(interface {
-		Manager() *tmux.Manager
-	})
-	if !ok {
-		return nil
-	}
-	return manager.Manager()
-}
-
-func subscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Router, send func(webproto.Message)) func() {
-	if mgr == nil || router == nil || send == nil {
-		return func() {}
-	}
-	activity := newPTYActivityTracker()
-	notify := make(chan tmux.EventAction, 1)
-	unsub := mgr.Subscribe(func(ev tmux.Event) {
-		activity.Observe(ev)
-		switch ev.Action {
-		case tmux.EventSessionCreated, tmux.EventSessionUpdated, tmux.EventSessionOutput, tmux.EventSessionClosed:
-			select {
-			case notify <- ev.Action:
-			default:
-			}
-		}
-	})
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(350 * time.Millisecond)
-		defer ticker.Stop()
-		dirty := false
-		for {
-			select {
-			case action := <-notify:
-				if action == tmux.EventSessionOutput {
-					dirty = true
-					continue
-				}
-				dirty = false
-				broadcastPTYSessions(mgr, router, activity, send)
-			case <-ticker.C:
-				if dirty {
-					dirty = false
-					broadcastPTYSessions(mgr, router, activity, send)
-				}
-			case <-ctx.Done():
-				return
-			case <-stop:
-				return
-			}
-		}
-	}()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			unsub()
-			close(stop)
-		})
-	}
-}
-
-func broadcastPTYSessions(mgr *tmux.Manager, router *pty.Router, activity *ptyActivityTracker, send func(webproto.Message)) {
-	streamIDs := router.StreamIDs()
-	if len(streamIDs) == 0 {
-		return
-	}
-	sessions := ptySessionViews(mgr.List(), activity)
-	for _, streamID := range streamIDs {
-		payload, _ := json.Marshal(map[string]any{"sessions": sessions})
-		send(webproto.Message{Type: "pty.sessions", StreamID: streamID, Payload: payload})
-	}
-}
-
-type ptyActivity struct {
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	ActivitySeq    int64     `json:"activity_seq,omitempty"`
-	OutputBytes    int64     `json:"output_bytes,omitempty"`
-}
-
-type ptyActivityTracker struct {
-	mu       sync.Mutex
-	sessions map[string]ptyActivity
-}
-
-type ptySessionView struct {
-	tmux.Info
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	ActivitySeq    int64     `json:"activity_seq,omitempty"`
-	OutputBytes    int64     `json:"output_bytes,omitempty"`
-}
-
-func newPTYActivityTracker() *ptyActivityTracker {
-	return &ptyActivityTracker{sessions: make(map[string]ptyActivity)}
-}
-
-func (t *ptyActivityTracker) Observe(ev tmux.Event) {
-	if t == nil || ev.Info.ID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	activity := t.sessions[ev.Info.ID]
-	now := time.Now()
-	if activity.LastActivityAt.IsZero() {
-		activity.LastActivityAt = ev.Info.StartedAt
-		if activity.LastActivityAt.IsZero() {
-			activity.LastActivityAt = now
-		}
-	}
-	switch ev.Action {
-	case tmux.EventSessionOutput:
-		activity.LastActivityAt = now
-		activity.ActivitySeq++
-		activity.OutputBytes += int64(ev.OutputBytes)
-	case tmux.EventSessionCreated, tmux.EventSessionUpdated, tmux.EventSessionClosed:
-		activity.LastActivityAt = now
-		activity.ActivitySeq++
-	}
-	t.sessions[ev.Info.ID] = activity
-}
-
-func (t *ptyActivityTracker) Snapshot(id string) ptyActivity {
-	if t == nil || id == "" {
-		return ptyActivity{}
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.sessions[id]
-}
-
-func ptySessionViews(sessions []tmux.Info, activity *ptyActivityTracker) []ptySessionView {
-	views := make([]ptySessionView, 0, len(sessions))
-	for _, session := range sessions {
-		snapshot := activity.Snapshot(session.ID)
-		if snapshot.LastActivityAt.IsZero() {
-			snapshot.LastActivityAt = session.EndedAt
-		}
-		if snapshot.LastActivityAt.IsZero() {
-			snapshot.LastActivityAt = session.StartedAt
-		}
-		views = append(views, ptySessionView{
-			Info:           session,
-			LastActivityAt: snapshot.LastActivityAt,
-			ActivitySeq:    snapshot.ActivitySeq,
-			OutputBytes:    snapshot.OutputBytes,
-		})
-	}
-	return views
-}
-
-func execCommand(ctx context.Context, msg webproto.Message, reg *commands.CommandRegistry, send func(webproto.Message)) {
-	taskID := msg.TaskID
-
-	// Parse structured payload; fall back to Data for backward compat.
-	var ep webproto.ExecPayload
-	if len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &ep)
-	}
-	if ep.Command == "" {
-		ep.Command = strings.TrimSpace(msg.Data)
-	}
-	if ep.Command == "" {
-		send(webproto.Message{Type: "error", TaskID: taskID, Data: "empty command"})
+func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *node.EventRouter) {
+	chatOpts := parseChatPayload(msg)
+	webSessionID := chatOpts.SessionID
+	ag, agErr := h.chatMgr.agentFor(webSessionID)
+	if agErr != nil {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: agErr.Error()})
 		return
 	}
 
-	if ep.Cwd != "" {
-		reg.SetWorkDir(ep.Cwd)
-	}
-
-	// Scope scanner telemetry/SCO output to the Cairn RPC that launched it.
-	// The bridge uses this call id to associate discovered assets with the
-	// task/tenant that owns the exec request.
-	execCtx := output.ContextWithCallID(ctx, taskID)
-	if ep.Timeout > 0 {
-		var cancel context.CancelFunc
-		execCtx, cancel = context.WithTimeout(ctx, time.Duration(ep.Timeout)*time.Second)
-		defer cancel()
-	}
-
-	tokens, err := commands.SplitCommandLine(ep.Command)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: taskID, Data: err.Error()})
-		return
-	}
-	if len(tokens) == 0 {
-		send(webproto.Message{Type: "error", TaskID: taskID, Data: "empty command"})
+	prompt := strings.TrimSpace(msg.Data)
+	if prompt == "" {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
 		return
 	}
 
-	writer := &streamWriter{taskID: taskID, sendFn: send}
+	// Always route future events to the latest message.
+	router.Route(ag.Cfg.SessionID, msg.TaskID)
 
-	// Try registered command (aiscan tools: scan, gogo, spray, etc.)
-	if cmd, ok := reg.Get(tokens[0]); ok {
-		if sc, ok := cmd.(interface {
-			ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error)
-		}); ok {
-			out, result, err := sc.ExecuteStructured(execCtx, tokens[1:], writer)
-			writer.flush()
-			if err != nil {
-				send(webproto.Message{Type: "error", TaskID: taskID, Data: err.Error()})
-				return
-			}
-			var payload json.RawMessage
-			if result != nil {
-				payload, _ = json.Marshal(result)
-			}
-			send(webproto.Message{Type: "complete", TaskID: taskID, Data: out, Payload: payload})
-			return
+	if ag.IsRunning() {
+		// Agent is busy -- append to inbox; the loop picks it up. Leave any
+		// pending upload notes queued so they ride the next idle turn rather
+		// than being drained into a steer that may not surface them.
+		ag.SteerUserMessage(prompt)
+		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
+		return
+	}
+
+	// Idle turn: fold in files uploaded to this session since the last turn so
+	// the agent learns their absolute on-disk paths and can read them. REPL/`!`
+	// lines are left untouched so a note never corrupts a command; the note
+	// stays queued for the next natural-language turn.
+	if !isREPLCommand(prompt) {
+		if note := h.chatMgr.takePendingUploads(webSessionID); note != "" {
+			msg.Data = note + "\n\n" + prompt
 		}
-		out, err := reg.ExecuteArgsStreaming(execCtx, tokens, writer)
-		writer.flush()
-		if err != nil {
-			send(webproto.Message{Type: "error", TaskID: taskID, Data: err.Error()})
-			return
-		}
-		send(webproto.Message{Type: "complete", TaskID: taskID, Data: out})
-		return
 	}
 
-	// Shell fallback — preserve Cairn's exec contract for cwd, env, timeout,
-	// streaming output, and the real process exit code.
-	shellExec(execCtx, taskID, ep, send)
+	// Agent is idle -- start a new run with this message. The node already
+	// launched us in a goroutine with a cancellable context, so we run
+	// synchronously here.
+	runChatWithAgent(ctx, msg, chatOpts, ag, h.rt, send)
 }
 
-func shellExec(ctx context.Context, taskID string, ep webproto.ExecPayload, send func(webproto.Message)) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", ep.Command)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", ep.Command)
-	}
-	if ep.Cwd != "" {
-		cmd.Dir = ep.Cwd
-	}
-	cmd.Env = os.Environ()
-	for key, value := range ep.Env {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-
-	out, err := cmd.CombinedOutput()
-	if len(out) > 0 {
-		send(webproto.Message{Type: "output", TaskID: taskID, Data: string(out)})
-	}
-	if err != nil {
-		code := 1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
-		}
-		send(webproto.Message{Type: "complete", TaskID: taskID, Data: fmt.Sprintf("exit %d", code)})
-		return
-	}
-	send(webproto.Message{Type: "complete", TaskID: taskID})
+func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
+	handleFileUpload(msg, send, h.chatMgr)
 }
 
+func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webproto.Message)) {
+	if provider, model, ok := reloadAgentConfig(serverURL, h.rt, h.chatMgr); ok {
+		payload, _ := json.Marshal(webproto.AgentIdentity{Provider: provider.Name(), Model: model})
+		send(webproto.Message{Type: "agent.identity", Payload: payload})
+	}
+}
+
+func (h *chatAgentHandler) CancelChat(taskID string) bool {
+	return false // cancel is handled by node's context cancellation
+}
+
+// ---------------------------------------------------------------------------
 // parseChatPayload decodes the "chat" WS payload: the web session to scope the
 // agent conversation to, plus optional Goal-mode run controls.
+// ---------------------------------------------------------------------------
+
 func parseChatPayload(msg webproto.Message) webproto.ChatPayload {
 	var payload webproto.ChatPayload
 	if len(msg.Payload) > 0 {
@@ -761,13 +186,17 @@ func parseChatPayload(msg webproto.Message) webproto.ChatPayload {
 	return payload
 }
 
+// ---------------------------------------------------------------------------
+// chatRuntimeManager
+// ---------------------------------------------------------------------------
+
 type chatRuntimeManager struct {
 	rt       *runner.AgentRuntime
 	mu       sync.Mutex
 	sessions map[string]*agent.Agent
 
 	uploadMu sync.Mutex
-	uploads  map[string][]string // web sessionID → notes about files uploaded since the last turn
+	uploads  map[string][]string // web sessionID -> notes about files uploaded since the last turn
 }
 
 func newChatRuntimeManager(rt *runner.AgentRuntime) *chatRuntimeManager {
@@ -853,11 +282,14 @@ func (m *chatRuntimeManager) reloadProvider(option *cfg.Option) (agent.Provider,
 	return provider, model, nil
 }
 
+// ---------------------------------------------------------------------------
 // reloadAgentConfig re-fetches the hub config and hot-swaps the LLM provider so
 // a running agent picks up a Settings change without a restart. Best-effort: a
 // fetch/build failure leaves the current provider in place. serverURL is the hub
 // base the agent already dials. Returns the live provider, resolved model, and
 // true when the swap succeeded, so the caller can re-announce identity.
+// ---------------------------------------------------------------------------
+
 func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntimeManager) (agent.Provider, string, bool) {
 	if rt == nil {
 		return nil, "", false
@@ -866,7 +298,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	remoteOpt, err := cfg.FetchRemoteConfig(serverURL)
+	remoteOpt, err := fetchRemoteConfig(serverURL)
 	if err != nil {
 		logger.Warnf("config reload: fetch remote config: %s", err)
 		return nil, "", false
@@ -879,6 +311,10 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
 	return provider, model, true
 }
+
+// ---------------------------------------------------------------------------
+// Chat execution
+// ---------------------------------------------------------------------------
 
 func runChatWithAgent(ctx context.Context, msg webproto.Message, opts webproto.ChatPayload, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
 	prompt := strings.TrimSpace(msg.Data)
@@ -967,6 +403,10 @@ func runChatEval(ctx context.Context, msg webproto.Message, prompt string, opts 
 	send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: trimChatOutput(result.Output)})
 }
 
+// ---------------------------------------------------------------------------
+// File upload
+// ---------------------------------------------------------------------------
+
 func handleFileUpload(msg webproto.Message, send func(webproto.Message), cr *chatRuntimeManager) {
 	var payload webproto.FileUploadPayload
 	if len(msg.Payload) > 0 {
@@ -1018,58 +458,9 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message), cr *cha
 	})
 }
 
-func handleFileRead(msg webproto.Message, send func(webproto.Message)) {
-	var payload webproto.FileRPCPayload
-	if len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &payload)
-	}
-	payload.Path = strings.TrimSpace(payload.Path)
-	if payload.Path == "" {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "file path required"})
-		return
-	}
-
-	data, err := os.ReadFile(payload.Path)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	payload.Size = int64(len(data))
-	send(webproto.Message{
-		Type:    "complete",
-		TaskID:  msg.TaskID,
-		DataB64: base64.StdEncoding.EncodeToString(data),
-		Payload: webproto.MustJSON(payload),
-	})
-}
-
-func handleFileWrite(msg webproto.Message, send func(webproto.Message)) {
-	var payload webproto.FileRPCPayload
-	if len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &payload)
-	}
-	payload.Path = strings.TrimSpace(payload.Path)
-	if payload.Path == "" {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "file path required"})
-		return
-	}
-
-	data, err := base64.StdEncoding.DecodeString(msg.DataB64)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "decode file: " + err.Error()})
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(payload.Path), 0o755); err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	if err := os.WriteFile(payload.Path, data, 0o644); err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	payload.Size = int64(len(data))
-	send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Payload: webproto.MustJSON(payload)})
-}
+// ---------------------------------------------------------------------------
+// REPL helpers
+// ---------------------------------------------------------------------------
 
 func isREPLCommand(prompt string) bool {
 	return strings.HasPrefix(prompt, "/") || strings.HasPrefix(prompt, "!")
@@ -1119,13 +510,13 @@ func runChatREPLLine(ctx context.Context, line string, rt *runner.AgentRuntime, 
 
 // fenceTerminalOutput wraps multi-line REPL/`!` command output in a Markdown
 // code fence. runChatREPLLine runs the same TUI console the interactive REPL
-// uses, whose panels (/status, /provider, /nodes …) are drawn with box-drawing
+// uses, whose panels (/status, /provider, /nodes ...) are drawn with box-drawing
 // characters and column padding that only line up in a fixed-width,
 // newline-preserving context. The web chat renders replies as Markdown prose,
-// which collapses single newlines to spaces and uses a proportional font — so an
+// which collapses single newlines to spaces and uses a proportional font -- so an
 // unfenced panel flattens into one mangled line. A fence makes the frontend
 // render it verbatim in a monospace <pre>. Single-line output (short status
-// confirmations like "Provider ready: …") is left as prose.
+// confirmations like "Provider ready: ...") is left as prose.
 func fenceTerminalOutput(s string) string {
 	if !strings.Contains(s, "\n") {
 		return s
@@ -1144,70 +535,9 @@ func trimChatOutput(value string) string {
 	return strings.TrimRight(value, " \t\r\n")
 }
 
-type agentStatsTracker struct {
-	mu    sync.Mutex
-	stats webproto.AgentStats
-}
-
-func newAgentStatsTracker() *agentStatsTracker {
-	return &agentStatsTracker{}
-}
-
-func (t *agentStatsTracker) Snapshot() webproto.AgentStats {
-	if t == nil {
-		return webproto.AgentStats{}
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.stats
-}
-
-func (t *agentStatsTracker) Observe(e agent.Event) (webproto.AgentStats, bool) {
-	if t == nil {
-		return webproto.AgentStats{}, false
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.stats.LastEvent = string(e.Type)
-	switch e.Type {
-	case agent.EventTurnEnd:
-		if e.Turn > t.stats.Turns {
-			t.stats.Turns = e.Turn
-		}
-		if e.Usage != nil {
-			t.stats.PromptTokens += e.Usage.PromptTokens
-			t.stats.CompletionTokens += e.Usage.CompletionTokens
-			t.stats.TotalTokens += e.Usage.TotalTokens
-			t.stats.CacheReadTokens += e.Usage.CacheReadTokens
-			t.stats.CacheWriteTokens += e.Usage.CacheWriteTokens
-		}
-	case agent.EventToolExecutionStart:
-		t.stats.ToolCalls++
-		t.stats.RunningTools++
-	case agent.EventToolExecutionEnd:
-		if t.stats.RunningTools > 0 {
-			t.stats.RunningTools--
-		}
-	default:
-		return t.stats, false
-	}
-	return t.stats, true
-}
-
-func agentRegisterPayload(name string, reg *commands.CommandRegistry, rt *runner.AgentRuntime, stats webproto.AgentStats) webproto.RegisterPayload {
-	payload := webproto.RegisterPayload{
-		Name:         name,
-		Commands:     reg.Names(),
-		CommandsMenu: agentCommandCatalog(rt),
-		Stats:        stats,
-		Identity:     agentIdentity(rt),
-	}
-	if payload.Identity.NodeName == "" {
-		payload.Identity.NodeName = name
-	}
-	return payload
-}
+// ---------------------------------------------------------------------------
+// Identity and command catalog (agent-specific, needs runner.AgentRuntime)
+// ---------------------------------------------------------------------------
 
 // agentCommandCatalog is the agent's user-facing "/verb" catalog reported to the
 // hub on register: the static agent-scope menu commands plus one per loaded (and
@@ -1233,29 +563,14 @@ func agentCommandCatalog(rt *runner.AgentRuntime) []webproto.CommandSpec {
 }
 
 func agentIdentity(rt *runner.AgentRuntime) webproto.AgentIdentity {
-	identity := webproto.AgentIdentity{
-		OS:           runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		PID:          os.Getpid(),
-		Capabilities: []string{"repl", "pty", "tmux", "ioa"},
-		Meta:         map[string]any{"client": "aiscan", "transport": "web-agent"},
-	}
-	if host, err := os.Hostname(); err == nil {
-		identity.Hostname = host
-	}
-	if wd, err := os.Getwd(); err == nil {
-		identity.WorkingDir = wd
-	}
-	if current, err := user.Current(); err == nil && current != nil {
-		identity.Username = current.Username
-	}
+	identity := node.DefaultIdentity()
 	if rt == nil {
 		return identity
 	}
 	identity.NodeName = rt.NodeName
 	if rt.Option != nil {
 		identity.Space = rt.Option.Space
-		identity.IOAURL = publicIOAURL(rt.Option.IOAURL)
+		identity.IOAURL = node.PublicIOAURL(rt.Option.IOAURL)
 	}
 	if rt.App != nil {
 		if rt.App.IOAClient != nil {
@@ -1267,77 +582,9 @@ func agentIdentity(rt *runner.AgentRuntime) webproto.AgentIdentity {
 	return identity
 }
 
-func publicIOAURL(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	parsed, err := url.Parse(strings.TrimRight(raw, "/"))
-	if err != nil {
-		return raw
-	}
-	parsed.User = nil
-	return parsed.String()
-}
-
-func agentEventSummary(e agent.Event) string {
-	switch e.Type {
-	case agent.EventToolExecutionStart:
-		return e.ToolName
-	case agent.EventToolExecutionEnd:
-		if e.IsError {
-			return e.ToolName + " error"
-		}
-		return e.ToolName + " done"
-	case agent.EventTurnStart:
-		return fmt.Sprintf("turn %d", e.Turn)
-	case agent.EventTurnEnd:
-		if e.Usage != nil {
-			return fmt.Sprintf("turn %d tokens=%d", e.Turn, e.Usage.TotalTokens)
-		}
-		return fmt.Sprintf("turn %d", e.Turn)
-	default:
-		return ""
-	}
-}
-
-const maxStreamBuf = 64 << 10
-
-type streamWriter struct {
-	taskID string
-	sendFn func(webproto.Message)
-	buf    []byte
-}
-
-func (w *streamWriter) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	for {
-		idx := bytes.IndexByte(w.buf, '\n')
-		if idx < 0 {
-			if len(w.buf) >= maxStreamBuf {
-				w.flush()
-			}
-			break
-		}
-		line := string(w.buf[:idx])
-		w.buf = w.buf[idx+1:]
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		w.sendFn(webproto.Message{Type: "output", TaskID: w.taskID, Data: line})
-	}
-	return len(p), nil
-}
-
-func (w *streamWriter) flush() {
-	if len(w.buf) == 0 {
-		return
-	}
-	data := string(w.buf)
-	w.buf = w.buf[:0]
-	if strings.TrimSpace(data) != "" {
-		w.sendFn(webproto.Message{Type: "output", TaskID: w.taskID, Data: data})
-	}
-}
+// ---------------------------------------------------------------------------
+// Startup helpers
+// ---------------------------------------------------------------------------
 
 func webAgentTask(option *cfg.Option) (string, error) {
 	if option == nil {
@@ -1362,31 +609,4 @@ func remoteIOAConfig(option *cfg.Option) *cfg.IOAConfig {
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan", "transport": "web-agent"},
 	}
-}
-
-// splitAccessKey lifts the access token out of a URL's userinfo
-// (http://<token>@host…), returning a userinfo-free URL plus the token. A URL
-// without userinfo (or an unparseable one) comes back unchanged with an empty token.
-func splitAccessKey(rawURL string) (dialURL, token string) {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.User == nil {
-		return rawURL, ""
-	}
-	token = u.User.Username()
-	u.User = nil
-	return u.String(), token
-}
-
-func httpToWS(rawURL string) string {
-	u, err := url.Parse(strings.TrimRight(rawURL, "/"))
-	if err != nil {
-		return rawURL
-	}
-	switch u.Scheme {
-	case "https":
-		u.Scheme = "wss"
-	default:
-		u.Scheme = "ws"
-	}
-	return u.String()
 }

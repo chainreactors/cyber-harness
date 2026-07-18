@@ -98,8 +98,8 @@ func (a *Agent) SetLogger(logger telemetry.Logger) {
 	}
 	tools := a.Cfg.Tools
 	a.mu.Unlock()
-	if tools != nil {
-		tools.SetLogger(logger)
+	if sl, ok := tools.(interface{ SetLogger(telemetry.Logger) }); ok {
+		sl.SetLogger(logger)
 	}
 }
 

@@ -228,7 +228,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}, nil
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
-	rt.App.Commands.Register(agent.NewLoopCommand(scheduler), "loop")
+	rt.App.Commands.Register(agent.NewLoopCommand(scheduler, cmdpkg.Output), "loop")
 
 	if option.Resume != "" {
 		path := option.Resume
@@ -296,8 +296,8 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 	if rt.Config.LoopScheduler != nil {
 		rt.Config.LoopScheduler.SetLogger(logger)
 	}
-	if rt.Config.Tools != nil {
-		rt.Config.Tools.SetLogger(logger)
+	if sl, ok := rt.Config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
+		sl.SetLogger(logger)
 	}
 }
 

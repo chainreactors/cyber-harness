@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/chainreactors/aiscan/core/tool"
 )
 
 // CacheRetention controls prompt caching behavior across providers.
@@ -143,16 +145,9 @@ type FunctionCallDelta struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-type ToolDefinition struct {
-	Type     string             `json:"type"`
-	Function FunctionDefinition `json:"function"`
-}
+type ToolDefinition = tool.Definition
 
-type FunctionDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-}
+type FunctionDefinition = tool.FuncDef
 
 type ResponseFormat struct {
 	Type       string          `json:"type"`

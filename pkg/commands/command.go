@@ -8,13 +8,33 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
-type ToolDefinition = provider.ToolDefinition
+// Type aliases — re-export toolapi types so existing consumers compile unchanged.
+type ToolDefinition = tool.Definition
 
-type FunctionDefinition = provider.FunctionDefinition
+type FunctionDefinition = tool.FuncDef
+
+type ToolResult = tool.Result
+
+type ContentBlock = tool.ContentBlock
+
+type AgentTool = tool.Tool
+
+// Forwarding helpers — existing callers use commands.TextResult(...) etc.
+var (
+	TextResult      = tool.TextResult
+	ErrorResult     = tool.ErrorResult
+	TerminateResult = tool.TerminateResult
+	TextBlock       = tool.TextBlock
+	ImageBlock      = tool.ImageBlock
+	SchemaOf        = tool.SchemaOf
+	ToolDef         = tool.Def
+)
+
+var _ tool.Executor = (*CommandRegistry)(nil)
 
 type Command interface {
 	Name() string
@@ -27,13 +47,6 @@ type Command interface {
 // description line extracted from Usage().
 type QuickReferencer interface {
 	QuickReference() string
-}
-
-type AgentTool interface {
-	Name() string
-	Description() string
-	Definition() ToolDefinition
-	Execute(ctx context.Context, arguments string) (ToolResult, error)
 }
 
 type WorkDirAware interface {

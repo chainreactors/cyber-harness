@@ -1,4 +1,4 @@
-package commands
+package tool
 
 import (
 	"encoding/json"
@@ -8,12 +8,6 @@ import (
 )
 
 // SchemaOf generates a JSON Schema (as map[string]any) from a Go struct.
-// Struct fields use standard tags:
-//
-//	json:"name"          → property name; omitempty marks the field as optional
-//	jsonschema:"..."     → description, enum, etc. per invopop/jsonschema
-//
-// Fields without omitempty are automatically added to the "required" list.
 func SchemaOf(proto any) map[string]any {
 	r := &jsonschema.Reflector{
 		DoNotReference: true,
@@ -36,12 +30,12 @@ func SchemaOf(proto any) map[string]any {
 	return m
 }
 
-// ToolDef builds a complete ToolDefinition from a name,
+// ToolDef builds a complete Definition from a name,
 // description, and an args struct prototype.
-func ToolDef(name, description string, argsProto any) ToolDefinition {
-	return ToolDefinition{
+func Def(name, description string, argsProto any) Definition {
+	return Definition{
 		Type: "function",
-		Function: FunctionDefinition{
+		Function: FuncDef{
 			Name:        name,
 			Description: description,
 			Parameters:  SchemaOf(argsProto),

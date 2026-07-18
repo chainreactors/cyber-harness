@@ -13,7 +13,19 @@ import (
 // live inside the response; a returned error only signals an untestable section.
 func (s *Service) TestConn(ctx context.Context, section string, in webproto.DistributeConfig) ([]probe.ConnCheck, error) {
 	stored, _ := s.storedConfig(ctx)
-	return probe.TestConn(ctx, section, in, stored)
+	return probe.TestConn(ctx, section, toProbeConfig(in), toProbeConfig(stored))
+}
+
+func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
+	return probe.ProbeConfig{
+		Cyberhub: probe.CyberhubProbe{URL: dc.Cyberhub.URL, Key: dc.Cyberhub.Key},
+		Recon: probe.ReconProbe{
+			FofaKey: dc.Recon.FofaKey, HunterToken: dc.Recon.HunterToken,
+			HunterAPIKey: dc.Recon.HunterAPIKey, Proxy: dc.Recon.Proxy,
+		},
+		Search: probe.SearchProbe{TavilyKeys: dc.Search.TavilyKeys},
+		IOA:    probe.IOAProbe{URL: dc.IOA.URL, Token: dc.IOA.Token},
+	}
 }
 
 // TestLLM probes the supplied LLM settings, falling back to the stored API key

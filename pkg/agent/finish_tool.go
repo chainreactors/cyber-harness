@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/tool"
 )
 
 type FinishTool struct{}
@@ -22,14 +22,14 @@ type finishArgs struct {
 }
 
 func (t *FinishTool) Definition() ToolDefinition {
-	return commands.ToolDef("finish", t.Description(), finishArgs{})
+	return tool.Def("finish", t.Description(), finishArgs{})
 }
 
-func (t *FinishTool) Execute(_ context.Context, arguments string) (commands.ToolResult, error) {
-	args, _ := commands.ParseArgs[finishArgs](arguments)
+func (t *FinishTool) Execute(_ context.Context, arguments string) (tool.Result, error) {
+	args, _ := tool.ParseArgs[finishArgs](arguments)
 	summary := strings.TrimSpace(args.Summary)
 	if summary == "" {
 		summary = "Task completed."
 	}
-	return commands.TerminateResult(summary), nil
+	return tool.TerminateResult(summary), nil
 }

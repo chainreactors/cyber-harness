@@ -10,7 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -19,7 +19,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, fmt.Errorf("agent provider is nil")
 	}
 	if cfg.Tools == nil {
-		cfg.Tools = commands.NewRegistry()
+		cfg.Tools = tool.EmptyExecutor()
 	}
 
 	fallbacks := cfg.Fallbacks
@@ -319,7 +319,7 @@ type toolCallSlot struct {
 type toolExecution struct {
 	result     string
 	rawResult  string
-	fullResult *commands.ToolResult
+	fullResult *tool.Result
 	isError    bool
 	err        error
 	flow       ToolFlowDecision
