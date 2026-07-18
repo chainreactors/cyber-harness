@@ -258,9 +258,9 @@ func (r *Request) Match(data map[string]interface{}, matcher *operators.Matcher)
 				statusCode = int(v)
 			}
 		}
-		return matcher.Result(matcher.MatchStatusCode(statusCode)), []string{}
+		return matcher.Result(matcher.MatchStatusCode(statusCode)), nil
 	case operators.SizeMatcher:
-		return matcher.Result(matcher.MatchSize(len(itemStr))), []string{}
+		return matcher.Result(matcher.MatchSize(len(itemStr))), nil
 	case operators.WordsMatcher:
 		return matcher.ResultWithMatchedSnippet(matcher.MatchWords(itemStr, data))
 	case operators.RegexMatcher:

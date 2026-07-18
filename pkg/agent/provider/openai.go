@@ -56,7 +56,7 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 		ctx, "POST", p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 	)
 	if err != nil {
-		return nil, err
+		return nil, hint404(err, p.completionEndpoint(), "Anthropic", "anthropic")
 	}
 
 	var result ChatCompletionResponse
@@ -83,17 +83,53 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	return streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
+	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 		func(_ string, data []byte) (ChatCompletionStreamEvent, error) {
 			return parseOpenAIStreamChunk(data)
 		},
 	)
+	if err != nil {
+		return nil, hint404(err, p.completionEndpoint(), "Anthropic", "anthropic")
+	}
+	return events, nil
 }
 
 func (p *OpenAIProvider) completionEndpoint() string {
 	base := strings.TrimSuffix(p.config.BaseURL, "/")
 	return base + "/chat/completions"
+}
+
+func (p *OpenAIProvider) modelsEndpoint() string {
+	base := strings.TrimSuffix(p.config.BaseURL, "/")
+	return base + "/models"
+}
+
+// ListModels enumerates the model IDs the endpoint advertises via the
+// OpenAI-compatible GET /models route. Most third-party gateways implement it,
+// so the settings UI can offer a picklist instead of a free-text field.
+func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
+	data, err := (&apiRequest{client: p.client, timeout: timeoutFromConfig(p.config.Timeout)}).do(
+		ctx, "GET", p.modelsEndpoint(), nil, p.setAuthHeaders,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal models: %w", err)
+	}
+	ids := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func (p *OpenAIProvider) setAuthHeaders(req *http.Request) {

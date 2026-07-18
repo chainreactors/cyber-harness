@@ -9,21 +9,20 @@ import (
 	"github.com/chainreactors/aiscan/skills"
 )
 
-const Version = "0.1.0"
+var Version = "dev"
 
 type Option struct {
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
-	IOAOptions     `group:"IOA Options" config:"ioa"`
+	IOAOptions     `group:"Server Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 	ScanConfig     ScanConfigOptions `no-flag:"true" config:"scan"`
 }
 
 type ScanConfigOptions struct {
-	Verify        string `config:"verify"`
-	VerifyTimeout int    `config:"verify_timeout"`
+	Verify string `config:"verify"`
 }
 
 type LLMOptions struct {
@@ -65,17 +64,17 @@ type AgentOptions struct {
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
-	Resume         string   `long:"resume" optional:"true" optional-value:"latest" description:"Resume session: no value = latest from .aiscan/sessions/, or specify a file path"`
+	Resume         string   `long:"resume" description:"Resume session from a saved session file path"`
 	SaveSession    bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
 }
 
 type IOAOptions struct {
-	IOAURL      string `long:"ioa-url" config:"url" description:"IOA server URL (supports http://token@host:port for auth)"`
-	IOAToken    string `long:"ioa-token" config:"token" description:"IOA server access key (for 'ioa serve'; auto-generated if empty)"`
-	IOANodeID   string `long:"ioa-node-id" description:"Existing IOA node id for agent tools"`
-	IOANodeName string `long:"ioa-node-name" config:"node_name" description:"IOA node name when auto-registering"`
-	Space       string `long:"space" config:"space" description:"IOA space name" default:"default"`
-	IOAJSON     bool   `long:"json" description:"Output IOA query results in JSON format"`
+	IOAURL      string `long:"server-url" config:"url" description:"Server URL for agent connection (supports http://token@host:port)"`
+	IOAToken    string `long:"server-token" config:"token" description:"Server access key (auto-generated if empty)"`
+	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
+	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`
+	Space       string `long:"space" config:"space" description:"Space name" default:"default"`
+	IOAJSON     bool   `long:"json" description:"Output query results in JSON format"`
 }
 
 type MiscOptions struct {

@@ -106,3 +106,15 @@ func TestClipLines_NoTruncation(t *testing.T) {
 		t.Fatalf("expected 2 lines 0 hidden, got %d lines %d hidden", len(lines), hidden)
 	}
 }
+
+func TestClipLines_NonPositiveLimitsDoNotPanic(t *testing.T) {
+	lines, hidden := ClipLines("a\nb", 0, 100)
+	if len(lines) != 0 || hidden != 2 {
+		t.Fatalf("expected no lines and 2 hidden, got %d lines %d hidden", len(lines), hidden)
+	}
+
+	lines, hidden = ClipLines("abc", 1, -1)
+	if len(lines) != 1 || hidden != 0 || lines[0] != "…" {
+		t.Fatalf("unexpected negative width result: lines=%q hidden=%d", lines, hidden)
+	}
+}

@@ -45,10 +45,14 @@ func New(eng *engine.UncoverEngine) *Command {
 }
 
 func (c *Command) WithLogger(l telemetry.Logger) *Command {
+	c.InitLogger(l)
+	return c
+}
+
+func (c *Command) InitLogger(l telemetry.Logger) {
 	if l != nil {
 		c.logger = l
 	}
-	return c
 }
 
 func (c *Command) Name() string { return "passive" }
@@ -73,7 +77,8 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("passive", &err)
 	src, rest, help, err := splitSource(args)
 	if err != nil {
 		return err

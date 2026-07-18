@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	gkcfg "github.com/gookit/config/v2"
 	yamldrv "github.com/gookit/config/v2/yaml"
@@ -100,9 +99,6 @@ func loadRuntimeDefaults(filename string) error {
 	}
 	if v := c.String("scan.verify"); v != "" {
 		DefaultVerify = v
-	}
-	if v := c.Int("scan.verify_timeout"); v > 0 {
-		DefaultVerifyTimeout = strconv.Itoa(v)
 	}
 	if v := c.String("search.tavily_keys"); v != "" {
 		DefaultTavilyKeys = v

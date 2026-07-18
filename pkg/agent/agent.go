@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type Agent struct {
@@ -27,9 +28,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) (*Result, error) {
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.Cfg
+	cfg := a.configSnapshot()
 	cfg = cfg.init()
-	cfg.Messages = a.messagesSnapshot()
+	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
@@ -55,12 +56,59 @@ func (a *Agent) Continue(ctx context.Context) (*Result, error) {
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.Cfg
+	cfg := a.configSnapshot()
 	cfg = cfg.init()
-	cfg.Messages = a.messagesSnapshot()
+	cfg.Messages = a.MessagesSnapshot()
 	result, runErr := runLoop(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr
+}
+
+// SetProvider hot-swaps the LLM provider (and model, when non-empty) on the
+// agent. A run already in flight keeps the provider it snapshotted at start; the
+// next run picks up the new one. Safe to call concurrently with Run/Continue.
+func (a *Agent) SetProvider(p Provider, model string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Cfg.Provider = p
+	if model != "" {
+		a.Cfg.Model = model
+	}
+}
+
+// SetMaxTurns overrides the per-run turn cap (0 = unlimited). Applied to the
+// next Run; a run already in flight keeps the cap it snapshotted at its start.
+func (a *Agent) SetMaxTurns(n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Cfg.MaxTurns = n
+}
+
+func (a *Agent) SetLogger(logger telemetry.Logger) {
+	if a == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	a.mu.Lock()
+	a.Cfg.Logger = logger
+	if a.Cfg.LoopScheduler != nil {
+		a.Cfg.LoopScheduler.SetLogger(logger)
+	}
+	tools := a.Cfg.Tools
+	a.mu.Unlock()
+	if tools != nil {
+		tools.SetLogger(logger)
+	}
+}
+
+// configSnapshot copies Cfg under the lock so a concurrent SetProvider can't
+// tear the read a run takes at its start.
+func (a *Agent) configSnapshot() Config {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Cfg
 }
 
 // Derive creates a new Agent with the same infrastructure (provider, tools,
@@ -148,7 +196,7 @@ func (a *Agent) finishRun() {
 	a.running = false
 }
 
-func (a *Agent) messagesSnapshot() []ChatMessage {
+func (a *Agent) MessagesSnapshot() []ChatMessage {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]ChatMessage(nil), a.state.Messages...)

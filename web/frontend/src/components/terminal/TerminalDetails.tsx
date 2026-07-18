@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { AgentInfo } from '../../api'
 import {
   type PTYSession,
@@ -10,7 +11,7 @@ import {
   positiveNumber,
   sessionTitle,
   stateLabel,
-} from '@aspect/terminal'
+} from '@cyber/terminal'
 
 export function TerminalDetails({
   agent,
@@ -25,65 +26,66 @@ export function TerminalDetails({
   status: TerminalStatus
   taskSessions: PTYSession[]
 }) {
+  const { t } = useTranslation('agent')
   const identity = agent.identity || {}
   const stats = agent.stats || {}
   const running = taskSessions.filter((s) => s.state === 'running').length
   const closed = taskSessions.length - running
 
   return (
-    <DetailPanel title="Details" onClose={onClose}>
-      <DetailGroup title="Agent">
-        <DetailRow label="Name" value={agent.name} />
+    <DetailPanel title={t('tdDetails')} onClose={onClose}>
+      <DetailGroup title={t('tdAgent')}>
+        <DetailRow label={t('tdName')} value={agent.name} />
         <DetailRow label="ID" value={agent.id} mono />
-        <DetailRow label="State" value={agent.busy ? 'busy' : 'idle'} />
-        <DetailRow label="Connected" value={formatDateTime(agent.connected_at)} />
-        <DetailRow label="Host" value={identity.hostname} />
-        <DetailRow label="User" value={identity.username} />
-        <DetailRow label="Runtime" value={[identity.os, identity.arch].filter(Boolean).join('/')} />
+        <DetailRow label={t('tdState')} value={agent.busy ? t('busy') : t('idle')} />
+        <DetailRow label={t('tdConnected')} value={formatDateTime(agent.connected_at)} />
+        <DetailRow label={t('tdHost')} value={identity.hostname} />
+        <DetailRow label={t('tdUser')} value={identity.username} />
+        <DetailRow label={t('tdRuntime')} value={[identity.os, identity.arch].filter(Boolean).join('/')} />
         <DetailRow label="PID" value={identity.pid} />
         <DetailRow label="CWD" value={identity.working_dir} mono />
-        <DetailRow label="LLM" value={[identity.provider, identity.model].filter(Boolean).join(' / ') || 'offline'} />
-        <DetailRow label="Space" value={identity.space} />
+        <DetailRow label="LLM" value={[identity.provider, identity.model].filter(Boolean).join(' / ') || t('offline')} />
+        <DetailRow label={t('tdSpace')} value={identity.space} />
       </DetailGroup>
 
-      <DetailGroup title="Active Session">
-        <DetailRow label="Console" value={status} />
+      <DetailGroup title={t('tdActiveSession')}>
+        <DetailRow label={t('tdConsole')} value={status} />
         {session ? (
           <>
-            <DetailRow label="Title" value={sessionTitle(session)} />
+            <DetailRow label={t('tdTitle')} value={sessionTitle(session)} />
             <DetailRow label="ID" value={session.id} mono />
-            <DetailRow label="Kind" value={session.kind} />
-            <DetailRow label="State" value={stateLabel(session.state || '') || session.state} />
-            <DetailRow label="Command" value={session.command} mono />
+            <DetailRow label={t('tdKind')} value={session.kind} />
+            <DetailRow label={t('tdState')} value={stateLabel(session.state || '') || session.state} />
+            <DetailRow label={t('tdCommand')} value={session.command} mono />
             <DetailRow label="PID" value={positiveNumber(session.pid)} />
-            <DetailRow label="Started" value={formatDateTime(session.started_at)} />
-            <DetailRow label="Activity" value={formatDateTime(session.last_activity_at)} />
-            <DetailRow label="Ended" value={formatDateTime(session.ended_at)} />
-            <DetailRow label="Exit" value={session.state === 'running' ? undefined : session.exit_code} />
-            <DetailRow label="Kill" value={session.kill_cause} />
-            <DetailRow label="Output" value={formatBytes(session.output_bytes)} />
+            <DetailRow label={t('tdStarted')} value={formatDateTime(session.started_at)} />
+            <DetailRow label={t('tdActivity')} value={formatDateTime(session.last_activity_at)} />
+            <DetailRow label={t('tdEnded')} value={formatDateTime(session.ended_at)} />
+            <DetailRow label={t('tdExit')} value={session.state === 'running' ? undefined : session.exit_code} />
+            <DetailRow label={t('tdKill')} value={session.kill_cause} />
+            <DetailRow label={t('tdOutput')} value={formatBytes(session.output_bytes)} />
           </>
         ) : (
-          <DetailRow label="State" value="starting" />
+          <DetailRow label={t('tdState')} value={t('starting')} />
         )}
       </DetailGroup>
 
-      <DetailGroup title="Tasks">
-        <DetailRow label="Total" value={taskSessions.length} />
-        <DetailRow label="Running" value={running} />
-        <DetailRow label="Closed" value={closed} />
-        <DetailRow label="Commands" value={agent.commands?.join(', ')} />
-        <DetailRow label="Capabilities" value={identity.capabilities?.join(', ')} />
+      <DetailGroup title={t('tdTasks')}>
+        <DetailRow label={t('tdTotal')} value={taskSessions.length} />
+        <DetailRow label={t('tdRunning')} value={running} />
+        <DetailRow label={t('tdClosed')} value={closed} />
+        <DetailRow label={t('tdCommands')} value={agent.commands?.join(', ')} />
+        <DetailRow label={t('tdCapabilities')} value={identity.capabilities?.join(', ')} />
       </DetailGroup>
 
-      <DetailGroup title="Stats">
-        <DetailRow label="Turns" value={stats.turns} />
-        <DetailRow label="Tools" value={stats.tool_calls} />
-        <DetailRow label="Running" value={stats.running_tools} />
-        <DetailRow label="Tokens" value={stats.total_tokens} />
-        <DetailRow label="Assets" value={stats.assets} />
-        <DetailRow label="Loots" value={stats.loots} />
-        <DetailRow label="Last" value={stats.last_event} />
+      <DetailGroup title={t('tdStats')}>
+        <DetailRow label={t('tdTurns')} value={stats.turns} />
+        <DetailRow label={t('tdTools')} value={stats.tool_calls} />
+        <DetailRow label={t('tdRunning')} value={stats.running_tools} />
+        <DetailRow label={t('tdTokens')} value={stats.total_tokens} />
+        <DetailRow label={t('tdAssets')} value={stats.assets} />
+        <DetailRow label={t('tdLoots')} value={stats.loots} />
+        <DetailRow label={t('tdLast')} value={stats.last_event} />
       </DetailGroup>
     </DetailPanel>
   )

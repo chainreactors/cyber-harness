@@ -12,6 +12,7 @@ type RuntimeConfig struct {
 	IOA           *IOAConfig
 	Logger        telemetry.Logger
 	CLISkillPaths []string
+	SkipEngines   bool
 }
 
 type RuntimeProviderConfig struct {
@@ -25,10 +26,8 @@ type ScannerConfig struct {
 	CyberhubURL       string
 	CyberhubKey       string
 	CyberhubMode      string
-	AIEnabled         bool
-	EnableAllAISkills bool
-	AITimeout         int
-	VerifyMode        string
+	AIEnabled  bool
+	VerifyMode string
 	Proxy             string
 	FofaEmail         string
 	FofaKey           string

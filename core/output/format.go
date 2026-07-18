@@ -75,21 +75,6 @@ func ExtractQuotedMarkdown(raw string) string {
 	return ""
 }
 
-func ExtractQuotedSummary(raw string) string {
-	fields := quotedFields(raw)
-	if len(fields) == 0 {
-		return ""
-	}
-	for _, value := range fields {
-		value = strings.TrimSpace(value)
-		if value == "" || looksLikeMarkdown(value) {
-			continue
-		}
-		return value
-	}
-	return ""
-}
-
 func quotedFields(input string) []string {
 	var values []string
 	for i := 0; i < len(input); i++ {

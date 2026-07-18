@@ -124,15 +124,26 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS sco_nodes (
+			cstx_id    TEXT PRIMARY KEY,
+			cstx_type  TEXT NOT NULL,
+			data       TEXT NOT NULL,
+			scan_id    TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`); err != nil {
+		return err
+	}
+
 	_, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
-		CREATE INDEX IF NOT EXISTS idx_records_scan ON records(scan_id, type, created_at);
-		CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_id, type);
-		CREATE INDEX IF NOT EXISTS idx_records_type ON records(type, created_at DESC);
-		CREATE INDEX IF NOT EXISTS idx_records_priority ON records(priority, type);
+		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
+		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
 	`)
 	return err
 }
@@ -195,12 +206,11 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) Create(ctx context.Context, job *ScanJob) error {
-	normalizeJobAnalysis(job)
 	resultJSON := marshalResult(job)
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO scans (id, target, mode, ai, verify, sniper, deep, status, progress, report, result, error, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.Target, job.Mode, boolToInt(job.AI), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		job.ID, job.Target, job.Mode, boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
 		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
 		job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano),
 	)
@@ -238,11 +248,10 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*ScanJob, error) {
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
-	normalizeJobAnalysis(job)
 	resultJSON := marshalResult(job)
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=? WHERE id=?`,
-		boolToInt(job.AI), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
 		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
 		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
 	)
@@ -267,11 +276,10 @@ func scanFromScanner(sc scanner) (*ScanJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	job.AI = ai != 0
+	_ = ai
 	job.Verify = verify != 0
 	job.Sniper = sniper != 0
 	job.Deep = deep != 0
-	normalizeJobAnalysis(&job)
 	job.Status = ScanStatus(status)
 	if resultJSON != "" {
 		_ = json.Unmarshal([]byte(resultJSON), &job.Result)
@@ -286,17 +294,6 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-func normalizeJobAnalysis(job *ScanJob) {
-	if job == nil {
-		return
-	}
-	if job.AI && !job.Verify && !job.Sniper {
-		job.Verify = true
-		job.Sniper = true
-	}
-	job.AI = job.Verify || job.Sniper
 }
 
 func marshalResult(job *ScanJob) string {
@@ -396,6 +393,14 @@ func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
 	return err
 }
 
+// ClearMessages deletes every message in a session without removing the session
+// itself — the store half of web /clear ("clear conversation"). Messages are leaf
+// rows (nothing references them), so a single delete suffices.
+func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE session_id = ?`, sessionID)
+	return err
+}
+
 func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {
 	if limit <= 0 {
 		limit = 500
@@ -454,16 +459,7 @@ func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]s
 // --- Records ---
 
 func (s *SQLiteStore) InsertRecord(ctx context.Context, rec *output.Record) error {
-	tagsJSON, _ := json.Marshal(rec.Tags)
-	_, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO records (id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, string(rec.Type), rec.ScanID, rec.SessionID, rec.AgentID,
-		rec.Source, rec.Target, rec.Turn, rec.Priority, rec.Summary,
-		boolToInt(rec.Loot), string(tagsJSON), string(rec.Data),
-		rec.Timestamp.Format(time.RFC3339Nano),
-	)
-	return err
+	return s.InsertRecords(ctx, []*output.Record{rec})
 }
 
 func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) error {
@@ -478,7 +474,7 @@ func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) 
 		`INSERT OR IGNORE INTO records (id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return err
 	}
 	defer stmt.Close()
@@ -490,10 +486,114 @@ func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) 
 			boolToInt(rec.Loot), string(tagsJSON), string(rec.Data),
 			rec.Timestamp.Format(time.RFC3339Nano),
 		); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
+// ── SCO Nodes ──
+
+func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, scanID string, nodes []json.RawMessage) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT OR REPLACE INTO sco_nodes (cstx_id, cstx_type, data, scan_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM sco_nodes WHERE cstx_id = ?), ?), ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().Format(time.RFC3339Nano)
+	for _, raw := range nodes {
+		var header struct {
+			Type string `json:"cstx_type"`
+			ID   string `json:"cstx_id"`
+		}
+		if json.Unmarshal(raw, &header) != nil || header.ID == "" {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx,
+			header.ID, header.Type, string(raw), scanID, header.ID, now, now,
+		); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ListSCONodes(ctx context.Context, nodeType string, limit int) ([]json.RawMessage, error) {
+	return s.ListSCONodesByScanID(ctx, "", nodeType, limit)
+}
+
+func (s *SQLiteStore) ListSCONodesByScanID(ctx context.Context, scanID, nodeType string, limit int) ([]json.RawMessage, error) {
+	var where []string
+	var args []any
+	if scanID != "" {
+		where = append(where, "scan_id = ?")
+		args = append(args, scanID)
+	}
+	if nodeType != "" {
+		where = append(where, "cstx_type = ?")
+		args = append(args, nodeType)
+	}
+	var qb strings.Builder
+	qb.WriteString("SELECT data FROM sco_nodes")
+	if len(where) > 0 {
+		qb.WriteString(" WHERE ")
+		qb.WriteString(strings.Join(where, " AND "))
+	}
+	qb.WriteString(" ORDER BY updated_at DESC LIMIT ?")
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, qb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var nodes []json.RawMessage
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, json.RawMessage(data))
+	}
+	return nodes, rows.Err()
+}
+
+func (s *SQLiteStore) GetSCONode(ctx context.Context, cstxID string) (json.RawMessage, error) {
+	var data string
+	err := s.db.QueryRowContext(ctx, `SELECT data FROM sco_nodes WHERE cstx_id = ?`, cstxID).Scan(&data)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
+func (s *SQLiteStore) DeleteSCONodesByScan(ctx context.Context, scanID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sco_nodes WHERE scan_id = ?`, scanID)
+	return err
+}
+
+func (s *SQLiteStore) SCONodeStats(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT cstx_type, COUNT(*) FROM sco_nodes GROUP BY cstx_type`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stats := make(map[string]int)
+	for rows.Next() {
+		var t string
+		var c int
+		if err := rows.Scan(&t, &c); err != nil {
+			return nil, err
+		}
+		stats[t] = c
+	}
+	return stats, rows.Err()
+}

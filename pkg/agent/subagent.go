@@ -12,6 +12,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type AgentType struct {
@@ -32,12 +33,12 @@ type subAgentInfo struct {
 }
 
 type SubAgentTool struct {
-	agent      *Agent
-	inbox      inbox.Inbox
-	messages   func() []ChatMessage
-	resolve    AgentTypeResolver
-	mu         sync.Mutex
-	running    map[string]*subAgentInfo
+	agent    *Agent
+	inbox    inbox.Inbox
+	messages func() []ChatMessage
+	resolve  AgentTypeResolver
+	mu       sync.Mutex
+	running  map[string]*subAgentInfo
 }
 
 func NewSubAgentTool(agent *Agent, parentInbox inbox.Inbox, resolve AgentTypeResolver) *SubAgentTool {
@@ -51,6 +52,21 @@ func NewSubAgentTool(agent *Agent, parentInbox inbox.Inbox, resolve AgentTypeRes
 
 func (t *SubAgentTool) SetMessages(fn func() []ChatMessage) {
 	t.messages = fn
+}
+
+func (t *SubAgentTool) InitLogger(logger telemetry.Logger) {
+	if t == nil || t.agent == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	t.agent.mu.Lock()
+	t.agent.Cfg.Logger = logger
+	if t.agent.Cfg.LoopScheduler != nil {
+		t.agent.Cfg.LoopScheduler.SetLogger(logger)
+	}
+	t.agent.mu.Unlock()
 }
 
 func (t *SubAgentTool) Name() string { return "subagent" }
@@ -265,12 +281,6 @@ func (t *SubAgentTool) sendMessage(name, message string) (string, error) {
 		return fmt.Sprintf("Subagent %q inbox: %s, message dropped.", name, err), nil
 	}
 	return fmt.Sprintf("Message sent to subagent %q.", name), nil
-}
-
-func (t *SubAgentTool) RunningCount() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return len(t.running)
 }
 
 func (t *SubAgentTool) list() string {

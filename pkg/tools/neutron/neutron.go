@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
@@ -96,6 +98,11 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
+	return c
+}
+
 func (c *Command) SetProxy(proxy string) {
 	c.Base.SetProxy(proxy)
 	scanengine.ApplyNeutronProxy(proxy)
@@ -142,11 +149,12 @@ Examples:
   neutron -u http://target.com -t ./pocs --id shiro-detect -j -o loots.jsonl`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("neutron", &err)
 	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
-	_, err := parser.ParseArgs(normalizeNucleiStyleArgs(args))
+	_, err = parser.ParseArgs(normalizeNucleiStyleArgs(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			fmt.Fprint(commands.Output, c.Usage()+"\n")
@@ -255,6 +263,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 			record := neutronResultFromExecution(target, result)
 			if record.Matched {
 				summary.Matched++
+				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
 				sb.WriteString(formatNeutronResult(record, jsonOutput))
@@ -452,8 +461,8 @@ func neutronResultFromExecution(target string, result *sdkneutron.ExecuteResult)
 		record.Tags = cleanTemplateTags(tmpl)
 		record.Fingers = append([]string(nil), tmpl.Fingers...)
 	}
-	if opResult := result.Result(); opResult != nil && opResult.Result != nil {
-		record.Extracts = append([]string(nil), opResult.Result.OutputExtracts()...)
+	if opResult := result.Value(); opResult != nil {
+		record.Extracts = append([]string(nil), opResult.OutputExtracts()...)
 	}
 	if err := result.Error(); err != nil {
 		record.Error = err.Error()

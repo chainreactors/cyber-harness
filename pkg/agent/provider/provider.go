@@ -115,11 +115,18 @@ func inferImageSupport(provider, model string) bool {
 	return false
 }
 
-// InferFromBaseURL returns a default provider type when --provider is not
-// set. Most third-party endpoints speak the OpenAI protocol, so "openai" is
-// the safest default. Users who need Anthropic protocol must pass --provider
-// explicitly.
-func InferFromBaseURL(_ string) string {
+// InferFromBaseURL guesses the wire protocol from the base URL when --provider
+// is not set. The official Anthropic endpoint is unambiguous, so it is detected
+// directly. Everything else — including custom third-party gateways — speaks the
+// OpenAI protocol in the common case, so "openai" stays the default. The
+// protocol genuinely cannot be sniffed for an arbitrary gateway (a gateway may
+// serve, e.g., glm models over the Anthropic protocol), so a wrong guess is
+// caught later as an actionable 404 from the provider (see hint404), not a
+// silent failure.
+func InferFromBaseURL(baseURL string) string {
+	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
+		return "anthropic"
+	}
 	return "openai"
 }
 

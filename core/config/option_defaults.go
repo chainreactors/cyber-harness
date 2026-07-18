@@ -1,27 +1,10 @@
 package config
 
-import (
-	"strconv"
-	"strings"
-)
-
 func ResolveString(value, fallback string) string {
 	if value != "" {
 		return value
 	}
 	return fallback
-}
-
-func DefaultInt(value string, fallback int) int {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
 }
 
 func resolveSpace(space string) string {

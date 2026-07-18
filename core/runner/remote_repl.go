@@ -9,8 +9,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/tui"
-	"github.com/chainreactors/utils/pty"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
+	"github.com/chainreactors/utils/pty"
 )
 
 func NewRemoteREPLOpener(rt *AgentRuntime, mgr *tmux.Manager) pty.OpenFunc {
@@ -27,7 +27,7 @@ func NewRemoteREPLOpener(rt *AgentRuntime, mgr *tmux.Manager) pty.OpenFunc {
 		}
 		session := agent.NewAgent(rt.Config.
 			WithSystemPrompt(rt.SystemPrompt).
-			WithStream(tui.AgentStreamingEnabled(option)))
+			WithStream(true))
 		appInfo := tui.AppInfo{
 			Provider:          rt.App.Provider,
 			ProviderConfig:    rt.App.ProviderConfig,

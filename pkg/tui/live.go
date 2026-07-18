@@ -358,12 +358,8 @@ func (l *LiveStatus) ensureTools() {
 }
 
 func (l *LiveStatus) hasTool(id string) bool {
-	for _, existing := range l.order {
-		if existing == id {
-			return true
-		}
-	}
-	return false
+	_, ok := l.tools[id]
+	return ok
 }
 
 func (l *LiveStatus) allToolsDone() bool {

@@ -4,3 +4,4 @@
 [submodule "web/frontend/cyber-ui"]
 	path = web/frontend/cyber-ui
 	url = https://github.com/chainreactors/cyber-ui.git
+	branch = main

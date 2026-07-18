@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { Info, Plus, RefreshCw, Square } from 'lucide-react'
 import { agentTerminalWebSocketURL } from '../../api'
 import type { AgentInfo } from '../../api'
-import { cn } from '@aspect/theme'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@aspect/ui'
+import { Button, Tooltip, TooltipTrigger, TooltipContent } from '@cyber/ui'
 import {
   type PTYSession,
   type TerminalStatus,
@@ -19,8 +19,8 @@ import {
   stringPayload,
   upsertSession,
   writeTerminalData,
-} from '@aspect/terminal'
-import { TerminalView, TerminalHeader, SessionNavigator, SessionButton, sessionDetails } from '@aspect/terminal'
+} from '@cyber/terminal'
+import { TerminalView, TerminalHeader, SessionNavigator, SessionButton, sessionDetails } from '@cyber/terminal'
 import { TerminalDetails } from './TerminalDetails'
 
 const REPL_NAME = 'main-repl'
@@ -30,6 +30,7 @@ interface AgentTerminalProps {
 }
 
 export default function AgentTerminal({ agent }: AgentTerminalProps) {
+  const { t } = useTranslation('agent')
   const [status, setStatus] = useState<TerminalStatus>('connecting')
   const [sessions, setSessions] = useState<PTYSession[]>([])
   const [activeID, setActiveID] = useState('')
@@ -77,6 +78,11 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
   }, [])
 
   function connectWebSocket(term: XTerm, fit: FitAddon) {
+    // Switching agents reuses this same xterm instance (the panel does not
+    // remount AgentTerminal per agent), so wipe the previous agent's screen
+    // buffer before attaching to the new one — otherwise the prior REPL output
+    // stays visible under the newly selected agent's session.
+    term.reset()
     setStatus('connecting')
     setSessions([])
     setActiveID('')
@@ -167,6 +173,15 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     ws.onclose = () => setStatus((c) => (c === 'error' ? c : 'closed'))
 
     return () => {
+      // Detach every handler first: this socket and the next agent's share one
+      // terminal (and shared `status` state), so a late frame — or the close/
+      // error handshake firing asynchronously after the next socket has already
+      // connected — must not paint stale output or clobber the live connection's
+      // status with 'closed'/'error'.
+      ws.onmessage = null
+      ws.onclose = null
+      ws.onerror = null
+      ws.onopen = null
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pty.detach' }))
       ws.close()
       resizeDisposable.dispose()
@@ -270,19 +285,21 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
   const activeTitle = activeSession ? sessionTitle(activeSession) : activeID
   const canStopActive = activeSession?.kind !== 'repl' && activeSession?.state === 'running'
   const detailsSession = activeSession || replSession
-  const summaryText = `${taskSummary.running} running${taskSummary.updates ? ` · ${taskSummary.updates} new` : ''}`
+  const summaryText = taskSummary.updates
+    ? `${t('summaryRunning', { count: taskSummary.running })} · ${t('summaryNew', { count: taskSummary.updates })}`
+    : t('summaryRunning', { count: taskSummary.running })
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <TerminalHeader
         status={status}
-        title={activeTitle || 'Console'}
+        title={activeTitle || t('console')}
         actions={
           <>
-            <IconButton label="New shell PTY" onClick={openShell}><Plus className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label="Refresh sessions" onClick={() => send({ type: 'pty.list' })}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label="Stop active task" onClick={stopActiveSession} disabled={!canStopActive}><Square className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label={detailsOpen ? 'Hide details' : 'Show details'} onClick={() => setDetailsOpen((v) => !v)} active={detailsOpen}><Info className="h-3.5 w-3.5" /></IconButton>
+            <IconButton label={t('newShellPty')} onClick={openShell}><Plus className="h-3.5 w-3.5" /></IconButton>
+            <IconButton label={t('refreshSessions')} onClick={() => send({ type: 'pty.list' })}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
+            <IconButton label={t('stopActiveTask')} onClick={stopActiveSession} disabled={!canStopActive}><Square className="h-3.5 w-3.5" /></IconButton>
+            <IconButton label={detailsOpen ? t('hideDetails') : t('showDetails')} onClick={() => setDetailsOpen((v) => !v)} active={detailsOpen}><Info className="h-3.5 w-3.5" /></IconButton>
           </>
         }
       />
@@ -292,9 +309,9 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
           sessions={taskSessions}
           unreadIDs={unreadIDs}
           onSelect={attachSession}
-          listLabel="Tasks"
+          listLabel={t('tasks')}
           summary={summaryText}
-          emptyText="No tasks yet"
+          emptyText={t('noTasksYet')}
           header={
             <SessionNavigatorReplButton
               active={!!replSession && replSession.id === activeID}
@@ -324,13 +341,14 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
 function SessionNavigatorReplButton({ active, replSession, unread, onClick }: {
   active: boolean; replSession: PTYSession | null; unread: boolean; onClick: () => void
 }) {
+  const { t } = useTranslation('agent')
   return (
     <SessionButton
       active={active}
-      title="Main REPL"
-      meta={replSession ? 'always on' : 'starting'}
+      title={t('mainRepl')}
+      meta={replSession ? t('alwaysOn') : t('starting')}
       state={replSession?.state || 'running'}
-      details={replSession ? sessionDetails(replSession) : 'Main REPL is starting'}
+      details={replSession ? sessionDetails(replSession) : t('mainReplStarting')}
       unread={unread}
       onClick={onClick}
     />
@@ -343,19 +361,19 @@ function IconButton({ children, active, disabled, label, onClick }: {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
+          active={active}
           aria-label={label}
           title={label}
           disabled={disabled}
           onClick={onClick}
-          className={cn(
-            'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
-            active && 'bg-primary/10 text-primary',
-          )}
+          className="text-muted-foreground"
         >
           {children}
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>

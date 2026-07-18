@@ -2,12 +2,15 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/chainreactors/fingers/alias"
 	fingersLib "github.com/chainreactors/fingers/fingers"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
@@ -90,36 +93,39 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	}
 	set.Resources = resourceSet
 	if resourceSet.RemoteEnabled {
-		logger.Infof("resources source=cyberhub mode=%s fingers=%d neutron=%d", resourceSet.Mode, resourceSet.RemoteFingers, resourceSet.RemoteNeutron)
+		logger.Infof("%s", telemetry.StartupOK("cyberhub", fmt.Sprintf("%s · %s fingers · %s neutron",
+			resourceSet.Mode,
+			util.FormatNumber(resourceSet.RemoteFingers),
+			util.FormatNumber(resourceSet.RemoteNeutron))))
 		if resourceSet.RemoteFingersErr != nil {
-			logger.Warnf("resources source=cyberhub type=fingers error=%q fallback=local", resourceSet.RemoteFingersErr)
+			logger.Warnf("%s", telemetry.StartupLine("skip", "cyberhub", fmt.Sprintf("fingers fallback=local reason=%q", resourceSet.RemoteFingersErr)))
 		} else if resourceSet.RemoteFingers == 0 {
-			logger.Warnf("resources source=cyberhub type=fingers count=0 fallback=local")
+			logger.Warnf("%s", telemetry.StartupLine("skip", "cyberhub", "fingers fallback=local reason=\"empty\""))
 		}
 		if resourceSet.RemoteNeutronErr != nil {
-			logger.Warnf("resources source=cyberhub type=neutron error=%q fallback=local", resourceSet.RemoteNeutronErr)
+			logger.Warnf("%s", telemetry.StartupLine("skip", "cyberhub", fmt.Sprintf("neutron fallback=local reason=%q", resourceSet.RemoteNeutronErr)))
 		} else if resourceSet.RemoteNeutron == 0 {
-			logger.Warnf("resources source=cyberhub type=neutron count=0 fallback=local")
+			logger.Warnf("%s", telemetry.StartupLine("skip", "cyberhub", "neutron fallback=local reason=\"empty\""))
 		}
 	}
 
 	fEngine := resourceSet.Fingers
 	if fEngine == nil {
-		logger.Warnf("engine=fingers templates=0 action=disable")
+		logger.Warnf("%s", telemetry.StartupLine("skip", "fingers", "no templates"))
 	} else if fEngine.Count() > 0 {
 		set.Fingers = fEngine
-		logger.Infof("engine=fingers status=ready templates=%d", fEngine.Count())
+		logger.Infof("%s", telemetry.StartupOK("fingers", util.FormatNumber(fEngine.Count())+" templates"))
 	} else {
-		logger.Warnf("engine=fingers templates=0 action=disable")
+		logger.Warnf("%s", telemetry.StartupLine("skip", "fingers", "no templates"))
 		_ = fEngine.Close()
 	}
 
 	nEngine := resourceSet.Neutron
 	if nEngine != nil && nEngine.Count() > 0 {
 		set.Neutron = nEngine
-		logger.Infof("engine=neutron status=ready templates=%d", nEngine.Count())
+		logger.Infof("%s", telemetry.StartupOK("neutron", util.FormatNumber(nEngine.Count())+" templates"))
 	} else {
-		logger.Warnf("engine=neutron templates=0 action=disable")
+		logger.Warnf("%s", telemetry.StartupLine("skip", "neutron", "no templates"))
 		if nEngine != nil {
 			_ = nEngine.Close()
 		}
@@ -134,8 +140,7 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 			aliases = set.Fingers.Aliases()
 		}
 		set.Index.BuildWithFingers(fingers, aliases, set.Neutron.Get())
-		logger.Infof("index=finger_poc status=ready fingers=%d aliases=%d templates=%d",
-			len(fingers), len(aliases), len(set.Neutron.Get()))
+		logger.Infof("%s", telemetry.StartupOK("finger-poc", fingerPOCDetail(len(fingers), len(aliases), len(set.Neutron.Get()))))
 	}
 
 	gogoConfig := gogo.NewConfig()
@@ -152,12 +157,17 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if proxy != "" {
 		gogoConfig.WithProxy(proxy)
 	}
-	gogoEngine, err := gogo.NewEngine(gogoConfig)
+	var gogoEngine *gogo.Engine
+	func() {
+		restoreLogs := telemetry.SuppressGlobalNonErrors()
+		defer restoreLogs()
+		gogoEngine, err = gogo.NewEngine(gogoConfig)
+	}()
 	if err != nil {
-		logger.Warnf("engine=gogo status=disabled error=%q", err)
+		logger.Warnf("%s", telemetry.StartupLine("fail", "gogo", err.Error()))
 	} else {
 		set.Gogo = gogoEngine
-		logger.Infof("engine=gogo status=ready")
+		logger.Infof("%s", telemetry.StartupOK("gogo", ""))
 	}
 
 	sprayConfig := spray.NewConfig()
@@ -171,12 +181,17 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if proxy != "" {
 		sprayConfig.WithProxy(proxy)
 	}
-	sprayEngine, err := spray.NewEngine(sprayConfig)
+	var sprayEngine *spray.Engine
+	func() {
+		restoreLogs := telemetry.SuppressGlobalNonErrors()
+		defer restoreLogs()
+		sprayEngine, err = spray.NewEngine(sprayConfig)
+	}()
 	if err != nil {
-		logger.Warnf("engine=spray status=disabled error=%q", err)
+		logger.Warnf("%s", telemetry.StartupLine("fail", "spray", err.Error()))
 	} else {
 		set.Spray = sprayEngine
-		logger.Infof("engine=spray status=ready")
+		logger.Infof("%s", telemetry.StartupOK("spray", ""))
 	}
 
 	zombieConfig := sdkzombie.NewConfig()
@@ -189,10 +204,10 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	}
 	zombieEngine, err := sdkzombie.NewEngine(zombieConfig)
 	if err != nil {
-		logger.Warnf("engine=zombie status=disabled error=%q", err)
+		logger.Warnf("%s", telemetry.StartupLine("fail", "zombie", err.Error()))
 	} else {
 		set.Zombie = zombieEngine
-		logger.Infof("engine=zombie status=ready")
+		logger.Infof("%s", telemetry.StartupOK("zombie", ""))
 	}
 
 	if set.Neutron != nil && caps.Neutron > 0 {
@@ -205,6 +220,17 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 
 	set.Capacity = caps
 	return set, nil
+}
+
+func fingerPOCDetail(fingers, aliases, templates int) string {
+	parts := []string{
+		util.FormatNumber(fingers) + " fingers",
+		util.FormatNumber(templates) + " templates",
+	}
+	if aliases > 0 {
+		parts = append(parts, util.FormatNumber(aliases)+" aliases")
+	}
+	return strings.Join(parts, " · ")
 }
 
 // ApplyNeutronProxy sets neutron DefaultOption/DefaultTransport proxy. The

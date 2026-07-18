@@ -1,9 +1,7 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +27,7 @@ func configureAgentReadline(c *console.Console) {
 	_ = cfg.Set("completion-query-items", 1000)
 	_ = cfg.Set("bell-style", "none")
 	_ = cfg.Set("enable-bracketed-paste", true)
+	_ = cfg.Set("autocomplete-select", false)
 	backspace := inputrc.Unescape(`\C-h`)
 	deleteBackspace := inputrc.Unescape(`\C-?`)
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
@@ -55,6 +54,10 @@ func (r *AgentConsole) configureInterruptKey() {
 	}
 }
 
+func (r *AgentConsole) configureCompletionKey() {
+	wrapCompleterForFuzzyAt(r.console.Shell())
+}
+
 func (r *AgentConsole) configureCtrlCKey() {
 	if r == nil || r.console == nil || r.console.Shell() == nil {
 		return
@@ -72,27 +75,42 @@ func (r *AgentConsole) configureCtrlCKey() {
 }
 
 func (r *AgentConsole) handleCtrlC() {
-	if r.InterruptCurrentRun() {
+	if r.pendingExit.Load() {
+		r.forceExit()
 		return
 	}
-	if r.pendingExit.Load() {
-		os.Exit(0)
+	if r.InterruptCurrentRun() {
+		r.pendingExit.Store(true)
+		go func() {
+			time.Sleep(5 * time.Second)
+			r.pendingExit.Store(false)
+		}()
+		return
 	}
 	r.pendingExit.Store(true)
-	fmt.Fprintf(r.stderr, " Press Ctrl+C again to exit\n")
+	r.clearReadlineInput()
+	r.printCtrlCExitHint()
 	go func() {
 		time.Sleep(3 * time.Second)
 		r.pendingExit.Store(false)
 	}()
+}
+
+func (r *AgentConsole) clearReadlineInput() {
 	shell := r.console.Shell()
-	shell.Display.AcceptLine()
-	shell.History.Accept(false, false, errors.New(os.Interrupt.String()))
+	shell.Line().Set()
+	shell.Cursor().Set(0)
+}
+
+func (r *AgentConsole) printCtrlCExitHint() {
+	if shell := r.console.Shell(); shell != nil {
+		_, _ = shell.Printf("Press Ctrl+C again to exit")
+		return
+	}
+	fmt.Fprintln(r.stderr, "Press Ctrl+C again to exit")
 }
 
 func (r *AgentConsole) configureVerbosityToggleKey() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
-		return
-	}
 	shell := r.console.Shell()
 	shell.Keymap.Register(map[string]func(){
 		agentConsoleToggleVerbosityCommandName: func() {
@@ -124,10 +142,10 @@ func (r *AgentConsole) handleToggleVerbosity() {
 }
 
 func (r *AgentConsole) handleEscapeInterruptKey() {
-	if r == nil || r.console == nil || r.console.Shell() == nil {
+	shell := r.console.Shell()
+	if shell == nil {
 		return
 	}
-	shell := r.console.Shell()
 	pending := string(shell.Keys.Read())
 	if pending == "" {
 		pending = readPendingTerminalBytes(agentConsoleEscapeSequenceWait)

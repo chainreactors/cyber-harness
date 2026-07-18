@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/runner"
@@ -18,6 +21,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
 	ioaclient "github.com/chainreactors/ioa/client"
+	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
@@ -35,7 +39,7 @@ func init() {
 func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
-	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, logger)
+	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, a.DataBus, logger)
 }
 
 func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -61,7 +65,7 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, logger telemetry.Logger) {
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
 	var scanOpts []any
 	if scanCfg.AIEnabled && llmProvider != nil {
 		scanOpts = append(scanOpts, scan.WithParent(agent.NewAgent(agent.Config{
@@ -95,6 +99,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 		ScanOpts:     scanOpts,
 		Logger:       logger,
 		TavilyKeys:   toolCfg.TavilyKeys,
+		DataBus:      dataBus,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources
@@ -102,7 +107,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 	commands.BuildGroup("scanner", deps, cmdReg)
 	commands.BuildGroup("proxy", deps, cmdReg)
 	commands.BuildGroup("ioa", deps, cmdReg)
-	logger.Infof("scanner commands ready: %v", cmdReg.GroupNames("scanner"))
+	logger.Infof("%s", telemetry.StartupOK("scanner", strings.Join(cmdReg.GroupNames("scanner"), ",")))
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +196,24 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 
 func ioaServe(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
 	store := ioaserver.NewMemoryStore()
-	logger.Importantf("ioa_server store=memory")
+	logger.Importantf("aiscan server store=memory")
 	defer func() { _ = store.Close() }()
+
+	accessKey := option.IOAToken
+	if accessKey == "" {
+		accessKey = protocols.NewToken()
+	}
+	listenURL := option.IOAURL
+	if listenURL == "" {
+		listenURL = "http://127.0.0.1:8765"
+	}
+	if u, err := url.Parse(listenURL); err == nil {
+		logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s", accessKey, u.Host)
+	}
+
 	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{
-		URL:       option.IOAURL,
-		AccessKey: option.IOAToken,
+		URL:       listenURL,
+		AccessKey: accessKey,
 		Store:     store,
 	})
 }
@@ -207,11 +225,11 @@ func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option,
 	}
 	client, err := ioaclient.NewClient(ioaURL, "")
 	if err != nil {
-		return fmt.Errorf("connect to IOA server: %w", err)
+		return fmt.Errorf("connect to server: %w", err)
 	}
 	if client.AccessKey() != "" {
 		if err := client.EnsureRegistered(ctx, "aiscan-cli", "", nil); err != nil {
-			return fmt.Errorf("IOA auth register: %w", err)
+			return fmt.Errorf("server auth register: %w", err)
 		}
 	}
 
@@ -225,7 +243,6 @@ func ioaClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Option,
 	case cfg.RunModeIOANodes:
 		return tui.RunIOANodes(ctx, client, option, args, os.Stdout, os.Stderr)
 	default:
-		return fmt.Errorf("unknown ioa mode: %s", mode)
+		return fmt.Errorf("unknown server mode: %s", mode)
 	}
 }
-

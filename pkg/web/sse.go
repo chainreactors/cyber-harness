@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 // HubEvent is the unit broadcast through the SSE hub. Type is the SSE
@@ -13,26 +16,22 @@ import (
 type HubEvent struct {
 	Type string
 	Data json.RawMessage
+	// Reliable marks a terminal event that Broadcast must not drop under
+	// backpressure: on a full buffer it evicts the oldest queued event to seat
+	// one, rather than shedding it like a token delta. See isTerminalChatEvent
+	// for which events qualify and why a lost one strands the UI.
+	Reliable bool
 }
-
-type BroadcastCallback func(id string, event HubEvent)
 
 type Hub struct {
 	mu          sync.Mutex
 	subscribers map[string]map[chan HubEvent]struct{}
-	callback    BroadcastCallback
 }
 
 func NewHub() *Hub {
 	return &Hub{
 		subscribers: make(map[string]map[chan HubEvent]struct{}),
 	}
-}
-
-func (h *Hub) OnBroadcast(cb BroadcastCallback) {
-	h.mu.Lock()
-	h.callback = cb
-	h.mu.Unlock()
 }
 
 func (h *Hub) Subscribe(id string) (<-chan HubEvent, func()) {
@@ -58,17 +57,30 @@ func (h *Hub) Subscribe(id string) (<-chan HubEvent, func()) {
 
 func (h *Hub) Broadcast(id string, event HubEvent) {
 	h.mu.Lock()
-	cb := h.callback
 	for ch := range h.subscribers[id] {
 		select {
 		case ch <- event:
 		default:
+			// Buffer full. A non-reliable event (a token delta) is simply
+			// dropped — a later cumulative delta and the final message resend the
+			// same text. A reliable (terminal) event must not be the one dropped,
+			// so evict the oldest queued event to make room. Safe under h.mu: no
+			// other Broadcast fills this channel concurrently (so the resend is
+			// guaranteed room), and unsubscribe takes h.mu before close(ch), so
+			// ch is still open here.
+			if event.Reliable {
+				select {
+				case <-ch:
+				default:
+				}
+				select {
+				case ch <- event:
+				default:
+				}
+			}
 		}
 	}
 	h.mu.Unlock()
-	if cb != nil {
-		cb(id, event)
-	}
 }
 
 func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, terminalEvents ...string) {
@@ -115,20 +127,8 @@ func isTerminalEvent(eventType string, terminalEvents []string) bool {
 	if len(terminalEvents) == 0 {
 		return eventType == "complete" || eventType == "error"
 	}
-	for _, t := range terminalEvents {
-		if eventType == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(terminalEvents, eventType)
 }
 
-// mustJSON marshals v to json.RawMessage. Panics on error (should never
-// happen with map/struct inputs).
-func mustJSON(v any) json.RawMessage {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
+// mustJSON is a package-local alias for webproto.MustJSON.
+var mustJSON = webproto.MustJSON

@@ -18,7 +18,7 @@ func TestActivateDebugUsesTelemetryLoggerAsGlobal(t *testing.T) {
 	logs.Log.Debugf("visible")
 	restore()
 
-	if got := buf.String(); got != "[debug] visible\n" {
+	if got := buf.String(); got != "● visible\n" {
 		t.Fatalf("debug output = %q", got)
 	}
 	if logs.Log != oldGlobal {
@@ -42,7 +42,7 @@ func TestSuppressGlobalNonErrorsKeepsOnlyErrors(t *testing.T) {
 	if strings.Contains(got, "hidden") {
 		t.Fatalf("non-error logs were not suppressed: %q", got)
 	}
-	if !strings.Contains(got, "[error] visible error") {
+	if !strings.Contains(got, "● visible error") {
 		t.Fatalf("error log missing after suppression: %q", got)
 	}
 }
@@ -60,7 +60,21 @@ func TestErrorOnlyLoggerSuppressesNonErrors(t *testing.T) {
 	if strings.Contains(got, "debug") || strings.Contains(got, "info") || strings.Contains(got, "warn") || strings.Contains(got, "important") {
 		t.Fatalf("non-error logs were not suppressed: %q", got)
 	}
-	if !strings.Contains(got, "[error] error") {
+	if !strings.Contains(got, "● error") {
 		t.Fatalf("error log missing: %q", got)
+	}
+}
+
+func TestLoggerColorStylesOnlyMarker(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger(LogConfig{Debug: true, Output: &buf, Color: true})
+	logger.Infof("ready")
+
+	got := buf.String()
+	if !strings.Contains(got, "\x1b[0;32m●\x1b[0m ready") {
+		t.Fatalf("colored marker missing: %q", got)
+	}
+	if strings.Contains(got, "\x1b[0;32m● ready") {
+		t.Fatalf("entire line appears colored: %q", got)
 	}
 }

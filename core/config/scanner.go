@@ -60,13 +60,13 @@ func ScannerUsageLines() string {
 
 func CLICommandSummary() string {
 	if !ScannerEnabled {
-		base := "agent, ioa serve"
+		base := "agent, serve"
 		if len(ExtraSummaryEntries) == 0 {
 			return base
 		}
 		return base + ", " + strings.Join(ExtraSummaryEntries, ", ")
 	}
-	base := "agent, ioa serve, scan, gogo, spray, zombie, neutron"
+	base := "agent, web, serve, scan, gogo, spray, zombie, neutron"
 	if len(ExtraSummaryEntries) == 0 {
 		return base
 	}

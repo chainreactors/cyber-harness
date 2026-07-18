@@ -368,11 +368,6 @@ func (s *Store) ReadBody(name string) string {
 	return strings.TrimSpace(body)
 }
 
-// ReadBody reads a skill's markdown body from embeddedFS only (package-level convenience).
-func ReadBody(name string) string {
-	return readEmbeddedBody(name)
-}
-
 func readEmbeddedBody(name string) string {
 	filePath := path.Join(name, "SKILL.md")
 	raw, err := embeddedFS.ReadFile(filePath)
@@ -465,12 +460,6 @@ func (s *Store) FormatInvocation(skill Skill, args string) string {
 	return formatInvocationBody(skill, body, args)
 }
 
-// FormatInvocation formats a skill invocation (package-level, embedded-only).
-func FormatInvocation(skill Skill, args string) string {
-	body := readEmbeddedBody(skill.Name)
-	return formatInvocationBody(skill, body, args)
-}
-
 func formatInvocationBody(skill Skill, body string, args string) string {
 	var sb strings.Builder
 	sb.WriteString(`<skill name="`)
@@ -547,18 +536,6 @@ func ParseFrontmatter(raw string) (Frontmatter, string) {
 	var fm Frontmatter
 	_ = yaml.Unmarshal([]byte(yamlBlock), &fm)
 	return fm, body
-}
-
-// SplitFrontmatter separates YAML frontmatter from markdown body.
-// Returns a string map for backward compatibility.
-func SplitFrontmatter(raw string) (map[string]string, string) {
-	yamlBlock, body := splitRaw(raw)
-	if yamlBlock == "" {
-		return make(map[string]string), body
-	}
-	result := make(map[string]string)
-	_ = yaml.Unmarshal([]byte(yamlBlock), &result)
-	return result, body
 }
 
 func splitRaw(raw string) (yamlBlock string, body string) {

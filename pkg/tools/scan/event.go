@@ -205,7 +205,7 @@ func weakpassLoot(result *parsers.ZombieResult) output.Loot {
 	}
 }
 
-func vulnLoot(result *sdktypes.VulnResult) output.Loot {
+func vulnLoot(result *sdktypes.TemplateResult) output.Loot {
 	pri := string(priorityHigh)
 	switch result.Severity {
 	case "critical":

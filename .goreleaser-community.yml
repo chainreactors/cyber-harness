@@ -32,6 +32,7 @@ builds:
     ldflags:
       - >-
         -s -w
+        -X 'github.com/chainreactors/aiscan/core/config.Version={{.Version}}'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultProvider=deepseek'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultModel=deepseek-chat'
@@ -71,6 +72,7 @@ builds:
     ldflags:
       - >-
         -s -w
+        -X 'github.com/chainreactors/aiscan/core/config.Version={{.Version}}'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultProvider=deepseek'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
         -X 'github.com/chainreactors/aiscan/core/config.DefaultModel=deepseek-chat'

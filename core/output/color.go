@@ -6,15 +6,13 @@ import (
 )
 
 const (
-	ANSIReset   = "\033[0m"
-	ANSIBold    = "\033[1m"
-	ANSIDim     = "\033[2m"
-	ANSIRed     = "\033[31m"
-	ANSIGreen   = "\033[32m"
-	ANSIYellow  = "\033[33m"
-	ANSIBlue    = "\033[34m"
-	ANSIMagenta = "\033[35m"
-	ANSICyan    = "\033[36m"
+	ANSIReset  = "\033[0m"
+	ANSIBold   = "\033[1m"
+	ANSIDim    = "\033[2m"
+	ANSIRed    = "\033[31m"
+	ANSIGreen  = "\033[32m"
+	ANSIYellow = "\033[33m"
+	ANSICyan   = "\033[36m"
 )
 
 type Color struct {
@@ -60,13 +58,6 @@ func (c Color) Red(s string) string {
 	return logs.Red(s)
 }
 
-func (c Color) RedBold(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return logs.RedBold(s)
-}
-
 func (c Color) Yellow(s string) string {
 	if !c.Enabled {
 		return s
@@ -88,20 +79,6 @@ func (c Color) Cyan(s string) string {
 	return logs.Cyan(s)
 }
 
-func (c Color) Blue(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return logs.Blue(s)
-}
-
-func (c Color) Magenta(s string) string {
-	if !c.Enabled {
-		return s
-	}
-	return logs.Purple(s)
-}
-
 func (c Color) Bold(s string) string {
 	if !c.Enabled {
 		return s
@@ -113,7 +90,7 @@ func (c Color) Dim(s string) string {
 	if !c.Enabled {
 		return s
 	}
-	return "\033[90m" + s + ANSIReset
+	return ANSIDim + s + ANSIReset
 }
 
 func (c Color) Status(s string) string {
@@ -138,21 +115,5 @@ func (c Color) ForPriority(p string) func(string) string {
 		return logs.RedBold
 	default:
 		return c.Dim
-	}
-}
-
-func (c Color) ForStatus(status string) func(string) string {
-	if !c.Enabled {
-		return func(s string) string { return s }
-	}
-	switch status {
-	case "confirmed":
-		return logs.Green
-	case "not_confirmed", "failed":
-		return logs.Red
-	case "info":
-		return logs.Yellow
-	default:
-		return logs.Yellow
 	}
 }

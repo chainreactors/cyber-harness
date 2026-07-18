@@ -40,26 +40,58 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 		option.Provider = selectedProvider
 	}
 
+	// AISCAN_BASE_URL is aiscan's own namespace: an intentional override that wins
+	// over a base URL set in the config file (CLI --base-url wins via the explicit gate).
 	if strings.TrimSpace(explicit.BaseURL) == "" {
 		if v := firstEnv(lookup, "AISCAN_BASE_URL", "AISCAN_BASEURL", "AISCAN_LLM_BASE_URL", "AISCAN_LLM_BASEURL"); v != "" {
 			option.BaseURL = v
-		} else if v := providerBaseURLEnv(selectedProvider, lookup); v != "" {
+		}
+	}
+	// Provider-scoped base-URL envs (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, …) are
+	// commonly injected by the surrounding environment for *other* tools — e.g.
+	// Claude-Code-style gateways export ANTHROPIC_BASE_URL. Treat them as a fallback
+	// only: they must not silently override a base URL the user configured for aiscan
+	// (config file / Settings UI). Apply only when nothing else set one. Mirrors the
+	// model handling below so a hub-launched agent that inherits the hub's env still
+	// honors the Settings-saved base URL.
+	if strings.TrimSpace(option.BaseURL) == "" {
+		if v := providerBaseURLEnv(selectedProvider, lookup); v != "" {
 			option.BaseURL = v
 		}
 	}
 
+	// AISCAN_MODEL / AISCAN_LLM_MODEL are aiscan's *own* namespace: an intentional
+	// override that still wins over a model set in the config file (CLI --model
+	// wins over it via the explicit gate).
 	if strings.TrimSpace(explicit.Model) == "" {
 		if v := firstEnv(lookup, "AISCAN_MODEL", "AISCAN_LLM_MODEL"); v != "" {
 			option.Model = v
-		} else if v := providerModelEnv(selectedProvider, lookup); v != "" {
+		}
+	}
+	// Provider-scoped model envs (ANTHROPIC_MODEL, OPENAI_MODEL, …) are commonly
+	// injected by the surrounding environment for *other* tools — e.g. Claude-Code
+	// style gateways export ANTHROPIC_MODEL. Treat them as a fallback only: they
+	// must not silently override a model the user configured for aiscan (config
+	// file / Settings UI or --model). Apply only when nothing else set a model.
+	if strings.TrimSpace(option.Model) == "" {
+		if v := providerModelEnv(selectedProvider, lookup); v != "" {
 			option.Model = v
 		}
 	}
 
+	// AISCAN_API_KEY is aiscan's own namespace: an intentional override that wins
+	// over a key set in the config file (CLI --api-key wins via the explicit gate).
 	if strings.TrimSpace(explicit.APIKey) == "" {
-		if v := providerAPIKeyEnv(selectedProvider, lookup); v != "" {
+		if v := firstEnv(lookup, "AISCAN_API_KEY", "AISCAN_LLM_API_KEY"); v != "" {
 			option.APIKey = v
-		} else if v := firstEnv(lookup, "AISCAN_API_KEY", "AISCAN_LLM_API_KEY"); v != "" {
+		}
+	}
+	// Provider-scoped key envs (ANTHROPIC_API_KEY, OPENAI_API_KEY) are commonly
+	// present for *other* tools. Treat them as a fallback only so they never override
+	// a key the user configured for aiscan (config file / Settings UI). Apply only
+	// when nothing else set one — same rationale as base URL and model above.
+	if strings.TrimSpace(option.APIKey) == "" {
+		if v := providerAPIKeyEnv(selectedProvider, lookup); v != "" {
 			option.APIKey = v
 		}
 	}

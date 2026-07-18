@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +17,16 @@ type SessionData struct {
 	Model     string        `json:"model,omitempty"`
 	Provider  string        `json:"provider,omitempty"`
 	Messages  []ChatMessage `json:"messages"`
+}
+
+type SessionInfo struct {
+	Path      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ModTime   time.Time
+	Model     string
+	Provider  string
+	Messages  int
 }
 
 const sessionVersion = 1
@@ -43,10 +54,6 @@ func SaveSession(dir string, data *SessionData) error {
 		return fmt.Errorf("write session file: %w", err)
 	}
 
-	latestPath := filepath.Join(dir, "latest.json")
-	if err := os.WriteFile(latestPath, raw, 0o644); err != nil {
-		return fmt.Errorf("write latest session: %w", err)
-	}
 	return nil
 }
 
@@ -62,8 +69,74 @@ func LoadSession(path string) (*SessionData, error) {
 	return &data, nil
 }
 
-func LatestSessionPath(dir string) string {
-	return filepath.Join(dir, "latest.json")
+type sessionMeta struct {
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Model     string            `json:"model,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	Messages  []json.RawMessage `json:"messages"`
+}
+
+func ListSessions(dir string) ([]SessionInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session dir: %w", err)
+	}
+	sessions := make([]SessionInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if matched, _ := filepath.Match("session-*.json", entry.Name()); !matched {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var meta sessionMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			continue
+		}
+		fi, _ := entry.Info()
+		modTime := time.Time{}
+		if fi != nil {
+			modTime = fi.ModTime()
+		}
+		sessions = append(sessions, SessionInfo{
+			Path:      path,
+			CreatedAt: meta.CreatedAt,
+			UpdatedAt: meta.UpdatedAt,
+			ModTime:   modTime,
+			Model:     meta.Model,
+			Provider:  meta.Provider,
+			Messages:  len(meta.Messages),
+		})
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		left := sessions[i].SortTime()
+		right := sessions[j].SortTime()
+		if left.Equal(right) {
+			return sessions[i].Path > sessions[j].Path
+		}
+		return left.After(right)
+	})
+	return sessions, nil
+}
+
+func (s SessionInfo) SortTime() time.Time {
+	switch {
+	case !s.UpdatedAt.IsZero():
+		return s.UpdatedAt
+	case !s.CreatedAt.IsZero():
+		return s.CreatedAt
+	default:
+		return s.ModTime
+	}
 }
 
 func sanitizeMessagesForSave(messages []ChatMessage) []ChatMessage {
@@ -87,12 +160,7 @@ func sanitizeMessagesForSave(messages []ChatMessage) []ChatMessage {
 				ToolCallID: m.ToolCallID,
 			}
 		} else {
-			out[i] = ChatMessage{
-				Role:       m.Role,
-				Content:    m.Content,
-				ToolCalls:  m.ToolCalls,
-				ToolCallID: m.ToolCallID,
-			}
+			out[i] = m
 		}
 	}
 	return out

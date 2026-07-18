@@ -309,7 +309,6 @@ func TestLoadScanDefaults(t *testing.T) {
 	writeTestConfig(t, dir, `
 scan:
   verify: critical
-  verify_timeout: 90
 `)
 
 	withDefaults(t, func() {
@@ -319,9 +318,6 @@ scan:
 
 		if DefaultVerify != "critical" {
 			t.Errorf("DefaultVerify: got %q, want %q", DefaultVerify, "critical")
-		}
-		if DefaultVerifyTimeout != "90" {
-			t.Errorf("DefaultVerifyTimeout: got %q, want %q", DefaultVerifyTimeout, "90")
 		}
 	})
 }
@@ -602,6 +598,111 @@ llm:
 	})
 }
 
+// A provider-scoped model env (ANTHROPIC_MODEL) is often injected by the
+// surrounding environment for another tool (a Claude-Code style gateway). It must
+// NOT override a model the user configured for aiscan itself — otherwise editing
+// the model in the config file / Settings UI has no effect at runtime. AISCAN_MODEL
+// (aiscan's own namespace) keeps overriding; the borrowed provider env only fills
+// an empty slot.
+func TestResolveRuntimeConfigConfigModelBeatsBorrowedProviderModelEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
+llm:
+  provider: anthropic
+  base_url: https://kiro.example/v1
+  api_key: config-key
+  model: kimi-for-coding
+`)
+	t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+
+	withDefaults(t, func() {
+		origDir, _ := os.Getwd()
+		os.Chdir(dir)
+		defer os.Chdir(origDir)
+
+		option := Option{}
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
+			t.Fatal(err)
+		}
+		if option.Model != "kimi-for-coding" {
+			t.Errorf("config model should win over borrowed ANTHROPIC_MODEL: got %q, want %q", option.Model, "kimi-for-coding")
+		}
+	})
+
+	// With no model in the config, the borrowed provider env still fills the gap.
+	withDefaults(t, func() {
+		emptyDir := t.TempDir()
+		writeTestConfig(t, emptyDir, "llm:\n  provider: anthropic\n  base_url: https://kiro.example/v1\n  api_key: config-key\n")
+		origDir, _ := os.Getwd()
+		os.Chdir(emptyDir)
+		defer os.Chdir(origDir)
+
+		option := Option{}
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
+			t.Fatal(err)
+		}
+		if option.Model != "claude-opus-4-8" {
+			t.Errorf("borrowed ANTHROPIC_MODEL should fill an empty model: got %q, want %q", option.Model, "claude-opus-4-8")
+		}
+	})
+}
+
+// Same borrowed-env hazard as the model case, but for base_url and api_key: a
+// hub-launched agent inherits the hub's env, which on a Claude-Code style gateway
+// exports ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY. Those must NOT override the
+// base URL / key the user saved via the Settings UI (the config file) — otherwise
+// "启动本地 Agent … 模型/密钥沿用当前配置" silently uses the borrowed env instead.
+func TestResolveRuntimeConfigConfigBaseURLAndKeyBeatBorrowedProviderEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
+llm:
+  provider: anthropic
+  base_url: https://kiro.example/v1
+  api_key: config-key
+  model: kimi-for-coding
+`)
+	t.Setenv("ANTHROPIC_BASE_URL", "https://borrowed.example/v1")
+	t.Setenv("ANTHROPIC_API_KEY", "borrowed-key")
+
+	withDefaults(t, func() {
+		origDir, _ := os.Getwd()
+		os.Chdir(dir)
+		defer os.Chdir(origDir)
+
+		option := Option{}
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
+			t.Fatal(err)
+		}
+		if option.BaseURL != "https://kiro.example/v1" {
+			t.Errorf("config base_url should win over borrowed ANTHROPIC_BASE_URL: got %q, want %q", option.BaseURL, "https://kiro.example/v1")
+		}
+		if option.APIKey != "config-key" {
+			t.Errorf("config api_key should win over borrowed ANTHROPIC_API_KEY: got %q, want %q", option.APIKey, "config-key")
+		}
+	})
+
+	// With no base_url / api_key in the config, the borrowed provider env still
+	// fills the gap (unchanged fallback behavior).
+	withDefaults(t, func() {
+		emptyDir := t.TempDir()
+		writeTestConfig(t, emptyDir, "llm:\n  provider: anthropic\n  model: kimi-for-coding\n")
+		origDir, _ := os.Getwd()
+		os.Chdir(emptyDir)
+		defer os.Chdir(origDir)
+
+		option := Option{}
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
+			t.Fatal(err)
+		}
+		if option.BaseURL != "https://borrowed.example/v1" {
+			t.Errorf("borrowed ANTHROPIC_BASE_URL should fill an empty base_url: got %q, want %q", option.BaseURL, "https://borrowed.example/v1")
+		}
+		if option.APIKey != "borrowed-key" {
+			t.Errorf("borrowed ANTHROPIC_API_KEY should fill an empty api_key: got %q, want %q", option.APIKey, "borrowed-key")
+		}
+	})
+}
+
 func TestProvidersListOnly(t *testing.T) {
 	option := Option{}
 	option.Providers = []LLMProviderEntry{
@@ -676,7 +777,7 @@ func withDefaults(t *testing.T, fn func()) {
 	saved := []*string{
 		&DefaultProvider, &DefaultBaseURL, &DefaultAPIKey, &DefaultModel,
 		&DefaultScannerProxy, &DefaultCyberhubURL, &DefaultCyberhubKey,
-		&DefaultCyberhubMode, &DefaultVerify, &DefaultVerifyTimeout,
+		&DefaultCyberhubMode, &DefaultVerify,
 		&DefaultTavilyKeys, &DefaultIOAURL, &DefaultIOANodeID,
 		&DefaultIOANodeName, &DefaultSpace,
 	}

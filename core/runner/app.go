@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/probe"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -27,7 +31,11 @@ type App struct {
 	SkillDiagnostics  []skills.Diagnostic
 	IOAClient         protocols.ClientAPI
 	IOAStreamClient   ioaclient.StreamAPI
+	DataBus           *eventbus.Bus[output.ToolDataEvent]
+	SCOSidecar        *output.SCOSidecar
 	enginesReady      chan struct{}
+	loggerMu          sync.RWMutex
+	logger            telemetry.Logger
 }
 
 func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
@@ -36,6 +44,11 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
+	a.logger = logger
+	logger = a.Logger()
+
+	a.DataBus = eventbus.New[output.ToolDataEvent]()
+	a.SCOSidecar = output.NewSCOSidecar(a.DataBus, output.CSTXTransform)
 
 	store, diagnostics := skills.LoadAll(rc.CLISkillPaths)
 	a.Skills = store
@@ -51,6 +64,7 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 		} else {
 			a.Provider = llmProvider
 			a.ProviderConfig = *resolved
+			logLLMProbeStatus(ctx, *resolved, logger)
 		}
 		for _, fbCfg := range rc.Provider.Fallbacks {
 			fbProvider, fbResolved, err := initProvider(fbCfg, logger)
@@ -70,7 +84,7 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 
 	a.enginesReady = make(chan struct{})
 	go func() {
-		if ScannerInitFunc != nil {
+		if ScannerInitFunc != nil && !rc.SkipEngines {
 			ScannerInitFunc(ctx, a, rc, logger)
 		}
 		close(a.enginesReady)
@@ -86,6 +100,53 @@ func NewApp(ctx context.Context, rc cfg.RuntimeConfig) (*App, error) {
 	return a, nil
 }
 
+func (a *App) Logger() telemetry.Logger {
+	return appLogger{app: a}
+}
+
+func (a *App) SetLogger(logger telemetry.Logger) {
+	if a == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	if proxy, ok := logger.(appLogger); ok && proxy.app == a {
+		return
+	}
+	a.loggerMu.Lock()
+	a.logger = logger
+	a.loggerMu.Unlock()
+	if a.Commands != nil {
+		a.Commands.SetLogger(a.Logger())
+	}
+}
+
+func (a *App) currentLogger() telemetry.Logger {
+	if a == nil {
+		return telemetry.NopLogger()
+	}
+	a.loggerMu.RLock()
+	logger := a.logger
+	a.loggerMu.RUnlock()
+	if logger == nil {
+		return telemetry.NopLogger()
+	}
+	return logger
+}
+
+type appLogger struct {
+	app *App
+}
+
+func (l appLogger) Debugf(format string, args ...any) { l.app.currentLogger().Debugf(format, args...) }
+func (l appLogger) Infof(format string, args ...any)  { l.app.currentLogger().Infof(format, args...) }
+func (l appLogger) Warnf(format string, args ...any)  { l.app.currentLogger().Warnf(format, args...) }
+func (l appLogger) Errorf(format string, args ...any) { l.app.currentLogger().Errorf(format, args...) }
+func (l appLogger) Importantf(format string, args ...any) {
+	l.app.currentLogger().Importantf(format, args...)
+}
+
 func (a *App) WaitEngines(ctx context.Context) error {
 	select {
 	case <-a.enginesReady:
@@ -98,6 +159,9 @@ func (a *App) WaitEngines(ctx context.Context) error {
 func (a *App) Close() {
 	if a == nil {
 		return
+	}
+	if a.SCOSidecar != nil {
+		a.SCOSidecar.Close()
 	}
 	if a.Commands != nil {
 		for _, t := range a.Commands.Tools() {
@@ -127,6 +191,46 @@ func initProvider(provCfg agent.ProviderConfig, logger telemetry.Logger) (agent.
 		return nil, nil, err
 	}
 	return llmProvider, resolved, nil
+}
+
+const startupLLMProbeTimeout = 5 * time.Second
+
+func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger telemetry.Logger) {
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, startupLLMProbeTimeout)
+	defer cancel()
+
+	result, err := probe.TestLLM(probeCtx, probe.LLMProbeRequest{
+		Provider: provCfg.Provider,
+		BaseURL:  provCfg.BaseURL,
+		APIKey:   provCfg.APIKey,
+		Model:    provCfg.Model,
+		Proxy:    provCfg.Proxy,
+	}, "")
+	if err != nil {
+		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %s", llmConfigLabel(provCfg.Provider, provCfg.Model), err.Error())))
+		return
+	}
+	if !result.OK {
+		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %dms · %s", llmConfigLabel(result.Provider, result.Model), result.LatencyMs, result.Error)))
+		return
+	}
+
+	logger.Infof("%s", telemetry.StartupOK("llm", fmt.Sprintf("%s · %dms", llmConfigLabel(result.Provider, result.Model), result.LatencyMs)))
+}
+
+func llmConfigLabel(providerName, model string) string {
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	if providerName == "" {
+		providerName = "unknown"
+	}
+	if model == "" {
+		return providerName
+	}
+	return providerName + "/" + model
 }
 
 // optionalToolGroups lists all selectable tool groups that can be enabled via

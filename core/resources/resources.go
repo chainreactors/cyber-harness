@@ -1,6 +1,6 @@
 package resources
 
-//go:generate go run ./templates_gen.go -t ../../templates -o template.go -embed
+//go:generate go run ./templates_gen.go -t ../../templates -o template.go
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 	"github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
-	"github.com/chainreactors/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,8 +21,6 @@ const (
 	ModeMerge    = "merge"
 	ModeOverride = "override"
 )
-
-var PortPreset *utils.PortPreset
 
 // Options controls aiscan-owned scanner resource loading.
 type Options struct {
@@ -57,9 +54,6 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 
 	localHTTP, localSocket, err := loadLocalFingers()
 	if err != nil {
-		return nil, err
-	}
-	if err := installLocalPortPreset(); err != nil {
 		return nil, err
 	}
 	localFingers := append(append(fingerslib.Fingers(nil), localHTTP...), localSocket...)
@@ -210,19 +204,6 @@ func loadLocalTemplates() []*templates.Template {
 		return nil
 	}
 	return tpls
-}
-
-func installLocalPortPreset() error {
-	content := loadEmbeddedConfig("port")
-	if len(content) == 0 {
-		return nil
-	}
-	var ports []*utils.PortConfig
-	if err := yaml.Unmarshal(content, &ports); err != nil {
-		return err
-	}
-	PortPreset = utils.NewPortPreset(ports)
-	return nil
 }
 
 func loadRemoteFingers(ctx context.Context, cyberhubURL, apiKey string) (fingers.FullFingers, error) {

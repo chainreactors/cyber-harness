@@ -170,7 +170,7 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 		if result == nil || !result.Matched() {
 			continue
 		}
-		emit(lootEvent(capNeutronPOC, vulnLoot(result.VulnResult(target.Target))))
+		emit(lootEvent(capNeutronPOC, vulnLoot(result.TemplateResult(target.Target))))
 	}
 }
 

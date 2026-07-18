@@ -81,9 +81,24 @@ func (r *apiRequest) do(ctx context.Context, method, endpoint string, body []byt
 		return nil, wrapReadError(parentCtx, callTimedOut.Load(), r.timeout, "read response", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(data)}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(data), Header: resp.Header.Clone()}
 	}
 	return data, nil
+}
+
+// hint404 enriches a 404 from a chat endpoint with an actionable cause. A 404 on
+// the chat POST almost always means the path does not exist: a wrong base_url,
+// or — most often with third-party gateways — a protocol mismatch, where the
+// endpoint does not speak this provider's wire protocol (e.g. an Anthropic-only
+// gateway has no /chat/completions). The underlying *APIError is preserved via
+// %w, so retry classification and errors.As stay intact.
+func hint404(err error, endpoint, altProtocol, altProvider string) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
+		return err
+	}
+	return fmt.Errorf("%w — POST %s not found (404); verify llm.base_url, or if this gateway speaks the %s protocol set llm.provider=%s",
+		err, endpoint, altProtocol, altProvider)
 }
 
 func doJSON(ctx context.Context, client *http.Client, timeout time.Duration, method, endpoint string, payload any, setHeaders func(*http.Request)) ([]byte, error) {
@@ -131,7 +146,7 @@ func streamSSE(
 		if readErr != nil {
 			return nil, wrapReadError(ctx, timedOut, timeout, "read response", readErr)
 		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody), Header: resp.Header.Clone()}
 	}
 
 	var stallDetected atomic.Bool

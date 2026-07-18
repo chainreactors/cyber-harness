@@ -64,6 +64,7 @@ func (c *Command) QuickReference() string {
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("spray", &err)
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
@@ -105,7 +106,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			return nil
 		},
 		OnResult: func(r *parsers.SprayResult) {
-			c.EmitData("spray", output.ToolDataWeb, r.UrlString, r)
+			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, r.UrlString, r)
 		},
 	}
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), runOpts); err != nil {

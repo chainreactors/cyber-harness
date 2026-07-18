@@ -55,7 +55,7 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 	if skill.Location != "aiscan://skills/aiscan/SKILL.md" {
 		t.Fatalf("location = %q", skill.Location)
 	}
-	body := ReadBody("aiscan")
+	body := store.ReadBody("aiscan")
 	if body == "" {
 		t.Fatal("ReadBody returned empty")
 	}
@@ -187,20 +187,6 @@ func TestParseFrontmatterNoFrontmatter(t *testing.T) {
 		t.Fatalf("expected empty frontmatter, got %+v", fm)
 	}
 	if body != raw {
-		t.Fatalf("body = %q", body)
-	}
-}
-
-func TestSplitFrontmatterBackwardCompat(t *testing.T) {
-	raw := "---\nname: test\ndescription: desc\ninternal: true\n---\nBody"
-	m, body := SplitFrontmatter(raw)
-	if m["name"] != "test" {
-		t.Fatalf("name = %q", m["name"])
-	}
-	if m["description"] != "desc" {
-		t.Fatalf("description = %q", m["description"])
-	}
-	if !strings.Contains(body, "Body") {
 		t.Fatalf("body = %q", body)
 	}
 }

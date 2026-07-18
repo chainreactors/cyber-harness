@@ -1,70 +1,108 @@
-import { ArrowRight, Shield, Server, Bug, FileText } from 'lucide-react'
-import type { ScanResult } from '../../api'
-import { cn } from '@aspect/theme'
+import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cyber/ui'
+import { fetchScanReport, type ScanResult } from '../../api'
+import { buildFindings } from '../../lib/scan-result'
+import { MarkdownContent } from '@/markdown'
+import AssetResultView from '../AssetResultView'
+import FindingsPanel from '../FindingsPanel'
 
 interface Props {
   scanID: string
   result: ScanResult
-  onViewDetails: (scanID: string) => void
 }
 
-export default function ScanSummaryCard({ scanID, result, onViewDetails }: Props) {
+export default function ScanSummaryCard({ scanID, result }: Props) {
+  const { t } = useTranslation('scan')
+  const { t: tf, i18n } = useTranslation('findings')
+  const findingsCount = useMemo(() => buildFindings(result).length, [result])
+  const [tab, setTab] = useState('assets')
+  const [reportMd, setReportMd] = useState('')
+  const [reportLoadedKey, setReportLoadedKey] = useState('')
   const s = result.summary
+  const lang = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'
+  const reportKey = `${scanID}:${lang}`
+
+  useEffect(() => {
+    if (tab !== 'report' || reportLoadedKey === reportKey) return
+    setReportMd('')
+    let cancelled = false
+    fetchScanReport(scanID, lang)
+      .then((md) => { if (!cancelled) { setReportMd(md); setReportLoadedKey(reportKey) } })
+      .catch(() => { if (!cancelled) { setReportMd(''); setReportLoadedKey(reportKey) } })
+    return () => { cancelled = true }
+  }, [tab, scanID, lang, reportKey, reportLoadedKey])
+
+  const reportLoading = tab === 'report' && reportLoadedKey !== reportKey
 
   return (
-    <div className="rounded-lg border border-primary/30 bg-primary/5 overflow-hidden">
-      <div className="px-3 py-2 flex items-center gap-2 border-b border-primary/20">
-        <Shield className="h-3.5 w-3.5 text-primary" />
-        <span className="text-xs font-medium text-primary">Scan Complete</span>
+    <section className="overflow-hidden rounded-lg border border-border/80 bg-card">
+      <header className="flex items-start justify-between gap-4 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-success" />
+            <h3 className="text-sm font-semibold text-foreground">{t('scanComplete')}</h3>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-[11px] text-muted-foreground">
+            <span>{tf('detailSummary', { targets: s.targets, services: s.services })}</span>
+            {s.webs > 0 && <MetaDivider label={`${tf('web')} ${s.webs}`} />}
+            {s.probes > 0 && <MetaDivider label={`${tf('probes')} ${s.probes}`} />}
+            {s.errors > 0 && <MetaDivider label={`${tf('errors')} ${s.errors}`} tone="error" />}
+          </div>
+        </div>
         {s.duration && (
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground">{s.duration}</span>
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{s.duration}</span>
         )}
-      </div>
-      <div className="flex flex-wrap gap-3 px-3 py-2">
-        <Metric icon={<Server className="h-3 w-3" />} label="Assets" value={s.targets} />
-        <Metric icon={<FileText className="h-3 w-3" />} label="Services" value={s.services} />
-        <Metric icon={<Bug className="h-3 w-3" />} label="Loots" value={s.loots} tone={s.loots > 0 ? 'warn' : 'muted'} />
-        {s.errors > 0 && <Metric icon={<Bug className="h-3 w-3" />} label="Errors" value={s.errors} tone="error" />}
-      </div>
-      <button
-        type="button"
-        onClick={() => onViewDetails(scanID)}
-        className={cn(
-          'flex w-full items-center justify-center gap-1.5 border-t border-primary/20',
-          'px-3 py-1.5 text-xs font-medium text-primary',
-          'hover:bg-primary/10 transition-colors',
+      </header>
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-auto w-full justify-start rounded-none border-y border-border/60 bg-transparent px-4 py-0">
+          <ResultTab value="assets">{tf('assets')}</ResultTab>
+          {findingsCount > 0 && (
+            <ResultTab value="findings">
+              {tf('findings')}
+              <span className="ml-1 tabular-nums text-muted-foreground">{findingsCount}</span>
+            </ResultTab>
+          )}
+          <ResultTab value="report">{tf('report')}</ResultTab>
+        </TabsList>
+
+        <TabsContent value="assets" className="mt-0 p-4 sm:p-5">
+          <AssetResultView result={result} anchorPrefix={scanID} />
+        </TabsContent>
+        {findingsCount > 0 && (
+          <TabsContent value="findings" className="mt-0 p-4 sm:p-5">
+            <FindingsPanel result={result} />
+          </TabsContent>
         )}
-      >
-        View Details
-        <ArrowRight className="h-3 w-3" />
-      </button>
-    </div>
+        <TabsContent value="report" className="mt-0 p-4 sm:p-5">
+          {reportLoading ? (
+            <div role="status" className="py-4 text-sm text-muted-foreground">{tf('loadingReport')}</div>
+          ) : (
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <MarkdownContent content={reportMd || tf('noReportAvailable')} />
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </section>
   )
 }
 
-function Metric({
-  icon,
-  label,
-  value,
-  tone = 'muted',
-}: {
-  icon: React.ReactNode
-  label: string
-  value: number
-  tone?: 'muted' | 'warn' | 'error'
-}) {
+function MetaDivider({ label, tone = 'muted' }: { label: string; tone?: 'muted' | 'error' }) {
   return (
-    <div
-      className={cn(
-        'flex items-center gap-1.5 text-xs',
-        tone === 'warn' && 'text-yellow-600 dark:text-warning',
-        tone === 'error' && 'text-red-600 dark:text-red-400',
-        tone === 'muted' && 'text-muted-foreground',
-      )}
+    <span className={tone === 'error' ? 'border-l border-border pl-2 text-destructive' : 'border-l border-border pl-2'}>{label}</span>
+  )
+}
+
+function ResultTab({ value, children }: { value: string; children: React.ReactNode }) {
+  return (
+    <TabsTrigger
+      value={value}
+      className="-mb-px mr-5 h-9 rounded-none border-b-2 border-transparent bg-transparent px-0 py-0 text-xs shadow-none last:mr-0 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
     >
-      {icon}
-      <span>{label}</span>
-      <span className="font-mono font-bold text-foreground">{value}</span>
-    </div>
+      {children}
+    </TabsTrigger>
   )
 }

@@ -3,11 +3,14 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -19,6 +22,7 @@ type AppInfo struct {
 	Commands          *commands.CommandRegistry
 	Skills            *skills.Store
 	OnProviderChange  func(agent.Provider, agent.ProviderConfig)
+	OnLoggerChange    func(telemetry.Logger)
 }
 
 // Session holds the dependencies commands need to operate on.
@@ -151,7 +155,7 @@ func CollectStatus(s *Session, mode, historyPath string) StatusInfo {
 	}
 	info.IOA = "disabled"
 	if s.Option != nil && strings.TrimSpace(s.Option.IOAURL) != "" {
-		info.IOA = strings.TrimSpace(s.Option.IOAURL)
+		info.IOA = redactIOAURL(strings.TrimSpace(s.Option.IOAURL))
 		if s.Option.Space != "" {
 			info.IOA += " · space " + s.Option.Space
 		}
@@ -172,4 +176,57 @@ func CollectStatus(s *Session, mode, historyPath string) StatusInfo {
 		}
 	}
 	return info
+}
+
+// redactIOAURL strips the access token that the IOA URL carries as userinfo
+// (http://<token>@host/ioa) so /status never prints the secret to the terminal
+// or into a shared screenshot. If URL parsing fails it still conservatively
+// strips userinfo from a scheme://userinfo@host authority; token-less URLs are
+// returned unchanged.
+func redactIOAURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return redactURLUserinfoFallback(raw)
+	}
+	if u.User == nil {
+		return redactURLUserinfoFallback(raw)
+	}
+	u.User = nil
+	return u.String()
+}
+
+func redactURLUserinfoFallback(raw string) string {
+	scheme := strings.Index(raw, "://")
+	if scheme < 0 {
+		return raw
+	}
+	authorityStart := scheme + len("://")
+	authorityEnd := len(raw)
+	if rel := strings.IndexAny(raw[authorityStart:], "/?#"); rel >= 0 {
+		authorityEnd = authorityStart + rel
+	}
+	at := strings.LastIndex(raw[authorityStart:authorityEnd], "@")
+	if at < 0 {
+		return raw
+	}
+	return raw[:authorityStart] + raw[authorityStart+at+1:]
+}
+
+// WebMenuSpecs extracts the web-visible command metadata from a Command list.
+// Run-control commands (/stop, /followup, /eval, /loop, /exit) are excluded
+// because the web expresses those through UI controls, not slash text.
+func WebMenuSpecs(cmds []Command) []webproto.CommandSpec {
+	hidden := map[string]bool{"/stop": true, "/continue": true, "/followup": true, "/eval": true, "/loop": true, "/exit": true}
+	var specs []webproto.CommandSpec
+	for _, c := range cmds {
+		if c.Hidden || hidden[c.Name] {
+			continue
+		}
+		specs = append(specs, webproto.CommandSpec{
+			Name:        c.Name,
+			Aliases:     c.Aliases,
+			Description: c.Description,
+		})
+	}
+	return specs
 }

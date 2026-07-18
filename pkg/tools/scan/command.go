@@ -7,14 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -41,7 +41,6 @@ type flags struct {
 	AssetReportFile string   `short:"F" long:"format" description:"Write aggregated asset report to file"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
-	Port            string   `long:"port" hidden:"true" description:"Alias for --ports"`
 	Threads         int      // derived from Thread; not a CLI flag
 	Timeout         int      `long:"timeout" description:"Per-probe timeout in seconds" default:"5"`
 	SprayThreads    int      // derived from Thread; not a CLI flag
@@ -57,7 +56,6 @@ type flags struct {
 	MaxNeutronPerFP int      `long:"max-neutron-per-finger" description:"Maximum neutron templates per fingerprint" default:"20"`
 	BroadPOC        bool     `long:"broad-poc" description:"Run POC templates even without matching fingerprints"`
 	Verify          string   `long:"verify" description:"Use AI to verify loots at priority threshold: auto, off, low, medium, high, or critical"`
-	VerifyTimeout   int      `long:"verify-timeout" hidden:"true" description:"Deprecated compatibility option; ignored" default:"120"`
 }
 
 func New(engineSet *engine.Set, opts ...Option) *Command {
@@ -69,6 +67,13 @@ func New(engineSet *engine.Set, opts ...Option) *Command {
 		}
 	}
 	return cmd
+}
+
+func (c *Command) InitLogger(logger telemetry.Logger) {
+	c.Base.InitLogger(logger)
+	if c.parent != nil {
+		c.parent.Cfg.Logger = c.Logger
+	}
 }
 
 func (c *Command) Name() string { return "scan" }
@@ -133,7 +138,8 @@ Examples:
   scan -l targets.txt --mode full --zombie-top 5`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("scan", &err)
 	out, _, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
 	if err != nil {
 		return err

@@ -16,7 +16,7 @@ func ResolveRelativePaths(args []string, fileFlags map[string]bool, workDir stri
 		arg := args[i]
 		if key, value, ok := strings.Cut(arg, "="); ok {
 			if fileFlags[key] {
-				out = append(out, key+"="+ResolvePath(value, workDir))
+				out = append(out, key+"="+resolvePath(value, workDir))
 				continue
 			}
 			out = append(out, arg)
@@ -25,7 +25,7 @@ func ResolveRelativePaths(args []string, fileFlags map[string]bool, workDir stri
 		if fileFlags[arg] && i+1 < len(args) {
 			out = append(out, arg)
 			i++
-			out = append(out, ResolvePath(args[i], workDir))
+			out = append(out, resolvePath(args[i], workDir))
 			continue
 		}
 		out = append(out, arg)
@@ -33,9 +33,9 @@ func ResolveRelativePaths(args []string, fileFlags map[string]bool, workDir stri
 	return out
 }
 
-// ResolvePath resolves a single path relative to workDir.
+// resolvePath resolves a single path relative to workDir.
 // Returns value unchanged if empty, absolute, or starts with "-".
-func ResolvePath(value, workDir string) string {
+func resolvePath(value, workDir string) string {
 	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "-") {
 		return value
 	}

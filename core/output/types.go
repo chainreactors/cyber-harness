@@ -1,6 +1,7 @@
 package output
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/chainreactors/utils/parsers"
@@ -9,6 +10,7 @@ import (
 type Result struct {
 	Summary   Summary                `json:"summary"`
 	Assets    []Asset                `json:"assets,omitempty"`
+	Nodes     []json.RawMessage      `json:"nodes,omitempty"`
 	Services  []*parsers.GOGOResult  `json:"services,omitempty"`
 	WebProbes []*parsers.SprayResult `json:"web_probes,omitempty"`
 	Loots     []Loot                 `json:"loots,omitempty"`

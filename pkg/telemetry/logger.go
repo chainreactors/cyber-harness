@@ -40,15 +40,37 @@ func NewLogger(cfg LogConfig) Logger {
 	} else {
 		base.SetOutput(os.Stderr)
 	}
-	base.SetFormatter(map[logs.Level]string{
-		logs.DebugLevel:     "[debug] %s\n",
-		logs.InfoLevel:      "[info] %s\n",
-		logs.WarnLevel:      "[warn] %s\n",
-		logs.ErrorLevel:     "[error] %s\n",
-		logs.ImportantLevel: "[info] %s\n",
-	})
-	base.SetColor(cfg.Color)
+	base.SetFormatter(logFormatter(cfg.Color))
+	base.SetColor(false)
 	return logsLogger{base: base}
+}
+
+const logMark = "●"
+
+func logFormatter(color bool) map[logs.Level]string {
+	debugMark := logMark
+	infoMark := logMark
+	warnMark := logMark
+	errorMark := logMark
+	importantMark := logMark
+	if color {
+		debugMark = darkGray(logMark)
+		infoMark = logs.Green(logMark)
+		warnMark = logs.YellowBold(logMark)
+		errorMark = logs.RedBold(logMark)
+		importantMark = logs.PurpleBold(logMark)
+	}
+	return map[logs.Level]string{
+		logs.DebugLevel:     debugMark + " %s\n",
+		logs.InfoLevel:      infoMark + " %s\n",
+		logs.WarnLevel:      warnMark + " %s\n",
+		logs.ErrorLevel:     errorMark + " %s\n",
+		logs.ImportantLevel: importantMark + " %s\n",
+	}
+}
+
+func darkGray(s string) string {
+	return "\033[90m" + s + "\033[0m"
 }
 
 func GlobalLogger(cfg LogConfig) Logger {

@@ -74,6 +74,20 @@ go build -o aiscan ./cmd/aiscan                          # 标准版
 go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 playwright/katana/passive）
 ```
 
+Makefile 对应 Release 的三种功能层级。`make full` 会先构建前端，再将最新的
+`web/static` 嵌入 full 二进制：
+
+```bash
+make                                                      # Standard 默认版
+make agent                                                # Agent 轻量版
+make full                                                 # 前端 + Full 完整版
+make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
+```
+
+在 Windows amd64 上，`make` 和 `make full` 会使用内置的静态 RE2 后端，
+并静态链接 MinGW 运行库，最终只需发布一个 EXE，不再附带 RE2、Abseil、
+libstdc++、libgcc 或 winpthread DLL。
+
 ---
 
 ## Features

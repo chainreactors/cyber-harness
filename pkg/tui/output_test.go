@@ -215,6 +215,32 @@ func TestThinkingLineShowsTokenUsage(t *testing.T) {
 	}
 }
 
+func TestInteractiveInputSuppressesLiveStatus(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.SetInteractiveInputActive(true)
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type:  agent.EventMessageUpdate,
+		Turn:  1,
+		Usage: &agent.Usage{PromptTokens: 1000, CompletionTokens: 234, TotalTokens: 1234},
+		Message: agent.ChatMessage{
+			Role: "assistant",
+		},
+	})
+
+	got := stripANSI(stderr.String())
+	if strings.Contains(got, "thinking") || strings.Contains(got, "tokens=1,234") {
+		t.Fatalf("live status leaked while input active: %q", got)
+	}
+	if liveRunning(o.live) {
+		t.Fatal("live spinner started while input was active")
+	}
+}
+
 func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
@@ -323,6 +349,33 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, liveStatusTalking) || !strings.Contains(got, liveStatusTooling) {
 		t.Fatalf("live output missing status labels: %q", got)
+	}
+}
+
+func TestAssistantToolCallMessageEndStopsLiveStatus(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(agent.Event{
+		Type: agent.EventMessageEnd,
+		Turn: 1,
+		Message: agent.ChatMessage{
+			Role: "assistant",
+			ToolCalls: []agent.ToolCall{{
+				ID: "call-1",
+				Function: agent.FunctionCall{
+					Name:      "bash",
+					Arguments: `{"command":"echo hi"}`,
+				},
+			}},
+		},
+	})
+
+	if liveRunning(o.live) {
+		t.Fatal("assistant tool-call message end should stop live status before logger output")
 	}
 }
 

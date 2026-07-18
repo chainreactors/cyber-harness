@@ -31,12 +31,12 @@ func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts Zombi
 	}
 	zctx := sdkzombie.NewContext().
 		WithContext(ctx).
-		SetThreads(opts.Threads).
-		SetTimeout(opts.Timeout).
-		SetTop(opts.Top).
-		SetStatsHandler(opts.OnStats)
+		WithThreads(opts.Threads).
+		WithTimeout(opts.Timeout).
+		WithTop(opts.Top).
+		WithStatsHandler(opts.OnStats)
 	if opts.Proxy != "" {
-		zctx = zctx.SetProxy(opts.Proxy)
+		zctx = zctx.WithProxy(opts.Proxy)
 	}
 
 	task := sdkzombie.NewBruteTask(opts.Targets)

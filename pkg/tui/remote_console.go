@@ -13,23 +13,6 @@ import (
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
-// RunRemoteAgentConsole runs the agent console over a byte-stream transport.
-// The transport provides raw terminal input and receives terminal output.
-func RunRemoteAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, bus ...*eventbus.Bus[agent.Event]) error {
-	if option == nil {
-		option = &cfg.Option{}
-	}
-	if input == nil {
-		return fmt.Errorf("remote console input is nil")
-	}
-	if output == nil {
-		output = io.Discard
-	}
-
-	control := rlterm.NewControl(true, 80, 24)
-	return RunRemoteAgentConsoleWithControl(ctx, option, appInfo, session, input, output, control, bus...)
-}
-
 func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, control *rlterm.StreamControl, bus ...*eventbus.Bus[agent.Event]) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
@@ -73,4 +56,3 @@ func (w *remoteTerminalWriter) Write(p []byte) (int, error) {
 	_, err := w.w.Write(w.buf.Bytes())
 	return len(p), err
 }
-

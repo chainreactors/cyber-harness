@@ -34,11 +34,11 @@ func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoScanOptions)
 	runOpt := buildGogoRunnerOption(opts)
 	gogoCtx := gogo.NewContext().
 		WithContext(ctx).
-		SetThreads(opts.Threads).
-		SetOption(runOpt).
-		SetStatsHandler(opts.OnStats)
+		WithThreads(opts.Threads).
+		WithOption(runOpt).
+		WithStatsHandler(opts.OnStats)
 	if opts.Proxy != "" {
-		gogoCtx = gogoCtx.SetProxy(opts.Proxy)
+		gogoCtx = gogoCtx.WithProxy(opts.Proxy)
 	}
 	resultCh, err := eng.Execute(gogoCtx, gogo.NewScanTask(opts.Target, opts.Ports))
 	if err != nil {

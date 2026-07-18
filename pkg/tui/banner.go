@@ -8,6 +8,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
+	runewidth "github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
 
@@ -71,11 +72,14 @@ func (r *AgentConsole) bannerWidth() int {
 		maxWidth     = 78
 	)
 	width := defaultWidth
+	resolved := false
 	if r != nil && r.terminal != nil && r.terminal.Control != nil {
 		if columns, _ := r.terminal.Control.Size(); columns > 0 {
 			width = columns - 4
+			resolved = true
 		}
-	} else if r != nil && r.output != nil && r.output.Stderr() != nil {
+	}
+	if !resolved && r != nil && r.output != nil && r.output.Stderr() != nil {
 		if columns := writerTerminalWidth(r.output.Stderr()); columns > 0 {
 			width = columns - 4
 		}
@@ -105,24 +109,22 @@ func bannerKV(label, value string, colorEnabled bool) string {
 	return ansiDim(fmt.Sprintf("%-9s", label), colorEnabled) + value
 }
 
+// renderFixedBox draws body inside a fixed-width box of width columns. Lines
+// longer than the inner width are clipped with an ellipsis rather than widening
+// the box, so a long path or URL can never blow the frame past the terminal.
 func renderFixedBox(body string, width int, colorEnabled bool) string {
 	const minInnerWidth = 16
 	innerWidth := width - 4
 	if innerWidth < minInnerWidth {
 		innerWidth = minInnerWidth
 	}
-	lines := strings.Split(body, "\n")
-	for _, line := range lines {
-		if n := visibleRuneLen(line); n > innerWidth {
-			innerWidth = n
-		}
-	}
 
 	border := func(s string) string { return ansiDim(s, colorEnabled) }
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", border("╭"+strings.Repeat("─", innerWidth+2)+"╮"))
-	for _, line := range lines {
-		padding := innerWidth - visibleRuneLen(line)
+	for _, line := range strings.Split(body, "\n") {
+		line = clipVisible(line, innerWidth)
+		padding := innerWidth - visibleWidth(line)
 		if padding < 0 {
 			padding = 0
 		}
@@ -136,8 +138,103 @@ func renderFixedBox(body string, width int, colorEnabled bool) string {
 	return b.String()
 }
 
-func visibleRuneLen(s string) int {
-	return len([]rune(outputpkg.StripANSI(s)))
+// visibleWidth returns the terminal cell width of s, ignoring ANSI escapes and
+// counting East Asian wide runes (CJK, fullwidth) as two columns so borders line
+// up under Chinese text.
+func visibleWidth(s string) int {
+	return runewidth.StringWidth(outputpkg.StripANSI(s))
+}
+
+// clipVisible truncates s to at most maxWidth terminal columns, preserving ANSI
+// escape sequences (zero width) and counting wide runes as two columns. When
+// content is dropped it appends "…" and closes any open color with a reset.
+func clipVisible(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if visibleWidth(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	var b strings.Builder
+	width, limit := 0, maxWidth-1 // reserve one column for the ellipsis
+	sawEscape := false
+	for i := 0; i < len(runes); {
+		if runes[i] == 0x1b { // copy the escape sequence verbatim (zero width)
+			j := i + 1
+			if j < len(runes) && runes[j] == '[' {
+				for j++; j < len(runes) && (runes[j] < 0x40 || runes[j] > 0x7e); j++ {
+				}
+				if j < len(runes) {
+					j++ // include the final byte
+				}
+			}
+			b.WriteString(string(runes[i:j]))
+			sawEscape = true
+			i = j
+			continue
+		}
+		rw := runewidth.RuneWidth(runes[i])
+		if width+rw > limit {
+			break
+		}
+		b.WriteRune(runes[i])
+		width += rw
+		i++
+	}
+	b.WriteString("…")
+	if sawEscape {
+		b.WriteString(outputpkg.ANSIReset)
+	}
+	return b.String()
+}
+
+// truncMiddle shortens s to about max columns by dropping the middle, keeping the
+// head and the (usually more informative) tail — used for long filesystem paths.
+func truncMiddle(s string, max int) string {
+	if visibleWidth(s) <= max || max < 5 {
+		return s
+	}
+	ellipsisWidth := visibleWidth("…")
+	keep := max - ellipsisWidth
+	headBudget := keep / 2
+	tailBudget := keep - headBudget
+	return visiblePrefix(s, headBudget) + "…" + visibleSuffix(s, tailBudget)
+}
+
+func visiblePrefix(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	width := 0
+	for _, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if width+rw > maxWidth {
+			break
+		}
+		b.WriteRune(r)
+		width += rw
+	}
+	return b.String()
+}
+
+func visibleSuffix(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	width := 0
+	start := len(runes)
+	for start > 0 {
+		rw := runewidth.RuneWidth(runes[start-1])
+		if width+rw > maxWidth {
+			break
+		}
+		start--
+		width += rw
+	}
+	return string(runes[start:])
 }
 
 func ansiWrap(s, code string, enabled bool) string {
@@ -199,7 +296,7 @@ func (r *AgentConsole) sessionSummary() string {
 }
 
 func (r *AgentConsole) providerModel() (string, string) {
-	if r.appInfo.Commands == nil {
+	if r == nil {
 		return "", ""
 	}
 	pc := r.appInfo.ProviderConfig
@@ -225,12 +322,13 @@ func (r *AgentConsole) renderHelp() string {
 func (r *AgentConsole) renderStatus() string {
 	colorEnabled := r.output != nil && r.output.color.Enabled
 	info := CollectStatus(r.replSession(), r.sessionSummary(), agentConsoleHistoryPath())
+	detailBudget := r.bannerWidth() - 4 - helpRowCommandWidth
 	rows := []helpRow{
 		{Command: "model", Detail: info.Provider + " / " + info.Model},
 		{Command: "render", Detail: info.Mode},
 		{Command: "task", Detail: info.Task},
-		{Command: "ioa", Detail: info.IOA},
-		{Command: "history", Detail: info.History},
+		{Command: "server", Detail: info.IOA},
+		{Command: "history", Detail: truncMiddle(info.History, detailBudget)},
 	}
 	if info.Skills != "" {
 		rows = append(rows, helpRow{Command: "skills", Detail: info.Skills})
@@ -252,11 +350,67 @@ func renderHelpRows(rows []helpRow, colorEnabled bool) string {
 			b.WriteByte('\n')
 			continue
 		}
-		command := ansiAccent(fmt.Sprintf("%-*s", helpRowCommandWidth, row.Command), colorEnabled)
+		pad := helpRowCommandWidth - visibleWidth(row.Command)
+		if pad < 1 {
+			pad = 1
+		}
+		command := ansiAccent(row.Command+strings.Repeat(" ", pad), colorEnabled)
 		detail := ansiDim(row.Detail, colorEnabled)
 		fmt.Fprintf(&b, "%s%s\n", command, detail)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderBoxTable lays rows out as display-width-aligned columns for use as the
+// body of renderPanel — so list commands (/spaces, /nodes, /messages) match the
+// boxed panels instead of dumping bare tabwriter tables. Column 1 (the name) is
+// accented, the rest dimmed; the final column is left unpadded and renderFixedBox
+// clips any line that would exceed the frame.
+func renderBoxTable(rows [][]string, colorEnabled bool) string {
+	const maxColumnWidth = 24
+	cols := 0
+	for _, row := range rows {
+		if len(row) > cols {
+			cols = len(row)
+		}
+	}
+	widths := make([]int, cols)
+	for _, row := range rows {
+		for i, cell := range row {
+			w := visibleWidth(cell)
+			if i < cols-1 && w > maxColumnWidth {
+				w = maxColumnWidth
+			}
+			if w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	var b strings.Builder
+	for ri, row := range rows {
+		if ri > 0 {
+			b.WriteByte('\n')
+		}
+		for i := 0; i < cols; i++ {
+			cell := ""
+			if i < len(row) {
+				cell = row[i]
+			}
+			if i < cols-1 {
+				cell = clipVisible(cell, widths[i])
+			}
+			styled := ansiDim(cell, colorEnabled)
+			if i == 1 {
+				styled = ansiAccent(cell, colorEnabled)
+			}
+			if i == cols-1 {
+				b.WriteString(styled)
+			} else {
+				b.WriteString(styled + strings.Repeat(" ", widths[i]-visibleWidth(cell)+2))
+			}
+		}
+	}
+	return b.String()
 }
 
 func (r *AgentConsole) renderPanel(title, body string, colorEnabled bool) string {

@@ -2,93 +2,493 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS Safari auto-zooms the whole page whenever a focused control's font-size is
+   below 16px. The composer (text-[15px]) and the compact settings/eval fields
+   (text-xs) would each trip it, so tapping any of them on a phone yanks the page
+   into a jarring zoom. Floor text-entry controls to 16px at phone widths only —
+   desktop keeps its tuned compact sizes. Left UNLAYERED on purpose: an unlayered
+   rule outranks every @layer, so it wins over Tailwind's text-* utilities (which
+   a @layer base rule could not). */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/*
+  AIScan — "Clean recon deck" (white + blue, minimal)
+  --------------------------------------------------------------------------
+  Day = clean white, Night = clean black. Color encodes ROLE, not decoration:
+    • Signal  (blue)  — the system, scanning, anything interactive.
+    • Cortex  (blue)  — the AI/agent layer; a brighter sky-blue within the same
+                        family, so AI reads as a role without a second hue.
+    • Spectrum (warm) — severity ONLY (critical→info), routed through tokens.
+  One blue accent, warm severity, neutral ink. This file is the single source
+  of truth; cyber-ui consumes these variables, so retuning here reskins the app.
+*/
+
 @layer base {
   :root {
     color-scheme: light;
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    /* DAY — clean white. Cool paper field sits a touch below pure white so the
+       white cards lift off it instead of dissolving into the background. */
+    --background: 216 38% 96%;
+    --foreground: 222 34% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --primary: 142 72% 32%;
+    --card-foreground: 222 34% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 34% 11%;
+    --primary: 220 84% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 94%;
-    --secondary-foreground: 222 47% 16%;
-    --muted: 210 40% 94%;
-    --muted-foreground: 215 16% 42%;
-    --accent: 142 32% 91%;
-    --accent-foreground: 142 72% 18%;
-    --destructive: 0 84% 60%;
+    --secondary: 215 30% 94%;
+    --secondary-foreground: 220 25% 22%;
+    --muted: 215 28% 94%;
+    --muted-foreground: 218 13% 42%;
+    --accent: 216 52% 94%;
+    --accent-foreground: 220 70% 38%;
+    --destructive: 350 75% 52%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 88%;
-    --input: 214 32% 84%;
-    --ring: 142 72% 32%;
-    --radius: 0.5rem;
-    --success: 142 72% 32%;
+    --border: 216 26% 86%;
+    --input: 216 24% 84%;
+    --ring: 220 84% 56%;
+    --radius: 0.7rem;
+
+    /* Elevation — theme-aware. Light uses a cool, layered blue-slate umbra (never
+       muddy black) so cards read as lifted paper; dark keeps its glassy top-lit
+       highlight + deep black drop. Consumed via Tailwind's shadow-soft/-lifted/
+       -elevated (mapped to these vars in tailwind.config.js). */
+    --shadow-soft: 0 1px 2px -1px hsl(222 47% 24% / 0.10), 0 1px 3px hsl(222 47% 24% / 0.06);
+    --shadow-lifted: 0 2px 4px -2px hsl(222 47% 24% / 0.07), 0 12px 26px -12px hsl(222 47% 24% / 0.17), 0 4px 10px -6px hsl(222 47% 24% / 0.10);
+    --shadow-elevated: 0 4px 8px -4px hsl(222 47% 24% / 0.09), 0 30px 58px -22px hsl(222 47% 24% / 0.24), 0 10px 24px -10px hsl(222 47% 24% / 0.13);
+
+    /* severity spectrum (semantic) — critical=destructive */
+    --success: 158 64% 36%;          /* low */
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --info: 199 89% 48%;
-    --info-foreground: 0 0% 100%;
-    --caution: 25 95% 53%;
+    --warning: 38 92% 46%;           /* medium */
+    --warning-foreground: 40 90% 8%;
+    --caution: 22 90% 50%;           /* high */
     --caution-foreground: 0 0% 100%;
+    --info: 205 90% 44%;             /* info */
+    --info-foreground: 0 0% 100%;
+
+    /* Cortex — AI/agent role (a brighter sky-blue within the system family) */
+    --ai: 210 88% 54%;
+    --ai-foreground: 0 0% 100%;
+
+    /* ambient signal accents (sweeps / hairlines) — all blue now */
+    --glow-a: 216 90% 56%;
+    --glow-b: 212 88% 54%;
+    --glow-c: 220 84% 56%;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 220 14% 4%;
-    --foreground: 210 20% 92%;
-    --card: 220 14% 6%;
-    --card-foreground: 210 20% 92%;
-    --primary: 142 71% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 215 14% 14%;
-    --secondary-foreground: 210 20% 92%;
-    --muted: 215 14% 14%;
-    --muted-foreground: 215 14% 60%;
-    --accent: 215 14% 14%;
-    --accent-foreground: 210 20% 92%;
-    --destructive: 0 84% 60%;
+    /* NIGHT — clean black. Neutral ink, no colour cast; blue is the only accent. */
+    --background: 218 28% 6%;
+    --foreground: 213 25% 92%;
+    --card: 216 22% 9%;
+    --card-foreground: 213 25% 92%;
+    --popover: 216 22% 11%;
+    --popover-foreground: 213 25% 92%;
+    /* Signal — one refined blue. Bright enough to read as text on the black field;
+       buttons (bg-primary) carry dark foreground text for guaranteed contrast. */
+    --primary: 216 92% 62%;
+    --primary-foreground: 216 72% 11%;
+    --secondary: 216 18% 15%;
+    --secondary-foreground: 213 20% 88%;
+    --muted: 216 16% 14%;
+    --muted-foreground: 215 14% 62%;
+    --accent: 216 22% 18%;
+    --accent-foreground: 213 38% 88%;
+    --destructive: 350 80% 62%;
     --destructive-foreground: 0 0% 100%;
-    --border: 215 14% 16%;
-    --input: 215 14% 16%;
-    --ring: 142 71% 45%;
-    --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --info: 199 89% 48%;
-    --info-foreground: 0 0% 100%;
-    --caution: 25 95% 53%;
-    --caution-foreground: 0 0% 100%;
+    --border: 216 18% 18%;
+    --input: 216 18% 22%;
+    --ring: 216 92% 62%;
+
+    /* NIGHT elevation — glassy top-highlight + black-based drop (unchanged look). */
+    --shadow-soft: inset 0 1px 0 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(0 0% 0% / 0.28);
+    --shadow-lifted: inset 0 1px 0 0 hsl(0 0% 100% / 0.05), 0 10px 28px -12px hsl(0 0% 0% / 0.5), 0 2px 6px -2px hsl(0 0% 0% / 0.3);
+    --shadow-elevated: inset 0 1px 0 0 hsl(0 0% 100% / 0.06), 0 28px 64px -20px hsl(0 0% 0% / 0.62), 0 8px 20px -10px hsl(0 0% 0% / 0.42);
+
+    --success: 158 60% 48%;          /* low */
+    --success-foreground: 165 80% 6%;
+    --warning: 42 94% 58%;           /* medium */
+    --warning-foreground: 40 90% 8%;
+    --caution: 24 92% 58%;           /* high */
+    --caution-foreground: 24 92% 8%;
+    --info: 205 90% 62%;             /* info */
+    --info-foreground: 205 90% 8%;
+
+    /* Cortex — AI/agent role (a brighter sky-blue within the system family) */
+    --ai: 207 96% 72%;
+    --ai-foreground: 216 72% 10%;
+
+    --glow-a: 216 92% 60%;
+    --glow-b: 212 90% 56%;
+    --glow-c: 208 92% 62%;
   }
 
   * {
     border-color: hsl(var(--border));
   }
 
-  html {
+  html,
+  body {
+    min-height: 100vh; /* fallback for browsers without dvh */
+    min-height: 100dvh; /* dynamic vh — excludes the mobile browser toolbar so
+                           the bottom-pinned composer is never hidden behind it */
     background-color: hsl(var(--background));
   }
 
   body {
-    background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    min-height: 100vh;
+    /* font-family comes from Tailwind preflight (theme.fontFamily.sans on html) — single source of truth in tailwind.config.js */
+    font-optical-sizing: auto;
+    font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss01' 1;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* clean, flat field — no colour wash in either mode (the corner glows read
+       as a grubby grey on the white day field). Depth comes from cards, not the body. */
+  }
+
+  code,
+  kbd,
+  pre,
+  samp,
+  .font-mono {
+    font-feature-settings: 'cv05' 1, 'cv11' 0, 'calt' 1, 'zero' 1;
+    font-variant-ligatures: contextual;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.30);
+    color: hsl(var(--foreground));
+  }
+
+  *:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.65);
+    outline-offset: 2px;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 9px;
+    height: 9px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.35);
-    border-radius: 3px;
+    background: hsl(var(--muted-foreground) / 0.26);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.55);
+    background: hsl(var(--muted-foreground) / 0.5);
+    background-clip: padding-box;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.26) transparent;
+  }
+}
+
+@layer components {
+  /* ── Mono label — the "terminal readout" treatment for eyebrows & data labels ── */
+  .mono-label {
+    font-family: theme('fontFamily.mono');
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 600;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── Reticle frame — the SIGNATURE. Corner brackets drawn with 8 corner gradients,
+        no extra DOM. Use on the active target / scan / idle instrument frame. ── */
+  .reticle {
+    position: relative;
+    --reticle-color: hsl(var(--primary) / 0.55);
+    --reticle-size: 14px;
+    --reticle-weight: 1.5px;
+    background-image:
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color)),
+      linear-gradient(var(--reticle-color), var(--reticle-color));
+    background-repeat: no-repeat;
+    /* 4 horizontal arms, then 4 vertical arms */
+    background-size:
+      var(--reticle-size) var(--reticle-weight), var(--reticle-size) var(--reticle-weight),
+      var(--reticle-size) var(--reticle-weight), var(--reticle-size) var(--reticle-weight),
+      var(--reticle-weight) var(--reticle-size), var(--reticle-weight) var(--reticle-size),
+      var(--reticle-weight) var(--reticle-size), var(--reticle-weight) var(--reticle-size);
+    background-position:
+      top left, top right, bottom left, bottom right,
+      top left, top right, bottom left, bottom right;
+  }
+  /* ── Tactical grid — for idle instrument states (an instrument at rest shows its field) ── */
+  .grid-tactical {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
+    background-size: 34px 34px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
+    mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
+  }
+}
+
+@layer utilities {
+  /* ── Chinese (CJK) refinement ──────────────────────────────────────────
+     CJK uses system fonts (PingFang SC / Microsoft YaHei / Noto Sans SC). CJK runs have
+     no inter-word spaces, so the wide Latin letter-spacing used on mono / eyebrow
+     labels (.mono-label = 0.14em, inline tracking-* = 0.08em) opens ugly gaps
+     between characters. Pull it back to a hairline when <html lang="zh">
+     (kept in sync by src/i18n). Declared in the utilities layer so it wins over
+     Tailwind's own tracking-* utilities, where @layer order outranks specificity. */
+  :lang(zh) .mono-label,
+  :lang(zh) .font-mono.uppercase,
+  :lang(zh) .font-display.uppercase {
+    letter-spacing: 0.03em;
+  }
+
+  /* ── Bilingual label harmonisation ─────────────────────────────────────
+     These mono eyebrow / chip / timeline labels routinely mix Latin tokens
+     (AI · POC · Web · model ids) with CJK — e.g. "发现 · Web 探测 · POC 检测".
+     In the mono stack the Latin renders in JetBrains Mono, a typewriter face,
+     while the CJK falls through to a system CJK face. Side by side the row
+     reads as two different fonts. Route the Latin companion to Inter instead —
+     the same face used for body text — so Latin + CJK read as
+     one label. tabular-nums keeps live timers / counters from jittering now
+     that digits are proportional. Gated to :lang(zh); Latin locales keep the
+     mono "terminal readout" treatment, which has no such clash. Same utilities
+     layer + higher specificity as the tracking rule above, so it wins over the
+     bare .font-mono utility. (.font-display headings are left on Space Grotesk —
+     they are display type, not data labels, and rarely mix scripts inline.) */
+  :lang(zh) .mono-label,
+  :lang(zh) .font-mono.uppercase {
+    font-family: theme('fontFamily.sans');
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Compact control-chip labels — the scan-mode + analysis-depth chips
+     (快速 · 完整 · 验证 · 精准 · 深度). At chip scale (text-xs) a bare two-character
+     CJK pair reads cramped and a hair small beside its icon. Nudge the size up ~1px
+     and open a hairline of tracking so each pair looks balanced and deliberate.
+     Gated to :lang(zh) — Latin chips (Quick / Full / Verify …) keep Inter's native
+     chip metrics. ── */
+  :lang(zh) .ctl-label {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+  }
+
+  /* Safe-area padding — clears the iOS home indicator / notch when the browser
+     runs edge-to-edge (needs viewport-fit=cover, which index.html sets). env() is
+     0 in an ordinary browser tab, so these are no-ops there and only take effect
+     on notched devices whose browser chrome is hidden / in a standalone PWA. */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+
+  /* subtle top-lit surface gradient for elevated panels/cards */
+  .surface-raised {
+    background-image: linear-gradient(180deg, hsl(0 0% 100% / 0.04), hsl(0 0% 100% / 0) 40%);
+  }
+  /* brand gradient text — cyan → blue → violet, echoing the logo + AI role */
+  .text-gradient-brand {
+    background-image: linear-gradient(100deg, hsl(var(--glow-a)), hsl(var(--glow-b)) 55%, hsl(var(--glow-c)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* a single horizontal scanline travelling top→bottom of an idle frame */
+  .scanline::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.7), transparent);
+    box-shadow: 0 0 12px 1px hsl(var(--primary) / 0.4);
+    animation: scanline 4.5s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes scanline {
+    0% { top: 6%; opacity: 0; }
+    12% { opacity: 1; }
+    88% { opacity: 1; }
+    100% { top: 94%; opacity: 0; }
+  }
+
+  .blink {
+    animation: blink 1.2s step-end infinite;
+  }
+  @keyframes blink {
+    50% { opacity: 0.2; }
+  }
+
+  /* ── CORTEX CORE — the hero signature. Two counter-rotating structural rings
+        around a luminous nucleus; a one-shot pulse fires per verified finding. ── */
+  .core-spin {
+    transform-origin: center;
+    animation: core-spin 28s linear infinite;
+  }
+  .core-spin-rev {
+    transform-origin: center;
+    animation: core-spin 40s linear infinite reverse;
+  }
+  @keyframes core-spin {
+    to { transform: rotate(360deg); }
+  }
+  .breathe {
+    animation: breathe 2.6s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.82); }
+  }
+  .core-pulse {
+    animation: core-pulse 0.9s cubic-bezier(0.16, 1, 0.3, 1) 1 forwards;
+  }
+  @keyframes core-pulse {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+    30% { opacity: 0.55; }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
+  }
+
+  .card-in {
+    opacity: 0;
+    animation: card-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .core-spin, .core-spin-rev, .breathe, .core-pulse,
+    .card-in {
+      animation: none !important;
+    }
+    .core-pulse { display: none; }
+    .card-in { opacity: 1; transform: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scanline::before,
+    .blink {
+      animation: none !important;
+    }
+    /* Decorative tailwindcss-animate utilities aren't covered by the bespoke
+       gating above — silence the looping/entrance ones too. (animate-spin is
+       left alone so loading spinners still read as "working".) */
+    .animate-ping,
+    .animate-pulse,
+    .animate-in {
+      animation: none !important;
+    }
+  }
+
+  /* ── Ambient field — the LIVING BACKDROP behind the whole deck. A slow cortex
+        aurora (sky-blue + signal-blue) drifts over a faint sensor grid that pans
+        beneath it. Transform-only motion (cheap to composite); pinned below all
+        content at z-index -10 so it reads through the translucent cards and the
+        gaps between them. Subtle by design so card text stays crisp — day keeps
+        it quieter than night — and it lifts a touch while a scan is live. Fully
+        gated by prefers-reduced-motion. ── */
+  .deck-ambient {
+    position: fixed;
+    inset: 0;
+    z-index: -10;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 1.4s ease;
+  }
+  .dark .deck-ambient {
+    opacity: 0.95;
+  }
+  .deck-ambient.is-scanning {
+    opacity: 1;
+  }
+
+  /* Idle standby deck: freeze the aurora + grid drift so nothing keeps the GPU
+     awake (and the laptop battery draining) when no scan is running. The blobs
+     stay put as a static gradient; full drift resumes on .is-scanning. */
+  .deck-ambient:not(.is-scanning)::before,
+  .deck-ambient:not(.is-scanning) .deck-ambient-blob {
+    animation-play-state: paused;
+  }
+
+  /* panning sensor grid, faded out toward the edges */
+  .deck-ambient::before {
+    content: '';
+    position: absolute;
+    inset: -60px;
+    background-image:
+      linear-gradient(to right, hsl(var(--primary) / 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--primary) / 0.08) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(ellipse 78% 78% at 50% 34%, #000 16%, transparent 76%);
+    mask-image: radial-gradient(ellipse 78% 78% at 50% 34%, #000 16%, transparent 76%);
+    animation: ambient-grid 24s linear infinite;
+    will-change: transform;
+  }
+  @keyframes ambient-grid {
+    to { transform: translate(46px, 46px); }
+  }
+
+  /* drifting aurora — three counter-phased cortex glows */
+  .deck-ambient-blob {
+    position: absolute;
+    border-radius: 50%;
+    will-change: transform;
+  }
+  .deck-ambient-blob-a {
+    left: -12vw; top: -14vh;
+    width: 52vw; height: 52vw;
+    background: radial-gradient(circle at 50% 50%, hsl(var(--ai) / 0.55), transparent 66%);
+    animation: ambient-a 32s ease-in-out infinite;
+  }
+  .deck-ambient-blob-b {
+    right: -14vw; top: -8vh;
+    width: 46vw; height: 46vw;
+    background: radial-gradient(circle at 50% 50%, hsl(var(--primary) / 0.5), transparent 66%);
+    animation: ambient-b 38s ease-in-out infinite;
+  }
+  .deck-ambient-blob-c {
+    left: 26vw; bottom: -26vh;
+    width: 50vw; height: 50vw;
+    background: radial-gradient(circle at 50% 50%, hsl(var(--glow-c) / 0.42), transparent 68%);
+    animation: ambient-c 46s ease-in-out infinite;
+  }
+  @keyframes ambient-a {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(7vw, 8vh) scale(1.18); }
+  }
+  @keyframes ambient-b {
+    0%, 100% { transform: translate(0, 0) scale(1.08); }
+    50% { transform: translate(-8vw, 6vh) scale(0.92); }
+  }
+  @keyframes ambient-c {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-6vw, -10vh) scale(1.22); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .deck-ambient::before,
+    .deck-ambient-blob {
+      animation: none !important;
+    }
   }
 }

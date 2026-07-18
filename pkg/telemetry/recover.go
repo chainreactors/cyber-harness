@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"runtime/debug"
 
 	"github.com/chainreactors/logs"
@@ -25,6 +26,19 @@ func SafeRun(name string, fn func()) {
 		}
 	}()
 	fn()
+}
+
+// RecoverAsError is designed for tool Execute methods. Call as:
+//
+//	defer telemetry.RecoverAsError("toolname", &err)
+//
+// It converts a panic into a returned error so the process stays alive.
+func RecoverAsError(name string, errp *error) {
+	if r := recover(); r != nil {
+		stack := debug.Stack()
+		logs.Log.Errorf("[%s] panic recovered: %v\n%s", name, r, stack)
+		*errp = fmt.Errorf("[%s] panic: %v", name, r)
+	}
 }
 
 // SDKGoRecover recovers from a panic inside a goroutine that processes SDK

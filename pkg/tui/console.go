@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,8 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -54,10 +57,14 @@ type AgentConsole struct {
 	// an IOA-unavailable degradation warning). Set by the caller before Start.
 	startupNotice string
 	evalCriteria  string
+	sessionDir    string
 
 	directMu     sync.Mutex
 	directCancel context.CancelFunc
 	pendingExit  atomic.Bool
+	onExit       func()
+
+	split *SplitTerminal
 }
 
 func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
@@ -68,24 +75,56 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	if t == nil {
 		t = rlterm.Local()
 	}
-	c := console.NewWithTerminal("aiscan", t)
-	c.NewlineAfter = true
+
+	// Determine whether to activate the split-pane layout. When enabled,
+	// readline uses an input-area writer (serialized via the same mutex)
+	// while all agent output routes to the upper scroll region.
+	var split *SplitTerminal
+	isTerminal := t.Control != nil && t.Control.IsTerminal()
+	useSplit := isTerminal && splitEnabled(int(os.Stdout.Fd()), resolveRenderMode())
+
+	var consoleTerminal *rlterm.Terminal
+	if useSplit {
+		split = NewSplitTerminal(t.Out, int(os.Stdout.Fd()))
+		// Readline gets a terminal whose Out/Err go through the split
+		// input writer so that prompt rendering is serialized with output.
+		consoleTerminal = rlterm.Stream(t.In, split.InputWriter(), split.InputWriter(), t.Control)
+	} else {
+		consoleTerminal = t
+	}
+
+	c := console.NewWithTerminal("aiscan", consoleTerminal)
+	if useSplit {
+		c.NewlineAfter = false
+	} else {
+		c.NewlineAfter = true
+	}
 	configureAgentReadline(c)
 	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
+
 	stdout := t.Out
 	stderr := t.Err
 	if output == nil {
 		if t.Control == nil {
 			output = NewAgentOutput(option)
 		} else {
-			output = NewAgentOutputWithWriters(option, stdout, stderr, t.Control.IsTerminal())
+			output = NewAgentOutputWithWriters(option, stdout, stderr, isTerminal)
 		}
 	}
-	if stdout == nil {
-		stdout = output.Stdout()
-	}
-	if stderr == nil {
-		stderr = output.Stderr()
+
+	// In split mode, redirect AgentOutput into the scroll region and
+	// point console stdout/stderr there too.
+	if split != nil {
+		output.SetSplitMode(split)
+		stdout = split.OutputWriter()
+		stderr = split.OutputWriter()
+	} else {
+		if stdout == nil {
+			stdout = output.Stdout()
+		}
+		if stderr == nil {
+			stderr = output.Stderr()
+		}
 	}
 
 	menu := c.NewMenu("agent")
@@ -109,11 +148,9 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		output:   output,
 		stdout:   stdout,
 		stderr:   stderr,
+		split:    split,
 	}
 	menu.Prompt().Primary = func() string {
-		if repl.pendingExit.Load() {
-			return ""
-		}
 		return agentPromptString(output)
 	}
 	if len(bus) > 0 && bus[0] != nil {
@@ -124,6 +161,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	}
 	repl.controller = newInteractiveRunController(ctx, repl.agent, output)
 	repl.controller.SetOnFinish(repl.refreshPromptAfterAsyncRun)
+	repl.configureCompletionKey()
 	repl.configureInterruptKey()
 	repl.configureCtrlCKey()
 	repl.configureVerbosityToggleKey()
@@ -160,12 +198,38 @@ func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
 }
 
 func (r *AgentConsole) Start() error {
+	if r.split != nil {
+		r.split.Setup()
+		r.activateSplitLogger()
+		defer r.split.Teardown()
+	}
 	r.renderBanner()
 	defer r.stopController()
 	if r.fastInputEnabled() {
 		return r.startFastInput()
 	}
 	return r.startReadline()
+}
+
+func (r *AgentConsole) activateSplitLogger() {
+	if r == nil || r.split == nil {
+		return
+	}
+	splitLogger := telemetry.GlobalLogger(telemetry.LogConfig{
+		Debug:  r.option != nil && r.option.Debug,
+		Quiet:  r.option != nil && r.option.Quiet,
+		Output: r.stderr,
+		Color:  r.option == nil || !r.option.NoColor,
+	})
+	if r.appInfo.OnLoggerChange != nil {
+		r.appInfo.OnLoggerChange(splitLogger)
+	}
+	if r.agent != nil {
+		r.agent.SetLogger(splitLogger)
+	}
+	if r.appInfo.Commands != nil {
+		r.appInfo.Commands.SetLogger(splitLogger)
+	}
 }
 
 func (r *AgentConsole) startFastInput() error {
@@ -175,8 +239,12 @@ func (r *AgentConsole) startFastInput() error {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
 
+		r.promptCompactIfNeeded()
+
 		fmt.Fprint(r.stderr, r.promptString())
+		r.setReadlineActive(true)
 		line, err := readFastInputLine(r.ctx, reader)
+		r.setReadlineActive(false)
 		if err != nil && !errors.Is(err, io.EOF) {
 			if errors.Is(err, context.Canceled) {
 				fmt.Fprintln(r.stdout)
@@ -256,9 +324,15 @@ func (r *AgentConsole) startReadline() error {
 			return nil //nolint:nilerr // context cancellation is clean shutdown
 		}
 
-		r.readlineActive.Store(true)
+		r.promptCompactIfNeeded()
+
+		if r.split != nil {
+			r.split.PrepareInputArea()
+		}
+
+		r.setReadlineActive(true)
 		line, err := r.console.Readline()
-		r.readlineActive.Store(false)
+		r.setReadlineActive(false)
 		if err != nil {
 			switch {
 			case errors.Is(err, io.EOF):
@@ -285,6 +359,16 @@ func (r *AgentConsole) startReadline() error {
 		if done {
 			return nil
 		}
+	}
+}
+
+func (r *AgentConsole) setReadlineActive(active bool) {
+	if r == nil {
+		return
+	}
+	r.readlineActive.Store(active)
+	if r.output != nil {
+		r.output.SetInteractiveInputActive(active && (r.controller == nil || !r.controller.Running()))
 	}
 }
 
@@ -428,6 +512,17 @@ func (r *AgentConsole) allCommands() []Command {
 	return cmds
 }
 
+// StaticCommands returns the non-skill REPL commands (builtin + provider + IOA).
+// Safe to call on a zero-value receiver — the returned Command.Run closures are
+// unusable, but the metadata (Name, Aliases, Description, Hidden) is correct.
+func (r *AgentConsole) StaticCommands() []Command {
+	var cmds []Command
+	cmds = append(cmds, r.builtinCommands()...)
+	cmds = append(cmds, r.providerCommands()...)
+	cmds = append(cmds, r.ioaCommands()...)
+	return cmds
+}
+
 func (r *AgentConsole) builtinCommands() []Command {
 	return []Command{
 		{
@@ -439,7 +534,7 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
-			Name: "/status", Description: "查看模型、渲染模式、IOA 和 skills",
+			Name: "/status", Description: "查看模型、渲染模式、Server 和 skills",
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
 				fmt.Fprint(r.stdout, r.renderStatus())
@@ -459,6 +554,33 @@ func (r *AgentConsole) builtinCommands() []Command {
 			},
 		},
 		{
+			Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)",
+			Args: ArgsOptional,
+			Run: func(_ context.Context, _ *Session, args []string) error {
+				raw := strings.TrimSpace(strings.Join(args, " "))
+				if raw == "" {
+					if r.interactivePickerEnabled() {
+						return r.resumeSessionInteractive()
+					}
+					sessions, err := r.renderSessions()
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, sessions)
+					return nil
+				}
+				if raw == "list" {
+					sessions, err := r.renderSessions()
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, sessions)
+					return nil
+				}
+				return r.resumeSession(raw)
+			},
+		},
+		{
 			Name: "/stop", Description: "停止当前正在运行的任务",
 			Args: ArgsNone,
 			Run: func(_ context.Context, _ *Session, _ []string) error {
@@ -466,6 +588,16 @@ func (r *AgentConsole) builtinCommands() []Command {
 					fmt.Fprintln(r.stderr, "No running task.")
 				}
 				return nil
+			},
+		},
+		{
+			Name: "/continue", Description: "继续当前会话",
+			Args: ArgsNone,
+			Run: func(_ context.Context, s *Session, _ []string) error {
+				if s.Controller == nil {
+					return fmt.Errorf("agent controller is not configured")
+				}
+				return s.Controller.Continue()
 			},
 		},
 		{
@@ -500,6 +632,29 @@ func (r *AgentConsole) builtinCommands() []Command {
 					}
 					fmt.Fprintf(r.stdout, "Goal evaluation enabled: %s\n", text)
 				}
+				return nil
+			},
+		},
+		{
+			Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])",
+			Args: ArgsOptional,
+			Run: func(ctx context.Context, s *Session, args []string) error {
+				if s.Controller != nil && s.Controller.Running() {
+					return fmt.Errorf("task is running — use /stop first")
+				}
+				if len(s.Agent.MessagesSnapshot()) < 4 {
+					fmt.Fprintln(r.stdout, "Nothing to compact (too few messages).")
+					return nil
+				}
+				instructions := strings.TrimSpace(strings.Join(args, " "))
+				result, err := s.Agent.Compact(ctx, agent.CompactConfig{
+					CustomInstructions: instructions,
+				})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(r.stdout, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
+					result.TokensBefore, result.TokensAfter, result.KeptMessages)
 				return nil
 			},
 		},
@@ -548,20 +703,55 @@ func (r *AgentConsole) providerCommands() []Command {
 				return nil
 			},
 		},
+		{
+			Name:        "/model",
+			Description: "查看/切换当前 provider 的模型",
+			Args:        ArgsOptional,
+			Run: func(ctx context.Context, _ *Session, args []string) error {
+				fields := splitArgs(args)
+				if len(fields) == 0 {
+					if r.interactivePickerEnabled() {
+						return r.configureModelInteractive(ctx)
+					}
+					models, err := r.renderModels(ctx)
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, models)
+					return nil
+				}
+				if len(fields) == 1 && fields[0] == "list" {
+					models, err := r.renderModels(ctx)
+					if err != nil {
+						return err
+					}
+					fmt.Fprint(r.stdout, models)
+					return nil
+				}
+				switch fields[0] {
+				case "set", "use":
+					fields = fields[1:]
+				}
+				if len(fields) != 1 {
+					return fmt.Errorf("usage: /model [list|<model>|#index]")
+				}
+				return r.configureModel(ctx, fields[0])
+			},
+		},
 	}
 }
 
 func (r *AgentConsole) ioaCommands() []Command {
 	return []Command{
 		{
-			Name: "/spaces", Description: "List all IOA spaces",
+			Name: "/spaces", Description: "List all spaces",
 			Args: ArgsNone,
 			Run: func(ctx context.Context, _ *Session, _ []string) error {
 				client, err := r.ioaClient()
 				if err != nil {
 					return err
 				}
-				return RunIOASpaces(ctx, client, r.option, r.stdout, r.stderr)
+				return r.renderIOASpaces(ctx, client)
 			},
 		},
 		{
@@ -572,7 +762,7 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if err != nil {
 					return err
 				}
-				return RunIOAMessages(ctx, client, r.option, cfg.IOAClientArgs{Space: args[0]}, r.stdout, r.stderr)
+				return r.renderIOAMessages(ctx, client, args[0])
 			},
 		},
 		{
@@ -598,11 +788,11 @@ func (r *AgentConsole) ioaCommands() []Command {
 				if err != nil {
 					return err
 				}
-				var a cfg.IOAClientArgs
+				space := ""
 				if len(args) > 0 {
-					a.Space = args[0]
+					space = args[0]
 				}
-				return RunIOANodes(ctx, client, r.option, a, r.stdout, r.stderr)
+				return r.renderIOANodes(ctx, client, space)
 			},
 		},
 	}
@@ -699,6 +889,39 @@ func (r *AgentConsole) refreshPromptAfterAsyncRun() {
 	r.console.Shell().Refresh()
 }
 
+func (r *AgentConsole) promptCompactIfNeeded() {
+	c := r.controller
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	ctxTokens, ctxWindow := c.compactContextTokens, c.compactContextWindow
+	c.compactContextTokens, c.compactContextWindow = 0, 0
+	c.mu.Unlock()
+	if ctxTokens == 0 {
+		return
+	}
+
+	fmt.Fprintf(r.stderr,
+		"\n⚠ Context usage: %d%% (%dK/%dK tokens). Compact now? [y/N] ",
+		ctxTokens*100/ctxWindow, ctxTokens/1000, ctxWindow/1000)
+
+	answer := ""
+	if r.terminal != nil && r.terminal.In != nil {
+		line, _ := bufio.NewReader(r.terminal.In).ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(line))
+	}
+	if answer == "y" || answer == "yes" {
+		result, err := r.agent.Compact(r.ctx, agent.CompactConfig{})
+		if err != nil {
+			fmt.Fprintf(r.stderr, "Compact failed: %s\n", err)
+		} else {
+			fmt.Fprintf(r.stderr, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
+				result.TokensBefore, result.TokensAfter, result.KeptMessages)
+		}
+	}
+}
+
 func (r *AgentConsole) setDirectCancel(fn context.CancelFunc) {
 	r.directMu.Lock()
 	r.directCancel = fn
@@ -727,10 +950,22 @@ func (r *AgentConsole) stopController() {
 	}
 }
 
+func (r *AgentConsole) SetOnExit(fn func()) {
+	r.onExit = fn
+}
+
+func (r *AgentConsole) forceExit() {
+	r.stopController()
+	if r.onExit != nil {
+		r.onExit()
+	}
+	os.Exit(0)
+}
+
 func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {
 	ioaURL := r.option.IOAURL
 	if ioaURL == "" {
-		return nil, fmt.Errorf("IOA not configured: use --ioa-url")
+		return nil, fmt.Errorf("server not configured: use --server-url")
 	}
 	client, err := ioaclient.NewClient(ioaURL, "")
 	if err != nil {
@@ -738,7 +973,7 @@ func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {
 	}
 	if client.AccessKey() != "" {
 		if err := client.EnsureRegistered(context.Background(), "aiscan-tui", "", nil); err != nil {
-			return nil, fmt.Errorf("IOA auth: %w", err)
+			return nil, fmt.Errorf("server auth: %w", err)
 		}
 	}
 	return client, nil
@@ -801,13 +1036,324 @@ func (r *AgentConsole) configureProvider(args []string) error {
 		}
 	}
 
-	resolved, err := agent.ResolveProvider(&pc)
+	resolved, err := r.applyProviderConfig(pc)
 	if err != nil {
 		return err
 	}
-	prov, err := agent.NewProviderFromResolved(resolved)
+	if resolved.Model != "" {
+		fmt.Fprintf(r.stdout, "Provider ready: %s / %s\n", resolved.Provider, resolved.Model)
+	} else {
+		fmt.Fprintf(r.stdout, "Provider ready: %s\n", resolved.Provider)
+	}
+	return nil
+}
+
+const modelListTimeout = 10 * time.Second
+
+func (r *AgentConsole) resumeSession(path string) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot resume while a task is running")
+	}
+	if r.agent == nil {
+		return fmt.Errorf("agent session is not configured")
+	}
+	path, err := r.resolveSessionSelection(path)
 	if err != nil {
 		return err
+	}
+	data, err := agent.LoadSession(path)
+	if err != nil {
+		return err
+	}
+	r.agent.LoadMessages(data.Messages)
+	fmt.Fprintf(r.stdout, "Resumed %d messages from %s\n", len(data.Messages), path)
+	return nil
+}
+
+func (r *AgentConsole) renderSessions() (string, error) {
+	colorEnabled := r.output != nil && r.output.color.Enabled
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return "", err
+	}
+	if len(sessions) == 0 {
+		return r.renderPanel("sessions", renderHelpRows([]helpRow{
+			{Command: "sessions", Detail: "none saved"},
+		}, colorEnabled), colorEnabled), nil
+	}
+	rows := make([]helpRow, 0, len(sessions))
+	for i, session := range sessions {
+		rows = append(rows, helpRow{
+			Command: fmt.Sprintf("#%d", i+1),
+			Detail:  filepath.Base(session.Path) + "  " + sessionDetail(session),
+		})
+	}
+	return r.renderPanel("sessions", renderHelpRows(rows, colorEnabled), colorEnabled), nil
+}
+
+func (r *AgentConsole) listSavedSessions() ([]agent.SessionInfo, error) {
+	dir := r.sessionDir
+	if dir == "" {
+		dir = cfg.DataSubDir("sessions")
+	}
+	return agent.ListSessions(dir)
+}
+
+func (r *AgentConsole) resumeSessionInteractive() error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot resume while a task is running")
+	}
+	if r.agent == nil {
+		return fmt.Errorf("agent session is not configured")
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return err
+	}
+	if len(sessions) == 0 {
+		rendered, err := r.renderSessions()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, rendered)
+		return nil
+	}
+
+	choices := make([]choiceItem, 0, len(sessions))
+	for _, session := range sessions {
+		choices = append(choices, choiceItem{
+			value: session.Path,
+			title: filepath.Base(session.Path),
+			desc:  sessionDetail(session),
+		})
+	}
+	width, height := r.pickerSize()
+	selected, ok, err := runChoicePicker("sessions", choices, "", width, height)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return r.resumeSession(selected)
+}
+
+func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) {
+	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
+	if selector == "" {
+		return "", fmt.Errorf("usage: /resume [list|<path>|#index]")
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		return "", err
+	}
+	if idx, err := strconv.Atoi(selector); err == nil {
+		if idx < 1 || idx > len(sessions) {
+			return "", fmt.Errorf("session index out of range: %d", idx)
+		}
+		return sessions[idx-1].Path, nil
+	}
+	for _, session := range sessions {
+		if selector == session.Path || selector == filepath.Base(session.Path) {
+			return session.Path, nil
+		}
+	}
+	return selector, nil
+}
+
+func sessionDetail(session agent.SessionInfo) string {
+	parts := make([]string, 0, 4)
+	if ts := session.SortTime(); !ts.IsZero() {
+		parts = append(parts, ts.Local().Format("2006-01-02 15:04:05"))
+	}
+	model := strings.Trim(strings.TrimSpace(session.Provider)+"/"+strings.TrimSpace(session.Model), "/")
+	if model != "" {
+		parts = append(parts, model)
+	}
+	parts = append(parts, fmt.Sprintf("%d messages", session.Messages))
+	return strings.Join(parts, "  ")
+}
+
+func (r *AgentConsole) renderModels(ctx context.Context) (string, error) {
+	colorEnabled := r.output != nil && r.output.color.Enabled
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(models) == 0 {
+		return r.renderPanel("models", renderHelpRows([]helpRow{
+			{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + r.appInfo.ProviderConfig.Model},
+			{Command: "models", Detail: "none returned"},
+		}, colorEnabled), colorEnabled), nil
+	}
+
+	current := strings.TrimSpace(r.appInfo.ProviderConfig.Model)
+	rows := []helpRow{
+		{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + valueOrDash(current)},
+	}
+	for i, model := range models {
+		command := fmt.Sprintf("#%d", i+1)
+		detail := model
+		if model == current {
+			detail += "  active"
+		}
+		rows = append(rows, helpRow{Command: command, Detail: detail})
+	}
+	return r.renderPanel("models", renderHelpRows(rows, colorEnabled), colorEnabled), nil
+}
+
+func (r *AgentConsole) configureModel(ctx context.Context, selector string) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change model while a task is running")
+	}
+	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
+	if selector == "" {
+		return fmt.Errorf("usage: /model [list|<model>|#index]")
+	}
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return err
+	}
+	model, err := resolveModelSelection(models, selector)
+	if err != nil {
+		return err
+	}
+
+	return r.applyModel(model)
+}
+
+func (r *AgentConsole) configureModelInteractive(ctx context.Context) error {
+	if r.controller != nil && r.controller.Running() {
+		return fmt.Errorf("cannot change model while a task is running")
+	}
+	models, err := r.listProviderModels(ctx)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		rendered, err := r.renderModels(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(r.stdout, rendered)
+		return nil
+	}
+	width, height := r.pickerSize()
+	selected, ok, err := runModelPicker(models, r.appInfo.ProviderConfig.Model, width, height)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return r.applyModel(selected)
+}
+
+func (r *AgentConsole) applyModel(model string) error {
+	pc := r.appInfo.ProviderConfig
+	pc.Model = model
+	resolved, err := r.applyProviderConfig(pc)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(r.stdout, "Model ready: %s / %s\n", resolved.Provider, resolved.Model)
+	return nil
+}
+
+func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error) {
+	pc := r.appInfo.ProviderConfig
+	if strings.TrimSpace(pc.Provider) == "" && strings.TrimSpace(pc.BaseURL) == "" {
+		return nil, fmt.Errorf("provider not configured")
+	}
+	req := probe.LLMProbeRequest{
+		Provider: pc.Provider,
+		BaseURL:  pc.BaseURL,
+		APIKey:   pc.APIKey,
+		Proxy:    pc.Proxy,
+	}
+	listCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
+	defer cancel()
+	result, err := probe.ListLLMModels(listCtx, req, "")
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		if strings.TrimSpace(result.Error) == "" {
+			return nil, fmt.Errorf("list models failed")
+		}
+		return nil, fmt.Errorf("list models: %s", result.Error)
+	}
+	return result.Models, nil
+}
+
+func resolveModelSelection(models []string, selector string) (string, error) {
+	if idx, err := strconv.Atoi(selector); err == nil {
+		if idx < 1 || idx > len(models) {
+			return "", fmt.Errorf("model index out of range: %d", idx)
+		}
+		return models[idx-1], nil
+	}
+	for _, model := range models {
+		if model == selector {
+			return model, nil
+		}
+	}
+	for _, model := range models {
+		if strings.EqualFold(model, selector) {
+			return model, nil
+		}
+	}
+	return "", fmt.Errorf("model %q is not in the provider model list", selector)
+}
+
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func (r *AgentConsole) interactivePickerEnabled() bool {
+	return r != nil &&
+		r.terminal != nil &&
+		r.terminal.Control != nil &&
+		r.terminal.Control.IsTerminal() &&
+		r.terminal.In == os.Stdin &&
+		r.terminal.Out == os.Stdout
+}
+
+func (r *AgentConsole) pickerSize() (int, int) {
+	width, height := 80, 18
+	if r == nil || r.terminal == nil || r.terminal.Control == nil {
+		return width, height
+	}
+	cols, rows := r.terminal.Control.Size()
+	if cols > 0 {
+		width = cols
+	}
+	if rows > 0 {
+		height = rows - 4
+	}
+	if height < 10 {
+		height = 10
+	}
+	if height > 24 {
+		height = 24
+	}
+	return width, height
+}
+
+func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.ProviderConfig, error) {
+	if pc.Model != r.appInfo.ProviderConfig.Model {
+		pc.Images = nil
+	}
+	resolved, err := agent.ResolveProvider(&pc)
+	if err != nil {
+		return agent.ProviderConfig{}, err
+	}
+	prov, err := agent.NewProviderFromResolved(resolved)
+	if err != nil {
+		return agent.ProviderConfig{}, err
 	}
 
 	r.appInfo.Provider = prov
@@ -825,12 +1371,7 @@ func (r *AgentConsole) configureProvider(args []string) error {
 	}
 	r.syncEvalToController()
 
-	if resolved.Model != "" {
-		fmt.Fprintf(r.stdout, "Provider ready: %s / %s\n", resolved.Provider, resolved.Model)
-	} else {
-		fmt.Fprintf(r.stdout, "Provider ready: %s\n", resolved.Provider)
-	}
-	return nil
+	return *resolved, nil
 }
 
 func (r *AgentConsole) pseudoCommandNames() []string {
@@ -919,8 +1460,9 @@ func (r *AgentConsole) atCompleteAction(c carapace.Context) carapace.Action {
 	if !strings.HasPrefix(c.Value, "@") {
 		return carapace.ActionValues()
 	}
-	c.Value = c.Value[1:]
-	fileAction := carapace.ActionFiles().Invoke(c).Prefix("@").ToA().NoSpace()
+	raw := c.Value[1:]
+	fileAction := atFuzzyFileAction(raw)
+	c.Value = raw
 	nodeAction := r.atNodeCompleteAction(c)
 	return carapace.Batch(fileAction, nodeAction).ToA()
 }

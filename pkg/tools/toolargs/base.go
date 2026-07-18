@@ -1,6 +1,7 @@
 package toolargs
 
 import (
+	"context"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -27,6 +28,10 @@ func (b *Base) InitLogger(logger telemetry.Logger) {
 }
 
 func (b *Base) EmitData(tool, kind, target string, data any) {
+	b.EmitDataCtx(context.Background(), tool, kind, target, data)
+}
+
+func (b *Base) EmitDataCtx(ctx context.Context, tool, kind, target string, data any) {
 	if b.DataBus == nil {
 		return
 	}
@@ -35,6 +40,7 @@ func (b *Base) EmitData(tool, kind, target string, data any) {
 		Kind:      kind,
 		Target:    target,
 		Data:      data,
+		CallID:    output.CallIDFromContext(ctx),
 		Timestamp: time.Now(),
 	})
 }

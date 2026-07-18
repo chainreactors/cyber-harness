@@ -24,7 +24,6 @@ type ScanJob struct {
 	Mode      string         `json:"mode"`
 	Verify    bool           `json:"verify,omitempty"`
 	Sniper    bool           `json:"sniper,omitempty"`
-	AI        bool           `json:"ai,omitempty"`
 	Deep      bool           `json:"deep,omitempty"`
 	Status    ScanStatus     `json:"status"`
 	Progress  string         `json:"progress,omitempty"`
@@ -40,20 +39,11 @@ type ScanRequest struct {
 	Mode   string `json:"mode"`
 	Verify bool   `json:"verify,omitempty"`
 	Sniper bool   `json:"sniper,omitempty"`
-	AI     bool   `json:"ai,omitempty"`
 	Deep   bool   `json:"deep,omitempty"`
 }
 
-func (r ScanRequest) AnalysisOptions() (verify, sniper, deep bool) {
-	verify, sniper, deep = r.Verify, r.Sniper, r.Deep
-	if r.AI && !verify && !sniper {
-		verify = true
-		sniper = true
-	}
-	return verify, sniper, deep
-}
-
 type ServiceStatus struct {
+	Version             string `json:"version"`
 	LLMAvailable        bool   `json:"llm_available"`
 	LLMProvider         string `json:"llm_provider,omitempty"`
 	LLMModel            string `json:"llm_model,omitempty"`
@@ -61,6 +51,7 @@ type ServiceStatus struct {
 	ConfigPath          string `json:"config_path,omitempty"`
 	ConfigLoaded        bool   `json:"config_loaded"`
 	Agents              int    `json:"agents"`
+	IOAURL              string `json:"ioa_url,omitempty"`
 }
 
 // ConfigStatus is the response for GET /api/config — secrets masked,
@@ -90,8 +81,7 @@ type ConfigStatus struct {
 		Limit                  *int   `json:"limit,omitempty"`
 	} `json:"recon"`
 	Scan struct {
-		Verify        string `json:"verify"`
-		VerifyTimeout int    `json:"verify_timeout"`
+		Verify string `json:"verify"`
 	} `json:"scan"`
 	Search struct {
 		TavilyKeysConfigured bool `json:"tavily_keys_configured"`
@@ -130,7 +120,6 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.Recon.Proxy = d.Recon.Proxy
 	cs.Recon.Limit = d.Recon.Limit
 	cs.Scan.Verify = d.Scan.Verify
-	cs.Scan.VerifyTimeout = d.Scan.VerifyTimeout
 	cs.Search.TavilyKeysConfigured = d.Search.TavilyKeys != ""
 	cs.IOA.URL = d.IOA.URL
 	cs.IOA.TokenConfigured = d.IOA.Token != ""
@@ -173,19 +162,35 @@ type ChatMessage struct {
 }
 
 const (
-	ChatEventMessage      = "message"
-	ChatEventMessageStart = "message_start"
-	ChatEventMessageDelta = "message_delta"
-	ChatEventMessageEnd   = "message_end"
-	ChatEventToolCall     = "tool_call"
-	ChatEventToolResult   = "tool_result"
-	ChatEventThinking     = "thinking"
-	ChatEventScanStarted  = "scan_started"
-	ChatEventScanProgress = "scan_progress"
-	ChatEventScanComplete = "scan_complete"
-	ChatEventScanError    = "scan_error"
-	ChatEventAgentJoined  = "agent_joined"
-	ChatEventError        = "error"
+	ChatEventMessage        = "message"
+	ChatEventMessageStart   = "message_start"
+	ChatEventMessageDelta   = "message_delta"
+	ChatEventMessageEnd     = "message_end"
+	ChatEventToolCall       = "tool_call"
+	ChatEventToolResult     = "tool_result"
+	ChatEventThinking       = "thinking"
+	ChatEventScanStarted    = "scan_started"
+	ChatEventScanProgress   = "scan_progress"
+	ChatEventScanComplete   = "scan_complete"
+	ChatEventScanError      = "scan_error"
+	ChatEventAgentJoined    = "agent_joined"
+	ChatEventSessionCleared = "session_cleared"
+	ChatEventEval           = "eval"
+	ChatEventCompact        = "compact"
+	ChatEventError          = "error"
+)
+
+// System message codes. A backend-generated system message carries a stable
+// Code (+ optional Params) so the client can localize it via i18n; Content
+// holds an English fallback for non-i18n consumers, logs and tests. Keys are
+// mirrored under `sys.*` in web/frontend/src/i18n/locales/*/chat.ts.
+const (
+	SysNoRunningTask     = "no_running_task"
+	SysPaused            = "paused"
+	SysFileUploaded      = "file_uploaded" // params: filename, path
+	SysNoAgentsConnected = "no_agents_connected"
+	SysAgentsList        = "agents_list" // params: count, agents[]
+	SysAgentNotConnected = "agent_not_connected"
 )
 
 type ChatEvent struct {
@@ -205,11 +210,26 @@ type ChatEvent struct {
 	Result     *output.Result `json:"result,omitempty"`
 	Data       string         `json:"data,omitempty"`
 	Error      string         `json:"error,omitempty"`
-	Transient  bool           `json:"-"`
+	Code       string         `json:"code,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
+	// Goal-mode evaluator verdict, carried on ChatEventEval. EvalRound is
+	// 0-indexed (the client renders round+1).
+	EvalRound  int    `json:"eval_round,omitempty"`
+	EvalPass   bool   `json:"eval_pass,omitempty"`
+	EvalReason string `json:"eval_reason,omitempty"`
+
+	CompactTokensBefore int `json:"compact_tokens_before,omitempty"`
+	CompactTokensAfter  int `json:"compact_tokens_after,omitempty"`
+	CompactKeptMessages int `json:"compact_kept_messages,omitempty"`
+
+	Transient bool `json:"-"`
 }
 
 type SendMessageRequest struct {
 	Content string `json:"content"`
+	// Goal-mode run controls (optional). The frontend sends these when the user
+	// enables the Goal panel; a plain chat send leaves them zero.
+	webproto.ChatPayload
 }
 
 type CreateSessionRequest struct {

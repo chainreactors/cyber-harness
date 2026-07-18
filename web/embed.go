@@ -2,5 +2,5 @@ package webstatic
 
 import "embed"
 
-//go:embed static
+//go:embed all:static
 var FS embed.FS

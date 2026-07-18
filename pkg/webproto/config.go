@@ -26,8 +26,7 @@ type DistributeConfig struct {
 		Limit        *int   `json:"limit,omitempty" yaml:"limit,omitempty"`
 	} `json:"recon" yaml:"recon"`
 	Scan struct {
-		Verify        string `json:"verify" yaml:"verify"`
-		VerifyTimeout int    `json:"verify_timeout" yaml:"verify_timeout"`
+		Verify string `json:"verify" yaml:"verify"`
 	} `json:"scan" yaml:"scan"`
 	Search struct {
 		TavilyKeys string `json:"tavily_keys,omitempty" yaml:"tavily_keys"`

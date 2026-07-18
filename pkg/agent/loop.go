@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -252,7 +253,10 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 	slots := make([]toolCallSlot, len(toolCalls))
 
 	for i, tc := range toolCalls {
-		cfg.Logger.Infof("[turn %d] tool_call id=%s name=%s args=%q", turn, tc.ID, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
+		cfg.Logger.Infof("[turn %d] tool_call name=%s args=%q", turn, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
+		slots[i] = toolCallSlot{tc: tc}
+	}
+	for _, tc := range toolCalls {
 		bus.Emit(Event{
 			Type:       EventToolExecutionStart,
 			Turn:       turn,
@@ -260,7 +264,6 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			ToolName:   tc.Function.Name,
 			Arguments:  tc.Function.Arguments,
 		})
-		slots[i] = toolCallSlot{tc: tc}
 	}
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
@@ -292,7 +295,7 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 			Err:        s.result.err,
 			StartedAt:  s.startedAt,
 		})
-		cfg.Logger.Debugf("[turn %d] tool_result id=%s name=%s bytes=%d", turn, s.tc.ID, s.tc.Function.Name, len(s.result.result))
+		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Function.Name, len(s.result.result))
 		toolMsg := toolResultToMessage(s.tc.ID, s.result)
 		bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: toolMsg})
 		bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: toolMsg})
@@ -323,15 +326,16 @@ type toolExecution struct {
 }
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, turn int) toolExecution {
-	execution := beforeToolCall(ctx, cfg, assistantMsg, tc)
+	toolCtx := output.ContextWithCallID(ctx, tc.ID)
+	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
-		toolResult, execErr := cfg.Tools.ExecuteTool(ctx, tc.Function.Name, tc.Function.Arguments)
+		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Function.Name, tc.Function.Arguments)
 		execution.result = toolResult.Text()
 		execution.err = execErr
 		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
 			execution.result = fmt.Sprintf("error: %s", execErr.Error())
-			cfg.Logger.Warnf("[turn %d] tool_error id=%s name=%s error=%q", turn, tc.ID, tc.Function.Name, execErr.Error())
+			cfg.Logger.Warnf("[turn %d] tool_error name=%s error=%q", turn, tc.Function.Name, execErr.Error())
 		}
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
@@ -348,7 +352,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 			"\n\n[truncated: showing %d/%d lines (%s of %s). Refine your query or use filter/parse tools to access specific parts.]",
 			tr.OutputLines, tr.TotalLines, truncate.FormatSize(tr.OutputBytes), truncate.FormatSize(tr.TotalBytes))
 	}
-	return afterToolCall(ctx, cfg, assistantMsg, tc, execution)
+	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution)
 }
 
 func (e toolExecution) eventResult() string {

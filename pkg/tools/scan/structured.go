@@ -45,5 +45,6 @@ func (c *collector) StructuredResult() *output.Result {
 	}
 
 	result.Assets = AggregateStructuredResult(result)
+	result.Nodes = buildSCONodes(result)
 	return result
 }

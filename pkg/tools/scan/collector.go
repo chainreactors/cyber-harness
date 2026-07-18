@@ -9,9 +9,9 @@ import (
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
-	"github.com/chainreactors/utils/parsers"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type sprayObservation struct {
@@ -184,10 +184,6 @@ func (c *collector) PlainText() string {
 
 func (c *collector) AssetReport() string {
 	return output.FormatAssetReport(c.StructuredResult(), false)
-}
-
-func (c *collector) LootReport() string {
-	return c.AssetReport()
 }
 
 type statsSnapshot struct {

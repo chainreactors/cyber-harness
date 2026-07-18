@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,27 +26,46 @@ const runModeWeb cfg.RunMode = "web"
 var webServeFunc func(ctx context.Context, option *cfg.Option, web webCommand, logger telemetry.Logger) error
 
 type webCommand struct {
-	Addr        string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
-	DB          string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
-	MaxScans    int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
-	ScanTimeout int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
-	IOAToken    string `long:"ioa-token" description:"IOA access key (auto-generated if empty)"`
+	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
+	DB                 string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
+	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
+	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
+	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	cfg.LLMOptions     `group:"LLM Options"`
+	cfg.ScannerOptions `group:"Scanner Options"`
+	cfg.IOAOptions     `group:"Server Options"`
+	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 type cliOptions struct {
-	cfg.Option
-	Agent struct{}   `command:"agent" description:"Run the LLM agent"`
-	Web   webCommand `command:"web" description:"Start the web UI server"`
-	IOA   ioaCommand `command:"ioa" description:"IOA server commands"`
+	cfg.MiscOptions `group:"Miscellaneous Options"`
+	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
+	Serve           serveCommand `command:"serve" description:"Run the standalone agent server"`
+	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
+	IOA             ioaCommand   `command:"ioa" description:"Server management commands" hidden:"true"`
 	cfg.ScannerCommands
 }
 
+type agentCommand struct {
+	cfg.LLMOptions     `group:"LLM Options"`
+	cfg.ScannerOptions `group:"Scanner Options"`
+	cfg.AgentOptions   `group:"Agent Options"`
+	cfg.IOAOptions     `group:"Server Options"`
+	cfg.ReconOptions   `group:"Recon Options"`
+}
+
+type serveCommand struct {
+	Token string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	Addr  string `long:"addr" default:"127.0.0.1:8765" description:"HTTP listen address"`
+}
+
 type ioaCommand struct {
-	Serve    struct{}       `command:"serve" description:"Run the IOA HTTP server"`
-	Spaces   struct{}       `command:"spaces" description:"List all IOA spaces"`
-	Messages ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context  ioaContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes    ioaNodesCmd    `command:"nodes" description:"List nodes"`
+	cfg.IOAOptions `group:"Server Options"`
+	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
+	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
+	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
+	Context        ioaContextCmd  `command:"context" description:"View message thread/context"`
+	Nodes          ioaNodesCmd    `command:"nodes" description:"List nodes"`
 }
 
 type ioaMessagesCmd struct {
@@ -73,6 +93,7 @@ type parsedCLI struct {
 	ScannerArgs []string
 	IOAArgs     cfg.IOAClientArgs
 	WebOpts     webCommand
+	ServeOpts   serveCommand
 	Help        bool
 }
 
@@ -161,12 +182,12 @@ func aiscan() {
 		}
 	case cfg.RunModeIOAServe:
 		if err := runner.RunIOAServe(ctx, &option, logger); err != nil {
-			logger.Errorf("ioa server failed: %s", err)
+			logger.Errorf("server failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeIOASpaces, cfg.RunModeIOAMessages, cfg.RunModeIOAContext, cfg.RunModeIOANodes:
 		if err := runner.RunIOAClientCommand(ctx, parsed.Mode, &option, parsed.IOAArgs, logger); err != nil {
-			logger.Errorf("ioa command failed: %s", err)
+			logger.Errorf("server command failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
@@ -188,7 +209,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
-				option := cli.Option
+				option := cfg.Option{MiscOptions: cli.MiscOptions}
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
@@ -199,12 +220,13 @@ func parseCLI(args []string) (parsedCLI, error) {
 		return parsedCLI{}, err
 	}
 
-	option := cli.Option
 	if cli.Version {
-		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
+		return parsedCLI{Option: cfg.Option{MiscOptions: cli.MiscOptions}, Mode: cfg.RunModeNoCommand}, nil
 	}
 
 	mode := selectedMode(parser)
+	option := buildOption(&cli, parser)
+
 	if mode == cfg.RunModeNoCommand {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
@@ -222,6 +244,17 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	if mode == runModeWeb {
 		return parsedCLI{Option: option, Mode: runModeWeb, WebOpts: cli.Web}, nil
+	}
+
+	if mode == cfg.RunModeIOAServe && parser.Active != nil && parser.Active.Name == "serve" {
+		serveOpts := cli.Serve
+		if serveOpts.Token != "" {
+			option.IOAToken = serveOpts.Token
+		}
+		if option.IOAURL == "" && serveOpts.Addr != "" {
+			option.IOAURL = "http://" + serveOpts.Addr
+		}
+		return parsedCLI{Option: option, Mode: cfg.RunModeIOAServe, ServeOpts: serveOpts}, nil
 	}
 
 	ioaArgs := extractIOAArgs(&cli, mode)
@@ -247,7 +280,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 		return parsedCLI{}, err
 	}
 
-	option := cli.Option
+	option := cfg.Option{MiscOptions: cli.MiscOptions}
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -303,6 +336,34 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	}
 }
 
+func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
+	var opt cfg.Option
+	opt.MiscOptions = cli.MiscOptions
+
+	active := parser.Active
+	if active == nil {
+		return opt
+	}
+
+	switch active.Name {
+	case "agent":
+		opt.LLMOptions = cli.Agent.LLMOptions
+		opt.ScannerOptions = cli.Agent.ScannerOptions
+		opt.AgentOptions = cli.Agent.AgentOptions
+		opt.IOAOptions = cli.Agent.IOAOptions
+		opt.ReconOptions = cli.Agent.ReconOptions
+	case "web":
+		opt.LLMOptions = cli.Web.LLMOptions
+		opt.ScannerOptions = cli.Web.ScannerOptions
+		opt.IOAOptions = cli.Web.IOAOptions
+		opt.ReconOptions = cli.Web.ReconOptions
+	case "ioa":
+		opt.IOAOptions = cli.IOA.IOAOptions
+	}
+
+	return opt
+}
+
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	parser.SubcommandsOptional = true
@@ -313,14 +374,14 @@ aiscan - AI-assisted security scanner
 Commands:
   scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
   agent          Run the natural-language agent
-  web            Start the web UI server
+  web            Start the web UI server (includes embedded agent server)
+  serve          Run the standalone agent server
 
 Advanced scanners:
 %s
 
-Infrastructure:
-  ioa serve      Run the IOA HTTP server
-  ioa spaces     List all IOA spaces
+Server management:
+  ioa spaces     List all spaces
   ioa messages   List start messages in a space
   ioa context    View message thread/context
   ioa nodes      List nodes
@@ -329,7 +390,8 @@ Examples:
   aiscan scan -i 127.0.0.1
   aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
-  aiscan web --addr 0.0.0.0:8080`, cfg.ScannerUsageLines())
+  aiscan web --addr 0.0.0.0:8080
+  aiscan serve --token mykey --addr 0.0.0.0:8765`, cfg.ScannerUsageLines())
 	return parser
 }
 
@@ -543,7 +605,7 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 		key, value, hasValue := strings.Cut(arg, "=")
 		matched := false
 		for _, f := range scannerKnownFlags {
-			if !containsString(f.names, key) {
+			if !slices.Contains(f.names, key) {
 				continue
 			}
 			if scannerName == "scan" && key == "--ai" {
@@ -581,15 +643,6 @@ func flagValue(arg string, hasValue bool, value string, args []string, i *int) (
 	}
 	*i++
 	return args[*i], nil
-}
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func truthyFlagValue(value string) bool {
@@ -662,8 +715,9 @@ func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *sig
 				}
 				fmt.Fprintf(os.Stderr, "\nPress Ctrl+C again to exit\n")
 			case 2:
-				logger.Warnf("signal=shutdown action=finish_current_turn")
+				logger.Warnf("signal=shutdown action=force_exit")
 				cancel()
+				os.Exit(130)
 			default:
 				logger.Warnf("signal=shutdown action=force_exit")
 				os.Exit(1)

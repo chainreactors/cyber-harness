@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,6 +87,53 @@ func TestWSRegisterAndList(t *testing.T) {
 	}
 	if agents[0].Stats.TotalTokens != 42 {
 		t.Fatalf("agent stats not retained: %+v", agents[0].Stats)
+	}
+}
+
+// waitAgents polls until the pool holds exactly want agents, so disconnect
+// detection (which fires when the server read loop errors) doesn't race the
+// assertions the way a fixed sleep would.
+func waitAgents(t *testing.T, pool *AgentPool, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pool.Count() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("agent count did not reach %d (got %d)", want, pool.Count())
+}
+
+// TestReconnectKeepsStableID pins the source fix for the "Agent 未连接" bug: the
+// pool is keyed by the agent's stable node identity, so a reconnect returns the
+// SAME agent id instead of a fresh throwaway. A chat session freezes that id at
+// creation; if it changed on every reconnect the stored id would resolve to
+// nothing and the chat would reject every message as "not connected" even with
+// the agent back. Also guards that the reconnect evicts the stale slot (Count
+// stays 1) rather than leaking a second entry under the same key.
+func TestReconnectKeepsStableID(t *testing.T) {
+	srv, pool := setupTestServer(t)
+
+	conn1 := dialAgent(t, srv, "stable-agent", []string{"scan"})
+	waitAgents(t, pool, 1)
+	id1 := pool.List()[0].ID
+
+	// Drop the connection and let the hub observe the disconnect.
+	conn1.Close()
+	waitAgents(t, pool, 0)
+
+	// Same node reconnects — new socket, new instance, same node name.
+	conn2 := dialAgent(t, srv, "stable-agent", []string{"scan"})
+	defer conn2.Close()
+	waitAgents(t, pool, 1)
+	id2 := pool.List()[0].ID
+
+	if id1 != id2 {
+		t.Fatalf("agent id changed across reconnect: %q -> %q (session binding would dangle)", id1, id2)
+	}
+	if pool.get(id1) == nil {
+		t.Fatalf("agent not resolvable by its pre-reconnect id %q", id1)
 	}
 }
 
@@ -172,6 +220,61 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 	}
 }
 
+// TestDispatchChatSessionCarriesGoalOptions guards the Goal-mode wiring: the
+// eval criteria and round budget must survive into the WS chat payload so the
+// agent can run the evaluator loop. This whole channel was silently dropped
+// once (SendMessageRequest{Content} only), leaving the Goal panel a dead
+// control — this test fails loudly if that regresses.
+func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, webproto.AgentIdentity{
+		NodeID:   "node-goal-worker",
+		NodeName: "goal-worker",
+		Provider: "openai",
+		Model:    "test-model",
+	})
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	agent := pool.PickChat()
+	if agent == nil {
+		t.Fatal("expected chat-capable agent")
+	}
+
+	opts := webproto.ChatPayload{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5}
+	resultCh, err := pool.DispatchChatSession(agent.id, "task-goal", "sess-1", "audit target", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cmd WSMessage
+	if err := conn.ReadJSON(&cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Type != "chat" || cmd.Data != "audit target" {
+		t.Fatalf("unexpected message: %+v", cmd)
+	}
+	var payload webproto.ChatPayload
+	if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+		t.Fatalf("decode chat payload: %v (raw=%s)", err, cmd.Payload)
+	}
+	if payload.SessionID != "sess-1" {
+		t.Errorf("session_id = %q, want sess-1", payload.SessionID)
+	}
+	if payload.EvalCriteria != "find at least one SQLi" {
+		t.Errorf("eval_criteria = %q, want it to reach the agent", payload.EvalCriteria)
+	}
+	if payload.EvalMaxRounds != 5 {
+		t.Errorf("eval_max_rounds = %d, want 5", payload.EvalMaxRounds)
+	}
+	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-goal", Data: "ok"})
+	select {
+	case <-resultCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
@@ -183,7 +286,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
 
-	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil))
+	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil, nil, ""))
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, webproto.AgentIdentity{
@@ -261,6 +364,18 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	}
 	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "File uploaded: note.txt") || !strings.Contains(msgs[0].Content, result.Path) {
 		t.Fatalf("unexpected persisted upload message: %+v", msgs[0])
+	}
+	// The English Content is only a fallback; the localizable contract lives in
+	// Metadata as {code, params} so the message stays translatable after reload.
+	var meta struct {
+		Code   string            `json:"code"`
+		Params map[string]string `json:"params"`
+	}
+	if err := json.Unmarshal(msgs[0].Metadata, &meta); err != nil {
+		t.Fatalf("decode system message metadata: %v", err)
+	}
+	if meta.Code != SysFileUploaded || meta.Params["filename"] != "note.txt" || meta.Params["path"] != result.Path {
+		t.Fatalf("unexpected system message metadata: %+v", meta)
 	}
 }
 
@@ -695,8 +810,8 @@ func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
 }
 
 func TestE2ETerminalOpenAndType(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping e2e test in short mode")
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("skipping e2e browser test (requires interactive terminal)")
 	}
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "e2e-agent")
@@ -784,8 +899,8 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 }
 
 func TestE2ETerminalResize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping e2e test in short mode")
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("skipping e2e browser test (requires interactive terminal)")
 	}
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "resize-agent")

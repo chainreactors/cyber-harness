@@ -43,6 +43,12 @@ func ClipRunes(s string, maxRunes int) string {
 func ClipLines(text string, maxLines, maxWidth int) ([]string, int) {
 	all := strings.Split(text, "\n")
 	total := len(all)
+	if maxLines <= 0 {
+		return nil, total
+	}
+	if maxWidth < 0 {
+		maxWidth = 0
+	}
 	if total > maxLines {
 		all = all[:maxLines]
 	}

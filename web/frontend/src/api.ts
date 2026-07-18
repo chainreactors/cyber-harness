@@ -11,13 +11,20 @@ export interface ScanJob {
   report?: string;
   result?: ScanResult;
   error?: string;
+  project?: string;
+  /** Batch targets dropped by validation on submit (transient, create only). */
+  skipped?: { target: string; reason: string }[];
   created_at: string;
   updated_at: string;
 }
 
+import type { SCONode } from '@cyber/cstx-easm';
+export type { SCONode };
+
 export interface ScanResult {
   summary: ScanResultSummary;
   assets?: Asset[];
+  nodes?: SCONode[];
   services?: unknown[];
   web_probes?: unknown[];
   loots?: Loot[];
@@ -76,8 +83,26 @@ export interface ResultError {
   message: string;
 }
 
+// One entry in the shared asset pool (deduplicated by target). Source is
+// 'scan' | 'agent' | 'manual'.
+export interface PoolAsset {
+  id: string;
+  project_id?: string;
+  target: string;
+  label?: string;
+  source?: string;
+  status?: string;
+  note?: string;
+  services?: number;
+  webs?: number;
+  loots?: number;
+  last_scan_id?: string;
+  first_seen: string;
+  last_seen: string;
+}
+
 export interface ScanEvent {
-  type: 'progress' | 'status' | 'complete' | 'error';
+  type: 'progress' | 'status' | 'stats' | 'complete' | 'error';
   scan_id: string;
   data?: string;
   status?: string;
@@ -94,6 +119,7 @@ export interface ScanOptions {
 }
 
 export interface ServerStatus {
+  version: string;
   llm_available: boolean;
   llm_provider?: string;
   llm_model?: string;
@@ -101,6 +127,7 @@ export interface ServerStatus {
   config_path?: string;
   config_loaded: boolean;
   agents: number;
+  ioa_url?: string;
 }
 
 export interface AgentInfo {
@@ -142,6 +169,8 @@ export interface AgentStats {
   assets?: number;
   loots?: number;
   last_event?: string;
+  current_tool?: string;
+  current_detail?: string;
 }
 
 // ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
@@ -197,31 +226,209 @@ export async function saveConfig(config: DistributeConfig): Promise<ConfigStatus
   });
 }
 
-export async function submitScan(target: string, mode: string, options: ScanOptions): Promise<ScanJob> {
+// LLMTestRequest — POST /api/config/llm/test body. Leave api_key blank to
+// reuse the key already stored on the server.
+export interface LLMTestRequest {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  proxy: string;
+}
+
+// LLMTestResult — outcome of a connectivity probe. ok=false carries the
+// failure reason in `error`; transport/HTTP errors never reject the promise.
+export interface LLMTestResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latency_ms: number;
+  reply?: string;
+  error?: string;
+}
+
+export async function testLLM(req: LLMTestRequest): Promise<LLMTestResult> {
+  return apiJSON('/api/config/llm/test', 'Failed to test LLM', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+// LLMModelsRequest — POST /api/config/llm/models body. Like LLMTestRequest but
+// without a model (listing is what fills the model field). Leave api_key blank
+// to reuse the key already stored on the server.
+export interface LLMModelsRequest {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  proxy: string;
+}
+
+// LLMModelsResult — models the endpoint advertises via the OpenAI-compatible
+// GET /models route. ok=false carries the reason in `error`.
+export interface LLMModelsResult {
+  ok: boolean;
+  models?: string[];
+  error?: string;
+}
+
+export async function listLLMModels(req: LLMModelsRequest): Promise<LLMModelsResult> {
+  return apiJSON('/api/config/llm/models', 'Failed to list models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+// ConnCheck — outcome of probing one external dependency within a settings
+// section. A section may return several checks (Recon probes FOFA and Hunter
+// independently). ok=false carries the reason in `error`.
+export interface ConnCheck {
+  name: string; // fofa | hunter | cyberhub | tavily | ioa | recon
+  ok: boolean;
+  latency_ms: number;
+  detail?: string;
+  error?: string;
+}
+
+export interface ConnTestResponse {
+  checks: ConnCheck[];
+}
+
+// testConn probes the external dependencies of a settings section
+// (cyberhub | recon | search | ioa). The current (possibly unsaved) form is
+// sent so edits are tested; blank secrets fall back to stored values server-side.
+export async function testConn(section: string, config: DistributeConfig): Promise<ConnTestResponse> {
+  return apiJSON(`/api/config/${section}/test`, 'Failed to test connection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+}
+
+// --- Local agents (hub-hosted nodes: one-click launch + delete) ---
+
+export interface LocalAgentView {
+  name: string
+  pid: number
+  registered: boolean
+  busy?: boolean
+}
+
+export async function launchLocalAgent(): Promise<LocalAgentView> {
+  return apiJSON('/api/deploy/local', 'Failed to launch local agent', {
+    method: 'POST',
+  })
+}
+
+export async function listLocalAgents(): Promise<LocalAgentView[]> {
+  return apiJSON('/api/deploy/local', 'Failed to list local agents')
+}
+
+export async function stopLocalAgent(name: string): Promise<void> {
+  await apiJSON(`/api/deploy/local/${encodeURIComponent(name)}`, 'Failed to delete local agent', {
+    method: 'DELETE',
+  })
+}
+
+export async function submitScan(target: string, mode: string, options: ScanOptions, project?: string): Promise<ScanJob> {
   return apiJSON('/api/scans', 'Failed to submit scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target, mode, ...options }),
+    body: JSON.stringify({ target, mode, ...options, project }),
   });
+}
+
+export async function getAssets(project?: string): Promise<PoolAsset[]> {
+  const q = project ? `?project=${encodeURIComponent(project)}` : '';
+  return apiJSON(`/api/assets${q}`, 'Failed to load assets');
+}
+
+export async function addAssets(targets: string[], source?: string, label?: string, project?: string): Promise<PoolAsset[]> {
+  return apiJSON('/api/assets', 'Failed to add assets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targets, source, label, project }),
+  });
+}
+
+export async function deleteAsset(id: string, project?: string): Promise<void> {
+  const q = project ? `?project=${encodeURIComponent(project)}` : '';
+  await apiJSON(`/api/assets/${encodeURIComponent(id)}${q}`, 'Failed to delete asset', { method: 'DELETE' });
+}
+
+// One passive-recon hit, normalized to an importable pool target + display bits.
+export interface ReconHit {
+  target: string;
+  ip?: string;
+  port?: string;
+  host?: string;
+  url?: string;
+  title?: string;
+  icp?: string;
+}
+
+export interface ReconSearchResult {
+  source: string;
+  sources: string[]; // every source the hub has credentials for (UI selector)
+  hits: ReconHit[];
+}
+
+// Run a passive-recon query (FOFA / Hunter / …) via the hub. Errors — no
+// credentials, bad query, upstream failure — reject with the server's message.
+export async function reconSearch(source: string, query: string, limit?: number): Promise<ReconSearchResult> {
+  return apiJSON('/api/recon/search', 'Recon search failed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, query, limit }),
+  });
+}
+
+// --- Projects (asset-pool scope) ---
+
+export interface Project {
+  id: string
+  name: string
+  assets: number
+  created_at: string
+}
+
+export async function getProjects(): Promise<Project[]> {
+  return apiJSON('/api/projects', 'Failed to load projects');
+}
+
+export async function createProject(name: string, id?: string): Promise<Project> {
+  return apiJSON('/api/projects', 'Failed to create project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, id }),
+  });
+}
+
+// Cascades on the server: the project and its entire asset pool are removed.
+export async function deleteProject(id: string): Promise<void> {
+  await apiJSON(`/api/projects/${encodeURIComponent(id)}`, 'Failed to delete project', { method: 'DELETE' });
 }
 
 export async function getScan(id: string): Promise<ScanJob> {
   return apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Scan not found');
 }
 
-export async function listScans(): Promise<ScanJob[]> {
-  return apiJSON('/api/scans', 'Failed to list scans');
+export async function listScans(project?: string): Promise<ScanJob[]> {
+  const q = project ? `?project=${encodeURIComponent(project)}` : '';
+  return apiJSON(`/api/scans${q}`, 'Failed to list scans');
 }
 
-export async function cancelScan(id: string): Promise<void> {
-  await apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Failed to cancel scan', { method: 'DELETE' });
+export async function deleteScan(id: string): Promise<void> {
+  await apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Failed to delete scan', { method: 'DELETE' });
 }
 
 export function subscribeScanEvents(
   id: string,
   onEvent: (event: ScanEvent) => void,
 ): () => void {
-  const es = new EventSource(`/api/scans/${encodeURIComponent(id)}/events`);
+  const es = new EventSource(authURL(`/api/scans/${encodeURIComponent(id)}/events`));
   const handler = (type: RawScanEventType) => (e: Event) => {
     const data = 'data' in e ? (e as MessageEvent).data : undefined;
     if (typeof data !== 'string' || data === '') {
@@ -266,6 +473,7 @@ export function subscribeScanEvents(
   };
   es.addEventListener('progress', handler('progress'));
   es.addEventListener('status', handler('status'));
+  es.addEventListener('stats', handler('stats'));
   es.addEventListener('complete', handler('complete'));
   es.addEventListener('error', handler('error'));
   es.addEventListener('output', handler('output'));
@@ -301,7 +509,7 @@ export type ChatEventType =
   | 'message' | 'message_start' | 'message_delta' | 'message_end'
   | 'tool_call' | 'tool_result' | 'thinking'
   | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
-  | 'agent_joined' | 'error'
+  | 'agent_joined' | 'eval' | 'session_cleared' | 'error'
 
 export interface ChatEvent {
   type: ChatEventType
@@ -320,15 +528,22 @@ export interface ChatEvent {
   result?: ScanResult
   data?: string
   error?: string
+  // System/error messages carry a stable code (+ params) so the client can
+  // localize them via i18n; `content`/`error` stay as English fallbacks.
+  code?: string
+  params?: Record<string, unknown>
+  eval_round?: number
+  eval_pass?: boolean
+  eval_reason?: string
 }
 
 // --- Chat session API ---
 
-export async function createChatSession(agentID: string, title?: string): Promise<ChatSession> {
+export async function createChatSession(agentID: string, title?: string, scanID?: string): Promise<ChatSession> {
   return apiJSON('/api/chat/sessions', 'Failed to create session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent_id: agentID, title: title || '' }),
+    body: JSON.stringify({ agent_id: agentID, title: title || '', scan_id: scanID || '' }),
   })
 }
 
@@ -346,11 +561,43 @@ export async function deleteChatSession(id: string): Promise<void> {
   })
 }
 
-export async function sendChatMessage(sessionID: string, content: string): Promise<ChatMessage> {
+// SlashCommandSpec mirrors pkg/slashcmd.Spec — the server's canonical view of a
+// "/verb" command. The web "/" menu is built from these so it always reflects
+// the hub's + bound agent's real command set instead of a hardcoded list.
+export interface SlashCommandSpec {
+  name: string
+  aliases?: string[]
+  usage?: string
+  description?: string
+  scope: number
+  web_menu?: boolean
+}
+
+export async function fetchSessionCommands(sessionID: string): Promise<SlashCommandSpec[]> {
+  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/commands`, 'Failed to load commands')
+}
+
+export async function sendChatMessage(
+  sessionID: string,
+  content: string,
+  opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number },
+): Promise<ChatMessage> {
+  const body: Record<string, unknown> = { content }
+  // Goal mode: the only run-control the backend acts on is a natural-language
+  // completion criteria judged by an independent evaluator for up to N rounds
+  // (webagent runChatEval). Persist without criteria is just a normal message.
+  if (opts?.persist) {
+    const criteria = opts.evalCriteria?.trim()
+    if (criteria) {
+      body.persist = true
+      body.eval_criteria = criteria
+      if (opts.evalMaxRounds && opts.evalMaxRounds > 0) body.eval_max_rounds = opts.evalMaxRounds
+    }
+  }
   return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to send message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -370,8 +617,12 @@ export interface FileUploadResult {
 export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
   const form = new FormData()
   form.append('file', file)
+  const headers: Record<string, string> = {}
+  const key = getAccessKey()
+  if (key) headers['Authorization'] = `Bearer ${key}`
   const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
     method: 'POST',
+    headers,
     body: form,
   })
   if (!resp.ok) {
@@ -385,18 +636,31 @@ export async function listChatMessages(sessionID: string): Promise<ChatMessage[]
   return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to list messages')
 }
 
+// Fetch a scan's markdown report, re-rendered server-side in the given language
+// ('en' | 'zh'). Returns '' when the report isn't ready yet (404) so callers can
+// just show a placeholder.
+export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
+  const headers: Record<string, string> = {}
+  const key = getAccessKey()
+  if (key) headers['Authorization'] = `Bearer ${key}`
+  const res = await fetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`, { headers })
+  if (!res.ok) return ''
+  return res.text()
+}
+
 export function subscribeChatEvents(
   sessionID: string,
   onEvent: (event: ChatEvent) => void,
+  onReconnect?: () => void,
 ): () => void {
-  const url = `/api/chat/sessions/${encodeURIComponent(sessionID)}/events`
+  const url = authURL(`/api/chat/sessions/${encodeURIComponent(sessionID)}/events`)
   const es = new EventSource(url)
 
   const eventTypes: ChatEventType[] = [
     'message', 'message_start', 'message_delta', 'message_end',
     'tool_call', 'tool_result', 'thinking',
     'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
-    'agent_joined', 'error',
+    'agent_joined', 'eval', 'session_cleared', 'error',
   ]
 
   for (const type of eventTypes) {
@@ -413,7 +677,12 @@ export function subscribeChatEvents(
   }
 
   es.addEventListener('error', () => {
-    // EventSource auto-reconnects; no action needed.
+    // EventSource auto-reconnects, but the chat SSE topic keeps no backlog, so a
+    // terminal event (message_end / tool_result / the aggregate 'message')
+    // broadcast during the drop is lost — which strands the composer in a
+    // permanent "thinking" state. Reconcile from REST truth on each connection
+    // error (idempotent), mirroring the scan path's getScan-on-error recovery.
+    onReconnect?.()
   })
 
   return () => es.close()
@@ -421,11 +690,69 @@ export function subscribeChatEvents(
 
 export function agentTerminalWebSocketURL(agentID: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
+  const base = `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
+  return authURL(base);
+}
+
+// ── SCO Nodes ──
+
+export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
+  const params = new URLSearchParams();
+  if (opts?.type) params.set('type', opts.type);
+  if (opts?.scanId) params.set('scan_id', opts.scanId);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return apiJSON(`/api/sco/nodes${qs ? '?' + qs : ''}`, 'Failed to load SCO nodes');
+}
+
+export async function getSCONode(id: string): Promise<SCONode> {
+  return apiJSON(`/api/sco/nodes/${encodeURIComponent(id)}`, 'SCO node not found');
+}
+
+export async function getSCOStats(): Promise<Record<string, number>> {
+  return apiJSON('/api/sco/stats', 'Failed to load SCO stats');
+}
+
+export async function getSupportedArtifacts(): Promise<string[]> {
+  return apiJSON('/api/sco/artifacts', 'Failed to load artifacts');
+}
+
+export async function importSCOData(
+  file: File,
+  artifact: string,
+  scanId = 'import',
+): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('artifact', artifact);
+  form.append('scan_id', scanId);
+  const resp = await fetch('/api/sco/import', { method: 'POST', body: form });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error(err.error || `Import failed: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+function getAccessKey(): string {
+  return (window as any).__AISCAN_ACCESS_KEY__ || ''
+}
+
+// For SSE/WebSocket, append access_key as query param since EventSource/WebSocket can't set headers.
+function authURL(path: string): string {
+  const key = getAccessKey()
+  if (!key) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}access_key=${encodeURIComponent(key)}`
 }
 
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  const key = getAccessKey()
+  const headers = new Headers(init?.headers)
+  if (key) {
+    headers.set('Authorization', `Bearer ${key}`)
+  }
+  const res = await fetch(path, { ...init, headers });
   if (!res.ok) {
     throw new Error(await errorMessage(res, fallbackMessage));
   }

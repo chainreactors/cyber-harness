@@ -177,6 +177,18 @@ func TestLine_Truncation(t *testing.T) {
 	}
 }
 
+func TestLine_NonPositiveLimitDoesNotPanic(t *testing.T) {
+	text, trunc := Line("abc", 0)
+	if !trunc || text != "... [truncated]" {
+		t.Fatalf("unexpected: %q trunc=%v", text, trunc)
+	}
+
+	text, trunc = Line("", -1)
+	if trunc || text != "" {
+		t.Fatalf("unexpected empty result: %q trunc=%v", text, trunc)
+	}
+}
+
 func TestFormatSize(t *testing.T) {
 	tests := []struct {
 		bytes int

@@ -122,6 +122,95 @@ func RunIOANodes(ctx context.Context, client *ioaclient.Client, option *cfg.Opti
 	return w.Flush()
 }
 
+// ---------------------------------------------------------------------------
+// REPL-boxed listings
+//
+// The CLI (cmd/aiscan) keeps the plain tabwriter tables above for scriptable,
+// pipeable --json output. The interactive REPL renders the same data as boxed
+// panels so /spaces, /nodes and /messages match /status and /provider.
+// ---------------------------------------------------------------------------
+
+func shortID(id string) string { return id[:min(len(id), 8)] }
+
+func (r *AgentConsole) renderIOASpaces(ctx context.Context, client *ioaclient.Client) error {
+	spaces, err := client.ListSpaces(ctx)
+	if err != nil {
+		return err
+	}
+	if len(spaces) == 0 {
+		fmt.Fprintln(r.stderr, "no spaces found")
+		return nil
+	}
+	rows := make([][]string, 0, len(spaces))
+	for _, s := range spaces {
+		rows = append(rows, []string{
+			shortID(s.ID), s.Name,
+			fmt.Sprintf("%d node", len(s.Nodes)), fmt.Sprintf("%d msg", s.MessageCount),
+		})
+	}
+	r.printBoxTable("spaces", rows)
+	return nil
+}
+
+func (r *AgentConsole) renderIOANodes(ctx context.Context, client *ioaclient.Client, space string) error {
+	if space != "" {
+		sp, err := client.ResolveSpace(ctx, space)
+		if err != nil {
+			return err
+		}
+		if len(sp.Nodes) == 0 {
+			fmt.Fprintf(r.stderr, "no nodes in space %q\n", sp.Name)
+			return nil
+		}
+		rows := make([][]string, 0, len(sp.Nodes))
+		for _, n := range sp.Nodes {
+			rows = append(rows, []string{shortID(n.ID), n.Name, n.Description})
+		}
+		r.printBoxTable("nodes", rows)
+		return nil
+	}
+	nodes, err := client.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+	if len(nodes) == 0 {
+		fmt.Fprintln(r.stderr, "no nodes found")
+		return nil
+	}
+	rows := make([][]string, 0, len(nodes))
+	for _, n := range nodes {
+		rows = append(rows, []string{shortID(n.ID), n.Name})
+	}
+	r.printBoxTable("nodes", rows)
+	return nil
+}
+
+func (r *AgentConsole) renderIOAMessages(ctx context.Context, client *ioaclient.Client, space string) error {
+	sp, err := client.ResolveSpace(ctx, space)
+	if err != nil {
+		return err
+	}
+	messages, err := client.ReadPublic(ctx, sp.ID, protocols.ReadOptions{})
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 {
+		fmt.Fprintf(r.stderr, "no start messages in space %q\n", sp.Name)
+		return nil
+	}
+	rows := make([][]string, 0, len(messages))
+	for _, m := range messages {
+		rows = append(rows, []string{shortID(m.ID), m.Sender, contentPreview(m.Content, 48)})
+	}
+	r.printBoxTable("messages", rows)
+	return nil
+}
+
+func (r *AgentConsole) printBoxTable(title string, rows [][]string) {
+	colorEnabled := r.output != nil && r.output.color.Enabled
+	fmt.Fprint(r.stdout, r.renderPanel(title, renderBoxTable(rows, colorEnabled), colorEnabled))
+}
+
 func contentPreview(content map[string]any, maxLen int) string {
 	if text, ok := content["text"].(string); ok {
 		if len(text) > maxLen {

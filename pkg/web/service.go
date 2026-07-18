@@ -3,7 +3,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,10 +15,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
+	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
+
+// hubCommands are the 3 commands that run on the web hub, not the agent.
+var hubCommands = map[string]bool{"scan": true, "agents": true, "help": true}
 
 type ConfigStore interface {
 	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg webproto.DistributeConfig, err error)
@@ -24,7 +32,7 @@ type ConfigStore interface {
 }
 
 type ServiceConfig struct {
-	Store         Store
+	Store         *SQLiteStore
 	App           *runner.App
 	ConfigStore   ConfigStore
 	AppFactory    func(ctx context.Context) (*runner.App, error)
@@ -34,7 +42,7 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	store   Store
+	store   *SQLiteStore
 	appMu   sync.RWMutex
 	app     *runner.App
 	config  ConfigStore
@@ -103,6 +111,7 @@ func (s *Service) Close() {
 func (s *Service) Status() ServiceStatus {
 	app := s.appSnapshot()
 	status := ServiceStatus{
+		Version:      config.Version,
 		LLMAvailable: app != nil && app.Provider != nil,
 	}
 	if app != nil {
@@ -152,6 +161,11 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 		}
 		s.swapApp(app)
 	}
+	// Tell connected agents to hot-swap their own provider too — the hub reload
+	// above only refreshes the hub's in-process runtime, not the agent subprocesses.
+	if s.agents != nil {
+		s.agents.BroadcastConfigReload()
+	}
 	return s.GetConfigStatus(ctx)
 }
 
@@ -183,7 +197,6 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		Mode:      mode,
 		Verify:    verify,
 		Sniper:    sniper,
-		AI:        verify || sniper,
 		Deep:      deep,
 		Status:    StatusQueued,
 		CreatedAt: now,
@@ -200,11 +213,29 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 }
 
 func (s *Service) GetScan(ctx context.Context, id string) (*ScanJob, error) {
-	return s.store.Get(ctx, id)
+	job, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	refreshStructuredAssets(job)
+	return job, nil
 }
 
 func (s *Service) ListScans(ctx context.Context) ([]*ScanJob, error) {
-	return s.store.List(ctx, 100)
+	jobs, err := s.store.List(ctx, 100)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
+		refreshStructuredAssets(job)
+	}
+	return jobs, nil
+}
+
+func refreshStructuredAssets(job *ScanJob) {
+	if job != nil && job.Result != nil && (len(job.Result.Services) > 0 || len(job.Result.WebProbes) > 0) {
+		job.Result.Assets = scantool.AggregateStructuredResult(job.Result)
+	}
 }
 
 func (s *Service) CancelScan(id string) error {
@@ -227,10 +258,17 @@ func (s *Service) CancelScan(id string) error {
 	return nil
 }
 
-func (s *Service) GetReport(ctx context.Context, id string) (string, error) {
-	job, err := s.store.Get(ctx, id)
+// GetReport re-renders the report in the requested language from the stored
+// structured result, so a zh user gets a zh report even though the scan ran
+// once. It falls back to the report frozen at scan time when the structured
+// result is no longer around.
+func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error) {
+	job, err := s.GetScan(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	if job.Result != nil {
+		return buildMarkdownReport(job.Target, job.Mode, job.Result, lang), nil
 	}
 	return job.Report, nil
 }
@@ -311,20 +349,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		_ = json.Unmarshal(res.Result, result)
 	}
 
-	report := buildMarkdownReport(job.Target, job.Mode, result)
-	job.Status = StatusCompleted
-	job.Report = report
-	job.Result = result
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
-
-	s.persistResultRecords(job.ID, agent.id, result)
-
-	s.hub.Broadcast(job.ID, HubEvent{
-		Type: "complete",
-		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
-	})
-	s.broadcastScanComplete(job.ID, result)
+	s.completeJob(ctx, job, agent.id, result)
 }
 
 func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
@@ -346,20 +371,7 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 		job = streamWriter.job
 	}
 
-	report := buildMarkdownReport(job.Target, job.Mode, result)
-	job.Status = StatusCompleted
-	job.Report = report
-	job.Result = result
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
-
-	s.persistResultRecords(job.ID, "", result)
-
-	s.hub.Broadcast(job.ID, HubEvent{
-		Type: "complete",
-		Data: mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
-	})
-	s.broadcastScanComplete(job.ID, result)
+	s.completeJob(ctx, job, "", result)
 }
 
 func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
@@ -369,14 +381,33 @@ func (s *Service) persistResultRecords(scanID, agentID string, result *output.Re
 	}
 }
 
+func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) {
+	job.Status = StatusCompleted
+	job.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
+	job.Result = result
+	job.UpdatedAt = time.Now()
+	_ = s.store.Update(ctx, job)
+	s.persistResultRecords(job.ID, agentID, result)
+	if len(result.Nodes) > 0 {
+		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
+	}
+	s.hub.Broadcast(job.ID, HubEvent{
+		Type:     "complete",
+		Data:     mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
+		Reliable: true,
+	})
+	s.broadcastScanComplete(job.ID, result)
+}
+
 func (s *Service) failJob(job *ScanJob, errMsg string) {
 	job.Status = StatusFailed
 	job.Error = errMsg
 	job.UpdatedAt = time.Now()
 	_ = s.store.Update(context.Background(), job)
 	s.hub.Broadcast(job.ID, HubEvent{
-		Type: "error",
-		Data: mustJSON(map[string]string{"scan_id": job.ID, "error": errMsg}),
+		Type:     "error",
+		Data:     mustJSON(map[string]string{"scan_id": job.ID, "error": errMsg}),
+		Reliable: true,
 	})
 }
 
@@ -444,7 +475,7 @@ func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writ
 type sseStreamWriter struct {
 	hub    *Hub
 	scanID string
-	store  Store
+	store  *SQLiteStore
 	job    *ScanJob
 	ctx    context.Context
 	buf    []byte
@@ -467,7 +498,7 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 		line := string(w.buf[:idx])
 		w.buf = w.buf[idx+1:]
 
-		line = stripANSI(line)
+		line = output.StripANSI(line)
 		if line == "" {
 			continue
 		}
@@ -496,62 +527,239 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func buildMarkdownReport(target, mode string, result *output.Result) string {
-	var sb strings.Builder
-	sb.WriteString("# Penetration Test Report\n\n")
-	sb.WriteString(fmt.Sprintf("**Target:** `%s`  \n", target))
-	sb.WriteString(fmt.Sprintf("**Mode:** %s  \n", mode))
-	sb.WriteString(fmt.Sprintf("**Date:** %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
-	sb.WriteString("---\n\n")
+// defaultReportLang is the language the report is frozen in at scan time; the
+// stored copy is only a fallback — GetReport re-renders per request language.
+const defaultReportLang = "zh"
 
-	if result == nil {
-		sb.WriteString("No structured result was returned.\n")
-		return sb.String()
-	}
-
-	sb.WriteString("## Summary\n\n")
-	sb.WriteString("| Metric | Value |\n|---|---:|\n")
-	sb.WriteString(fmt.Sprintf("| Targets | %d |\n", result.Summary.Targets))
-	sb.WriteString(fmt.Sprintf("| Services | %d |\n", result.Summary.Services))
-	sb.WriteString(fmt.Sprintf("| Web | %d |\n", result.Summary.Webs))
-	sb.WriteString(fmt.Sprintf("| Probes | %d |\n", result.Summary.Probes))
-	sb.WriteString(fmt.Sprintf("| Fingerprints | %d |\n", resultFingerprintCount(result)))
-	sb.WriteString(fmt.Sprintf("| Loots | %d |\n", result.Summary.Loots))
-	sb.WriteString(fmt.Sprintf("| Errors | %d |\n", result.Summary.Errors))
-	if result.Summary.Duration != "" {
-		sb.WriteString(fmt.Sprintf("| Duration | %s |\n", result.Summary.Duration))
-	}
-	sb.WriteString("\n")
-
-	if len(result.Assets) == 0 {
-		return sb.String()
-	}
-
-	sb.WriteString("## Assets\n\n")
-	for _, asset := range result.Assets {
-		title := output.FirstNonEmpty(asset.Title, asset.Target, asset.Key, "Asset")
-		sb.WriteString(fmt.Sprintf("### %s\n\n", title))
-		if asset.Target != "" && asset.Target != title {
-			sb.WriteString(fmt.Sprintf("- **Target:** %s\n", markdownCode(asset.Target)))
-		}
-		if asset.Status != "" {
-			sb.WriteString(fmt.Sprintf("- **State:** %s\n", markdownCode(asset.Status)))
-		}
-		writeMarkdownList(&sb, "Services", assetServiceFacts(asset.Items))
-		writeMarkdownList(&sb, "HTTP", assetHTTPStatuses(asset.Items))
-		writeMarkdownList(&sb, "Fingers", assetFingers(asset.Items))
-		writeMarkdownList(&sb, "Sources", assetSources(asset.Items))
-		if paths := assetPathCount(asset.Items); paths > 0 {
-			sb.WriteString(fmt.Sprintf("- **Paths:** %d\n", paths))
-		}
-		writeAssetLootMarkdown(&sb, asset.Items)
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
+// reportWriter holds the target language so every helper can call w.tr()
+// without threading `lang` through every signature.
+type reportWriter struct {
+	strings.Builder
+	lang string
 }
 
-func writeMarkdownList(sb *strings.Builder, label string, values []string) {
+func newReportWriter(lang string) *reportWriter {
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return &reportWriter{lang: "zh"}
+	}
+	return &reportWriter{lang: "en"}
+}
+
+func (w *reportWriter) tr(zh, en string) string {
+	if w.lang == "zh" {
+		return zh
+	}
+	return en
+}
+
+func (w *reportWriter) modeName(mode string) string {
+	if strings.EqualFold(mode, "full") {
+		return w.tr("全面侦察", "Full recon")
+	}
+	return w.tr("快速侦察", "Quick recon")
+}
+
+func (w *reportWriter) sep() string { return w.tr("：", ": ") }
+
+// buildMarkdownReport renders a scan result as an operator-facing recon report.
+// It reads like something a human wrote — a prose overview instead of a raw
+// metric dump, no internal scanner names (gogo_portscan / check) leaking into
+// the prose, and bare live hosts (an icmp echo, say) folded into a trailing
+// list rather than each claiming a full section.
+func buildMarkdownReport(target, mode string, result *output.Result, lang string) string {
+	w := newReportWriter(lang)
+
+	heading := output.FirstNonEmpty(target, w.tr("目标", "target"))
+	fmt.Fprintf(w, "# %s%s\n\n", w.tr("侦察报告 · ", "Recon report · "), heading)
+	fmt.Fprintf(w, "%s `%s`  ·  %s  ·  %s\n\n",
+		w.tr("目标", "Target"), target,
+		w.modeName(mode),
+		time.Now().Format("2006-01-02 15:04:05"))
+	w.WriteString("---\n\n")
+
+	if result == nil {
+		w.WriteString(w.tr("本次扫描未返回结构化结果。\n", "No structured result was returned.\n"))
+		return w.String()
+	}
+
+	w.WriteString("## " + w.tr("概述", "Overview") + "\n\n")
+	w.writeOverview(result)
+	w.WriteString("\n\n")
+
+	rich, bare := splitReportAssets(result.Assets)
+	if len(rich) > 0 {
+		w.WriteString("## " + w.tr("资产明细", "Assets") + "\n\n")
+		for _, asset := range rich {
+			w.writeAsset(asset)
+		}
+	}
+	if len(bare) > 0 {
+		w.WriteString("## " + w.tr("其他存活主机", "Other live hosts") + "\n\n")
+		for _, asset := range bare {
+			w.writeBareAsset(asset)
+		}
+		w.WriteString("\n")
+	}
+
+	return w.String()
+}
+
+// writeOverview appends the executive summary — one flowing paragraph that
+// names only the numbers that are actually present, so a clean scan reads like
+// a sentence rather than a table full of zeros.
+func (w *reportWriter) writeOverview(result *output.Result) {
+	s := result.Summary
+	hosts := reportHostCount(result.Assets)
+	fingers := resultFingerprintCount(result)
+
+	if w.lang == "zh" {
+		fmt.Fprintf(w, "本次侦察共识别 %d 台主机、%d 个开放服务", hosts, s.Services)
+		if s.Webs > 0 {
+			fmt.Fprintf(w, "（含 %d 个 Web 站点）", s.Webs)
+		}
+		w.WriteString("。")
+		if s.Probes > 0 {
+			fmt.Fprintf(w, "累计探测 %d 条路径", s.Probes)
+			if fingers > 0 {
+				fmt.Fprintf(w, "、命中 %d 项 Web 指纹", fingers)
+			}
+			w.WriteString("。")
+		} else if fingers > 0 {
+			fmt.Fprintf(w, "命中 %d 项 Web 指纹。", fingers)
+		}
+		if s.Loots > 0 {
+			fmt.Fprintf(w, "**发现 %d 项需优先复核的安全发现（凭证 / 弱口令 / 漏洞）。**", s.Loots)
+		}
+		if s.Errors > 0 {
+			fmt.Fprintf(w, "另有 %d 处探测报错。", s.Errors)
+		}
+		if s.Duration != "" {
+			fmt.Fprintf(w, "全程耗时 %s。", s.Duration)
+		}
+		return
+	}
+
+	fmt.Fprintf(w, "The scan identified %s across %s", plural(hosts, "host", "hosts"), plural(s.Services, "open service", "open services"))
+	if s.Webs > 0 {
+		fmt.Fprintf(w, " (%s)", plural(s.Webs, "web site", "web sites"))
+	}
+	w.WriteString(". ")
+	if s.Probes > 0 {
+		fmt.Fprintf(w, "It probed %s", plural(s.Probes, "path", "paths"))
+		if fingers > 0 {
+			fmt.Fprintf(w, " and matched %s", plural(fingers, "fingerprint", "fingerprints"))
+		}
+		w.WriteString(". ")
+	} else if fingers > 0 {
+		fmt.Fprintf(w, "It matched %s. ", plural(fingers, "fingerprint", "fingerprints"))
+	}
+	if s.Loots > 0 {
+		fmt.Fprintf(w, "**%s surfaced (credentials / weak passwords / vulnerabilities) — review these first.** ", plural(s.Loots, "security finding", "security findings"))
+	}
+	if s.Errors > 0 {
+		fmt.Fprintf(w, "%s occurred during probing. ", plural(s.Errors, "error", "errors"))
+	}
+	if s.Duration != "" {
+		fmt.Fprintf(w, "The scan took %s.", s.Duration)
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// reportHostCount collapses assets down to distinct hosts, so an IP that has
+// both an icmp echo and a web service counts once, not twice.
+func reportHostCount(assets []output.Asset) int {
+	seen := make(map[string]struct{})
+	for _, a := range assets {
+		if h := assetHost(a); h != "" {
+			seen[h] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return len(assets)
+	}
+	return len(seen)
+}
+
+func assetHost(a output.Asset) string {
+	v := output.FirstNonEmpty(a.Target, a.Key, a.Title)
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if strings.Count(v, ":") == 1 { // host:port — drop the port, leave IPv6 alone
+		v = v[:strings.LastIndex(v, ":")]
+	}
+	return v
+}
+
+func splitReportAssets(assets []output.Asset) (rich, bare []output.Asset) {
+	for _, a := range assets {
+		if assetIsBare(a) {
+			bare = append(bare, a)
+		} else {
+			rich = append(rich, a)
+		}
+	}
+	return rich, bare
+}
+
+// assetIsBare is true for a live host that only answered with non-web services
+// (an icmp echo, a bare tcp port) — nothing worth its own section.
+func assetIsBare(a output.Asset) bool {
+	hasService := false
+	for _, item := range a.Items {
+		if item.Kind != output.AssetItemService {
+			return false
+		}
+		hasService = true
+		svc := strings.ToLower(output.AssetDataString(item.Data, "service") + " " + output.AssetDataString(item.Data, "protocol"))
+		if strings.Contains(svc, "http") {
+			return false
+		}
+	}
+	return hasService
+}
+
+func (w *reportWriter) writeAsset(asset output.Asset) {
+	title := output.FirstNonEmpty(asset.Title, asset.Target, asset.Key, w.tr("资产", "Asset"))
+	if asset.Target != "" && asset.Target != title {
+		fmt.Fprintf(w, "### %s — `%s`\n\n", title, asset.Target)
+	} else {
+		fmt.Fprintf(w, "### %s\n\n", title)
+	}
+
+	w.writeFact(w.tr("开放服务", "Services"), assetServiceFacts(asset.Items))
+	w.writeFact(w.tr("HTTP 响应", "HTTP"), assetHTTPStatuses(asset.Items))
+	w.writeFact(w.tr("Web 指纹", "Fingerprints"), assetFingers(asset.Items))
+	if paths := assetPathCount(asset.Items); paths > 0 {
+		fmt.Fprintf(w, "- %s%s%s\n", w.tr("已探测路径", "Paths"), w.sep(), w.tr(fmt.Sprintf("%d 条", paths), fmt.Sprintf("%d", paths)))
+	}
+	if asset.Status != "" {
+		fmt.Fprintf(w, "- %s%s%s\n", w.tr("状态", "State"), w.sep(), markdownCode(asset.Status))
+	}
+	w.WriteString("\n")
+
+	w.writeLootMarkdown(asset.Items)
+}
+
+func (w *reportWriter) writeBareAsset(asset output.Asset) {
+	host := output.FirstNonEmpty(asset.Target, asset.Title, asset.Key)
+	if services := assetServiceFacts(asset.Items); len(services) > 0 {
+		fmt.Fprintf(w, "- `%s` · %s\n", host, strings.Join(services, ", "))
+	} else {
+		fmt.Fprintf(w, "- `%s`\n", host)
+	}
+}
+
+func (w *reportWriter) writeFact(label string, values []string) {
 	if len(values) == 0 {
 		return
 	}
@@ -559,10 +767,10 @@ func writeMarkdownList(sb *strings.Builder, label string, values []string) {
 	for _, value := range values {
 		coded = append(coded, markdownCode(value))
 	}
-	sb.WriteString(fmt.Sprintf("- **%s:** %s\n", label, strings.Join(coded, ", ")))
+	fmt.Fprintf(w, "- %s%s%s\n", label, w.sep(), strings.Join(coded, w.tr("、", ", ")))
 }
 
-func writeAssetLootMarkdown(sb *strings.Builder, items []output.AssetItem) {
+func (w *reportWriter) writeLootMarkdown(items []output.AssetItem) {
 	wrote := false
 	for _, item := range items {
 		switch item.Kind {
@@ -572,24 +780,19 @@ func writeAssetLootMarkdown(sb *strings.Builder, items []output.AssetItem) {
 			if summary == "" && detail == "" {
 				continue
 			}
-			prefix := output.FirstNonEmpty(item.Source, item.Kind)
-			if item.Status != "" {
-				prefix += ":" + item.Status
-			}
 			if !wrote {
-				sb.WriteString("\n#### Analysis\n\n")
+				w.WriteString("#### " + w.tr("分析研判", "Analysis") + "\n\n")
 				wrote = true
 			}
 			if summary == "" {
 				summary = firstMarkdownLine(detail)
 			}
-			sb.WriteString(fmt.Sprintf("##### %s\n\n", markdownHeading(summary)))
-			sb.WriteString(fmt.Sprintf("**Source:** %s\n\n", markdownCode(prefix)))
+			fmt.Fprintf(w, "##### %s\n\n", markdownHeading(summary))
 			if detail != "" && !sameMarkdownText(summary, detail) {
-				writeMarkdownBlock(sb, detail)
+				writeMarkdownBlock(&w.Builder, detail)
 			} else if detail == "" && summary != "" {
-				sb.WriteString(summary)
-				sb.WriteString("\n\n")
+				w.WriteString(summary)
+				w.WriteString("\n\n")
 			}
 		}
 	}
@@ -657,14 +860,6 @@ func assetFingers(items []output.AssetItem) []string {
 	return output.CompactStrings(values...)
 }
 
-func assetSources(items []output.AssetItem) []string {
-	var values []string
-	for _, item := range items {
-		values = append(values, item.Source)
-	}
-	return output.CompactStrings(values...)
-}
-
 func assetPathCount(items []output.AssetItem) int {
 	count := 0
 	for _, item := range items {
@@ -703,17 +898,15 @@ func markdownHeading(value string) string {
 }
 
 func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-func stripANSI(s string) string {
-	return output.StripANSI(s)
-}
-
-func lastOutputLine(output string) string {
-	lines := strings.Split(output, "\n")
+func lastOutputLine(s string) string {
+	lines := strings.Split(s, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(stripANSI(lines[i]))
+		line := strings.TrimSpace(output.StripANSI(lines[i]))
 		if line != "" {
 			return line
 		}
@@ -775,7 +968,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	s.mu.Unlock()
 
 	if len(tasks) == 0 {
-		s.broadcastSystemMessage(sessionID, "No running task.")
+		s.broadcastSystemMessage(sessionID, SysNoRunningTask, "No running task.", nil)
 		return nil
 	}
 	if s.agents != nil {
@@ -785,7 +978,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 			}
 		}
 	}
-	s.broadcastSystemMessage(sessionID, "Paused.")
+	s.broadcastSystemMessage(sessionID, SysPaused, "Paused.", nil)
 	return nil
 }
 
@@ -829,23 +1022,22 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			return nil, fmt.Errorf("agent disconnected during upload")
 		}
 		var result webproto.FileUploadResult
-		if len(res.Result) > 0 {
-			if err := json.Unmarshal(res.Result, &result); err != nil {
-				return &webproto.FileUploadResult{
-					Filename: filename,
-					Path:     res.Output,
-					Size:     int64(len(data)),
-				}, nil
+		// The agent normally returns a JSON-encoded FileUploadResult. If it sent
+		// nothing structured (or non-JSON output), synthesize one from the raw
+		// output path — the upload still succeeded, just without an envelope.
+		if len(res.Result) == 0 || json.Unmarshal(res.Result, &result) != nil {
+			result = webproto.FileUploadResult{
+				Filename: filename,
+				Path:     res.Output,
+				Size:     int64(len(data)),
 			}
-		} else {
-			result.Filename = filename
-			result.Path = res.Output
-			result.Size = int64(len(data))
 		}
 		if result.Error != "" {
 			return nil, fmt.Errorf("agent upload error: %s", result.Error)
 		}
-		s.broadcastSystemMessage(sessionID, fmt.Sprintf("File uploaded: %s → %s", filename, result.Path))
+		s.broadcastSystemMessage(sessionID, SysFileUploaded,
+			fmt.Sprintf("File uploaded: %s → %s", filename, result.Path),
+			map[string]any{"filename": filename, "path": result.Path})
 		return &result, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -899,7 +1091,26 @@ func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
 		Type: event.Type,
 		Data: mustJSON(event),
+		// Terminal events must never be dropped (see isTerminalChatEvent). Eval
+		// verdicts are rare, non-terminal, but each one is a discrete round marker
+		// the client can't reconstruct if lost under backpressure — send reliably.
+		Reliable: isTerminalChatEvent(event.Type) || event.Type == ChatEventEval || event.Type == ChatEventCompact,
 	})
+}
+
+// isTerminalChatEvent reports whether an event ends a run (or its scan) on the
+// client — the signals that release the composer and stop the streaming
+// indicators. These are broadcast reliably so the SSE hub never drops them under
+// backpressure: a lost token delta is invisible (a later delta and the final
+// message resend the full text), but a lost terminal event leaves the UI stuck
+// "streaming" forever — a busy composer and a blinking cursor that never clears.
+func isTerminalChatEvent(t string) bool {
+	switch t {
+	case ChatEventMessage, ChatEventMessageEnd, ChatEventError,
+		ChatEventScanComplete, ChatEventScanError:
+		return true
+	}
+	return false
 }
 
 func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
@@ -923,6 +1134,24 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	}
 
 	switch event.Type {
+	case ChatEventMessageEnd:
+		// The finalized assistant text for one turn — the commentary the model
+		// emits before (or between) its tool calls. Only the run's LAST turn used
+		// to survive a reload, persisted as the aggregate reply by
+		// completeAssistantRun; every earlier turn's text streamed live but was
+		// dropped from the store, so it vanished from any timeline rebuilt from it:
+		// a page reload, an SSE reconnect, or a session switch that revalidates
+		// against the store. Persist each turn's text as an assistant message keyed
+		// by its turn so buildTimelineFromMessages reconstructs it. The final turn
+		// shares a turn key with the aggregate reply, so on rebuild the two merge
+		// into one bubble instead of doubling. (message_start / message_delta stay
+		// unpersisted — they are streaming partials of this same finalized text.)
+		msg.Role = "assistant"
+		msg.Content = strings.TrimSpace(event.Content)
+		if msg.Content == "" {
+			return
+		}
+
 	case ChatEventThinking:
 		msg.Role = "system"
 		msg.Content = strings.TrimSpace(event.Content)
@@ -946,6 +1175,38 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 		msg.Content = event.Content
 		metadata["tool_call_id"] = event.ToolCallID
 
+	case ChatEventEval:
+		// Persist the round verdict so the eval badge survives a reload / session
+		// switch — buildTimelineFromMessages reconstructs it from content (reason)
+		// plus this metadata (round/pass).
+		msg.Role = "system"
+		msg.Content = event.EvalReason
+		metadata["eval_round"] = event.EvalRound
+		metadata["eval_pass"] = event.EvalPass
+		metadata["eval_reason"] = event.EvalReason
+
+	case ChatEventCompact:
+		msg.Role = "system"
+		msg.Content = fmt.Sprintf("context compacted: ~%d → ~%d tokens", event.CompactTokensBefore, event.CompactTokensAfter)
+		metadata["compact_tokens_before"] = event.CompactTokensBefore
+		metadata["compact_tokens_after"] = event.CompactTokensAfter
+		metadata["compact_kept_messages"] = event.CompactKeptMessages
+
+	case ChatEventScanComplete:
+		// Persist a lightweight marker so the inline scan card survives a reload /
+		// session switch. The heavy Result payload is NOT stored here — it stays
+		// reloadable via the session_scans link (getScan), and the client fills the
+		// card from its scanResults map keyed by this scan_id. Without this marker
+		// the scan is invisible to any timeline rebuilt from messages (a page
+		// reload, an SSE reconnect, or a session switch that revalidates against
+		// the store), even though the result itself is still fetchable.
+		if event.ScanID == "" {
+			return
+		}
+		msg.Role = "system"
+		msg.Content = "scan complete"
+		metadata["scan_id"] = event.ScanID
+
 	default:
 		return
 	}
@@ -956,7 +1217,7 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	_ = s.store.AddMessage(context.Background(), msg)
 }
 
-func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string) (*ChatMessage, error) {
+func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.ChatPayload) (*ChatMessage, error) {
 	now := time.Now()
 	msg := &ChatMessage{
 		ID:        generateID(),
@@ -983,14 +1244,124 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		_ = s.store.UpdateSession(ctx, session)
 	}
 
-	go s.dispatchUserMessage(sessionID, msg)
+	go s.dispatchUserMessage(sessionID, msg, opts)
 
 	return msg, nil
 }
 
-func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage) {
+func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.ChatPayload) {
 	content := strings.TrimSpace(msg.Content)
-	s.handleChatMessage(sessionID, content)
+
+	// A typed "/verb" is routed by scope. Hub-scope commands (scan pipeline,
+	// agent roster, merged help) run here. Agent-scope commands (/status,
+	// /provider, /<skill>, ...) and unknown verbs fall through to the agent,
+	// where the AgentConsole bridge runs the real REPL — so the full REPL
+	// command set and `!bash` work from the browser without a parallel switch.
+	if verb, args, ok := parseCommand(content); ok {
+		// /clear is a true "clear conversation" on the web: it must wipe the
+		// visible+persisted transcript, not just reset the agent's model context.
+		// Owned end-to-end by the hub so it does both (see handleClearCommand).
+		if verb == "clear" {
+			s.handleClearCommand(sessionID, opts)
+			return
+		}
+		if hubCommands[verb] {
+			s.runHubCommand(sessionID, verb, args)
+			return
+		}
+	}
+
+	s.handleChatMessage(sessionID, content, opts)
+}
+
+// handleClearCommand implements web /clear as "clear conversation": it deletes the
+// session's persisted messages (incl. the "/clear" message itself) and signals the
+// open UI to empty its timeline, then forwards /clear to the bound agent so its
+// in-memory model context resets too. The agent's "Context cleared." reply lands in
+// the now-empty transcript as the sole confirmation line; with no agent bound, the
+// emptied view is itself the confirmation.
+func (s *Service) handleClearCommand(sessionID string, opts webproto.ChatPayload) {
+	_ = s.store.ClearMessages(context.Background(), sessionID)
+	// Transient: a live-only signal to connected clients — the cleared state is
+	// already durable in the store, so a reconnecting client re-derives it on load.
+	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
+	if s.sessionAgent(sessionID) != nil {
+		s.handleChatMessage(sessionID, "/clear", opts)
+	}
+}
+
+// runHubCommand executes a hub-scope slash command — one that needs hub state
+// (the scan pipeline, the connected-agent roster, or the merged help catalog).
+// name is the canonical catalog name without its leading slash. Agent-scope
+// commands never reach here; they fall through to the agent bridge.
+func (s *Service) runHubCommand(sessionID, name, args string) {
+	switch name {
+	case "scan":
+		s.handleScanCommand(sessionID, args)
+	case "agents":
+		s.handleAgentsCommand(sessionID)
+	case "help":
+		s.handleHelpCommand(sessionID)
+	}
+}
+
+// parseCommand splits a leading "/verb args..." into its lowercased verb
+// and the trimmed remainder. ok is false when content does not begin with a
+// non-empty "/verb".
+func parseCommand(content string) (cmd, args string, ok bool) {
+	if !strings.HasPrefix(content, "/") {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(content[1:])
+	if rest == "" {
+		return "", "", false
+	}
+	if i := strings.IndexAny(rest, " \t\r\n"); i >= 0 {
+		return strings.ToLower(rest[:i]), strings.TrimSpace(rest[i:]), true
+	}
+	return strings.ToLower(rest), "", true
+}
+
+// handleHelpCommand renders the merged "/" command catalog (hub-scope plus the
+// bound agent's reported agent-scope commands) as a system message. Broadcast
+// with an empty code so the frontend shows this dynamic, already-localized text
+// verbatim instead of translating it.
+func (s *Service) handleHelpCommand(sessionID string) {
+	var b strings.Builder
+	b.WriteString("**Commands**\n")
+	for _, c := range s.SessionMenu(sessionID) {
+		syntax := c.Usage
+		if syntax == "" {
+			syntax = c.Name
+		}
+		if c.Description != "" {
+			fmt.Fprintf(&b, "- `%s` — %s\n", syntax, c.Description)
+		} else {
+			fmt.Fprintf(&b, "- `%s`\n", syntax)
+		}
+	}
+	b.WriteString("\n`!<command>` 直接在 agent 上执行 shell/伪命令;其他文本作为对话发送给 agent。")
+	s.broadcastSystemMessage(sessionID, "", b.String(), nil)
+}
+
+// SessionMenu is the web "/" command catalog for a session: the hub-scope
+// commands plus the bound agent's reported agent-scope commands (its skills
+// included). It falls back to the static agent-scope menu when no agent is
+// bound, so the menu is populated even before an agent connects. This is the
+// single source both the "/" menu (GET .../commands) and /help render from.
+func (s *Service) SessionMenu(sessionID string) []webproto.CommandSpec {
+	hubSpecs := []webproto.CommandSpec{
+		{Name: "/help", Description: "查看命令面板"},
+		{Name: "/scan", Description: "在本会话运行扫描", Usage: "/scan <target> [--mode full] [--verify] [--sniper] [--deep]"},
+		{Name: "/agents", Description: "列出已连接的 agent"},
+	}
+	agentSpecs := s.sessionAgent(sessionID).commandSpecs()
+	if len(agentSpecs) == 0 {
+		// Fall back to the static agent-scope menu when no agent is bound.
+		r := &tui.AgentConsole{}
+		agentSpecs = tui.WebMenuSpecs(r.StaticCommands())
+	}
+	return append(hubSpecs, agentSpecs...)
 }
 
 func (s *Service) handleScanCommand(sessionID, args string) {
@@ -1049,10 +1420,11 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 func (s *Service) handleAgentsCommand(sessionID string) {
 	if s.agents == nil || s.agents.Count() == 0 {
-		s.broadcastSystemMessage(sessionID, "No agents connected.")
+		s.broadcastSystemMessage(sessionID, SysNoAgentsConnected, "No agents connected.", nil)
 		return
 	}
 	agents := s.agents.List()
+	list := make([]map[string]any, 0, len(agents))
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%d agent(s) connected:\n", len(agents)))
 	for _, a := range agents {
@@ -1061,12 +1433,17 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 			status = "busy"
 		}
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", a.Name, a.ID[:8], status))
+		entry := map[string]any{"name": a.Name, "id": a.ID[:8], "busy": a.Busy}
 		if a.Identity.Model != "" {
 			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Identity.Provider, a.Identity.Model))
+			entry["provider"] = a.Identity.Provider
+			entry["model"] = a.Identity.Model
 		}
 		sb.WriteString("\n")
+		list = append(list, entry)
 	}
-	s.broadcastSystemMessage(sessionID, sb.String())
+	s.broadcastSystemMessage(sessionID, SysAgentsList, sb.String(),
+		map[string]any{"count": len(agents), "agents": list})
 }
 
 func (s *Service) sessionAgent(sessionID string) *remoteAgent {
@@ -1080,18 +1457,11 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	return s.agents.get(session.AgentID)
 }
 
-func (s *Service) handleShellCommand(sessionID, command string) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return
-	}
-
+func (s *Service) handleChatMessage(sessionID, content string, opts webproto.ChatPayload) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: "agent is not connected",
-		})
+		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
+			"Agent is not connected. Reconnect the agent to continue chatting.", nil)
 		return
 	}
 
@@ -1104,7 +1474,7 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 		AgentName: agent.name,
 	})
 
-	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, command)
+	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, sessionID, content, opts)
 	if err != nil {
 		s.finishSessionTask(taskID)
 		s.BroadcastChatEvent(sessionID, ChatEvent{
@@ -1118,6 +1488,9 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 		res, ok := <-resultCh
 		canceled := s.finishSessionTask(taskID)
 		if !ok {
+			// Agent dropped mid-run: signal completion so the composer releases
+			// instead of hanging on the streaming indicator (mirrors the command
+			// path above).
 			s.BroadcastChatEvent(sessionID, ChatEvent{
 				Type:  ChatEventError,
 				Error: "agent disconnected",
@@ -1127,68 +1500,31 @@ func (s *Service) handleShellCommand(sessionID, command string) {
 		if canceled {
 			return
 		}
-		content := res.Output
-		if res.Err != "" {
-			content = "Error: " + res.Err
-		}
-		if strings.TrimSpace(content) != "" {
-			s.persistAssistantMessage(sessionID, agent.id, agent.name, content, res.Turn)
-		}
-	}()
-}
-
-func (s *Service) handleChatMessage(sessionID, content string) {
-	agent := s.sessionAgent(sessionID)
-	if agent == nil {
-		s.broadcastSystemMessage(sessionID, "Agent is not connected. Reconnect the agent to continue chatting.")
-		return
-	}
-
-	taskID := generateID()
-	s.registerSessionTask(taskID, sessionID, agent.id)
-
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:      ChatEventAgentJoined,
-		AgentID:   agent.id,
-		AgentName: agent.name,
-	})
-
-	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, sessionID, content)
-	if err != nil {
-		s.finishSessionTask(taskID)
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: err.Error(),
-		})
-		return
-	}
-
-	go func() {
-		res, ok := <-resultCh
-		canceled := s.finishSessionTask(taskID)
-		if !ok {
-			return
-		}
-		if canceled {
-			return
-		}
 		reply := res.Output
 		if res.Err != "" {
 			reply = "Error: " + res.Err
 		}
-		if strings.TrimSpace(reply) != "" {
-			s.persistAssistantMessage(sessionID, agent.id, agent.name, reply, res.Turn)
-		}
+		s.completeAssistantRun(sessionID, agent.id, agent.name, reply, res.Turn)
 	}()
 }
 
-func (s *Service) broadcastSystemMessage(sessionID, content string) {
+// broadcastSystemMessage persists + broadcasts a system message. code names a
+// translatable template rendered client-side via i18n (see the Sys* codes);
+// fallback is the English text kept in Content for non-i18n consumers, logs and
+// tests. params feeds i18n interpolation and is stored next to code so the
+// message stays localizable after a reload.
+func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, params map[string]any) {
 	now := time.Now()
+	var meta json.RawMessage
+	if code != "" {
+		meta, _ = json.Marshal(map[string]any{"code": code, "params": params})
+	}
 	msg := &ChatMessage{
 		ID:        generateID(),
 		SessionID: sessionID,
 		Role:      "system",
-		Content:   content,
+		Content:   fallback,
+		Metadata:  meta,
 		CreatedAt: now,
 	}
 	_ = s.store.AddMessage(context.Background(), msg)
@@ -1196,7 +1532,9 @@ func (s *Service) broadcastSystemMessage(sessionID, content string) {
 		Type:      ChatEventMessage,
 		MessageID: msg.ID,
 		Role:      "system",
-		Content:   content,
+		Content:   fallback,
+		Code:      code,
+		Params:    params,
 	})
 }
 
@@ -1217,31 +1555,40 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	})
 }
 
-func (s *Service) persistAssistantMessage(sessionID, agentID, agentName, content string, turn int) {
+// completeAssistantRun is a run's terminal signal to the client. It always
+// broadcasts the aggregate assistant message so the UI finalizes the turn and
+// releases the composer — even when the run produced no final text (a tool-only
+// turn, or an eval run that hit its round cap). Skipping the broadcast on empty
+// content was what stranded the streaming indicator — the blinking cursor or the
+// "working" dots — forever. The reply is persisted only when it carries text, so
+// an empty completion never leaves a blank row in the transcript.
+func (s *Service) completeAssistantRun(sessionID, agentID, agentName, content string, turn int) {
 	content = strings.TrimRight(content, " \t\r\n")
-	now := time.Now()
-	msg := &ChatMessage{
-		ID:        generateID(),
-		SessionID: sessionID,
-		Role:      "assistant",
-		AgentID:   agentID,
-		AgentName: agentName,
-		Content:   content,
-		CreatedAt: now,
-	}
-	if turn > 0 {
-		if data, err := json.Marshal(map[string]any{"turn": turn}); err == nil {
-			msg.Metadata = data
-		}
-	}
-	_ = s.store.AddMessage(context.Background(), msg)
-	s.BroadcastChatEvent(sessionID, ChatEvent{
+	event := ChatEvent{
 		Type:      ChatEventMessage,
-		MessageID: msg.ID,
 		Role:      "assistant",
 		AgentID:   agentID,
 		AgentName: agentName,
 		Turn:      turn,
 		Content:   content,
-	})
+	}
+	if content != "" {
+		msg := &ChatMessage{
+			ID:        generateID(),
+			SessionID: sessionID,
+			Role:      "assistant",
+			AgentID:   agentID,
+			AgentName: agentName,
+			Content:   content,
+			CreatedAt: time.Now(),
+		}
+		if turn > 0 {
+			if data, err := json.Marshal(map[string]any{"turn": turn}); err == nil {
+				msg.Metadata = data
+			}
+		}
+		_ = s.store.AddMessage(context.Background(), msg)
+		event.MessageID = msg.ID
+	}
+	s.BroadcastChatEvent(sessionID, event)
 }

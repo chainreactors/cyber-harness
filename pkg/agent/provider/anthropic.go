@@ -62,7 +62,7 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatComplet
 		ctx, "POST", p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 	)
 	if err != nil {
-		return nil, err
+		return nil, hint404(err, p.completionEndpoint(), "OpenAI", "openai")
 	}
 
 	result, err := parseAnthropicResponse(data)
@@ -91,10 +91,14 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 	}
 
 	parser := &anthropicStreamParser{}
-	return streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
+	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 		parser.parse,
 	)
+	if err != nil {
+		return nil, hint404(err, p.completionEndpoint(), "OpenAI", "openai")
+	}
+	return events, nil
 }
 
 func (p *AnthropicProvider) completionEndpoint() string {
@@ -110,6 +114,42 @@ func (p *AnthropicProvider) setAuthHeaders(req *http.Request) {
 		req.Header.Set("x-api-key", p.config.APIKey)
 	}
 	req.Header.Set("anthropic-version", anthropicVersion)
+}
+
+func (p *AnthropicProvider) modelsEndpoint() string {
+	base := strings.TrimSuffix(p.config.BaseURL, "/")
+	base = strings.TrimSuffix(base, "/messages")
+	return strings.TrimSuffix(base, "/") + "/models"
+}
+
+// ListModels enumerates the model IDs advertised by GET {base}/models. The
+// Anthropic Messages API and the OpenAI-compatible gateways that front it both
+// answer this route with a {"data":[{"id":...}]} list, so the settings UI can
+// offer a model picklist under provider=anthropic instead of erroring with
+// "provider does not support listing models". Implementing this satisfies the
+// probe's modelLister interface for the Anthropic provider.
+func (p *AnthropicProvider) ListModels(ctx context.Context) ([]string, error) {
+	data, err := (&apiRequest{client: p.client, timeout: timeoutFromConfig(p.config.Timeout)}).do(
+		ctx, "GET", p.modelsEndpoint(), nil, p.setAuthHeaders,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal models: %w", err)
+	}
+	ids := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 type cacheControlMarker struct {

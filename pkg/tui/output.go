@@ -48,9 +48,11 @@ type AgentOutput struct {
 	toolErrorCount int
 
 	// Transient UI.
-	mode RenderMode
-	tty  bool
-	live *LiveStatus
+	mode                   RenderMode
+	tty                    bool
+	interactiveInputActive bool
+	live                   *LiveStatus
+	split                  *SplitTerminal
 }
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
@@ -115,8 +117,6 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	return o
 }
 
-func AgentStreamingEnabled(_ *cfg.Option) bool { return true }
-
 // Stderr returns the stream writer's stderr for direct output.
 func (o *AgentOutput) Stderr() io.Writer { return o.stream.stderr }
 
@@ -125,6 +125,21 @@ func (o *AgentOutput) Stdout() io.Writer { return o.stream.stdout }
 
 // Markdown returns whether markdown rendering is enabled.
 func (o *AgentOutput) Markdown() bool { return o.stream.markdown }
+
+// SetSplitMode redirects all output through the split terminal's scroll region
+// and wires the live status into the fixed status bar.
+func (o *AgentOutput) SetSplitMode(st *SplitTerminal) {
+	if o == nil || st == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.split = st
+	outW := st.OutputWriter()
+	o.stream.stdout = outW
+	o.stream.stderr = outW
+	o.live.view.SetSplitTerminal(st)
+}
 
 // ---------------------------------------------------------------------------
 // Verbosity
@@ -247,8 +262,6 @@ func (o *AgentOutput) Queued(text string) {
 	}
 }
 
-func (o *AgentOutput) QueuedFollowUp(text string) { o.Queued("follow-up: " + text) }
-
 func (o *AgentOutput) Stopping() {
 	if o == nil || o.verbosity < 0 {
 		return
@@ -304,6 +317,20 @@ func (o *AgentOutput) EnsureStreamNewline() {
 	o.stream.EnsureNewline()
 }
 
+func (o *AgentOutput) SetInteractiveInputActive(active bool) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.interactiveInputActive = active
+	// In split mode the live status renders to a separate area, so we
+	// never need to stop it when readline becomes active.
+	if active && o.split == nil {
+		o.stopLive()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Event handling
 // ---------------------------------------------------------------------------
@@ -350,6 +377,11 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 		}
 		if o.canAnimate() {
 			o.live.MessageUpdate(event, contentDelta)
+		}
+
+	case agent.EventMessageEnd:
+		if event.Message.Role == "assistant" && len(event.Message.ToolCalls) > 0 {
+			o.stopLive()
 		}
 
 	case agent.EventToolExecutionStart:
@@ -418,6 +450,15 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 	case agent.EventEvalError:
 		o.stopLive()
 		o.evalError(event)
+	case agent.EventCompactStart:
+		o.stopLive()
+		o.compactStart(event)
+	case agent.EventCompactEnd:
+		o.stopLive()
+		o.compactEnd(event)
+	case agent.EventCompactError:
+		o.stopLive()
+		o.compactError(event)
 	}
 }
 
@@ -426,7 +467,15 @@ func (o *AgentOutput) HandleEvent(event agent.Event) {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) canAnimate() bool {
-	return o != nil && o.mode == ModeInteractive && o.tty && o.verbosity >= 0
+	if o == nil || o.mode != ModeInteractive || !o.tty || o.verbosity < 0 {
+		return false
+	}
+	// In split mode the status bar never overlaps the input area, so
+	// animation can continue while readline is active.
+	if o.split != nil {
+		return true
+	}
+	return !o.interactiveInputActive
 }
 
 func (o *AgentOutput) renderToolLine(ev agent.Event) string {
@@ -759,6 +808,38 @@ func (o *AgentOutput) evalError(event agent.Event) {
 		detail = event.EvalError
 	}
 	fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(detail+", continuing..."))
+}
+
+func (o *AgentOutput) compactStart(_ agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("⋯", output.ANSICyan)+" "+o.bold("compact")+"  "+o.dim("compacting context..."))
+}
+
+func (o *AgentOutput) compactEnd(event agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("✓", output.ANSIGreen)+" "+o.bold("compact")+"  "+
+			o.dim(fmt.Sprintf("~%d → ~%d tokens (%d messages kept)",
+				event.CompactTokensBefore, event.CompactTokensAfter, event.CompactKeptMessages)))
+}
+
+func (o *AgentOutput) compactError(_ agent.Event) {
+	w := o.Stderr()
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
+		o.color.Wrap("⚠", output.ANSIYellow)+" "+o.bold("compact")+"  "+o.dim("failed"))
 }
 
 func (o *AgentOutput) renderUserIntent(body string) {

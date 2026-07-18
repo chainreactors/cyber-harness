@@ -4,6 +4,8 @@ project_name: aiscan
 
 before:
   hooks:
+    - npm --prefix web/frontend ci
+    - npm --prefix web/frontend run build
     - go generate ./core/resources
 
 builds:
@@ -31,7 +33,7 @@ builds:
       - osusergo
       - netgo
     ldflags:
-      - -s -w
+      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
@@ -63,7 +65,7 @@ builds:
       - full
       - sqlite
     ldflags:
-      - -s -w
+      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
@@ -93,7 +95,7 @@ builds:
       - osusergo
       - netgo
     ldflags:
-      - -s -w
+      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:

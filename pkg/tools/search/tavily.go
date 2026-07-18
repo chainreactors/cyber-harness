@@ -49,7 +49,7 @@ func NewTavilySearch(builtinKeys string) *TavilySearch {
 	c := &TavilySearch{
 		client: &http.Client{
 			Timeout:   searchTimeout,
-			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+			Transport: proxyTransport(""),
 		},
 	}
 
@@ -82,21 +82,23 @@ func NewTavilySearch(builtinKeys string) *TavilySearch {
 	return c
 }
 
+// proxyTransport builds an HTTP transport that routes through proxy when it is a
+// valid URL, falling back to the environment proxy for an empty or unparseable
+// value.
+func proxyTransport(proxy string) *http.Transport {
+	t := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if proxy != "" {
+		if u, err := url.Parse(proxy); err == nil {
+			t.Proxy = http.ProxyURL(u)
+		}
+	}
+	return t
+}
+
 func (c *TavilySearch) SetProxy(proxyURLStr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	transport := &http.Transport{}
-	if proxyURLStr != "" {
-		proxyURL, err := url.Parse(proxyURLStr)
-		if err == nil {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		} else {
-			transport.Proxy = http.ProxyFromEnvironment
-		}
-	} else {
-		transport.Proxy = http.ProxyFromEnvironment
-	}
-	c.client.Transport = transport
+	c.client.Transport = proxyTransport(proxyURLStr)
 }
 
 func (c *TavilySearch) rotateKey() bool {
@@ -110,6 +112,16 @@ func (c *TavilySearch) rotateKey() bool {
 	return true
 }
 
+// currentAPIKey snapshots the active key index and value under the lock. The
+// agent runs tool calls in parallel, so a shared *TavilySearch may have Execute
+// racing rotateKey; callers must read the key through here rather than touch
+// c.apiKey/c.currentKey directly.
+func (c *TavilySearch) currentAPIKey() (int, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.currentKey, c.apiKey
+}
+
 func (c *TavilySearch) Execute(ctx context.Context, args []string) (string, error) {
 	query, num, err := parseTavilyArgs(args)
 	if err != nil {
@@ -118,9 +130,9 @@ func (c *TavilySearch) Execute(ctx context.Context, args []string) (string, erro
 
 	switch c.backend {
 	case backendTavily:
-		startKey := c.currentKey
+		startKey, key := c.currentAPIKey()
 		for {
-			result, err := c.searchTavily(ctx, query, num)
+			result, err := c.searchTavily(ctx, query, num, key)
 			if err == nil {
 				return result, nil
 			}
@@ -130,7 +142,8 @@ func (c *TavilySearch) Execute(ctx context.Context, args []string) (string, erro
 			if !c.rotateKey() {
 				break
 			}
-			if c.currentKey == startKey {
+			var idx int
+			if idx, key = c.currentAPIKey(); idx == startKey {
 				break
 			}
 		}
@@ -220,46 +233,77 @@ type tavilyResult struct {
 	Score   float64 `json:"score"`
 }
 
-func (c *TavilySearch) searchTavily(ctx context.Context, query string, num int) (string, error) {
-	reqBody := tavilyRequest{
-		Query:             query,
-		MaxResults:        num,
-		SearchDepth:       "basic",
-		IncludeAnswer:     true,
-		IncludeRawContent: false,
-	}
+// doTavilyRequest issues a single Tavily search and decodes the response. Both
+// searchTavily (with DuckDuckGo fallback) and ProbeTavily (no fallback) share
+// this request/response plumbing; only the client and the result shaping differ.
+func doTavilyRequest(ctx context.Context, client *http.Client, apiKey string, reqBody tavilyRequest) (tavilyResponse, error) {
+	var out tavilyResponse
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return out, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tavilySearchURL, strings.NewReader(string(bodyBytes)))
 	if err != nil {
-		return "", err
+		return out, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := c.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("tavily request failed: %w", err)
+		return out, fmt.Errorf("tavily request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return "", fmt.Errorf("read tavily response: %w", err)
+		return out, fmt.Errorf("read tavily response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("tavily returned HTTP %d: %s", resp.StatusCode, string(body))
+		return out, fmt.Errorf("tavily returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return out, fmt.Errorf("parse tavily response: %w", err)
+	}
+	return out, nil
+}
+
+func (c *TavilySearch) searchTavily(ctx context.Context, query string, num int, apiKey string) (string, error) {
+	resp, err := doTavilyRequest(ctx, c.client, apiKey, tavilyRequest{
+		Query:         query,
+		MaxResults:    num,
+		SearchDepth:   "basic",
+		IncludeAnswer: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return formatTavilyResults(resp, query), nil
+}
+
+// ProbeTavily verifies a single Tavily API key by issuing a minimal search
+// directly against the Tavily API. Unlike Execute, it never falls back to
+// DuckDuckGo, so an invalid or exhausted key surfaces as an error instead of
+// being silently masked by the fallback. A non-empty proxy routes the request.
+// On success it returns a short human-readable detail (e.g. "1 result").
+func ProbeTavily(ctx context.Context, apiKey, proxy string) (string, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return "", fmt.Errorf("tavily api key is empty")
 	}
 
-	var tavilyResp tavilyResponse
-	if err := json.Unmarshal(body, &tavilyResp); err != nil {
-		return "", fmt.Errorf("parse tavily response: %w", err)
-	}
+	client := &http.Client{Timeout: searchTimeout, Transport: proxyTransport(proxy)}
 
-	return formatTavilyResults(tavilyResp, query), nil
+	resp, err := doTavilyRequest(ctx, client, apiKey, tavilyRequest{
+		Query:       "ping",
+		MaxResults:  1,
+		SearchDepth: "basic",
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d results", len(resp.Results)), nil
 }
 
 func formatTavilyResults(resp tavilyResponse, query string) string {

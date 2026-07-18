@@ -36,6 +36,9 @@ type interactiveRunController struct {
 	onFinish func()
 
 	Eval *EvalSettings
+
+	compactContextTokens int
+	compactContextWindow int
 }
 
 func newInteractiveRunController(ctx context.Context, session *agent.Agent, output *AgentOutput) *interactiveRunController {
@@ -152,6 +155,21 @@ func (c *interactiveRunController) run(ctx context.Context, cancel context.Cance
 		return
 	}
 	c.output.Final(result.Output)
+
+	c.checkContextUsage(result)
+}
+
+func (c *interactiveRunController) checkContextUsage(result *agent.Result) {
+	if result == nil || result.ContextTokens <= 0 {
+		return
+	}
+	contextWindow := agent.ModelContextWindow(c.session.Cfg.Model)
+	if result.ContextTokens*100/contextWindow >= 80 {
+		c.mu.Lock()
+		c.compactContextTokens = result.ContextTokens
+		c.compactContextWindow = contextWindow
+		c.mu.Unlock()
+	}
 }
 
 func (c *interactiveRunController) finish() {

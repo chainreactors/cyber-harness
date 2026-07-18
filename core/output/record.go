@@ -61,6 +61,7 @@ func (r Record) Marshal() []byte {
 	return b
 }
 
+
 func ParseRecord(line []byte) (Record, error) {
 	var r Record
 	err := json.Unmarshal(line, &r)

@@ -20,11 +20,36 @@ type Message struct {
 	Payload  json.RawMessage `json:"payload,omitempty"`
 }
 
+// ExecPayload carries structured parameters for an "exec" message.
+// When Payload is populated, Command/Cwd/Timeout/Env are used instead of
+// the legacy Data field. If Payload is empty, Data is treated as the command.
+type ExecPayload struct {
+	Command string            `json:"command"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Timeout int               `json:"timeout,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// CommandSpec is the surface-neutral description of one user-facing "/verb" command.
+type CommandSpec struct {
+	Name        string   `json:"name"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Usage       string   `json:"usage,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
 type RegisterPayload struct {
-	Name     string        `json:"name"`
-	Commands []string      `json:"commands,omitempty"`
-	Identity AgentIdentity `json:"identity,omitempty"`
-	Stats    AgentStats    `json:"stats,omitempty"`
+	Name string `json:"name"`
+	// Commands is the LLM tool/pseudo-command registry (pkg/commands) the agent
+	// exposes to the model — distinct from CommandsMenu.
+	Commands []string `json:"commands,omitempty"`
+	// CommandsMenu is the agent's user-facing "/verb" catalog: the agent-scope,
+	// menu-visible commands it can run, plus one per loaded skill. The hub merges
+	// these with its own hub-scope commands to drive the web "/" menu and /help,
+	// so the surfaces never drift.
+	CommandsMenu []CommandSpec `json:"commands_menu,omitempty"`
+	Identity     AgentIdentity `json:"identity,omitempty"`
+	Stats        AgentStats    `json:"stats,omitempty"`
 }
 
 type AgentIdentity struct {
@@ -58,6 +83,17 @@ type AgentStats struct {
 	LastEvent        string `json:"last_event,omitempty"`
 }
 
+// ChatPayload is the WS payload for a "chat" message: it scopes the remote
+// agent conversation to a web session and carries optional Goal-mode run
+// controls. Empty EvalCriteria means a plain turn; a non-empty one makes the
+// agent run the evaluator loop against the criteria for up to EvalMaxRounds.
+type ChatPayload struct {
+	SessionID       string `json:"session_id,omitempty"`
+	EvalCriteria    string `json:"eval_criteria,omitempty"`
+	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
+	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
+}
+
 type FileUploadPayload struct {
 	Filename  string `json:"filename"`
 	FileSize  int64  `json:"file_size"`
@@ -70,6 +106,14 @@ type FileUploadResult struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 	Error    string `json:"error,omitempty"`
+}
+
+// FileRPCPayload carries the target path for Cairn runner file operations.
+// The file bytes travel in Message.DataB64 so the webagent transport remains
+// JSON-only even when the Cairn side uses binary WebSocket frames.
+type FileRPCPayload struct {
+	Path string `json:"path"`
+	Size int64  `json:"size,omitempty"`
 }
 
 type PTYPayload struct {
@@ -159,10 +203,10 @@ func FrameToMessage(frame pty.Frame) Message {
 			Singleton: frame.Singleton,
 		}
 		encodePayloadData(&payload, frame.Data)
-		msg.Payload = mustMarshal(payload)
+		msg.Payload = MustJSON(payload)
 	case pty.FrameOutput:
 		if frame.SessionID != "" {
-			msg.Payload = mustMarshal(map[string]any{"session_id": frame.SessionID})
+			msg.Payload = MustJSON(map[string]any{"session_id": frame.SessionID})
 		}
 		encodeMessageData(&msg, frame.Data)
 	case pty.FrameError:
@@ -172,7 +216,7 @@ func FrameToMessage(frame pty.Frame) Message {
 			msg.Data = string(frame.Data)
 		}
 	case pty.FrameOpened:
-		msg.Payload = mustMarshal(map[string]any{
+		msg.Payload = MustJSON(map[string]any{
 			"session_id": frame.SessionID,
 			"kind":       frame.Kind,
 			"name":       frame.Name,
@@ -180,16 +224,16 @@ func FrameToMessage(frame pty.Frame) Message {
 			"session":    frame.Session,
 		})
 	case pty.FrameAttached:
-		msg.Payload = mustMarshal(map[string]any{
+		msg.Payload = MustJSON(map[string]any{
 			"session_id": frame.SessionID,
 			"session":    frame.Session,
 		})
 	case pty.FrameDetached:
-		msg.Payload = mustMarshal(map[string]any{"session_id": frame.SessionID})
+		msg.Payload = MustJSON(map[string]any{"session_id": frame.SessionID})
 	case pty.FrameSessions:
-		msg.Payload = mustMarshal(map[string]any{"sessions": frame.Sessions})
+		msg.Payload = MustJSON(map[string]any{"sessions": frame.Sessions})
 	case pty.FrameClosed:
-		msg.Payload = mustMarshal(map[string]any{
+		msg.Payload = MustJSON(map[string]any{
 			"session_id": frame.SessionID,
 			"state":      frame.State,
 			"exit_code":  frame.ExitCode,
@@ -277,7 +321,7 @@ func encodePayloadData(payload *PTYPayload, data []byte) {
 	payload.DataB64 = base64.StdEncoding.EncodeToString(data)
 }
 
-func mustMarshal(v any) json.RawMessage {
+func MustJSON(v any) json.RawMessage {
 	data, _ := json.Marshal(v)
 	return data
 }

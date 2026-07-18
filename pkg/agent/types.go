@@ -81,6 +81,9 @@ const (
 	EventEvalStart          EventType = "eval_start"
 	EventEvalEnd            EventType = "eval_end"
 	EventEvalError          EventType = "eval_error"
+	EventCompactStart       EventType = "compact_start"
+	EventCompactEnd         EventType = "compact_end"
+	EventCompactError       EventType = "compact_error"
 )
 
 type StopReason string
@@ -120,6 +123,10 @@ type Event struct {
 	EvalPass        bool
 	EvalReason      string
 	EvalError       string
+
+	CompactTokensBefore int
+	CompactTokensAfter  int
+	CompactKeptMessages int
 }
 
 type TransformContextFunc func([]ChatMessage) []ChatMessage
@@ -232,7 +239,7 @@ func (c Config) init() Config {
 	if c.Logger == nil {
 		c.Logger = telemetry.NopLogger()
 	}
-	if c.MaxRetries < 0 {
+	if c.MaxRetries <= 0 {
 		c.MaxRetries = DefaultMaxRetries
 	}
 	if c.MaxResultSize <= 0 {

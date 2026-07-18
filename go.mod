@@ -6,22 +6,26 @@ require (
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
-	github.com/chainreactors/fingers v1.2.2-0.20260703124922-b8ac7e00cf68
-	github.com/chainreactors/gogo/v2 v2.14.2-0.20260704194421-e5ce938d9b51
+	github.com/chainreactors/fingers v1.2.2-0.20260704073236-3e22b6a528b9
+	github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226
 	github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645
+	github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
-	github.com/chainreactors/neutron v0.1.1-0.20260704194031-f57d0a560e32
-	github.com/chainreactors/proton v0.3.3-0.20260704194051-e7034d2bb8cb
+	github.com/chainreactors/neutron v0.1.1-0.20260710171341-456d36779ab2
+	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
 	github.com/chainreactors/proxyclient v1.1.1-0.20260529172347-2a80e08d5593
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
-	github.com/chainreactors/sdk v0.3.4-0.20260704194820-4141f24c2bcd
+	github.com/chainreactors/sdk v0.3.4-0.20260708104745-dcad8620f5e9
+	github.com/chainreactors/sdk/gogo v0.0.0-20260708104745-dcad8620f5e9
+	github.com/chainreactors/sdk/spray v0.0.0-20260708104745-dcad8620f5e9
+	github.com/chainreactors/sdk/zombie v0.0.0-20260708104745-dcad8620f5e9
 	github.com/chainreactors/spray v1.3.3-0.20260704194611-7ce7b850d447
-	github.com/chainreactors/tui/console v0.0.0-20260701051656-c5b85e7256a9
-	github.com/chainreactors/tui/readline v0.0.0-20260626181537-7c0eb4b933cd
-	github.com/chainreactors/utils v0.0.0-20260704063748-6f849f173481
-	github.com/chainreactors/utils/mitmproxy v0.0.0-20260630095004-c4fb7a13ed39
-	github.com/chainreactors/utils/parsers v0.0.2
-	github.com/chainreactors/utils/pty v0.0.0-20260630095004-c4fb7a13ed39
+	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
+	github.com/chainreactors/tui/readline v0.0.0-20260712082522-2ba36ad7841f
+	github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/parsers v0.0.3-0.20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/pty v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/zombie v1.3.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0
@@ -31,6 +35,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jessevdk/go-flags v1.6.1
+	github.com/mattn/go-runewidth v0.0.23
 	github.com/muesli/termenv v0.16.0
 	github.com/projectdiscovery/goflags v0.1.74
 	github.com/projectdiscovery/gologger v1.1.68
@@ -82,19 +87,18 @@ require (
 	github.com/bodgit/sevenzip v1.6.4 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
-	github.com/brianvoe/gofakeit/v7 v7.2.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
-	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260703124839-c4091ad1e02d // indirect
+	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
-	github.com/chainreactors/utils/cert v0.0.0-20260624181253-2b3d0b35862f // indirect
+	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
-	github.com/charmbracelet/bubbletea v1.3.10 // indirect
+	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/lipgloss v1.1.0 // indirect
+	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -147,8 +151,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gookit/goutil v0.7.5 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gosimple/slug v1.15.0 // indirect
-	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/gosnmp/gosnmp v1.43.2 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/happyhackingspace/dit v0.0.14 // indirect
@@ -156,10 +158,8 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/hdm/jarm-go v0.0.7 // indirect
 	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
 	github.com/huin/asn1ber v0.0.0-20120622192748-af09f62e6358 // indirect
-	github.com/iangcarroll/cookiemonster v1.6.0 // indirect
 	github.com/icholy/digest v1.1.0 // indirect
 	github.com/icodeface/tls v0.0.0-20230910023335-34df9250cd12 // indirect
 	github.com/imroc/req/v3 v3.57.0 // indirect
@@ -168,7 +168,6 @@ require (
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
 	github.com/jlaffaye/ftp v0.2.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kataras/jwt v0.1.8 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
@@ -184,7 +183,6 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/metacubex/utls v1.7.3 // indirect
 	github.com/mfonda/simhash v0.0.0-20151007195837-79f94a1100d6 // indirect
 	github.com/mholt/archiver v3.1.1+incompatible // indirect
@@ -214,9 +212,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/projectdiscovery/blackrock v0.0.1 // indirect
-	github.com/projectdiscovery/dsl v0.8.17 // indirect
 	github.com/projectdiscovery/fastdialer v0.5.6 // indirect
-	github.com/projectdiscovery/gostruct v0.0.2 // indirect
 	github.com/projectdiscovery/hmap v0.0.100 // indirect
 	github.com/projectdiscovery/mapcidr v1.1.97 // indirect
 	github.com/projectdiscovery/networkpolicy v0.1.37 // indirect
@@ -233,10 +229,10 @@ require (
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/sagernet/sing v0.7.6 // indirect
 	github.com/sagernet/sing-vmess v0.2.7 // indirect
+	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
-	github.com/sashabaranov/go-openai v1.37.0 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -267,7 +263,6 @@ require (
 	github.com/valyala/fasthttp v1.71.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/vbauerster/mpb/v8 v8.12.1 // indirect
-	github.com/vulncheck-oss/go-exploit v1.51.0 // indirect
 	github.com/wasilibs/go-re2 v1.11.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
 	github.com/weppos/publicsuffix-go v0.50.3-0.20260104170930-90713dec78f2 // indirect
@@ -310,3 +305,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
+
+replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
+
+replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320

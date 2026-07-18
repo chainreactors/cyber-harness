@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
@@ -377,5 +379,133 @@ func TestInferImageSupportModelRegistry(t *testing.T) {
 				t.Errorf("inferImageSupport(%q, %q) = %v, want %v", tt.provider, tt.model, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- Backoff & Retry-After parsing tests ---
+
+func TestRetryDelayBackoffSequence(t *testing.T) {
+	// RetryDelay keeps the original conservative policy (1s·2^attempt, cap 10s)
+	// for backward compatibility with external callers (runner, webagent).
+	want := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		10 * time.Second, // cap reached
+		10 * time.Second, // stays capped
+	}
+	for i, w := range want {
+		if got := RetryDelay(i); got != w {
+			t.Errorf("attempt %d: RetryDelay = %s, want %s", i, got, w)
+		}
+	}
+}
+
+func TestComputeRetryDelaySequence(t *testing.T) {
+	// New LLM retry policy: 0.5s base, doubling, capped at 32s (no jitter here).
+	want := []time.Duration{
+		500 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		32 * time.Second, // cap reached
+		32 * time.Second, // stays capped
+	}
+	for i, w := range want {
+		if got := computeRetryDelay(i, 0); got != w {
+			t.Errorf("attempt %d: computeRetryDelay = %s, want %s", i, got, w)
+		}
+	}
+}
+
+func TestRetryDelayJitterBounds(t *testing.T) {
+	// With jitter, delay must fall in [base, base + 0.25·base] (inclusive upper
+	// bound because jitterFrac can equal 1.0 in the test).
+	for attempt := 0; attempt < 8; attempt++ {
+		base := baseRetryDelay << uint(attempt)
+		if base > maxRetryDelay {
+			base = maxRetryDelay
+		}
+		upper := base + time.Duration(retryJitterFactor*float64(base))
+		for i := 0; i < 50; i++ {
+			got := computeRetryDelay(attempt, 1.0) // max jitter
+			if got < base || got > upper {
+				t.Errorf("attempt %d sample %d: got %s, want in [%s, %s]", attempt, i, got, base, upper)
+			}
+		}
+	}
+}
+
+func TestRetryAfterFromError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want time.Duration
+	}{
+		{
+			name: "seconds form",
+			err:  &APIError{StatusCode: 429, Header: http.Header{"Retry-After": []string{"30"}}},
+			want: 30 * time.Second,
+		},
+		{
+			name: "header absent",
+			err:  &APIError{StatusCode: 429},
+			want: 0,
+		},
+		{
+			name: "non-integer",
+			err:  &APIError{StatusCode: 429, Header: http.Header{"Retry-After": []string{"Wed, 21 Oct 2015 07:28:00 GMT"}}},
+			want: 0,
+		},
+		{
+			name: "wrapped APIError",
+			err:  fmt.Errorf("call failed: %w", &APIError{StatusCode: 429, Header: http.Header{"Retry-After": []string{"5"}}}),
+			want: 5 * time.Second,
+		},
+		{
+			name: "non-APIError",
+			err:  fmt.Errorf("plain error"),
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := retryAfterFromError(tt.err); got != tt.want {
+				t.Errorf("retryAfterFromError() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryDelayForHonorsRetryAfter(t *testing.T) {
+	err := &APIError{StatusCode: 429, Header: http.Header{"Retry-After": []string{"60"}}}
+	// Retry-After bypasses both the formula and the 32s cap.
+	if got := retryDelayFor(0, err); got != 60*time.Second {
+		t.Errorf("retryDelayFor with Retry-After=60 = %s, want 60s", got)
+	}
+}
+
+func TestRetryDelayForFallsBackToBackoffWhenNoHeader(t *testing.T) {
+	err := &APIError{StatusCode: 500} // no Header
+	got := retryDelayFor(2, err)
+	// attempt 2 base = 2s; with jitter it must stay in [2s, 2.5s)
+	if got < 2*time.Second || got >= 2500*time.Millisecond {
+		t.Errorf("retryDelayFor(attempt=2, no header) = %s, want in [2s, 2.5s)", got)
+	}
+}
+
+func TestIsRetryableNowIncludes408409(t *testing.T) {
+	for _, code := range []int{408, 409, 429, 500, 502, 503, 529} {
+		if !isRetryableError(&APIError{StatusCode: code}) {
+			t.Errorf("status %d should be retryable", code)
+		}
+	}
+	for _, code := range []int{400, 401, 403, 404} {
+		if isRetryableError(&APIError{StatusCode: code}) {
+			t.Errorf("status %d should NOT be retryable", code)
+		}
 	}
 }

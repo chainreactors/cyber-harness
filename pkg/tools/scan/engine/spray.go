@@ -46,8 +46,8 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	runCtx, cancel := sprayInvocationContext(ctx, opts)
 	sprayCtx := spray.NewContext().
 		WithContext(runCtx).
-		SetOption(buildSprayOption(opts)).
-		SetStatsHandler(opts.OnStats)
+		WithOption(buildSprayOption(opts)).
+		WithStatsHandler(opts.OnStats)
 
 	var resultCh <-chan sdktypes.Result
 	var err error

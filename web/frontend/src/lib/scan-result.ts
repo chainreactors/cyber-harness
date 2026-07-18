@@ -1,4 +1,7 @@
 import type { Asset, AssetItem, Loot, ScanResult } from '../api'
+import type { SCONode } from '@cyber/cstx-easm'
+import { buildSCOModel } from '@cyber/cstx-easm'
+import type { SCOResultModel } from '@cyber/cstx-easm'
 
 export const assetItemKind = {
   service: 'service',
@@ -22,21 +25,8 @@ export type BadgeSpec = {
   tone?: BadgeTone
 }
 
-export type ResultMetrics = {
-  assets: number
-  hosts: number
-  services: number
-  web: number
-  probes: number
-  fingers: number
-  loots: number
-  errors: number
-  duration: string
-}
-
 export type ResultModel = {
   hosts: HostGroup[]
-  metrics: ResultMetrics
 }
 
 export type HostGroup = {
@@ -55,7 +45,6 @@ export type ServiceNode = {
   target: string
   title: string
   summary: string
-  sources: string[]
   states: string[]
   statuses: string[]
   fingers: string[]
@@ -81,23 +70,22 @@ export type SitemapNode = {
   items: AssetItem[]
 }
 
-export function buildResultModel(result: ScanResult): ResultModel {
+export type { SCOResultModel, SCOHostGroup, SCOPortNode, SCOMetrics } from '@cyber/cstx-easm'
+
+export function isSCOModel(model: ResultModel | SCOResultModel): model is SCOResultModel {
+  return 'metrics' in model && 'ips' in (model as SCOResultModel).metrics
+}
+
+export function buildResultModel(result: ScanResult): ResultModel | SCOResultModel {
+  if (result.nodes && result.nodes.length > 0) {
+    return buildSCOModel(result.nodes, result.summary?.duration || '')
+  }
+
   const assets = normalizeAssets(result.assets || [])
   const hosts = buildHostGroups(assets)
 
   return {
     hosts,
-    metrics: {
-      assets: assets.length,
-      hosts: hosts.length,
-      services: result.summary.services,
-      web: result.summary.webs,
-      probes: result.summary.probes,
-      fingers: countFingerprints(assets),
-      loots: result.summary.loots || result.loots?.length || countLootItems(assets),
-      errors: result.summary.errors,
-      duration: result.summary.duration,
-    },
   }
 }
 
@@ -142,9 +130,13 @@ export function serviceNode(asset: ViewAsset): ServiceNode {
   const detailItems = asset.items.filter((item) => item.kind !== assetItemKind.path && !isAnalysisItem(item))
   const protocol = firstText(dataString(serviceItem, 'protocol'), dataString(serviceItem, 'service'))
   const service = firstText(dataString(serviceItem, 'service'), serviceItem?.title, protocol)
-  const host = dataString(serviceItem, 'ip') || 'Scan'
-  const port = dataString(serviceItem, 'port')
   const target = firstText(serviceItem?.target, asset.target)
+  // Web-only scans produce no `service` item (no port-scan result), so the host
+  // and port live only in the asset target URL. Fall back to parsing them out of
+  // the URL instead of collapsing every web asset under the literal "Scan" host.
+  const targetURL = parseURL(target)
+  const host = dataString(serviceItem, 'ip') || targetURL?.hostname || 'Scan'
+  const port = dataString(serviceItem, 'port') || targetURL?.port || ''
   const title = serviceTitle(asset, serviceItem, service)
   const summary = serviceSummary(asset, serviceItem, title, service)
   const protocolKey = protocol.toLowerCase()
@@ -160,7 +152,6 @@ export function serviceNode(asset: ViewAsset): ServiceNode {
     target,
     title,
     summary,
-    sources: sourceValues(asset.items),
     states: stateValues(asset.items),
     statuses: statusCodeValues(paths),
     fingers: fingerprintValues(asset.items),
@@ -252,6 +243,31 @@ export function pathSearch(item: AssetItem) {
   return idx >= 0 ? path.slice(idx) : ''
 }
 
+// Short content-type token for an endpoint (JS / JSON / CSS / …), derived from
+// the probe's content_type header, falling back to the URL extension so it
+// still flags JS bundles etc. on scans that don't surface the header. HTML —
+// the default page type — deliberately returns '' so it never adds noise.
+export function contentToken(item: AssetItem): string {
+  const ct = dataString(item, 'content_type').toLowerCase()
+  const pathname = (dataString(item, 'path') || webPath(item.target)).split('?')[0].toLowerCase()
+  const ext = pathname.includes('.') ? pathname.slice(pathname.lastIndexOf('.') + 1) : ''
+  if (ct.includes('json') || ext === 'json') return 'JSON'
+  if (ct.includes('javascript') || /^m?jsx?$/.test(ext)) return 'JS'
+  if (ct.includes('css') || ext === 'css') return 'CSS'
+  if (ct.includes('xml') || ext === 'xml') return 'XML'
+  if (ct.includes('html')) return ''
+  if (ct.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'bmp'].includes(ext)) return 'IMG'
+  if (ct.includes('font') || ['woff', 'woff2', 'ttf', 'otf', 'eot'].includes(ext)) return 'FONT'
+  if (ct.includes('pdf') || ext === 'pdf') return 'PDF'
+  if (ct.startsWith('text/plain') || ['txt', 'log', 'map'].includes(ext)) return 'TXT'
+  return ''
+}
+
+// Redirect destination for an endpoint (empty when the probe was not a redirect).
+export function redirectTarget(item: AssetItem): string {
+  return dataString(item, 'redirect_url')
+}
+
 export function pathIdentity(item: AssetItem) {
   return `${canonicalKey(dataString(item, 'url') || item.target || dataString(item, 'path'))}|host=${dataString(item, 'host_header')}`
 }
@@ -339,10 +355,6 @@ export function statusCodeTone(status?: string): BadgeTone {
   return 'muted'
 }
 
-export function formatCount(count: number, singular: string) {
-  return `${count} ${count === 1 ? singular : `${singular}s`}`
-}
-
 function serviceTitle(asset: ViewAsset, serviceItem: AssetItem | undefined, service: string) {
   const assetTitle = firstText(asset.title)
   if (assetTitle && assetTitle !== asset.target && labelKey(assetTitle) !== labelKey(service)) {
@@ -360,21 +372,12 @@ function serviceSummary(asset: ViewAsset, serviceItem: AssetItem | undefined, ti
   return firstText(...values.filter((value) => labelKey(value) !== labelKey(title) && labelKey(value) !== labelKey(service)))
 }
 
-function countLootItems(assets: ViewAsset[]) {
-  return assets.reduce((sum, asset) => (
-    sum + asset.items.filter((item) => (
-      item.kind === assetItemKind.loot && dataString(item, 'kind').toLowerCase() !== 'fingerprint'
-    )).length
-  ), 0)
-}
-
-function countFingerprints(assets: ViewAsset[]) {
-  return uniqueStrings(assets.flatMap((asset) => fingerprintValues(asset.items))).length
-}
-
 function serviceSort(a: ServiceNode, b: ServiceNode) {
   const ap = Number.parseInt(a.port, 10)
   const bp = Number.parseInt(b.port, 10)
+  if (Number.isFinite(ap) !== Number.isFinite(bp)) {
+    return Number.isFinite(ap) ? -1 : 1
+  }
   if (Number.isFinite(ap) && Number.isFinite(bp) && ap !== bp) {
     return ap - bp
   }
@@ -554,19 +557,24 @@ export type FindingItem = {
   raw?: AssetItem | Loot
 }
 
-export type FindingsSummaryModel = {
-  byPriority: Record<string, FindingItem[]>
-  byStatus: Record<string, FindingItem[]>
-  aiVerifiedCount: number
-  totalFindings: number
-  topFinding?: FindingItem
-}
-
 export function serviceAIStatus(service: ServiceNode): 'verified' | 'sniper' | 'deep' | null {
   if (service.analysisItems.some(i => i.source === 'verify' && i.status === 'confirmed')) return 'verified'
   if (service.analysisItems.some(i => i.source === 'sniper')) return 'sniper'
   if (service.analysisItems.some(i => i.source === 'deep')) return 'deep'
   return null
+}
+
+/**
+ * A finding's target is "navigable" only when it is an absolute http(s) URL we
+ * can open in a browser tab. Bare host:port / service targets (e.g. an ssh
+ * service on :22) return null so the UI never renders a link that 404s or
+ * points at a non-web port. Lets findings click through to the live target.
+ */
+export function findingTargetURL(target?: string): string | null {
+  const parsed = parseURL(target)
+  if (!parsed) return null
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  return parsed.href
 }
 
 export function buildFindings(result: ScanResult): FindingItem[] {
@@ -596,6 +604,11 @@ export function buildFindings(result: ScanResult): FindingItem[] {
     for (const item of asset.items || []) {
       if (!isAnalysisItem(item)) continue
       if (item.kind === 'error') continue
+      // Every loot in result.loots is already emitted above, and the backend
+      // mirrors each loot into its asset as a 'loot' item (isAnalysisItem keeps
+      // the non-fingerprint ones). Counting those here would double every vuln/
+      // weakpass finding, so skip them — result.loots is the single source.
+      if (item.kind === assetItemKind.loot) continue
       const id = `item:${asset.target}:${item.source}:${item.kind}:${item.title || item.summary || ''}`
       if (seen.has(id)) continue
       seen.add(id)
@@ -627,34 +640,6 @@ export function buildFindings(result: ScanResult): FindingItem[] {
   })
 
   return findings
-}
-
-export function buildFindingsSummary(result: ScanResult): FindingsSummaryModel | null {
-  const findings = buildFindings(result)
-  if (findings.length === 0) return null
-
-  const byPriority: Record<string, FindingItem[]> = {}
-  const byStatus: Record<string, FindingItem[]> = {}
-
-  for (const f of findings) {
-    ;(byPriority[f.priority] ||= []).push(f)
-    if (f.source) {
-      const key = f.status || 'unknown'
-      ;(byStatus[key] ||= []).push(f)
-    }
-  }
-
-  const aiVerifiedCount = findings.filter(
-    f => f.source === 'verify' && f.status === 'confirmed',
-  ).length
-
-  return {
-    byPriority,
-    byStatus,
-    aiVerifiedCount,
-    totalFindings: findings.length,
-    topFinding: findings[0],
-  }
 }
 
 function normalizeLootKind(kind?: string): FindingItem['kind'] {

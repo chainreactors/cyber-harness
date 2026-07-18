@@ -135,13 +135,12 @@ func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 	flagValues := flags{
 		Mode:    scanModeFull,
 		Ports:   "top100",
-		Port:    "80,443",
 		Threads: 77, // set internally by derivePerInvocationThreads
 		Timeout: 6,
 	}
 	opts = resolveScanOptions(flagValues)
-	if opts.Discovery.Ports != "80,443" {
-		t.Fatalf("discovery ports = %q, want --port override", opts.Discovery.Ports)
+	if opts.Discovery.Ports != "top100" {
+		t.Fatalf("discovery ports = %q, want --ports override", opts.Discovery.Ports)
 	}
 	if opts.Discovery.Threads != 77 || opts.Discovery.Timeout != 6 {
 		t.Fatalf("discovery options = %#v", opts.Discovery)
@@ -185,20 +184,6 @@ func TestScanRejectsRemovedAIFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "ai") {
 		t.Fatalf("error = %v, want unknown ai flag", err)
-	}
-}
-
-func TestScanAcceptsDeprecatedCompatibilityFlags(t *testing.T) {
-	cmd := New(&engine.Set{})
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{
-		"-i", "http://127.0.0.1",
-		"--verify-timeout", "1",
-		"--port", "top100",
-		"--no-color",
-	})
-	if err != nil {
-		t.Fatalf("Execute() with deprecated compatibility flags error = %v", err)
 	}
 }
 
@@ -824,7 +809,7 @@ func TestLootPriorityDefaults(t *testing.T) {
 	if got := wp.Priority; got != string(priorityHigh) {
 		t.Fatalf("weakpass priority = %s, want %s", got, priorityHigh)
 	}
-	vl := vulnLoot(&sdktypes.VulnResult{Target: "http://127.0.0.1", TemplateID: "test", Severity: "high", TemplateName: "test high"})
+	vl := vulnLoot(&sdktypes.TemplateResult{Target: "http://127.0.0.1", TemplateID: "test", Severity: "high", TemplateName: "test high"})
 	if got := vl.Priority; got != string(priorityHigh) {
 		t.Fatalf("vuln priority = %s, want %s", got, priorityHigh)
 	}

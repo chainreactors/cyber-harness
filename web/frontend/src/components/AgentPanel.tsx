@@ -1,63 +1,70 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Circle, Monitor, RefreshCw, X } from 'lucide-react'
-import { listAgents } from '../api'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
+import { Monitor, Search } from 'lucide-react'
 import type { AgentInfo } from '../api'
-import AgentTerminal from './terminal'
-import { cn } from '@aspect/theme'
-import { Spinner } from '@aspect/ui'
+// Lazy — same @xterm chunk App splits; a static import here would pull it back
+// into the first-paint bundle.
+const AgentTerminal = lazy(() => import('./terminal'))
+import {
+  Badge,
+  EmptyState,
+  Input,
+  ListRow,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  StatusDot,
+} from '@cyber/ui'
 
 interface AgentPanelProps {
   open: boolean
+  /** The roster from useChatSession — avoids a redundant listAgents poll. */
+  agents: AgentInfo[]
+  /** When opened from a deck node click, focus this agent's console. */
+  focusAgentID?: string
   onClose: () => void
 }
 
-export default function AgentPanel({ open, onClose }: AgentPanelProps) {
-  const { agents, error, loading, refresh, selected, selectedID, setSelectedID } = useAgentDirectory(open)
+export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, onClose }: AgentPanelProps) {
+  const { t } = useTranslation('agent')
+  const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusAgentID)
   const showAgentList = agents.length > 1
 
-  if (!open) return null
-
+  // Sheet is a controlled Radix dialog: it owns the overlay, right-slide
+  // animation, focus trap/restore, Esc and the corner close button — a11y the
+  // panel previously hand-rolled.
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-background/70 backdrop-blur-sm">
-      <div className="flex h-full w-full max-w-7xl flex-col border-l border-border bg-card shadow-xl">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 border-l border-border/70 bg-card p-0 sm:max-w-7xl"
+      >
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4 pr-12">
           <div className="flex min-w-0 items-center gap-3">
             <Monitor className="h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="text-sm font-medium text-foreground">Agent Console</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                <SheetTitle className="text-sm font-medium text-foreground">{t('agentConsole')}</SheetTitle>
+                <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
                   {agents.length}
-                </span>
+                </Badge>
               </div>
-              <div className="truncate text-xs text-muted-foreground" title={selected ? agentDetails(selected) : undefined}>
-                {selected ? `${selected.name} · ${selected.busy ? 'busy' : 'idle'}` : 'No agent selected'}
-              </div>
+              <SheetDescription
+                className="truncate text-xs text-muted-foreground"
+                title={selected ? agentDetails(selected) : undefined}
+              >
+                {selected ? `${selected.name} · ${selected.busy ? t('busy') : t('idle')}` : t('noAgentSelected')}
+              </SheetDescription>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label="Close agents"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
         <div className="min-h-0 flex-1">
-          {loading ? (
-            <div className="flex h-32 items-center justify-center text-muted-foreground">
-              <Spinner className="h-5 w-5" />
-            </div>
-          ) : error ? (
-            <div className="m-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          ) : agents.length === 0 ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Monitor className="h-8 w-8 opacity-20" />
-              <p className="text-sm">No agents connected</p>
+          {agents.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <EmptyState icon={Monitor} title={t('noAgentsConnected')} />
             </div>
           ) : (
             <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -65,113 +72,134 @@ export default function AgentPanel({ open, onClose }: AgentPanelProps) {
                 <AgentList
                   agents={agents}
                   selectedID={selectedID}
-                  onRefresh={() => refresh(true)}
                   onSelect={setSelectedID}
                 />
               )}
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-                {selected && <AgentTerminal agent={selected} />}
+                {selected && (
+                  <Suspense fallback={<div className="flex-1" />}>
+                    <AgentTerminal agent={selected} />
+                  </Suspense>
+                )}
               </section>
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 
-function useAgentDirectory(open: boolean) {
-  const [agents, setAgents] = useState<AgentInfo[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+// Derives selection state from the parent-provided roster (useChatSession
+// already polls listAgents every 5s). No internal fetch or polling — the agent
+// list is a prop, so the panel never double-polls.
+function useAgentDirectory(open: boolean, roster: AgentInfo[], focusAgentID?: string) {
   const [selectedID, setSelectedID] = useState('')
 
-  const refresh = useCallback((silent = false) => {
-    if (!silent) {
-      setLoading(true)
-      setError('')
+  // Keep selection valid as the roster changes (agents disconnect / reconnect).
+  useEffect(() => {
+    setSelectedID((current) => roster.some((a) => a.id === current) ? current : roster[0]?.id || '')
+  }, [roster])
+
+  // Focus a specific node when the panel is opened from a deck node click.
+  // Apply it exactly ONCE per open/focus request: `roster` is in the deps only
+  // so we can wait for the roster to load, but the 5s poll replaces `roster`
+  // every tick — without this guard the effect would re-fire and yank the
+  // selection back to the focused node, defeating any manual agent switch.
+  const focusAppliedRef = useRef(false)
+  useEffect(() => {
+    focusAppliedRef.current = false
+  }, [open, focusAgentID])
+  useEffect(() => {
+    if (focusAppliedRef.current) return
+    if (open && focusAgentID && roster.some((a) => a.id === focusAgentID)) {
+      setSelectedID(focusAgentID)
+      focusAppliedRef.current = true
     }
-    return listAgents()
-      .then((items) => {
-        setAgents(items)
-        setSelectedID((current) => items.some((agent) => agent.id === current) ? current : items[0]?.id || '')
-      })
-      .catch((err: Error) => {
-        if (!silent) setError(err.message || 'Failed to load agents')
-      })
-      .finally(() => {
-        if (!silent) setLoading(false)
-      })
-  }, [])
+  }, [open, focusAgentID, roster])
 
-  useEffect(() => {
-    if (!open) return
-    refresh()
-  }, [open, refresh])
+  const selected = roster.find((agent) => agent.id === selectedID) || roster[0] || null
 
-  useEffect(() => {
-    if (!open) return
-    const interval = setInterval(() => refresh(true), 5000)
-    return () => clearInterval(interval)
-  }, [open, refresh])
-
-  const selected = agents.find((agent) => agent.id === selectedID) || agents[0] || null
-
-  return { agents, error, loading, refresh, selected, selectedID, setSelectedID }
+  return { agents: roster, selected, selectedID, setSelectedID }
 }
 
 function AgentList({
   agents,
-  onRefresh,
   onSelect,
   selectedID,
 }: {
   agents: AgentInfo[]
-  onRefresh: () => void
   onSelect: (id: string) => void
   selectedID: string
 }) {
+  const { t } = useTranslation('agent')
+  const [query, setQuery] = useState('')
+
+  // Busy agents first, then alphabetical — keeps active nodes at the top.
+  const sorted = useMemo(
+    () =>
+      [...agents].sort((a, b) => {
+        if (a.busy !== b.busy) return a.busy ? -1 : 1
+        return (a.name || '').localeCompare(b.name || '')
+      }),
+    [agents],
+  )
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return sorted
+    return sorted.filter((a) =>
+      `${a.name} ${a.identity?.model || ''} ${a.identity?.provider || ''} ${a.identity?.hostname || ''}`
+        .toLowerCase()
+        .includes(q),
+    )
+  }, [sorted, query])
+  const busy = agents.filter((a) => a.busy).length
+  const showFilter = agents.length > 6
+
   return (
     <aside className="flex max-h-52 w-full shrink-0 flex-col border-b border-border lg:max-h-none lg:w-64 lg:border-b-0 lg:border-r">
-      <div className="flex h-10 items-center justify-between border-b border-border px-3">
-        <span className="text-xs font-medium uppercase text-muted-foreground">Agents</span>
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Refresh agents"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-        </button>
+      <div className="flex h-10 items-center border-b border-border px-3">
+        <span className="text-xs font-medium uppercase text-muted-foreground">
+          {t('agents')}
+          <span className="ml-1.5 font-mono text-[10px] normal-case text-muted-foreground/60">
+            {busy}/{agents.length}
+          </span>
+        </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
-        {agents.map((agent) => (
-          <button
-            key={agent.id}
-            type="button"
-            onClick={() => onSelect(agent.id)}
-            title={agentDetails(agent)}
-            className={cn(
-              'mb-1 flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
-              selectedID === agent.id
-                ? 'bg-primary/10 text-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-            )}
-          >
-            <Circle
-              className={cn(
-                'mt-1 h-2.5 w-2.5 shrink-0 fill-current',
-                agent.busy ? 'text-warning' : 'text-primary',
-              )}
+      {showFilter && (
+        <div className="border-b border-border p-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('filterAgents')}
+              aria-label={t('filterAgents')}
+              className="h-8 pl-7 text-xs"
             />
-            <span className="min-w-0 flex-1">
+          </div>
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {filtered.length === 0 ? (
+          <EmptyState compact title={t('noMatchingAgents')} />
+        ) : (
+          filtered.map((agent) => (
+            <ListRow
+              key={agent.id}
+              active={selectedID === agent.id}
+              leading={<StatusDot status={agent.busy ? 'warning' : 'info'} className="mt-1" />}
+              onClick={() => onSelect(agent.id)}
+              title={agentDetails(agent)}
+              className="mb-1"
+            >
               <span className="block truncate text-sm font-medium">{agent.name}</span>
               <span className="mt-0.5 block truncate text-xs">
-                {agent.busy ? 'busy' : 'idle'} · {formatRelativeTime(agent.connected_at)}
+                {agent.busy ? t('busy') : t('idle')} · {formatRelativeTime(agent.connected_at, t)}
               </span>
-            </span>
-          </button>
-        ))}
+            </ListRow>
+          ))
+        )}
       </div>
     </aside>
   )
@@ -208,15 +236,15 @@ function formatDateTime(iso: string) {
   }
 }
 
-function formatRelativeTime(iso: string): string {
+function formatRelativeTime(iso: string, t: TFunction<'agent'>): string {
   try {
     const diff = Date.now() - new Date(iso).getTime()
     const mins = Math.floor(diff / 60000)
-    if (mins < 1) return 'just now'
-    if (mins < 60) return `${mins}m ago`
+    if (mins < 1) return t('justNow')
+    if (mins < 60) return t('minutesAgo', { count: mins })
     const hours = Math.floor(mins / 60)
-    if (hours < 24) return `${hours}h ago`
-    return `${Math.floor(hours / 24)}d ago`
+    if (hours < 24) return t('hoursAgo', { count: hours })
+    return t('daysAgo', { count: Math.floor(hours / 24) })
   } catch {
     return ''
   }

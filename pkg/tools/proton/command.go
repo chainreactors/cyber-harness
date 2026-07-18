@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
@@ -43,6 +45,11 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 
 func (c *Command) WithProxy(proxy string) *Command {
 	c.Proxy = proxy
+	return c
+}
+
+func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
+	c.DataBus = bus
 	return c
 }
 
@@ -134,7 +141,8 @@ type protonFlags struct {
 	Debug   bool `long:"debug" description:"enable debug logging"`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("proton", &err)
 	args = c.resolveRelativePaths(args)
 	var flags protonFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
@@ -240,6 +248,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 		if uf.Class == "extract" {
 			atomic.AddInt64(&extractCount, 1)
 		}
+		c.EmitDataCtx(ctx, "proton", output.ToolDataVuln, uf.FilePath, &uf)
 		writeFinding(commands.Output, uf, flags.JSON, inputs[0])
 		if fileOut != nil {
 			writeFinding(fileOut, uf, flags.JSON, inputs[0])
@@ -361,9 +370,35 @@ func (c *Command) resolveRelativePaths(args []string) []string {
 
 // --- output ---
 
+// jsonFinding is proton's nuclei-style JSON contract. It deliberately uses
+// hyphenated keys (template-id/template-name) rather than marshaling
+// file.Finding directly, which would leak the internal parsers.FindingResult
+// tags (template_id/template_name) and break consumers expecting nuclei output.
+type jsonFinding struct {
+	TemplateID   string   `json:"template-id"`
+	TemplateName string   `json:"template-name,omitempty"`
+	Severity     string   `json:"severity,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Matched      bool     `json:"matched"`
+	Extracted    bool     `json:"extracted"`
+	Class        string   `json:"class,omitempty"`
+	File         string   `json:"file,omitempty"`
+	Events       any      `json:"events,omitempty"`
+}
+
 func writeFinding(w interface{ Write([]byte) (int, error) }, f file.Finding, jsonMode bool, baseDir string) {
 	if jsonMode {
-		data, _ := json.Marshal(f)
+		data, _ := json.Marshal(jsonFinding{
+			TemplateID:   f.TemplateID,
+			TemplateName: f.TemplateName,
+			Severity:     f.Severity,
+			Tags:         f.Tags,
+			Matched:      f.Matched,
+			Extracted:    f.Extracted,
+			Class:        f.Class,
+			File:         f.FilePath,
+			Events:       f.Events,
+		})
 		fmt.Fprintln(w, string(data))
 		return
 	}
@@ -473,7 +508,7 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 		}
 		return nil
 	}); walkErr != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "proton: walk %s: %v\n", target, walkErr)
+		fmt.Fprintf(commands.Output, "proton: walk %s: %v\n", target, walkErr)
 	}
 	close(jobCh)
 	wg.Wait()

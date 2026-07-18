@@ -14,6 +14,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 const (
@@ -158,7 +159,8 @@ func NewFetchCommand() *FetchCommand {
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
 
-func (c *FetchCommand) Execute(ctx context.Context, args []string) error {
+func (c *FetchCommand) Execute(ctx context.Context, args []string) (err error) {
+	defer telemetry.RecoverAsError("fetch", &err)
 	rawURL, extract, err := parseFetchArgs(args)
 	if err != nil {
 		return err
@@ -550,8 +552,9 @@ var (
 
 	allTagRe = regexp.MustCompile(`<[^>]+>`)
 
-	multiNewlineRe = regexp.MustCompile(`\n{4,}`)
-	multiSpaceRe   = regexp.MustCompile(`[ \t]{2,}`)
+	multiNewlineRe    = regexp.MustCompile(`\n{4,}`)
+	multiSpaceRe      = regexp.MustCompile(`[ \t]{2,}`)
+	blankLineSplitRe  = regexp.MustCompile(`\n\s*\n`)
 
 	commentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
 )
@@ -696,7 +699,7 @@ func extractTerms(hint string) []string {
 }
 
 func splitContentBlocks(content string) []string {
-	parts := regexp.MustCompile(`\n\s*\n`).Split(content, -1)
+	parts := blankLineSplitRe.Split(content, -1)
 	blocks := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)

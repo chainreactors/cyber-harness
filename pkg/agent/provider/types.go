@@ -3,8 +3,8 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
-
 )
 
 // CacheRetention controls prompt caching behavior across providers.
@@ -236,10 +236,11 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 }
 
 type APIError struct {
-	Message    string `json:"message"`
-	Type       string `json:"type"`
-	Code       string `json:"code"`
-	StatusCode int    `json:"-"`
+	Message    string      `json:"message"`
+	Type       string      `json:"type"`
+	Code       string      `json:"code"`
+	StatusCode int         `json:"-"`
+	Header     http.Header `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -254,7 +255,7 @@ func (e *APIError) Error() string {
 
 func (e *APIError) IsRetryable() bool {
 	switch e.StatusCode {
-	case 429, 500, 502, 503, 529:
+	case 408, 409, 429, 500, 502, 503, 529:
 		return true
 	default:
 		return false

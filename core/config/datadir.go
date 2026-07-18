@@ -10,6 +10,7 @@ import (
 const dataDirName = ".aiscan"
 
 var (
+	dataDirMu       sync.Mutex
 	resolvedDataDir string
 	dataDirOnce     sync.Once
 )
@@ -17,13 +18,17 @@ var (
 // SetDataDir sets the data directory explicitly (from -c/config).
 // Must be called before any DataDir() call (typically during config resolution).
 func SetDataDir(dir string) {
+	dataDirMu.Lock()
 	resolvedDataDir = dir
+	dataDirMu.Unlock()
 }
 
 // DataDir returns the resolved .aiscan data directory.
 // Priority: AISCAN_DATA_DIR env > config/CLI --data-dir > <binary_dir>/.aiscan
 func DataDir() string {
 	dataDirOnce.Do(func() {
+		dataDirMu.Lock()
+		defer dataDirMu.Unlock()
 		if v := strings.TrimSpace(os.Getenv("AISCAN_DATA_DIR")); v != "" {
 			resolvedDataDir = v
 		}
@@ -35,6 +40,8 @@ func DataDir() string {
 			}
 		}
 	})
+	dataDirMu.Lock()
+	defer dataDirMu.Unlock()
 	return resolvedDataDir
 }
 

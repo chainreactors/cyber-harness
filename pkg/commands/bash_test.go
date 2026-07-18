@@ -11,6 +11,7 @@ import (
 
 	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 // ---------------------------------------------------------------------------
@@ -58,9 +59,9 @@ func (c *outputCommand) Execute(_ context.Context, _ []string) error {
 // panicTool is a test tool that always panics.
 type panicTool struct{ msg string }
 
-func (t *panicTool) Name() string                          { return "panic_tool" }
-func (t *panicTool) Description() string                   { return "always panics" }
-func (t *panicTool) Definition() commands.ToolDefinition   { return commands.ToolDefinition{} }
+func (t *panicTool) Name() string                        { return "panic_tool" }
+func (t *panicTool) Description() string                 { return "always panics" }
+func (t *panicTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
 func (t *panicTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
 	panic(t.msg)
 }
@@ -68,11 +69,48 @@ func (t *panicTool) Execute(_ context.Context, _ string) (commands.ToolResult, e
 // normalTool returns a result without panicking.
 type normalTool struct{}
 
-func (t *normalTool) Name() string                          { return "normal_tool" }
-func (t *normalTool) Description() string                   { return "works fine" }
-func (t *normalTool) Definition() commands.ToolDefinition   { return commands.ToolDefinition{} }
+func (t *normalTool) Name() string                        { return "normal_tool" }
+func (t *normalTool) Description() string                 { return "works fine" }
+func (t *normalTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
 func (t *normalTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
 	return commands.TextResult("hello"), nil
+}
+
+type testLogger struct{}
+
+func (*testLogger) Debugf(string, ...any)     {}
+func (*testLogger) Infof(string, ...any)      {}
+func (*testLogger) Warnf(string, ...any)      {}
+func (*testLogger) Errorf(string, ...any)     {}
+func (*testLogger) Importantf(string, ...any) {}
+
+type loggerAwareCommand struct {
+	name   string
+	logger telemetry.Logger
+}
+
+func (c *loggerAwareCommand) Name() string  { return c.name }
+func (c *loggerAwareCommand) Usage() string { return c.name }
+func (c *loggerAwareCommand) Execute(_ context.Context, _ []string) error {
+	return nil
+}
+func (c *loggerAwareCommand) InitLogger(logger telemetry.Logger) {
+	c.logger = logger
+}
+
+type loggerAwareTool struct {
+	name   string
+	logger telemetry.Logger
+}
+
+func (t *loggerAwareTool) Name() string                        { return t.name }
+func (t *loggerAwareTool) Description() string                 { return t.name }
+func (t *loggerAwareTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
+func (t *loggerAwareTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
+	return commands.TextResult("ok"), nil
+}
+func (t *loggerAwareTool) InitLogger(logger telemetry.Logger) {
+	t.logger = logger
 }
 
 func bashArgs(cmd string) string {
@@ -95,6 +133,24 @@ func newBashWithPseudo(dir string, cmds ...*outputCommand) *commands.BashTool {
 	)
 	bash.Manager().SetWorkDir(dir)
 	return bash
+}
+
+func TestCommandRegistrySetLoggerRebindsCommandsAndTools(t *testing.T) {
+	reg := commands.NewRegistry()
+	cmd := &loggerAwareCommand{name: "sample"}
+	tool := &loggerAwareTool{name: "sample_tool"}
+	logger := &testLogger{}
+
+	reg.Register(cmd, "test")
+	reg.RegisterTool(tool)
+	reg.SetLogger(logger)
+
+	if cmd.logger != logger {
+		t.Fatalf("command logger not rebound")
+	}
+	if tool.logger != logger {
+		t.Fatalf("tool logger not rebound")
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,13 +21,14 @@ type WSMessage = webproto.Message
 
 // AgentInfo is the public view of a connected agent.
 type AgentInfo struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Commands  []string               `json:"commands,omitempty"`
-	Busy      bool                   `json:"busy"`
-	ConnectAt time.Time              `json:"connected_at"`
-	Identity  webproto.AgentIdentity `json:"identity,omitempty"`
-	Stats     webproto.AgentStats    `json:"stats,omitempty"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Commands      []string               `json:"commands,omitempty"`
+	CommandsMenu  []webproto.CommandSpec       `json:"commands_menu,omitempty"`
+	Busy          bool                   `json:"busy"`
+	ConnectAt     time.Time              `json:"connected_at"`
+	Identity      webproto.AgentIdentity `json:"identity,omitempty"`
+	Stats         webproto.AgentStats    `json:"stats,omitempty"`
 }
 
 type taskResult struct {
@@ -37,14 +39,15 @@ type taskResult struct {
 }
 
 type remoteAgent struct {
-	id        string
-	name      string
-	commands  []string
-	conn      *websocket.Conn
-	sendCh    chan WSMessage
-	connectAt time.Time
-	identity  webproto.AgentIdentity
-	stats     webproto.AgentStats
+	id            string
+	name          string
+	commands      []string
+	commandsMenu  []webproto.CommandSpec
+	conn          *websocket.Conn
+	sendCh        chan WSMessage
+	connectAt     time.Time
+	identity      webproto.AgentIdentity
+	stats         webproto.AgentStats
 
 	mu    sync.Mutex
 	tasks map[string]chan taskResult
@@ -56,14 +59,25 @@ func (a *remoteAgent) info() AgentInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return AgentInfo{
-		ID:        a.id,
-		Name:      a.name,
-		Commands:  a.commands,
-		Busy:      len(a.tasks) > 0,
-		ConnectAt: a.connectAt,
-		Identity:  a.identity,
-		Stats:     a.stats,
+		ID:            a.id,
+		Name:          a.name,
+		Commands:      a.commands,
+		CommandsMenu:  a.commandsMenu,
+		Busy:          len(a.tasks) > 0,
+		ConnectAt:     a.connectAt,
+		Identity:      a.identity,
+		Stats:         a.stats,
 	}
+}
+
+// commandSpecs returns the agent's reported "/verb" catalog (its agent-scope
+// menu commands plus one per loaded skill). Immutable after register, so it
+// needs no lock. The hub merges it with its hub-scope commands in SessionMenu.
+func (a *remoteAgent) commandSpecs() []webproto.CommandSpec {
+	if a == nil {
+		return nil
+	}
+	return a.commandsMenu
 }
 
 // SessionLookup resolves a task ID to its owning chat session.
@@ -89,6 +103,7 @@ type AgentPool struct {
 	ptySubs        map[string]chan WSMessage
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
+	upgrader       websocket.Upgrader
 }
 
 func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
@@ -96,6 +111,7 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
 		ptySubs:        make(map[string]chan WSMessage),
+		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
 	}
 }
@@ -108,25 +124,51 @@ func (p *AgentPool) SetRecordStore(rs RecordStore) {
 	p.records = rs
 }
 
-func (p *AgentPool) register(a *remoteAgent) {
-	p.mu.Lock()
-	p.agents[a.id] = a
-	p.mu.Unlock()
+// agentKey is the pool key for a registering agent: its stable node identity, so
+// a reconnecting agent (WS flap, hub restart, config-driven bounce) re-registers
+// under the SAME key. The hub used to mint a throwaway id per connection, which
+// dangled every chat session bound to it — the session freezes the agent id at
+// creation, so on reconnect the stored id resolved to nothing and the chat
+// rejected every message as "not connected" even with the agent right back.
+// Mirrors the frontend's agentNodeKey (node_name, then name); in practice both
+// equal rt.NodeName. Only a fully anonymous client — no node name and no name —
+// falls back to a per-connection id.
+func agentKey(info webproto.RegisterPayload) string {
+	if k := cmp.Or(info.Identity.NodeName, info.Name); k != "" {
+		return k
+	}
+	return generateID()
 }
 
-func (p *AgentPool) unregister(id string) {
+func (p *AgentPool) register(a *remoteAgent) {
 	p.mu.Lock()
-	a, ok := p.agents[id]
-	delete(p.agents, id)
+	old := p.agents[a.id]
+	p.agents[a.id] = a
 	p.mu.Unlock()
-	if ok {
-		a.mu.Lock()
-		for _, ch := range a.tasks {
-			close(ch)
-		}
-		a.tasks = nil
-		a.mu.Unlock()
+	// The pool is keyed by stable identity (see agentKey), so a reconnecting agent
+	// — or a second agent sharing the same node name — lands on an occupied slot.
+	// Tear the stale connection down: its read loop then exits and its
+	// identity-checked unregister no-ops, leaving `a` alone in the slot.
+	if old != nil && old != a {
+		_ = old.conn.Close()
 	}
+}
+
+func (p *AgentPool) unregister(a *remoteAgent) {
+	p.mu.Lock()
+	// Only vacate the slot if it still holds THIS instance. After a reconnect the
+	// slot was already reassigned to the replacement under the same key; the old
+	// instance tearing down must not evict its successor.
+	if p.agents[a.id] == a {
+		delete(p.agents, a.id)
+	}
+	p.mu.Unlock()
+	a.mu.Lock()
+	for _, ch := range a.tasks {
+		close(ch)
+	}
+	a.tasks = nil
+	a.mu.Unlock()
 }
 
 func (p *AgentPool) get(id string) *remoteAgent {
@@ -196,50 +238,25 @@ func (p *AgentPool) PickChat() *remoteAgent {
 
 // DispatchCommand sends a command to an agent and returns a channel for the result.
 func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan taskResult, error) {
-	return p.dispatch(agentID, taskID, "exec", command)
+	return p.dispatchPayload(agentID, taskID, "exec", command, nil)
 }
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
 func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchChatSession(agentID, taskID, "", prompt)
+	return p.DispatchChatSession(agentID, taskID, "", prompt, webproto.ChatPayload{})
 }
 
 // DispatchChatSession sends chat input to an agent and scopes the remote
-// agent-side conversation state to the web chat session.
-func (p *AgentPool) DispatchChatSession(agentID, taskID, sessionID, prompt string) (<-chan taskResult, error) {
-	var payload json.RawMessage
-	if sessionID != "" {
-		payload = mustJSON(map[string]string{"session_id": sessionID})
-	}
-	return p.dispatchPayload(agentID, taskID, "chat", prompt, payload)
-}
-
-func (p *AgentPool) dispatch(agentID, taskID, typ, data string) (<-chan taskResult, error) {
-	return p.dispatchPayload(agentID, taskID, typ, data, nil)
+// agent-side conversation state to the web chat session. Goal-mode controls in
+// opts (persist / eval criteria / turn caps) ride along so the agent can run
+// the evaluator loop instead of a plain single-shot turn.
+func (p *AgentPool) DispatchChatSession(agentID, taskID, sessionID, prompt string, opts webproto.ChatPayload) (<-chan taskResult, error) {
+	opts.SessionID = sessionID
+	return p.dispatchPayload(agentID, taskID, "chat", prompt, mustJSON(opts))
 }
 
 func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {
-	a := p.get(agentID)
-	if a == nil {
-		return nil, fmt.Errorf("agent %s not connected", agentID)
-	}
-	ch := make(chan taskResult, 1)
-	a.mu.Lock()
-	a.tasks[taskID] = ch
-	a.turns[taskID] = 0
-	a.mu.Unlock()
-
-	select {
-	case a.sendCh <- WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload}:
-	default:
-		a.mu.Lock()
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		a.mu.Unlock()
-		close(ch)
-		return nil, fmt.Errorf("agent %s send channel full", agentID)
-	}
-	return ch, nil
+	return p.dispatchMessage(agentID, taskID, WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload})
 }
 
 func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-chan taskResult, error) {
@@ -264,6 +281,24 @@ func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-ch
 		return nil, fmt.Errorf("agent %s send channel full", agentID)
 	}
 	return ch, nil
+}
+
+// BroadcastConfigReload notifies every connected agent that the hub config
+// changed so each re-fetches and hot-swaps its LLM provider without a restart.
+// Best-effort: an agent whose send channel is full picks the change up on its
+// next reconnect. Returns the number of agents notified.
+func (p *AgentPool) BroadcastConfigReload() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	n := 0
+	for _, a := range p.agents {
+		select { // non-blocking, so safe to send under the read lock
+		case a.sendCh <- WSMessage{Type: "config"}:
+			n++
+		default:
+		}
+	}
+	return n
 }
 
 func (p *AgentPool) SendAgentMessage(agentID string, msg WSMessage) error {
@@ -299,7 +334,7 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 		return
 	}
 
-	conn, err := p.upgrader().Upgrade(w, r, nil)
+	conn, err := p.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -407,12 +442,11 @@ func (p *AgentPool) forwardPTYMessage(msg WSMessage) bool {
 
 // --- WebSocket handler ---
 
-func (p *AgentPool) upgrader() *websocket.Upgrader {
-	if len(p.allowedOrigins) == 0 {
-		return &websocket.Upgrader{}
+func buildUpgrader(origins []string) websocket.Upgrader {
+	if len(origins) == 0 {
+		return websocket.Upgrader{}
 	}
-	origins := p.allowedOrigins
-	return &websocket.Upgrader{
+	return websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 			for _, o := range origins {
@@ -428,7 +462,7 @@ func (p *AgentPool) upgrader() *websocket.Upgrader {
 // HandleWS upgrades to WebSocket and manages the agent lifecycle.
 // This single endpoint replaces register + stream + output + complete.
 func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := p.upgrader().Upgrade(w, r, nil)
+	conn, err := p.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -443,26 +477,31 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	if reg.Payload != nil {
 		_ = json.Unmarshal(reg.Payload, &info)
 	}
+	// Resolve the stable pool key from the raw payload before the display-name
+	// default below, so an anonymous client still gets a unique per-connection id
+	// instead of every nameless agent colliding on the literal "agent".
+	id := agentKey(info)
 	if info.Name == "" {
 		info.Name = "agent"
 	}
 
 	agent := &remoteAgent{
-		id:        generateID(),
-		name:      info.Name,
-		commands:  info.Commands,
-		conn:      conn,
-		sendCh:    make(chan WSMessage, 32),
-		connectAt: time.Now(),
-		identity:  info.Identity,
-		stats:     info.Stats,
-		tasks:     make(map[string]chan taskResult),
-		turns:     make(map[string]int),
-		done:      make(chan struct{}),
+		id:            id,
+		name:          info.Name,
+		commands:      info.Commands,
+		commandsMenu:  info.CommandsMenu,
+		conn:          conn,
+		sendCh:        make(chan WSMessage, 32),
+		connectAt:     time.Now(),
+		identity:      info.Identity,
+		stats:         info.Stats,
+		tasks:         make(map[string]chan taskResult),
+		turns:         make(map[string]int),
+		done:          make(chan struct{}),
 	}
 	p.register(agent)
 	defer func() {
-		p.unregister(agent.id)
+		p.unregister(agent)
 		conn.Close()
 		close(agent.done)
 	}()
@@ -518,9 +557,26 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			a.mu.Unlock()
 		}
 
+	case "agent.identity":
+		// Sent by the agent after a config hot-reload so the pooled identity — and
+		// thus the UI's provider/model badge — tracks the swapped provider instead
+		// of the value captured once at registration. Merge only the fields that a
+		// reload can change; never clobber NodeName/PID/host set at register time.
+		var id webproto.AgentIdentity
+		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &id) == nil {
+			a.mu.Lock()
+			if id.Provider != "" {
+				a.identity.Provider = id.Provider
+			}
+			if id.Model != "" {
+				a.identity.Model = id.Model
+			}
+			a.mu.Unlock()
+		}
+
 	case "output":
 		if p.hub != nil && msg.TaskID != "" {
-			data := stripANSI(msg.Data)
+			data := output.StripANSI(msg.Data)
 			if data == "" {
 				return
 			}
@@ -622,13 +678,14 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 		return
 	}
 
-	turn := agentEventTurn(msg.Payload)
+	data := extractEventData(msg.Payload)
+	turn := turnFromEventData(data)
 	var event ChatEvent
 	switch msg.Type {
 	case "agent.turn_start":
 		event = ChatEvent{Type: ChatEventThinking, Turn: turn, Transient: true}
 	case "agent.message_start":
-		role, content, _, ok := agentMessageFromPayload(msg.Payload)
+		role, content, _, ok := messageFromEventData(data)
 		if !ok || role != "assistant" {
 			return
 		}
@@ -639,7 +696,7 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			Turn:    turn,
 		}
 	case "agent.message_update":
-		role, content, reasoning, ok := agentMessageFromPayload(msg.Payload)
+		role, content, reasoning, ok := messageFromEventData(data)
 		if !ok || role != "assistant" {
 			return
 		}
@@ -662,7 +719,7 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			Turn:    turn,
 		}
 	case "agent.message_end":
-		role, content, reasoning, ok := agentMessageFromPayload(msg.Payload)
+		role, content, reasoning, ok := messageFromEventData(data)
 		if !ok || role != "assistant" {
 			return
 		}
@@ -690,7 +747,7 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			Arguments  string `json:"arguments"`
 			Turn       int    `json:"turn"`
 		}
-		if data := extractEventData(msg.Payload); len(data) > 0 {
+		if len(data) > 0 {
 			_ = json.Unmarshal(data, &ev)
 		}
 		if ev.Turn != 0 {
@@ -709,7 +766,7 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			Result     string `json:"result"`
 			Turn       int    `json:"turn"`
 		}
-		if data := extractEventData(msg.Payload); len(data) > 0 {
+		if len(data) > 0 {
 			_ = json.Unmarshal(data, &ev)
 		}
 		if ev.Turn != 0 {
@@ -720,6 +777,45 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 			ToolCallID: ev.ToolCallID,
 			Content:    ev.Result,
 			Turn:       turn,
+		}
+	case "agent.eval_end", "agent.eval_error":
+		// Goal-mode per-round verdict from the evaluator loop. eval_start is a
+		// transient "judging…" marker with no verdict, so only the end/error
+		// events carry something worth showing. A judge error surfaces as a
+		// not-passed note with its message as the reason.
+		var ev struct {
+			EvalRound  int    `json:"eval_round"`
+			EvalPass   bool   `json:"eval_pass"`
+			EvalReason string `json:"eval_reason"`
+			EvalError  string `json:"eval_error"`
+		}
+		if len(data) > 0 {
+			_ = json.Unmarshal(data, &ev)
+		}
+		reason := ev.EvalReason
+		if msg.Type == "agent.eval_error" {
+			reason = ev.EvalError
+		}
+		event = ChatEvent{
+			Type:       ChatEventEval,
+			EvalRound:  ev.EvalRound,
+			EvalPass:   ev.EvalPass,
+			EvalReason: reason,
+		}
+	case "agent.compact_end", "agent.compact_error":
+		var ev struct {
+			CompactTokensBefore int `json:"compact_tokens_before"`
+			CompactTokensAfter  int `json:"compact_tokens_after"`
+			CompactKeptMessages int `json:"compact_kept_messages"`
+		}
+		if len(data) > 0 {
+			_ = json.Unmarshal(data, &ev)
+		}
+		event = ChatEvent{
+			Type:                ChatEventCompact,
+			CompactTokensBefore: ev.CompactTokensBefore,
+			CompactTokensAfter:  ev.CompactTokensAfter,
+			CompactKeptMessages: ev.CompactKeptMessages,
 		}
 	default:
 		return
@@ -751,8 +847,8 @@ func extractEventData(payload json.RawMessage) json.RawMessage {
 	return payload
 }
 
-func agentEventTurn(payload json.RawMessage) int {
-	data := extractEventData(payload)
+// turnFromEventData extracts the turn number from pre-extracted event data.
+func turnFromEventData(data json.RawMessage) int {
 	if len(data) == 0 {
 		return 0
 	}
@@ -763,8 +859,8 @@ func agentEventTurn(payload json.RawMessage) int {
 	return event.Turn
 }
 
-func agentMessageFromPayload(payload json.RawMessage) (role, content, reasoning string, ok bool) {
-	data := extractEventData(payload)
+// messageFromEventData extracts role, content, and reasoning from pre-extracted event data.
+func messageFromEventData(data json.RawMessage) (role, content, reasoning string, ok bool) {
 	if len(data) == 0 {
 		return "", "", "", false
 	}

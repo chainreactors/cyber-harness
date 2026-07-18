@@ -9,16 +9,13 @@ import (
 	fingerresources "github.com/chainreactors/fingers/resources"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	spraypkg "github.com/chainreactors/spray/pkg"
-	"github.com/chainreactors/utils"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 
 func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
-	oldUtilsPrePort := utils.PrePort
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
 	t.Cleanup(func() {
-		utils.PrePort = oldUtilsPrePort
 		fingerresources.PrePort = oldFingerPrePort
 		fingerresources.PortData = oldFingerPortData
 	})
@@ -62,8 +59,8 @@ func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
 	if string(set.GogoConfig("fingerprinthub_web")) != "[]" || string(set.GogoConfig("fingerprinthub_service")) != "[]" {
 		t.Fatalf("fingerprinthub fallback data should be empty JSON")
 	}
-	if utils.PrePort == nil || fingerresources.PrePort == nil || len(fingerresources.PortData) == 0 {
-		t.Fatalf("local port preset was not installed")
+	if len(set.GogoConfig("port")) == 0 {
+		t.Fatalf("aiscan port config was not delivered to the gogo scan provider")
 	}
 }
 
@@ -85,11 +82,9 @@ func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
 // switch to no-op stubs) is the strongest harness: the suite should still
 // pass because data must come from aiscan.
 func TestPipelineDeliversAiscanBytes(t *testing.T) {
-	oldUtilsPrePort := utils.PrePort
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
 	t.Cleanup(func() {
-		utils.PrePort = oldUtilsPrePort
 		fingerresources.PrePort = oldFingerPrePort
 		fingerresources.PortData = oldFingerPortData
 		gogopkg.ResetResourceProvider()
@@ -174,11 +169,9 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 // our provider. This catches the case where bytes reach LoadConfig but their
 // shape differs from what the SDK's yaml.Unmarshal target expects.
 func TestPipelineParsesIntoSDKStructures(t *testing.T) {
-	oldUtilsPrePort := utils.PrePort
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
 	t.Cleanup(func() {
-		utils.PrePort = oldUtilsPrePort
 		fingerresources.PrePort = oldFingerPrePort
 		fingerresources.PortData = oldFingerPortData
 		gogopkg.ResetResourceProvider()

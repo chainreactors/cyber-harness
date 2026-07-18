@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
-
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type ToolDefinition = provider.ToolDefinition
@@ -40,13 +40,17 @@ type WorkDirAware interface {
 	SetWorkDir(dir string)
 }
 
+type LoggerAware interface {
+	InitLogger(telemetry.Logger)
+}
+
 type CommandRegistry struct {
-	mu        sync.RWMutex
-	items     map[string]Command
-	order     []string
-	groups    map[string][]string
-	workDir   string
-	output    io.Writer
+	mu      sync.RWMutex
+	items   map[string]Command
+	order   []string
+	groups  map[string][]string
+	workDir string
+	output  io.Writer
 
 	tools     map[string]AgentTool
 	toolOrder []string
@@ -58,23 +62,27 @@ func (r *CommandRegistry) SetOutput(w io.Writer) {
 	r.output = w
 }
 
-func NewRegistry() *CommandRegistry {
-	return &CommandRegistry{
-		items: make(map[string]Command),
-		groups: make(map[string][]string),
-		tools:  make(map[string]AgentTool),
+func (r *CommandRegistry) SetLogger(logger telemetry.Logger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, cmd := range r.items {
+		if aware, ok := cmd.(LoggerAware); ok {
+			aware.InitLogger(logger)
+		}
+	}
+	for _, tool := range r.tools {
+		if aware, ok := tool.(LoggerAware); ok {
+			aware.InitLogger(logger)
+		}
 	}
 }
 
-func (r *CommandRegistry) CloneTools() *CommandRegistry {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	clone := NewRegistry()
-	for _, name := range r.toolOrder {
-		clone.tools[name] = r.tools[name]
-		clone.toolOrder = append(clone.toolOrder, name)
+func NewRegistry() *CommandRegistry {
+	return &CommandRegistry{
+		items:  make(map[string]Command),
+		groups: make(map[string][]string),
+		tools:  make(map[string]AgentTool),
 	}
-	return clone
 }
 
 func (r *CommandRegistry) RegisterTool(t AgentTool) {
