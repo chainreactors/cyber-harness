@@ -1,40 +1,40 @@
-// First-party viewer kit — the curated slice of the former cyber-ui viewer
-// package the app actually consumes: the timeline-renderer registry, tool-arg
-// utilities and the presentational chat components. The upstream graph/APG
-// dashboard is not vendored because nothing here imports it.
+// Re-export from the canonical @cyber/viewer package.
+// The local component forks are no longer maintained — use the upstream versions.
 
-// Utility functions
 export {
   stripAnsiControl,
   formatArgs,
   summarizeArgs,
-} from './lib/tool-utils'
+} from '../../cyber-ui/packages/viewer/src/lib/tool-utils'
 
-// Timeline renderer registry (extension mechanism)
 export {
   registerTimelineRenderer,
   resolveTimelineRenderer,
-} from './lib/timeline-registry'
+} from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
 
-// Presentational chat components (props-first, no provider dependency)
-export { default as MessageBubble, StreamingCursor } from './components/chat/MessageBubble'
-export { default as ToolCallDisplay, CodeCallDisplay, BlockingOutputDisplay, OutputSection } from './components/chat/ToolCallDisplay'
-export { default as ChatThinking, ThinkingDots } from './components/chat/ChatThinking'
-export { default as AssistantResponse } from './components/chat/AssistantResponse'
-export { default as ChatInput } from './components/chat/ChatInput'
+export { default as MessageBubble, StreamingCursor } from '../../cyber-ui/packages/viewer/src/components/chat/MessageBubble'
+export { default as ToolCallDisplay, CodeCallDisplay, BlockingOutputDisplay, OutputSection } from '../../cyber-ui/packages/viewer/src/components/chat/ToolCallDisplay'
+export { default as ChatThinking, ThinkingDots } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'
+export { default as AssistantResponse } from '../../cyber-ui/packages/viewer/src/components/chat/AssistantResponse'
+export { default as ChatInput } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
+export { AgentVoiceCard } from '../../cyber-ui/packages/viewer/src/components/chat/AgentVoiceCard'
+export { ChatPanel } from '../../cyber-ui/packages/viewer/src/components/chat/ChatPanel'
 
-// Types — timeline registry
 export type {
   ExtensionTimelineItem,
-  TimelineItem,
   TimelineRendererConfig,
-  TimelineRendererContext,
-  TimelineRendererProps,
-} from './lib/timeline-registry'
+} from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
+export type { TimelineItem as ViewerTimelineItem } from '../../cyber-ui/packages/viewer/src/types/timeline'
 
-// Types — components
-export type { MessageBubbleProps } from './components/chat/MessageBubble'
-export type { ChatThinkingProps } from './components/chat/ChatThinking'
-export type { AssistantResponseProps } from './components/chat/AssistantResponse'
-export type { ToolCallDisplayProps, CodeCallDisplayProps, BlockingOutputDisplayProps } from './components/chat/ToolCallDisplay'
-export type { ChatInputProps, CommandHint, ChatAttachment, AttachmentMode, Mentionable, MentionPopupApi } from './components/chat/ChatInput'
+export type { MessageBubbleProps, MessageBubbleVariant } from '../../cyber-ui/packages/viewer/src/components/chat/MessageBubble'
+export type { ChatThinkingProps } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'
+export type { AssistantResponseProps } from '../../cyber-ui/packages/viewer/src/components/chat/AssistantResponse'
+export type { ToolCallDisplayProps, CodeCallDisplayProps, BlockingOutputDisplayProps } from '../../cyber-ui/packages/viewer/src/components/chat/ToolCallDisplay'
+export type { ChatInputProps, CommandHint, ChatAttachment, AttachmentMode, Mentionable, MentionPopupApi } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
+export type { AgentVoiceCardProps } from '../../cyber-ui/packages/viewer/src/components/chat/AgentVoiceCard'
+
+// Backward compat: the local timeline-registry types used slightly different names
+export type {
+  TimelineItemRendererProps as TimelineRendererProps,
+} from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
+export type { ExtensionRendererProps as TimelineRendererContext } from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'

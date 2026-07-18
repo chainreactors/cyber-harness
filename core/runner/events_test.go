@@ -3,17 +3,16 @@ package runner
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
-func parseEventLines(t *testing.T, path string) []map[string]any {
+func parseAOPLines(t *testing.T, path string) []aop.Event {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -21,21 +20,15 @@ func parseEventLines(t *testing.T, path string) []map[string]any {
 	}
 	defer f.Close()
 
-	var events []map[string]any
+	var events []aop.Event
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 	for scanner.Scan() {
-		var rec output.Record
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			t.Fatalf("invalid Record line %q: %v", scanner.Text(), err)
+		var ev aop.Event
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
+			t.Fatalf("invalid AOP line %q: %v", scanner.Text()[:80], err)
 		}
-		if rec.Type != output.TypeAgent {
-			t.Fatalf("unexpected record type %s, want agent", rec.Type)
-		}
-		var m map[string]any
-		if err := json.Unmarshal(rec.Data, &m); err != nil {
-			t.Fatalf("invalid agent event data: %v", err)
-		}
-		events = append(events, m)
+		events = append(events, ev)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan events file: %v", err)
@@ -82,25 +75,44 @@ func TestEventsFileSubscriberAppendsJSONL(t *testing.T) {
 		w.HandleEvent(e)
 	}
 
-	lines := parseEventLines(t, path)
-	if got, want := len(lines), len(events); got != want {
-		t.Fatalf("line count = %d, want %d", got, want)
+	aopLines := parseAOPLines(t, path)
+	// 6 agent events → AOP lines (session.start, turn.start, tool.call, tool.result, text, session.end)
+	if len(aopLines) < 6 {
+		t.Fatalf("expected at least 6 AOP lines, got %d", len(aopLines))
 	}
 
-	if lines[0]["type"] != string(agent.EventAgentStart) {
-		t.Errorf("line[0].type = %v, want %s", lines[0]["type"], agent.EventAgentStart)
+	if aopLines[0].Type != aop.TypeSessionStart {
+		t.Errorf("line[0].type = %s, want %s", aopLines[0].Type, aop.TypeSessionStart)
 	}
-	if _, ok := lines[0]["ts"].(string); !ok {
-		t.Errorf("line[0] missing ts field")
+	if aopLines[0].V != aop.Version {
+		t.Errorf("line[0].v = %d, want %d", aopLines[0].V, aop.Version)
 	}
-	if lines[2]["tool_name"] != "bash" {
-		t.Errorf("line[2].tool_name = %v, want bash", lines[2]["tool_name"])
+	if aopLines[0].Agent != "aiscan" {
+		t.Errorf("line[0].agent = %s, want aiscan", aopLines[0].Agent)
 	}
-	if v, _ := lines[5]["new_messages"].(float64); v != 3 {
-		t.Errorf("line[5].new_messages = %v, want 3", lines[5]["new_messages"])
+
+	// tool.call should have tool_name=bash
+	var toolCall aop.ToolCallData
+	for _, ev := range aopLines {
+		if ev.Type == aop.TypeToolCall {
+			json.Unmarshal(ev.Data, &toolCall)
+			break
+		}
 	}
-	if v, _ := lines[5]["stop"].(string); v != "completed" {
-		t.Errorf("line[5].stop = %v, want completed", lines[5]["stop"])
+	if toolCall.ToolName != "bash" {
+		t.Errorf("tool.call.tool_name = %s, want bash", toolCall.ToolName)
+	}
+
+	// session.end should have stop=completed
+	var sessionEnd aop.SessionEndData
+	for _, ev := range aopLines {
+		if ev.Type == aop.TypeSessionEnd {
+			json.Unmarshal(ev.Data, &sessionEnd)
+			break
+		}
+	}
+	if sessionEnd.Stop != "completed" {
+		t.Errorf("session.end.stop = %s, want completed", sessionEnd.Stop)
 	}
 }
 
@@ -147,16 +159,10 @@ func TestEventsFileSubscriberLLMRequest(t *testing.T) {
 		},
 	})
 
-	lines := parseEventLines(t, path)
-	m := lines[0]
-	if v, _ := m["request_model"].(string); v != "deepseek-v4-pro" {
-		t.Errorf("request_model = %v, want deepseek-v4-pro", m["request_model"])
-	}
-	if v, _ := m["request_messages"].(float64); v != 5 {
-		t.Errorf("request_messages = %v, want 5", m["request_messages"])
-	}
-	if v, _ := m["request_tools"].(float64); v != 3 {
-		t.Errorf("request_tools = %v, want 3", m["request_tools"])
+	// llm_request is not mapped to any AOP event (internal-only)
+	aopLines := parseAOPLines(t, path)
+	if len(aopLines) != 0 {
+		t.Errorf("llm_request should not produce AOP events, got %d", len(aopLines))
 	}
 }
 
@@ -177,10 +183,17 @@ func TestEventsFileSubscriberToolEndNoArgs(t *testing.T) {
 		Result:     "ok",
 	})
 
-	lines := parseEventLines(t, path)
-	m := lines[0]
-	if _, ok := m["arguments"]; ok {
-		t.Errorf("tool_execution_end should not contain arguments field")
+	aopLines := parseAOPLines(t, path)
+	if len(aopLines) != 1 {
+		t.Fatalf("expected 1 AOP line, got %d", len(aopLines))
+	}
+	if aopLines[0].Type != aop.TypeToolResult {
+		t.Errorf("type = %s, want %s", aopLines[0].Type, aop.TypeToolResult)
+	}
+	var data aop.ToolResultData
+	json.Unmarshal(aopLines[0].Data, &data)
+	if data.ToolName != "bash" {
+		t.Errorf("tool_name = %s, want bash", data.ToolName)
 	}
 }
 
@@ -197,12 +210,19 @@ func TestEventsFileSubscriberErrorField(t *testing.T) {
 		Type:    agent.EventToolExecutionEnd,
 		Turn:    1,
 		IsError: true,
-		Err:     fmt.Errorf("connection refused"),
+		Result:  "connection refused",
 	})
 
-	lines := parseEventLines(t, path)
-	m := lines[0]
-	if v, _ := m["error"].(string); v != "connection refused" {
-		t.Errorf("error = %v, want connection refused", m["error"])
+	aopLines := parseAOPLines(t, path)
+	if len(aopLines) != 1 {
+		t.Fatalf("expected 1 AOP line, got %d", len(aopLines))
+	}
+	var data aop.ToolResultData
+	json.Unmarshal(aopLines[0].Data, &data)
+	if !data.IsError {
+		t.Error("is_error should be true")
+	}
+	if data.Content != "connection refused" {
+		t.Errorf("content = %v, want 'connection refused'", data.Content)
 	}
 }

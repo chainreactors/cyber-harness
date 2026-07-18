@@ -1,11 +1,13 @@
 package scan
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 )
 
@@ -58,7 +60,10 @@ func (w *scanJSONLWriter) handleObservation(obs pipeline.Observation) {
 }
 
 func (w *scanJSONLWriter) handleAgentEvent(event agent.Event) {
-	w.w.WriteRecord(output.NewRecord(output.TypeAgent, event))
+	for _, ev := range aop.FromAgentEvent(event, "aiscan") {
+		raw, _ := json.Marshal(ev)
+		w.w.WriteRaw(raw)
+	}
 }
 
 func observationToRecords(e event) []output.Record {

@@ -12,6 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -212,12 +213,8 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 				statsPayload, _ := json.Marshal(next)
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
 			}
-			rec := output.NewRecord(output.TypeAgent, e)
-			payload, _ := json.Marshal(rec)
+			aopEvents := aop.FromAgentEvent(e, "aiscan")
 			data := AgentEventSummary(e)
-			if data == "" {
-				data = string(payload)
-			}
 			mu.Lock()
 			msgID := eventRoute[e.SessionID]
 			if msgID == "" && e.ParentSessionID != "" {
@@ -235,13 +232,20 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 				}
 			}
 			mu.Unlock()
-			for _, id := range targets {
-				send(webproto.Message{
-					Type:    "agent." + string(e.Type),
-					TaskID:  id,
-					Data:    data,
-					Payload: payload,
-				})
+			for _, aopEv := range aopEvents {
+				payload, _ := json.Marshal(aopEv)
+				summary := data
+				if summary == "" {
+					summary = string(payload)
+				}
+				for _, id := range targets {
+					send(webproto.Message{
+						Type:    "aop." + aopEv.Type,
+						TaskID:  id,
+						Data:    summary,
+						Payload: payload,
+					})
+				}
 			}
 		})
 		defer unsub()

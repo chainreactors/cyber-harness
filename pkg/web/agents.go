@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/gorilla/websocket"
 )
@@ -678,145 +679,101 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 		return
 	}
 
-	data := extractEventData(msg.Payload)
-	turn := turnFromEventData(data)
+	var aopEv aop.Event
+	if len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &aopEv)
+	}
+
+	turn := 0
+	ext := extractAgentExt(aopEv)
 	var event ChatEvent
-	switch msg.Type {
-	case "agent.turn_start":
+
+	switch aopEv.Type {
+	case aop.TypeTurnStart:
+		var d aop.TurnData
+		_ = json.Unmarshal(aopEv.Data, &d)
+		turn = d.Turn
 		event = ChatEvent{Type: ChatEventThinking, Turn: turn, Transient: true}
-	case "agent.message_start":
-		role, content, _, ok := messageFromEventData(data)
-		if !ok || role != "assistant" {
+
+	case aop.TypeText:
+		var d aop.TextData
+		_ = json.Unmarshal(aopEv.Data, &d)
+		if d.Role != "" && d.Role != "assistant" {
 			return
 		}
-		event = ChatEvent{
-			Type:    ChatEventMessageStart,
-			Role:    role,
-			Content: content,
-			Turn:    turn,
-		}
-	case "agent.message_update":
-		role, content, reasoning, ok := messageFromEventData(data)
-		if !ok || role != "assistant" {
+		if d.Content == "" {
 			return
 		}
-		if reasoning != "" {
-			p.forwardToSession(a, msg.TaskID, ChatEvent{
-				Type:      ChatEventThinking,
-				Role:      role,
-				Content:   reasoning,
-				Turn:      turn,
-				Transient: true,
-			})
+		if d.Delta {
+			event = ChatEvent{Type: ChatEventMessageDelta, Role: "assistant", Content: d.Content, Turn: turn}
+		} else {
+			event = ChatEvent{Type: ChatEventMessageEnd, Role: "assistant", Content: d.Content, Turn: turn}
 		}
-		if content == "" {
-			return
-		}
-		event = ChatEvent{
-			Type:    ChatEventMessageDelta,
-			Role:    role,
-			Content: content,
-			Turn:    turn,
-		}
-	case "agent.message_end":
-		role, content, reasoning, ok := messageFromEventData(data)
-		if !ok || role != "assistant" {
-			return
-		}
-		if reasoning != "" {
-			p.forwardToSession(a, msg.TaskID, ChatEvent{
-				Type:    ChatEventThinking,
-				Role:    role,
-				Content: reasoning,
-				Turn:    turn,
-			})
-		}
-		if content == "" {
-			return
-		}
-		event = ChatEvent{
-			Type:    ChatEventMessageEnd,
-			Role:    role,
-			Content: content,
-			Turn:    turn,
-		}
-	case "agent.tool_execution_start":
-		var ev struct {
-			ToolName   string `json:"tool_name"`
-			ToolCallID string `json:"tool_call_id"`
-			Arguments  string `json:"arguments"`
-			Turn       int    `json:"turn"`
-		}
-		if len(data) > 0 {
-			_ = json.Unmarshal(data, &ev)
-		}
-		if ev.Turn != 0 {
-			turn = ev.Turn
+
+	case aop.TypeToolCall:
+		var d aop.ToolCallData
+		_ = json.Unmarshal(aopEv.Data, &d)
+		argsStr := ""
+		if s, ok := d.Args.(string); ok {
+			argsStr = s
+		} else if d.Args != nil {
+			raw, _ := json.Marshal(d.Args)
+			argsStr = string(raw)
 		}
 		event = ChatEvent{
 			Type:       ChatEventToolCall,
-			ToolName:   ev.ToolName,
-			ToolArgs:   ev.Arguments,
-			ToolCallID: ev.ToolCallID,
+			ToolName:   d.ToolName,
+			ToolArgs:   argsStr,
+			ToolCallID: d.ToolCallID,
 			Turn:       turn,
 		}
-	case "agent.tool_execution_end":
-		var ev struct {
-			ToolCallID string `json:"tool_call_id"`
-			Result     string `json:"result"`
-			Turn       int    `json:"turn"`
-		}
-		if len(data) > 0 {
-			_ = json.Unmarshal(data, &ev)
-		}
-		if ev.Turn != 0 {
-			turn = ev.Turn
+
+	case aop.TypeToolResult:
+		var d aop.ToolResultData
+		_ = json.Unmarshal(aopEv.Data, &d)
+		content := ""
+		if s, ok := d.Content.(string); ok {
+			content = s
+		} else if d.Content != nil {
+			raw, _ := json.Marshal(d.Content)
+			content = string(raw)
 		}
 		event = ChatEvent{
 			Type:       ChatEventToolResult,
-			ToolCallID: ev.ToolCallID,
-			Content:    ev.Result,
+			ToolCallID: d.ToolCallID,
+			Content:    content,
 			Turn:       turn,
 		}
-	case "agent.eval_end", "agent.eval_error":
-		// Goal-mode per-round verdict from the evaluator loop. eval_start is a
-		// transient "judging…" marker with no verdict, so only the end/error
-		// events carry something worth showing. A judge error surfaces as a
-		// not-passed note with its message as the reason.
-		var ev struct {
-			EvalRound  int    `json:"eval_round"`
-			EvalPass   bool   `json:"eval_pass"`
-			EvalReason string `json:"eval_reason"`
-			EvalError  string `json:"eval_error"`
+
+	case aop.TypeTurnEnd, aop.TypeUsage, aop.TypeSessionStart, aop.TypeSessionEnd:
+		// Check ext for eval/compact data on turn.end events
+		if ext != nil {
+			if round, ok := ext["eval_round"].(float64); ok && round > 0 {
+				pass, _ := ext["eval_pass"].(bool)
+				reason, _ := ext["eval_reason"].(string)
+				if errMsg, ok := ext["eval_error"].(string); ok && errMsg != "" {
+					reason = errMsg
+				}
+				p.forwardToSession(a, msg.TaskID, ChatEvent{
+					Type:       ChatEventEval,
+					EvalRound:  int(round),
+					EvalPass:   pass,
+					EvalReason: reason,
+				})
+			}
+			if before, ok := ext["compact_tokens_before"].(float64); ok && before > 0 {
+				after, _ := ext["compact_tokens_after"].(float64)
+				kept, _ := ext["compact_kept_messages"].(float64)
+				p.forwardToSession(a, msg.TaskID, ChatEvent{
+					Type:                ChatEventCompact,
+					CompactTokensBefore: int(before),
+					CompactTokensAfter:  int(after),
+					CompactKeptMessages: int(kept),
+				})
+			}
 		}
-		if len(data) > 0 {
-			_ = json.Unmarshal(data, &ev)
-		}
-		reason := ev.EvalReason
-		if msg.Type == "agent.eval_error" {
-			reason = ev.EvalError
-		}
-		event = ChatEvent{
-			Type:       ChatEventEval,
-			EvalRound:  ev.EvalRound,
-			EvalPass:   ev.EvalPass,
-			EvalReason: reason,
-		}
-	case "agent.compact_end", "agent.compact_error":
-		var ev struct {
-			CompactTokensBefore int `json:"compact_tokens_before"`
-			CompactTokensAfter  int `json:"compact_tokens_after"`
-			CompactKeptMessages int `json:"compact_kept_messages"`
-		}
-		if len(data) > 0 {
-			_ = json.Unmarshal(data, &ev)
-		}
-		event = ChatEvent{
-			Type:                ChatEventCompact,
-			CompactTokensBefore: ev.CompactTokensBefore,
-			CompactTokensAfter:  ev.CompactTokensAfter,
-			CompactKeptMessages: ev.CompactKeptMessages,
-		}
+		return
+
 	default:
 		return
 	}
@@ -832,69 +789,40 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 	p.forwardToSession(a, msg.TaskID, event)
 }
 
-// extractEventData unwraps the agent event data from a WS payload.
-// The payload is a Record whose Data field contains the serialized agent.Event.
-func extractEventData(payload json.RawMessage) json.RawMessage {
-	if len(payload) == 0 {
+func extractAgentExt(ev aop.Event) map[string]any {
+	if ev.Ext == nil {
 		return nil
 	}
-	var rec struct {
-		Data json.RawMessage `json:"data"`
+	// Try the agent name from the event first, then any namespace.
+	if ext, ok := ev.Ext[ev.Agent]; ok {
+		if m, ok := ext.(map[string]any); ok {
+			return m
+		}
 	}
-	if json.Unmarshal(payload, &rec) == nil && len(rec.Data) > 0 {
-		return rec.Data
+	for _, ext := range ev.Ext {
+		if m, ok := ext.(map[string]any); ok {
+			return m
+		}
 	}
-	return payload
-}
-
-// turnFromEventData extracts the turn number from pre-extracted event data.
-func turnFromEventData(data json.RawMessage) int {
-	if len(data) == 0 {
-		return 0
-	}
-	var event struct {
-		Turn int `json:"turn"`
-	}
-	_ = json.Unmarshal(data, &event)
-	return event.Turn
-}
-
-// messageFromEventData extracts role, content, and reasoning from pre-extracted event data.
-func messageFromEventData(data json.RawMessage) (role, content, reasoning string, ok bool) {
-	if len(data) == 0 {
-		return "", "", "", false
-	}
-	var event struct {
-		Message *struct {
-			Role             string  `json:"role"`
-			Content          *string `json:"content"`
-			ReasoningContent *string `json:"reasoning_content"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(data, &event); err != nil || event.Message == nil {
-		return "", "", "", false
-	}
-	role = event.Message.Role
-	if event.Message.Content != nil {
-		content = *event.Message.Content
-	}
-	if event.Message.ReasoningContent != nil {
-		reasoning = *event.Message.ReasoningContent
-	}
-	return role, content, reasoning, role != ""
+	return nil
 }
 
 func (p *AgentPool) persistAgentRecord(a *remoteAgent, msg WSMessage) {
 	if p.records == nil || len(msg.Payload) == 0 {
 		return
 	}
-	var rec output.Record
-	if err := json.Unmarshal(msg.Payload, &rec); err != nil {
+	var ev aop.Event
+	if err := json.Unmarshal(msg.Payload, &ev); err != nil {
 		return
 	}
-	rec.ID = generateID()
-	rec.ScanID = msg.TaskID
-	rec.AgentID = a.id
+	rec := output.Record{
+		Type:      output.RecordType("aop." + ev.Type),
+		Timestamp: time.Now(),
+		Data:      ev.Data,
+		ID:        generateID(),
+		ScanID:    msg.TaskID,
+		AgentID:   a.id,
+	}
 	if p.sessions != nil && msg.TaskID != "" {
 		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
 			rec.SessionID = sid

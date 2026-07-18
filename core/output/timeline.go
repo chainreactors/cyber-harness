@@ -75,6 +75,10 @@ func parseRecordData(rec Record) any {
 		return unmarshalItem[parsers.SprayResult](rec.Data)
 	case TypeAgent:
 		return unmarshalItem[AgentEvent](rec.Data)
+	default:
+		if strings.HasPrefix(string(rec.Type), "aop.") {
+			return unmarshalAOPEntry(rec)
+		}
 	case TypeScanEnd:
 		return unmarshalItem[ScanEnd](rec.Data)
 	}
@@ -119,6 +123,8 @@ func BuildTimelineMarkdown(entries []TimelineEntry) string {
 		case *parsers.Loot:
 			writeLootMarkdown(&sb, d)
 		case *AgentEvent:
+			d.writeMarkdown(&sb)
+		case *AOPTimelineEntry:
 			d.writeMarkdown(&sb)
 		case *ScanEnd:
 			d.writeMarkdown(&sb)
@@ -292,28 +298,50 @@ func (s *sessionMeta) duration() time.Duration {
 func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 	var m sessionMeta
 	for _, e := range entries {
-		ev, ok := e.Data.(*AgentEvent)
-		if !ok {
-			continue
-		}
-		if m.id == "" {
-			m.id = ev.SessionID
-			m.parentID = ev.ParentSessionID
-		}
-		if ev.RequestModel != "" && m.model == "" {
-			m.model = ev.RequestModel
-		}
-		switch ev.Type {
-		case "agent_start":
-			m.startTS = e.Timestamp
-		case "agent_end":
-			m.endTS = e.Timestamp
-			m.stop = ev.Stop
-		case "turn_start":
-			m.turns++
-		case "turn_end":
-			if ev.Usage != nil {
-				m.totalTokens = ev.Usage.TotalTokens
+		switch d := e.Data.(type) {
+		case *AgentEvent:
+			if m.id == "" {
+				m.id = d.SessionID
+				m.parentID = d.ParentSessionID
+			}
+			if d.RequestModel != "" && m.model == "" {
+				m.model = d.RequestModel
+			}
+			switch d.Type {
+			case "agent_start":
+				m.startTS = e.Timestamp
+			case "agent_end":
+				m.endTS = e.Timestamp
+				m.stop = d.Stop
+			case "turn_start":
+				m.turns++
+			case "turn_end":
+				if d.Usage != nil {
+					m.totalTokens = d.Usage.TotalTokens
+				}
+			}
+		case *AOPTimelineEntry:
+			switch d.AOPType {
+			case "session.start":
+				m.startTS = e.Timestamp
+				var sd struct{ Model string `json:"model"` }
+				_ = json.Unmarshal(d.Data, &sd)
+				if sd.Model != "" && m.model == "" {
+					m.model = sd.Model
+				}
+			case "session.end":
+				m.endTS = e.Timestamp
+				var sd struct{ Stop string `json:"stop"` }
+				_ = json.Unmarshal(d.Data, &sd)
+				m.stop = sd.Stop
+			case "turn.start":
+				m.turns++
+			case "usage":
+				var ud struct{ TotalTokens int `json:"total_tokens"` }
+				_ = json.Unmarshal(d.Data, &ud)
+				if ud.TotalTokens > 0 {
+					m.totalTokens = ud.TotalTokens
+				}
 			}
 		}
 	}
@@ -438,4 +466,102 @@ func compactResult(result string, maxLen int) string {
 	}
 	first := strings.TrimSpace(lines[0])
 	return TruncateStr(first, maxLen-20) + fmt.Sprintf(" (+%d lines)", len(lines)-1)
+}
+
+// ---------------------------------------------------------------------------
+// AOP event support
+// ---------------------------------------------------------------------------
+
+type AOPTimelineEntry struct {
+	AOPType string
+	Data    json.RawMessage
+}
+
+func unmarshalAOPEntry(rec Record) *AOPTimelineEntry {
+	aopType := strings.TrimPrefix(string(rec.Type), "aop.")
+	return &AOPTimelineEntry{AOPType: aopType, Data: rec.Data}
+}
+
+func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
+	switch e.AOPType {
+	case "turn.start":
+		var d struct{ Turn int `json:"turn"` }
+		_ = json.Unmarshal(e.Data, &d)
+		sb.WriteString(fmt.Sprintf("## Turn %d\n\n", d.Turn))
+
+	case "text":
+		var d struct {
+			Content string `json:"content"`
+			Role    string `json:"role"`
+			Delta   bool   `json:"delta"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		if d.Delta || d.Content == "" {
+			return
+		}
+		if d.Role == "user" {
+			sb.WriteString(fmt.Sprintf("> %s\n\n", TruncateStr(d.Content, 200)))
+		} else {
+			sb.WriteString(d.Content + "\n\n")
+		}
+
+	case "tool.call":
+		var d struct {
+			ToolName string `json:"tool_name"`
+			Args     any    `json:"args"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		argsStr := ""
+		switch a := d.Args.(type) {
+		case string:
+			argsStr = a
+		case map[string]any:
+			raw, _ := json.Marshal(a)
+			argsStr = string(raw)
+		}
+		args := summarizeToolArgs(d.ToolName, argsStr)
+		if args != "" {
+			sb.WriteString(fmt.Sprintf("- **%s** `%s`\n", d.ToolName, args))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", d.ToolName))
+		}
+
+	case "tool.result":
+		var d struct {
+			ToolName string `json:"tool_name"`
+			Content  any    `json:"content"`
+			IsError  bool   `json:"is_error"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		result := ""
+		if s, ok := d.Content.(string); ok {
+			result = s
+		}
+		if d.IsError {
+			sb.WriteString(fmt.Sprintf("  - ✗ `%s`\n", TruncateStr(result, 120)))
+		} else {
+			sb.WriteString(fmt.Sprintf("  - ✓ %s\n", compactResult(result, 150)))
+		}
+
+	case "usage":
+		var d struct {
+			TotalTokens     int `json:"total_tokens"`
+			CacheReadTokens int `json:"cache_read_tokens"`
+			InputTokens     int `json:"input_tokens"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		if d.TotalTokens > 0 {
+			usage := fmt.Sprintf("*%d tokens", d.TotalTokens)
+			if d.CacheReadTokens > 0 && d.InputTokens > 0 {
+				pct := float64(d.CacheReadTokens) / float64(d.InputTokens) * 100
+				usage += fmt.Sprintf(", cache %.0f%%", pct)
+			}
+			sb.WriteString("\n" + usage + "*\n\n")
+		}
+
+	case "session.end":
+		var d struct{ Stop string `json:"stop"` }
+		_ = json.Unmarshal(e.Data, &d)
+		sb.WriteString(fmt.Sprintf("\n> **agent done** (stop=%s)\n\n", d.Stop))
+	}
 }

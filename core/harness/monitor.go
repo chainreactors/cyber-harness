@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
 // Monitor tails the agent events JSONL file in real-time, rendering a
@@ -94,62 +94,60 @@ func (m *Monitor) tailFile(f *os.File, done <-chan struct{}) {
 }
 
 func (m *Monitor) renderLine(line string) {
-	rec, err := output.ParseRecord([]byte(line))
-	if err != nil || rec.Type != output.TypeAgent {
+	var ev aop.Event
+	if json.Unmarshal([]byte(line), &ev) != nil || ev.V == 0 {
 		return
 	}
-	var ev monitorEvent
-	if json.Unmarshal(rec.Data, &ev) != nil {
-		return
-	}
-	m.renderEvent(ev)
+	m.renderAOPEvent(ev)
 }
 
-type monitorEvent struct {
-	Type     string       `json:"type"`
-	Turn     int          `json:"turn"`
-	ToolName string       `json:"tool_name"`
-	Args     string       `json:"arguments"`
-	Result   string       `json:"result"`
-	IsError  bool         `json:"is_error"`
-	Message  *monitorMsg  `json:"message"`
-	Stop     string       `json:"stop"`
-}
-
-type monitorMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-func (m *Monitor) renderEvent(ev monitorEvent) {
+func (m *Monitor) renderAOPEvent(ev aop.Event) {
 	switch ev.Type {
-	case "turn_start":
-		if ev.Turn != m.turnSeen {
-			m.turnSeen = ev.Turn
-			m.printf("\n── turn %d ──\n", ev.Turn)
+	case aop.TypeTurnStart:
+		var d aop.TurnData
+		_ = json.Unmarshal(ev.Data, &d)
+		if d.Turn != m.turnSeen {
+			m.turnSeen = d.Turn
+			m.printf("\n── turn %d ──\n", d.Turn)
 		}
 
-	case "message_end":
-		if ev.Message != nil && ev.Message.Role == "assistant" && ev.Message.Content != "" {
-			m.printf("  💬 %s\n", truncate.Clip(ev.Message.Content, 200))
+	case aop.TypeText:
+		var d aop.TextData
+		_ = json.Unmarshal(ev.Data, &d)
+		if !d.Delta && d.Content != "" && (d.Role == "" || d.Role == "assistant") {
+			m.printf("  💬 %s\n", truncate.Clip(d.Content, 200))
 		}
 
-	case "tool_execution_start":
-		m.printf("  🔧 %s %s\n", ev.ToolName, truncate.Clip(ev.Args, 120))
+	case aop.TypeToolCall:
+		var d aop.ToolCallData
+		_ = json.Unmarshal(ev.Data, &d)
+		argsStr := ""
+		if s, ok := d.Args.(string); ok {
+			argsStr = s
+		} else if d.Args != nil {
+			raw, _ := json.Marshal(d.Args)
+			argsStr = string(raw)
+		}
+		m.printf("  🔧 %s %s\n", d.ToolName, truncate.Clip(argsStr, 120))
 
-	case "tool_execution_end":
-		if ev.IsError {
-			m.printf("  ❌ %s error: %s\n", ev.ToolName, truncate.Clip(ev.Result, 100))
+	case aop.TypeToolResult:
+		var d aop.ToolResultData
+		_ = json.Unmarshal(ev.Data, &d)
+		result := ""
+		if s, ok := d.Content.(string); ok {
+			result = s
+		}
+		if d.IsError {
+			m.printf("  ❌ %s error: %s\n", d.ToolName, truncate.Clip(result, 100))
+		} else if len(result) > 0 {
+			m.printf("  ✓  %s → %d bytes: %s\n", d.ToolName, len(result), truncate.Clip(result, 100))
 		} else {
-			size := len(ev.Result)
-			if size > 0 {
-				m.printf("  ✓  %s → %d bytes: %s\n", ev.ToolName, size, truncate.Clip(ev.Result, 100))
-			} else {
-				m.printf("  ✓  %s → (empty)\n", ev.ToolName)
-			}
+			m.printf("  ✓  %s → (empty)\n", d.ToolName)
 		}
 
-	case "agent_end":
-		m.printf("\n── agent done (stop=%s) ──\n", ev.Stop)
+	case aop.TypeSessionEnd:
+		var d aop.SessionEndData
+		_ = json.Unmarshal(ev.Data, &d)
+		m.printf("\n── agent done (stop=%s) ──\n", d.Stop)
 	}
 }

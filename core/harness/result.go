@@ -3,12 +3,13 @@
 package harness
 
 import (
+	"bufio"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
 type RunResult struct {
@@ -19,24 +20,24 @@ type RunResult struct {
 	Events   []AgentEvent
 }
 
+// AgentEvent is a flattened view of AOP events for test assertions.
 type AgentEvent struct {
-	Type            string              `json:"type"`
-	Turn            int                 `json:"turn,omitempty"`
-	ToolName        string              `json:"tool_name,omitempty"`
-	ToolCallID      string              `json:"tool_call_id,omitempty"`
-	Args            string              `json:"arguments,omitempty"`
-	Result          string              `json:"result,omitempty"`
-	IsError         bool                `json:"is_error,omitempty"`
-	Error           string              `json:"error,omitempty"`
-	Stop            string              `json:"stop,omitempty"`
-	Message         *agent.ChatMessage  `json:"message,omitempty"`
-	ToolResults     []agent.ChatMessage `json:"tool_results,omitempty"`
-	Usage           *agent.Usage        `json:"usage,omitempty"`
-	ContextTokens   int                 `json:"context_tokens,omitempty"`
-	NewMessages     int                 `json:"new_messages,omitempty"`
-	RequestModel    string              `json:"request_model,omitempty"`
-	RequestMessages int                 `json:"request_messages,omitempty"`
-	RequestTools    int                 `json:"request_tools,omitempty"`
+	AOPType    string `json:"aop_type"`
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Args       string `json:"args,omitempty"`
+	Result     string `json:"result,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+	Content    string `json:"content,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Delta      bool   `json:"delta,omitempty"`
+	Stop       string `json:"stop,omitempty"`
+	Turn       int    `json:"turn,omitempty"`
+	Turns      int    `json:"turns,omitempty"`
+
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
 }
 
 func (r *RunResult) OK() bool       { return r.ExitCode == 0 }
@@ -47,18 +48,16 @@ func (r *RunResult) ContainsOutput(substr string) bool {
 	return strings.Contains(r.Stdout, substr) || strings.Contains(r.Stderr, substr)
 }
 
-// ToolCalls returns merged tool call events: arguments come from
-// tool_execution_start, results from tool_execution_end, joined by tool_call_id.
 func (r *RunResult) ToolCalls() []AgentEvent {
 	argsByID := make(map[string]string)
 	for _, e := range r.Events {
-		if e.Type == "tool_execution_start" && e.ToolCallID != "" {
+		if e.AOPType == aop.TypeToolCall && e.ToolCallID != "" {
 			argsByID[e.ToolCallID] = e.Args
 		}
 	}
 	var calls []AgentEvent
 	for _, e := range r.Events {
-		if e.Type == "tool_execution_end" {
+		if e.AOPType == aop.TypeToolResult {
 			if e.Args == "" && e.ToolCallID != "" {
 				e.Args = argsByID[e.ToolCallID]
 			}
@@ -144,7 +143,7 @@ func (r *RunResult) ErroredToolCalls() []AgentEvent {
 
 func (r *RunResult) StopReason() string {
 	for i := len(r.Events) - 1; i >= 0; i-- {
-		if r.Events[i].Type == "agent_end" {
+		if r.Events[i].AOPType == aop.TypeSessionEnd {
 			return r.Events[i].Stop
 		}
 	}
@@ -153,14 +152,12 @@ func (r *RunResult) StopReason() string {
 
 func (r *RunResult) TotalTokens() int {
 	for i := len(r.Events) - 1; i >= 0; i-- {
-		if r.Events[i].Type == "turn_end" && r.Events[i].Usage != nil {
-			return r.Events[i].Usage.TotalTokens
+		if r.Events[i].AOPType == aop.TypeUsage && r.Events[i].TotalTokens > 0 {
+			return r.Events[i].TotalTokens
 		}
 	}
 	return 0
 }
-
-// tool-specific accessors
 
 func (r *RunResult) SubagentCalls() []AgentEvent { return r.ToolCallsNamed("subagent") }
 
@@ -194,20 +191,81 @@ func (r *RunResult) SubagentResults() []string {
 	return results
 }
 
+// loadEvents reads AOP JSONL and flattens into AgentEvent for assertions.
 func loadEvents(path string) []AgentEvent {
-	records, err := output.ParseRecordFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
+
 	var events []AgentEvent
-	for _, rec := range records {
-		if rec.Type != output.TypeAgent {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
+	for scanner.Scan() {
+		var ev aop.Event
+		if json.Unmarshal(scanner.Bytes(), &ev) != nil {
 			continue
 		}
-		var e AgentEvent
-		if json.Unmarshal(rec.Data, &e) == nil {
-			events = append(events, e)
+		if ae, ok := flattenAOPEvent(ev); ok {
+			events = append(events, ae)
 		}
 	}
 	return events
+}
+
+func flattenAOPEvent(ev aop.Event) (AgentEvent, bool) {
+	ae := AgentEvent{AOPType: ev.Type}
+
+	switch ev.Type {
+	case aop.TypeText:
+		var d aop.TextData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.Content = d.Content
+		ae.Role = d.Role
+		ae.Delta = d.Delta
+	case aop.TypeToolCall:
+		var d aop.ToolCallData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.ToolName = d.ToolName
+		ae.ToolCallID = d.ToolCallID
+		if s, ok := d.Args.(string); ok {
+			ae.Args = s
+		} else if d.Args != nil {
+			raw, _ := json.Marshal(d.Args)
+			ae.Args = string(raw)
+		}
+	case aop.TypeToolResult:
+		var d aop.ToolResultData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.ToolName = d.ToolName
+		ae.ToolCallID = d.ToolCallID
+		ae.IsError = d.IsError
+		if s, ok := d.Content.(string); ok {
+			ae.Result = s
+		} else if d.Content != nil {
+			raw, _ := json.Marshal(d.Content)
+			ae.Result = string(raw)
+		}
+	case aop.TypeUsage:
+		var d aop.UsageData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.InputTokens = d.InputTokens
+		ae.OutputTokens = d.OutputTokens
+		ae.TotalTokens = d.TotalTokens
+	case aop.TypeSessionEnd:
+		var d aop.SessionEndData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.Stop = d.Stop
+		ae.Turns = d.Turns
+	case aop.TypeTurnStart, aop.TypeTurnEnd:
+		var d aop.TurnData
+		_ = json.Unmarshal(ev.Data, &d)
+		ae.Turn = d.Turn
+	case aop.TypeSessionStart:
+		// no extra fields needed for assertions
+	default:
+		return ae, false
+	}
+	return ae, true
 }
