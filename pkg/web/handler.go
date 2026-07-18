@@ -428,7 +428,7 @@ func (h *handlerImpl) getSCONode(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(node)
+	_, _ = w.Write(node)
 }
 
 func (h *handlerImpl) scoNodeStats(w http.ResponseWriter, r *http.Request) {

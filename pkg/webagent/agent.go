@@ -116,11 +116,11 @@ func RunConnectionWithPathEx(ctx context.Context, cc ConnectionConfig) error {
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
 		err := runConnectionOnceWithPipeline(ctx, cc.ServerURL, cc.WSPath, cc.Name, cc.Registry, cc.AgentBus, nil, pipeline)
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
 		if err != nil {
 			delay := agent.RetryDelay(attempt)

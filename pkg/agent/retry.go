@@ -2,9 +2,10 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"strconv"
 	"strings"
@@ -101,7 +102,10 @@ func retryDelayFor(attempt int, err error) time.Duration {
 	if after := retryAfterFromError(err); after > 0 {
 		return after
 	}
-	return computeRetryDelay(attempt, rand.Float64())
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	jitter := float64(binary.LittleEndian.Uint64(b[:])>>11) / (1 << 53)
+	return computeRetryDelay(attempt, jitter)
 }
 
 // retryAfterFromError parses a Retry-After header (integer seconds form) from

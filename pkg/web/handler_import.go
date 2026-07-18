@@ -10,6 +10,7 @@ import (
 )
 
 func (h *handlerImpl) importSCONodes(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
 	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "parse form: "+err.Error())
 		return

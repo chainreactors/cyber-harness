@@ -542,13 +542,15 @@ func (s *SQLiteStore) ListSCONodesByScanID(ctx context.Context, scanID, nodeType
 		where = append(where, "cstx_type = ?")
 		args = append(args, nodeType)
 	}
-	query := "SELECT data FROM sco_nodes"
+	var qb strings.Builder
+	qb.WriteString("SELECT data FROM sco_nodes")
 	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+		qb.WriteString(" WHERE ")
+		qb.WriteString(strings.Join(where, " AND "))
 	}
-	query += " ORDER BY updated_at DESC LIMIT ?"
+	qb.WriteString(" ORDER BY updated_at DESC LIMIT ?")
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, qb.String(), args...)
 	if err != nil {
 		return nil, err
 	}

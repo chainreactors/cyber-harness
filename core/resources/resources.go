@@ -1,6 +1,6 @@
 package resources
 
-//go:generate go run ./templates_gen.go -t ../../templates -o template.go -embed
+//go:generate go run ./templates_gen.go -t ../../templates -o template.go
 
 import (
 	"context"

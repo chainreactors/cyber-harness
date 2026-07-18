@@ -78,7 +78,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	}
 
 	// Determine whether to activate the split-pane layout. When enabled,
-	// readline uses an input-area writer (serialised via the same mutex)
+	// readline uses an input-area writer (serialized via the same mutex)
 	// while all agent output routes to the upper scroll region.
 	var split *SplitTerminal
 	isTerminal := t.Control != nil && t.Control.IsTerminal()
@@ -88,7 +88,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	if useSplit {
 		split = NewSplitTerminal(t.Out, int(os.Stdout.Fd()))
 		// Readline gets a terminal whose Out/Err go through the split
-		// input writer so that prompt rendering is serialised with output.
+		// input writer so that prompt rendering is serialized with output.
 		consoleTerminal = rlterm.Stream(t.In, split.InputWriter(), split.InputWriter(), t.Control)
 	} else {
 		consoleTerminal = t

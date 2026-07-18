@@ -197,7 +197,7 @@ func (st *SplitTerminal) OutputWriter() io.Writer {
 	return st.outputW
 }
 
-// InputWriter returns a writer for readline that serialises with output writes
+// InputWriter returns a writer for readline that serializes with output writes
 // and clips terminal control sequences to the input area.
 func (st *SplitTerminal) InputWriter() io.Writer {
 	return st.inputW
@@ -470,7 +470,7 @@ func (st *SplitTerminal) clearOutputScreenLocked() {
 }
 
 // ---------------------------------------------------------------------------
-// splitInputWriter serialises readline writes into the input area.
+// splitInputWriter serializes readline writes into the input area.
 // ---------------------------------------------------------------------------
 
 type splitInputWriter struct {
