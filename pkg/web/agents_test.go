@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -809,8 +810,8 @@ func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
 }
 
 func TestE2ETerminalOpenAndType(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping e2e test in short mode")
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("skipping e2e browser test (requires interactive terminal)")
 	}
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "e2e-agent")

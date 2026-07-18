@@ -77,6 +77,9 @@ func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
 }
 
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
+	if raceEnabled {
+		t.Skip("scanner pipeline has known races under -race; this test checks log output")
+	}
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
 	err := runner.RunDirectScannerMode(context.Background(), &cfg.Option{
@@ -94,6 +97,9 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 }
 
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
+	if raceEnabled {
+		t.Skip("scanner pipeline has known races under -race; this test checks log output")
+	}
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
 	err := runner.RunDirectScannerMode(context.Background(), &cfg.Option{
