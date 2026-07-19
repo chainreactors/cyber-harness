@@ -14,6 +14,9 @@ import {
   SheetDescription,
   SheetTitle,
   Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 
@@ -76,6 +79,19 @@ const BATCH_ACTIONS = [
   { id: 'sendToChat', label: 'Send to Chat', icon: 'MessageSquare' },
 ]
 
+const TYPE_ORDER = ['ip', 'cidr', 'domain', 'port', 'app', 'url', 'framework', 'endpoint', 'vuln']
+
+function compareAssetTypes(left: string, right: string) {
+  const leftIndex = TYPE_ORDER.indexOf(left)
+  const rightIndex = TYPE_ORDER.indexOf(right)
+  if (leftIndex >= 0 || rightIndex >= 0) {
+    if (leftIndex < 0) return 1
+    if (rightIndex < 0) return -1
+    return leftIndex - rightIndex
+  }
+  return left.localeCompare(right)
+}
+
 export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelProps) {
   const { t } = useTranslation('assets')
   const importLabels = useMemo(() => ({
@@ -129,6 +145,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   const [artifactsLoading, setArtifactsLoading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
+  const [activeType, setActiveType] = useState('all')
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -175,6 +192,26 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   }, [importOpen, dragOver, artifactOptions.length, loadArtifacts])
 
   const rows = useMemo(() => nodes.map(flattenSCO), [nodes])
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const node of nodes) {
+      const type = node.cstx_type || 'unknown'
+      counts.set(type, (counts.get(type) ?? 0) + 1)
+    }
+    return counts
+  }, [nodes])
+  const assetTypes = useMemo(
+    () => [...typeCounts.keys()].sort(compareAssetTypes),
+    [typeCounts],
+  )
+  const visibleRows = useMemo(
+    () => activeType === 'all' ? rows : rows.filter((row) => row.cstx_type === activeType),
+    [activeType, rows],
+  )
+
+  useEffect(() => {
+    if (activeType !== 'all' && !typeCounts.has(activeType)) setActiveType('all')
+  }, [activeType, typeCounts])
 
   const handleAction = useCallback((action: string, payload?: Record<string, unknown>) => {
     if (action === 'cellClick' && payload?.value) {
@@ -262,9 +299,26 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                 <EmptyState compact title={t('noAssets')} description={t('noAssetsHint')} />
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-auto">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <Tabs value={activeType} onValueChange={setActiveType} className="shrink-0">
+                  <div className="overflow-x-auto border-b border-border/60 px-4">
+                    <TabsList className="h-auto min-w-max justify-start rounded-none bg-transparent p-0">
+                      <AssetTypeTab value="all" label={t('allTypes')} count={rows.length} />
+                      {assetTypes.map((type) => (
+                        <AssetTypeTab
+                          key={type}
+                          value={type}
+                          label={t(`types.${type}`, { defaultValue: type.toUpperCase() })}
+                          count={typeCounts.get(type) ?? 0}
+                        />
+                      ))}
+                    </TabsList>
+                  </div>
+                </Tabs>
+                <div className="min-h-0 flex-1 overflow-auto">
                 <CSTXTable
-                  data={{ rows, total: rows.length }}
+                  key={activeType}
+                  data={{ rows: visibleRows, total: visibleRows.length }}
                   loading={{ rows: loading }}
                   errors={{ rows: null }}
                   colSpan={4}
@@ -289,6 +343,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                   }}
                   onAction={handleAction}
                 />
+                </div>
               </div>
             )}
           </div>
@@ -305,6 +360,18 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
         droppedFiles={droppedFiles}
       />
     </>
+  )
+}
+
+function AssetTypeTab({ value, label, count }: { value: string; label: string; count: number }) {
+  return (
+    <TabsTrigger
+      value={value}
+      className="-mb-px mr-5 h-10 gap-1.5 rounded-none border-b-2 border-transparent bg-transparent px-0 py-0 text-xs shadow-none last:mr-0 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+    >
+      <span>{label}</span>
+      <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{count}</span>
+    </TabsTrigger>
   )
 }
 

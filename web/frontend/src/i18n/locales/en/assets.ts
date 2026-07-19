@@ -8,6 +8,18 @@ export default {
   assetCount: '{{count}} asset(s)',
   refreshing: 'Refreshing…',
   import: 'Import',
+  allTypes: 'All',
+  types: {
+    ip: 'IPs',
+    cidr: 'CIDRs',
+    domain: 'Domains',
+    port: 'Ports',
+    app: 'Apps',
+    url: 'URLs',
+    framework: 'Frameworks',
+    endpoint: 'Endpoints',
+    vuln: 'Vulnerabilities',
+  },
   importDialog: {
     title: 'Import data',
     description: 'Files are validated and previewed in the browser before the backend parses and merges them into the asset pool.',

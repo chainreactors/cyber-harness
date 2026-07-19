@@ -8,6 +8,18 @@ export default {
   assetCount: '{{count}} 项资产',
   refreshing: '刷新中…',
   import: '导入',
+  allTypes: '全部',
+  types: {
+    ip: 'IP',
+    cidr: '网段',
+    domain: '域名',
+    port: '端口',
+    app: '应用',
+    url: 'URL',
+    framework: '指纹',
+    endpoint: '端点',
+    vuln: '漏洞',
+  },
   importDialog: {
     title: '导入数据',
     description: '文件会先在前端完成结构校验和摘要预览，再由后端解析并归并到资产池。',
