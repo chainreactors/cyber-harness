@@ -94,6 +94,11 @@ type RecordStore interface {
 	InsertRecords(ctx context.Context, recs []*output.Record) error
 }
 
+// SCOStore persists libcstx nodes emitted by a connected agent process.
+type SCOStore interface {
+	UpsertSCONodes(ctx context.Context, scanID string, nodes []json.RawMessage) error
+}
+
 // AgentPool manages connected remote aiscan agents via WebSocket.
 type AgentPool struct {
 	mu             sync.RWMutex
@@ -101,6 +106,7 @@ type AgentPool struct {
 	hub            *Hub
 	sessions       SessionLookup
 	records        RecordStore
+	sco            SCOStore
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan WSMessage
 	ptyDrops       atomic.Int64
@@ -124,6 +130,10 @@ func (p *AgentPool) SetSessionLookup(sl SessionLookup) {
 
 func (p *AgentPool) SetRecordStore(rs RecordStore) {
 	p.records = rs
+}
+
+func (p *AgentPool) SetSCOStore(store SCOStore) {
+	p.sco = store
 }
 
 // agentKey is the pool key for a registering agent: its stable node identity, so
@@ -575,6 +585,30 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			}
 			a.mu.Unlock()
 		}
+
+	case "tool.data":
+		// Raw typed scanner data is transported for live consumers. The durable
+		// asset path uses the corresponding libcstx-normalized tool.sco message.
+
+	case "tool.sco":
+		if p.sco == nil || len(msg.Payload) == 0 {
+			return
+		}
+		var payload struct {
+			CallID string            `json:"call_id"`
+			Nodes  []json.RawMessage `json:"nodes"`
+		}
+		if json.Unmarshal(msg.Payload, &payload) != nil || len(payload.Nodes) == 0 {
+			return
+		}
+		scanID := payload.CallID
+		if scanID == "" {
+			scanID = msg.TaskID
+		}
+		if scanID == "" {
+			scanID = "standalone"
+		}
+		_ = p.sco.UpsertSCONodes(context.Background(), scanID, payload.Nodes)
 
 	case "output":
 		if p.hub != nil && msg.TaskID != "" {

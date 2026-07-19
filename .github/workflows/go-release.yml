@@ -93,13 +93,13 @@ jobs:
             profile: standard
             main: ./cmd/aiscan
             binary: aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo"
+            tags: "forceposix emptytemplates noembed osusergo netgo cstx_native"
             generate: true
           - id: aiscan-full
             profile: full
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full"
+            tags: "forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim"
             generate: true
           - id: aiscan-agent
             profile: agent

@@ -28,7 +28,6 @@ import {
   ChatPanel as ViewerChatPanel,
   ChatThinking,
   MessageBubble as ChatMessageBubble,
-  ToolCallDisplay as ChatToolCall,
   reduceAOPToTimeline,
   resolveTimelineRenderer,
   summarizeArgs,
@@ -44,6 +43,7 @@ import { fetchSessionCommands, uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
 import type { TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
+import ScannerToolCall from './chat/ScannerToolCall'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
@@ -594,7 +594,8 @@ function timelineContent(
 
     case 'tool_call':
       return (
-        <ChatToolCall
+        <ScannerToolCall
+          id={item.toolCall.id}
           toolName={item.toolCall.toolName}
           toolArgs={item.toolCall.toolArgs}
           result={item.toolCall.result}
@@ -699,8 +700,9 @@ function AssistantResponseEntry({
       tools={response.tools.length > 0 ? (
         <div className="space-y-2">
           {response.tools.map((tool) => (
-            <ChatToolCall
+            <ScannerToolCall
               key={tool.id}
+              id={tool.id}
               toolName={tool.toolName}
               toolArgs={tool.toolArgs}
               result={tool.result}

@@ -20,6 +20,40 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type recordingSCOStore struct {
+	scanID string
+	nodes  []json.RawMessage
+}
+
+func (s *recordingSCOStore) UpsertSCONodes(_ context.Context, scanID string, nodes []json.RawMessage) error {
+	s.scanID = scanID
+	s.nodes = append([]json.RawMessage(nil), nodes...)
+	return nil
+}
+
+func TestAgentPoolPersistsToolSCO(t *testing.T) {
+	store := &recordingSCOStore{}
+	pool := NewAgentPool(NewHub())
+	pool.SetSCOStore(store)
+	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","value":"127.0.0.1"}`)
+	payload, err := json.Marshal(map[string]any{
+		"call_id": "call-gogo-1",
+		"nodes":   []json.RawMessage{node},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pool.handleAgentMessage(&remoteAgent{}, WSMessage{Type: "tool.sco", Payload: payload})
+
+	if store.scanID != "call-gogo-1" {
+		t.Fatalf("scan id = %q, want tool call id", store.scanID)
+	}
+	if len(store.nodes) != 1 || string(store.nodes[0]) != string(node) {
+		t.Fatalf("stored nodes = %s", store.nodes)
+	}
+}
+
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
 	return dialAgentWithIdentity(t, srv, name, commands, webproto.AgentIdentity{
 		NodeID:   "node-" + name,

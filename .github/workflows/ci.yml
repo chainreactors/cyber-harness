@@ -230,11 +230,11 @@ jobs:
         include:
           - id: standard
             main: ./cmd/aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo"
+            tags: "forceposix emptytemplates noembed osusergo netgo cstx_native"
             generate: true
           - id: full
             main: ./cmd/aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo full"
+            tags: "forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim"
             generate: true
           - id: agent
             main: ./cmd/agent
