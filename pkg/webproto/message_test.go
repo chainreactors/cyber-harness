@@ -8,6 +8,27 @@ import (
 	"github.com/chainreactors/utils/pty"
 )
 
+func TestDecodeChatPayloadCarriesExecutorContext(t *testing.T) {
+	raw := json.RawMessage(`{
+		"session_id":" session-1 ",
+		"system_prompt":" be concise ",
+		"output_schema":{"name":"Result","schema":{"type":"object"}}
+	}`)
+	payload, err := DecodeChatPayload(raw)
+	if err != nil {
+		t.Fatalf("DecodeChatPayload() error = %v", err)
+	}
+	if payload.SessionID != "session-1" {
+		t.Fatalf("session_id = %q", payload.SessionID)
+	}
+	if payload.SystemPrompt != "be concise" {
+		t.Fatalf("system_prompt = %q", payload.SystemPrompt)
+	}
+	if payload.OutputSchema == nil || payload.OutputSchema.Name != "Result" {
+		t.Fatalf("output_schema = %#v", payload.OutputSchema)
+	}
+}
+
 func TestPTYResponsePayloadRoundTripPreservesSessions(t *testing.T) {
 	info := tmux.Info{ID: "session-1", Kind: "repl", Name: "main-repl", State: tmux.StateRunning}
 	msg := FrameToMessage(pty.Frame{

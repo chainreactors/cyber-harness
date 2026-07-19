@@ -8,14 +8,14 @@ const Version = 1
 
 // Event is the AOP envelope. Every JSONL line is one Event.
 type Event struct {
-	V         int                `json:"v"`
-	Type      string             `json:"type"`
-	TS        string             `json:"ts"`
-	SessionID string             `json:"session_id"`
-	Agent     string             `json:"agent"`
-	Seq       int                `json:"seq,omitempty"`
-	Data      json.RawMessage    `json:"data"`
-	Ext       map[string]any     `json:"ext,omitempty"`
+	V         int             `json:"v"`
+	Type      string          `json:"type"`
+	TS        string          `json:"ts"`
+	SessionID string          `json:"session_id"`
+	Agent     string          `json:"agent"`
+	Seq       int             `json:"seq,omitempty"`
+	Data      json.RawMessage `json:"data"`
+	Ext       map[string]any  `json:"ext,omitempty"`
 }
 
 // ── Core event types ────────────────────────────────────────────
@@ -49,7 +49,7 @@ type SessionEndData struct {
 type TextData struct {
 	Content string `json:"content"`
 	Role    string `json:"role,omitempty"`
-	Delta   bool   `json:"delta,omitempty"`
+	Delta   bool   `json:"delta,omitempty"` // append-only streaming fragment
 }
 
 type ToolCallData struct {

@@ -114,7 +114,11 @@ type chatAgentHandler struct {
 }
 
 func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *node.EventRouter) {
-	chatOpts := parseChatPayload(msg)
+	chatOpts, err := parseChatPayload(msg)
+	if err != nil {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+		return
+	}
 	webSessionID := chatOpts.SessionID
 	ag, agErr := h.chatMgr.agentFor(webSessionID)
 	if agErr != nil {
@@ -176,14 +180,8 @@ func (h *chatAgentHandler) CancelChat(taskID string) bool {
 // agent conversation to, plus optional Goal-mode run controls.
 // ---------------------------------------------------------------------------
 
-func parseChatPayload(msg webproto.Message) webproto.ChatPayload {
-	var payload webproto.ChatPayload
-	if len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &payload)
-	}
-	payload.SessionID = strings.TrimSpace(payload.SessionID)
-	payload.EvalCriteria = strings.TrimSpace(payload.EvalCriteria)
-	return payload
+func parseChatPayload(msg webproto.Message) (webproto.ChatPayload, error) {
+	return webproto.DecodeChatPayload(msg.Payload)
 }
 
 // ---------------------------------------------------------------------------

@@ -133,7 +133,7 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 			switch msg.Type {
 			case "output":
 				seenOutput = strings.Contains(msg.Data, "hello world")
-			case "agent.turn_start":
+			case "aop.turn.start":
 				seenTelemetry = strings.Contains(msg.Data, "turn 1")
 			case "complete":
 				seenComplete = true

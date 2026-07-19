@@ -88,10 +88,31 @@ type AgentStats struct {
 // controls. Empty EvalCriteria means a plain turn; a non-empty one makes the
 // agent run the evaluator loop against the criteria for up to EvalMaxRounds.
 type ChatPayload struct {
-	SessionID       string `json:"session_id,omitempty"`
-	EvalCriteria    string `json:"eval_criteria,omitempty"`
-	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
-	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
+	SessionID       string        `json:"session_id,omitempty"`
+	EvalCriteria    string        `json:"eval_criteria,omitempty"`
+	EvalMaxRounds   int           `json:"eval_max_rounds,omitempty"`
+	PersistMaxTurns int           `json:"persist_max_turns,omitempty"`
+	SystemPrompt    string        `json:"system_prompt,omitempty"`
+	OutputSchema    *OutputSchema `json:"output_schema,omitempty"`
+}
+
+type OutputSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+}
+
+func DecodeChatPayload(raw json.RawMessage) (ChatPayload, error) {
+	var payload ChatPayload
+	if len(raw) == 0 {
+		return payload, nil
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ChatPayload{}, fmt.Errorf("decode chat payload: %w", err)
+	}
+	payload.SessionID = strings.TrimSpace(payload.SessionID)
+	payload.EvalCriteria = strings.TrimSpace(payload.EvalCriteria)
+	payload.SystemPrompt = strings.TrimSpace(payload.SystemPrompt)
+	return payload, nil
 }
 
 type FileUploadPayload struct {

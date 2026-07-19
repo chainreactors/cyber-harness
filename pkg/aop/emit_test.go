@@ -114,6 +114,33 @@ func TestFromAgentEventMessageEnd(t *testing.T) {
 	}
 }
 
+func TestFromAgentEventMessageUpdateUsesAppendOnlyFragment(t *testing.T) {
+	cumulative := "hello"
+	ev := agent.Event{
+		Type:         agent.EventMessageUpdate,
+		ContentDelta: "lo",
+		Message: agent.ChatMessage{
+			Role:    "assistant",
+			Content: &cumulative,
+		},
+	}
+
+	events := FromAgentEvent(ev, "aiscan")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	var data TextData
+	if err := json.Unmarshal(events[0].Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if data.Content != "lo" {
+		t.Fatalf("content = %q, want append-only fragment %q", data.Content, "lo")
+	}
+	if !data.Delta {
+		t.Fatal("delta should be true for message_update")
+	}
+}
+
 func TestFromAgentEventTurnEndProducesTwo(t *testing.T) {
 	ev := agent.Event{
 		Type:      agent.EventTurnEnd,
@@ -153,11 +180,11 @@ func TestFromAgentEventTurnEndProducesTwo(t *testing.T) {
 
 func TestFromAgentEventEvalExt(t *testing.T) {
 	ev := agent.Event{
-		Type:      agent.EventTurnEnd,
-		SessionID: "sess-001",
-		Turn:      1,
-		EvalRound: 2,
-		EvalPass:  true,
+		Type:       agent.EventTurnEnd,
+		SessionID:  "sess-001",
+		Turn:       1,
+		EvalRound:  2,
+		EvalPass:   true,
 		EvalReason: "target scanned",
 	}
 

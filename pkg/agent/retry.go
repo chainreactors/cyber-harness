@@ -22,9 +22,9 @@ type imageDisabler interface {
 var errEmptyResponse = errors.New("empty response from LLM")
 
 const (
-	baseRetryDelay     = 500 * time.Millisecond
-	maxRetryDelay      = 32 * time.Second
-	retryJitterFactor  = 0.25
+	baseRetryDelay    = 500 * time.Millisecond
+	maxRetryDelay     = 32 * time.Second
+	retryJitterFactor = 0.25
 )
 
 func isRetryableError(err error) bool {
@@ -256,11 +256,26 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 				goto streamDone
 			}
 			updated := builder.Apply(event.Delta)
+			contentDelta := ""
+			if event.Delta.Content != nil {
+				contentDelta = *event.Delta.Content
+			}
+			reasoningDelta := ""
+			if event.Delta.ReasoningContent != nil {
+				reasoningDelta = *event.Delta.ReasoningContent
+			}
 			if !started {
 				started = true
 				bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: updated})
 			}
-			bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: updated, Usage: usage})
+			bus.Emit(Event{
+				Type:           EventMessageUpdate,
+				Turn:           turn,
+				Message:        updated,
+				ContentDelta:   contentDelta,
+				ReasoningDelta: reasoningDelta,
+				Usage:          usage,
+			})
 		}
 	}
 streamDone:

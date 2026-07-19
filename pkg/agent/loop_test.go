@@ -158,6 +158,7 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		},
 	}
 	var updates int
+	var contentDeltas []string
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
@@ -166,6 +167,9 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		Bus: testBus(func(event Event) {
 			if event.Type == EventMessageUpdate {
 				updates++
+				if event.ContentDelta != "" {
+					contentDeltas = append(contentDeltas, event.ContentDelta)
+				}
 			}
 		}),
 	})).Run(context.Background(), "stream")
@@ -177,6 +181,9 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 	}
 	if updates == 0 {
 		t.Fatal("expected message_update events")
+	}
+	if got := strings.Join(contentDeltas, ""); got != "hello" {
+		t.Fatalf("content deltas = %q, want hello", got)
 	}
 }
 

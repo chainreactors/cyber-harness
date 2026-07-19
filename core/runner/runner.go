@@ -53,6 +53,8 @@ type RuntimeConfig struct {
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
 	rt := &AgentRuntime{}
+	eventsPath := os.Getenv("AISCAN_EVENTS_FILE")
+	stdioMode := eventsPath == "-"
 	if option != nil {
 		optCopy := *option
 		rt.Option = &optCopy
@@ -124,7 +126,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	rt.SystemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.SystemPrompt))
 
-	if rc == nil || !rc.NoOutput {
+	if !stdioMode && (rc == nil || !rc.NoOutput) {
 		if rc != nil && rc.InteractiveOutput {
 			rt.Output = tui.NewAgentOutput(option)
 		} else {
@@ -137,14 +139,20 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		agentBus.Subscribe(rt.Output.HandleEvent)
 	}
 	var eventsCloser func()
-	if eventsPath := os.Getenv("AISCAN_EVENTS_FILE"); eventsPath != "" {
+	if eventsPath == "-" {
+		// The stdio session owns stdout and wraps AOP events in webproto.
+		eventsPath = ""
+	}
+	if eventsPath != "" {
 		w, err := newEventsFileSubscriber(eventsPath)
 		if err != nil {
-			logger.Warnf("events file: %s", err)
-		} else {
-			unsub := agentBus.Subscribe(w.HandleEvent)
-			eventsCloser = func() { unsub(); w.Close() }
+			if rt.ownsApp && rt.App != nil {
+				rt.App.Close()
+			}
+			return nil, fmt.Errorf("open events sink: %w", err)
 		}
+		unsub := agentBus.Subscribe(w.HandleEvent)
+		eventsCloser = func() { unsub(); w.Close() }
 	}
 	rt.Bus = agentBus
 
@@ -363,7 +371,9 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	rt.Output.Start("task", task)
+	if rt.Output != nil {
+		rt.Output.Start("task", task)
+	}
 
 	a := agent.NewAgent(rt.Config.
 		WithSystemPrompt(rt.SystemPrompt).
@@ -382,7 +392,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	if err != nil {
 		return err
 	}
-	if result != nil && strings.TrimSpace(result.Output) != "" {
+	if rt.Output != nil && result != nil && strings.TrimSpace(result.Output) != "" {
 		rt.Output.Final(result.Output)
 	}
 	return nil

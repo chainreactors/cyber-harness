@@ -15,6 +15,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@cyber/ui': path.resolve(cyberUI, 'ui/src'),
       '@cyber/theme': path.resolve(cyberUI, 'theme/src'),
+      '@cyber/markdown': path.resolve(cyberUI, 'markdown/src'),
       '@cyber/terminal': path.resolve(cyberUI, 'terminal/src'),
       '@cyber/cstx': path.resolve(cyberUI, 'cstx/src'),
       '@cyber/cstx-easm': path.resolve(cyberUI, 'cstx-easm/src'),

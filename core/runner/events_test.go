@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,35 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
+
+func TestEventsSubscriberDashWritesAOPToStdoutWithoutClosingIt(t *testing.T) {
+	var stdout bytes.Buffer
+	w, err := newEventsSubscriber("-", &stdout)
+	if err != nil {
+		t.Fatalf("newEventsSubscriber() error = %v", err)
+	}
+
+	content := "hello"
+	w.HandleEvent(agent.Event{
+		Type: agent.EventMessageEnd,
+		Message: agent.ChatMessage{
+			Role:    "assistant",
+			Content: &content,
+		},
+	})
+	w.Close()
+
+	var ev aop.Event
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &ev); err != nil {
+		t.Fatalf("stdout is not AOP JSONL: %v", err)
+	}
+	if ev.Type != aop.TypeText {
+		t.Fatalf("event type = %s, want %s", ev.Type, aop.TypeText)
+	}
+	if _, err := stdout.WriteString("still-open"); err != nil {
+		t.Fatalf("stdout writer was closed: %v", err)
+	}
+}
 
 func parseAOPLines(t *testing.T, path string) []aop.Event {
 	t.Helper()

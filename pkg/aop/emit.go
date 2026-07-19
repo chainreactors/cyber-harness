@@ -82,12 +82,8 @@ func FromAgentEvent(ev agent.Event, agentName string) []Event {
 		return nil
 
 	case agent.EventMessageUpdate:
-		content := ""
-		if ev.Message.Content != nil {
-			content = *ev.Message.Content
-		}
-		if ev.Message.Role == "assistant" && content != "" {
-			return []Event{base(TypeText, TextData{Content: content, Role: "assistant", Delta: true})}
+		if ev.Message.Role == "assistant" && ev.ContentDelta != "" {
+			return []Event{base(TypeText, TextData{Content: ev.ContentDelta, Role: "assistant", Delta: true})}
 		}
 		return nil
 

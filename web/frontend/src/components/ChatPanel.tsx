@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import {
@@ -25,7 +25,7 @@ import BrandMark from './brand/BrandMark'
 import { MarkdownContent } from '@/markdown'
 import {
   AssistantResponse,
-  ChatInput,
+  ChatPanel as ViewerChatPanel,
   ChatThinking,
   MessageBubble as ChatMessageBubble,
   ToolCallDisplay as ChatToolCall,
@@ -36,15 +36,13 @@ import {
   type ExtensionTimelineItem,
   type Mentionable,
   type ChatInputProps,
+  type ViewerTimelineItem,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
-import type { AssistantResponseState, TimelineItem } from '../hooks/useChatSession'
+import type { TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 
-// Inlined from the former timeline-mapper.ts — converts the hook's local
-// TimelineItem variants into the viewer's ExtensionTimelineItem so the
-// registered timeline renderers (scan cards, agent-joined chip) can render them.
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
     case 'scan_started':
@@ -72,6 +70,97 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
         extensionType: 'agent_joined',
         data: { agentName: item.agentName || '' },
       }
+    case 'eval':
+      return {
+        id: item.id,
+        kind: 'extension',
+        timestamp: item.timestamp,
+        extensionType: 'eval',
+        data: {
+          pass: !!item.evalPass,
+          round: item.evalRound,
+          reason: item.evalReason,
+        },
+      }
+    default:
+      return null
+  }
+}
+
+function toViewerTimelineItem(
+  item: TimelineItem,
+  scanResults: Map<string, ScanResult>,
+): ViewerTimelineItem | null {
+  switch (item.kind) {
+    case 'message': {
+      const message = item.message
+      if (!message) return null
+      const role = message.role === 'user' || message.role === 'assistant'
+        ? message.role
+        : 'system'
+      const parsed = new Date(message.created_at).getTime()
+      return {
+        id: item.id,
+        kind: 'message',
+        timestamp: Number.isNaN(parsed) ? item.timestamp : parsed,
+        actorName: message.agent_name,
+        role,
+        content: message.content,
+        metadata: message.metadata,
+      }
+    }
+    case 'assistant_response': {
+      const response = item.assistantResponse
+      if (!response) return null
+      return {
+        id: item.id,
+        kind: 'assistant_response',
+        timestamp: item.timestamp,
+        actorName: response.agentName || response.response?.agent_name,
+        thinking: response.thinking,
+        tools: response.tools.map((tool) => ({
+          id: tool.id,
+          toolName: tool.toolName,
+          toolArgs: tool.toolArgs,
+          result: tool.result,
+          pending: tool.pending,
+        })),
+        response: response.response
+          ? { content: response.response.content, metadata: response.response.metadata }
+          : undefined,
+        streaming: response.streaming,
+      }
+    }
+    case 'tool_call':
+      return item.toolCall ? {
+        id: item.id,
+        kind: 'tool_call',
+        timestamp: item.timestamp,
+        toolCall: {
+          id: item.toolCall.id,
+          toolName: item.toolCall.toolName,
+          toolArgs: item.toolCall.toolArgs,
+          result: item.toolCall.result,
+          pending: item.toolCall.pending,
+        },
+      } : null
+    case 'thinking':
+      return {
+        id: item.id,
+        kind: 'message',
+        timestamp: item.timestamp,
+        actorName: item.agentName,
+        role: 'thinking',
+        content: item.content || '',
+      }
+    case 'scan_started':
+    case 'scan_progress':
+      if (item.scanID && scanResults.has(item.scanID)) return null
+      return toExtensionItem(item)
+    case 'scan_complete':
+    case 'agent_joined':
+    case 'eval':
+      return toExtensionItem(item)
     default:
       return null
   }
@@ -123,18 +212,23 @@ export default function ChatPanel({
   onClearError,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const footerRef = useRef<HTMLDivElement>(null)
-  const stickRef = useRef(true)
-  const jumpRef = useRef(false)
   const hasAssistantResponse = timeline.some((item) => item.kind === 'assistant_response')
+  const liveThinkingItem = useMemo<TimelineItem | null>(() => {
+    if (!isThinking || hasAssistantResponse) return null
+    return { id: 'thinking-live', kind: 'thinking', timestamp: Date.now() }
+  }, [hasAssistantResponse, isThinking])
+  const viewerTimeline = useMemo<ViewerTimelineItem[]>(() => {
+    const source = liveThinkingItem ? [...timeline, liveThinkingItem] : timeline
+    return source
+      .map((item) => toViewerTimelineItem(item, scanResults))
+      .filter((item): item is ViewerTimelineItem => item !== null)
+  }, [liveThinkingItem, scanResults, timeline])
   // The right rail carries IOA thread notes, which only a fraction of turns emit.
   // Reserve its 6rem column only when the transcript actually has one — otherwise
   // the empty rail just steals horizontal space from the conversation.
   const hasThreadNotes = useMemo(
-    () => timeline.some((item) => describeIOAThreadItem(item, t) !== null),
-    [timeline, t],
+    () => viewerTimeline.some((item) => describeIOAThreadItem(item, t) !== null),
+    [viewerTimeline, t],
   )
   const inputFormClass = cn(contentOffsetClass, hasThreadNotes && threadOffsetClass)
   const [persist, setPersist] = useState(false)
@@ -214,12 +308,7 @@ export default function ChatPanel({
     }
   }, [activeSessionID, i18n.language, t])
 
-  // Re-entering a session (switching sessions, or returning to the chat tab)
-  // re-pins to the bottom and requests an instant jump, so we land on the
-  // latest message instead of sitting at the top.
   useEffect(() => {
-    stickRef.current = true
-    jumpRef.current = true
     // Goal (persist/eval) mode is per-session intent. ChatPanel doesn't remount
     // on session switch, so clear it here — otherwise session A's done-when
     // criteria stays toggled on and gets silently sent with the next message in
@@ -228,34 +317,6 @@ export default function ChatPanel({
     setEvalCriteria('')
     setEvalMaxRounds(3)
   }, [activeSessionID])
-
-  useEffect(() => {
-    if (!stickRef.current) return
-    if (timeline.length === 0) return
-    const behavior: ScrollBehavior = jumpRef.current ? 'auto' : 'smooth'
-    jumpRef.current = false
-    bottomRef.current?.scrollIntoView({ behavior })
-    // Depend on `timeline` (not `timeline.length`): streamed deltas update the
-    // last item in place, producing a new array reference but the same length,
-    // so keying on length would freeze autoscroll mid-reply.
-  }, [timeline, isThinking])
-
-  // The composer footer shares the flex column with the message viewport, so
-  // whenever it grows — Goal panel expands, the eval/message textareas auto-grow,
-  // attachment chips or the offline banner appear — the viewport shrinks by the
-  // same amount while scrollTop stays put, pushing the newest messages (often the
-  // latest tool calls) below the fold so the composer reads as if it "covered"
-  // them. Re-pin to the bottom on any footer resize while we're still stuck
-  // there, keeping the tail visible without disturbing a user who scrolled up.
-  useEffect(() => {
-    const el = footerRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      if (stickRef.current) bottomRef.current?.scrollIntoView({ behavior: 'auto' })
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [hasActiveSession])
 
   // Auto-grow the goal criteria textarea (min ~2 rows, capped) so long
   // natural-language goals stay readable instead of scrolling a one-liner.
@@ -303,126 +364,100 @@ export default function ChatPanel({
     if (hadGoal) resetGoal()
   }
 
-  function handleScroll() {
-    const el = scrollRef.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    stickRef.current = atBottom
-  }
+  const renderViewerItem = useCallback(
+    (item: ViewerTimelineItem) => timelineContent(item, scanResults),
+    [scanResults],
+  )
+  const renderViewerMark = useCallback(
+    (item: ViewerTimelineItem) => <TimelineMark item={item} />,
+    [],
+  )
+  const renderViewerSideNote = useCallback(
+    (item: ViewerTimelineItem) => <IOAThreadNote item={item} />,
+    [],
+  )
+
+  const emptyState = !hasActiveSession ? (
+    <div className={cn(workspaceClass, 'py-4')}>
+      <div className={inputFormClass}>
+        <InstrumentIdle
+          eyebrow={t('consoleReady')}
+          title={t('startConversation')}
+          className="py-16"
+        >
+          {agents.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-2">
+              {agents.map((agent) => (
+                <div key={agent.id} className="flex gap-1">
+                  {onCreateSession && (
+                    <Button size="sm" variant="outline" onClick={() => onCreateSession(agent.id)} className="gap-1.5">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      {agent.name || 'Chat'}
+                    </Button>
+                  )}
+                  {onOpenTerminal && (
+                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.id)} className="gap-1.5 text-muted-foreground">
+                      <Terminal className="h-3.5 w-3.5" />
+                      Terminal
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </InstrumentIdle>
+      </div>
+    </div>
+  ) : !isThinking ? (
+    <div className={cn(workspaceClass, 'py-4')}>
+      <div className={inputFormClass}>
+        <div className="hidden md:block">
+          <EmptyState
+            eyebrow={t('readyEyebrow')}
+            title={t('ready')}
+            subtitle={
+              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
+            }
+          />
+        </div>
+        <div className="md:hidden">
+          <MobileChatGreeting onSeed={seedComposer} />
+        </div>
+      </div>
+    </div>
+  ) : null
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <ViewerChatPanel timeline={viewerTimeline} className="min-w-0 bg-transparent">
       {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive animate-in fade-in slide-in-from-top-1 duration-200"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span className="min-w-0 flex-1 break-words">{error}</span>
-          <button type="button" aria-label={t('dismiss')} onClick={onClearError} className="rounded p-0.5 hover:bg-destructive/10">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      <main className="flex min-h-0 flex-1 flex-col bg-transparent">
-        {/* Off-screen polite live region — announces the turn phase to screen
-            readers without reading the streamed tokens one by one. */}
-        <div className="sr-only" role="status" aria-live="polite">{liveStatus}</div>
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        >
-          <div className={cn(workspaceClass, 'space-y-3 py-4')}>
-            {!hasActiveSession && timeline.length === 0 && (
-              <div className={inputFormClass}>
-                <InstrumentIdle
-                  eyebrow={t('consoleReady')}
-                  title={t('startConversation')}
-                  className="py-16"
-                >
-                  {agents.length > 0 && (
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {agents.map((a) => (
-                        <div key={a.id} className="flex gap-1">
-                          {onCreateSession && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onCreateSession(a.id)}
-                              className="gap-1.5"
-                            >
-                              <MessageSquare className="h-3.5 w-3.5" />
-                              {a.name || 'Chat'}
-                            </Button>
-                          )}
-                          {onOpenTerminal && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onOpenTerminal(a.id)}
-                              className="gap-1.5 text-muted-foreground"
-                            >
-                              <Terminal className="h-3.5 w-3.5" />
-                              Terminal
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </InstrumentIdle>
-              </div>
-            )}
-            {hasActiveSession && timeline.length === 0 && !isThinking && (
-              <div className={inputFormClass}>
-                {/* Desktop keeps the idle "instrument" empty state; phones get the
-                    Doubao-style greeting + capability cards (mobile-only, so the
-                    deck's identity is untouched at md+). */}
-                <div className="hidden md:block">
-                  <EmptyState
-                    eyebrow={t('readyEyebrow')}
-                    title={t('ready')}
-                    subtitle={
-                      <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
-                    }
-                  />
-                </div>
-                <div className="md:hidden">
-                  <MobileChatGreeting onSeed={seedComposer} />
-                </div>
-              </div>
-            )}
-
-            {timeline.map((item) => (
-              <TimelineEntry
-                key={item.id}
-                item={item}
-                scanResults={scanResults}
-                hasThreadNotes={hasThreadNotes}
-              />
-            ))}
-
-            {isThinking && !hasAssistantResponse && (
-              <TimelineRow
-                item={{
-                  id: 'thinking-live',
-                  kind: 'thinking',
-                  timestamp: Date.now(),
-                }}
-                hasThreadNotes={hasThreadNotes}
-              >
-                <ChatThinking />
-              </TimelineRow>
-            )}
-
-            <div ref={bottomRef} />
+        <ViewerChatPanel.ErrorBar>
+          <div
+            role="alert"
+            className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive animate-in fade-in slide-in-from-top-1 duration-200"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            <button type="button" aria-label={t('dismiss')} onClick={onClearError} className="rounded p-0.5 hover:bg-destructive/10">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        </div>
+        </ViewerChatPanel.ErrorBar>
+      )}
+      <div className="sr-only" role="status" aria-live="polite">{liveStatus}</div>
+      <ViewerChatPanel.Timeline
+        className="overscroll-contain !px-0 !py-0"
+        contentClassName={cn(workspaceClass, 'py-4')}
+        emptyState={emptyState}
+        renderItem={renderViewerItem}
+        renderMark={renderViewerMark}
+        renderSideNote={hasThreadNotes ? renderViewerSideNote : undefined}
+        stickyScroll
+        memoItems
+        scrollResetKey={activeSessionID}
+      />
 
-        {hasActiveSession && (
-          <div ref={footerRef} className="bg-background/95 pb-safe backdrop-blur-sm">
+      {hasActiveSession && (
+        <div className="bg-background/95 pb-safe backdrop-blur-sm">
             {agentOffline && (
               <div className={cn(workspaceClass, 'pt-2')}>
                 <div className={inputFormClass}>
@@ -438,7 +473,7 @@ export default function ChatPanel({
             )}
             <div className={workspaceClass}>
               <div className={inputFormClass}>
-                <ChatInput
+                <ViewerChatPanel.Input
                   className="!border-t-0 !bg-transparent !backdrop-blur-none"
                   topSlot={persist ? (
                     <div className="bg-primary/[0.04] px-3.5 py-3">
@@ -502,138 +537,71 @@ export default function ChatPanel({
                 />
               </div>
             </div>
-          </div>
-        )}
-      </main>
-    </div>
-  )
-}
-
-// Memoized: during token streaming useChatSession mints a new `timeline` array
-// on every message_delta, but only the streaming item's reference actually
-// changes. Without memo, timeline.map re-renders EVERY settled entry each token
-// — and each MessageBubble re-parses its markdown (remark) from scratch, so a
-// 40-message transcript re-parses 40 docs per token. A shallow prop compare lets
-// unchanged entries bail out because settled item references and the scan-results
-// map stay stable while an unrelated response streams.
-const TimelineEntry = memo(function TimelineEntry({
-  item,
-  scanResults,
-  hasThreadNotes,
-}: {
-  item: TimelineItem
-  scanResults: Map<string, ScanResult>
-  hasThreadNotes: boolean
-}) {
-  const content = timelineContent(item, scanResults)
-  if (!content) return null
-
-  return (
-    <TimelineRow item={item} hasThreadNotes={hasThreadNotes}>
-      {content}
-    </TimelineRow>
-  )
-})
-
-function TimelineRow({
-  item,
-  hasThreadNotes,
-  children,
-}: {
-  item: TimelineItem
-  hasThreadNotes: boolean
-  children: ReactNode
-}) {
-  return (
-    <div
-      data-testid="chat-timeline-row"
-      data-kind={item.kind}
-      className={cn(
-        'grid grid-cols-1 gap-y-1 animate-in fade-in slide-in-from-bottom-1 duration-200',
-        'xl:gap-x-3',
-        hasThreadNotes ? 'xl:grid-cols-[6rem_minmax(0,1fr)_6rem]' : 'xl:grid-cols-[6rem_minmax(0,1fr)]',
+        </div>
       )}
-    >
-      <TimelineMark item={item} />
-      <div data-testid="chat-content" className="min-w-0">
-        {children}
-      </div>
-      {hasThreadNotes && <IOAThreadNote item={item} />}
-    </div>
+    </ViewerChatPanel>
   )
 }
 
 function timelineContent(
-  item: TimelineItem,
+  item: ViewerTimelineItem,
   scanResults: Map<string, ScanResult>,
 ): ReactNode {
   switch (item.kind) {
-    case 'message':
-      if (!item.message) return null
-      {
-        const msg = item.message
-        const role = msg.role === 'tool_call' || msg.role === 'tool_result' ? 'system' : msg.role
+    case 'message': {
+      if (item.role === 'thinking') {
         return (
-          <ChatMessageBubble
-            role={role}
-            actorName={msg.agent_name}
-            timestamp={msg.created_at}
-          >
-            {role === 'system' && systemCode(msg.metadata) ? (
-              <SystemMessageContent metadata={msg.metadata!} fallback={msg.content} />
-            ) : msg.content ? (
-              <MessageBody content={msg.content} compact={role !== 'system'} />
-            ) : null}
-          </ChatMessageBubble>
+          <ChatThinking actorName={item.actorName}>
+            {item.content.trim() ? <MarkdownContent content={trimDisplayContent(item.content)} compact muted /> : null}
+          </ChatThinking>
         )
       }
+      return (
+        <ChatMessageBubble
+          role={item.role}
+          actorName={item.actorName}
+          timestamp={new Date(item.timestamp).toISOString()}
+        >
+          {item.role === 'system' && systemCode(item.metadata) ? (
+            <SystemMessageContent metadata={item.metadata!} fallback={item.content} />
+          ) : item.content ? (
+            <MessageBody content={item.content} compact={item.role !== 'system'} />
+          ) : null}
+        </ChatMessageBubble>
+      )
+    }
 
     case 'assistant_response':
-      if (!item.assistantResponse) return null
-      return <AssistantResponseEntry response={item.assistantResponse} />
+      return <AssistantResponseEntry response={item} />
 
     case 'tool_call':
-      if (!item.toolCall) return null
       return (
         <ChatToolCall
           toolName={item.toolCall.toolName}
           toolArgs={item.toolCall.toolArgs}
           result={item.toolCall.result}
           pending={item.toolCall.pending}
-          toolCallId={item.toolCall.id}
         />
       )
 
-    case 'scan_started':
-    case 'scan_progress':
-    case 'scan_complete': {
-      if (item.kind !== 'scan_complete' && item.scanID && scanResults.has(item.scanID)) return null
-      const ext = toExtensionItem(item) as ExtensionTimelineItem | null
-      if (!ext) return null
-      const config = resolveTimelineRenderer(ext.extensionType)
+    case 'extension': {
+      if (item.extensionType === 'eval') {
+        return (
+          <EvalNote
+            pass={item.data.pass === true}
+            round={typeof item.data.round === 'number' ? item.data.round : undefined}
+            reason={typeof item.data.reason === 'string' ? item.data.reason : undefined}
+          />
+        )
+      }
+      const config = resolveTimelineRenderer(item.extensionType)
       if (!config) return null
       const Renderer = config.renderer
-      return <Renderer item={ext} context={{ scanResults }} />
+      return <Renderer item={item} context={{ scanResults }} />
     }
 
-    case 'thinking':
-      return (
-        <ChatThinking actorName={item.agentName}>
-          {item.content?.trim() ? <MarkdownContent content={trimDisplayContent(item.content)} compact muted /> : null}
-        </ChatThinking>
-      )
-
-    case 'agent_joined': {
-      const ext = toExtensionItem(item) as ExtensionTimelineItem | null
-      if (!ext) return null
-      const config = resolveTimelineRenderer(ext.extensionType)
-      if (!config) return null
-      const AgentRenderer = config.renderer
-      return <AgentRenderer item={ext} context={{}} />
-    }
-
-    case 'eval':
-      return <EvalNote pass={!!item.evalPass} round={item.evalRound} reason={item.evalReason} />
+    case 'divider':
+      return undefined
 
     default:
       return null
@@ -694,16 +662,20 @@ function EvalNote({ pass, round, reason }: { pass: boolean; round?: number; reas
   )
 }
 
-function AssistantResponseEntry({ response }: { response: AssistantResponseState }) {
+function AssistantResponseEntry({
+  response,
+}: {
+  response: Extract<ViewerTimelineItem, { kind: 'assistant_response' }>
+}) {
   const { t } = useTranslation('chat')
   const message = response.response
   const hasThinking = !!response.thinking?.trim()
-  const hasResponse = !!message?.content?.trim()
+  const hasResponse = !!message?.content.trim()
 
   return (
     <AssistantResponse
-      actorName={response.agentName || message?.agent_name}
-      timestamp={message?.created_at}
+      actorName={response.actorName}
+      timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
       thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
       tools={response.tools.length > 0 ? (
@@ -715,7 +687,6 @@ function AssistantResponseEntry({ response }: { response: AssistantResponseState
               toolArgs={tool.toolArgs}
               result={tool.result}
               pending={tool.pending}
-              toolCallId={tool.id}
             />
           ))}
         </div>
@@ -726,7 +697,7 @@ function AssistantResponseEntry({ response }: { response: AssistantResponseState
   )
 }
 
-function TimelineMark({ item }: { item: TimelineItem }) {
+function TimelineMark({ item }: { item: ViewerTimelineItem }) {
   const { t } = useTranslation('chat')
   const descriptor = describeTimelineItem(item, t)
   if (!descriptor) return <div className="hidden xl:block" />
@@ -750,7 +721,7 @@ function TimelineMark({ item }: { item: TimelineItem }) {
   )
 }
 
-function IOAThreadNote({ item }: { item: TimelineItem }) {
+function IOAThreadNote({ item }: { item: ViewerTimelineItem }) {
   const { t } = useTranslation('chat')
   const note = describeIOAThreadItem(item, t)
   if (!note) return <div className="hidden 2xl:block" />
@@ -818,14 +789,12 @@ interface TimelineDescriptor {
   dotClass: string
 }
 
-function describeTimelineItem(item: TimelineItem, t: (key: string) => string): TimelineDescriptor | null {
+function describeTimelineItem(item: ViewerTimelineItem, t: (key: string) => string): TimelineDescriptor | null {
   const time = formatRailTime(item)
 
   switch (item.kind) {
     case 'message': {
-      if (!item.message) return null
-      const role = item.message.role
-      if (role === 'user') {
+      if (item.role === 'user') {
         return {
           label: t('you'),
           time,
@@ -833,12 +802,20 @@ function describeTimelineItem(item: TimelineItem, t: (key: string) => string): T
           dotClass: 'border-primary bg-primary',
         }
       }
-      if (role === 'assistant') {
+      if (item.role === 'assistant') {
         return {
-          label: item.message.agent_name || t('assistant'),
+          label: item.actorName || t('assistant'),
           time,
           icon: <BrandMark size={12} className="text-ai" />,
           dotClass: 'border-ai bg-ai',
+        }
+      }
+      if (item.role === 'thinking') {
+        return {
+          label: item.actorName || t('thinking'),
+          time,
+          icon: <Loader2 className="h-3 w-3 animate-spin text-primary" />,
+          dotClass: 'border-primary bg-background',
         }
       }
       return {
@@ -851,32 +828,35 @@ function describeTimelineItem(item: TimelineItem, t: (key: string) => string): T
 
     case 'assistant_response':
       return {
-        label: item.assistantResponse?.agentName || item.agentName || t('assistant'),
+        label: item.actorName || t('assistant'),
         time,
         icon: <BrandMark size={12} className="text-ai" />,
-        dotClass: item.assistantResponse?.streaming
+        dotClass: item.streaming
           ? 'border-primary bg-background animate-pulse'
           : 'border-ai bg-ai',
       }
 
     case 'tool_call':
       return {
-        label: item.toolCall?.toolName || t('tool'),
+        label: item.toolCall.toolName || t('tool'),
         time,
         icon: <Wrench className="h-3 w-3 text-warning" />,
-        dotClass: item.toolCall?.pending ? 'border-warning bg-warning animate-pulse' : 'border-primary bg-primary',
+        dotClass: item.toolCall.pending ? 'border-warning bg-warning animate-pulse' : 'border-primary bg-primary',
       }
 
-    case 'scan_started':
-    case 'scan_progress':
-    case 'scan_complete':
-    case 'agent_joined': {
-      const ext = toExtensionItem(item) as ExtensionTimelineItem | null
-      if (!ext) return null
-      const config = resolveTimelineRenderer(ext.extensionType)
+    case 'extension': {
+      if (item.extensionType === 'eval') {
+        return {
+          label: t('evalLabel'),
+          time,
+          icon: <Sparkles className="h-3 w-3 text-ai" />,
+          dotClass: item.data.pass === true ? 'border-success bg-success' : 'border-ai bg-ai',
+        }
+      }
+      const config = resolveTimelineRenderer(item.extensionType)
       if (config?.mark) {
         const markLabel = typeof config.mark.label === 'function'
-          ? config.mark.label(ext) : (config.mark.label || item.kind)
+          ? config.mark.label(item) : (config.mark.label || item.extensionType)
         const MarkIcon = config.mark.icon
         return {
           label: markLabel,
@@ -888,30 +868,17 @@ function describeTimelineItem(item: TimelineItem, t: (key: string) => string): T
       return null
     }
 
-    case 'thinking':
-      return {
-        label: item.agentName || t('thinking'),
-        time,
-        icon: <Loader2 className="h-3 w-3 animate-spin text-primary" />,
-        dotClass: 'border-primary bg-background',
-      }
-
-    case 'eval':
-      return {
-        label: t('evalLabel'),
-        time,
-        icon: <Sparkles className="h-3 w-3 text-ai" />,
-        dotClass: item.evalPass ? 'border-success bg-success' : 'border-ai bg-ai',
-      }
+    case 'divider':
+      return null
 
     default:
       return null
   }
 }
 
-function describeIOAThreadItem(item: TimelineItem, t: (key: string) => string): { label: string; detail?: string } | null {
-  if (item.kind === 'assistant_response' && item.assistantResponse) {
-    const ioaTool = item.assistantResponse.tools.find((tool) => isIOATool(tool.toolName, tool.toolArgs))
+function describeIOAThreadItem(item: ViewerTimelineItem, t: (key: string) => string): { label: string; detail?: string } | null {
+  if (item.kind === 'assistant_response') {
+    const ioaTool = item.tools.find((tool) => isIOATool(tool.toolName, tool.toolArgs))
     if (ioaTool) {
       return {
         label: ioaTool.toolName || 'server',
@@ -920,15 +887,15 @@ function describeIOAThreadItem(item: TimelineItem, t: (key: string) => string): 
     }
   }
 
-  if (item.kind === 'tool_call' && item.toolCall && isIOATool(item.toolCall.toolName, item.toolCall.toolArgs)) {
+  if (item.kind === 'tool_call' && isIOATool(item.toolCall.toolName, item.toolCall.toolArgs)) {
     return {
       label: item.toolCall.toolName || 'server',
       detail: previewText(summarizeArgs(item.toolCall.toolArgs) || item.toolCall.result || '', 140),
     }
   }
 
-  if (item.kind === 'message' && item.message) {
-    const metadata = item.message.metadata || {}
+  if (item.kind === 'message') {
+    const metadata = item.metadata || {}
     const thread = metadata.ioa_thread || metadata.ioa_message || metadata.thread
     if (thread) {
       return {
@@ -947,9 +914,8 @@ function isIOATool(toolName: string, toolArgs: string): boolean {
   return /\bioa_(space|send|read)\b/i.test(toolArgs)
 }
 
-function formatRailTime(item: TimelineItem): string {
-  const raw = item.message?.created_at ? new Date(item.message.created_at).getTime() : item.timestamp
-  const date = new Date(raw)
+function formatRailTime(item: ViewerTimelineItem): string {
+  const date = new Date(item.timestamp)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })
 }

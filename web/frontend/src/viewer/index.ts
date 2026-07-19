@@ -21,10 +21,12 @@ export { AgentVoiceCard } from '../../cyber-ui/packages/viewer/src/components/ch
 export { ChatPanel } from '../../cyber-ui/packages/viewer/src/components/chat/ChatPanel'
 
 export type {
-  ExtensionTimelineItem,
   TimelineRendererConfig,
 } from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
-export type { TimelineItem as ViewerTimelineItem } from '../../cyber-ui/packages/viewer/src/types/timeline'
+export type {
+  ExtensionTimelineItem,
+  TimelineItem as ViewerTimelineItem,
+} from '../../cyber-ui/packages/viewer/src/types/timeline'
 
 export type { MessageBubbleProps, MessageBubbleVariant } from '../../cyber-ui/packages/viewer/src/components/chat/MessageBubble'
 export type { ChatThinkingProps } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'
