@@ -14,9 +14,9 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/node"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/node"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -68,7 +68,10 @@ func main() {
 		option.ConfigFile = configFile
 		_ = os.Setenv("AISCAN_RUNNER_CONFIG", configFile)
 	}
-	cfg.ResolveRuntimeConfig(&option)
+	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
+		logger.Errorf("load config: %v", err)
+		os.Exit(1)
+	}
 
 	dataBus := eventbus.New[output.ToolDataEvent]()
 	registry, err := initTools(ctx, &option, logger, dataBus)
@@ -110,7 +113,10 @@ func runToolMode(args []string) int {
 	if configFile := strings.TrimSpace(os.Getenv("AISCAN_RUNNER_CONFIG")); configFile != "" {
 		option.ConfigFile = configFile
 	}
-	cfg.ResolveRuntimeConfig(&option)
+	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	dataBus := eventbus.New[output.ToolDataEvent]()
 	registry, err := initTools(ctx, &option, logger, dataBus)
 	if err != nil {
@@ -196,7 +202,7 @@ func initTools(ctx context.Context, option *cfg.Option, logger telemetry.Logger,
 		CyberhubURL: option.CyberhubURL,
 		APIKey:      option.CyberhubKey,
 		Mode:        option.CyberhubMode,
-		Proxy:       option.ScannerOptions.Proxy,
+		Proxy:       option.Proxy,
 	}, logger)
 	if err != nil {
 		logger.Warnf("engine init: %v (continuing with available engines)", err)
@@ -211,7 +217,7 @@ func initTools(ctx context.Context, option *cfg.Option, logger telemetry.Logger,
 	}
 	if engineSet != nil {
 		deps.Resources = engineSet.Resources
-		deps.ScannerProxy = option.ScannerOptions.Proxy
+		deps.ScannerProxy = option.Proxy
 	}
 	for _, group := range []string{"core", "scanner", "arsenal"} {
 		commands.BuildGroup(group, deps, reg)

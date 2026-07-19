@@ -20,19 +20,6 @@ func (s *evalSink) BroadcastChatEvent(sessionID string, event ChatEvent) {
 
 func (s *evalSink) BroadcastAOPEvent(string, aop.Event) {}
 
-func aopPayload(t *testing.T, ev agent.Event) json.RawMessage {
-	t.Helper()
-	aopEvents := aop.FromAgentEvent(ev, "test-agent")
-	if len(aopEvents) == 0 {
-		t.Fatal("FromAgentEvent produced no events")
-	}
-	payload, err := json.Marshal(aopEvents[0])
-	if err != nil {
-		t.Fatalf("marshal aop event: %v", err)
-	}
-	return payload
-}
-
 func TestForwardAgentEventSurfacesEvalVerdict(t *testing.T) {
 	sink := &evalSink{sid: "sess-eval"}
 	pool := NewAgentPool(NewHub())

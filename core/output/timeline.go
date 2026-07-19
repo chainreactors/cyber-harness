@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/utils/parsers"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
-	"github.com/chainreactors/utils/parsers"
 )
 
 // ---------------------------------------------------------------------------
@@ -75,12 +75,12 @@ func parseRecordData(rec Record) any {
 		return unmarshalItem[parsers.SprayResult](rec.Data)
 	case TypeAgent:
 		return unmarshalItem[AgentEvent](rec.Data)
+	case TypeScanEnd:
+		return unmarshalItem[ScanEnd](rec.Data)
 	default:
 		if strings.HasPrefix(string(rec.Type), "aop.") {
 			return unmarshalAOPEntry(rec)
 		}
-	case TypeScanEnd:
-		return unmarshalItem[ScanEnd](rec.Data)
 	}
 	return nil
 }
@@ -324,20 +324,26 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 			switch d.AOPType {
 			case "session.start":
 				m.startTS = e.Timestamp
-				var sd struct{ Model string `json:"model"` }
+				var sd struct {
+					Model string `json:"model"`
+				}
 				_ = json.Unmarshal(d.Data, &sd)
 				if sd.Model != "" && m.model == "" {
 					m.model = sd.Model
 				}
 			case "session.end":
 				m.endTS = e.Timestamp
-				var sd struct{ Stop string `json:"stop"` }
+				var sd struct {
+					Stop string `json:"stop"`
+				}
 				_ = json.Unmarshal(d.Data, &sd)
 				m.stop = sd.Stop
 			case "turn.start":
 				m.turns++
 			case "usage":
-				var ud struct{ TotalTokens int `json:"total_tokens"` }
+				var ud struct {
+					TotalTokens int `json:"total_tokens"`
+				}
 				_ = json.Unmarshal(d.Data, &ud)
 				if ud.TotalTokens > 0 {
 					m.totalTokens = ud.TotalTokens
@@ -485,7 +491,9 @@ func unmarshalAOPEntry(rec Record) *AOPTimelineEntry {
 func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
 	switch e.AOPType {
 	case "turn.start":
-		var d struct{ Turn int `json:"turn"` }
+		var d struct {
+			Turn int `json:"turn"`
+		}
 		_ = json.Unmarshal(e.Data, &d)
 		sb.WriteString(fmt.Sprintf("## Turn %d\n\n", d.Turn))
 
@@ -560,7 +568,9 @@ func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
 		}
 
 	case "session.end":
-		var d struct{ Stop string `json:"stop"` }
+		var d struct {
+			Stop string `json:"stop"`
+		}
 		_ = json.Unmarshal(e.Data, &d)
 		sb.WriteString(fmt.Sprintf("\n> **agent done** (stop=%s)\n\n", d.Stop))
 	}

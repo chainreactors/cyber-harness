@@ -99,7 +99,7 @@ jobs:
             profile: full
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full"
             generate: true
           - id: aiscan-agent
             profile: agent

@@ -234,7 +234,7 @@ jobs:
             generate: true
           - id: full
             main: ./cmd/aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full"
             generate: true
           - id: agent
             main: ./cmd/agent

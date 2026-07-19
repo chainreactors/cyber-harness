@@ -24,7 +24,7 @@ FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 # Keep the local feature tiers aligned with the release workflow.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo cstx_native $(RE2_TAGS)
 AGENT_TAGS := forceposix emptytemplates noembed osusergo netgo
-FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite cstx_native katana_slim $(RE2_TAGS)
+FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim $(RE2_TAGS)
 BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: help prepare frontend standard agent full web-build web-run web all clean

@@ -59,7 +59,7 @@ type ChatHandler interface {
 	HandleConfigReload(serverURL string, send func(webproto.Message))
 
 	// CancelChat attempts to cancel a running chat by task ID. Returns true if
-	// the task was found and cancelled.
+	// the task was found and canceled.
 	CancelChat(taskID string) bool
 }
 

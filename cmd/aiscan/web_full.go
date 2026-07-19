@@ -91,12 +91,19 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
 	ioaHandler := ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc))
 
+	listener, err := net.Listen("tcp", opts.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", opts.Addr, err)
+	}
+	defer listener.Close()
+	listenAddr := listener.Addr().String()
+
 	// Local agents: the hub can spawn `aiscan agent` children on its own host
 	// (one-click launch/stop from the UI). Each child dials the hub's loopback
 	// web + IOA endpoints — the IOA access key is embedded into the IOA URL — and
 	// registers in the pool like any node. The hub holds the only handle to them,
 	// so they are all killed on shutdown.
-	localAgents := web.NewLocalAgents(hubLocalURL(opts.Addr), accessKey, pool)
+	localAgents := web.NewLocalAgents(hubLocalURL(listenAddr), accessKey, configFile, pool)
 	go func() {
 		<-ctx.Done()
 		localAgents.StopAll()
@@ -116,9 +123,14 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		_ = srv.Shutdown(shutCtx)
 	}()
 
-	logger.Infof("aiscan server listening on http://%s?access_key=%s", opts.Addr, accessKey)
-	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, opts.Addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	logger.Infof("aiscan server listening on http://%s?access_key=%s", listenAddr, accessKey)
+	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, listenAddr)
+	if localAgent, err := localAgents.Launch(ctx); err != nil {
+		logger.Warnf("auto-start local agent: %s", err)
+	} else {
+		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.PID)
+	}
+	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil
