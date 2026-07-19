@@ -77,9 +77,11 @@ func TestStdioSenderEncodesTypedAOPFrame(t *testing.T) {
 	var output bytes.Buffer
 	sender := newStdioSender(&output, cancel)
 	event := aop.Event{
-		V:    aop.Version,
-		Type: aop.TypeText,
-		Data: webproto.MustJSON(aop.TextData{Content: "hello"}),
+		Type:      aop.TypeText,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "session-1",
+		Agent:     "aiscan",
+		Data:      webproto.MustJSON(aop.TextData{Content: "hello"}),
 	}
 
 	if err := sender.SendAOP("task-1", event); err != nil {
@@ -97,7 +99,7 @@ func TestStdioSenderEncodesTypedAOPFrame(t *testing.T) {
 	if err := json.Unmarshal(frame.Payload, &got); err != nil {
 		t.Fatalf("decode AOP payload: %v", err)
 	}
-	if got.Type != event.Type || got.V != event.V {
+	if got.Type != event.Type || !got.Valid() {
 		t.Fatalf("AOP payload = %#v", got)
 	}
 }

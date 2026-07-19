@@ -14,11 +14,7 @@ import (
 
 func TestConsumeAgentStream(t *testing.T) {
 	taskID := "task-1"
-	event := aop.Event{
-		V:    aop.Version,
-		Type: aop.TypeText,
-		Data: webproto.MustJSON(aop.TextData{Content: "hello", Role: "assistant"}),
-	}
+	event := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello", Role: "assistant"})
 	input := encodeFrames(t,
 		webproto.Message{
 			Type:    "aop.text",
@@ -51,28 +47,20 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 		webproto.Message{
 			Type:   "aop.tool.call",
 			TaskID: taskID,
-			Payload: webproto.MustJSON(aop.Event{
-				V:    aop.Version,
-				Type: aop.TypeToolCall,
-				Data: webproto.MustJSON(aop.ToolCallData{
-					ToolCallID: callID,
-					ToolName:   "bash",
-					Args:       map[string]any{"command": "echo hello"},
-				}),
-			}),
+			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
+				ToolCallID: callID,
+				ToolName:   "bash",
+				Args:       map[string]any{"command": "echo hello"},
+			})),
 		},
 		webproto.Message{
 			Type:   "aop.tool.result",
 			TaskID: taskID,
-			Payload: webproto.MustJSON(aop.Event{
-				V:    aop.Version,
-				Type: aop.TypeToolResult,
-				Data: webproto.MustJSON(aop.ToolResultData{
-					ToolCallID: callID,
-					ToolName:   "bash",
-					Content:    "hello",
-				}),
-			}),
+			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
+				ToolCallID: callID,
+				ToolName:   "bash",
+				Content:    "hello",
+			})),
 		},
 		webproto.Message{Type: "complete", TaskID: taskID, Data: "done"},
 	)
@@ -95,29 +83,17 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 
 func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 	taskID := "task-1"
-	validEvent := aop.Event{
-		V:    aop.Version,
-		Type: aop.TypeText,
-		Data: webproto.MustJSON(aop.TextData{Content: "hello"}),
-	}
-	invalidToolArgs := aop.Event{
-		V:    aop.Version,
-		Type: aop.TypeToolCall,
-		Data: webproto.MustJSON(aop.ToolCallData{
-			ToolCallID: "call-1",
-			ToolName:   "bash",
-			Args:       "echo hello",
-		}),
-	}
-	invalidToolResult := aop.Event{
-		V:    aop.Version,
-		Type: aop.TypeToolResult,
-		Data: webproto.MustJSON(aop.ToolResultData{
-			ToolCallID: "call-1",
-			ToolName:   "bash",
-			Content:    map[string]any{"output": "hello"},
-		}),
-	}
+	validEvent := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello"})
+	invalidToolArgs := aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Args:       "echo hello",
+	})
+	invalidToolResult := aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Content:    map[string]any{"output": "hello"},
+	})
 
 	tests := []struct {
 		name   string
@@ -173,6 +149,16 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 				t.Fatalf("error = %v, want containing %q", err, tt.needle)
 			}
 		})
+	}
+}
+
+func aopTestEvent(eventType string, data any) aop.Event {
+	return aop.Event{
+		Type:      eventType,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "session-1",
+		Agent:     "aiscan",
+		Data:      webproto.MustJSON(data),
 	}
 }
 

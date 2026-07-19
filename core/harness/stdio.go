@@ -73,8 +73,8 @@ func decodeAOPFrame(msg webproto.Message) (aop.Event, error) {
 	if err := json.Unmarshal(msg.Payload, &event); err != nil {
 		return event, fmt.Errorf("decode %s payload: %w", msg.Type, err)
 	}
-	if event.V != aop.Version {
-		return event, fmt.Errorf("unsupported AOP version %d", event.V)
+	if !event.Valid() {
+		return event, fmt.Errorf("invalid AOP envelope")
 	}
 	wantType := strings.TrimPrefix(msg.Type, "aop.")
 	if event.Type != wantType {

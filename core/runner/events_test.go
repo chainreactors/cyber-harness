@@ -102,6 +102,7 @@ func TestEventsFileSubscriberAppendsJSONL(t *testing.T) {
 		{Type: agent.EventAgentEnd, Turn: 1, Stop: agent.StopReasonCompleted, NewMessages: make([]agent.ChatMessage, 3)},
 	}
 	for _, e := range events {
+		e.SessionID = "session-1"
 		w.HandleEvent(e)
 	}
 
@@ -114,8 +115,8 @@ func TestEventsFileSubscriberAppendsJSONL(t *testing.T) {
 	if aopLines[0].Type != aop.TypeSessionStart {
 		t.Errorf("line[0].type = %s, want %s", aopLines[0].Type, aop.TypeSessionStart)
 	}
-	if aopLines[0].V != aop.Version {
-		t.Errorf("line[0].v = %d, want %d", aopLines[0].V, aop.Version)
+	if !aopLines[0].Valid() {
+		t.Error("line[0] has an invalid AOP envelope")
 	}
 	if aopLines[0].Agent != "aiscan" {
 		t.Errorf("line[0].agent = %s, want aiscan", aopLines[0].Agent)
