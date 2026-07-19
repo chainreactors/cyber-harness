@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -68,6 +69,36 @@ func TestStdioSenderCancelsOnWriteFailure(t *testing.T) {
 	}
 	if !errors.Is(context.Cause(ctx), err) {
 		t.Fatalf("context cause = %v, want %v", context.Cause(ctx), err)
+	}
+}
+
+func TestStdioSenderEncodesTypedAOPFrame(t *testing.T) {
+	_, cancel := context.WithCancelCause(context.Background())
+	var output bytes.Buffer
+	sender := newStdioSender(&output, cancel)
+	event := aop.Event{
+		V:    aop.Version,
+		Type: aop.TypeText,
+		Data: webproto.MustJSON(aop.TextData{Content: "hello"}),
+	}
+
+	if err := sender.SendAOP("task-1", event); err != nil {
+		t.Fatalf("SendAOP() error = %v", err)
+	}
+
+	var frame webproto.Message
+	if err := json.NewDecoder(&output).Decode(&frame); err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	if frame.Type != "aop.text" || frame.TaskID != "task-1" {
+		t.Fatalf("frame = %#v", frame)
+	}
+	var got aop.Event
+	if err := json.Unmarshal(frame.Payload, &got); err != nil {
+		t.Fatalf("decode AOP payload: %v", err)
+	}
+	if got.Type != event.Type || got.V != event.V {
+		t.Fatalf("AOP payload = %#v", got)
 	}
 }
 

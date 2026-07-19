@@ -3,7 +3,6 @@
 package harness
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -14,14 +13,14 @@ import (
 //	Tool("bash").ArgContains("gogo").NoError()
 //	Tool("subagent").Action("create").Arg("name", "worker").Arg("mode", "async")
 type ToolPattern struct {
-	tool       string
-	action     string
-	argChecks  []argCheck
-	resultHas  []string
-	resultNot  []string
-	noError    bool
-	isError    bool
-	label      string
+	tool      string
+	action    string
+	argChecks []argCheck
+	resultHas []string
+	resultNot []string
+	noError   bool
+	isError   bool
+	label     string
 }
 
 type argCheck struct {
@@ -84,18 +83,18 @@ func (p ToolPattern) Match(e AgentEvent) bool {
 				return false
 			}
 		} else {
-			if !strings.Contains(e.Args, ac.contains) {
+			if !strings.Contains(e.ArgsText(), ac.contains) {
 				return false
 			}
 		}
 	}
 	for _, s := range p.resultHas {
-		if !strings.Contains(e.Result, s) {
+		if !strings.Contains(e.ResultText(), s) {
 			return false
 		}
 	}
 	for _, s := range p.resultNot {
-		if strings.Contains(e.Result, s) {
+		if strings.Contains(e.ResultText(), s) {
 			return false
 		}
 	}
@@ -127,16 +126,13 @@ func (p ToolPattern) describe() string {
 	return strings.Join(parts, " ")
 }
 
-func argsContainAction(argsJSON, action string) bool {
-	return strings.Contains(argsJSON, fmt.Sprintf("%q", action))
+func argsContainAction(args map[string]any, action string) bool {
+	value, ok := args["action"]
+	return ok && fmt.Sprint(value) == action
 }
 
-func argsFieldContains(argsJSON, key, contains string) bool {
-	var m map[string]any
-	if json.Unmarshal([]byte(argsJSON), &m) != nil {
-		return strings.Contains(argsJSON, contains)
-	}
-	val, ok := m[key]
+func argsFieldContains(args map[string]any, key, contains string) bool {
+	val, ok := args[key]
 	if !ok {
 		return false
 	}

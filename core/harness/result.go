@@ -3,9 +3,8 @@
 package harness
 
 import (
-	"bufio"
 	"encoding/json"
-	"os"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,26 +21,26 @@ type RunResult struct {
 
 // AgentEvent is a flattened view of AOP events for test assertions.
 type AgentEvent struct {
-	AOPType    string `json:"aop_type"`
-	ToolName   string `json:"tool_name,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Args       string `json:"args,omitempty"`
-	Result     string `json:"result,omitempty"`
-	IsError    bool   `json:"is_error,omitempty"`
-	Content    string `json:"content,omitempty"`
-	Role       string `json:"role,omitempty"`
-	Delta      bool   `json:"delta,omitempty"`
-	Stop       string `json:"stop,omitempty"`
-	Turn       int    `json:"turn,omitempty"`
-	Turns      int    `json:"turns,omitempty"`
+	AOPType    string         `json:"aop_type"`
+	ToolName   string         `json:"tool_name,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Args       map[string]any `json:"args,omitempty"`
+	Result     any            `json:"result,omitempty"`
+	IsError    bool           `json:"is_error,omitempty"`
+	Content    string         `json:"content,omitempty"`
+	Role       string         `json:"role,omitempty"`
+	Delta      bool           `json:"delta,omitempty"`
+	Stop       string         `json:"stop,omitempty"`
+	Turn       int            `json:"turn,omitempty"`
+	Turns      int            `json:"turns,omitempty"`
 
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
 	TotalTokens  int `json:"total_tokens,omitempty"`
 }
 
-func (r *RunResult) OK() bool       { return r.ExitCode == 0 }
-func (r *RunResult) Output() string { return strings.TrimSpace(r.Stdout) }
+func (r *RunResult) OK() bool         { return r.ExitCode == 0 }
+func (r *RunResult) Output() string   { return strings.TrimSpace(r.Stdout) }
 func (r *RunResult) Combined() string { return r.Stdout + r.Stderr }
 
 func (r *RunResult) ContainsOutput(substr string) bool {
@@ -49,7 +48,7 @@ func (r *RunResult) ContainsOutput(substr string) bool {
 }
 
 func (r *RunResult) ToolCalls() []AgentEvent {
-	argsByID := make(map[string]string)
+	argsByID := make(map[string]map[string]any)
 	for _, e := range r.Events {
 		if e.AOPType == aop.TypeToolCall && e.ToolCallID != "" {
 			argsByID[e.ToolCallID] = e.Args
@@ -58,7 +57,7 @@ func (r *RunResult) ToolCalls() []AgentEvent {
 	var calls []AgentEvent
 	for _, e := range r.Events {
 		if e.AOPType == aop.TypeToolResult {
-			if e.Args == "" && e.ToolCallID != "" {
+			if e.Args == nil && e.ToolCallID != "" {
 				e.Args = argsByID[e.ToolCallID]
 			}
 			calls = append(calls, e)
@@ -106,7 +105,7 @@ func (r *RunResult) ToolCallSequence() []string {
 
 func (r *RunResult) ToolResultContains(toolName, substr string) bool {
 	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.Result, substr) {
+		if strings.Contains(e.ResultText(), substr) {
 			return true
 		}
 	}
@@ -115,7 +114,7 @@ func (r *RunResult) ToolResultContains(toolName, substr string) bool {
 
 func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
 	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.Args, substr) {
+		if strings.Contains(e.ArgsText(), substr) {
 			return true
 		}
 	}
@@ -125,7 +124,7 @@ func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
 func (r *RunResult) AllToolResults() string {
 	var sb strings.Builder
 	for _, e := range r.ToolCalls() {
-		sb.WriteString(e.Result)
+		sb.WriteString(e.ResultText())
 		sb.WriteByte('\n')
 	}
 	return sb.String()
@@ -164,7 +163,7 @@ func (r *RunResult) SubagentCalls() []AgentEvent { return r.ToolCallsNamed("suba
 func (r *RunResult) SubagentCreateCount() int {
 	n := 0
 	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
+		if isSubagentCreate(e) {
 			n++
 		}
 	}
@@ -174,8 +173,8 @@ func (r *RunResult) SubagentCreateCount() int {
 func (r *RunResult) SubagentCreateArgs() []string {
 	var args []string
 	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
-			args = append(args, e.Args)
+		if isSubagentCreate(e) {
+			args = append(args, e.ArgsText())
 		}
 	}
 	return args
@@ -184,88 +183,113 @@ func (r *RunResult) SubagentCreateArgs() []string {
 func (r *RunResult) SubagentResults() []string {
 	var results []string
 	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
-			results = append(results, e.Result)
+		if isSubagentCreate(e) {
+			results = append(results, e.ResultText())
 		}
 	}
 	return results
 }
 
-// loadEvents reads AOP JSONL and flattens into AgentEvent for assertions.
-func loadEvents(path string) []AgentEvent {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var events []AgentEvent
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
-	for scanner.Scan() {
-		var ev aop.Event
-		if json.Unmarshal(scanner.Bytes(), &ev) != nil {
-			continue
-		}
-		if ae, ok := flattenAOPEvent(ev); ok {
-			events = append(events, ae)
-		}
-	}
-	return events
-}
-
-func flattenAOPEvent(ev aop.Event) (AgentEvent, bool) {
+func flattenAOPEvent(ev aop.Event) (AgentEvent, error) {
 	ae := AgentEvent{AOPType: ev.Type}
 
 	switch ev.Type {
 	case aop.TypeText:
 		var d aop.TextData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.Content = d.Content
 		ae.Role = d.Role
 		ae.Delta = d.Delta
 	case aop.TypeToolCall:
 		var d aop.ToolCallData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.ToolName = d.ToolName
 		ae.ToolCallID = d.ToolCallID
-		if s, ok := d.Args.(string); ok {
-			ae.Args = s
-		} else if d.Args != nil {
-			raw, _ := json.Marshal(d.Args)
-			ae.Args = string(raw)
+		args, ok := d.Args.(map[string]any)
+		if !ok {
+			return ae, fmt.Errorf("AOP %s args must be an object", ev.Type)
 		}
+		ae.Args = args
 	case aop.TypeToolResult:
 		var d aop.ToolResultData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.ToolName = d.ToolName
 		ae.ToolCallID = d.ToolCallID
 		ae.IsError = d.IsError
-		if s, ok := d.Content.(string); ok {
-			ae.Result = s
-		} else if d.Content != nil {
-			raw, _ := json.Marshal(d.Content)
-			ae.Result = string(raw)
-		}
+		ae.Result = d.Content
 	case aop.TypeUsage:
 		var d aop.UsageData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.InputTokens = d.InputTokens
 		ae.OutputTokens = d.OutputTokens
 		ae.TotalTokens = d.TotalTokens
 	case aop.TypeSessionEnd:
 		var d aop.SessionEndData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.Stop = d.Stop
 		ae.Turns = d.Turns
 	case aop.TypeTurnStart, aop.TypeTurnEnd:
 		var d aop.TurnData
-		_ = json.Unmarshal(ev.Data, &d)
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
 		ae.Turn = d.Turn
 	case aop.TypeSessionStart:
-		// no extra fields needed for assertions
+		var d aop.SessionStartData
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
+	case aop.TypeError:
+		var d aop.ErrorData
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
+		ae.Content = d.Message
+		ae.IsError = true
+	case aop.TypeStatus:
+		var d aop.StatusData
+		if err := decodeAOPData(ev, &d); err != nil {
+			return ae, err
+		}
+		ae.Content = d.State
 	default:
-		return ae, false
+		return ae, fmt.Errorf("unsupported AOP event type %q", ev.Type)
 	}
-	return ae, true
+	return ae, nil
+}
+
+func decodeAOPData(ev aop.Event, target any) error {
+	if err := json.Unmarshal(ev.Data, target); err != nil {
+		return fmt.Errorf("decode AOP %s data: %w", ev.Type, err)
+	}
+	return nil
+}
+
+func eventValueText(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	raw, _ := json.Marshal(value)
+	return string(raw)
+}
+
+func (e AgentEvent) ArgsText() string   { return eventValueText(e.Args) }
+func (e AgentEvent) ResultText() string { return eventValueText(e.Result) }
+
+func isSubagentCreate(event AgentEvent) bool {
+	action, _ := event.Args["action"].(string)
+	return action != "list" && action != "kill" && action != "message"
 }

@@ -58,16 +58,7 @@ func RunStdio(
 
 	unsub := rt.Bus.Subscribe(func(event agent.Event) {
 		for _, protocolEvent := range aop.FromAgentEvent(event, "aiscan") {
-			payload, marshalErr := json.Marshal(protocolEvent)
-			if marshalErr != nil {
-				sender.Fail(marshalErr)
-				return
-			}
-			if sendErr := sender.Send(webproto.Message{
-				Type:    "aop." + protocolEvent.Type,
-				TaskID:  msg.TaskID,
-				Payload: payload,
-			}); sendErr != nil {
+			if sendErr := sender.SendAOP(msg.TaskID, protocolEvent); sendErr != nil {
 				return
 			}
 		}
@@ -175,31 +166,34 @@ func newStdioSender(output io.Writer, cancel context.CancelCauseFunc) *stdioSend
 }
 
 func (s *stdioSender) Send(msg webproto.Message) error {
+	return s.encode(msg)
+}
+
+func (s *stdioSender) SendAOP(taskID string, event aop.Event) error {
+	return s.encode(struct {
+		Type    string    `json:"type"`
+		TaskID  string    `json:"task_id"`
+		Payload aop.Event `json:"payload"`
+	}{
+		Type:    "aop." + event.Type,
+		TaskID:  taskID,
+		Payload: event,
+	})
+}
+
+func (s *stdioSender) encode(value any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
 		return s.err
 	}
-	if err := s.enc.Encode(msg); err != nil {
+	if err := s.enc.Encode(value); err != nil {
 		s.err = err
 		s.cancel(err)
 		return err
 	}
 	return nil
 }
-
-func (s *stdioSender) Fail(err error) {
-	if err == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.err == nil {
-		s.err = err
-		s.cancel(err)
-	}
-	s.mu.Unlock()
-}
-
 func (s *stdioSender) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

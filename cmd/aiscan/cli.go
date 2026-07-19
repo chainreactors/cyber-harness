@@ -164,6 +164,8 @@ func aiscan() {
 		var err error
 		if option.WebURL != "" {
 			err = webagent.Run(ctx, &option, logger)
+		} else if os.Getenv("AISCAN_EVENTS_FILE") == "-" {
+			err = runner.RunStdio(ctx, &option, logger, os.Stdin, os.Stdout)
 		} else {
 			err = runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc)
 		}
