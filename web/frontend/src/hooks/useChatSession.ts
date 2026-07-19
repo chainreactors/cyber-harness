@@ -104,7 +104,6 @@ export interface ToolCallState {
 interface SessionSnapshot {
   messages: ChatMessage[]
   timeline: TimelineItem[]
-  aopEvents: AOPEvent[]
   scanResults: Map<string, ScanResult>
 }
 
@@ -185,8 +184,8 @@ export function useChatSession() {
   // never file the incoming session's state under the outgoing session's key.
   useEffect(() => {
     if (!activeSessionID) return
-    sessionCacheRef.current.set(activeSessionID, { messages, timeline, aopEvents, scanResults })
-  }, [activeSessionID, aopEvents, messages, timeline, scanResults])
+    sessionCacheRef.current.set(activeSessionID, { messages, timeline, scanResults })
+  }, [activeSessionID, messages, timeline, scanResults])
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -266,7 +265,10 @@ export function useChatSession() {
     setMessages(snap.messages)
     timelineRef.current = snap.timeline
     setTimeline(snap.timeline)
-    setAOPEvents(snap.aopEvents ?? [])
+    // The SSE endpoint replays the complete AOP history on every connection.
+    // Restoring a cached copy here would append that history again each time
+    // the user reopens this session.
+    setAOPEvents([])
     setScanResults(snap.scanResults)
     resetTransientState()
   }
@@ -766,6 +768,11 @@ export function useChatSession() {
       handleChatEvent,
       () => reconcileAfterReconnect(id),
       handleAOPEvent,
+      () => {
+        // Reconnects also replay the complete history, so each connection is a
+        // replacement snapshot rather than an incremental continuation.
+        if (id === activeSessionRef.current) setAOPEvents([])
+      },
     )
   }
 

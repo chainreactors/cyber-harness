@@ -658,9 +658,12 @@ export function subscribeChatEvents(
   onEvent: (event: ChatEvent) => void,
   onReconnect?: () => void,
   onAOP?: (event: AOPEvent) => void,
+  onOpen?: () => void,
 ): () => void {
   const url = authURL(`/api/chat/sessions/${encodeURIComponent(sessionID)}/events`)
   const es = new EventSource(url)
+
+  es.addEventListener('open', () => onOpen?.())
 
   const eventTypes: ChatEventType[] = [
     'message',
