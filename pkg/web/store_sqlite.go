@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	_ "modernc.org/sqlite"
 )
 
@@ -67,6 +68,13 @@ func migrate(db *sql.DB) error {
 			agent_name TEXT NOT NULL DEFAULT '',
 			content    TEXT NOT NULL DEFAULT '',
 			metadata   TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS chat_aop_events (
+			id         TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
 
@@ -142,6 +150,7 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
+		CREATE INDEX IF NOT EXISTS idx_aop_events_session ON chat_aop_events(session_id, created_at, id);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
 	`)
@@ -398,7 +407,49 @@ func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
 // rows (nothing references them), so a single delete suffices.
 func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM chat_aop_events WHERE session_id = ?`, sessionID)
 	return err
+}
+
+func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event aop.Event) error {
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO chat_aop_events (id, session_id, event_json, created_at) VALUES (?, ?, ?, ?)`,
+		generateID(), sessionID, string(raw), time.Now().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]aop.Event, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT event_json FROM chat_aop_events WHERE session_id = ? ORDER BY rowid ASC LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := make([]aop.Event, 0)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var event aop.Event
+		if json.Unmarshal([]byte(raw), &event) == nil && event.Valid() {
+			events = append(events, event)
+		}
+	}
+	return events, rows.Err()
 }
 
 func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {

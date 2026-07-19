@@ -163,12 +163,6 @@ type ChatMessage struct {
 
 const (
 	ChatEventMessage        = "message"
-	ChatEventMessageStart   = "message_start"
-	ChatEventMessageDelta   = "message_delta"
-	ChatEventMessageEnd     = "message_end"
-	ChatEventToolCall       = "tool_call"
-	ChatEventToolResult     = "tool_result"
-	ChatEventThinking       = "thinking"
 	ChatEventScanStarted    = "scan_started"
 	ChatEventScanProgress   = "scan_progress"
 	ChatEventScanComplete   = "scan_complete"
@@ -194,24 +188,20 @@ const (
 )
 
 type ChatEvent struct {
-	Type       string         `json:"type"`
-	SessionID  string         `json:"session_id"`
-	MessageID  string         `json:"message_id,omitempty"`
-	Role       string         `json:"role,omitempty"`
-	AgentID    string         `json:"agent_id,omitempty"`
-	AgentName  string         `json:"agent_name,omitempty"`
-	Turn       int            `json:"turn,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	Delta      string         `json:"delta,omitempty"`
-	ToolName   string         `json:"tool_name,omitempty"`
-	ToolArgs   string         `json:"tool_args,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ScanID     string         `json:"scan_id,omitempty"`
-	Result     *output.Result `json:"result,omitempty"`
-	Data       string         `json:"data,omitempty"`
-	Error      string         `json:"error,omitempty"`
-	Code       string         `json:"code,omitempty"`
-	Params     map[string]any `json:"params,omitempty"`
+	Type      string         `json:"type"`
+	SessionID string         `json:"session_id"`
+	MessageID string         `json:"message_id,omitempty"`
+	Role      string         `json:"role,omitempty"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	AgentName string         `json:"agent_name,omitempty"`
+	Turn      int            `json:"turn,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	ScanID    string         `json:"scan_id,omitempty"`
+	Result    *output.Result `json:"result,omitempty"`
+	Data      string         `json:"data,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Code      string         `json:"code,omitempty"`
+	Params    map[string]any `json:"params,omitempty"`
 	// Goal-mode evaluator verdict, carried on ChatEventEval. EvalRound is
 	// 0-indexed (the client renders round+1).
 	EvalRound  int    `json:"eval_round,omitempty"`

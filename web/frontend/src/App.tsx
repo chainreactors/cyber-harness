@@ -228,6 +228,7 @@ export default function App() {
           ) : (
             <ChatPanel
               timeline={chat.timeline}
+              aopEvents={chat.aopEvents}
               scanResults={chat.scanResults}
               isThinking={chat.isThinking}
               isBusy={chat.busy}

@@ -29,6 +29,7 @@ import {
   ChatThinking,
   MessageBubble as ChatMessageBubble,
   ToolCallDisplay as ChatToolCall,
+  reduceAOPToTimeline,
   resolveTimelineRenderer,
   summarizeArgs,
   type ChatAttachment,
@@ -37,6 +38,7 @@ import {
   type Mentionable,
   type ChatInputProps,
   type ViewerTimelineItem,
+  type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
 import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
@@ -172,6 +174,7 @@ const threadOffsetClass = 'xl:mr-[6.75rem]'
 
 interface Props {
   timeline: TimelineItem[]
+  aopEvents?: AOPEvent[]
   scanResults: Map<string, ScanResult>
   isThinking: boolean
   isBusy: boolean
@@ -193,6 +196,7 @@ interface Props {
 
 export default function ChatPanel({
   timeline,
+  aopEvents = [],
   scanResults,
   isThinking,
   isBusy,
@@ -218,11 +222,25 @@ export default function ChatPanel({
     return { id: 'thinking-live', kind: 'thinking', timestamp: Date.now() }
   }, [hasAssistantResponse, isThinking])
   const viewerTimeline = useMemo<ViewerTimelineItem[]>(() => {
-    const source = liveThinkingItem ? [...timeline, liveThinkingItem] : timeline
-    return source
+    const source = liveThinkingItem && aopEvents.length === 0 ? [...timeline, liveThinkingItem] : timeline
+    const platformItems = source
       .map((item) => toViewerTimelineItem(item, scanResults))
       .filter((item): item is ViewerTimelineItem => item !== null)
-  }, [liveThinkingItem, scanResults, timeline])
+      .filter((item) => aopEvents.length === 0
+        || item.kind === 'extension'
+        || (item.kind === 'message' && item.role === 'user'))
+    const aopItems = reduceAOPToTimeline(aopEvents, { streaming: isBusy })
+      .filter((item) => item.kind !== 'message'
+        || item.role !== 'user'
+        || !platformItems.some(
+          (existing) => existing.kind === 'message'
+            && existing.role === 'user'
+            && existing.content === item.content,
+        ))
+    return [...platformItems, ...aopItems].sort(
+      (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
+    )
+  }, [aopEvents, isBusy, liveThinkingItem, scanResults, timeline])
   // The right rail carries IOA thread notes, which only a fraction of turns emit.
   // Reserve its 6rem column only when the transcript actually has one — otherwise
   // the empty rail just steals horizontal space from the conversation.

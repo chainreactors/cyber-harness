@@ -18,6 +18,8 @@ func (s *evalSink) BroadcastChatEvent(sessionID string, event ChatEvent) {
 	s.events = append(s.events, event)
 }
 
+func (s *evalSink) BroadcastAOPEvent(string, aop.Event) {}
+
 func aopPayload(t *testing.T, ev agent.Event) json.RawMessage {
 	t.Helper()
 	aopEvents := aop.FromAgentEvent(ev, "test-agent")
@@ -41,8 +43,9 @@ func TestForwardAgentEventSurfacesEvalVerdict(t *testing.T) {
 	ev := agent.Event{Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalPass: true, EvalReason: "found SQLi"}
 	aopEvents := aop.FromAgentEvent(ev, "test-agent")
 	for _, aopEv := range aopEvents {
+		aopEv.SessionID = "agent-session"
 		payload, _ := json.Marshal(aopEv)
-		pool.forwardAgentEvent(a, WSMessage{
+		pool.forwardAOPEvent(a, WSMessage{
 			Type:    "aop." + aopEv.Type,
 			TaskID:  "task-1",
 			Payload: payload,
@@ -73,8 +76,9 @@ func TestForwardAgentEventEvalErrorBecomesReason(t *testing.T) {
 	ev := agent.Event{Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalError: "judge timed out"}
 	aopEvents := aop.FromAgentEvent(ev, "test-agent")
 	for _, aopEv := range aopEvents {
+		aopEv.SessionID = "agent-session"
 		payload, _ := json.Marshal(aopEv)
-		pool.forwardAgentEvent(a, WSMessage{
+		pool.forwardAOPEvent(a, WSMessage{
 			Type:    "aop." + aopEv.Type,
 			TaskID:  "task-1",
 			Payload: payload,
@@ -108,8 +112,9 @@ func TestForwardAgentEventEvalStartDropped(t *testing.T) {
 	if len(aopEvents) != 0 {
 		// If it does produce events, forward them and check nothing leaks
 		for _, aopEv := range aopEvents {
+			aopEv.SessionID = "agent-session"
 			payload, _ := json.Marshal(aopEv)
-			pool.forwardAgentEvent(a, WSMessage{
+			pool.forwardAOPEvent(a, WSMessage{
 				Type:    "aop." + aopEv.Type,
 				TaskID:  "task-1",
 				Payload: payload,

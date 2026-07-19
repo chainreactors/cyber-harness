@@ -394,7 +394,16 @@ func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	ServeSSE(w, r, h.service.Hub(), sessionTopic(id), "_never")
+	events, err := h.service.GetAOPEvents(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	initial := make([]HubEvent, 0, len(events))
+	for _, event := range events {
+		initial = append(initial, HubEvent{Type: "aop", Data: mustJSON(event)})
+	}
+	ServeSSEWithInitial(w, r, h.service.Hub(), sessionTopic(id), initial, "_never")
 }
 
 // ── SCO Nodes ──

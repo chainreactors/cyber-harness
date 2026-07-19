@@ -506,8 +506,7 @@ export interface ChatMessage {
 }
 
 export type ChatEventType =
-  | 'message' | 'message_start' | 'message_delta' | 'message_end'
-  | 'tool_call' | 'tool_result' | 'thinking'
+  | 'message'
   | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
   | 'agent_joined' | 'eval' | 'session_cleared' | 'error'
 
@@ -520,10 +519,6 @@ export interface ChatEvent {
   agent_name?: string
   turn?: number
   content?: string
-  delta?: string
-  tool_name?: string
-  tool_args?: string
-  tool_call_id?: string
   scan_id?: string
   result?: ScanResult
   data?: string
@@ -535,6 +530,16 @@ export interface ChatEvent {
   eval_round?: number
   eval_pass?: boolean
   eval_reason?: string
+}
+
+export interface AOPEvent {
+  type: string
+  ts: string
+  session_id: string
+  agent: string
+  seq?: number
+  data: Record<string, unknown>
+  ext?: Record<string, Record<string, unknown>>
 }
 
 // --- Chat session API ---
@@ -652,13 +657,13 @@ export function subscribeChatEvents(
   sessionID: string,
   onEvent: (event: ChatEvent) => void,
   onReconnect?: () => void,
+  onAOP?: (event: AOPEvent) => void,
 ): () => void {
   const url = authURL(`/api/chat/sessions/${encodeURIComponent(sessionID)}/events`)
   const es = new EventSource(url)
 
   const eventTypes: ChatEventType[] = [
-    'message', 'message_start', 'message_delta', 'message_end',
-    'tool_call', 'tool_result', 'thinking',
+    'message',
     'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
     'agent_joined', 'eval', 'session_cleared', 'error',
   ]
@@ -676,12 +681,20 @@ export function subscribeChatEvents(
     })
   }
 
+  es.addEventListener('aop', (e: Event) => {
+    const data = 'data' in e ? (e as MessageEvent).data : undefined
+    if (typeof data !== 'string' || data === '') return
+    try {
+      const parsed = JSON.parse(data) as AOPEvent
+      if (parsed.session_id && parsed.agent && parsed.type && parsed.ts && parsed.data) onAOP?.(parsed)
+    } catch {
+      // Ignore malformed protocol frames; platform events continue normally.
+    }
+  })
+
   es.addEventListener('error', () => {
-    // EventSource auto-reconnects, but the chat SSE topic keeps no backlog, so a
-    // terminal event (message_end / tool_result / the aggregate 'message')
-    // broadcast during the drop is lost — which strands the composer in a
-    // permanent "thinking" state. Reconcile from REST truth on each connection
-    // error (idempotent), mirroring the scan path's getScan-on-error recovery.
+    // EventSource reconnects automatically. Reconcile platform-domain state
+    // from REST; AOP itself is replayed from durable storage by the SSE endpoint.
     onReconnect?.()
   })
 

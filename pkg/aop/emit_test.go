@@ -26,8 +26,8 @@ func TestFromAgentEventToolCall(t *testing.T) {
 	if e.Type != TypeToolCall {
 		t.Errorf("type = %s, want %s", e.Type, TypeToolCall)
 	}
-	if e.V != Version {
-		t.Errorf("v = %d, want %d", e.V, Version)
+	if !e.Valid() {
+		t.Fatal("event envelope is invalid")
 	}
 	if e.Agent != "aiscan" {
 		t.Errorf("agent = %s, want aiscan", e.Agent)

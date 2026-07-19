@@ -20,7 +20,6 @@ func FromAgentEvent(ev agent.Event, agentName string) []Event {
 	base := func(typ string, data any) Event {
 		raw, _ := json.Marshal(data)
 		e := Event{
-			V:         Version,
 			Type:      typ,
 			TS:        tsStr,
 			SessionID: sid,

@@ -19,6 +19,7 @@ export { default as AssistantResponse } from '../../cyber-ui/packages/viewer/src
 export { default as ChatInput } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
 export { AgentVoiceCard } from '../../cyber-ui/packages/viewer/src/components/chat/AgentVoiceCard'
 export { ChatPanel } from '../../cyber-ui/packages/viewer/src/components/chat/ChatPanel'
+export { reduceAOPToTimeline } from '../../cyber-ui/packages/viewer/src/lib/aop-reducer'
 
 export type {
   TimelineRendererConfig,
@@ -27,6 +28,7 @@ export type {
   ExtensionTimelineItem,
   TimelineItem as ViewerTimelineItem,
 } from '../../cyber-ui/packages/viewer/src/types/timeline'
+export type { AOPEvent } from '../../cyber-ui/packages/agent-protocol/src/types'
 
 export type { MessageBubbleProps, MessageBubbleVariant } from '../../cyber-ui/packages/viewer/src/components/chat/MessageBubble'
 export type { ChatThinkingProps } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'

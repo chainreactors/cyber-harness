@@ -22,14 +22,14 @@ type WSMessage = webproto.Message
 
 // AgentInfo is the public view of a connected agent.
 type AgentInfo struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Commands      []string               `json:"commands,omitempty"`
-	CommandsMenu  []webproto.CommandSpec       `json:"commands_menu,omitempty"`
-	Busy          bool                   `json:"busy"`
-	ConnectAt     time.Time              `json:"connected_at"`
-	Identity      webproto.AgentIdentity `json:"identity,omitempty"`
-	Stats         webproto.AgentStats    `json:"stats,omitempty"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	Commands     []string               `json:"commands,omitempty"`
+	CommandsMenu []webproto.CommandSpec `json:"commands_menu,omitempty"`
+	Busy         bool                   `json:"busy"`
+	ConnectAt    time.Time              `json:"connected_at"`
+	Identity     webproto.AgentIdentity `json:"identity,omitempty"`
+	Stats        webproto.AgentStats    `json:"stats,omitempty"`
 }
 
 type taskResult struct {
@@ -40,15 +40,15 @@ type taskResult struct {
 }
 
 type remoteAgent struct {
-	id            string
-	name          string
-	commands      []string
-	commandsMenu  []webproto.CommandSpec
-	conn          *websocket.Conn
-	sendCh        chan WSMessage
-	connectAt     time.Time
-	identity      webproto.AgentIdentity
-	stats         webproto.AgentStats
+	id           string
+	name         string
+	commands     []string
+	commandsMenu []webproto.CommandSpec
+	conn         *websocket.Conn
+	sendCh       chan WSMessage
+	connectAt    time.Time
+	identity     webproto.AgentIdentity
+	stats        webproto.AgentStats
 
 	mu    sync.Mutex
 	tasks map[string]chan taskResult
@@ -60,14 +60,14 @@ func (a *remoteAgent) info() AgentInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return AgentInfo{
-		ID:            a.id,
-		Name:          a.name,
-		Commands:      a.commands,
-		CommandsMenu:  a.commandsMenu,
-		Busy:          len(a.tasks) > 0,
-		ConnectAt:     a.connectAt,
-		Identity:      a.identity,
-		Stats:         a.stats,
+		ID:           a.id,
+		Name:         a.name,
+		Commands:     a.commands,
+		CommandsMenu: a.commandsMenu,
+		Busy:         len(a.tasks) > 0,
+		ConnectAt:    a.connectAt,
+		Identity:     a.identity,
+		Stats:        a.stats,
 	}
 }
 
@@ -85,6 +85,7 @@ func (a *remoteAgent) commandSpecs() []webproto.CommandSpec {
 type SessionLookup interface {
 	TaskSession(taskID string) (sessionID string, ok bool)
 	BroadcastChatEvent(sessionID string, event ChatEvent)
+	BroadcastAOPEvent(sessionID string, event aop.Event)
 }
 
 // RecordStore is the subset of Store needed for record persistence.
@@ -487,18 +488,18 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent := &remoteAgent{
-		id:            id,
-		name:          info.Name,
-		commands:      info.Commands,
-		commandsMenu:  info.CommandsMenu,
-		conn:          conn,
-		sendCh:        make(chan WSMessage, 32),
-		connectAt:     time.Now(),
-		identity:      info.Identity,
-		stats:         info.Stats,
-		tasks:         make(map[string]chan taskResult),
-		turns:         make(map[string]int),
-		done:          make(chan struct{}),
+		id:           id,
+		name:         info.Name,
+		commands:     info.Commands,
+		commandsMenu: info.CommandsMenu,
+		conn:         conn,
+		sendCh:       make(chan WSMessage, 32),
+		connectAt:    time.Now(),
+		identity:     info.Identity,
+		stats:        info.Stats,
+		tasks:        make(map[string]chan taskResult),
+		turns:        make(map[string]int),
+		done:         make(chan struct{}),
 	}
 	p.register(agent)
 	defer func() {
@@ -632,8 +633,8 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			})
 			p.hub.Broadcast(msg.TaskID, HubEvent{Type: "progress", Data: raw})
 		}
-		// Enriched: map agent events to typed ChatEvents for session SSE.
-		p.forwardAgentEvent(a, msg)
+		// AOP is the only agent activity protocol on the session stream.
+		p.forwardAOPEvent(a, msg)
 		// Persist: write agent event as a record.
 		p.persistAgentRecord(a, msg)
 	}
@@ -674,7 +675,7 @@ func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEv
 	p.sessions.BroadcastChatEvent(sid, event)
 }
 
-func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
+func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 	if p.sessions == nil || msg.TaskID == "" {
 		return
 	}
@@ -683,110 +684,53 @@ func (p *AgentPool) forwardAgentEvent(a *remoteAgent, msg WSMessage) {
 	if len(msg.Payload) > 0 {
 		_ = json.Unmarshal(msg.Payload, &aopEv)
 	}
+	if !aopEv.Valid() {
+		return
+	}
+	if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
+		p.sessions.BroadcastAOPEvent(sid, aopEv)
+	}
 
-	turn := 0
 	ext := extractAgentExt(aopEv)
-	var event ChatEvent
-
-	switch aopEv.Type {
-	case aop.TypeTurnStart:
+	if aopEv.Type == aop.TypeTurnStart {
 		var d aop.TurnData
 		_ = json.Unmarshal(aopEv.Data, &d)
-		turn = d.Turn
-		event = ChatEvent{Type: ChatEventThinking, Turn: turn, Transient: true}
-
-	case aop.TypeText:
-		var d aop.TextData
-		_ = json.Unmarshal(aopEv.Data, &d)
-		if d.Role != "" && d.Role != "assistant" {
-			return
-		}
-		if d.Content == "" {
-			return
-		}
-		if d.Delta {
-			event = ChatEvent{Type: ChatEventMessageDelta, Role: "assistant", Content: d.Content, Turn: turn}
-		} else {
-			event = ChatEvent{Type: ChatEventMessageEnd, Role: "assistant", Content: d.Content, Turn: turn}
-		}
-
-	case aop.TypeToolCall:
-		var d aop.ToolCallData
-		_ = json.Unmarshal(aopEv.Data, &d)
-		argsStr := ""
-		if s, ok := d.Args.(string); ok {
-			argsStr = s
-		} else if d.Args != nil {
-			raw, _ := json.Marshal(d.Args)
-			argsStr = string(raw)
-		}
-		event = ChatEvent{
-			Type:       ChatEventToolCall,
-			ToolName:   d.ToolName,
-			ToolArgs:   argsStr,
-			ToolCallID: d.ToolCallID,
-			Turn:       turn,
-		}
-
-	case aop.TypeToolResult:
-		var d aop.ToolResultData
-		_ = json.Unmarshal(aopEv.Data, &d)
-		content := ""
-		if s, ok := d.Content.(string); ok {
-			content = s
-		} else if d.Content != nil {
-			raw, _ := json.Marshal(d.Content)
-			content = string(raw)
-		}
-		event = ChatEvent{
-			Type:       ChatEventToolResult,
-			ToolCallID: d.ToolCallID,
-			Content:    content,
-			Turn:       turn,
-		}
-
-	case aop.TypeTurnEnd, aop.TypeUsage, aop.TypeSessionStart, aop.TypeSessionEnd:
-		// Check ext for eval/compact data on turn.end events
-		if ext != nil {
-			if round, ok := ext["eval_round"].(float64); ok && round > 0 {
-				pass, _ := ext["eval_pass"].(bool)
-				reason, _ := ext["eval_reason"].(string)
-				if errMsg, ok := ext["eval_error"].(string); ok && errMsg != "" {
-					reason = errMsg
-				}
-				p.forwardToSession(a, msg.TaskID, ChatEvent{
-					Type:       ChatEventEval,
-					EvalRound:  int(round),
-					EvalPass:   pass,
-					EvalReason: reason,
-				})
+		if d.Turn > 0 {
+			a.mu.Lock()
+			if _, ok := a.tasks[msg.TaskID]; ok {
+				a.turns[msg.TaskID] = d.Turn
 			}
-			if before, ok := ext["compact_tokens_before"].(float64); ok && before > 0 {
-				after, _ := ext["compact_tokens_after"].(float64)
-				kept, _ := ext["compact_kept_messages"].(float64)
-				p.forwardToSession(a, msg.TaskID, ChatEvent{
-					Type:                ChatEventCompact,
-					CompactTokensBefore: int(before),
-					CompactTokensAfter:  int(after),
-					CompactKeptMessages: int(kept),
-				})
-			}
+			a.mu.Unlock()
 		}
-		return
-
-	default:
-		return
 	}
 
-	if turn > 0 {
-		a.mu.Lock()
-		if _, ok := a.tasks[msg.TaskID]; ok {
-			a.turns[msg.TaskID] = turn
+	// Evaluator/compaction metadata belongs to the web product, so it remains a
+	// platform control event while the underlying agent event stays untouched.
+	if ext != nil {
+		if round, ok := ext["eval_round"].(float64); ok && round > 0 {
+			pass, _ := ext["eval_pass"].(bool)
+			reason, _ := ext["eval_reason"].(string)
+			if errMsg, ok := ext["eval_error"].(string); ok && errMsg != "" {
+				reason = errMsg
+			}
+			p.forwardToSession(a, msg.TaskID, ChatEvent{
+				Type:       ChatEventEval,
+				EvalRound:  int(round),
+				EvalPass:   pass,
+				EvalReason: reason,
+			})
 		}
-		a.mu.Unlock()
+		if before, ok := ext["compact_tokens_before"].(float64); ok && before > 0 {
+			after, _ := ext["compact_tokens_after"].(float64)
+			kept, _ := ext["compact_kept_messages"].(float64)
+			p.forwardToSession(a, msg.TaskID, ChatEvent{
+				Type:                ChatEventCompact,
+				CompactTokensBefore: int(before),
+				CompactTokensAfter:  int(after),
+				CompactKeptMessages: int(kept),
+			})
+		}
 	}
-
-	p.forwardToSession(a, msg.TaskID, event)
 }
 
 func extractAgentExt(ev aop.Event) map[string]any {

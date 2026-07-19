@@ -13,7 +13,7 @@ import {
   subscribeChatEvents,
   getScan,
 } from '../api'
-import type { AgentInfo, ChatEvent, ChatMessage, ChatSession, ScanResult } from '../api'
+import type { AgentInfo, AOPEvent, ChatEvent, ChatMessage, ChatSession, ScanResult } from '../api'
 import {
   isRootPath,
   parseRoute,
@@ -104,6 +104,7 @@ export interface ToolCallState {
 interface SessionSnapshot {
   messages: ChatMessage[]
   timeline: TimelineItem[]
+  aopEvents: AOPEvent[]
   scanResults: Map<string, ScanResult>
 }
 
@@ -146,6 +147,7 @@ export function useChatSession() {
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
+  const [aopEvents, setAOPEvents] = useState<AOPEvent[]>([])
   const timelineRef = useRef<TimelineItem[]>([])
   const [scanResults, setScanResults] = useState<Map<string, ScanResult>>(() => new Map())
   const [isThinking, setIsThinking] = useState(false)
@@ -183,8 +185,8 @@ export function useChatSession() {
   // never file the incoming session's state under the outgoing session's key.
   useEffect(() => {
     if (!activeSessionID) return
-    sessionCacheRef.current.set(activeSessionID, { messages, timeline, scanResults })
-  }, [activeSessionID, messages, timeline, scanResults])
+    sessionCacheRef.current.set(activeSessionID, { messages, timeline, aopEvents, scanResults })
+  }, [activeSessionID, aopEvents, messages, timeline, scanResults])
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -252,6 +254,7 @@ export function useChatSession() {
     setMessages([])
     timelineRef.current = []
     setTimeline([])
+    setAOPEvents([])
     setScanResults(new Map())
     resetTransientState()
   }
@@ -263,6 +266,7 @@ export function useChatSession() {
     setMessages(snap.messages)
     timelineRef.current = snap.timeline
     setTimeline(snap.timeline)
+    setAOPEvents(snap.aopEvents ?? [])
     setScanResults(snap.scanResults)
     resetTransientState()
   }
@@ -296,143 +300,8 @@ export function useChatSession() {
     setTimelineItems((prev) => prev.map((item) => item.id === id ? updater(item) : item))
   }
 
-  function isDuplicateAssistantResponse(content: string) {
-    const items = timelineRef.current
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]
-      if (item.kind === 'message' && item.message?.role === 'user') return false
-      if (item.kind === 'assistant_response') {
-        return isDuplicateAssistantResponseContent(item, content)
-      }
-    }
-    return false
-  }
-
-  function assistantResponseID(timestamp = Date.now(), event?: ChatEvent) {
-    if (event?.turn) {
-      if (!event.agent_id && activeTurnRef.current?.endsWith(`-${event.turn}`)) {
-        return activeTurnRef.current
-      }
-      const scope = [runEpochRef.current, event.session_id || activeSessionID || 'session', event.agent_id || event.agent_name || 'agent', event.turn].join('-')
-      const id = `turn-${scope}`
-      activeTurnRef.current = id
-      return id
-    }
-    if (activeTurnRef.current) return activeTurnRef.current
-    const id = `turn-${timestamp}-${safeUUID()}`
-    activeTurnRef.current = id
-    return id
-  }
-
-  function upsertAssistantResponse(
-    updater: (response: AssistantResponseState) => AssistantResponseState,
-    event?: ChatEvent,
-    timestamp = Date.now(),
-    responseID?: string,
-  ) {
-    const id = responseID || assistantResponseID(timestamp, event)
-    const agentName = event?.agent_name
-    setTimelineItems((prev) => {
-      const index = prev.findIndex((item) => item.id === id)
-      if (index >= 0) {
-        const item = prev[index]
-        const current = item.assistantResponse || {
-          id,
-          turn: event?.turn,
-          agentName: agentName || item.agentName,
-          tools: [],
-          streaming: false,
-        }
-        const next = prev.slice()
-        const response = updater({
-          ...current,
-          turn: event?.turn || current.turn,
-          agentName: agentName || current.agentName,
-        })
-        next[index] = {
-          ...item,
-          kind: 'assistant_response',
-          agentName: response.agentName,
-          assistantResponse: response,
-        }
-        return next
-      }
-      const response = updater({
-        id,
-        turn: event?.turn,
-        agentName,
-        tools: [],
-        streaming: false,
-      })
-      return [
-        ...prev,
-        {
-          id,
-          kind: 'assistant_response',
-          timestamp,
-          agentName: response.agentName,
-          assistantResponse: response,
-        },
-      ]
-    })
-  }
-
-  function setAssistantThinking(event: ChatEvent, content: string, timestamp: number) {
-    upsertAssistantResponse((response) => ({
-      ...response,
-      thinking: content || response.thinking,
-      streaming: true,
-    }), event, timestamp)
-  }
-
-  function setAssistantResponseMessage(event: ChatEvent, content: string, streaming: boolean, timestamp: number) {
-    const responseID = assistantResponseID(timestamp, event)
-    const msg = eventToMessage(event, `assistant-response-${responseID}`, content)
-    upsertAssistantResponse((response) => ({
-      ...response,
-      agentName: event.agent_name || response.agentName,
-      response: msg,
-      streaming,
-    }), event, timestamp, responseID)
-  }
-
-  function upsertAssistantTool(event: ChatEvent, toolCall: ToolCallState, timestamp: number) {
-    upsertAssistantResponse((response) => {
-      const index = response.tools.findIndex((item) => item.id === toolCall.id)
-      const tools = response.tools.slice()
-      if (index >= 0) {
-        tools[index] = { ...tools[index], ...toolCall }
-      } else {
-        tools.push(toolCall)
-      }
-      return { ...response, tools, streaming: true }
-    }, event, timestamp)
-  }
-
-  function updateAssistantToolResult(event: ChatEvent, toolCallID: string, result: string | undefined) {
-    const id = assistantResponseID(Date.now(), event)
-    updateTimelineItem(id, (item) => {
-      if (!item.assistantResponse) return item
-      return {
-        ...item,
-        assistantResponse: {
-          ...item.assistantResponse,
-          tools: item.assistantResponse.tools.map((tool) => (
-            tool.id === toolCallID ? { ...tool, result, pending: false } : tool
-          )),
-        },
-      }
-    })
-  }
-
-  // Release the composer and stop every streaming indicator. Called at the two
-  // points a run stops producing output: the hub's terminal aggregate message
-  // (normal completion, including eval max-rounds) and an explicit cancel.
-  // A tool-only turn emits message_start (streaming=true) but the hub drops its
-  // empty-content message_end, so its assistant_response never flips back to
-  // done. Since `busy` ORs over every response's streaming flag, one orphaned
-  // flag keeps the send/stop button stuck on "stop" after the run has ended —
-  // most visible on long multi-turn / eval runs. Sweep them all here.
+  // Release the composer when AOP reports session.end/error or the user cancels.
+  // The sweep also closes any platform timeline item left streaming by a scan.
   function finalizeRun() {
     setIsThinking(false)
     setPendingResponse(false)
@@ -456,18 +325,6 @@ export function useChatSession() {
       case 'message': {
         const isUserEcho = event.message_id && userMsgIdsRef.current.has(event.message_id)
         if (isUserEcho) break
-        if ((event.role || 'assistant') === 'assistant') {
-          // The hub persists the run's aggregate reply as this event once the
-          // agent finishes — the authoritative "run is over" signal. Record the
-          // text (unless it merely echoes the already-streamed answer), then
-          // finalize the run even when the content is empty, so a run that ended
-          // on tool calls or hit its eval round cap still releases the composer.
-          if (event.content && !(!activeTurnRef.current && isDuplicateAssistantResponse(event.content))) {
-            setAssistantResponseMessage(event, event.content, false, now)
-          }
-          finalizeRun()
-          break
-        }
         if (!event.content) break
         const msg = eventToMessage(event, safeUUID())
         appendMessage(msg, now)
@@ -475,68 +332,6 @@ export function useChatSession() {
         setPendingResponse(false)
         break
       }
-
-      case 'message_start':
-        setAssistantResponseMessage(event, event.content || '', true, now)
-        setIsThinking(false)
-        break
-
-      case 'message_delta':
-        if (event.content !== undefined) {
-          setAssistantResponseMessage(event, event.content, true, now)
-        } else if (event.delta) {
-          upsertAssistantResponse((response) => {
-            const prevContent = response.response?.content || ''
-            const msg: ChatMessage = response.response || eventToMessage(event, `assistant-response-${response.id}`, '')
-            return {
-              ...response,
-              response: { ...msg, content: prevContent + event.delta },
-              streaming: true,
-            }
-          }, event, now)
-        }
-        break
-
-      case 'message_end': {
-        const finalContent = event.content || ''
-        if (finalContent) {
-          setAssistantResponseMessage(event, finalContent, false, now)
-        } else {
-          upsertAssistantResponse((response) => ({ ...response, streaming: false }), event, now)
-        }
-        setIsThinking(false)
-        setPendingResponse(false)
-        break
-      }
-
-      case 'tool_call': {
-        const tcID = event.tool_call_id || safeUUID()
-        const tc: ToolCallState = {
-          id: tcID,
-          toolName: event.tool_name || '',
-          toolArgs: event.tool_args || '',
-          pending: true,
-        }
-        upsertAssistantTool(event, tc, now)
-        setIsThinking(false)
-        break
-      }
-
-      case 'tool_result': {
-        if (!event.tool_call_id) break
-        const tcID = event.tool_call_id
-        updateAssistantToolResult(event, tcID, event.content)
-        break
-      }
-
-      case 'thinking':
-        setIsThinking(true)
-        if (event.content || event.data || event.delta) {
-          setAssistantThinking(event, event.content || event.data || event.delta || '', now)
-        } else {
-          upsertAssistantResponse((response) => ({ ...response, streaming: true }), event, now)
-        }
-        break
 
       case 'session_cleared':
         // Web /clear wiped this session's transcript server-side; mirror it in the
@@ -620,6 +415,33 @@ export function useChatSession() {
       case 'error':
         if (event.code) setError(t(`sys.${event.code}`, { ...(event.params || {}), defaultValue: event.error || '' }))
         else if (event.error) setError(event.error)
+        finalizeRun()
+        break
+    }
+  }
+
+  function handleAOPEvent(event: AOPEvent) {
+    setAOPEvents((previous) => {
+      if (event.seq !== undefined && previous.some(
+        (item) => item.session_id === event.session_id && item.seq === event.seq,
+      )) return previous
+      return [...previous, event]
+    })
+    switch (event.type) {
+      case 'turn.start':
+      case 'text':
+      case 'tool.call':
+        setPendingResponse(true)
+        setIsThinking(event.type === 'turn.start')
+        break
+      case 'turn.end':
+        setIsThinking(false)
+        break
+      case 'session.end':
+        finalizeRun()
+        break
+      case 'error':
+        setError(String(event.data.message ?? 'Agent error'))
         finalizeRun()
         break
     }
@@ -939,7 +761,12 @@ export function useChatSession() {
     } catch {}
 
     if (activation !== activationRef.current) return
-    unsubRef.current = subscribeChatEvents(id, handleChatEvent, () => reconcileAfterReconnect(id))
+    unsubRef.current = subscribeChatEvents(
+      id,
+      handleChatEvent,
+      () => reconcileAfterReconnect(id),
+      handleAOPEvent,
+    )
   }
 
   async function handleCreateSession(agentID: string) {
@@ -1174,6 +1001,7 @@ export function useChatSession() {
     sessions,
     activeSessionID,
     timeline,
+    aopEvents,
     scanResults,
     isThinking,
     busy: pendingResponse || isThinking || timeline.some((item) => (
@@ -1209,11 +1037,6 @@ function isDuplicateAssistantMessage(prev: ChatMessage | undefined, next: ChatMe
   if (!prev || next.role !== 'assistant' || prev.role !== 'assistant') return false
   if (normalizeMessageContent(prev.content) !== normalizeMessageContent(next.content)) return false
   return (prev.agent_name || '') === (next.agent_name || '')
-}
-
-function isDuplicateAssistantResponseContent(item: TimelineItem | undefined, content: string): boolean {
-  if (!item?.assistantResponse?.response) return false
-  return normalizeMessageContent(item.assistantResponse.response.content) === normalizeMessageContent(content)
 }
 
 function normalizeMessageContent(value: string): string {

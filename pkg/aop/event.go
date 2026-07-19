@@ -1,14 +1,11 @@
-// Package aop implements Agent Output Protocol v1 — a language-neutral
+// Package aop implements Agent Output Protocol — a language-neutral
 // JSONL event protocol for AI coding agents.
 package aop
 
 import "encoding/json"
 
-const Version = 1
-
 // Event is the AOP envelope. Every JSONL line is one Event.
 type Event struct {
-	V         int             `json:"v"`
 	Type      string          `json:"type"`
 	TS        string          `json:"ts"`
 	SessionID string          `json:"session_id"`
@@ -16,6 +13,11 @@ type Event struct {
 	Seq       int             `json:"seq,omitempty"`
 	Data      json.RawMessage `json:"data"`
 	Ext       map[string]any  `json:"ext,omitempty"`
+}
+
+// Valid reports whether the required AOP envelope fields are present.
+func (e Event) Valid() bool {
+	return e.Type != "" && e.TS != "" && e.SessionID != "" && e.Agent != "" && len(e.Data) > 0
 }
 
 // ── Core event types ────────────────────────────────────────────

@@ -24,7 +24,8 @@
       "@cyber/markdown": ["./cyber-ui/packages/markdown/src"],
       "@cyber/terminal": ["./cyber-ui/packages/terminal/src"],
       "@cyber/cstx": ["./cyber-ui/packages/cstx/src"],
-      "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"]
+      "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"],
+      "@cyber/agent-protocol": ["./cyber-ui/packages/agent-protocol/src"]
     }
   },
   "include": [
@@ -34,6 +35,7 @@
     "cyber-ui/packages/markdown/src",
     "cyber-ui/packages/terminal/src",
     "cyber-ui/packages/cstx/src",
-    "cyber-ui/packages/cstx-easm/src"
+    "cyber-ui/packages/cstx-easm/src",
+    "cyber-ui/packages/agent-protocol/src"
   ]
 }

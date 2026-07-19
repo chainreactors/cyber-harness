@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -1083,6 +1084,10 @@ func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMes
 	return s.store.ListMessages(ctx, sessionID, 500)
 }
 
+func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Event, error) {
+	return s.store.ListAOPEvents(ctx, sessionID, 10000)
+}
+
 func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 	event.SessionID = sessionID
 	if !event.Transient {
@@ -1098,15 +1103,36 @@ func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 	})
 }
 
-// isTerminalChatEvent reports whether an event ends a run (or its scan) on the
-// client — the signals that release the composer and stop the streaming
-// indicators. These are broadcast reliably so the SSE hub never drops them under
-// backpressure: a lost token delta is invisible (a later delta and the final
-// message resend the full text), but a lost terminal event leaves the UI stuck
-// "streaming" forever — a busy composer and a blinking cursor that never clears.
+func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
+	if s == nil || s.hub == nil || sessionID == "" || !event.Valid() {
+		return
+	}
+	if s.store != nil {
+		_ = s.store.AddAOPEvent(context.Background(), sessionID, event)
+	}
+	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
+		Type:     "aop",
+		Data:     mustJSON(event),
+		Reliable: isReliableAOPEvent(event),
+	})
+}
+
+func isReliableAOPEvent(event aop.Event) bool {
+	switch event.Type {
+	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd:
+		return true
+	case aop.TypeText:
+		var data aop.TextData
+		return json.Unmarshal(event.Data, &data) == nil && !data.Delta
+	}
+	return false
+}
+
+// isTerminalChatEvent classifies terminal platform events. Agent run lifecycle
+// is carried exclusively by AOP.
 func isTerminalChatEvent(t string) bool {
 	switch t {
-	case ChatEventMessage, ChatEventMessageEnd, ChatEventError,
+	case ChatEventMessage, ChatEventError,
 		ChatEventScanComplete, ChatEventScanError:
 		return true
 	}
@@ -1134,46 +1160,9 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	}
 
 	switch event.Type {
-	case ChatEventMessageEnd:
-		// The finalized assistant text for one turn — the commentary the model
-		// emits before (or between) its tool calls. Only the run's LAST turn used
-		// to survive a reload, persisted as the aggregate reply by
-		// completeAssistantRun; every earlier turn's text streamed live but was
-		// dropped from the store, so it vanished from any timeline rebuilt from it:
-		// a page reload, an SSE reconnect, or a session switch that revalidates
-		// against the store. Persist each turn's text as an assistant message keyed
-		// by its turn so buildTimelineFromMessages reconstructs it. The final turn
-		// shares a turn key with the aggregate reply, so on rebuild the two merge
-		// into one bubble instead of doubling. (message_start / message_delta stay
-		// unpersisted — they are streaming partials of this same finalized text.)
-		msg.Role = "assistant"
-		msg.Content = strings.TrimSpace(event.Content)
-		if msg.Content == "" {
-			return
-		}
-
-	case ChatEventThinking:
-		msg.Role = "system"
-		msg.Content = strings.TrimSpace(event.Content)
-		if msg.Content == "" {
-			msg.Content = "thinking"
-		}
-
 	case ChatEventAgentJoined:
 		msg.Role = "system"
 		msg.Content = strings.TrimSpace(event.AgentName + " joined")
-
-	case ChatEventToolCall:
-		msg.Role = "tool_call"
-		msg.Content = event.ToolArgs
-		metadata["tool_call_id"] = event.ToolCallID
-		metadata["tool_name"] = event.ToolName
-		metadata["tool_args"] = event.ToolArgs
-
-	case ChatEventToolResult:
-		msg.Role = "tool_result"
-		msg.Content = event.Content
-		metadata["tool_call_id"] = event.ToolCallID
 
 	case ChatEventEval:
 		// Persist the round verdict so the eval badge survives a reload / session
@@ -1555,23 +1544,10 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	})
 }
 
-// completeAssistantRun is a run's terminal signal to the client. It always
-// broadcasts the aggregate assistant message so the UI finalizes the turn and
-// releases the composer — even when the run produced no final text (a tool-only
-// turn, or an eval run that hit its round cap). Skipping the broadcast on empty
-// content was what stranded the streaming indicator — the blinking cursor or the
-// "working" dots — forever. The reply is persisted only when it carries text, so
-// an empty completion never leaves a blank row in the transcript.
+// completeAssistantRun persists the aggregate reply for conversation context.
+// The frontend lifecycle and rendering are driven exclusively by AOP.
 func (s *Service) completeAssistantRun(sessionID, agentID, agentName, content string, turn int) {
 	content = strings.TrimRight(content, " \t\r\n")
-	event := ChatEvent{
-		Type:      ChatEventMessage,
-		Role:      "assistant",
-		AgentID:   agentID,
-		AgentName: agentName,
-		Turn:      turn,
-		Content:   content,
-	}
 	if content != "" {
 		msg := &ChatMessage{
 			ID:        generateID(),
@@ -1588,7 +1564,5 @@ func (s *Service) completeAssistantRun(sessionID, agentID, agentName, content st
 			}
 		}
 		_ = s.store.AddMessage(context.Background(), msg)
-		event.MessageID = msg.ID
 	}
-	s.BroadcastChatEvent(sessionID, event)
 }
