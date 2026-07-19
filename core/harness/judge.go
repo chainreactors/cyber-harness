@@ -77,11 +77,11 @@ func buildTrace(r *RunResult) string {
 			sb.WriteString(" (ERROR)")
 		}
 		sb.WriteByte('\n')
-		if args := e.ArgsText(); args != "" {
-			fmt.Fprintf(&sb, "      args: %s\n", clip(args, 200))
+		if len(e.Args) > 0 {
+			fmt.Fprintf(&sb, "      args: %s\n", clip(argsText(e.Args), 200))
 		}
-		if result := e.ResultText(); result != "" {
-			fmt.Fprintf(&sb, "      result: %s\n", clip(result, 300))
+		if e.Result != "" {
+			fmt.Fprintf(&sb, "      result: %s\n", clip(e.Result, 300))
 		}
 	}
 

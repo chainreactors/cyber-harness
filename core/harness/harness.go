@@ -214,7 +214,7 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 		cancel()
 	}
 
-	stream, streamErr := consumeAgentStream(stdout, taskID, h.monitor)
+	output, events, streamErr := consumeAgentStream(stdout, taskID, h.monitor)
 	if streamErr != nil {
 		cancel()
 	}
@@ -235,11 +235,11 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 	}
 
 	result := &RunResult{
-		Stdout:   stream.Output,
+		Stdout:   output,
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 		Duration: duration,
-		Events:   stream.Events,
+		Events:   events,
 	}
 
 	h.t.Logf("ran: aiscan agent (exit=%d, duration=%s, turns=%d, tools=%d)",

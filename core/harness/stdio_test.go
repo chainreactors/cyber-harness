@@ -29,18 +29,67 @@ func TestConsumeAgentStream(t *testing.T) {
 	)
 
 	var monitorOutput bytes.Buffer
-	result, err := consumeAgentStream(input, taskID, NewMonitor(&monitorOutput))
+	output, events, err := consumeAgentStream(input, taskID, NewMonitor(&monitorOutput))
 	if err != nil {
 		t.Fatalf("consumeAgentStream() error = %v", err)
 	}
-	if result.Output != "done" {
-		t.Fatalf("output = %q", result.Output)
+	if output != "done" {
+		t.Fatalf("output = %q", output)
 	}
-	if len(result.Events) != 1 || result.Events[0].Content != "hello" {
-		t.Fatalf("events = %#v", result.Events)
+	if len(events) != 1 || events[0].Content != "hello" {
+		t.Fatalf("events = %#v", events)
 	}
 	if !strings.Contains(monitorOutput.String(), "hello") {
 		t.Fatalf("monitor output = %q", monitorOutput.String())
+	}
+}
+
+func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
+	taskID := "task-1"
+	callID := "call-1"
+	input := encodeFrames(t,
+		webproto.Message{
+			Type:   "aop.tool.call",
+			TaskID: taskID,
+			Payload: webproto.MustJSON(aop.Event{
+				V:    aop.Version,
+				Type: aop.TypeToolCall,
+				Data: webproto.MustJSON(aop.ToolCallData{
+					ToolCallID: callID,
+					ToolName:   "bash",
+					Args:       map[string]any{"command": "echo hello"},
+				}),
+			}),
+		},
+		webproto.Message{
+			Type:   "aop.tool.result",
+			TaskID: taskID,
+			Payload: webproto.MustJSON(aop.Event{
+				V:    aop.Version,
+				Type: aop.TypeToolResult,
+				Data: webproto.MustJSON(aop.ToolResultData{
+					ToolCallID: callID,
+					ToolName:   "bash",
+					Content:    "hello",
+				}),
+			}),
+		},
+		webproto.Message{Type: "complete", TaskID: taskID, Data: "done"},
+	)
+
+	_, events, err := consumeAgentStream(input, taskID, nil)
+	if err != nil {
+		t.Fatalf("consumeAgentStream() error = %v", err)
+	}
+	calls := (&RunResult{Events: events}).ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("tool calls = %#v", calls)
+	}
+	if string(calls[0].Args["command"]) != `"echo hello"` {
+		t.Fatalf("args = %#v", calls[0].Args)
+	}
+	if calls[0].Result != "hello" {
+		t.Fatalf("result = %q", calls[0].Result)
 	}
 }
 
@@ -58,6 +107,15 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 			ToolCallID: "call-1",
 			ToolName:   "bash",
 			Args:       "echo hello",
+		}),
+	}
+	invalidToolResult := aop.Event{
+		V:    aop.Version,
+		Type: aop.TypeToolResult,
+		Data: webproto.MustJSON(aop.ToolResultData{
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Content:    map[string]any{"output": "hello"},
 		}),
 	}
 
@@ -92,7 +150,14 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 			input: encodeFrames(t,
 				webproto.Message{Type: "aop.tool.call", TaskID: taskID, Payload: webproto.MustJSON(invalidToolArgs)},
 			),
-			needle: "args must be an object",
+			needle: "decode AOP tool.call data",
+		},
+		{
+			name: "non-string tool result",
+			input: encodeFrames(t,
+				webproto.Message{Type: "aop.tool.result", TaskID: taskID, Payload: webproto.MustJSON(invalidToolResult)},
+			),
+			needle: "decode AOP tool.result data",
 		},
 		{
 			name:   "missing terminal",
@@ -103,7 +168,7 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := consumeAgentStream(tt.input, taskID, nil)
+			_, _, err := consumeAgentStream(tt.input, taskID, nil)
 			if err == nil || !strings.Contains(err.Error(), tt.needle) {
 				t.Fatalf("error = %v, want containing %q", err, tt.needle)
 			}

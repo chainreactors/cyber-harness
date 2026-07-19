@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -83,18 +84,18 @@ func (p ToolPattern) Match(e AgentEvent) bool {
 				return false
 			}
 		} else {
-			if !strings.Contains(e.ArgsText(), ac.contains) {
+			if !strings.Contains(argsText(e.Args), ac.contains) {
 				return false
 			}
 		}
 	}
 	for _, s := range p.resultHas {
-		if !strings.Contains(e.ResultText(), s) {
+		if !strings.Contains(e.Result, s) {
 			return false
 		}
 	}
 	for _, s := range p.resultNot {
-		if strings.Contains(e.ResultText(), s) {
+		if strings.Contains(e.Result, s) {
 			return false
 		}
 	}
@@ -126,18 +127,12 @@ func (p ToolPattern) describe() string {
 	return strings.Join(parts, " ")
 }
 
-func argsContainAction(args map[string]any, action string) bool {
-	value, ok := args["action"]
-	return ok && fmt.Sprint(value) == action
+func argsContainAction(args map[string]json.RawMessage, action string) bool {
+	return string(args["action"]) == fmt.Sprintf("%q", action)
 }
 
-func argsFieldContains(args map[string]any, key, contains string) bool {
-	val, ok := args[key]
-	if !ok {
-		return false
-	}
-	s := fmt.Sprintf("%v", val)
-	return strings.Contains(s, contains)
+func argsFieldContains(args map[string]json.RawMessage, key, contains string) bool {
+	return strings.Contains(string(args[key]), contains)
 }
 
 // matchResult holds the result of matching expectations against actual tool calls.

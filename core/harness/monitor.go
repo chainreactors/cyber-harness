@@ -45,14 +45,13 @@ func (m *Monitor) renderEvent(ev AgentEvent) {
 		}
 
 	case aop.TypeToolCall:
-		m.printf("  🔧 %s %s\n", ev.ToolName, truncate.Clip(ev.ArgsText(), 120))
+		m.printf("  🔧 %s %s\n", ev.ToolName, truncate.Clip(argsText(ev.Args), 120))
 
 	case aop.TypeToolResult:
-		result := ev.ResultText()
 		if ev.IsError {
-			m.printf("  ❌ %s error: %s\n", ev.ToolName, truncate.Clip(result, 100))
-		} else if result != "" {
-			m.printf("  ✓  %s → %d bytes: %s\n", ev.ToolName, len(result), truncate.Clip(result, 100))
+			m.printf("  ❌ %s error: %s\n", ev.ToolName, truncate.Clip(ev.Result, 100))
+		} else if ev.Result != "" {
+			m.printf("  ✓  %s → %d bytes: %s\n", ev.ToolName, len(ev.Result), truncate.Clip(ev.Result, 100))
 		} else {
 			m.printf("  ✓  %s → (empty)\n", ev.ToolName)
 		}

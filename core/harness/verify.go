@@ -144,7 +144,7 @@ func (v *Verifier) ToolUsed(name string) *Verifier {
 
 func (v *Verifier) ToolArgMatch(name string, match func(string) bool) *Verifier {
 	for _, call := range v.r.ToolCallsNamed(name) {
-		if match(call.ArgsText()) {
+		if match(argsText(call.Args)) {
 			return v
 		}
 	}
@@ -154,7 +154,7 @@ func (v *Verifier) ToolArgMatch(name string, match func(string) bool) *Verifier 
 
 func (v *Verifier) ToolResultMatch(name string, match func(string) bool) *Verifier {
 	for _, call := range v.r.ToolCallsNamed(name) {
-		if match(call.ResultText()) {
+		if match(call.Result) {
 			return v
 		}
 	}
@@ -219,7 +219,7 @@ func (v *Verifier) NoToolErrors() *Verifier {
 	if len(errs) > 0 {
 		names := make([]string, len(errs))
 		for i, e := range errs {
-			names[i] = fmt.Sprintf("%s(%s)", e.ToolName, clip(e.ResultText(), 80))
+			names[i] = fmt.Sprintf("%s(%s)", e.ToolName, clip(e.Result, 80))
 		}
 		v.fail(fmt.Sprintf("%d tool call(s) errored: %s", len(errs), strings.Join(names, ", ")))
 	}

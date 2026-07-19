@@ -21,22 +21,22 @@ type RunResult struct {
 
 // AgentEvent is a flattened view of AOP events for test assertions.
 type AgentEvent struct {
-	AOPType    string         `json:"aop_type"`
-	ToolName   string         `json:"tool_name,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Args       map[string]any `json:"args,omitempty"`
-	Result     any            `json:"result,omitempty"`
-	IsError    bool           `json:"is_error,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	Role       string         `json:"role,omitempty"`
-	Delta      bool           `json:"delta,omitempty"`
-	Stop       string         `json:"stop,omitempty"`
-	Turn       int            `json:"turn,omitempty"`
-	Turns      int            `json:"turns,omitempty"`
+	AOPType    string
+	ToolName   string
+	ToolCallID string
+	Args       map[string]json.RawMessage
+	Result     string
+	IsError    bool
+	Content    string
+	Role       string
+	Delta      bool
+	Stop       string
+	Turn       int
+	Turns      int
 
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
 }
 
 func (r *RunResult) OK() bool         { return r.ExitCode == 0 }
@@ -48,7 +48,7 @@ func (r *RunResult) ContainsOutput(substr string) bool {
 }
 
 func (r *RunResult) ToolCalls() []AgentEvent {
-	argsByID := make(map[string]map[string]any)
+	argsByID := make(map[string]map[string]json.RawMessage)
 	for _, e := range r.Events {
 		if e.AOPType == aop.TypeToolCall && e.ToolCallID != "" {
 			argsByID[e.ToolCallID] = e.Args
@@ -105,7 +105,7 @@ func (r *RunResult) ToolCallSequence() []string {
 
 func (r *RunResult) ToolResultContains(toolName, substr string) bool {
 	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.ResultText(), substr) {
+		if strings.Contains(e.Result, substr) {
 			return true
 		}
 	}
@@ -114,7 +114,7 @@ func (r *RunResult) ToolResultContains(toolName, substr string) bool {
 
 func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
 	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.ArgsText(), substr) {
+		if strings.Contains(argsText(e.Args), substr) {
 			return true
 		}
 	}
@@ -124,7 +124,7 @@ func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
 func (r *RunResult) AllToolResults() string {
 	var sb strings.Builder
 	for _, e := range r.ToolCalls() {
-		sb.WriteString(e.ResultText())
+		sb.WriteString(e.Result)
 		sb.WriteByte('\n')
 	}
 	return sb.String()
@@ -174,7 +174,7 @@ func (r *RunResult) SubagentCreateArgs() []string {
 	var args []string
 	for _, e := range r.SubagentCalls() {
 		if isSubagentCreate(e) {
-			args = append(args, e.ArgsText())
+			args = append(args, argsText(e.Args))
 		}
 	}
 	return args
@@ -184,7 +184,7 @@ func (r *RunResult) SubagentResults() []string {
 	var results []string
 	for _, e := range r.SubagentCalls() {
 		if isSubagentCreate(e) {
-			results = append(results, e.ResultText())
+			results = append(results, e.Result)
 		}
 	}
 	return results
@@ -195,28 +195,36 @@ func flattenAOPEvent(ev aop.Event) (AgentEvent, error) {
 
 	switch ev.Type {
 	case aop.TypeText:
-		var d aop.TextData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.TextData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.Content = d.Content
 		ae.Role = d.Role
 		ae.Delta = d.Delta
 	case aop.TypeToolCall:
-		var d aop.ToolCallData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[struct {
+			ToolCallID string                     `json:"tool_call_id"`
+			ToolName   string                     `json:"tool_name"`
+			Args       map[string]json.RawMessage `json:"args"`
+		}](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.ToolName = d.ToolName
 		ae.ToolCallID = d.ToolCallID
-		args, ok := d.Args.(map[string]any)
-		if !ok {
+		if d.Args == nil {
 			return ae, fmt.Errorf("AOP %s args must be an object", ev.Type)
 		}
-		ae.Args = args
+		ae.Args = d.Args
 	case aop.TypeToolResult:
-		var d aop.ToolResultData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[struct {
+			ToolCallID string `json:"tool_call_id"`
+			ToolName   string `json:"tool_name"`
+			Content    string `json:"content"`
+			IsError    bool   `json:"is_error"`
+		}](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.ToolName = d.ToolName
@@ -224,41 +232,40 @@ func flattenAOPEvent(ev aop.Event) (AgentEvent, error) {
 		ae.IsError = d.IsError
 		ae.Result = d.Content
 	case aop.TypeUsage:
-		var d aop.UsageData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.UsageData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.InputTokens = d.InputTokens
 		ae.OutputTokens = d.OutputTokens
 		ae.TotalTokens = d.TotalTokens
 	case aop.TypeSessionEnd:
-		var d aop.SessionEndData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.SessionEndData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.Stop = d.Stop
 		ae.Turns = d.Turns
 	case aop.TypeTurnStart, aop.TypeTurnEnd:
-		var d aop.TurnData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.TurnData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.Turn = d.Turn
 	case aop.TypeSessionStart:
-		var d aop.SessionStartData
-		if err := decodeAOPData(ev, &d); err != nil {
+		if _, err := decodeAOPData[aop.SessionStartData](ev); err != nil {
 			return ae, err
 		}
 	case aop.TypeError:
-		var d aop.ErrorData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.ErrorData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.Content = d.Message
 		ae.IsError = true
 	case aop.TypeStatus:
-		var d aop.StatusData
-		if err := decodeAOPData(ev, &d); err != nil {
+		d, err := decodeAOPData[aop.StatusData](ev)
+		if err != nil {
 			return ae, err
 		}
 		ae.Content = d.State
@@ -268,28 +275,23 @@ func flattenAOPEvent(ev aop.Event) (AgentEvent, error) {
 	return ae, nil
 }
 
-func decodeAOPData(ev aop.Event, target any) error {
-	if err := json.Unmarshal(ev.Data, target); err != nil {
-		return fmt.Errorf("decode AOP %s data: %w", ev.Type, err)
+func decodeAOPData[T any](ev aop.Event) (T, error) {
+	var data T
+	if err := json.Unmarshal(ev.Data, &data); err != nil {
+		return data, fmt.Errorf("decode AOP %s data: %w", ev.Type, err)
 	}
-	return nil
+	return data, nil
 }
-
-func eventValueText(value any) string {
-	if value == nil {
-		return ""
-	}
-	if text, ok := value.(string); ok {
-		return text
-	}
-	raw, _ := json.Marshal(value)
-	return string(raw)
-}
-
-func (e AgentEvent) ArgsText() string   { return eventValueText(e.Args) }
-func (e AgentEvent) ResultText() string { return eventValueText(e.Result) }
 
 func isSubagentCreate(event AgentEvent) bool {
-	action, _ := event.Args["action"].(string)
-	return action != "list" && action != "kill" && action != "message"
+	action := string(event.Args["action"])
+	return action != `"list"` && action != `"kill"` && action != `"message"`
+}
+
+func argsText(args map[string]json.RawMessage) string {
+	if len(args) == 0 {
+		return "{}"
+	}
+	encoded, _ := json.Marshal(args)
+	return string(encoded)
 }
