@@ -162,11 +162,17 @@ func aiscan() {
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
 		var err error
-		if option.WebURL != "" {
+		transport, transportErr := cfg.ResolveAgentTransport(&option)
+		if transportErr != nil {
+			logger.Errorf("agent failed: %s", transportErr)
+			os.Exit(1)
+		}
+		switch transport {
+		case cfg.AgentTransportWeb:
 			err = webagent.Run(ctx, &option, logger)
-		} else if os.Getenv("AISCAN_EVENTS_FILE") == "-" {
+		case cfg.AgentTransportStdio:
 			err = runner.RunStdio(ctx, &option, logger, os.Stdin, os.Stdout)
-		} else {
+		default:
 			err = runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc)
 		}
 		if err != nil {

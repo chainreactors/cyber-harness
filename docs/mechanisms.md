@@ -83,11 +83,9 @@ type ChatPayload struct {
 
 ## 5. Eval 事件透传与持久化
 
-**序列化修复**: `Event.MarshalJSON` 是 allowlist 模式，之前缺少 `EvalRound`/`EvalPass`/`EvalReason`/`EvalError` 四个字段，verdict 从未离开 agent 进程。
+agent 在 producer 边缘生成原生 AOP envelope；hub 只校验 envelope，并以固定的 `aop` transport frame 原样转发。评估字段保留在 `ext.aiscan` 中，嵌套结构不会 flatten。
 
-**hub 转发**: `forwardAgentEvent` 新增 `"agent.eval_end"` / `"agent.eval_error"` case，转为 `ChatEventEval` 广播到 session SSE。`eval_start` 是瞬态标记，不转发。
-
-**持久化**: `persistRuntimeChatEvent` 新增 `ChatEventEval` case，将 round/pass/reason 存为 system message + metadata。页面刷新后从 metadata 重建 eval 徽章。
+eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事件，但不会再投影成另一套 agent 事件或 system message。会话正文只持久化到 `chat_aop_events`，刷新后从同一 AOP 源重建。
 
 **评估器门控修正**: 旧逻辑只对 Terminated/Completed 执行评估，turn-capped（Stopped）或 token-capped（Budget）的 agent 被静默跳过。新逻辑只在 Error/Canceled 时跳过。
 

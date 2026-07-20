@@ -1,13 +1,18 @@
 package commands_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -47,6 +52,20 @@ func (c *argsCapture) Execute(_ context.Context, args []string) error {
 type outputCommand struct {
 	name   string
 	output string
+}
+
+type stagedOutputCommand struct {
+	name  string
+	value string
+}
+
+func (c *stagedOutputCommand) Name() string  { return c.name }
+func (c *stagedOutputCommand) Usage() string { return c.name }
+func (c *stagedOutputCommand) Execute(context.Context, []string) error {
+	fmt.Fprint(commands.Output, c.value+"-first\n")
+	time.Sleep(75 * time.Millisecond)
+	fmt.Fprint(commands.Output, c.value+"-second\n")
+	return nil
 }
 
 func (c *outputCommand) Name() string  { return c.name }
@@ -457,6 +476,150 @@ func TestNoPipeStillWorks(t *testing.T) {
 	}
 	if !strings.Contains(res.Text(), "all findings here") {
 		t.Errorf("output %q should contain expected text", res.Text())
+	}
+}
+
+func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	root := t.TempDir()
+	dirs := []string{filepath.Join(root, "one"), filepath.Join(root, "two")}
+	for _, dir := range dirs {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bash := commands.NewBashTool(root, 5)
+	defer bash.Close()
+
+	results := make([]tmux.Info, 2)
+	outputs := make([]bytes.Buffer, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range dirs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd`, commands.BashExecOptions{
+				WorkDir: dirs[i],
+				Env:     map[string]string{"AISCAN_RUN_VALUE": fmt.Sprintf("value-%d", i)},
+				OnOutput: func(data []byte) {
+					_, _ = outputs[i].Write(data)
+				},
+			})
+		}(i)
+	}
+	wg.Wait()
+	for i := range results {
+		if errs[i] != nil {
+			t.Fatalf("run %d: %v", i, errs[i])
+		}
+		got := filepath.ToSlash(outputs[i].String())
+		if !strings.Contains(got, fmt.Sprintf("value-%d", i)) || !strings.Contains(got, "/"+filepath.Base(dirs[i])) {
+			t.Fatalf("run %d leaked cwd/env: %q", i, got)
+		}
+	}
+}
+
+func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
+	root := t.TempDir()
+	commandsByName := map[string]commands.Command{
+		"one": &stagedOutputCommand{name: "one", value: "one"},
+		"two": &stagedOutputCommand{name: "two", value: "two"},
+	}
+	bash := commands.NewBashTool(root, 5)
+	bash.SetCommandResolver(func(name string) (commands.Command, bool) {
+		command, ok := commandsByName[name]
+		return command, ok
+	})
+	bash.Manager().SetExecHooks(
+		func(w io.Writer) { commands.Output.Reset(w) },
+		func() { commands.Output.Reset(nil) },
+	)
+	defer bash.Close()
+
+	var outputs [2]bytes.Buffer
+	var errs [2]error
+	var wg sync.WaitGroup
+	for i, name := range []string{"one", "two"} {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			_, errs[i] = bash.RunForeground(context.Background(), name, commands.BashExecOptions{
+				OnOutput: func(data []byte) { _, _ = outputs[i].Write(data) },
+			})
+		}(i, name)
+	}
+	wg.Wait()
+	for i, name := range []string{"one", "two"} {
+		if errs[i] != nil {
+			t.Fatalf("%s: %v", name, errs[i])
+		}
+		other := []string{"two", "one"}[i]
+		if !strings.Contains(outputs[i].String(), name+"-first") || strings.Contains(outputs[i].String(), other+"-") {
+			t.Fatalf("%s output leaked: %q", name, outputs[i].String())
+		}
+	}
+}
+
+func TestBashRunForegroundStreams(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	defer bash.Close()
+	var stream bytes.Buffer
+	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, commands.BashExecOptions{
+		OnOutput: func(data []byte) { _, _ = stream.Write(data) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stream.String(); !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+		t.Fatalf("stream = %q", got)
+	}
+	if result.ExitCode != 0 || result.State != tmux.StateCompleted {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestBashRunTimeoutStopsSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	defer bash.Close()
+	started := time.Now()
+	result, err := bash.RunForeground(context.Background(), "sleep 5", commands.BashExecOptions{
+		Timeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatal("timeout did not stop the session promptly")
+	}
+	if result.State != tmux.StateKilled || result.KillCause == "" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestBashRunReportsNonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	defer bash.Close()
+	var output bytes.Buffer
+	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, commands.BashExecOptions{
+		OnOutput: func(data []byte) { _, _ = output.Write(data) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "failure") || result.ExitCode != 7 {
+		t.Fatalf("result=%+v output=%q", result, output.String())
 	}
 }
 

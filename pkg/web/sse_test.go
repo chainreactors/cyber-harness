@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
@@ -69,43 +70,6 @@ func TestIsTerminalChatEvent(t *testing.T) {
 	}
 }
 
-// A run that ends with no final text (a tool-only turn, or an eval run that hit
-// its round cap) must still broadcast the terminal message so the client
-// finalizes the turn and releases the composer — but it must not leave a blank
-// assistant row in the transcript. A run with real text does both.
-func TestCompleteAssistantRunAlwaysSignalsButPersistsOnlyText(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	svc := NewService(ServiceConfig{Store: store})
-
-	const sid = "sess-terminal"
-	ch, unsub := svc.Hub().Subscribe(sessionTopic(sid))
-	defer unsub()
-
-	// Empty completion persists nothing; AOP session.end is the terminal signal.
-	svc.completeAssistantRun(sid, "agent-1", "Agent One", "   ", 1)
-	if got := drainEventTypes(ch); len(got) != 0 {
-		t.Fatalf("empty completion broadcast = %v, want none", got)
-	}
-	if msgs, _ := store.ListMessages(context.Background(), sid, 100); len(msgs) != 0 {
-		t.Fatalf("empty completion persisted %d messages, want 0", len(msgs))
-	}
-
-	// Text completion is persisted for the transcript but not re-broadcast as a
-	// second agent protocol event.
-	svc.completeAssistantRun(sid, "agent-1", "Agent One", "done", 2)
-	if got := drainEventTypes(ch); len(got) != 0 {
-		t.Fatalf("text completion broadcast = %v, want none", got)
-	}
-	msgs, _ := store.ListMessages(context.Background(), sid, 100)
-	if len(msgs) != 1 || msgs[0].Content != "done" {
-		t.Fatalf("text completion persisted %+v, want one message %q", msgs, "done")
-	}
-}
-
 func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
@@ -138,7 +102,7 @@ func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	}
 }
 
-func TestEvalEventPersistsVerdictMetadata(t *testing.T) {
+func TestEvalProjectionDoesNotDuplicateAOP(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +110,13 @@ func TestEvalEventPersistsVerdictMetadata(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
+	svc.BroadcastAOPEvent("sess-eval", aop.Event{
+		Type: "turn.end", TS: time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "sess-eval", Agent: "aiscan", Data: json.RawMessage(`{"turn":1}`),
+		Ext: map[string]any{"aiscan": map[string]any{
+			"eval_round": 2, "eval_pass": false, "eval_reason": "needs one more verified finding",
+		}},
+	})
 	svc.BroadcastChatEvent("sess-eval", ChatEvent{
 		Type:       ChatEventEval,
 		EvalRound:  2,
@@ -153,22 +124,12 @@ func TestEvalEventPersistsVerdictMetadata(t *testing.T) {
 		EvalReason: "needs one more verified finding",
 	})
 
-	msgs, err := store.ListMessages(context.Background(), "sess-eval", 100)
+	events, err := store.ListAOPEvents(context.Background(), "sess-eval", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("persisted messages = %d, want 1", len(msgs))
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal(msgs[0].Metadata, &metadata); err != nil {
-		t.Fatalf("metadata json: %v", err)
-	}
-	if metadata["event_type"] != ChatEventEval || metadata["eval_reason"] != "needs one more verified finding" {
-		t.Fatalf("eval metadata = %#v", metadata)
-	}
-	if metadata["eval_round"] != float64(2) || metadata["eval_pass"] != false {
-		t.Fatalf("eval verdict metadata = %#v", metadata)
+	if len(events) != 1 {
+		t.Fatalf("persisted AOP events = %d, want 1", len(events))
 	}
 }
 

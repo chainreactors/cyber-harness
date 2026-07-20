@@ -33,7 +33,7 @@ func TestForwardAgentEventSurfacesEvalVerdict(t *testing.T) {
 		aopEv.SessionID = "agent-session"
 		payload, _ := json.Marshal(aopEv)
 		pool.forwardAOPEvent(a, WSMessage{
-			Type:    "aop." + aopEv.Type,
+			Type:    "aop",
 			TaskID:  "task-1",
 			Payload: payload,
 		})
@@ -66,7 +66,7 @@ func TestForwardAgentEventEvalErrorBecomesReason(t *testing.T) {
 		aopEv.SessionID = "agent-session"
 		payload, _ := json.Marshal(aopEv)
 		pool.forwardAOPEvent(a, WSMessage{
-			Type:    "aop." + aopEv.Type,
+			Type:    "aop",
 			TaskID:  "task-1",
 			Payload: payload,
 		})
@@ -102,7 +102,7 @@ func TestForwardAgentEventEvalStartDropped(t *testing.T) {
 			aopEv.SessionID = "agent-session"
 			payload, _ := json.Marshal(aopEv)
 			pool.forwardAOPEvent(a, WSMessage{
-				Type:    "aop." + aopEv.Type,
+				Type:    "aop",
 				TaskID:  "task-1",
 				Payload: payload,
 			})

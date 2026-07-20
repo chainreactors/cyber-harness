@@ -17,7 +17,7 @@ func TestConsumeAgentStream(t *testing.T) {
 	event := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello", Role: "assistant"})
 	input := encodeFrames(t,
 		webproto.Message{
-			Type:    "aop.text",
+			Type:    "aop",
 			TaskID:  taskID,
 			Payload: webproto.MustJSON(event),
 		},
@@ -32,8 +32,12 @@ func TestConsumeAgentStream(t *testing.T) {
 	if output != "done" {
 		t.Fatalf("output = %q", output)
 	}
-	if len(events) != 1 || events[0].Content != "hello" {
+	if len(events) != 1 {
 		t.Fatalf("events = %#v", events)
+	}
+	text, err := aop.DecodeData[aop.TextData](events[0])
+	if err != nil || text.Content != "hello" {
+		t.Fatalf("text event = %#v err=%v", events[0], err)
 	}
 	if !strings.Contains(monitorOutput.String(), "hello") {
 		t.Fatalf("monitor output = %q", monitorOutput.String())
@@ -45,21 +49,24 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	callID := "call-1"
 	input := encodeFrames(t,
 		webproto.Message{
-			Type:   "aop.tool.call",
+			Type:   "aop",
 			TaskID: taskID,
 			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
 				ToolCallID: callID,
 				ToolName:   "bash",
-				Args:       map[string]any{"command": "echo hello"},
+				Args: map[string]any{
+					"command": "echo hello",
+					"nested":  []any{map[string]any{"enabled": true}},
+				},
 			})),
 		},
 		webproto.Message{
-			Type:   "aop.tool.result",
+			Type:   "aop",
 			TaskID: taskID,
 			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
 				ToolCallID: callID,
 				ToolName:   "bash",
-				Content:    "hello",
+				Content:    map[string]any{"output": []any{"hello", map[string]any{"code": float64(0)}}},
 			})),
 		},
 		webproto.Message{Type: "complete", TaskID: taskID, Data: "done"},
@@ -73,28 +80,18 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("tool calls = %#v", calls)
 	}
-	if string(calls[0].Args["command"]) != `"echo hello"` {
-		t.Fatalf("args = %#v", calls[0].Args)
+	args, ok := calls[0].Args().(map[string]any)
+	if !ok || args["command"] != "echo hello" {
+		t.Fatalf("args = %#v", calls[0].Args())
 	}
-	if calls[0].Result != "hello" {
-		t.Fatalf("result = %q", calls[0].Result)
+	if !strings.Contains(calls[0].ResultText(), `"output":["hello"`) {
+		t.Fatalf("result = %q", calls[0].ResultText())
 	}
 }
 
 func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 	taskID := "task-1"
 	validEvent := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello"})
-	invalidToolArgs := aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Args:       "echo hello",
-	})
-	invalidToolResult := aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Content:    map[string]any{"output": "hello"},
-	})
-
 	tests := []struct {
 		name   string
 		input  *bytes.Buffer
@@ -110,7 +107,7 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 		{
 			name: "event type mismatch",
 			input: encodeFrames(t,
-				webproto.Message{Type: "aop.usage", TaskID: taskID, Payload: webproto.MustJSON(validEvent)},
+				webproto.Message{Type: "aop", TaskID: taskID, Payload: webproto.MustJSON(validEvent)},
 			),
 			needle: "contains AOP event",
 		},
@@ -122,22 +119,8 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 			needle: "unsupported webproto frame",
 		},
 		{
-			name: "non-object tool args",
-			input: encodeFrames(t,
-				webproto.Message{Type: "aop.tool.call", TaskID: taskID, Payload: webproto.MustJSON(invalidToolArgs)},
-			),
-			needle: "decode AOP tool.call data",
-		},
-		{
-			name: "non-string tool result",
-			input: encodeFrames(t,
-				webproto.Message{Type: "aop.tool.result", TaskID: taskID, Payload: webproto.MustJSON(invalidToolResult)},
-			),
-			needle: "decode AOP tool.result data",
-		},
-		{
 			name:   "missing terminal",
-			input:  encodeFrames(t, webproto.Message{Type: "aop.text", TaskID: taskID, Payload: webproto.MustJSON(validEvent)}),
+			input:  encodeFrames(t, webproto.Message{Type: "aop", TaskID: taskID, Payload: webproto.MustJSON(validEvent)}),
 			needle: "without a terminal frame",
 		},
 	}

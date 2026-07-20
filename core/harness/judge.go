@@ -72,16 +72,16 @@ func buildTrace(r *RunResult) string {
 
 	sb.WriteString("\nTool call trace:\n")
 	for i, e := range r.ToolCalls() {
-		fmt.Fprintf(&sb, "  [%d] %s", i+1, e.ToolName)
-		if e.IsError {
+		fmt.Fprintf(&sb, "  [%d] %s", i+1, e.Name())
+		if e.IsError() {
 			sb.WriteString(" (ERROR)")
 		}
 		sb.WriteByte('\n')
-		if len(e.Args) > 0 {
-			fmt.Fprintf(&sb, "      args: %s\n", clip(argsText(e.Args), 200))
+		if args := argsText(e.Args()); args != "" {
+			fmt.Fprintf(&sb, "      args: %s\n", clip(args, 200))
 		}
-		if e.Result != "" {
-			fmt.Fprintf(&sb, "      result: %s\n", clip(e.Result, 300))
+		if result := e.ResultText(); result != "" {
+			fmt.Fprintf(&sb, "      result: %s\n", clip(result, 300))
 		}
 	}
 

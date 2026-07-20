@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 	ioaclient "github.com/chainreactors/ioa/client"
-	"github.com/chainreactors/ioa/protocols"
 )
 
 type App struct {
@@ -29,7 +28,7 @@ type App struct {
 	Engines           any
 	Skills            *skills.Store
 	SkillDiagnostics  []skills.Diagnostic
-	IOAClient         protocols.ClientAPI
+	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
 	DataBus           *eventbus.Bus[output.ToolDataEvent]
 	SCOSidecar        *output.SCOSidecar
@@ -329,10 +328,16 @@ func (a *App) InitIOA(ctx context.Context, ioa cfg.IOAConfig) error {
 	if err != nil {
 		return err
 	}
-	a.IOAClient = client
-	if streamClient, ok := client.(ioaclient.StreamAPI); ok {
-		a.IOAStreamClient = streamClient
+	if client == nil {
+		return nil
 	}
+	a.IOAClient = client
+	if ioa.Identity != nil {
+		if err := client.Bind(ioa.Identity); err != nil {
+			return fmt.Errorf("bind ioa identity: %w", err)
+		}
+	}
+	a.IOAStreamClient = client
 	if ioa.RegisterTools && a.Commands != nil {
 		deps := &commands.Deps{
 			IOAClient: client,
@@ -341,27 +346,40 @@ func (a *App) InitIOA(ctx context.Context, ioa cfg.IOAConfig) error {
 		}
 		commands.BuildGroup("ioa", deps, a.Commands)
 	}
-	if ioa.AutoRegister && client != nil && client.NodeID() == "" {
-		type autoRegisterer interface {
-			EnsureRegistered(ctx context.Context, name, description string, meta map[string]any) error
-		}
-		if ar, ok := client.(autoRegisterer); ok {
-			if err := ar.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
-				return err
-			}
-		} else {
-			if _, err := client.RegisterNode(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
-				return err
-			}
+	if ioa.AutoRegister && client != nil {
+		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
+			a.Logger().Warnf("ioa registration pending: %s", err)
+			go a.retryIOARegistration(ctx, client, ioa)
+			return nil
 		}
 	}
-	if ioa.Space != "" && client != nil && client.NodeID() != "" {
+	a.configureIOASpace(ctx, client, ioa)
+	return nil
+}
+
+func (a *App) retryIOARegistration(ctx context.Context, client *ioaclient.Client, ioa cfg.IOAConfig) {
+	for attempt := 0; ; attempt++ {
+		delay := agent.RetryDelay(attempt)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta) == nil {
+			a.Logger().Infof("ioa node registered: %s", client.NodeID())
+			a.configureIOASpace(ctx, client, ioa)
+			return
+		}
+	}
+}
+
+func (a *App) configureIOASpace(ctx context.Context, client *ioaclient.Client, ioa cfg.IOAConfig) {
+	if ioa.Space != "" && client != nil && client.Bound() {
 		info, err := client.Space(ctx, ioa.Space, "aiscan agent")
 		if err == nil {
 			a.setIOASpace(info.ID)
 		}
 	}
-	return nil
 }
 
 func (a *App) setIOASpace(spaceID string) {
@@ -372,7 +390,7 @@ func (a *App) setIOASpace(spaceID string) {
 	}
 }
 
-func newIOAClient(ioa cfg.IOAConfig) (protocols.ClientAPI, error) {
+func newIOAClient(ioa cfg.IOAConfig) (*ioaclient.Client, error) {
 	if ioa.URL == "" {
 		return nil, nil
 	}

@@ -1,4 +1,4 @@
-package node
+package webagent
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 )
@@ -23,9 +24,9 @@ import (
 // DefaultWSPath is the default WebSocket endpoint for agent connections.
 const DefaultWSPath = "/api/agent/ws"
 
-// ConnectConfig holds all the parameters needed to establish and run a
+// connectionConfig holds all the parameters needed to establish and run a
 // WebSocket connection to the hub.
-type ConnectConfig struct {
+type connectionConfig struct {
 	ServerURL string
 	WSPath    string
 	Name      string
@@ -34,23 +35,25 @@ type ConnectConfig struct {
 	DataBus   *eventbus.Bus[output.ToolDataEvent]
 	SCO       *output.SCOSidecar
 	Logger    telemetry.Logger
-	Chat      ChatHandler                    // nil for runner (no LLM)
-	Identity  func() webproto.AgentIdentity  // nil = use default OS identity
-	Menu      func() []webproto.CommandSpec   // nil = no command menu
+	Chat      chatHandler
+	Node      protocols.NodeRef
+	Runtime   webproto.AgentRuntime
+	Status    func() webproto.AgentStatus
+	Menu      func() []webproto.CommandSpec // nil = no command menu
 
 	// ExtraPTYOpeners provides additional PTY openers (e.g. a REPL opener from
 	// the agent runtime) without requiring a core/runner import.
 	ExtraPTYOpeners map[string]pty.OpenFunc
 }
 
-// ChatHandler defines the interface for handling LLM chat interactions.
+// chatHandler defines the WebAgent-owned chat callbacks.
 // Implementations live in webagent or other packages that have access to the
 // agent runtime and provider.
-type ChatHandler interface {
+type chatHandler interface {
 	// HandleChat runs a chat turn. The node manages the cancellable context and
 	// the chatCancels map. The EventRouter lets the handler register agent
 	// session ID -> task ID mappings for event routing.
-	HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *EventRouter)
+	HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *eventRouter)
 
 	// HandleUpload processes a file upload message.
 	HandleUpload(msg webproto.Message, send func(webproto.Message))
@@ -63,22 +66,22 @@ type ChatHandler interface {
 	CancelChat(taskID string) bool
 }
 
-// EventRouter lets ChatHandler register agent session -> task ID mappings so
+// eventRouter registers agent session -> task ID mappings so
 // that agent events are routed to the correct WebSocket task.
-type EventRouter struct {
+type eventRouter struct {
 	mu         *sync.Mutex
 	eventRoute map[string]string // agent sessionID -> task messageID
 }
 
 // Route registers a mapping from an agent session ID to a WebSocket task ID.
-func (r *EventRouter) Route(agentSessionID, taskID string) {
+func (r *eventRouter) Route(agentSessionID, taskID string) {
 	r.mu.Lock()
 	r.eventRoute[agentSessionID] = taskID
 	r.mu.Unlock()
 }
 
 // Unroute removes all event route entries for the given task ID.
-func (r *EventRouter) Unroute(taskID string) {
+func (r *eventRouter) Unroute(taskID string) {
 	r.mu.Lock()
 	for sid, mid := range r.eventRoute {
 		if mid == taskID {
@@ -88,10 +91,10 @@ func (r *EventRouter) Unroute(taskID string) {
 	r.mu.Unlock()
 }
 
-// Connect implements the reconnect loop. It calls connectOnce in a loop with
+// connect implements the reconnect loop. It calls connectOnce in a loop with
 // agent.RetryDelay backoff. This is the main entry point for establishing a
 // persistent WebSocket connection.
-func Connect(ctx context.Context, cc ConnectConfig) error {
+func connect(ctx context.Context, cc connectionConfig) error {
 	if cc.WSPath == "" {
 		cc.WSPath = DefaultWSPath
 	}
@@ -125,7 +128,7 @@ func Connect(ctx context.Context, cc ConnectConfig) error {
 	}
 }
 
-func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, logger telemetry.Logger) error {
+func connectOnce(ctx context.Context, cc connectionConfig, pipeline *DataPipeline, logger telemetry.Logger) error {
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
@@ -156,7 +159,11 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 	}
 
 	stats := NewAgentStatsTracker()
-	regPayload, _ := json.Marshal(RegisterPayload(cc.Name, cc.Registry, cc.Identity, cc.Menu, stats.Snapshot()))
+	registration, err := RegisterPayload(cc.Name, cc.Registry, cc.Node, cc.Runtime, cc.Status, cc.Menu, stats.Snapshot())
+	if err != nil {
+		return err
+	}
+	regPayload, _ := json.Marshal(registration)
 	if err := conn.WriteJSON(webproto.Message{Type: "register", Payload: regPayload}); err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
@@ -190,6 +197,28 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 		}
 	}()
 
+	if cc.Status != nil {
+		go func(last webproto.AgentStatus) {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					next := cc.Status()
+					if next != last {
+						payload, _ := json.Marshal(next)
+						send(webproto.Message{Type: "agent.status", Payload: payload})
+						last = next
+					}
+				case <-ctx.Done():
+					return
+				case <-done:
+					return
+				}
+			}
+		}(registration.Status)
+	}
+
 	// Context close goroutine.
 	go func() {
 		select {
@@ -204,7 +233,7 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 	chatCancels := make(map[string]context.CancelFunc) // active chat messageID -> cancel
 	eventRoute := make(map[string]string)              // agent SessionID -> messageID for event routing
 
-	router := &EventRouter{mu: &mu, eventRoute: eventRoute}
+	router := &eventRouter{mu: &mu, eventRoute: eventRoute}
 
 	// Event bus subscription with stats tracking and event routing.
 	if cc.AgentBus != nil {
@@ -214,7 +243,6 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
 			}
 			aopEvents := aop.FromAgentEvent(e, "aiscan")
-			data := AgentEventSummary(e)
 			mu.Lock()
 			msgID := eventRoute[e.SessionID]
 			if msgID == "" && e.ParentSessionID != "" {
@@ -234,15 +262,10 @@ func connectOnce(ctx context.Context, cc ConnectConfig, pipeline *DataPipeline, 
 			mu.Unlock()
 			for _, aopEv := range aopEvents {
 				payload, _ := json.Marshal(aopEv)
-				summary := data
-				if summary == "" {
-					summary = string(payload)
-				}
 				for _, id := range targets {
 					send(webproto.Message{
-						Type:    "aop." + aopEv.Type,
+						Type:    "aop",
 						TaskID:  id,
-						Data:    summary,
 						Payload: payload,
 					})
 				}

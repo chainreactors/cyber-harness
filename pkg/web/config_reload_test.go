@@ -41,27 +41,24 @@ func TestBroadcastConfigReload(t *testing.T) {
 	}
 }
 
-// TestHandleAgentIdentityUpdate covers the post-hot-reload identity re-announce:
-// the agent's swapped provider/model reach the pool (so the UI badge tracks the
-// live model), while the register-time identity fields (NodeName/PID/host) are
-// preserved rather than clobbered by the partial update.
-func TestHandleAgentIdentityUpdate(t *testing.T) {
+func TestHandleAgentStatusUpdate(t *testing.T) {
 	pool := NewAgentPool(nil)
 	a := newFakeAgent("n1", 1)
-	a.identity = webproto.AgentIdentity{NodeName: "local-1", PID: 4242, Provider: "anthropic", Model: "old-model"}
+	a.runtime = webproto.AgentRuntime{PID: 4242, Hostname: "local-1"}
+	a.status = webproto.AgentStatus{Provider: "anthropic", Model: "old-model"}
 	pool.register(a)
 
-	payload, _ := json.Marshal(webproto.AgentIdentity{Provider: "anthropic", Model: "glm-5.2"})
-	pool.handleAgentMessage(a, WSMessage{Type: "agent.identity", Payload: payload})
+	payload, _ := json.Marshal(webproto.AgentStatus{Provider: "anthropic", Model: "glm-5.2", Bound: true})
+	pool.handleAgentMessage(a, WSMessage{Type: "agent.status", Payload: payload})
 
-	got := a.info().Identity
+	got := a.info().Status
 	if got.Model != "glm-5.2" {
-		t.Errorf("Model = %q, want glm-5.2 (identity should track the hot-reload)", got.Model)
+		t.Errorf("Model = %q, want glm-5.2", got.Model)
 	}
 	if got.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want anthropic", got.Provider)
 	}
-	if got.NodeName != "local-1" || got.PID != 4242 {
-		t.Errorf("register-time identity clobbered: NodeName=%q PID=%d", got.NodeName, got.PID)
+	if runtime := a.info().Runtime; runtime.Hostname != "local-1" || runtime.PID != 4242 {
+		t.Errorf("runtime clobbered: Hostname=%q PID=%d", runtime.Hostname, runtime.PID)
 	}
 }

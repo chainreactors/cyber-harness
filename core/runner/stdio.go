@@ -49,7 +49,7 @@ func RunStdio(
 	defer cancel(nil)
 	sender := newStdioSender(output, cancel)
 
-	rt, err := NewAgentRuntime(runCtx, option, logger, nil)
+	rt, err := NewAgentRuntime(runCtx, option, logger, &RuntimeConfig{NoOutput: true})
 	if err != nil {
 		_ = sender.Send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
 		return err
@@ -84,7 +84,7 @@ func RunStdio(
 	}
 	agentConfig = agentConfig.WithSystemPrompt(systemPrompt)
 
-	result, runErr := agent.NewAgent(agentConfig).Run(runCtx, prompt)
+	_, runErr := agent.NewAgent(agentConfig).Run(runCtx, prompt)
 	if transportErr := sender.Err(); transportErr != nil {
 		return fmt.Errorf("write webproto stdout: %w", transportErr)
 	}
@@ -95,11 +95,7 @@ func RunStdio(
 		return runErr
 	}
 
-	final := ""
-	if result != nil {
-		final = result.Output
-	}
-	if err := sender.Send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: final}); err != nil {
+	if err := sender.Send(webproto.Message{Type: "complete", TaskID: msg.TaskID}); err != nil {
 		return fmt.Errorf("write webproto stdout: %w", err)
 	}
 	return nil
@@ -175,7 +171,7 @@ func (s *stdioSender) SendAOP(taskID string, event aop.Event) error {
 		TaskID  string    `json:"task_id"`
 		Payload aop.Event `json:"payload"`
 	}{
-		Type:    "aop." + event.Type,
+		Type:    "aop",
 		TaskID:  taskID,
 		Payload: event,
 	})

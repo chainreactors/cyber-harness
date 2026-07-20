@@ -52,6 +52,10 @@ func ParseTimelineFile(path string) ([]TimelineEntry, error) {
 }
 
 func parseLine(line []byte) (TimelineEntry, bool) {
+	var event AOPTimelineEntry
+	if json.Unmarshal(line, &event) == nil && event.Valid() {
+		return TimelineEntry{Timestamp: event.Timestamp, Type: event.Type, Data: &event}, true
+	}
 	rec, err := ParseRecord(line)
 	if err != nil || rec.Type == "" {
 		return TimelineEntry{}, false
@@ -77,10 +81,6 @@ func parseRecordData(rec Record) any {
 		return unmarshalItem[AgentEvent](rec.Data)
 	case TypeScanEnd:
 		return unmarshalItem[ScanEnd](rec.Data)
-	default:
-		if strings.HasPrefix(string(rec.Type), "aop.") {
-			return unmarshalAOPEntry(rec)
-		}
 	}
 	return nil
 }
@@ -321,7 +321,7 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 				}
 			}
 		case *AOPTimelineEntry:
-			switch d.AOPType {
+			switch d.Type {
 			case "session.start":
 				m.startTS = e.Timestamp
 				var sd struct {
@@ -479,17 +479,19 @@ func compactResult(result string, maxLen int) string {
 // ---------------------------------------------------------------------------
 
 type AOPTimelineEntry struct {
-	AOPType string
-	Data    json.RawMessage
+	Type      string          `json:"type"`
+	Timestamp time.Time       `json:"ts"`
+	SessionID string          `json:"session_id"`
+	Agent     string          `json:"agent"`
+	Data      json.RawMessage `json:"data"`
 }
 
-func unmarshalAOPEntry(rec Record) *AOPTimelineEntry {
-	aopType := strings.TrimPrefix(string(rec.Type), "aop.")
-	return &AOPTimelineEntry{AOPType: aopType, Data: rec.Data}
+func (e AOPTimelineEntry) Valid() bool {
+	return e.Type != "" && !e.Timestamp.IsZero() && e.SessionID != "" && e.Agent != "" && len(e.Data) > 0
 }
 
 func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
-	switch e.AOPType {
+	switch e.Type {
 	case "turn.start":
 		var d struct {
 			Turn int `json:"turn"`

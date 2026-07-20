@@ -13,27 +13,50 @@ import (
 	"testing"
 	"time"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/node"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 	"github.com/gorilla/websocket"
 )
 
+func TestWebNodeRefUsesWebIdentity(t *testing.T) {
+	ref, err := webNodeRef(&cfg.Option{
+		AgentOptions: cfg.AgentOptions{WebURL: "https://secret@example.test/hub"},
+		IOAOptions:   cfg.IOAOptions{IOANodeName: "worker-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.ID != "worker-1" || ref.Authority != "https://example.test/hub" {
+		t.Fatalf("node ref = %#v", ref)
+	}
+	if _, err := webNodeRef(&cfg.Option{AgentOptions: cfg.AgentOptions{WebURL: "https://example.test"}}); err == nil {
+		t.Fatal("expected missing ioa.node_name error")
+	}
+}
+
 func connectForTest(ctx context.Context, serverURL, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event]) error {
-	return node.Connect(ctx, node.ConnectConfig{
+	if _, ok := reg.GetTool("bash"); !ok {
+		bash := commands.NewBashTool(".", 5)
+		bash.SetCommandResolver(reg.Get)
+		bash.Manager().SetExecHooks(
+			func(w io.Writer) { commands.Output.Reset(w) },
+			func() { commands.Output.Reset(nil) },
+		)
+		reg.RegisterTool(bash)
+		defer bash.Close()
+	}
+	return connect(ctx, connectionConfig{
 		ServerURL: serverURL,
 		Name:      name,
 		Registry:  reg,
 		AgentBus:  bus,
+		Node:      protocols.NodeRef{ID: "node-" + name, Authority: serverURL},
 	})
-}
-
-func TestRunConnectionFileRoundTrip(t *testing.T) {
-	// This test is now covered by core/node tests. Keeping a thin integration
-	// check that the node.Connect path works from this package.
-	t.Skip("file read/write moved to core/node; covered by node-level tests")
 }
 
 type webConnectionTestCommand struct {
@@ -133,8 +156,13 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 			switch msg.Type {
 			case "output":
 				seenOutput = strings.Contains(msg.Data, "hello world")
-			case "aop.turn.start":
-				seenTelemetry = strings.Contains(msg.Data, "turn 1")
+			case "aop":
+				var event aop.Event
+				if json.Unmarshal(msg.Payload, &event) == nil && event.Type == aop.TypeTurnStart {
+					var data aop.TurnData
+					_ = json.Unmarshal(event.Data, &data)
+					seenTelemetry = data.Turn == 1
+				}
 			case "complete":
 				seenComplete = true
 			}
@@ -218,7 +246,7 @@ func TestRunConnectionChatWithoutRuntimeReturnsClearError(t *testing.T) {
 		t.Fatal("web agent connection did not register")
 	}
 
-	// Without a ChatHandler, node.Connect does not dispatch "chat" messages,
+	// Without a chat handler, the connection does not dispatch "chat" messages,
 	// so the hub never gets an error reply. This test now verifies that the
 	// connection stays stable when chat arrives without a handler.
 	select {
@@ -386,7 +414,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 
 	reg := commands.NewRegistry()
 	commands.BuildGroup("core", &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5}, reg)
-	mgr := node.RegistryPTYManager(reg)
+	mgr := RegistryPTYManager(reg)
 	if mgr == nil {
 		t.Fatal("bash command did not expose tmux manager")
 	}

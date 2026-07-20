@@ -107,14 +107,9 @@ interface SessionSnapshot {
   scanResults: Map<string, ScanResult>
 }
 
-// A node's stable identity across reconnects. The hub mints a fresh transient
-// agent id on every WebSocket (re)connect (pkg/web/agents.go), so a node that
-// flaps — a local agent restarting, a deployed node bouncing to reload config —
-// briefly leaves the roster and returns under a new id. Key selection on the
-// node_name (falling back to name, then id) so it follows the same logical node
-// instead of being reset to an unrelated one.
+// A node's canonical IOA identity across transports and reconnects.
 export function agentNodeKey(a: AgentInfo): string {
-  return a.identity?.node_name || a.name || a.id
+  return a.id // backend canonicalizes NodeRef.URI()
 }
 
 // Deterministic roster order. The hub returns agents in Go-map iteration order,
@@ -443,7 +438,7 @@ export function useChatSession() {
         finalizeRun()
         break
       case 'error':
-        setError(String(event.data.message ?? 'Agent error'))
+        setError(String((event.data as Record<string, unknown>).message ?? 'Agent error'))
         finalizeRun()
         break
     }

@@ -1110,6 +1110,10 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
 	if s.store != nil {
 		_ = s.store.AddAOPEvent(context.Background(), sessionID, event)
 	}
+	s.broadcastAOPEvent(sessionID, event)
+}
+
+func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
 		Type:     "aop",
 		Data:     mustJSON(event),
@@ -1160,27 +1164,6 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	}
 
 	switch event.Type {
-	case ChatEventAgentJoined:
-		msg.Role = "system"
-		msg.Content = strings.TrimSpace(event.AgentName + " joined")
-
-	case ChatEventEval:
-		// Persist the round verdict so the eval badge survives a reload / session
-		// switch — buildTimelineFromMessages reconstructs it from content (reason)
-		// plus this metadata (round/pass).
-		msg.Role = "system"
-		msg.Content = event.EvalReason
-		metadata["eval_round"] = event.EvalRound
-		metadata["eval_pass"] = event.EvalPass
-		metadata["eval_reason"] = event.EvalReason
-
-	case ChatEventCompact:
-		msg.Role = "system"
-		msg.Content = fmt.Sprintf("context compacted: ~%d → ~%d tokens", event.CompactTokensBefore, event.CompactTokensAfter)
-		metadata["compact_tokens_before"] = event.CompactTokensBefore
-		metadata["compact_tokens_after"] = event.CompactTokensAfter
-		metadata["compact_kept_messages"] = event.CompactKeptMessages
-
 	case ChatEventScanComplete:
 		// Persist a lightweight marker so the inline scan card survives a reload /
 		// session switch. The heavy Result payload is NOT stored here — it stays
@@ -1217,6 +1200,9 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 	}
 	if err := s.store.AddMessage(ctx, msg); err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
+	}
+	if event, err := aopEventFromChatMessage(msg); err == nil {
+		s.broadcastAOPEvent(sessionID, event)
 	}
 
 	// Update session timestamp and auto-title from first message.
@@ -1423,10 +1409,10 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 		}
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", a.Name, a.ID[:8], status))
 		entry := map[string]any{"name": a.Name, "id": a.ID[:8], "busy": a.Busy}
-		if a.Identity.Model != "" {
-			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Identity.Provider, a.Identity.Model))
-			entry["provider"] = a.Identity.Provider
-			entry["model"] = a.Identity.Model
+		if a.Status.Model != "" {
+			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Status.Provider, a.Status.Model))
+			entry["provider"] = a.Status.Provider
+			entry["model"] = a.Status.Model
 		}
 		sb.WriteString("\n")
 		list = append(list, entry)
@@ -1489,11 +1475,9 @@ func (s *Service) handleChatMessage(sessionID, content string, opts webproto.Cha
 		if canceled {
 			return
 		}
-		reply := res.Output
 		if res.Err != "" {
-			reply = "Error: " + res.Err
+			s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventError, Error: res.Err})
 		}
-		s.completeAssistantRun(sessionID, agent.id, agent.name, reply, res.Turn)
 	}()
 }
 
@@ -1517,14 +1501,9 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		CreatedAt: now,
 	}
 	_ = s.store.AddMessage(context.Background(), msg)
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:      ChatEventMessage,
-		MessageID: msg.ID,
-		Role:      "system",
-		Content:   fallback,
-		Code:      code,
-		Params:    params,
-	})
+	if event, err := aopEventFromChatMessage(msg); err == nil {
+		s.broadcastAOPEvent(sessionID, event)
+	}
 }
 
 func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
@@ -1542,27 +1521,4 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 		ScanID: scanID,
 		Result: result,
 	})
-}
-
-// completeAssistantRun persists the aggregate reply for conversation context.
-// The frontend lifecycle and rendering are driven exclusively by AOP.
-func (s *Service) completeAssistantRun(sessionID, agentID, agentName, content string, turn int) {
-	content = strings.TrimRight(content, " \t\r\n")
-	if content != "" {
-		msg := &ChatMessage{
-			ID:        generateID(),
-			SessionID: sessionID,
-			Role:      "assistant",
-			AgentID:   agentID,
-			AgentName: agentName,
-			Content:   content,
-			CreatedAt: time.Now(),
-		}
-		if turn > 0 {
-			if data, err := json.Marshal(map[string]any{"turn": turn}); err == nil {
-				msg.Metadata = data
-			}
-		}
-		_ = s.store.AddMessage(context.Background(), msg)
-	}
 }

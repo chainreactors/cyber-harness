@@ -182,14 +182,13 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 	h.t.Helper()
 
 	fullArgs := h.agentCLIArgs(extraArgs...)
+	fullArgs = append(fullArgs, "--transport", "stdio")
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, h.exe, fullArgs...)
 	cmd.Dir = h.workDir
-	cmd.Env = append(os.Environ(), "AISCAN_EVENTS_FILE=-")
-
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		h.t.Fatalf("agent stdin pipe: %v", err)

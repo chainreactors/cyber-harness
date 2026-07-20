@@ -148,7 +148,7 @@ function AgentList({
     const q = query.trim().toLowerCase()
     if (!q) return sorted
     return sorted.filter((a) =>
-      `${a.name} ${a.identity?.model || ''} ${a.identity?.provider || ''} ${a.identity?.hostname || ''}`
+      `${a.name} ${a.status?.model || ''} ${a.status?.provider || ''} ${a.runtime?.hostname || ''}`
         .toLowerCase()
         .includes(q),
     )
@@ -206,21 +206,22 @@ function AgentList({
 }
 
 function agentDetails(agent: AgentInfo) {
-  const identity = agent.identity || {}
+  const runtime = agent.runtime || {}
+  const status = agent.status || { bound: false }
   const stats = agent.stats || {}
   const parts = [
     `name: ${agent.name}`,
     `id: ${agent.id}`,
     `state: ${agent.busy ? 'busy' : 'idle'}`,
     `connected: ${formatDateTime(agent.connected_at)}`,
-    identity.hostname ? `host: ${identity.hostname}` : '',
-    identity.username ? `user: ${identity.username}` : '',
-    identity.working_dir ? `cwd: ${identity.working_dir}` : '',
-    identity.os || identity.arch ? `runtime: ${[identity.os, identity.arch].filter(Boolean).join('/')}` : '',
-    identity.pid ? `pid: ${identity.pid}` : '',
-    identity.provider || identity.model ? `llm: ${[identity.provider, identity.model].filter(Boolean).join(' / ')}` : '',
+    runtime.hostname ? `host: ${runtime.hostname}` : '',
+    runtime.username ? `user: ${runtime.username}` : '',
+    runtime.working_dir ? `cwd: ${runtime.working_dir}` : '',
+    runtime.os || runtime.arch ? `runtime: ${[runtime.os, runtime.arch].filter(Boolean).join('/')}` : '',
+    runtime.pid ? `pid: ${runtime.pid}` : '',
+    status.provider || status.model ? `llm: ${[status.provider, status.model].filter(Boolean).join(' / ')}` : '',
     agent.commands?.length ? `commands: ${agent.commands.join(', ')}` : '',
-    identity.capabilities?.length ? `capabilities: ${identity.capabilities.join(', ')}` : '',
+    runtime.capabilities?.length ? `capabilities: ${runtime.capabilities.join(', ')}` : '',
     typeof stats.turns === 'number' ? `turns: ${stats.turns}` : '',
     typeof stats.tool_calls === 'number' ? `tool calls: ${stats.tool_calls}` : '',
     typeof stats.total_tokens === 'number' ? `tokens: ${stats.total_tokens}` : '',

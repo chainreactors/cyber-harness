@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -48,7 +49,7 @@ type Event = pty.Event
 type OutputBuffer = pty.OutputBuffer
 
 const (
-	DefaultTimeout  = pty.DefaultTimeout
+	DefaultTimeout   = pty.DefaultTimeout
 	DefaultBufferCap = pty.DefaultBufferCap
 )
 
@@ -105,6 +106,7 @@ type Manager struct {
 	workDir    string
 	beforeExec func(w io.Writer)
 	afterExec  func()
+	pseudoMu   sync.Mutex
 }
 
 // NewManager creates a Manager backed by a fresh pty.Manager.
@@ -150,7 +152,6 @@ func (m *Manager) SetExecHooks(before func(w io.Writer), after func()) {
 func (m *Manager) SetWorkDir(dir string) {
 	m.workDir = dir
 }
-
 
 // RunCommand creates a session for the given command line. If the first
 // token matches a registered in-process Command, the command runs in a
@@ -231,13 +232,7 @@ func (m *Manager) RunCommand(cmdLine string, opts RunOpts) (Info, error) {
 // createPseudo runs a pseudo-command in-process without pipes.
 func (m *Manager) createPseudo(ctx context.Context, cmd Command, args []string, name string, timeout time.Duration) (Info, error) {
 	return m.CreateFunc(ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
-		if m.beforeExec != nil {
-			m.beforeExec(w)
-		}
-		if m.afterExec != nil {
-			defer m.afterExec()
-		}
-		return cmd.Execute(ctx, args)
+		return m.executePseudo(ctx, cmd, args, w)
 	})
 }
 
@@ -254,13 +249,7 @@ func (m *Manager) runPipedPseudo(
 	return m.CreateFunc(ctx, name, timeout, func(ctx context.Context, w io.Writer) error {
 		// Phase 1: run pseudo-command, capture output to buffer.
 		var buf bytes.Buffer
-		if m.beforeExec != nil {
-			m.beforeExec(&buf)
-		}
-		execErr := cmd.Execute(ctx, args)
-		if m.afterExec != nil {
-			m.afterExec()
-		}
+		execErr := m.executePseudo(ctx, cmd, args, &buf)
 		if execErr != nil {
 			_, _ = w.Write(buf.Bytes())
 			return execErr
@@ -330,14 +319,20 @@ func (m *Manager) runShellToPseudo(
 		}
 		defer os.Remove(tmpPath)
 
-		if m.beforeExec != nil {
-			m.beforeExec(w)
-		}
-		if m.afterExec != nil {
-			defer m.afterExec()
-		}
-		return cmd.Execute(ctx, pseudoArgs)
+		return m.executePseudo(ctx, cmd, pseudoArgs, w)
 	})
+}
+
+func (m *Manager) executePseudo(ctx context.Context, cmd Command, args []string, writer io.Writer) (err error) {
+	m.pseudoMu.Lock()
+	defer m.pseudoMu.Unlock()
+	if m.beforeExec != nil {
+		m.beforeExec(writer)
+	}
+	if m.afterExec != nil {
+		defer m.afterExec()
+	}
+	return cmd.Execute(ctx, args)
 }
 
 func stripCommentsAndBlanks(input string) string {

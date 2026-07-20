@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/node"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
@@ -20,6 +19,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -33,10 +33,17 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 			cfg.MergeRemoteOption(option, remoteOpt)
 		}
 	}
+	if strings.TrimSpace(option.IOAURL) == "" {
+		return fmt.Errorf("ioa.url is required for web node identity")
+	}
+	identityRef, err := webNodeRef(option)
+	if err != nil {
+		return err
+	}
 
 	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
 		NoOutput:         true,
-		IOA:              remoteIOAConfig(option),
+		IOA:              remoteIOAConfig(option, identityRef),
 		ProviderOptional: true,
 	})
 	if err != nil {
@@ -57,13 +64,13 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 		logger.Debugf("web agent connection to %s", option.WebURL)
 
 		var extraPTYOpeners map[string]pty.OpenFunc
-		if mgr := node.RegistryPTYManager(rt.App.Commands); mgr != nil {
+		if mgr := RegistryPTYManager(rt.App.Commands); mgr != nil {
 			extraPTYOpeners = map[string]pty.OpenFunc{
 				"repl": runner.NewRemoteREPLOpener(rt, mgr),
 			}
 		}
 
-		_ = node.Connect(ctx, node.ConnectConfig{
+		_ = connect(ctx, connectionConfig{
 			ServerURL:       option.WebURL,
 			Name:            rt.NodeName,
 			Registry:        rt.App.Commands,
@@ -72,7 +79,9 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 			SCO:             rt.App.SCOSidecar,
 			Logger:          logger,
 			Chat:            chatHandler,
-			Identity:        func() webproto.AgentIdentity { return agentIdentity(rt) },
+			Node:            identityRef,
+			Runtime:         DefaultRuntime(),
+			Status:          func() webproto.AgentStatus { return agentStatus(rt) },
 			Menu:            func() []webproto.CommandSpec { return agentCommandCatalog(rt) },
 			ExtraPTYOpeners: extraPTYOpeners,
 		})
@@ -104,7 +113,7 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 }
 
 // ---------------------------------------------------------------------------
-// chatAgentHandler implements node.ChatHandler
+// chatAgentHandler implements the private connection chat handler.
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
@@ -113,7 +122,7 @@ type chatAgentHandler struct {
 	serverURL string
 }
 
-func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *node.EventRouter) {
+func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *eventRouter) {
 	chatOpts, err := parseChatPayload(msg)
 	if err != nil {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
@@ -165,10 +174,7 @@ func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto
 }
 
 func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webproto.Message)) {
-	if provider, model, ok := reloadAgentConfig(serverURL, h.rt, h.chatMgr); ok {
-		payload, _ := json.Marshal(webproto.AgentIdentity{Provider: provider.Name(), Model: model})
-		send(webproto.Message{Type: "agent.identity", Payload: payload})
-	}
+	_, _, _ = reloadAgentConfig(serverURL, h.rt, h.chatMgr)
 }
 
 func (h *chatAgentHandler) CancelChat(taskID string) bool {
@@ -370,7 +376,7 @@ func runChatWithAgent(ctx context.Context, msg webproto.Message, opts webproto.C
 		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 		return
 	}
-	send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: trimChatOutput(result.Output)})
+	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 }
 
 // runChatEval drives the agent through the evaluator loop for a Goal with
@@ -398,7 +404,7 @@ func runChatEval(ctx context.Context, msg webproto.Message, prompt string, opts 
 		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 		return
 	}
-	send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: trimChatOutput(result.Output)})
+	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 }
 
 // ---------------------------------------------------------------------------
@@ -560,24 +566,27 @@ func agentCommandCatalog(rt *runner.AgentRuntime) []webproto.CommandSpec {
 	return specs
 }
 
-func agentIdentity(rt *runner.AgentRuntime) webproto.AgentIdentity {
-	identity := node.DefaultIdentity()
+func agentStatus(rt *runner.AgentRuntime) webproto.AgentStatus {
+	var status webproto.AgentStatus
 	if rt == nil {
-		return identity
+		return status
 	}
-	identity.NodeName = rt.NodeName
 	if rt.Option != nil {
-		identity.Space = rt.Option.Space
-		identity.IOAURL = node.PublicIOAURL(rt.Option.IOAURL)
+		status.Space = rt.Option.Space
 	}
 	if rt.App != nil {
-		if rt.App.IOAClient != nil {
-			identity.NodeID = rt.App.IOAClient.NodeID()
-		}
-		identity.Provider = rt.App.ProviderConfig.Provider
-		identity.Model = rt.App.ProviderConfig.Model
+		status.Provider = rt.App.ProviderConfig.Provider
+		status.Model = rt.App.ProviderConfig.Model
+		status.Bound = ioaBound(rt)
 	}
-	return identity
+	return status
+}
+
+func ioaBound(rt *runner.AgentRuntime) bool {
+	if rt == nil || rt.App == nil || rt.App.IOAClient == nil {
+		return false
+	}
+	return rt.App.IOAClient.Bound()
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +603,31 @@ func webAgentTask(option *cfg.Option) (string, error) {
 	return cfg.ResolveTask(option)
 }
 
-func remoteIOAConfig(option *cfg.Option) *cfg.IOAConfig {
+type webIdentity struct{ ref protocols.NodeRef }
+
+func (i webIdentity) IOABinding() protocols.IdentityBinding {
+	return protocols.IdentityBinding{
+		Namespace: "aiscan.web",
+		Subject:   i.ref.URI(),
+	}
+}
+
+func webNodeRef(option *cfg.Option) (protocols.NodeRef, error) {
+	if option == nil {
+		return protocols.NodeRef{}, fmt.Errorf("web node configuration is required")
+	}
+	authority, err := protocols.CanonicalAuthority(option.WebURL)
+	if err != nil {
+		return protocols.NodeRef{}, fmt.Errorf("web node authority: %w", err)
+	}
+	name := strings.TrimSpace(option.IOANodeName)
+	if name == "" {
+		return protocols.NodeRef{}, fmt.Errorf("ioa.node_name is required for web node identity")
+	}
+	return protocols.NodeRef{ID: name, Authority: authority}, nil
+}
+
+func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *cfg.IOAConfig {
 	if option == nil || option.IOAURL == "" {
 		return nil
 	}
@@ -606,5 +639,6 @@ func remoteIOAConfig(option *cfg.Option) *cfg.IOAConfig {
 		RegisterTools: true,
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan", "transport": "web-agent"},
+		Identity:      webIdentity{ref: ref},
 	}
 }

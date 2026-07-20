@@ -141,6 +141,46 @@ func TestFromAgentEventMessageUpdateUsesAppendOnlyFragment(t *testing.T) {
 	}
 }
 
+func TestFromAgentEventPreservesReasoningChannel(t *testing.T) {
+	ev := agent.Event{
+		Type:           agent.EventMessageUpdate,
+		SessionID:      "sess-001",
+		ContentDelta:   "answer",
+		ReasoningDelta: "inspect",
+		Message:        agent.ChatMessage{Role: "assistant"},
+	}
+
+	events := FromAgentEvent(ev, "aiscan")
+	if len(events) != 2 {
+		t.Fatalf("expected reasoning and output events, got %d", len(events))
+	}
+	var reasoning, output TextData
+	if err := json.Unmarshal(events[0].Data, &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(events[1].Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if reasoning.Content != "inspect" || reasoning.Channel != TextChannelReasoning || !reasoning.Delta {
+		t.Fatalf("reasoning = %+v", reasoning)
+	}
+	if output.Content != "answer" || output.Channel != "" || !output.Delta {
+		t.Fatalf("output = %+v", output)
+	}
+}
+
+func TestFromAgentEventDoesNotEchoUserInput(t *testing.T) {
+	content := "prompt"
+	events := FromAgentEvent(agent.Event{
+		Type:      agent.EventMessageStart,
+		SessionID: "sess-001",
+		Message:   agent.ChatMessage{Role: "user", Content: &content},
+	}, "aiscan")
+	if len(events) != 0 {
+		t.Fatalf("user input was echoed as agent output: %+v", events)
+	}
+}
+
 func TestFromAgentEventTurnEndProducesTwo(t *testing.T) {
 	ev := agent.Event{
 		Type:      agent.EventTurnEnd,

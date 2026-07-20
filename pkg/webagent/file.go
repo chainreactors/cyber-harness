@@ -1,4 +1,4 @@
-package node
+package webagent
 
 import (
 	"encoding/base64"

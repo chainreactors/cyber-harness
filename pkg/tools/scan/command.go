@@ -140,10 +140,11 @@ Examples:
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	defer telemetry.RecoverAsError("scan", &err)
-	out, _, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
+	out, result, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
 	if err != nil {
 		return err
 	}
+	output.PublishResult(ctx, result)
 	if out != "" {
 		fmt.Fprint(commands.Output, out)
 	}
@@ -151,7 +152,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 }
 
 func (c *Command) ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
-	return c.execute(ctx, c.resolveRelativePaths(args), stream)
+	out, result, err := c.execute(ctx, c.resolveRelativePaths(args), stream)
+	if err == nil {
+		output.PublishResult(ctx, result)
+	}
+	return out, result, err
 }
 
 func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {

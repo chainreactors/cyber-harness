@@ -28,35 +28,48 @@ func (m *Monitor) printf(format string, args ...any) {
 	fmt.Fprintf(m.out, format, args...)
 }
 
-func (m *Monitor) renderEvent(ev AgentEvent) {
-	switch ev.AOPType {
+func (m *Monitor) renderEvent(ev aop.Event) {
+	switch ev.Type {
 	case aop.TypeSessionStart:
 		m.turnSeen = 0
 
 	case aop.TypeTurnStart:
-		if ev.Turn != m.turnSeen {
-			m.turnSeen = ev.Turn
-			m.printf("\n── turn %d ──\n", ev.Turn)
+		data, err := aop.DecodeData[aop.TurnData](ev)
+		if err == nil && data.Turn != m.turnSeen {
+			m.turnSeen = data.Turn
+			m.printf("\n── turn %d ──\n", data.Turn)
 		}
 
 	case aop.TypeText:
-		if !ev.Delta && ev.Content != "" && (ev.Role == "" || ev.Role == "assistant") {
-			m.printf("  💬 %s\n", truncate.Clip(ev.Content, 200))
+		data, err := aop.DecodeData[aop.TextData](ev)
+		if err == nil && !data.Delta && data.Content != "" && (data.Role == "" || data.Role == "assistant") {
+			m.printf("  💬 %s\n", truncate.Clip(data.Content, 200))
 		}
 
 	case aop.TypeToolCall:
-		m.printf("  🔧 %s %s\n", ev.ToolName, truncate.Clip(argsText(ev.Args), 120))
+		data, err := aop.DecodeData[aop.ToolCallData](ev)
+		if err == nil {
+			m.printf("  🔧 %s %s\n", data.ToolName, truncate.Clip(argsText(data.Args), 120))
+		}
 
 	case aop.TypeToolResult:
-		if ev.IsError {
-			m.printf("  ❌ %s error: %s\n", ev.ToolName, truncate.Clip(ev.Result, 100))
-		} else if ev.Result != "" {
-			m.printf("  ✓  %s → %d bytes: %s\n", ev.ToolName, len(ev.Result), truncate.Clip(ev.Result, 100))
-		} else {
-			m.printf("  ✓  %s → (empty)\n", ev.ToolName)
+		data, err := aop.DecodeData[aop.ToolResultData](ev)
+		if err == nil {
+			result := valueText(data.Content)
+			switch {
+			case data.IsError:
+				m.printf("  ❌ %s error: %s\n", data.ToolName, truncate.Clip(result, 100))
+			case result != "":
+				m.printf("  ✓  %s → %d bytes: %s\n", data.ToolName, len(result), truncate.Clip(result, 100))
+			default:
+				m.printf("  ✓  %s → (empty)\n", data.ToolName)
+			}
 		}
 
 	case aop.TypeSessionEnd:
-		m.printf("\n── agent done (stop=%s) ──\n", ev.Stop)
+		data, err := aop.DecodeData[aop.SessionEndData](ev)
+		if err == nil {
+			m.printf("\n── agent done (stop=%s) ──\n", data.Stop)
+		}
 	}
 }

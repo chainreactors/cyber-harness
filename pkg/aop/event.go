@@ -51,8 +51,14 @@ type SessionEndData struct {
 type TextData struct {
 	Content string `json:"content"`
 	Role    string `json:"role,omitempty"`
-	Delta   bool   `json:"delta,omitempty"` // append-only streaming fragment
+	Delta   bool   `json:"delta,omitempty"`   // append-only streaming fragment
+	Channel string `json:"channel,omitempty"` // output (default) or reasoning
 }
+
+const (
+	TextChannelOutput    = "output"
+	TextChannelReasoning = "reasoning"
+)
 
 type ToolCallData struct {
 	ToolCallID string `json:"tool_call_id"`

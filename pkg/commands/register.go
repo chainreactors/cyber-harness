@@ -2,8 +2,6 @@ package commands
 
 import (
 	"io"
-
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 )
 
 func init() {
@@ -34,9 +32,7 @@ func init() {
 
 			bash := NewBashTool(workDir, timeout).WithScannerProxy(deps.ScannerProxy)
 			bash.SetCommandNames(reg.Names)
-			bash.Manager().SetCommands(func(name string) (tmux.Command, bool) {
-				return reg.Get(name)
-			})
+			bash.SetCommandResolver(reg.Get)
 			bash.Manager().SetExecHooks(
 				func(w io.Writer) { Output.Reset(w) },
 				func() { Output.Reset(nil) },

@@ -71,38 +71,38 @@ func (p ToolPattern) IsError() ToolPattern {
 
 func (p ToolPattern) Label() string { return p.label }
 
-func (p ToolPattern) Match(e AgentEvent) bool {
-	if e.ToolName != p.tool {
+func (p ToolPattern) Match(e ToolExecution) bool {
+	if e.Name() != p.tool {
 		return false
 	}
-	if p.action != "" && !argsContainAction(e.Args, p.action) {
+	if p.action != "" && !argsContainAction(e.Args(), p.action) {
 		return false
 	}
 	for _, ac := range p.argChecks {
 		if ac.key != "" {
-			if !argsFieldContains(e.Args, ac.key, ac.contains) {
+			if !argsFieldContains(e.Args(), ac.key, ac.contains) {
 				return false
 			}
 		} else {
-			if !strings.Contains(argsText(e.Args), ac.contains) {
+			if !strings.Contains(argsText(e.Args()), ac.contains) {
 				return false
 			}
 		}
 	}
 	for _, s := range p.resultHas {
-		if !strings.Contains(e.Result, s) {
+		if !strings.Contains(e.ResultText(), s) {
 			return false
 		}
 	}
 	for _, s := range p.resultNot {
-		if strings.Contains(e.Result, s) {
+		if strings.Contains(e.ResultText(), s) {
 			return false
 		}
 	}
-	if p.noError && e.IsError {
+	if p.noError && e.IsError() {
 		return false
 	}
-	if p.isError && !e.IsError {
+	if p.isError && !e.IsError() {
 		return false
 	}
 	return true
@@ -127,12 +127,22 @@ func (p ToolPattern) describe() string {
 	return strings.Join(parts, " ")
 }
 
-func argsContainAction(args map[string]json.RawMessage, action string) bool {
-	return string(args["action"]) == fmt.Sprintf("%q", action)
+func argsContainAction(args any, action string) bool {
+	values, ok := args.(map[string]any)
+	if !ok {
+		return false
+	}
+	value, _ := values["action"].(string)
+	return value == action
 }
 
-func argsFieldContains(args map[string]json.RawMessage, key, contains string) bool {
-	return strings.Contains(string(args[key]), contains)
+func argsFieldContains(args any, key, contains string) bool {
+	values, ok := args.(map[string]any)
+	if !ok {
+		return false
+	}
+	encoded, _ := json.Marshal(values[key])
+	return strings.Contains(string(encoded), contains)
 }
 
 // matchResult holds the result of matching expectations against actual tool calls.
@@ -143,12 +153,12 @@ type matchResult struct {
 
 type matchPair struct {
 	pattern ToolPattern
-	event   AgentEvent
+	event   ToolExecution
 	index   int
 }
 
 // matchUnordered finds a matching event for each pattern (greedy, unordered).
-func matchUnordered(patterns []ToolPattern, events []AgentEvent) matchResult {
+func matchUnordered(patterns []ToolPattern, events []ToolExecution) matchResult {
 	used := make([]bool, len(events))
 	var matched []matchPair
 	var unmatched []ToolPattern
@@ -174,7 +184,7 @@ func matchUnordered(patterns []ToolPattern, events []AgentEvent) matchResult {
 }
 
 // matchOrdered finds matching events in order (subsequence match).
-func matchOrdered(patterns []ToolPattern, events []AgentEvent) matchResult {
+func matchOrdered(patterns []ToolPattern, events []ToolExecution) matchResult {
 	var matched []matchPair
 	pi := 0
 	for i, e := range events {

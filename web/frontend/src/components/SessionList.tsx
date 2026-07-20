@@ -219,8 +219,8 @@ function AgentGroup({
 }) {
   const { t } = useTranslation('sidebar')
   const [expanded, setExpanded] = useState(isSelected || sessions.some((s) => s.id === activeSessionID))
-  const identity = agent.identity || {}
-  const llm = [identity.provider, identity.model].filter(Boolean).join('/')
+  const status = agent.status || { bound: false }
+  const llm = [status.provider, status.model].filter(Boolean).join('/')
   const act = agentActivity(agent)
 
   function handleToggle() {

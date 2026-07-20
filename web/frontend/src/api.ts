@@ -19,7 +19,9 @@ export interface ScanJob {
 }
 
 import type { SCONode } from '@cyber/cstx-easm';
+import type { AOPEvent } from '../cyber-ui/packages/agent-protocol/src/types';
 export type { SCONode };
+export type { AOPEvent };
 
 export interface ScanResult {
   summary: ScanResultSummary;
@@ -136,25 +138,33 @@ export interface AgentInfo {
   commands?: string[];
   busy: boolean;
   connected_at: string;
-  identity?: AgentIdentity;
+  node: NodeRef;
+  runtime?: AgentRuntime;
+  status?: AgentStatus;
   stats?: AgentStats;
 }
 
-export interface AgentIdentity {
-  node_id?: string;
-  node_name?: string;
-  space?: string;
-  ioa_url?: string;
+export interface NodeRef {
+  id: string;
+  authority: string;
+}
+
+export interface AgentRuntime {
   hostname?: string;
   username?: string;
   working_dir?: string;
   os?: string;
   arch?: string;
   pid?: number;
-  provider?: string;
-  model?: string;
   capabilities?: string[];
   meta?: Record<string, unknown>;
+}
+
+export interface AgentStatus {
+  provider?: string;
+  model?: string;
+  space?: string;
+  bound: boolean;
 }
 
 export interface AgentStats {
@@ -171,6 +181,51 @@ export interface AgentStats {
   last_event?: string;
   current_tool?: string;
   current_detail?: string;
+}
+
+export interface IOAIdentityBinding {
+  namespace: string
+  subject: string
+  claims?: Record<string, unknown>
+}
+
+export interface IOANode {
+  id: string
+  name: string
+  description?: string
+  meta?: Record<string, unknown>
+  identities?: IOAIdentityBinding[]
+}
+
+export interface IOASpace {
+  id: string
+  name: string
+  tags?: string[]
+  nodes?: IOANode[]
+  message_count: number
+}
+
+export interface IOARef {
+  messages?: string[]
+  nodes?: string[]
+}
+
+export interface IOAMessage {
+  id: string
+  space_id: string
+  sender: string
+  created_at: string
+  content_type?: string
+  content: Record<string, unknown>
+  refs?: IOARef
+  meta?: Record<string, unknown>
+  content_schema?: Record<string, unknown>
+}
+
+export interface IOAOverview {
+  nodes: IOANode[]
+  spaces: IOASpace[]
+  messages: IOAMessage[]
 }
 
 // ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
@@ -324,6 +379,10 @@ export async function launchLocalAgent(): Promise<LocalAgentView> {
 
 export async function listLocalAgents(): Promise<LocalAgentView[]> {
   return apiJSON('/api/deploy/local', 'Failed to list local agents')
+}
+
+export async function getIOAOverview(): Promise<IOAOverview> {
+  return apiJSON('/api/ioa/overview', 'Failed to load IOA console')
 }
 
 export async function stopLocalAgent(name: string): Promise<void> {
@@ -530,16 +589,6 @@ export interface ChatEvent {
   eval_round?: number
   eval_pass?: boolean
   eval_reason?: string
-}
-
-export interface AOPEvent {
-  type: string
-  ts: string
-  session_id: string
-  agent: string
-  seq?: number
-  data: Record<string, unknown>
-  ext?: Record<string, Record<string, unknown>>
 }
 
 // --- Chat session API ---

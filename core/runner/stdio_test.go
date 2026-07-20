@@ -92,7 +92,7 @@ func TestStdioSenderEncodesTypedAOPFrame(t *testing.T) {
 	if err := json.NewDecoder(&output).Decode(&frame); err != nil {
 		t.Fatalf("decode frame: %v", err)
 	}
-	if frame.Type != "aop.text" || frame.TaskID != "task-1" {
+	if frame.Type != "aop" || frame.TaskID != "task-1" {
 		t.Fatalf("frame = %#v", frame)
 	}
 	var got aop.Event

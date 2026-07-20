@@ -53,8 +53,6 @@ type RuntimeConfig struct {
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
 	rt := &AgentRuntime{}
-	eventsPath := os.Getenv("AISCAN_EVENTS_FILE")
-	stdioMode := eventsPath == "-"
 	if option != nil {
 		optCopy := *option
 		rt.Option = &optCopy
@@ -126,7 +124,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	rt.SystemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.SystemPrompt))
 
-	if !stdioMode && (rc == nil || !rc.NoOutput) {
+	if rc == nil || !rc.NoOutput {
 		if rc != nil && rc.InteractiveOutput {
 			rt.Output = tui.NewAgentOutput(option)
 		} else {
@@ -137,22 +135,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	agentBus := eventbus.New[agent.Event]()
 	if rt.Output != nil {
 		agentBus.Subscribe(rt.Output.HandleEvent)
-	}
-	var eventsCloser func()
-	if eventsPath == "-" {
-		// The stdio session owns stdout and wraps AOP events in webproto.
-		eventsPath = ""
-	}
-	if eventsPath != "" {
-		w, err := newEventsFileSubscriber(eventsPath)
-		if err != nil {
-			if rt.ownsApp && rt.App != nil {
-				rt.App.Close()
-			}
-			return nil, fmt.Errorf("open events sink: %w", err)
-		}
-		unsub := agentBus.Subscribe(w.HandleEvent)
-		eventsCloser = func() { unsub(); w.Close() }
 	}
 	rt.Bus = agentBus
 
@@ -271,9 +253,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		scheduler.Stop()
 		if sessMgr != nil {
 			sessMgr.Shutdown()
-		}
-		if eventsCloser != nil {
-			eventsCloser()
 		}
 	}
 
@@ -620,6 +599,15 @@ func formatIOAMessage(msg protocols.Message) string {
 // Helpers
 // ---------------------------------------------------------------------------
 
+type memoryIdentity struct{ ref protocols.NodeRef }
+
+func (i memoryIdentity) IOABinding() protocols.IdentityBinding {
+	return protocols.IdentityBinding{
+		Namespace: "aiscan.memory",
+		Subject:   i.ref.URI(),
+	}
+}
+
 func registerIOATools(ctx context.Context, application *App, option *cfg.Option) error {
 	ioaURL := option.IOAURL
 	if ioaURL == "" {
@@ -633,6 +621,9 @@ func registerIOATools(ctx context.Context, application *App, option *cfg.Option)
 		RegisterTools: true,
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan"},
+		Identity: memoryIdentity{ref: protocols.NodeRef{
+			ID: protocols.NewID(), Authority: "memory://aiscan",
+		}},
 	}
 	if ioaCfg.NodeName == "" {
 		ioaCfg.NodeName = ResolveIOANodeName(option)

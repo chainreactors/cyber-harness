@@ -125,6 +125,7 @@ func mergeOption(dst, src *Option) {
 	}
 	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
 	dst.WebURL = ResolveString(dst.WebURL, src.WebURL)
+	dst.Transport = ResolveString(dst.Transport, src.Transport)
 	dst.IOAURL = ResolveString(dst.IOAURL, src.IOAURL)
 	dst.IOAToken = ResolveString(dst.IOAToken, src.IOAToken)
 	dst.IOANodeName = ResolveString(dst.IOANodeName, src.IOANodeName)

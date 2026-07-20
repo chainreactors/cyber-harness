@@ -13,9 +13,9 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-func consumeAgentStream(input io.Reader, taskID string, monitor *Monitor) (string, []AgentEvent, error) {
+func consumeAgentStream(input io.Reader, taskID string, monitor *Monitor) (string, []aop.Event, error) {
 	var output string
-	var events []AgentEvent
+	var events []aop.Event
 	decoder := json.NewDecoder(input)
 	terminal := false
 
@@ -38,22 +38,23 @@ func consumeAgentStream(input io.Reader, taskID string, monitor *Monitor) (strin
 		}
 
 		switch {
-		case strings.HasPrefix(msg.Type, "aop."):
+		case msg.Type == "aop":
 			event, err := decodeAOPFrame(msg)
 			if err != nil {
 				return output, events, err
 			}
-			flattened, err := flattenAOPEvent(event)
-			if err != nil {
-				return output, events, err
+			events = append(events, event)
+			if event.Type == aop.TypeText {
+				var data aop.TextData
+				if json.Unmarshal(event.Data, &data) == nil && !data.Delta && data.Channel != aop.TextChannelReasoning && data.Role != "user" {
+					output = data.Content
+				}
 			}
-			events = append(events, flattened)
 			if monitor != nil {
-				monitor.renderEvent(flattened)
+				monitor.renderEvent(event)
 			}
 
 		case msg.Type == "complete":
-			output = msg.Data
 			terminal = true
 
 		case msg.Type == "error":
@@ -75,10 +76,6 @@ func decodeAOPFrame(msg webproto.Message) (aop.Event, error) {
 	}
 	if !event.Valid() {
 		return event, fmt.Errorf("invalid AOP envelope")
-	}
-	wantType := strings.TrimPrefix(msg.Type, "aop.")
-	if event.Type != wantType {
-		return event, fmt.Errorf("webproto type %q contains AOP event %q", msg.Type, event.Type)
 	}
 	return event, nil
 }

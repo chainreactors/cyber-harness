@@ -64,8 +64,41 @@ type AgentOptions struct {
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
+	Transport      string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume         string   `long:"resume" description:"Resume session from a saved session file path"`
 	SaveSession    bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
+}
+
+type AgentTransport string
+
+const (
+	AgentTransportAuto  AgentTransport = "auto"
+	AgentTransportLocal AgentTransport = "local"
+	AgentTransportWeb   AgentTransport = "web"
+	AgentTransportStdio AgentTransport = "stdio"
+)
+
+func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
+	value := AgentTransport(strings.ToLower(strings.TrimSpace(opt.Transport)))
+	if value == "" {
+		value = AgentTransportAuto
+	}
+	switch value {
+	case AgentTransportAuto:
+		if strings.TrimSpace(opt.WebURL) != "" {
+			return AgentTransportWeb, nil
+		}
+		return AgentTransportLocal, nil
+	case AgentTransportLocal, AgentTransportStdio:
+		return value, nil
+	case AgentTransportWeb:
+		if strings.TrimSpace(opt.WebURL) == "" {
+			return "", fmt.Errorf("--transport web requires --web-url")
+		}
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported agent transport %q: use auto, local, web, or stdio", opt.Transport)
+	}
 }
 
 type IOAOptions struct {

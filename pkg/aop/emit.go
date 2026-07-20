@@ -68,33 +68,41 @@ func FromAgentEvent(ev agent.Event, agentName string) []Event {
 		return events
 
 	case agent.EventMessageStart:
-		role := ev.Message.Role
-		if role == "user" {
-			content := ""
-			if ev.Message.Content != nil {
-				content = *ev.Message.Content
-			}
-			if content != "" {
-				return []Event{base(TypeText, TextData{Content: content, Role: role})}
-			}
-		}
+		// User input is owned by the caller (web/aide), so the agent producer
+		// does not echo it back into the output stream.
 		return nil
 
 	case agent.EventMessageUpdate:
-		if ev.Message.Role == "assistant" && ev.ContentDelta != "" {
-			return []Event{base(TypeText, TextData{Content: ev.ContentDelta, Role: "assistant", Delta: true})}
+		if ev.Message.Role != "assistant" {
+			return nil
 		}
-		return nil
+		events := make([]Event, 0, 2)
+		if ev.ReasoningDelta != "" {
+			events = append(events, base(TypeText, TextData{
+				Content: ev.ReasoningDelta,
+				Role:    "assistant", Delta: true, Channel: TextChannelReasoning,
+			}))
+		}
+		if ev.ContentDelta != "" {
+			events = append(events, base(TypeText, TextData{Content: ev.ContentDelta, Role: "assistant", Delta: true}))
+		}
+		return events
 
 	case agent.EventMessageEnd:
-		content := ""
-		if ev.Message.Content != nil {
-			content = *ev.Message.Content
+		if ev.Message.Role != "assistant" {
+			return nil
 		}
-		if ev.Message.Role == "assistant" && content != "" {
-			return []Event{base(TypeText, TextData{Content: content, Role: "assistant"})}
+		events := make([]Event, 0, 2)
+		if ev.Message.ReasoningContent != nil && *ev.Message.ReasoningContent != "" {
+			events = append(events, base(TypeText, TextData{
+				Content: *ev.Message.ReasoningContent,
+				Role:    "assistant", Channel: TextChannelReasoning,
+			}))
 		}
-		return nil
+		if ev.Message.Content != nil && *ev.Message.Content != "" {
+			events = append(events, base(TypeText, TextData{Content: *ev.Message.Content, Role: "assistant"}))
+		}
+		return events
 
 	case agent.EventToolExecutionStart:
 		args := parseArgs(ev.Arguments)

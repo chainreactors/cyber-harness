@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/ioa/protocols"
 )
 
 type RuntimeConfig struct {
@@ -23,18 +24,18 @@ type RuntimeProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL       string
-	CyberhubKey       string
-	CyberhubMode      string
-	AIEnabled  bool
-	VerifyMode string
-	Proxy             string
-	FofaEmail         string
-	FofaKey           string
-	HunterToken       string
-	HunterAPIKey      string
-	ReconProxy        string
-	ReconLimit        int
+	CyberhubURL  string
+	CyberhubKey  string
+	CyberhubMode string
+	AIEnabled    bool
+	VerifyMode   string
+	Proxy        string
+	FofaEmail    string
+	FofaKey      string
+	HunterToken  string
+	HunterAPIKey string
+	ReconProxy   string
+	ReconLimit   int
 }
 
 type ToolConfig struct {
@@ -52,4 +53,5 @@ type IOAConfig struct {
 	RegisterTools bool
 	AutoRegister  bool
 	NodeMeta      map[string]any
+	Identity      protocols.Identity
 }

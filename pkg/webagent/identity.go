@@ -1,6 +1,7 @@
-package node
+package webagent
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"os/user"
@@ -9,12 +10,13 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 )
 
-// DefaultIdentity returns a basic OS-based agent identity without any
-// runner.AgentRuntime dependency.
-func DefaultIdentity() webproto.AgentIdentity {
-	identity := webproto.AgentIdentity{
+// DefaultRuntime returns OS process metadata without introducing another
+// identity beside the IOA NodeRef.
+func DefaultRuntime() webproto.AgentRuntime {
+	runtimeInfo := webproto.AgentRuntime{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		PID:          os.Getpid(),
@@ -22,24 +24,28 @@ func DefaultIdentity() webproto.AgentIdentity {
 		Meta:         map[string]any{"client": "aiscan", "transport": "web-agent"},
 	}
 	if host, err := os.Hostname(); err == nil {
-		identity.Hostname = host
+		runtimeInfo.Hostname = host
 	}
 	if wd, err := os.Getwd(); err == nil {
-		identity.WorkingDir = wd
+		runtimeInfo.WorkingDir = wd
 	}
 	if current, err := user.Current(); err == nil && current != nil {
-		identity.Username = current.Username
+		runtimeInfo.Username = current.Username
 	}
-	return identity
+	return runtimeInfo
 }
 
 // RegisterPayload builds the WebSocket registration payload.
-func RegisterPayload(name string, reg *commands.CommandRegistry, identityFn func() webproto.AgentIdentity, menuFn func() []webproto.CommandSpec, stats webproto.AgentStats) webproto.RegisterPayload {
-	var identity webproto.AgentIdentity
-	if identityFn != nil {
-		identity = identityFn()
-	} else {
-		identity = DefaultIdentity()
+func RegisterPayload(name string, reg *commands.CommandRegistry, ref protocols.NodeRef, runtimeInfo webproto.AgentRuntime, statusFn func() webproto.AgentStatus, menuFn func() []webproto.CommandSpec, stats webproto.AgentStats) (webproto.RegisterPayload, error) {
+	if !ref.Valid() {
+		return webproto.RegisterPayload{}, fmt.Errorf("valid node reference is required")
+	}
+	if runtimeInfo.OS == "" {
+		runtimeInfo = DefaultRuntime()
+	}
+	var status webproto.AgentStatus
+	if statusFn != nil {
+		status = statusFn()
 	}
 
 	var menu []webproto.CommandSpec
@@ -52,12 +58,11 @@ func RegisterPayload(name string, reg *commands.CommandRegistry, identityFn func
 		Commands:     reg.Names(),
 		CommandsMenu: menu,
 		Stats:        stats,
-		Identity:     identity,
+		Node:         ref,
+		Runtime:      runtimeInfo,
+		Status:       status,
 	}
-	if payload.Identity.NodeName == "" {
-		payload.Identity.NodeName = name
-	}
-	return payload
+	return payload, nil
 }
 
 // SplitAccessKey lifts the access token out of a URL's userinfo
@@ -87,17 +92,4 @@ func HTTPToWS(rawURL string) string {
 		u.Scheme = "ws"
 	}
 	return u.String()
-}
-
-// PublicIOAURL strips userinfo from an IOA URL for safe display.
-func PublicIOAURL(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	parsed, err := url.Parse(strings.TrimRight(raw, "/"))
-	if err != nil {
-		return raw
-	}
-	parsed.User = nil
-	return parsed.String()
 }

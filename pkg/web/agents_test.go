@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	webstatic "github.com/chainreactors/aiscan/web"
 
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
@@ -55,14 +57,10 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 }
 
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
-	return dialAgentWithIdentity(t, srv, name, commands, webproto.AgentIdentity{
-		NodeID:   "node-" + name,
-		NodeName: name,
-		Space:    "case-test",
-	})
+	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, webproto.AgentStatus{Space: "case-test"})
 }
 
-func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, identity webproto.AgentIdentity) *websocket.Conn {
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status webproto.AgentStatus) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -75,7 +73,8 @@ func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, comm
 	reg, _ := json.Marshal(webproto.RegisterPayload{
 		Name:     name,
 		Commands: commands,
-		Identity: identity,
+		Node:     protocols.NodeRef{ID: nodeID, Authority: srv.URL},
+		Status:   status,
 		Stats:    webproto.AgentStats{TotalTokens: 42},
 	})
 	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
@@ -93,13 +92,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	pool := NewAgentPool(hub)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/agent/ws", pool.HandleWS)
-	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
-		segments := pathSegments(r.URL.Path)
-		if len(segments) == 5 && segments[0] == "api" && segments[1] == "agents" && segments[3] == "terminal" && segments[4] == "ws" {
-			pool.HandleTerminalWS(segments[2], w, r)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		pool.HandleTerminalWS(r.PathValue("id"), w, r)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -116,8 +110,8 @@ func TestWSRegisterAndList(t *testing.T) {
 	if len(agents) != 1 || agents[0].Name != "test-agent" {
 		t.Fatalf("expected 1 agent named test-agent, got %+v", agents)
 	}
-	if agents[0].Identity.NodeID != "node-test-agent" || agents[0].Identity.Space != "case-test" {
-		t.Fatalf("agent identity not retained: %+v", agents[0].Identity)
+	if agents[0].Node.ID != "node-test-agent" || agents[0].Status.Space != "case-test" {
+		t.Fatalf("agent descriptor not retained: %+v", agents[0])
 	}
 	if agents[0].Stats.TotalTokens != 42 {
 		t.Fatalf("agent stats not retained: %+v", agents[0].Stats)
@@ -217,13 +211,8 @@ func TestWSDispatchAndComplete(t *testing.T) {
 
 func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
-	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-chat-worker",
-		NodeName: "chat-worker",
-		Space:    "case-test",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",
+		webproto.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -261,12 +250,8 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 // control — this test fails loudly if that regresses.
 func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
-	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-goal-worker",
-		NodeName: "goal-worker",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
+		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -323,12 +308,8 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil, nil, ""))
 	defer srv.Close()
 
-	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-upload-agent",
-		NodeName: "upload-agent",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
+		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -431,7 +412,7 @@ func TestWSPick(t *testing.T) {
 	}
 }
 
-func TestWSTelemetryForwarding(t *testing.T) {
+func TestWSLegacyTelemetryIsNotProjected(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgent(t, srv, "tele-agent", []string{"scan"})
 	defer conn.Close()
@@ -445,11 +426,8 @@ func TestWSTelemetryForwarding(t *testing.T) {
 
 	select {
 	case evt := <-progressCh:
-		if !strings.Contains(string(evt.Data), "turn 1") {
-			t.Fatalf("unexpected: %s", evt.Data)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
+		t.Fatalf("legacy telemetry was projected into progress: %+v", evt)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -460,7 +438,7 @@ func TestWSTerminalRelay(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -528,7 +506,7 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -648,7 +626,7 @@ func TestWSTerminalSingleton(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -681,7 +659,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -734,13 +712,8 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(pool.List())
 	})
-	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
-		segments := pathSegments(r.URL.Path)
-		if len(segments) == 5 && segments[1] == "agents" && segments[3] == "terminal" && segments[4] == "ws" {
-			pool.HandleTerminalWS(segments[2], w, r)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		pool.HandleTerminalWS(r.PathValue("id"), w, r)
 	})
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -782,7 +755,10 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *websocket.C
 	if err != nil {
 		t.Fatalf("dial agent: %v", err)
 	}
-	reg, _ := json.Marshal(map[string]any{"name": name, "commands": []string{"tmux"}})
+	reg, _ := json.Marshal(webproto.RegisterPayload{
+		Name: name, Commands: []string{"tmux"},
+		Node: protocols.NodeRef{ID: "node-" + name, Authority: srv.URL},
+	})
 	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
 	var ack WSMessage
 	conn.ReadJSON(&ack)

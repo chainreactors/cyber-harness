@@ -1,7 +1,6 @@
 package web
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
 	"github.com/gorilla/websocket"
 )
 
@@ -28,7 +28,9 @@ type AgentInfo struct {
 	CommandsMenu []webproto.CommandSpec `json:"commands_menu,omitempty"`
 	Busy         bool                   `json:"busy"`
 	ConnectAt    time.Time              `json:"connected_at"`
-	Identity     webproto.AgentIdentity `json:"identity,omitempty"`
+	Node         protocols.NodeRef      `json:"node"`
+	Runtime      webproto.AgentRuntime  `json:"runtime,omitempty"`
+	Status       webproto.AgentStatus   `json:"status,omitempty"`
 	Stats        webproto.AgentStats    `json:"stats,omitempty"`
 }
 
@@ -47,7 +49,9 @@ type remoteAgent struct {
 	conn         *websocket.Conn
 	sendCh       chan WSMessage
 	connectAt    time.Time
-	identity     webproto.AgentIdentity
+	node         protocols.NodeRef
+	runtime      webproto.AgentRuntime
+	status       webproto.AgentStatus
 	stats        webproto.AgentStats
 
 	mu    sync.Mutex
@@ -66,7 +70,9 @@ func (a *remoteAgent) info() AgentInfo {
 		CommandsMenu: a.commandsMenu,
 		Busy:         len(a.tasks) > 0,
 		ConnectAt:    a.connectAt,
-		Identity:     a.identity,
+		Node:         a.node,
+		Runtime:      a.runtime,
+		Status:       a.status,
 		Stats:        a.stats,
 	}
 }
@@ -136,20 +142,14 @@ func (p *AgentPool) SetSCOStore(store SCOStore) {
 	p.sco = store
 }
 
-// agentKey is the pool key for a registering agent: its stable node identity, so
+// agentKey is the pool key for a registering agent: its canonical Web identity, so
 // a reconnecting agent (WS flap, hub restart, config-driven bounce) re-registers
 // under the SAME key. The hub used to mint a throwaway id per connection, which
 // dangled every chat session bound to it — the session freezes the agent id at
 // creation, so on reconnect the stored id resolved to nothing and the chat
 // rejected every message as "not connected" even with the agent right back.
-// Mirrors the frontend's agentNodeKey (node_name, then name); in practice both
-// equal rt.NodeName. Only a fully anonymous client — no node name and no name —
-// falls back to a per-connection id.
 func agentKey(info webproto.RegisterPayload) string {
-	if k := cmp.Or(info.Identity.NodeName, info.Name); k != "" {
-		return k
-	}
-	return generateID()
+	return info.Node.URI()
 }
 
 func (p *AgentPool) register(a *remoteAgent) {
@@ -233,7 +233,7 @@ func (p *AgentPool) PickChat() *remoteAgent {
 	for _, a := range p.agents {
 		a.mu.Lock()
 		busy := len(a.tasks) > 0
-		chatCapable := a.identity.Provider != ""
+		chatCapable := a.status.Provider != ""
 		a.mu.Unlock()
 		if !chatCapable {
 			continue
@@ -493,6 +493,10 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	// default below, so an anonymous client still gets a unique per-connection id
 	// instead of every nameless agent colliding on the literal "agent".
 	id := agentKey(info)
+	if id == "" {
+		conn.Close()
+		return
+	}
 	if info.Name == "" {
 		info.Name = "agent"
 	}
@@ -505,7 +509,9 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		conn:         conn,
 		sendCh:       make(chan WSMessage, 32),
 		connectAt:    time.Now(),
-		identity:     info.Identity,
+		node:         info.Node,
+		runtime:      info.Runtime,
+		status:       info.Status,
 		stats:        info.Stats,
 		tasks:        make(map[string]chan taskResult),
 		turns:        make(map[string]int),
@@ -569,19 +575,19 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			a.mu.Unlock()
 		}
 
-	case "agent.identity":
-		// Sent by the agent after a config hot-reload so the pooled identity — and
-		// thus the UI's provider/model badge — tracks the swapped provider instead
-		// of the value captured once at registration. Merge only the fields that a
-		// reload can change; never clobber NodeName/PID/host set at register time.
-		var id webproto.AgentIdentity
-		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &id) == nil {
+	case "agent.status":
+		var status webproto.AgentStatus
+		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &status) == nil {
 			a.mu.Lock()
-			if id.Provider != "" {
-				a.identity.Provider = id.Provider
+			if status.Provider != "" {
+				a.status.Provider = status.Provider
 			}
-			if id.Model != "" {
-				a.identity.Model = id.Model
+			if status.Model != "" {
+				a.status.Model = status.Model
+			}
+			a.status.Bound = status.Bound
+			if status.Space != "" {
+				a.status.Space = status.Space
 			}
 			a.mu.Unlock()
 		}
@@ -658,19 +664,14 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			close(ch)
 		}
 
-	default:
-		// Backward-compat: flatten agent events into scan progress stream.
-		if p.hub != nil && msg.TaskID != "" {
-			raw, _ := json.Marshal(map[string]string{
-				"scan_id": msg.TaskID,
-				"data":    formatTelemetryProgress(msg),
-			})
-			p.hub.Broadcast(msg.TaskID, HubEvent{Type: "progress", Data: raw})
-		}
-		// AOP is the only agent activity protocol on the session stream.
+	case "aop":
+		// The transport identifies only the protocol. Event semantics live in
+		// the untouched AOP payload and are validated once at this ingress.
 		p.forwardAOPEvent(a, msg)
-		// Persist: write agent event as a record.
-		p.persistAgentRecord(a, msg)
+
+	default:
+		// Unknown control frames are intentionally not projected into another
+		// protocol. Producers must emit either a documented control frame or AOP.
 	}
 }
 
@@ -783,30 +784,6 @@ func extractAgentExt(ev aop.Event) map[string]any {
 		}
 	}
 	return nil
-}
-
-func (p *AgentPool) persistAgentRecord(a *remoteAgent, msg WSMessage) {
-	if p.records == nil || len(msg.Payload) == 0 {
-		return
-	}
-	var ev aop.Event
-	if err := json.Unmarshal(msg.Payload, &ev); err != nil {
-		return
-	}
-	rec := output.Record{
-		Type:      output.RecordType("aop." + ev.Type),
-		Timestamp: time.Now(),
-		Data:      ev.Data,
-		ID:        generateID(),
-		ScanID:    msg.TaskID,
-		AgentID:   a.id,
-	}
-	if p.sessions != nil && msg.TaskID != "" {
-		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
-			rec.SessionID = sid
-		}
-	}
-	_ = p.records.InsertRecord(context.Background(), &rec)
 }
 
 func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {
