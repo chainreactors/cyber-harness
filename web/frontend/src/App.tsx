@@ -113,7 +113,7 @@ export default function App() {
 
   const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
 
-  const model = serverStatus?.llm_model || chat.agents.find((a) => a.identity?.model)?.identity?.model || 'cortex'
+  const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
   const activeSession = chat.sessions.find((s) => s.id === chat.activeSessionID) || null
   // The open session's bound agent has dropped off the live roster (its node
   // exited / the hub restarted). The transcript still shows, but a new turn
@@ -237,7 +237,7 @@ export default function App() {
               hasActiveSession={chat.activeSessionID !== null}
               agentOffline={activeAgentOffline}
               agentName={activeSession?.agent_name}
-              agents={chat.agents.map((a) => ({ id: a.id, name: a.identity?.node_name }))}
+              agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
               onCreateSession={handleCreateSession}
               onOpenTerminal={handleOpenTerminal}
               mentionables={mentionables}
