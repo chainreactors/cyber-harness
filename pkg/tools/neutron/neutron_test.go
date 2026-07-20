@@ -36,6 +36,18 @@ func TestNormalizeNucleiStyleArgs(t *testing.T) {
 	}
 }
 
+func TestUsageIsGeneratedFromNeutronFlags(t *testing.T) {
+	usage := New(nil, nil).Usage()
+	if !strings.Contains(usage, "Usage:") || !strings.Contains(usage, "neutron [OPTIONS]") {
+		t.Fatalf("usage was not rendered by the neutron go-flags parser:\n%s", usage)
+	}
+	for _, flag := range []string{"--target", "--templates", "--rate-limit", "--restrict-templates"} {
+		if !strings.Contains(usage, flag) {
+			t.Fatalf("usage missing generated flag %q:\n%s", flag, usage)
+		}
+	}
+}
+
 func TestSelectNeutronTemplatesFiltersByCommonMetadata(t *testing.T) {
 	engine := newTestNeutronEngine(t,
 		testTemplate("critical-cve", "critical", "cve,rce", "nginx"),

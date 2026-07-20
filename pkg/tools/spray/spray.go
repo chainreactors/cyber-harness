@@ -11,9 +11,9 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
-	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/spray"
 	spraycore "github.com/chainreactors/spray/core"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type Command struct {
@@ -45,7 +45,8 @@ func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command 
 func (c *Command) Name() string { return "spray" }
 
 func (c *Command) Usage() string {
-	return spraycore.Help()
+	var options spraycore.Option
+	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
 func (c *Command) QuickReference() string {

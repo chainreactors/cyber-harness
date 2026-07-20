@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	cfg.ScanUsageFunc = scan.Usage
+	cfg.ExtraScannerUsage["scan"] = scan.Usage
 	commands.RegisterFactory(commands.Factory{
 		Group: "scanner",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {

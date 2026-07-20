@@ -13,8 +13,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
-	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/gogo"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type Command struct {
@@ -46,7 +46,8 @@ func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command 
 func (c *Command) Name() string { return "gogo" }
 
 func (c *Command) Usage() string {
-	return gogocore.Help()
+	var options gogocore.Runner
+	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
 func (c *Command) QuickReference() string {

@@ -51,6 +51,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
       - name: Install upx
         run: sudo apt install upx -y
         continue-on-error: true
@@ -64,6 +71,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOPATH: "/home/runner/go"
+
+      - name: Verify embedded frontend was built
+        run: |
+          test -s web/static/index.html
+          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
 
       - name: Publish release (remove draft)
         run: gh release edit "$TAG" --draft=false --prerelease

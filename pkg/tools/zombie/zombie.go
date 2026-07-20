@@ -43,7 +43,8 @@ func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command 
 func (c *Command) Name() string { return "zombie" }
 
 func (c *Command) Usage() string {
-	return zombiecore.Help()
+	var options zombiecore.Option
+	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {

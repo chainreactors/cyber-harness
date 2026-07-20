@@ -25,13 +25,13 @@ import (
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
-	"github.com/chainreactors/utils/parsers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func newTestPipeline(t *testing.T, ctx context.Context, caps []pipeline.Capability, coll *collector, debug bool) *pipeline.Pipeline {
@@ -160,6 +160,14 @@ func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 
 func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
 	usage := Usage()
+	if !strings.Contains(usage, "Usage:") || !strings.Contains(usage, "scan [OPTIONS]") {
+		t.Fatalf("usage was not rendered by the scan go-flags parser:\n%s", usage)
+	}
+	for _, flag := range []string{"--input", "--verify", "--broad-poc", "--max-neutron-per-finger"} {
+		if !strings.Contains(usage, flag) {
+			t.Fatalf("usage missing generated flag %q:\n%s", flag, usage)
+		}
+	}
 	if strings.Contains(usage, "--verify-timeout") {
 		t.Fatal("usage should not advertise deprecated --verify-timeout")
 	}

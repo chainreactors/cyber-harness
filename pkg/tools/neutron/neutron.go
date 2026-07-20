@@ -16,8 +16,8 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -111,49 +111,15 @@ func (c *Command) SetProxy(proxy string) {
 func (c *Command) Name() string { return "neutron" }
 
 func (c *Command) Usage() string {
-	return `neutron - POC/vulnerability testing with nuclei-style options
-Usage: neutron -u <target> [options]
-
-Input:
-  -u, --target       Target URL, host, or ip:port. Can specify multiple.
-  -i, --input        Target URL, host, or ip:port (alias of --target).
-  -l, --list         File containing targets, one per line.
-
-Templates:
-  -t, --templates    Template file or directory to run. Can specify multiple.
-      --id           Run templates by id (comma-separated or repeated).
-      --exclude-id   Exclude templates by id.
-      --finger       Filter templates by fingerprint name.
-      --tags, --tag  Filter templates by tag.
-      --exclude-tags Exclude templates by tag.
-  -s, --severity     Filter severity: info, low, medium, high, critical.
-      --exclude-severity  Exclude severity.
-      --max-per-finger    Maximum templates selected per fingerprint.
-
-Rate and output:
-  -c, --concurrency  Template concurrency (default: 1).
-      --rate-limit, -rl  Maximum template executions per second.
-      --timeout      Overall timeout in seconds.
-  -o, --output       Write output to file.
-  -j, --json         Output JSON Lines.
-      --jsonl        Output JSON Lines.
-      --silent       Only output matched loots.
-      --all          Print matched and unmatched templates.
-      --template-list  List selected templates and exit.
-      --debug        Enable debug logging.
-
-Examples:
-  neutron -u http://target.com -s critical,high
-  neutron -l targets.txt -tags cve,rce -c 10 --rate-limit 20
-  neutron -u 10.0.0.1:8080 --finger nginx --max-per-finger 20
-  neutron -u http://target.com -t ./pocs --id shiro-detect -j -o loots.jsonl`
+	var options neutronFlags
+	return toolargs.GoFlagsHelp("neutron", &options)
 }
 
 func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	defer telemetry.RecoverAsError("neutron", &err)
 	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
-	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
+	parser := toolargs.NewGoFlagsParser("neutron", &flags)
 	_, err = parser.ParseArgs(normalizeNucleiStyleArgs(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {

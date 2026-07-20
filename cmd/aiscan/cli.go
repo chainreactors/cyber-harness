@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"slices"
@@ -53,6 +54,8 @@ type agentCommand struct {
 	cfg.IOAOptions     `group:"Server Options"`
 	cfg.ReconOptions   `group:"Recon Options"`
 }
+
+func (agentCommand) Usage() string { return "[OPTIONS]" }
 
 type serveCommand struct {
 	Token string `long:"token" description:"Access key for the server (auto-generated if empty)"`
@@ -736,5 +739,21 @@ func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *sig
 }
 
 func printHelp(parser *goflags.Parser) {
-	parser.WriteHelp(os.Stdout)
+	writeHelp(parser, os.Stdout)
+}
+
+func writeHelp(parser *goflags.Parser, writer io.Writer) {
+	if parser.Active == nil {
+		parser.WriteHelp(writer)
+		return
+	}
+
+	// Parser.Usage contains the long root command catalog. go-flags reuses it
+	// verbatim when rendering subcommand help, which pushes the active command's
+	// flags below the fold. Keep the detailed catalog for `aiscan -h`, but use a
+	// compact root prefix for `aiscan <command> -h`.
+	rootUsage := parser.Usage
+	parser.Usage = "[GLOBAL OPTIONS]"
+	defer func() { parser.Usage = rootUsage }()
+	parser.WriteHelp(writer)
 }

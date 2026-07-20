@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
+	goflags "github.com/jessevdk/go-flags"
 )
 
 type fakeConsoleProvider struct {
@@ -141,6 +142,54 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 	}
 	if resolved.Provider != "openai" {
 		t.Fatalf("resolved provider = %q, want openai (DeepSeek uses OpenAI-compatible protocol)", resolved.Provider)
+	}
+}
+
+func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
+	var cli cliOptions
+	parser := newCLIParser(&cli, parserOptionsForArgs([]string{"agent", "-h"}))
+	_, err := parser.ParseArgs([]string{"agent", "-h"})
+	flagsErr, ok := err.(*goflags.Error)
+	if !ok || flagsErr.Type != goflags.ErrHelp {
+		t.Fatalf("ParseArgs() error = %v, want ErrHelp", err)
+	}
+
+	var buf bytes.Buffer
+	writeHelp(parser, &buf)
+	help := buf.String()
+	for _, want := range []string{
+		"agent [OPTIONS]",
+		"Agent Options:",
+		"--prompt",
+		"--transport",
+		"--server-url",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("agent help missing %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "Advanced scanners:") || strings.Contains(help, "Server management:") {
+		t.Fatalf("agent help leaked the root command catalog:\n%s", help)
+	}
+}
+
+func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
+	for _, name := range []string{"scan", "gogo", "spray", "zombie", "neutron"} {
+		t.Run(name, func(t *testing.T) {
+			help, ok := cfg.StaticScannerUsage(name)
+			if !ok {
+				t.Fatalf("StaticScannerUsage(%q) was not registered", name)
+			}
+			if !strings.Contains(help, "Usage:") || !strings.Contains(help, name+" [OPTIONS]") {
+				t.Fatalf("%s help was not rendered by its go-flags parser:\n%s", name, help)
+			}
+			if !strings.Contains(help, "Help Options:") {
+				t.Fatalf("%s help is missing go-flags help options:\n%s", name, help)
+			}
+			if strings.Count(help, "\n") < 10 {
+				t.Fatalf("%s help looks like a static placeholder:\n%s", name, help)
+			}
+		})
 	}
 }
 
