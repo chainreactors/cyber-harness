@@ -848,10 +848,3 @@ func resultToRecords(scanID, agentID string, result *output.Result) []*output.Re
 	}
 	return recs
 }
-
-func formatTelemetryProgress(msg WSMessage) string {
-	if msg.Data == "" {
-		return "[" + msg.Type + "]"
-	}
-	return fmt.Sprintf("[%s] %s", msg.Type, msg.Data)
-}

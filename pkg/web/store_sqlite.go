@@ -189,7 +189,7 @@ func migrateLegacyChatMessages(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	existingAssistantText := map[string]map[string]bool{}
 	aopRows, err := tx.Query(`SELECT session_id, event_json FROM chat_aop_events`)

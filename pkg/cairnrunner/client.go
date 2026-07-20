@@ -71,17 +71,17 @@ func New(cfg Config) (*Client, error) {
 func (c *Client) Run(ctx context.Context) error {
 	for attempt := 0; ; attempt++ {
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
 		err := c.runOnce(ctx)
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
 		delay := agent.RetryDelay(attempt)
 		c.cfg.Logger.Warnf("cairn runner disconnected, retrying in %s: %v", delay, err)
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-time.After(delay):
 		}
 	}

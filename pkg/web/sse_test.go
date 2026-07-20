@@ -171,11 +171,3 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))
 	}
 }
-
-func drainEventTypes(ch <-chan HubEvent) []string {
-	var out []string
-	for len(ch) > 0 {
-		out = append(out, (<-ch).Type)
-	}
-	return out
-}

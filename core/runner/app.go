@@ -346,7 +346,7 @@ func (a *App) InitIOA(ctx context.Context, ioa cfg.IOAConfig) error {
 		}
 		commands.BuildGroup("ioa", deps, a.Commands)
 	}
-	if ioa.AutoRegister && client != nil {
+	if ioa.AutoRegister {
 		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
 			a.Logger().Warnf("ioa registration pending: %s", err)
 			go a.retryIOARegistration(ctx, client, ioa)
