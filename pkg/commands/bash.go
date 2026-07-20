@@ -3,6 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -23,10 +26,14 @@ const (
 // BashTool defaults. Runner/WebAgent transports use this entry point while the
 // agent-facing Execute method keeps its auto-background behavior.
 type BashExecOptions struct {
+	Name     string
 	WorkDir  string
 	Env      map[string]string
 	Timeout  time.Duration
 	OnOutput func([]byte)
+	Stdin    io.Reader
+	Stdout   io.Writer
+	Stderr   io.Writer
 }
 
 type BashTool struct {
@@ -35,6 +42,7 @@ type BashTool struct {
 	scannerProxy   string
 	tasks          *tmux.Manager
 	commandNames   func() []string
+	resolveCommand func(string) (Command, bool)
 	inbox          inbox.Inbox
 }
 
@@ -49,7 +57,7 @@ func (t *BashTool) Manager() *tmux.Manager             { return t.tasks }
 func (t *BashTool) SetScannerProxy(proxy string)       { t.scannerProxy = proxy }
 func (t *BashTool) SetCommandNames(fn func() []string) { t.commandNames = fn }
 func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
-	t.tasks.SetCommands(func(name string) (tmux.Command, bool) { return fn(name) })
+	t.resolveCommand = fn
 }
 func (t *BashTool) SetInbox(ib inbox.Inbox) { t.inbox = ib }
 func (t *BashTool) Name() string            { return "bash" }
@@ -92,39 +100,39 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 		return TextResult("ok"), nil
 	}
 
-	info, err := t.start(ctx, command, BashExecOptions{})
+	execution, err := t.Start(ctx, command, BashExecOptions{})
 	if err != nil {
 		return ToolResult{}, err
 	}
 
-	return t.waitOrBackground(info.ID, ctx), nil
+	return t.waitOrBackground(execution, ctx), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
 // router used by the bash agent tool, streams raw output, and waits for the
 // final session state. Non-zero exits are represented by Info.ExitCode rather
 // than returned as transport errors.
-func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (tmux.Info, error) {
+func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return tmux.Info{}, fmt.Errorf("empty command")
+		return nil, fmt.Errorf("empty command")
 	}
 	if isOnlyCommentsOrBlank(command) {
 		if options.OnOutput != nil {
 			options.OnOutput([]byte("ok"))
 		}
-		return tmux.Info{State: tmux.StateCompleted}, nil
+		return &Execution{Command: command, State: tmux.StateCompleted}, nil
 	}
 
-	info, err := t.start(ctx, command, options)
+	execution, err := t.Start(ctx, command, options)
 	if err != nil {
-		return tmux.Info{}, err
+		return nil, err
 	}
 
 	offset := int64(0)
 	flush := func() error {
 		for {
-			data, next, readErr := t.tasks.ReadBytesFrom(info.ID, offset, 0)
+			data, next, readErr := t.tasks.ReadBytesFrom(execution.ID, offset, 0)
 			if readErr != nil {
 				return readErr
 			}
@@ -140,32 +148,41 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 
 	ticker := time.NewTicker(streamInterval)
 	defer ticker.Stop()
-	done := t.tasks.Done(info.ID)
+	done := t.tasks.Done(execution.ID)
 	for {
 		select {
 		case <-done:
 			if err := flush(); err != nil {
-				return tmux.Info{}, err
+				return nil, err
 			}
-			final, _ := t.tasks.Get(info.ID)
-			return final, nil
+			execution.refresh()
+			return execution, nil
 		case <-ctx.Done():
-			_ = t.tasks.Kill(info.ID)
+			_ = execution.Kill()
 			<-done
 			if err := flush(); err != nil {
-				return tmux.Info{}, err
+				return nil, err
 			}
-			final, _ := t.tasks.Get(info.ID)
-			return final, nil
+			execution.refresh()
+			return execution, nil
 		case <-ticker.C:
 			if err := flush(); err != nil {
-				return tmux.Info{}, err
+				return nil, err
 			}
 		}
 	}
 }
 
-func (t *BashTool) start(ctx context.Context, command string, options BashExecOptions) (tmux.Info, error) {
+// Start resolves command through the built-in registry or the system shell and
+// always returns an Execution backed by one PTY session.
+func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
+	command = stripCommentsAndBlanks(command)
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("empty command")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	timeout := options.Timeout
 	if timeout <= 0 {
 		timeout = time.Duration(t.timeout) * time.Second
@@ -174,34 +191,226 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	if workDir == "" {
 		workDir = t.workDir
 	}
-	return t.tasks.RunCommand(command, tmux.RunOpts{
-		Timeout: timeout,
-		WorkDir: workDir,
-		Env:     t.runEnv(options.Env),
-		Ctx:     ctx,
-	})
+	env := t.runEnv(options.Env)
+	left, right, hasPipe := splitPipeline(command)
+	leftToken := firstCommandToken(left)
+	if cmd, ok := t.resolve(leftToken); ok {
+		tokens, err := SplitCommandLine(left)
+		if err != nil {
+			return nil, err
+		}
+		args, err := stripShellSyntax(tokens[1:])
+		if err != nil {
+			return nil, err
+		}
+		args = normalizeNoColor(cmd.Name, args)
+		if hasPipe && right != "" {
+			return t.startBuiltinToShell(ctx, cmd, args, right, timeout, workDir, env, options)
+		}
+		return t.startBuiltin(ctx, cmd, args, timeout, workDir, env, options)
+	}
+	if hasPipe && right != "" {
+		rightToken := firstCommandToken(right)
+		if cmd, ok := t.resolve(rightToken); ok {
+			tokens, err := SplitCommandLine(right)
+			if err != nil {
+				return nil, err
+			}
+			args, err := stripShellSyntax(tokens[1:])
+			if err != nil {
+				return nil, err
+			}
+			args = normalizeNoColor(cmd.Name, args)
+			return t.startShellToBuiltin(ctx, left, cmd, args, timeout, workDir, env, options)
+		}
+	}
+	execution := newExecution(t.tasks, command, nil, workDir, env)
+	info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+	if err != nil {
+		return nil, err
+	}
+	execution.bind(info)
+	return execution, nil
 }
 
-func (t *BashTool) waitOrBackground(id string, ctx context.Context) ToolResult {
-	done := t.tasks.Done(id)
+func (t *BashTool) resolve(name string) (Command, bool) {
+	if t.resolveCommand == nil || name == "" {
+		return Command{}, false
+	}
+	return t.resolveCommand(name)
+}
+
+func (t *BashTool) startBuiltin(
+	ctx context.Context,
+	command Command,
+	args []string,
+	timeout time.Duration,
+	workDir string,
+	env []string,
+	options BashExecOptions,
+) (*Execution, error) {
+	execution := newExecution(t.tasks, command.Name, args, workDir, env)
+	name := options.Name
+	if name == "" {
+		name = command.Name
+	}
+	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+		stdout := joinedWriter(session, options.Stdout)
+		stderr := joinedWriter(session, options.Stderr)
+		execution.setIO(options.Stdin, stdout, stderr)
+		if command.Run == nil {
+			return fmt.Errorf("command %s has no runner", command.Name)
+		}
+		details, runErr := command.Run(runCtx, execution)
+		execution.setDetails(details)
+		return runErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	execution.bind(info)
+	return execution, nil
+}
+
+func (t *BashTool) startBuiltinToShell(
+	ctx context.Context,
+	command Command,
+	args []string,
+	pipeline string,
+	timeout time.Duration,
+	workDir string,
+	env []string,
+	options BashExecOptions,
+) (*Execution, error) {
+	execution := newExecution(t.tasks, command.Name, args, workDir, env)
+	name := options.Name
+	if name == "" {
+		name = command.Name
+	}
+	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+		reader, writer := io.Pipe()
+		sh := exec.CommandContext(runCtx, "sh", "-c", pipeline)
+		sh.Stdin = reader
+		sh.Stdout = joinedWriter(session, options.Stdout)
+		sh.Stderr = joinedWriter(session, options.Stderr)
+		configureProcess(sh, workDir, env)
+		shellDone := make(chan error, 1)
+		go func() {
+			shellDone <- sh.Run()
+			_ = reader.Close()
+		}()
+
+		execution.setIO(options.Stdin, writer, joinedWriter(session, options.Stderr))
+		if command.Run == nil {
+			_ = writer.Close()
+			<-shellDone
+			return fmt.Errorf("command %s has no runner", command.Name)
+		}
+		details, commandErr := command.Run(runCtx, execution)
+		execution.setDetails(details)
+		_ = writer.CloseWithError(commandErr)
+		shellErr := <-shellDone
+		if commandErr != nil {
+			return commandErr
+		}
+		return shellErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	execution.bind(info)
+	return execution, nil
+}
+
+func (t *BashTool) startShellToBuiltin(
+	ctx context.Context,
+	shellLine string,
+	command Command,
+	args []string,
+	timeout time.Duration,
+	workDir string,
+	env []string,
+	options BashExecOptions,
+) (*Execution, error) {
+	execution := newExecution(t.tasks, command.Name, args, workDir, env)
+	name := options.Name
+	if name == "" {
+		name = command.Name
+	}
+	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+		reader, writer := io.Pipe()
+		sh := exec.CommandContext(runCtx, "sh", "-c", shellLine)
+		sh.Stdin = options.Stdin
+		sh.Stdout = writer
+		sh.Stderr = joinedWriter(session, options.Stderr)
+		configureProcess(sh, workDir, env)
+		shellDone := make(chan error, 1)
+		go func() {
+			err := sh.Run()
+			_ = writer.CloseWithError(err)
+			shellDone <- err
+		}()
+
+		execution.setIO(reader, joinedWriter(session, options.Stdout), joinedWriter(session, options.Stderr))
+		if command.Run == nil {
+			_ = reader.Close()
+			<-shellDone
+			return fmt.Errorf("command %s has no runner", command.Name)
+		}
+		details, commandErr := command.Run(runCtx, execution)
+		execution.setDetails(details)
+		_ = reader.Close()
+		shellErr := <-shellDone
+		if commandErr != nil {
+			return commandErr
+		}
+		return shellErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	execution.bind(info)
+	return execution, nil
+}
+
+func joinedWriter(session, extra io.Writer) io.Writer {
+	if extra == nil || extra == session {
+		return session
+	}
+	return io.MultiWriter(session, extra)
+}
+
+func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+}
+
+func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context) ToolResult {
+	done := t.tasks.Done(execution.ID)
 	select {
 	case <-done:
-		return t.collectResult(id)
+		execution.refresh()
+		return t.collectResult(execution)
 	case <-time.After(autoBackgroundThreshold):
-		info, _ := t.tasks.Get(id)
+		info, _ := t.tasks.Get(execution.ID)
 		t.startMonitor(info)
 		return TextResult(fmt.Sprintf(
 			"Command auto-backgrounded (exceeded %s).\nsession id=%s name=%s\nIncremental output will be delivered automatically. Use `tmux kill -t %s` to stop.",
 			autoBackgroundThreshold, info.ID, info.Name, info.ID))
 	case <-ctx.Done():
-		_ = t.tasks.Kill(id)
+		_ = execution.Kill()
 		<-done
-		return t.collectResult(id)
+		execution.refresh()
+		return t.collectResult(execution)
 	}
 }
 
-func (t *BashTool) collectResult(id string) ToolResult {
-	raw := t.tasks.PeekOrEmpty(id, truncate.DefaultMaxLines)
+func (t *BashTool) collectResult(execution *Execution) ToolResult {
+	raw := t.tasks.PeekOrEmpty(execution.ID, truncate.DefaultMaxLines)
 	r := truncate.Tail(raw, truncate.Options{})
 	text := r.Content
 	if r.Truncated {
@@ -210,14 +419,16 @@ func (t *BashTool) collectResult(id string) ToolResult {
 			"\n\n[truncated: showing lines %d-%d of %d (%s of %s). Use tmux read to access earlier output.]",
 			startLine, r.TotalLines, r.TotalLines, truncate.FormatSize(r.OutputBytes), truncate.FormatSize(r.TotalBytes))
 	}
-	info, _ := t.tasks.Get(id)
+	info, _ := t.tasks.Get(execution.ID)
 	if info.KillCause != "" {
 		text += fmt.Sprintf("\n[command stopped: %s]", info.KillCause)
 	}
 	if info.ExitCode != 0 && info.State != tmux.StateRunning {
 		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
-	return TextResult(text)
+	result := TextResult(text)
+	result.Details = execution.Details
+	return result
 }
 
 func (t *BashTool) runEnv(overrides map[string]string) []string {
@@ -274,4 +485,60 @@ func isOnlyCommentsOrBlank(cmdLine string) bool {
 		}
 	}
 	return true
+}
+
+func stripCommentsAndBlanks(input string) string {
+	lines := strings.Split(input, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func firstCommandToken(input string) string {
+	tokens, err := SplitCommandLine(input)
+	if err != nil || len(tokens) == 0 {
+		return ""
+	}
+	return tokens[0]
+}
+
+func splitPipeline(commandLine string) (left, right string, ok bool) {
+	var quote rune
+	escaped := false
+	runes := []rune(commandLine)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			continue
+		}
+		if r == '|' {
+			if i+1 < len(runes) && runes[i+1] == '|' {
+				i++
+				continue
+			}
+			return strings.TrimSpace(string(runes[:i])), strings.TrimSpace(string(runes[i+1:])), true
+		}
+	}
+	return commandLine, "", false
 }

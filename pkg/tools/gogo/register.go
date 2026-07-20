@@ -15,10 +15,8 @@ func init() {
 			if es == nil || es.Gogo == nil {
 				return
 			}
-			reg.Register(
-				New(es.Gogo).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus),
-				"scanner",
-			)
+			impl := New(es.Gogo).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
+			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(), Run: impl.Run, SetProxy: impl.SetProxy, GetProxy: func() string { return impl.Proxy }}, "scanner")
 		},
 	})
 }

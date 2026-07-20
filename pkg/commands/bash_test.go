@@ -28,9 +28,9 @@ type simpleCommand struct{ name string }
 
 func (c *simpleCommand) Name() string  { return c.name }
 func (c *simpleCommand) Usage() string { return c.name }
-func (c *simpleCommand) Execute(_ context.Context, _ []string) error {
-	fmt.Fprint(commands.Output, "ok")
-	return nil
+func (c *simpleCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	fmt.Fprint(execution.Stdout, "ok")
+	return nil, nil
 }
 
 // argsCapture records the args received by Execute.
@@ -41,14 +41,13 @@ type argsCapture struct {
 
 func (c *argsCapture) Name() string  { return c.name }
 func (c *argsCapture) Usage() string { return c.name }
-func (c *argsCapture) Execute(_ context.Context, args []string) error {
-	c.got = append([]string(nil), args...)
-	fmt.Fprint(commands.Output, strings.Join(args, " "))
-	return nil
+func (c *argsCapture) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	c.got = append([]string(nil), execution.Args...)
+	fmt.Fprint(execution.Stdout, strings.Join(execution.Args, " "))
+	return nil, nil
 }
 
-// outputCommand writes multi-line output to commands.Output, simulating a
-// pseudo-command that produces filterable results.
+// outputCommand writes multi-line output to its explicit execution writer.
 type outputCommand struct {
 	name   string
 	output string
@@ -61,18 +60,18 @@ type stagedOutputCommand struct {
 
 func (c *stagedOutputCommand) Name() string  { return c.name }
 func (c *stagedOutputCommand) Usage() string { return c.name }
-func (c *stagedOutputCommand) Execute(context.Context, []string) error {
-	fmt.Fprint(commands.Output, c.value+"-first\n")
+func (c *stagedOutputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	fmt.Fprint(execution.Stdout, c.value+"-first\n")
 	time.Sleep(75 * time.Millisecond)
-	fmt.Fprint(commands.Output, c.value+"-second\n")
-	return nil
+	fmt.Fprint(execution.Stdout, c.value+"-second\n")
+	return nil, nil
 }
 
 func (c *outputCommand) Name() string  { return c.name }
 func (c *outputCommand) Usage() string { return c.name + " — test command" }
-func (c *outputCommand) Execute(_ context.Context, _ []string) error {
-	_, err := commands.Output.Write([]byte(c.output))
-	return err
+func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	_, err := execution.Stdout.Write([]byte(c.output))
+	return nil, err
 }
 
 // panicTool is a test tool that always panics.
@@ -103,20 +102,6 @@ func (*testLogger) Warnf(string, ...any)      {}
 func (*testLogger) Errorf(string, ...any)     {}
 func (*testLogger) Importantf(string, ...any) {}
 
-type loggerAwareCommand struct {
-	name   string
-	logger telemetry.Logger
-}
-
-func (c *loggerAwareCommand) Name() string  { return c.name }
-func (c *loggerAwareCommand) Usage() string { return c.name }
-func (c *loggerAwareCommand) Execute(_ context.Context, _ []string) error {
-	return nil
-}
-func (c *loggerAwareCommand) InitLogger(logger telemetry.Logger) {
-	c.logger = logger
-}
-
 type loggerAwareTool struct {
 	name   string
 	logger telemetry.Logger
@@ -140,33 +125,21 @@ func bashArgs(cmd string) string {
 func newBashWithPseudo(dir string, cmds ...*outputCommand) *commands.BashTool {
 	registry := commands.NewRegistry()
 	for _, c := range cmds {
-		registry.Register(c, "")
+		registry.Register(commands.Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run}, "")
 	}
 	bash := commands.NewBashTool(dir, 10)
-	bash.Manager().SetCommands(func(name string) (tmux.Command, bool) {
-		return registry.Get(name)
-	})
-	bash.Manager().SetExecHooks(
-		func(w io.Writer) { commands.Output.Reset(w) },
-		func() { commands.Output.Reset(nil) },
-	)
-	bash.Manager().SetWorkDir(dir)
+	bash.SetCommandResolver(registry.Get)
 	return bash
 }
 
-func TestCommandRegistrySetLoggerRebindsCommandsAndTools(t *testing.T) {
+func TestCommandRegistrySetLoggerRebindsTools(t *testing.T) {
 	reg := commands.NewRegistry()
-	cmd := &loggerAwareCommand{name: "sample"}
 	tool := &loggerAwareTool{name: "sample_tool"}
 	logger := &testLogger{}
 
-	reg.Register(cmd, "test")
 	reg.RegisterTool(tool)
 	reg.SetLogger(logger)
 
-	if cmd.logger != logger {
-		t.Fatalf("command logger not rebound")
-	}
 	if tool.logger != logger {
 		t.Fatalf("tool logger not rebound")
 	}
@@ -178,11 +151,10 @@ func TestCommandRegistrySetLoggerRebindsCommandsAndTools(t *testing.T) {
 
 func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 	registry := commands.NewRegistry()
-	registry.Register(&simpleCommand{name: "spray"}, "")
+	impl := &simpleCommand{name: "spray"}
+	registry.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "")
 	bash := commands.NewBashTool(t.TempDir(), 5)
-	bash.Manager().SetCommands(func(name string) (tmux.Command, bool) {
-		return registry.Get(name)
-	})
+	bash.SetCommandResolver(registry.Get)
 
 	// Single pipe (|) is now supported — pseudo-command output is piped
 	// through a shell pipeline. Only ||, redirections, and chaining are
@@ -255,9 +227,10 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 func TestNormalizeNoColorInjectForScan(t *testing.T) {
 	reg := commands.NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(cmd, "")
+	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
-	_, err := reg.ExecuteArgs(context.Background(), []string{"scan", "-i", "10.0.0.1"})
+	var output bytes.Buffer
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -272,9 +245,10 @@ func TestNormalizeNoColorInjectForScan(t *testing.T) {
 func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 	reg := commands.NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(cmd, "")
+	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
-	_, err := reg.ExecuteArgs(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"})
+	var output bytes.Buffer
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &commands.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -292,9 +266,10 @@ func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 func TestNormalizeNoColorSkipsNonScan(t *testing.T) {
 	reg := commands.NewRegistry()
 	cmd := &argsCapture{name: "gogo"}
-	reg.Register(cmd, "")
+	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
-	_, err := reg.ExecuteArgs(context.Background(), []string{"gogo", "-i", "10.0.0.1"})
+	var output bytes.Buffer
+	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -493,7 +468,7 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 	bash := commands.NewBashTool(root, 5)
 	defer bash.Close()
 
-	results := make([]tmux.Info, 2)
+	results := make([]*commands.Execution, 2)
 	outputs := make([]bytes.Buffer, 2)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -525,18 +500,14 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 	root := t.TempDir()
 	commandsByName := map[string]commands.Command{
-		"one": &stagedOutputCommand{name: "one", value: "one"},
-		"two": &stagedOutputCommand{name: "two", value: "two"},
+		"one": {Name: "one", Usage: "one", Run: (&stagedOutputCommand{name: "one", value: "one"}).Run},
+		"two": {Name: "two", Usage: "two", Run: (&stagedOutputCommand{name: "two", value: "two"}).Run},
 	}
 	bash := commands.NewBashTool(root, 5)
 	bash.SetCommandResolver(func(name string) (commands.Command, bool) {
 		command, ok := commandsByName[name]
 		return command, ok
 	})
-	bash.Manager().SetExecHooks(
-		func(w io.Writer) { commands.Output.Reset(w) },
-		func() { commands.Output.Reset(nil) },
-	)
 	defer bash.Close()
 
 	var outputs [2]bytes.Buffer
@@ -560,6 +531,67 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 		if !strings.Contains(outputs[i].String(), name+"-first") || strings.Contains(outputs[i].String(), other+"-") {
 			t.Fatalf("%s output leaked: %q", name, outputs[i].String())
 		}
+	}
+}
+
+func TestBuiltinExecutionReturnsDetails(t *testing.T) {
+	registry := commands.NewRegistry()
+	want := map[string]any{"targets": 2}
+	registry.Register(commands.Command{
+		Name:  "details",
+		Usage: "details",
+		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+			fmt.Fprint(execution.Stdout, "done")
+			return want, nil
+		},
+	}, "")
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash.SetCommandResolver(registry.Get)
+	defer bash.Close()
+
+	execution, err := bash.RunForeground(context.Background(), "details", commands.BashExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.ID == "" {
+		t.Fatal("execution has no PTY session ID")
+	}
+	if got, ok := execution.Details.(map[string]any); !ok || got["targets"] != 2 {
+		t.Fatalf("details = %#v", execution.Details)
+	}
+	info, ok := bash.Manager().Get(execution.ID)
+	if !ok || info.ID != execution.ID || info.State != execution.State {
+		t.Fatalf("execution/session mismatch: execution=%+v info=%+v", execution, info)
+	}
+}
+
+func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
+	registry := commands.NewRegistry()
+	registry.Register(commands.Command{
+		Name:  "consume",
+		Usage: "consume",
+		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+			data, err := io.ReadAll(execution.Stdin)
+			if err != nil {
+				return nil, err
+			}
+			_, err = execution.Stdout.Write(bytes.ToUpper(data))
+			return nil, err
+		},
+	}, "")
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash.SetCommandResolver(registry.Get)
+	defer bash.Close()
+
+	var output bytes.Buffer
+	_, err := bash.RunForeground(context.Background(), "printf 'hello stdin' | consume", commands.BashExecOptions{
+		OnOutput: func(data []byte) { _, _ = output.Write(data) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "HELLO STDIN") {
+		t.Fatalf("output = %q", output.String())
 	}
 }
 

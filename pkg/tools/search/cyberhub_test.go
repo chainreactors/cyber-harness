@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -13,15 +14,19 @@ import (
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
+func runCyberhub(t *testing.T, cmd *CyberhubSearch, args ...string) string {
+	t.Helper()
+	var output bytes.Buffer
+	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	return output.String()
+}
+
 func TestCyberhubSearchesFingerprints(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"search", "finger", "nginx"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	out := commands.Output.Captured()
+	out := runCyberhub(t, cmd, "search", "finger", "nginx")
 	if !strings.Contains(out, "nginx") {
 		t.Fatalf("output missing nginx fingerprint: %q", out)
 	}
@@ -33,12 +38,7 @@ func TestCyberhubSearchesFingerprints(t *testing.T) {
 func TestCyberhubListsPOCsWithFilters(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"list", "poc", "--severity", "critical,high", "--limit", "0"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	out := commands.Output.Captured()
+	out := runCyberhub(t, cmd, "list", "poc", "--severity", "critical,high", "--limit", "0")
 	if !strings.Contains(out, "spring-rce") {
 		t.Fatalf("output missing spring poc: %q", out)
 	}
@@ -50,12 +50,7 @@ func TestCyberhubListsPOCsWithFilters(t *testing.T) {
 func TestCyberhubSearchJSONLines(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"search", "poc", "spring", "--json"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	out := commands.Output.Captured()
+	out := runCyberhub(t, cmd, "search", "poc", "spring", "--json")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1: %q", len(lines), out)
@@ -72,12 +67,7 @@ func TestCyberhubSearchJSONLines(t *testing.T) {
 func TestCyberhubFingerAssociation(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"search", "--finger", "spring"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	out := commands.Output.Captured()
+	out := runCyberhub(t, cmd, "search", "--finger", "spring")
 	if !strings.Contains(out, "spring-rce") {
 		t.Fatalf("--finger spring should find associated poc: %q", out)
 	}
@@ -86,12 +76,7 @@ func TestCyberhubFingerAssociation(t *testing.T) {
 func TestCyberhubID(t *testing.T) {
 	cmd := newTestCyberhub()
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"id", "nginx"})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	out := commands.Output.Captured()
+	out := runCyberhub(t, cmd, "id", "nginx")
 	if !strings.Contains(out, "nginx") {
 		t.Fatalf("id nginx should return nginx detail: %q", out)
 	}
@@ -153,4 +138,3 @@ func newTestCyberhub() *CyberhubSearch {
 	)
 	return NewCyberhubSearch(idx)
 }
-

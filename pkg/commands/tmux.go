@@ -11,18 +11,12 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
-type TmuxCommand struct {
+type tmuxCommand struct {
 	manager *tmux.Manager
+	start   func(context.Context, string, BashExecOptions) (*Execution, error)
 }
 
-func NewTmuxCommand(mgr *tmux.Manager) *TmuxCommand {
-	return &TmuxCommand{manager: mgr}
-}
-
-func (t *TmuxCommand) Name() string { return "tmux" }
-
-func (t *TmuxCommand) Usage() string {
-	return `tmux - PTY session manager
+const tmuxUsage = `tmux - PTY session manager
 
   new-session [-d] [-s name] [--timeout duration] "command"
       Create session. -d detached (background). -s session name.
@@ -42,13 +36,18 @@ func (t *TmuxCommand) Usage() string {
 
   wait-for -t <id> [--timeout duration]
       Block until session completes.`
+
+func NewTmuxCommand(bash *BashTool) Command {
+	runner := &tmuxCommand{manager: bash.Manager(), start: bash.Start}
+	return Command{Name: "tmux", Usage: tmuxUsage, Run: runner.run}
 }
 
-func (t *TmuxCommand) Execute(ctx context.Context, args []string) error {
+func (t *tmuxCommand) run(ctx context.Context, execution *Execution) (any, error) {
+	args := execution.Args
 	var result string
 	var err error
 	if len(args) == 0 {
-		result = t.Usage()
+		result = tmuxUsage
 	} else {
 		switch args[0] {
 		case "new", "new-session":
@@ -64,21 +63,21 @@ func (t *TmuxCommand) Execute(ctx context.Context, args []string) error {
 		case "wait", "wait-for":
 			result, err = t.cmdWaitFor(ctx, args[1:])
 		default:
-			result, err = t.cmdImplicitNewSession(args)
+			result, err = t.cmdImplicitNewSession(ctx, args)
 		}
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result != "" {
-		fmt.Fprint(Output, result)
+		fmt.Fprint(execution.Stdout, result)
 	}
-	return nil
+	return nil, nil
 }
 
-func (t *TmuxCommand) cmdImplicitNewSession(args []string) (string, error) {
+func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
 	cmdLine := strings.Join(args, " ")
-	info, err := t.createSession(cmdLine, "", tmux.DefaultTimeout)
+	info, err := t.createSession(ctx, cmdLine, "", tmux.DefaultTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +86,7 @@ func (t *TmuxCommand) cmdImplicitNewSession(args []string) (string, error) {
 }
 
 // new-session [-d] [-s name] [--timeout 30m] "command args..."
-func (t *TmuxCommand) cmdNewSession(ctx context.Context, args []string) (string, error) {
+func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string, error) {
 	var detached bool
 	var name, timeoutStr string
 	var cmdParts []string
@@ -125,7 +124,7 @@ func (t *TmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		timeout = d
 	}
 
-	info, err := t.createSession(cmdLine, name, timeout)
+	info, err := t.createSession(ctx, cmdLine, name, timeout)
 	if err != nil {
 		return "", err
 	}
@@ -146,15 +145,17 @@ func (t *TmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	return output, nil
 }
 
-func (t *TmuxCommand) createSession(cmdLine, name string, timeout time.Duration) (tmux.Info, error) {
-	return t.manager.RunCommand(cmdLine, tmux.RunOpts{
-		Name:    name,
-		Timeout: timeout,
-	})
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration) (tmux.Info, error) {
+	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout})
+	if err != nil {
+		return tmux.Info{}, err
+	}
+	info, _ := t.manager.Get(execution.ID)
+	return info, nil
 }
 
 // ls / list-sessions
-func (t *TmuxCommand) cmdListSessions() (string, error) {
+func (t *tmuxCommand) cmdListSessions() (string, error) {
 	items := t.manager.List()
 	if len(items) == 0 {
 		return "no server running on this host", nil
@@ -178,7 +179,7 @@ func (t *TmuxCommand) cmdListSessions() (string, error) {
 }
 
 // send-keys -t <id> "text" [Enter] [C-m] [C-c]
-func (t *TmuxCommand) cmdSendKeys(args []string) (string, error) {
+func (t *tmuxCommand) cmdSendKeys(args []string) (string, error) {
 	id, rest := parseTarget(args)
 	if id == "" {
 		return "", fmt.Errorf("tmux send-keys: -t <id> required")
@@ -219,7 +220,7 @@ func (t *TmuxCommand) cmdSendKeys(args []string) (string, error) {
 }
 
 // capture-pane -t <id> [-p] [-n lines] [-c bytes] [--full]
-func (t *TmuxCommand) cmdCapturePane(args []string) (string, error) {
+func (t *tmuxCommand) cmdCapturePane(args []string) (string, error) {
 	id, rest := parseTarget(args)
 	if id == "" {
 		return "", fmt.Errorf("tmux capture-pane: -t <id> required")
@@ -286,7 +287,7 @@ func (t *TmuxCommand) cmdCapturePane(args []string) (string, error) {
 }
 
 // kill-session -t <id>
-func (t *TmuxCommand) cmdKillSession(args []string) (string, error) {
+func (t *tmuxCommand) cmdKillSession(args []string) (string, error) {
 	id, _ := parseTarget(args)
 	if id == "" {
 		return "", fmt.Errorf("tmux kill-session: -t <id> required")
@@ -298,7 +299,7 @@ func (t *TmuxCommand) cmdKillSession(args []string) (string, error) {
 }
 
 // wait-for -t <id> [--timeout 60s]
-func (t *TmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, error) {
+func (t *tmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, error) {
 	id, rest := parseTarget(args)
 	if id == "" {
 		return "", fmt.Errorf("tmux wait-for: -t <id> required")

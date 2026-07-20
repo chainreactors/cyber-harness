@@ -22,7 +22,8 @@ func init() {
 				unc = es.Uncover
 			}
 			logger := deps.GetLogger()
-			reg.Register(New(unc).WithLogger(logger), "scanner")
+			impl := New(unc).WithLogger(logger)
+			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
 		},
 	})
 }

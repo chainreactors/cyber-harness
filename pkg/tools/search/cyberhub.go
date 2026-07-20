@@ -98,9 +98,10 @@ Examples:
 func (c *CyberhubSearch) Name() string  { return "cyberhub" }
 func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 
-func (c *CyberhubSearch) Execute(_ context.Context, args []string) error {
+func (c *CyberhubSearch) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	args := execution.Args
 	if c.index == nil {
-		return fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (CYBERHUB_URL, CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
+		return nil, fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (CYBERHUB_URL, CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
 	}
 
 	var opts cyberhubFlags
@@ -108,18 +109,18 @@ func (c *CyberhubSearch) Execute(_ context.Context, args []string) error {
 	rest, err := parser.ParseArgs(args)
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			fmt.Fprint(commands.Output, cyberhubUsage()+"\n")
-			return nil
+			fmt.Fprint(execution.Stdout, cyberhubUsage()+"\n")
+			return nil, nil
 		}
-		return fmt.Errorf("search cyberhub: %w", err)
+		return nil, fmt.Errorf("search cyberhub: %w", err)
 	}
 	if opts.Limit < 0 {
-		return fmt.Errorf("search cyberhub: --limit cannot be negative")
+		return nil, fmt.Errorf("search cyberhub: --limit cannot be negative")
 	}
 
 	action, typ, query, err := parseCyberhubAction(rest, opts.Type, opts.Query)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var out string
@@ -137,12 +138,12 @@ func (c *CyberhubSearch) Execute(_ context.Context, args []string) error {
 		out, err = renderCyberhubItems(items, total, action, typ, opts.JSONLines)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if out != "" {
-		fmt.Fprint(commands.Output, out)
+		fmt.Fprint(execution.Stdout, out)
 	}
-	return nil
+	return nil, nil
 }
 
 // buildQuery constructs a single association.Query from all flags and text input.

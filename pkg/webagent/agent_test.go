@@ -44,10 +44,6 @@ func connectForTest(ctx context.Context, serverURL, name string, reg *commands.C
 	if _, ok := reg.GetTool("bash"); !ok {
 		bash := commands.NewBashTool(".", 5)
 		bash.SetCommandResolver(reg.Get)
-		bash.Manager().SetExecHooks(
-			func(w io.Writer) { commands.Output.Reset(w) },
-			func() { commands.Output.Reset(nil) },
-		)
 		reg.RegisterTool(bash)
 		defer bash.Close()
 	}
@@ -67,12 +63,12 @@ type webConnectionTestCommand struct {
 func (c webConnectionTestCommand) Name() string  { return "echo" }
 func (c webConnectionTestCommand) Usage() string { return "echo" }
 
-func (c webConnectionTestCommand) Execute(_ context.Context, args []string) error {
+func (c webConnectionTestCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
 	if c.bus != nil {
 		c.bus.Emit(agent.Event{Type: agent.EventTurnStart, Turn: 1})
 	}
-	fmt.Fprintf(commands.Output, "progress: %s\n", strings.Join(args, " "))
-	return nil
+	fmt.Fprintf(execution.Stdout, "progress: %s\n", strings.Join(execution.Args, " "))
+	return nil, nil
 }
 
 func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
@@ -131,7 +127,8 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 
 	bus := eventbus.New[agent.Event]()
 	reg := commands.NewRegistry()
-	reg.Register(webConnectionTestCommand{bus: bus}, "test")
+	impl := webConnectionTestCommand{bus: bus}
+	reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "test")
 
 	done := make(chan error, 1)
 	go func() {
@@ -234,7 +231,8 @@ func TestRunConnectionChatWithoutRuntimeReturnsClearError(t *testing.T) {
 	defer cancel()
 
 	reg := commands.NewRegistry()
-	reg.Register(webConnectionTestCommand{}, "test")
+	impl := webConnectionTestCommand{}
+	reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "test")
 
 	done := make(chan error, 1)
 	go func() {

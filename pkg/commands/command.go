@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -36,21 +35,18 @@ var (
 
 var _ tool.Executor = (*CommandRegistry)(nil)
 
-type Command interface {
-	Name() string
-	Usage() string
-	Execute(ctx context.Context, args []string) error
-}
-
-// QuickReferencer is optionally implemented by commands that want a concise
-// multi-line reference embedded in the system prompt instead of the single
-// description line extracted from Usage().
-type QuickReferencer interface {
-	QuickReference() string
-}
-
-type WorkDirAware interface {
-	SetWorkDir(dir string)
+// Command describes one built-in command accepted by the Bash tool. Runtime
+// state belongs to Execution; command-specific dependencies are captured by
+// Run at construction time.
+type Command struct {
+	Name            string
+	Usage           string
+	QuickReference  string
+	Run             func(context.Context, *Execution) (any, error)
+	SetProxy        func(string)
+	GetProxy        func() string
+	SetDefaultSpace func(string)
+	Close           func()
 }
 
 type LoggerAware interface {
@@ -58,31 +54,18 @@ type LoggerAware interface {
 }
 
 type CommandRegistry struct {
-	mu      sync.RWMutex
-	items   map[string]Command
-	order   []string
-	groups  map[string][]string
-	workDir string
-	output  io.Writer
+	mu     sync.RWMutex
+	items  map[string]Command
+	order  []string
+	groups map[string][]string
 
 	tools     map[string]AgentTool
 	toolOrder []string
 }
 
-func (r *CommandRegistry) SetOutput(w io.Writer) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.output = w
-}
-
 func (r *CommandRegistry) SetLogger(logger telemetry.Logger) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, cmd := range r.items {
-		if aware, ok := cmd.(LoggerAware); ok {
-			aware.InitLogger(logger)
-		}
-	}
 	for _, tool := range r.tools {
 		if aware, ok := tool.(LoggerAware); ok {
 			aware.InitLogger(logger)
@@ -149,30 +132,14 @@ func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments strin
 	return t.Execute(ctx, arguments)
 }
 
-func (r *CommandRegistry) SetWorkDir(dir string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.workDir = dir
-	for _, cmd := range r.items {
-		if wda, ok := cmd.(WorkDirAware); ok {
-			wda.SetWorkDir(dir)
-		}
-	}
-}
-
 func (r *CommandRegistry) Register(cmd Command, group string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	name := cmd.Name()
+	name := cmd.Name
 	if _, exists := r.items[name]; !exists {
 		r.order = append(r.order, name)
 	}
 	r.items[name] = cmd
-	if r.workDir != "" {
-		if wda, ok := cmd.(WorkDirAware); ok {
-			wda.SetWorkDir(r.workDir)
-		}
-	}
 	if group != "" {
 		r.groups[group] = append(r.groups[group], name)
 	}
@@ -214,54 +181,46 @@ func (r *CommandRegistry) GroupNames(group string) []string {
 	return append([]string(nil), r.groups[group]...)
 }
 
-func (r *CommandRegistry) Execute(ctx context.Context, cmdLine string) (string, error) {
-	tokens, err := SplitCommandLine(cmdLine)
-	if err != nil {
-		return "", err
-	}
-	return r.ExecuteArgs(ctx, tokens)
-}
-
-func (r *CommandRegistry) ExecuteArgs(ctx context.Context, tokens []string) (string, error) {
-	return r.ExecuteArgsStreaming(ctx, tokens, nil)
-}
-
-func (r *CommandRegistry) ExecuteArgsStreaming(ctx context.Context, tokens []string, stream io.Writer) (out string, err error) {
+// Run executes a nested built-in command inside an existing Execution. The
+// child shares the outer PTY session and file descriptors; it does not create
+// a second lifecycle or an ID-less execution.
+func (r *CommandRegistry) Run(ctx context.Context, tokens []string, parent *Execution) (details any, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			out = ""
+			details = nil
 			err = fmt.Errorf("command panic: %v\n%s", recovered, debug.Stack())
 		}
 	}()
 
 	if len(tokens) == 0 {
-		return "", fmt.Errorf("empty command")
+		return nil, fmt.Errorf("empty command")
 	}
 
 	name := tokens[0]
 	cmd, ok := r.Get(name)
 	if !ok {
-		return "", fmt.Errorf("unknown command: %s", name)
+		return nil, fmt.Errorf("unknown command: %s", name)
 	}
 
 	args, parseErr := stripShellSyntax(tokens[1:])
 	if parseErr != nil {
-		return "", parseErr
+		return nil, parseErr
 	}
 	args = normalizeNoColor(name, args)
 
-	w := stream
-	if w == nil {
-		r.mu.RLock()
-		w = r.output
-		r.mu.RUnlock()
+	if parent == nil {
+		return nil, fmt.Errorf("command %s requires an execution", name)
 	}
-
-	Output.Reset(w)
-	defer Output.Reset(nil)
-
-	execErr := cmd.Execute(ctx, args)
-	return Output.Captured(), execErr
+	if cmd.Run == nil {
+		return nil, fmt.Errorf("command %s has no runner", name)
+	}
+	child := &Execution{
+		ID: parent.ID, Command: name, Args: args, Dir: parent.Dir, Env: parent.Env,
+		Stdin: parent.Stdin, Stdout: parent.Stdout, Stderr: parent.Stderr,
+		State: parent.State, ExitCode: parent.ExitCode, StartedAt: parent.StartedAt,
+		EndedAt: parent.EndedAt, KillCause: parent.KillCause, manager: parent.manager,
+	}
+	return cmd.Run(ctx, child)
 }
 
 // stripShellSyntax processes shell-style tokens that LLMs frequently append
@@ -351,18 +310,18 @@ func normalizeNoColor(name string, args []string) []string {
 func (r *CommandRegistry) UsageDocs() string {
 	var sb strings.Builder
 	for _, cmd := range r.All() {
-		if qr, ok := cmd.(QuickReferencer); ok {
-			sb.WriteString(qr.QuickReference())
+		if cmd.QuickReference != "" {
+			sb.WriteString(cmd.QuickReference)
 			sb.WriteString("\n")
 			continue
 		}
-		first := cmd.Usage()
+		first := cmd.Usage
 		if idx := strings.IndexByte(first, '\n'); idx > 0 {
 			first = first[:idx]
 		}
 		first = strings.TrimSpace(first)
-		if !strings.HasPrefix(first, cmd.Name()) {
-			first = cmd.Name()
+		if !strings.HasPrefix(first, cmd.Name) {
+			first = cmd.Name
 		}
 		sb.WriteString("- ")
 		sb.WriteString(first)
@@ -438,4 +397,22 @@ func SplitCommandLine(input string) ([]string, error) {
 		tokens = append(tokens, cur.String())
 	}
 	return tokens, nil
+}
+
+// JoinCommandLine builds a command line that SplitCommandLine can losslessly
+// parse. It is intended for trusted internal callers that already have args.
+func JoinCommandLine(name string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, quoteCommandArg(name))
+	for _, arg := range args {
+		parts = append(parts, quoteCommandArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func quoteCommandArg(arg string) string {
+	if arg != "" && !strings.ContainsAny(arg, " \\t\\r\\n\\\"'\\\\|;&<>") {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\\\''") + "'"
 }

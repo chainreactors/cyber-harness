@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 // LoopCommand is a pseudo-command invoked via bash:
@@ -16,14 +18,10 @@ import (
 //	bash(command="loop stop loop-a1b2c3d4")
 type LoopCommand struct {
 	scheduler *LoopScheduler
-	output    io.Writer
 }
 
-func NewLoopCommand(scheduler *LoopScheduler, output io.Writer) *LoopCommand {
-	if output == nil {
-		output = io.Discard
-	}
-	return &LoopCommand{scheduler: scheduler, output: output}
+func NewLoopCommand(scheduler *LoopScheduler) *LoopCommand {
+	return &LoopCommand{scheduler: scheduler}
 }
 
 func (c *LoopCommand) Name() string { return "loop" }
@@ -49,30 +47,35 @@ Examples:
   loop 5m monitor targets                   every 5 minutes`
 }
 
-func (c *LoopCommand) Execute(ctx context.Context, args []string) error {
+func (c *LoopCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
+	args := execution.Args
+	output := execution.Stdout
+	if output == nil {
+		output = io.Discard
+	}
 	if len(args) == 0 {
-		_, _ = fmt.Fprint(c.output, c.Usage()+"\n")
-		return nil
+		_, _ = fmt.Fprint(output, c.Usage()+"\n")
+		return nil, nil
 	}
 
 	switch strings.ToLower(args[0]) {
 	case "list", "ls":
-		return c.list()
+		return nil, c.list(output)
 	case "stop", "rm", "remove":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: loop stop <name>")
+			return nil, fmt.Errorf("usage: loop stop <name>")
 		}
-		return c.stop(args[1])
+		return nil, c.stop(output, args[1])
 	case "stop-all":
 		c.scheduler.Stop()
-		_, _ = fmt.Fprint(c.output, "All loops stopped.\n")
-		return nil
+		_, _ = fmt.Fprint(output, "All loops stopped.\n")
+		return nil, nil
 	default:
-		return c.create(ctx, args)
+		return nil, c.create(ctx, output, args)
 	}
 }
 
-func (c *LoopCommand) create(ctx context.Context, args []string) error {
+func (c *LoopCommand) create(ctx context.Context, output io.Writer, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
@@ -98,7 +101,7 @@ func (c *LoopCommand) create(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.output, "Loop %q created: %s\n", name, entry.Schedule())
+	_, _ = fmt.Fprintf(output, "Loop %q created: %s\n", name, entry.Schedule())
 	return nil
 }
 
@@ -121,10 +124,10 @@ func tryCronPrefix(args []string) (*CronExpr, []string, bool) {
 	return cron, args[5:], true
 }
 
-func (c *LoopCommand) list() error {
+func (c *LoopCommand) list(output io.Writer) error {
 	loops := c.scheduler.List()
 	if len(loops) == 0 {
-		_, _ = fmt.Fprint(c.output, "No active loops.\n")
+		_, _ = fmt.Fprint(output, "No active loops.\n")
 		return nil
 	}
 	for _, l := range loops {
@@ -135,15 +138,15 @@ func (c *LoopCommand) list() error {
 		if l.Prompt != "" {
 			line += fmt.Sprintf("  prompt=%q", l.Prompt)
 		}
-		_, _ = fmt.Fprintln(c.output, line)
+		_, _ = fmt.Fprintln(output, line)
 	}
 	return nil
 }
 
-func (c *LoopCommand) stop(name string) error {
+func (c *LoopCommand) stop(output io.Writer, name string) error {
 	if err := c.scheduler.Remove(name); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.output, "Loop %q stopped.\n", name)
+	_, _ = fmt.Fprintf(output, "Loop %q stopped.\n", name)
 	return nil
 }

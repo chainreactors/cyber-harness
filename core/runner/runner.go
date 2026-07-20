@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -218,7 +217,8 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}, nil
 	})
 	rt.App.Commands.RegisterTool(subAgentTool)
-	rt.App.Commands.Register(agent.NewLoopCommand(scheduler, cmdpkg.Output), "loop")
+	loop := agent.NewLoopCommand(scheduler)
+	rt.App.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
 
 	if option.Resume != "" {
 		path := option.Resume
@@ -482,17 +482,33 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	if option.NoColor && scannerArgs[0] == "scan" && !HasScannerFlag(scannerArgs[1:], "--no-color") {
 		scannerArgs = append(scannerArgs, "--no-color")
 	}
-	var stream io.Writer
-	streaming := ShouldStreamScannerOutput(scannerArgs)
-	if streaming {
-		stream = os.Stdout
+	tool, ok := application.Commands.GetTool("bash")
+	if !ok {
+		return fmt.Errorf("bash tool is not registered")
 	}
-	out, err := application.Commands.ExecuteArgsStreaming(ctx, scannerArgs, stream)
+	bash, ok := tool.(*cmdpkg.BashTool)
+	if !ok {
+		return fmt.Errorf("registered bash tool has unexpected type")
+	}
+	streaming := ShouldStreamScannerOutput(scannerArgs)
+	var captured strings.Builder
+	execution, err := bash.RunForeground(ctx, cmdpkg.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), cmdpkg.BashExecOptions{
+		OnOutput: func(data []byte) {
+			if streaming {
+				_, _ = os.Stdout.Write(data)
+			} else {
+				_, _ = captured.Write(data)
+			}
+		},
+	})
 	if err != nil {
 		return err
 	}
 	if !streaming {
-		fmt.Print(out)
+		fmt.Print(captured.String())
+	}
+	if execution.ExitCode != 0 {
+		return fmt.Errorf("%s exited with code %d", scannerArgs[0], execution.ExitCode)
 	}
 	return nil
 }

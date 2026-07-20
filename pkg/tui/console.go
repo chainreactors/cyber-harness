@@ -21,6 +21,7 @@ import (
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -662,14 +663,21 @@ func (r *AgentConsole) builtinCommands() []Command {
 			Name: "/loop", Description: "定时循环任务 (/loop 30s <prompt> | /loop list | /loop stop <name>)",
 			Args: ArgsOptional,
 			Run: func(ctx context.Context, s *Session, args []string) error {
-				cmd, ok := s.AppInfo.Commands.Get("loop")
+				tool, ok := s.AppInfo.Commands.GetTool("bash")
 				if !ok {
-					return fmt.Errorf("loop command not registered")
+					return fmt.Errorf("bash tool not registered")
+				}
+				bash, ok := tool.(*commands.BashTool)
+				if !ok {
+					return fmt.Errorf("registered bash tool has unexpected type")
 				}
 				if len(args) == 0 {
 					args = []string{"list"}
 				}
-				return cmd.Execute(ctx, args)
+				_, err := bash.RunForeground(ctx, commands.JoinCommandLine("loop", args), commands.BashExecOptions{
+					OnOutput: func(data []byte) { _, _ = r.stdout.Write(data) },
+				})
+				return err
 			},
 		},
 		{
@@ -1408,19 +1416,7 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 		}
 		return nil
 	}
-
-	result, err := reg.Execute(directCtx, cmdLine)
-	if err != nil {
-		if errors.Is(err, context.Canceled) && directCtx.Err() != nil && ctx.Err() == nil {
-			fmt.Fprintln(r.stderr, "\ncommand interrupted")
-			return nil
-		}
-		return err
-	}
-	if result != "" {
-		fmt.Fprint(r.stdout, result)
-	}
-	return nil
+	return fmt.Errorf("bash tool is not registered")
 }
 
 // splitArgs splits a single-element args slice (from DisableFlagParsing) into fields.

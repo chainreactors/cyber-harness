@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -28,7 +29,6 @@ import (
 
 type Command struct {
 	toolargs.Base
-	stdinFile        string
 	resourceProvider func(string) []byte
 }
 
@@ -58,8 +58,7 @@ func (c *Command) WithResourceProvider(provider func(string) []byte) *Command {
 	return c
 }
 
-func (c *Command) SetStdinFile(path string) { c.stdinFile = path }
-func (c *Command) Name() string             { return "proton" }
+func (c *Command) Name() string { return "proton" }
 
 func (c *Command) Usage() string {
 	return `proton - sensitive information scanner (nuclei-style)
@@ -141,18 +140,19 @@ type protonFlags struct {
 	Debug   bool `long:"debug" description:"enable debug logging"`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("proton", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var flags protonFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
 	remaining, err := parser.ParseArgs(normalizeShortFlags(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			fmt.Fprint(commands.Output, c.Usage()+"\n")
-			return nil
+			fmt.Fprint(execution.Stdout, c.Usage()+"\n")
+			return nil, nil
 		}
-		return fmt.Errorf("proton: %w", err)
+		return nil, fmt.Errorf("proton: %w", err)
 	}
 
 	if flags.Debug {
@@ -183,39 +183,48 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	if len(flags.Expressions) > 0 {
 		rule, exprErr := buildExpressionRule(flags.Expressions, flags.ExtFilter, !flags.Bin)
 		if exprErr != nil {
-			return fmt.Errorf("proton: %w", exprErr)
+			return nil, fmt.Errorf("proton: %w", exprErr)
 		}
 		cfg.WithRules(rule)
 	}
 
 	engine, engineErr := sdkproton.NewEngine(cfg)
 	if engineErr != nil {
-		return fmt.Errorf("proton: %w", engineErr)
+		return nil, fmt.Errorf("proton: %w", engineErr)
 	}
 	scanner := engine.Scanner()
 	if scanner == nil || len(scanner.Groups) == 0 {
-		return fmt.Errorf("proton: no rules loaded (check -c, -t, or -e flags)")
+		return nil, fmt.Errorf("proton: no rules loaded (check -c, -t, or -e flags)")
 	}
 
 	// --- Template list mode ---
 	if flags.TemplateList {
-		return c.renderTemplateList(scanner, flags.JSON)
+		return nil, c.renderTemplateList(execution.Stdout, scanner, flags.JSON)
 	}
 
 	// --- Resolve inputs ---
 	inputs, err := readInputs(flags.Input, flags.ListFile, remaining)
 	if err != nil {
-		return fmt.Errorf("proton: %w", err)
+		return nil, fmt.Errorf("proton: %w", err)
 	}
-	if len(inputs) == 0 && c.stdinFile != "" {
-		inputs = append(inputs, c.stdinFile)
-		defer func() {
-			os.Remove(c.stdinFile)
-			c.stdinFile = ""
-		}()
+	if len(inputs) == 0 && execution.Stdin != nil {
+		stdinFile, stdinErr := os.CreateTemp("", "aiscan-proton-stdin-*")
+		if stdinErr != nil {
+			return nil, fmt.Errorf("proton: create stdin file: %w", stdinErr)
+		}
+		stdinPath := stdinFile.Name()
+		defer os.Remove(stdinPath)
+		if _, stdinErr = io.Copy(stdinFile, execution.Stdin); stdinErr != nil {
+			stdinFile.Close()
+			return nil, fmt.Errorf("proton: read stdin: %w", stdinErr)
+		}
+		if stdinErr = stdinFile.Close(); stdinErr != nil {
+			return nil, fmt.Errorf("proton: close stdin file: %w", stdinErr)
+		}
+		inputs = append(inputs, stdinPath)
 	}
 	if len(inputs) == 0 && len(flags.Expressions) == 0 {
-		return fmt.Errorf("proton: target required (-i <path>, -l <file>, -e <regex>, or pipe: <cmd> | proton)")
+		return nil, fmt.Errorf("proton: target required (-i <path>, -l <file>, -e <regex>, or pipe: <cmd> | proton)")
 	}
 	if len(inputs) == 0 {
 		inputs = []string{"."}
@@ -230,7 +239,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	if flags.OutputFile != "" {
 		f, fErr := os.Create(flags.OutputFile)
 		if fErr != nil {
-			return fmt.Errorf("proton: %w", fErr)
+			return nil, fmt.Errorf("proton: %w", fErr)
 		}
 		defer f.Close()
 		fileOut = f
@@ -249,7 +258,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			atomic.AddInt64(&extractCount, 1)
 		}
 		c.EmitDataCtx(ctx, "proton", output.ToolDataVuln, uf.FilePath, &uf)
-		writeFinding(commands.Output, uf, flags.JSON, inputs[0])
+		writeFinding(execution.Stdout, uf, flags.JSON, inputs[0])
 		if fileOut != nil {
 			writeFinding(fileOut, uf, flags.JSON, inputs[0])
 		}
@@ -264,7 +273,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 			continue
 		}
 		if info.IsDir() {
-			walkAndScan(ctx, scanner, input, callback)
+			walkAndScan(ctx, execution.Stderr, scanner, input, callback)
 		} else {
 			scanSingleFile(scanner, input, callback)
 		}
@@ -278,18 +287,18 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		ruleCount := scanner.Stats.Rules
 		ec := atomic.LoadInt64(&extractCount)
 		if count > 0 {
-			fmt.Fprintf(commands.Output, "\n[proton] %d findings (extract: %d, match: %d) | %d rules | %d files\n",
+			fmt.Fprintf(execution.Stdout, "\n[proton] %d findings (extract: %d, match: %d) | %d rules | %d files\n",
 				count, ec, count-ec, ruleCount, fileCount)
 		} else {
-			fmt.Fprintf(commands.Output, "[proton] no findings | %d rules | %d files\n", ruleCount, fileCount)
+			fmt.Fprintf(execution.Stdout, "[proton] no findings | %d rules | %d files\n", ruleCount, fileCount)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // --- template list ---
 
-func (c *Command) renderTemplateList(scanner *file.Scanner, jsonOutput bool) error {
+func (c *Command) renderTemplateList(writer io.Writer, scanner *file.Scanner, jsonOutput bool) error {
 	var sb strings.Builder
 	count := 0
 	for _, group := range scanner.Groups {
@@ -318,9 +327,9 @@ func (c *Command) renderTemplateList(scanner *file.Scanner, jsonOutput bool) err
 			sb.WriteByte('\n')
 		}
 	}
-	fmt.Fprint(commands.Output, sb.String())
+	fmt.Fprint(writer, sb.String())
 	if !jsonOutput {
-		fmt.Fprintf(commands.Output, "\nTotal: %d rules\n", count)
+		fmt.Fprintf(writer, "\nTotal: %d rules\n", count)
 	}
 	return nil
 }
@@ -440,7 +449,7 @@ func scanSingleFile(scanner *file.Scanner, path string, callback func(file.Findi
 	}
 }
 
-func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, callback func(file.Finding)) {
+func walkAndScan(ctx context.Context, stderr io.Writer, scanner *file.Scanner, target string, callback func(file.Finding)) {
 	numWorkers := runtime.NumCPU()
 	if numWorkers > 8 {
 		numWorkers = 8
@@ -508,7 +517,7 @@ func walkAndScan(ctx context.Context, scanner *file.Scanner, target string, call
 		}
 		return nil
 	}); walkErr != nil && ctx.Err() == nil {
-		fmt.Fprintf(commands.Output, "proton: walk %s: %v\n", target, walkErr)
+		fmt.Fprintf(stderr, "proton: walk %s: %v\n", target, walkErr)
 	}
 	close(jobCh)
 	wg.Wait()

@@ -64,8 +64,9 @@ func (c *Command) QuickReference() string {
     spray -l urls.txt --finger --crawl`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("spray", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
@@ -111,11 +112,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		},
 	}
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), runOpts); err != nil {
-		fmt.Fprint(commands.Output, buf.String())
-		return fmt.Errorf("spray: %w", err)
+		fmt.Fprint(execution.Stdout, buf.String())
+		return nil, fmt.Errorf("spray: %w", err)
 	}
-	fmt.Fprint(commands.Output, buf.String())
-	return nil
+	fmt.Fprint(execution.Stdout, buf.String())
+	return nil, nil
 }
 
 // TestInjectProxy is exported for cross-package testing.

@@ -28,7 +28,8 @@ func init() {
 			}
 
 			if es.Gogo != nil && es.Spray != nil {
-				reg.Register(scan.New(es, scanOpts...), "scanner")
+				impl := scan.New(es, scanOpts...)
+				reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
 			}
 		},
 	})

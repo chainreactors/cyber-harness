@@ -3,9 +3,9 @@ package scan
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 )
 
@@ -15,18 +15,18 @@ type pipelineEvent struct {
 	Event      event
 }
 
-func subscribePipeline(bus *eventbus.Bus[pipeline.Observation], coll *collector, debug bool) {
+func subscribePipeline(bus *eventbus.Bus[pipeline.Observation], coll *collector, debug bool, writer io.Writer) {
 	if coll != nil {
 		bus.Subscribe(func(obs pipeline.Observation) {
 			e, _ := obs.Event.(event)
 			coll.Observe(pipelineEvent{Action: obs.Action, Capability: obs.Capability, Event: e})
 		})
 	}
-	if debug {
+	if debug && writer != nil {
 		bus.Subscribe(func(obs pipeline.Observation) {
 			e, _ := obs.Event.(event)
 			if trace := formatTraceEvent(pipelineEvent{Action: obs.Action, Capability: obs.Capability, Event: e}); trace != "" {
-				fmt.Fprintln(commands.Output, trace)
+				fmt.Fprintln(writer, trace)
 			}
 		})
 	}

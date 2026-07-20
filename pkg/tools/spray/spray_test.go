@@ -115,8 +115,8 @@ func TestExecuteInstallsResourceProviderBeforePrint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commands.Output.Reset(nil)
-	err = New(engine).Execute(context.Background(), []string{"--print"})
+	var output bytes.Buffer
+	_, err = New(engine).Run(context.Background(), &commands.Execution{Args: []string{"--print"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -129,8 +129,8 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	var logs bytes.Buffer
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "● spray debug enabled") {

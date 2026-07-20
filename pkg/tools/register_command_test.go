@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -145,12 +146,12 @@ func TestGogoInjectProxy(t *testing.T) {
 
 	cmd := gogo.New(nil).WithProxy(proxyAddr)
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"--help"})
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("gogo --help with proxy: %v", err)
 	}
-	if commands.Output.Captured() == "" {
+	if output.String() == "" {
 		t.Fatal("expected help output")
 	}
 
@@ -205,8 +206,8 @@ func TestZombieExecuteWithProxy(t *testing.T) {
 
 	// Execute with --help just to verify no panic; the proxy is built
 	// but not exercised because --help exits before any network I/O.
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"--help"})
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("zombie --help: %v", err)
 	}

@@ -57,5 +57,6 @@ func (s *session) handleExec(msg message) {
 		ExitCode:  info.ExitCode,
 		State:     string(info.State),
 		KillCause: info.KillCause,
+		Duration:  info.Duration().Seconds(),
 	}, nil)
 }

@@ -77,27 +77,28 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("passive", &err)
+	args := execution.Args
 	src, rest, help, err := splitSource(args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if help {
-		fmt.Fprint(commands.Output, c.Usage())
-		return nil
+		fmt.Fprint(execution.Stdout, c.Usage())
+		return nil, nil
 	}
 	if c.sources[src] {
 		result, err := c.runQuery(ctx, src, rest)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if result != "" {
-			fmt.Fprint(commands.Output, result)
+			fmt.Fprint(execution.Stdout, result)
 		}
-		return nil
+		return nil, nil
 	}
-	return fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
+	return nil, fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
 }
 
 // --------------- query dispatch ----------------------------------------------

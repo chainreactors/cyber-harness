@@ -11,7 +11,8 @@ func init() {
 		Group: "scanner",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger := deps.GetLogger()
-			reg.Register(New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus), "scanner")
+			impl := New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
+			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run, SetProxy: impl.SetProxy, GetProxy: func() string { return impl.Proxy }}, "scanner")
 		},
 	})
 }

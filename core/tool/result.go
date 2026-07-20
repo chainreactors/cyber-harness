@@ -21,6 +21,7 @@ func ImageBlock(mimeType, base64Data string) ContentBlock {
 // Result is the value returned by Tool.Execute.
 type Result struct {
 	Content   []ContentBlock
+	Details   any
 	IsError   bool
 	Terminate bool
 }

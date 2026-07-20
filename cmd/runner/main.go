@@ -120,8 +120,8 @@ func closeTools(registry *commands.CommandRegistry) {
 		}
 	}
 	for _, command := range registry.All() {
-		if closer, ok := command.(interface{ Close() }); ok {
-			closer.Close()
+		if command.Close != nil {
+			command.Close()
 		}
 	}
 }

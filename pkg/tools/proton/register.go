@@ -15,7 +15,7 @@ func init() {
 				cmd.WithResourceProvider(rs.ProtonConfig)
 			}
 			cmd.SetWorkDir(deps.WorkDir)
-			reg.Register(cmd, "proton")
+			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run, SetProxy: cmd.SetProxy, GetProxy: func() string { return cmd.Proxy }}, "proton")
 		},
 	})
 }

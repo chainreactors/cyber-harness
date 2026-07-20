@@ -44,9 +44,10 @@ type fileParams struct {
 }
 
 type execResult struct {
-	ExitCode  int    `json:"exitCode"`
-	State     string `json:"state,omitempty"`
-	KillCause string `json:"killCause,omitempty"`
+	ExitCode  int     `json:"exitCode"`
+	State     string  `json:"state,omitempty"`
+	KillCause string  `json:"killCause,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
 }
 
 func newPTYMessage(frame pty.Frame) message {

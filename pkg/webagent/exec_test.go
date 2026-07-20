@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -23,12 +22,11 @@ func (*recordingBash) Definition() commands.ToolDefinition { return commands.Too
 func (*recordingBash) Execute(context.Context, string) (commands.ToolResult, error) {
 	return commands.ToolResult{}, nil
 }
-func (b *recordingBash) RunForeground(ctx context.Context, command string, options commands.BashExecOptions) (tmux.Info, error) {
+func (b *recordingBash) RunForeground(_ context.Context, command string, options commands.BashExecOptions) (*commands.Execution, error) {
 	b.command = command
 	b.options = options
 	options.OnOutput([]byte("streamed\n"))
-	output.PublishResult(ctx, &output.Result{Summary: output.Summary{Targets: 2}})
-	return tmux.Info{State: tmux.StateCompleted}, nil
+	return &commands.Execution{Details: &output.Result{Summary: output.Summary{Targets: 2}}}, nil
 }
 
 func TestExecCommandUsesBashForegroundExecution(t *testing.T) {

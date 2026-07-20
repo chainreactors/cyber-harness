@@ -1,9 +1,5 @@
 package commands
 
-import (
-	"io"
-)
-
 func init() {
 	RegisterFactory(Factory{
 		Group: "core",
@@ -33,14 +29,9 @@ func init() {
 			bash := NewBashTool(workDir, timeout).WithScannerProxy(deps.ScannerProxy)
 			bash.SetCommandNames(reg.Names)
 			bash.SetCommandResolver(reg.Get)
-			bash.Manager().SetExecHooks(
-				func(w io.Writer) { Output.Reset(w) },
-				func() { Output.Reset(nil) },
-			)
-			bash.Manager().SetWorkDir(workDir)
 			reg.RegisterTool(bash)
 
-			tmuxCmd := NewTmuxCommand(bash.Manager())
+			tmuxCmd := NewTmuxCommand(bash)
 			reg.Register(tmuxCmd, "core")
 		},
 	})

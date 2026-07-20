@@ -15,10 +15,8 @@ func init() {
 			if es == nil || es.Neutron == nil {
 				return
 			}
-			reg.Register(
-				New(es.Neutron, es.Index).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus),
-				"scanner",
-			)
+			impl := New(es.Neutron, es.Index).WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
+			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run, SetProxy: impl.SetProxy, GetProxy: func() string { return impl.Proxy }}, "scanner")
 		},
 	})
 }

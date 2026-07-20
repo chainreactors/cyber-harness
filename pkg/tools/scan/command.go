@@ -87,25 +87,16 @@ func Usage() string {
 	return toolargs.GoFlagsHelp("scan", &options)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("scan", &err)
-	out, result, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
+	out, result, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	output.PublishResult(ctx, result)
 	if out != "" {
-		fmt.Fprint(commands.Output, out)
+		fmt.Fprint(execution.Stdout, out)
 	}
-	return nil
-}
-
-func (c *Command) ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
-	out, result, err := c.execute(ctx, c.resolveRelativePaths(args), stream)
-	if err == nil {
-		output.PublishResult(ctx, result)
-	}
-	return out, result, err
+	return result, nil
 }
 
 func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
@@ -155,7 +146,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	trace := flags.Trace || flags.Debug
 	pipelineBus := eventbus.New[pipeline.Observation]()
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
-	subscribePipeline(pipelineBus, coll, trace)
+	subscribePipeline(pipelineBus, coll, trace, stream)
 
 	var scanWriter *scanJSONLWriter
 	if flags.OutputFile != "" {

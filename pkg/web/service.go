@@ -19,6 +19,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -453,24 +454,36 @@ func scanArgsForJob(job *ScanJob) []string {
 	return args
 }
 
-type structuredScanCommand interface {
-	ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error)
-}
-
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
 	app := s.appSnapshot()
 	if app == nil || app.Commands == nil {
 		return "", nil, fmt.Errorf("aiscan runtime is not ready")
 	}
-	cmd, ok := app.Commands.Get("scan")
+	tool, ok := app.Commands.GetTool("bash")
 	if !ok {
-		return "", nil, fmt.Errorf("scan command is not registered")
+		return "", nil, fmt.Errorf("bash tool is not registered")
 	}
-	structured, ok := cmd.(structuredScanCommand)
+	bash, ok := tool.(*commands.BashTool)
 	if !ok {
-		return "", nil, fmt.Errorf("scan command does not support structured results")
+		return "", nil, fmt.Errorf("registered bash tool has unexpected type")
 	}
-	return structured.ExecuteStructured(ctx, args, stream)
+	var text strings.Builder
+	execution, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
+		OnOutput: func(data []byte) {
+			_, _ = text.Write(data)
+			if stream != nil {
+				_, _ = stream.Write(data)
+			}
+		},
+	})
+	if err != nil {
+		return text.String(), nil, err
+	}
+	result, ok := execution.Details.(*output.Result)
+	if !ok || result == nil {
+		return text.String(), nil, fmt.Errorf("scan execution returned no structured result")
+	}
+	return text.String(), result, nil
 }
 
 type sseStreamWriter struct {

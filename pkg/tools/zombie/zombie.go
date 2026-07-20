@@ -47,8 +47,9 @@ func (c *Command) Usage() string {
 	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("zombie", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {
@@ -61,12 +62,12 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		if buf.Len() > 0 {
-			fmt.Fprint(commands.Output, buf.String())
+			fmt.Fprint(execution.Stdout, buf.String())
 		}
-		return fmt.Errorf("zombie: %w", err)
+		return nil, fmt.Errorf("zombie: %w", err)
 	}
-	fmt.Fprint(commands.Output, buf.String())
-	return nil
+	fmt.Fprint(execution.Stdout, buf.String())
+	return nil, nil
 }
 
 var zombieFileFlags = map[string]bool{

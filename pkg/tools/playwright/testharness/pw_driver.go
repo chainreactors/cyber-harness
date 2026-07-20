@@ -7,14 +7,16 @@
 // Build: go build -tags browser -o pw_driver ./pkg/tools/playwright/testharness/pw_driver.go
 //
 // Protocol:
-//   Input (one JSON per line):  {"args": ["open", "http://...", "--session", "s1"]}
-//   Output (one JSON per line): {"output": "Session: s1\n...", "error": ""}
+//
+//	Input (one JSON per line):  {"args": ["open", "http://...", "--session", "s1"]}
+//	Output (one JSON per line): {"output": "Session: s1\n...", "error": ""}
 //
 // Send {"args": ["__quit__"]} to exit cleanly.
 package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -55,9 +57,9 @@ func main() {
 			break
 		}
 
-		commands.Output.Reset(nil)
-		err := cmd.Execute(ctx, req.Args)
-		resp := response{Output: commands.Output.Captured()}
+		var output bytes.Buffer
+		_, err := cmd.Run(ctx, &commands.Execution{Args: req.Args, Stdout: &output, Stderr: &output})
+		resp := response{Output: output.String()}
 		if err != nil {
 			resp.Error = err.Error()
 		}

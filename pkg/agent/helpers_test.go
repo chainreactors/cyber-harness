@@ -217,9 +217,9 @@ type stubPseudoCommand struct {
 
 func (c *stubPseudoCommand) Name() string  { return c.name }
 func (c *stubPseudoCommand) Usage() string { return c.name }
-func (c *stubPseudoCommand) Execute(_ context.Context, _ []string) error {
-	fmt.Fprint(commands.Output, c.output)
-	return nil
+func (c *stubPseudoCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	fmt.Fprint(execution.Stdout, c.output)
+	return nil, nil
 }
 
 func chatResponse(msg ChatMessage) *ChatCompletionResponse {

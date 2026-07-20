@@ -64,8 +64,9 @@ func (c *Command) QuickReference() string {
     gogo -l targets.txt -p top2 -ev`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("gogo", &err)
+	args := execution.Args
 	args = c.normalizeArgs(args)
 	args = c.injectProxy(args)
 
@@ -95,11 +96,11 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		},
 	}
 	if err := gogocore.RunWithArgs(ctx, args, opts); err != nil {
-		fmt.Fprint(commands.Output, buf.String())
-		return err
+		fmt.Fprint(execution.Stdout, buf.String())
+		return nil, err
 	}
-	fmt.Fprint(commands.Output, buf.String())
-	return nil
+	fmt.Fprint(execution.Stdout, buf.String())
+	return nil, nil
 }
 
 // TestInjectProxy is exported for cross-package testing.

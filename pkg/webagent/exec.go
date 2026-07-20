@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -31,12 +30,9 @@ func ExecCommand(ctx context.Context, msg webproto.Message, reg *commands.Comman
 		return
 	}
 
-	// Scope scanner telemetry and structured results to this remote execution.
+	// Scope scanner telemetry to this remote execution. Final structured data
+	// returns normally on Execution.Details.
 	execCtx := output.ContextWithCallID(ctx, taskID)
-	var structuredResult *output.Result
-	execCtx = output.ContextWithResultSink(execCtx, func(result *output.Result) {
-		structuredResult = result
-	})
 	writer := &StreamWriter{TaskID: taskID, SendFn: send}
 	bash, ok := reg.GetTool("bash")
 	if !ok {
@@ -44,7 +40,7 @@ func ExecCommand(ctx context.Context, msg webproto.Message, reg *commands.Comman
 		return
 	}
 	runner, ok := bash.(interface {
-		RunForeground(context.Context, string, commands.BashExecOptions) (tmux.Info, error)
+		RunForeground(context.Context, string, commands.BashExecOptions) (*commands.Execution, error)
 	})
 	if !ok {
 		send(webproto.Message{Type: "error", TaskID: taskID, Data: "registered bash tool does not support controlled execution"})
@@ -69,8 +65,8 @@ func ExecCommand(ctx context.Context, msg webproto.Message, reg *commands.Comman
 		data = fmt.Sprintf("exit %d", result.ExitCode)
 	}
 	var payload json.RawMessage
-	if structuredResult != nil {
-		payload, _ = json.Marshal(structuredResult)
+	if result.Details != nil {
+		payload, _ = json.Marshal(result.Details)
 	}
 	send(webproto.Message{Type: "complete", TaskID: taskID, Data: data, Payload: payload})
 }

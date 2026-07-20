@@ -18,6 +18,15 @@ import (
 	goflags "github.com/jessevdk/go-flags"
 )
 
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 type fakeConsoleProvider struct {
 	requests int
 }
@@ -157,14 +166,15 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 	var buf bytes.Buffer
 	writeHelp(parser, &buf)
 	help := buf.String()
-	for _, want := range []string{
-		"agent [OPTIONS]",
-		"Agent Options:",
-		"--prompt",
-		"--transport",
-		"--server-url",
+	for _, wants := range [][]string{
+		{"agent [OPTIONS]"},
+		{"Agent Options:"},
+		{"--prompt", "/prompt"},
+		{"--transport", "/transport"},
+		{"--server-url", "/server-url"},
 	} {
-		if !strings.Contains(help, want) {
+		if !containsAny(help, wants...) {
+			want := strings.Join(wants, " or ")
 			t.Fatalf("agent help missing %q:\n%s", want, help)
 		}
 	}
