@@ -312,3 +312,5 @@ require (
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320
+
+replace github.com/chainreactors/utils/pty => ../utils/pty

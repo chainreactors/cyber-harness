@@ -252,15 +252,6 @@ export interface DistributeConfig {
   agent: { tools: string[]; timeout: number; save_session: boolean };
 }
 
-export interface TerminalMessage {
-  type: string;
-  task_id?: string;
-  stream_id?: string;
-  data?: string;
-  data_b64?: string;
-  payload?: Record<string, unknown>;
-}
-
 export async function getStatus(): Promise<ServerStatus> {
   return apiJSON('/api/status', 'Failed to load status');
 }

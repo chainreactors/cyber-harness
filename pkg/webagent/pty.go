@@ -2,7 +2,6 @@ package webagent
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"time"
 
@@ -53,10 +52,8 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Ro
 	if mgr == nil || router == nil || send == nil {
 		return func() {}
 	}
-	activity := NewPTYActivityTracker()
 	notify := make(chan tmux.EventAction, 1)
 	unsub := mgr.Subscribe(func(ev tmux.Event) {
-		activity.Observe(ev)
 		switch ev.Action {
 		case tmux.EventSessionCreated, tmux.EventSessionUpdated, tmux.EventSessionOutput, tmux.EventSessionClosed:
 			select {
@@ -78,11 +75,11 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Ro
 					continue
 				}
 				dirty = false
-				BroadcastPTYSessions(mgr, router, activity, send)
+				BroadcastPTYSessions(mgr, router, send)
 			case <-ticker.C:
 				if dirty {
 					dirty = false
-					BroadcastPTYSessions(mgr, router, activity, send)
+					BroadcastPTYSessions(mgr, router, send)
 				}
 			case <-ctx.Done():
 				return
@@ -101,98 +98,13 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Ro
 }
 
 // BroadcastPTYSessions sends the current PTY session list to all active streams.
-func BroadcastPTYSessions(mgr *tmux.Manager, router *pty.Router, activity *PTYActivityTracker, send func(webproto.Message)) {
+func BroadcastPTYSessions(mgr *tmux.Manager, router *pty.Router, send func(webproto.Message)) {
 	streamIDs := router.StreamIDs()
 	if len(streamIDs) == 0 {
 		return
 	}
-	sessions := PTYSessionViews(mgr.List(), activity)
+	sessions := mgr.List()
 	for _, streamID := range streamIDs {
-		payload, _ := json.Marshal(map[string]any{"sessions": sessions})
-		send(webproto.Message{Type: "pty.sessions", StreamID: streamID, Payload: payload})
+		send(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameSessions, StreamID: streamID, Sessions: sessions}))
 	}
-}
-
-// PTYActivity tracks per-session activity metrics.
-type PTYActivity struct {
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	ActivitySeq    int64     `json:"activity_seq,omitempty"`
-	OutputBytes    int64     `json:"output_bytes,omitempty"`
-}
-
-// PTYActivityTracker tracks activity across all PTY sessions.
-type PTYActivityTracker struct {
-	mu       sync.Mutex
-	sessions map[string]PTYActivity
-}
-
-// PTYSessionView combines session info with activity metrics.
-type PTYSessionView struct {
-	tmux.Info
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	ActivitySeq    int64     `json:"activity_seq,omitempty"`
-	OutputBytes    int64     `json:"output_bytes,omitempty"`
-}
-
-// NewPTYActivityTracker creates a new activity tracker.
-func NewPTYActivityTracker() *PTYActivityTracker {
-	return &PTYActivityTracker{sessions: make(map[string]PTYActivity)}
-}
-
-// Observe records a PTY event.
-func (t *PTYActivityTracker) Observe(ev tmux.Event) {
-	if t == nil || ev.Info.ID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	activity := t.sessions[ev.Info.ID]
-	now := time.Now()
-	if activity.LastActivityAt.IsZero() {
-		activity.LastActivityAt = ev.Info.StartedAt
-		if activity.LastActivityAt.IsZero() {
-			activity.LastActivityAt = now
-		}
-	}
-	switch ev.Action {
-	case tmux.EventSessionOutput:
-		activity.LastActivityAt = now
-		activity.ActivitySeq++
-		activity.OutputBytes += int64(ev.OutputBytes)
-	case tmux.EventSessionCreated, tmux.EventSessionUpdated, tmux.EventSessionClosed:
-		activity.LastActivityAt = now
-		activity.ActivitySeq++
-	}
-	t.sessions[ev.Info.ID] = activity
-}
-
-// Snapshot returns the activity data for a given session ID.
-func (t *PTYActivityTracker) Snapshot(id string) PTYActivity {
-	if t == nil || id == "" {
-		return PTYActivity{}
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.sessions[id]
-}
-
-// PTYSessionViews combines session info with activity snapshots.
-func PTYSessionViews(sessions []tmux.Info, activity *PTYActivityTracker) []PTYSessionView {
-	views := make([]PTYSessionView, 0, len(sessions))
-	for _, session := range sessions {
-		snapshot := activity.Snapshot(session.ID)
-		if snapshot.LastActivityAt.IsZero() {
-			snapshot.LastActivityAt = session.EndedAt
-		}
-		if snapshot.LastActivityAt.IsZero() {
-			snapshot.LastActivityAt = session.StartedAt
-		}
-		views = append(views, PTYSessionView{
-			Info:           session,
-			LastActivityAt: snapshot.LastActivityAt,
-			ActivitySeq:    snapshot.ActivitySeq,
-			OutputBytes:    snapshot.OutputBytes,
-		})
-	}
-	return views
 }

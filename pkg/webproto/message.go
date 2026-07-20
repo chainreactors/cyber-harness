@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/ptywire"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
@@ -141,24 +140,31 @@ type FileRPCPayload struct {
 	Size int64  `json:"size,omitempty"`
 }
 
-type PTYPayload = ptywire.Payload
+const TypePTY = "pty"
 
-func MessageToFrame(msg Message) (pty.Frame, error) {
-	return ptywire.ToFrame(ptywire.Message{
-		Type: msg.Type, StreamID: msg.StreamID, Data: msg.Data,
-		DataB64: msg.DataB64, Payload: msg.Payload,
-	})
+func NewPTYMessage(frame pty.Frame) Message {
+	payload, _ := json.Marshal(frame)
+	return Message{Type: TypePTY, Payload: payload}
 }
 
-func FrameToMessage(frame pty.Frame) Message {
-	msg := ptywire.FromFrame(frame)
-	return Message{Type: msg.Type, StreamID: msg.StreamID, Data: msg.Data, DataB64: msg.DataB64, Payload: msg.Payload}
-}
-
-func DecodePTYPayload(raw json.RawMessage) (PTYPayload, error) {
-	return ptywire.DecodePayload(raw)
+func DecodePTYMessage(msg Message) (pty.Frame, error) {
+	if msg.Type != TypePTY {
+		return pty.Frame{}, fmt.Errorf("unsupported PTY envelope %q", msg.Type)
+	}
+	var frame pty.Frame
+	if len(msg.Payload) == 0 {
+		return frame, fmt.Errorf("PTY frame payload is required")
+	}
+	if err := json.Unmarshal(msg.Payload, &frame); err != nil {
+		return frame, fmt.Errorf("decode PTY frame: %w", err)
+	}
+	if frame.Type == "" {
+		return frame, fmt.Errorf("PTY frame type is required")
+	}
+	return frame, nil
 }
 
 func MustJSON(v any) json.RawMessage {
-	return ptywire.MustJSON(v)
+	data, _ := json.Marshal(v)
+	return data
 }

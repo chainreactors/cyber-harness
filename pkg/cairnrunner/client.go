@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/ptywire"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
@@ -207,33 +206,19 @@ func (s *session) writeBinary(value []byte) error {
 }
 
 func (s *session) handleText(data []byte) error {
-	var envelope struct {
-		T    string `json:"t"`
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return err
-	}
-	if strings.HasPrefix(envelope.Type, "pty.") {
-		var msg ptywire.Message
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		frame, err := ptywire.ToFrame(msg)
-		if err != nil {
-			return err
-		}
-		s.router.Handle(s.ctx, frame, func(out pty.Frame) {
-			_ = s.writeJSON(ptywire.FromFrame(out))
-		})
-		return nil
-	}
-
 	var msg message
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return err
 	}
 	switch msg.T {
+	case "pty":
+		frame, err := decodePTYMessage(msg)
+		if err != nil {
+			return err
+		}
+		s.router.Handle(s.ctx, frame, func(out pty.Frame) {
+			_ = s.writeJSON(newPTYMessage(out))
+		})
 	case "req":
 		if msg.Method == "write_file" {
 			var params fileParams

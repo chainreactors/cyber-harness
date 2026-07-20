@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -292,14 +291,14 @@ func connectOnce(ctx context.Context, cc connectionConfig, pipeline *DataPipelin
 			return nil
 		}
 
-		if strings.HasPrefix(msg.Type, "pty.") {
-			frame, err := webproto.MessageToFrame(msg)
+		if msg.Type == webproto.TypePTY {
+			frame, err := webproto.DecodePTYMessage(msg)
 			if err != nil {
-				send(webproto.Message{Type: "pty.error", StreamID: msg.StreamID, Data: err.Error()})
+				send(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameError, StreamID: frame.StreamID, Error: err.Error()}))
 				continue
 			}
 			ptyRouter.Handle(ctx, frame, func(out pty.Frame) {
-				send(webproto.FrameToMessage(out))
+				send(webproto.NewPTYMessage(out))
 			})
 			continue
 		}

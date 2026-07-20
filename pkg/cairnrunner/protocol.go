@@ -1,6 +1,11 @@
 package cairnrunner
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/chainreactors/utils/pty"
+)
 
 const chunkSize = 256 * 1024
 
@@ -42,4 +47,26 @@ type execResult struct {
 	ExitCode  int    `json:"exitCode"`
 	State     string `json:"state,omitempty"`
 	KillCause string `json:"killCause,omitempty"`
+}
+
+func newPTYMessage(frame pty.Frame) message {
+	payload, _ := json.Marshal(frame)
+	return message{T: "pty", Payload: payload}
+}
+
+func decodePTYMessage(msg message) (pty.Frame, error) {
+	var frame pty.Frame
+	if msg.T != "pty" {
+		return frame, fmt.Errorf("unsupported PTY envelope %q", msg.T)
+	}
+	if len(msg.Payload) == 0 {
+		return frame, fmt.Errorf("PTY frame payload is required")
+	}
+	if err := json.Unmarshal(msg.Payload, &frame); err != nil {
+		return frame, fmt.Errorf("decode PTY frame: %w", err)
+	}
+	if frame.Type == "" {
+		return frame, fmt.Errorf("PTY frame type is required")
+	}
+	return frame, nil
 }

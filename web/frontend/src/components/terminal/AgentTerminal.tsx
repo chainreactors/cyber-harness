@@ -11,12 +11,12 @@ import {
   type TerminalStatus,
   activitySeq,
   compareSessionsByActivity,
+  encodeTerminalData,
   mergeSession,
-  parseTerminalMessage,
-  sessionFromPayload,
-  sessionPayload,
+  parsePTYFrame,
+  sessionFromFrame,
+  sessionsFromFrame,
   sessionTitle,
-  stringPayload,
   upsertSession,
   writeTerminalData,
 } from '@cyber/terminal'
@@ -101,46 +101,46 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
 
     const dataDisposable = term.onData((data) => {
       if (!activeRef.current) return
-      send({ type: 'pty.input', payload: { session_id: activeRef.current, data } })
+      send({ type: 'input', session_id: activeRef.current, data: encodeTerminalData(data) })
     })
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (!activeRef.current) return
-      send({ type: 'pty.resize', payload: { session_id: activeRef.current, cols, rows } })
+      send({ type: 'resize', session_id: activeRef.current, cols, rows })
     })
 
     ws.onopen = () => {
       setStatus('connected')
-      send({ type: 'pty.open', payload: { kind: 'repl', name: REPL_NAME, singleton: true, ...size() } })
-      send({ type: 'pty.list' })
+      send({ type: 'open', kind: 'repl', name: REPL_NAME, singleton: true, ...size() })
+      send({ type: 'list' })
     }
     ws.onmessage = (event) => {
-      const msg = parseTerminalMessage(event.data)
+      const msg = parsePTYFrame(event.data)
       if (!msg) return
       switch (msg.type) {
-        case 'pty.sessions':
-          applySessions(sessionPayload(msg))
+        case 'sessions':
+          applySessions(sessionsFromFrame(msg))
           break
-        case 'pty.opened':
-        case 'pty.attached': {
-          const id = stringPayload(msg, 'session_id')
-          const session = sessionFromPayload(msg)
+        case 'opened':
+        case 'attached': {
+          const session = sessionFromFrame(msg)
+          const id = msg.session_id || session?.id || ''
           if (session) rememberSession(session)
           if (id) { activeRef.current = id; setActiveID(id); markSessionRead(id, session) }
           setStatus('connected')
-          send({ type: 'pty.list' })
+          send({ type: 'list' })
           term.focus()
           break
         }
-        case 'pty.output': {
-          const id = stringPayload(msg, 'session_id')
+        case 'output': {
+          const id = msg.session_id || ''
           if (id && activeRef.current && id !== activeRef.current) { markSessionUnread(id); break }
           writeTerminalData(term, msg)
           markSessionRead(id || activeRef.current)
           break
         }
-        case 'pty.closed': {
-          const id = stringPayload(msg, 'session_id')
-          const session = sessionFromPayload(msg)
+        case 'closed': {
+          const session = sessionFromFrame(msg)
+          const id = msg.session_id || session?.id || ''
           const known = sessionsRef.current.find((s) => s.id === id) || null
           const current = session ? { ...known, ...session } : known
           if (session) rememberSession(session)
@@ -149,23 +149,23 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
             if (current?.kind === 'repl') {
               setStatus('connected')
               term.reset()
-              send({ type: 'pty.open', payload: { kind: 'repl', name: REPL_NAME, singleton: true, ...size() } })
-              send({ type: 'pty.list' })
+              send({ type: 'open', kind: 'repl', name: REPL_NAME, singleton: true, ...size() })
+              send({ type: 'list' })
               break
             }
             setStatus('closed')
             term.write('\r\n[session closed]\r\n')
           }
-          send({ type: 'pty.list' })
+          send({ type: 'list' })
           break
         }
-        case 'pty.detached':
+        case 'detached':
           activeRef.current = ''
           setActiveID('')
           break
-        case 'pty.error':
+        case 'error':
           setStatus('error')
-          term.write(`\r\n[pty error] ${msg.data || 'unknown error'}\r\n`)
+          term.write(`\r\n[pty error] ${msg.error || 'unknown error'}\r\n`)
           break
       }
     }
@@ -182,7 +182,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
       ws.onclose = null
       ws.onerror = null
       ws.onopen = null
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pty.detach' }))
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'detach' }))
       ws.close()
       resizeDisposable.dispose()
       dataDisposable.dispose()
@@ -260,26 +260,26 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     activeRef.current = session.id
     setActiveID(session.id)
     markSessionRead(session.id, session)
-    send({ type: 'pty.attach', payload: { session_id: session.id, ...terminalSize() } })
+    send({ type: 'attach', session_id: session.id, ...terminalSize() })
   }
 
   function attachRepl() {
     if (replSession) { attachSession(replSession); return }
     termRef.current?.reset()
-    send({ type: 'pty.open', payload: { kind: 'repl', name: REPL_NAME, singleton: true, ...terminalSize() } })
+    send({ type: 'open', kind: 'repl', name: REPL_NAME, singleton: true, ...terminalSize() })
   }
 
   function openShell() {
     termRef.current?.reset()
     activeRef.current = ''
     setActiveID('')
-    send({ type: 'pty.detach' })
-    send({ type: 'pty.open', payload: { kind: 'shell', name: `shell-${agent.name}`, ...terminalSize() } })
+    send({ type: 'detach' })
+    send({ type: 'open', kind: 'shell', name: `shell-${agent.name}`, ...terminalSize() })
   }
 
   function stopActiveSession() {
     if (!activeID || activeSession?.kind === 'repl') return
-    send({ type: 'pty.kill', payload: { session_id: activeID } })
+    send({ type: 'kill', session_id: activeID })
   }
 
   const activeTitle = activeSession ? sessionTitle(activeSession) : activeID
@@ -297,7 +297,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
         actions={
           <>
             <IconButton label={t('newShellPty')} onClick={openShell}><Plus className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label={t('refreshSessions')} onClick={() => send({ type: 'pty.list' })}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
+            <IconButton label={t('refreshSessions')} onClick={() => send({ type: 'list' })}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
             <IconButton label={t('stopActiveTask')} onClick={stopActiveSession} disabled={!canStopActive}><Square className="h-3.5 w-3.5" /></IconButton>
             <IconButton label={detailsOpen ? t('hideDetails') : t('showDetails')} onClick={() => setDetailsOpen((v) => !v)} active={detailsOpen}><Info className="h-3.5 w-3.5" /></IconButton>
           </>

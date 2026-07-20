@@ -1,10 +1,10 @@
 package webproto
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -18,129 +18,49 @@ func TestDecodeChatPayloadCarriesExecutorContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeChatPayload() error = %v", err)
 	}
-	if payload.SessionID != "session-1" {
-		t.Fatalf("session_id = %q", payload.SessionID)
-	}
-	if payload.SystemPrompt != "be concise" {
-		t.Fatalf("system_prompt = %q", payload.SystemPrompt)
+	if payload.SessionID != "session-1" || payload.SystemPrompt != "be concise" {
+		t.Fatalf("decoded chat payload = %+v", payload)
 	}
 	if payload.OutputSchema == nil || payload.OutputSchema.Name != "Result" {
 		t.Fatalf("output_schema = %#v", payload.OutputSchema)
 	}
 }
 
-func TestPTYResponsePayloadRoundTripPreservesSessions(t *testing.T) {
-	info := tmux.Info{ID: "session-1", Kind: "repl", Name: "main-repl", State: tmux.StateRunning}
-	msg := FrameToMessage(pty.Frame{
-		Type:     pty.FrameSessions,
-		StreamID: "term-1",
-		Sessions: []tmux.Info{info},
-	})
-
-	frame, err := MessageToFrame(msg)
-	if err != nil {
-		t.Fatalf("MessageToFrame() error = %v", err)
-	}
-	if len(frame.Sessions) != 1 || frame.Sessions[0].ID != info.ID || frame.Sessions[0].Kind != info.Kind {
-		t.Fatalf("sessions not preserved: %+v", frame.Sessions)
-	}
-
-	normalized := FrameToMessage(frame)
-	normalizedFrame, err := MessageToFrame(normalized)
-	if err != nil {
-		t.Fatalf("normalized MessageToFrame() error = %v", err)
-	}
-	if len(normalizedFrame.Sessions) != 1 || normalizedFrame.Sessions[0].ID != info.ID {
-		t.Fatalf("normalized sessions not preserved: %+v", normalizedFrame.Sessions)
-	}
-}
-
-func TestPTYResponsePayloadRoundTripPreservesAttachedSession(t *testing.T) {
-	info := tmux.Info{ID: "session-1", Kind: "repl", Name: "main-repl", State: tmux.StateRunning}
-	msg := FrameToMessage(pty.Frame{
-		Type:      pty.FrameAttached,
-		StreamID:  "term-1",
-		SessionID: info.ID,
-		Session:   &info,
-	})
-
-	frame, err := MessageToFrame(msg)
-	if err != nil {
-		t.Fatalf("MessageToFrame() error = %v", err)
-	}
-	if frame.Session == nil || frame.Session.ID != info.ID || frame.SessionID != info.ID {
-		t.Fatalf("attached session not preserved: frame=%+v session=%+v", frame, frame.Session)
-	}
-}
-
-func TestPTYOutputPreservesSessionID(t *testing.T) {
-	msg := FrameToMessage(pty.Frame{
+func TestPTYMessageRoundTrip(t *testing.T) {
+	want := pty.Frame{
 		Type:      pty.FrameOutput,
-		StreamID:  "term-1",
+		StreamID:  "terminal-1",
 		SessionID: "session-1",
-		Data:      []byte("hello\n"),
-	})
-	if msg.Data != "hello\n" {
-		t.Fatalf("output data = %q", msg.Data)
-	}
-	var payload PTYPayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	if payload.SessionID != "session-1" {
-		t.Fatalf("session id lost: %+v", payload)
+		Data:      []byte{0xff, 0x00, 'x'},
+		Sessions: []pty.Info{{
+			ID:          "session-1",
+			State:       pty.StateRunning,
+			ActivitySeq: 2,
+			OutputBytes: 10,
+		}},
 	}
 
-	frame, err := MessageToFrame(msg)
-	if err != nil {
-		t.Fatalf("MessageToFrame: %v", err)
+	msg := NewPTYMessage(want)
+	if msg.Type != TypePTY || msg.StreamID != "" || msg.Data != "" || msg.DataB64 != "" {
+		t.Fatalf("PTY envelope = %+v", msg)
 	}
-	if frame.SessionID != "session-1" || string(frame.Data) != "hello\n" {
-		t.Fatalf("round-trip lost output fields: %+v data=%q", frame, frame.Data)
+	got, err := DecodePTYMessage(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != want.Type || got.StreamID != want.StreamID || got.SessionID != want.SessionID || !bytes.Equal(got.Data, want.Data) {
+		t.Fatalf("round trip frame = %+v", got)
+	}
+	if len(got.Sessions) != 1 || got.Sessions[0].ActivitySeq != 2 || got.Sessions[0].OutputBytes != 10 {
+		t.Fatalf("round trip sessions = %+v", got.Sessions)
 	}
 }
 
-func TestDecodePTYPayloadError(t *testing.T) {
-	if _, err := DecodePTYPayload(json.RawMessage(`{invalid`)); err == nil {
-		t.Fatal("expected error for malformed JSON")
+func TestDecodePTYMessageRejectsInvalidEnvelope(t *testing.T) {
+	if _, err := DecodePTYMessage(Message{Type: "pty.open"}); err == nil {
+		t.Fatal("expected invalid envelope error")
 	}
-	p, err := DecodePTYPayload(nil)
-	if err != nil {
-		t.Fatalf("nil input: %v", err)
-	}
-	if p.Kind != "" || p.SessionID != "" {
-		t.Fatalf("expected zero value, got %+v", p)
-	}
-}
-
-func TestMessageFrameRoundTripSingleton(t *testing.T) {
-	payload, _ := json.Marshal(PTYPayload{
-		Kind: "repl", Name: "main-repl", Singleton: true,
-		SessionID: "sess-42", Cols: 120, Rows: 40, Data: "hello",
-	})
-	msg := Message{Type: "pty.open", StreamID: "s1", Payload: payload}
-
-	frame, err := MessageToFrame(msg)
-	if err != nil {
-		t.Fatalf("MessageToFrame: %v", err)
-	}
-	if !frame.Singleton || frame.Kind != "repl" || frame.Name != "main-repl" {
-		t.Fatalf("fields lost: %+v", frame)
-	}
-	if frame.Cols != 120 || frame.Rows != 40 || string(frame.Data) != "hello" {
-		t.Fatalf("data lost: cols=%d rows=%d data=%q", frame.Cols, frame.Rows, frame.Data)
-	}
-
-	msg2 := FrameToMessage(frame)
-	var p PTYPayload
-	_ = json.Unmarshal(msg2.Payload, &p)
-	if !p.Singleton || p.Kind != "repl" || p.SessionID != "sess-42" {
-		t.Fatalf("round-trip lost: %+v", p)
-	}
-}
-
-func TestMessageToFrameRejectsInvalidType(t *testing.T) {
-	if _, err := MessageToFrame(Message{Type: "not.pty"}); err == nil {
-		t.Fatal("expected error for invalid type")
+	if _, err := DecodePTYMessage(Message{Type: TypePTY, Payload: json.RawMessage(`{"stream_id":"x"}`)}); err == nil {
+		t.Fatal("expected missing frame type error")
 	}
 }

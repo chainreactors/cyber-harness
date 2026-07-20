@@ -20,6 +20,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 )
 
@@ -293,7 +294,7 @@ func TestRunConnectionPTYRoundTrip(t *testing.T) {
 		}
 		registeredOnce.Do(func() { close(registered) })
 
-		if err := conn.WriteJSON(webproto.Message{Type: "pty.open", StreamID: "term-1"}); err != nil {
+		if err := conn.WriteJSON(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameOpen, StreamID: "term-1"})); err != nil {
 			t.Errorf("pty.open write: %v", err)
 			return
 		}
@@ -305,27 +306,34 @@ func TestRunConnectionPTYRoundTrip(t *testing.T) {
 			if err := conn.ReadJSON(&msg); err != nil {
 				return
 			}
-			switch msg.Type {
-			case "pty.opened":
+			if msg.Type != webproto.TypePTY {
+				continue
+			}
+			frame, err := webproto.DecodePTYMessage(msg)
+			if err != nil {
+				result <- "error: " + err.Error()
+				return
+			}
+			switch frame.Type {
+			case pty.FrameOpened:
 				opened = true
 				lineEnding := "\n"
 				if runtime.GOOS == "windows" {
 					lineEnding = "\r\n"
 				}
-				payload, _ := json.Marshal(map[string]string{"data": "echo pty_web_ok" + lineEnding})
-				if err := conn.WriteJSON(webproto.Message{Type: "pty.input", StreamID: "term-1", Payload: payload}); err != nil {
+				if err := conn.WriteJSON(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameInput, StreamID: "term-1", Data: []byte("echo pty_web_ok" + lineEnding)})); err != nil {
 					t.Errorf("pty.input write: %v", err)
 					return
 				}
 				inputSent = true
-			case "pty.output":
-				if opened && inputSent && strings.Contains(msg.Data, "pty_web_ok") {
-					_ = conn.WriteJSON(webproto.Message{Type: "pty.kill", StreamID: "term-1"})
-					result <- msg.Data
+			case pty.FrameOutput:
+				if opened && inputSent && strings.Contains(string(frame.Data), "pty_web_ok") {
+					_ = conn.WriteJSON(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameKill, StreamID: "term-1"}))
+					result <- string(frame.Data)
 					return
 				}
-			case "pty.error":
-				result <- "error: " + msg.Data
+			case pty.FrameError:
+				result <- "error: " + frame.Error
 				return
 			}
 		}
@@ -366,7 +374,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 	var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	registered := make(chan struct{})
 	var registeredOnce sync.Once
-	sessionUpdates := make(chan webproto.Message, 8)
+	sessionUpdates := make(chan pty.Frame, 8)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/agent/ws" {
@@ -392,7 +400,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 		}
 		registeredOnce.Do(func() { close(registered) })
 
-		if err := conn.WriteJSON(webproto.Message{Type: "pty.list", StreamID: "term-live"}); err != nil {
+		if err := conn.WriteJSON(webproto.NewPTYMessage(pty.Frame{Type: pty.FrameList, StreamID: "term-live"})); err != nil {
 			t.Errorf("pty.list write: %v", err)
 			return
 		}
@@ -402,8 +410,12 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 			if err := conn.ReadJSON(&msg); err != nil {
 				return
 			}
-			if msg.Type == "pty.sessions" && msg.StreamID == "term-live" {
-				sessionUpdates <- msg
+			if msg.Type != webproto.TypePTY {
+				continue
+			}
+			frame, err := webproto.DecodePTYMessage(msg)
+			if err == nil && frame.Type == pty.FrameSessions && frame.StreamID == "term-live" {
+				sessionUpdates <- frame
 			}
 		}
 	}))
@@ -431,7 +443,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 	}
 
 	// Drain the explicit pty.list response so later reads prove event-driven pushes.
-	readSessionUpdate(t, sessionUpdates, func(webproto.PTYPayload) bool { return true })
+	readSessionUpdate(t, sessionUpdates, func(pty.Frame) bool { return true })
 
 	release := make(chan struct{})
 	info, err := mgr.CreateFunc(ctx, "live-session", 5*time.Second, func(ctx context.Context, w io.Writer) error {
@@ -447,60 +459,40 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 		t.Fatalf("CreateFunc: %v", err)
 	}
 
-	readSessionUpdate(t, sessionUpdates, func(payload webproto.PTYPayload) bool {
-		return payloadHasSessionState(payload, info.ID, "running")
+	readSessionUpdate(t, sessionUpdates, func(frame pty.Frame) bool {
+		return frameHasSessionState(frame, info.ID, "running")
 	})
-	readSessionMessage(t, sessionUpdates, func(msg webproto.Message) bool {
-		return payloadHasSessionActivity(msg.Payload, info.ID)
+	readSessionUpdate(t, sessionUpdates, func(frame pty.Frame) bool {
+		return frameHasSessionActivity(frame, info.ID)
 	})
 
 	close(release)
-	readSessionUpdate(t, sessionUpdates, func(payload webproto.PTYPayload) bool {
-		return payloadHasSessionState(payload, info.ID, "completed")
+	readSessionUpdate(t, sessionUpdates, func(frame pty.Frame) bool {
+		return frameHasSessionState(frame, info.ID, "completed")
 	})
 
 	cancel()
 	<-done
 }
 
-func readSessionMessage(t *testing.T, updates <-chan webproto.Message, match func(webproto.Message) bool) webproto.Message {
+func readSessionUpdate(t *testing.T, updates <-chan pty.Frame, match func(pty.Frame) bool) pty.Frame {
 	t.Helper()
 	deadline := time.After(20 * time.Second)
 	for {
 		select {
-		case msg := <-updates:
-			if match(msg) {
-				return msg
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for pty.sessions message")
-			return webproto.Message{}
-		}
-	}
-}
-
-func readSessionUpdate(t *testing.T, updates <-chan webproto.Message, match func(webproto.PTYPayload) bool) webproto.Message {
-	t.Helper()
-	deadline := time.After(20 * time.Second)
-	for {
-		select {
-		case msg := <-updates:
-			payload, err := webproto.DecodePTYPayload(msg.Payload)
-			if err != nil {
-				t.Fatalf("decode pty payload: %v", err)
-			}
-			if match(payload) {
-				return msg
+		case frame := <-updates:
+			if match(frame) {
+				return frame
 			}
 		case <-deadline:
 			t.Fatal("timeout waiting for pty.sessions update")
-			return webproto.Message{}
+			return pty.Frame{}
 		}
 	}
 }
 
-func payloadHasSessionState(payload webproto.PTYPayload, sessionID, state string) bool {
-	for _, session := range payload.Sessions {
+func frameHasSessionState(frame pty.Frame, sessionID, state string) bool {
+	for _, session := range frame.Sessions {
 		if session.ID == sessionID && string(session.State) == state {
 			return true
 		}
@@ -508,18 +500,8 @@ func payloadHasSessionState(payload webproto.PTYPayload, sessionID, state string
 	return false
 }
 
-func payloadHasSessionActivity(raw json.RawMessage, sessionID string) bool {
-	var payload struct {
-		Sessions []struct {
-			ID          string `json:"id"`
-			ActivitySeq int64  `json:"activity_seq"`
-			OutputBytes int64  `json:"output_bytes"`
-		} `json:"sessions"`
-	}
-	if json.Unmarshal(raw, &payload) != nil {
-		return false
-	}
-	for _, session := range payload.Sessions {
+func frameHasSessionActivity(frame pty.Frame, sessionID string) bool {
+	for _, session := range frame.Sessions {
 		if session.ID == sessionID && session.ActivitySeq >= 2 && session.OutputBytes > 0 {
 			return true
 		}

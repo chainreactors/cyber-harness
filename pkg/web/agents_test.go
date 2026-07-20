@@ -17,6 +17,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/utils/pty"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
@@ -58,6 +59,48 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
 	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, webproto.AgentStatus{Space: "case-test"})
+}
+
+func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+	t.Helper()
+	if err := conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
+		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
+	}
+}
+
+func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+	t.Helper()
+	var msg WSMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("agent read PTY %s: %v", want, err)
+	}
+	frame, err := webproto.DecodePTYMessage(msg)
+	if err != nil {
+		t.Fatalf("decode agent PTY %s: %v", want, err)
+	}
+	if frame.Type != want {
+		t.Fatalf("agent expected PTY %s, got %s", want, frame.Type)
+	}
+	return frame
+}
+
+func writeBrowserPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+	t.Helper()
+	if err := conn.WriteJSON(frame); err != nil {
+		t.Fatalf("browser write PTY %s: %v", frame.Type, err)
+	}
+}
+
+func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+	t.Helper()
+	var frame pty.Frame
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("browser read PTY %s: %v", want, err)
+	}
+	if frame.Type != want {
+		t.Fatalf("browser expected PTY %s, got %s", want, frame.Type)
+	}
+	return frame
 }
 
 func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status webproto.AgentStatus) *websocket.Conn {
@@ -448,53 +491,31 @@ func TestWSTerminalRelay(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	if err := browserConn.WriteJSON(WSMessage{Type: "pty.open"}); err != nil {
-		t.Fatalf("browser pty.open: %v", err)
-	}
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
 
-	var open WSMessage
-	if err := agentConn.ReadJSON(&open); err != nil {
-		t.Fatalf("agent read pty.open: %v", err)
-	}
-	if open.Type != "pty.open" || open.StreamID == "" || open.TaskID != "" {
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
+	if open.StreamID == "" {
 		t.Fatalf("unexpected pty.open: %+v", open)
 	}
 
-	openedPayload, _ := json.Marshal(map[string]string{"session_id": "session-1"})
-	if err := agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: open.StreamID, Payload: openedPayload}); err != nil {
-		t.Fatalf("agent pty.opened: %v", err)
-	}
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "session-1"})
 
-	var opened WSMessage
-	if err := browserConn.ReadJSON(&opened); err != nil {
-		t.Fatalf("browser read pty.opened: %v", err)
-	}
-	if opened.Type != "pty.opened" || opened.StreamID != open.StreamID || opened.TaskID != "" || !strings.Contains(string(opened.Payload), "session-1") {
+	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
+	if opened.StreamID != open.StreamID || opened.SessionID != "session-1" {
 		t.Fatalf("unexpected pty.opened: %+v", opened)
 	}
 
-	inputPayload, _ := json.Marshal(map[string]string{"session_id": "session-1", "data": "echo pty-ok\n"})
-	if err := browserConn.WriteJSON(WSMessage{Type: "pty.input", Payload: inputPayload}); err != nil {
-		t.Fatalf("browser pty.input: %v", err)
-	}
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, SessionID: "session-1", Data: []byte("echo pty-ok\n")})
 
-	var input WSMessage
-	if err := agentConn.ReadJSON(&input); err != nil {
-		t.Fatalf("agent read pty.input: %v", err)
-	}
-	if input.Type != "pty.input" || input.StreamID != open.StreamID || input.TaskID != "" || !strings.Contains(string(input.Payload), "pty-ok") {
+	input := readAgentPTY(t, agentConn, pty.FrameInput)
+	if input.StreamID != open.StreamID || input.SessionID != "session-1" || string(input.Data) != "echo pty-ok\n" {
 		t.Fatalf("unexpected pty.input: %+v", input)
 	}
 
-	if err := agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: open.StreamID, Data: "pty-ok\n"}); err != nil {
-		t.Fatalf("agent pty.output: %v", err)
-	}
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: open.StreamID, Data: []byte("pty-ok\n")})
 
-	var output WSMessage
-	if err := browserConn.ReadJSON(&output); err != nil {
-		t.Fatalf("browser read pty.output: %v", err)
-	}
-	if output.Type != "pty.output" || output.TaskID != "" || output.StreamID != open.StreamID || output.Data != "pty-ok\n" {
+	output := readBrowserPTY(t, browserConn, pty.FrameOutput)
+	if output.StreamID != open.StreamID || string(output.Data) != "pty-ok\n" {
 		t.Fatalf("unexpected pty.output: %+v", output)
 	}
 }
@@ -516,106 +537,64 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	readAgent := func(typ string) WSMessage {
-		t.Helper()
-		var m WSMessage
-		if err := agentConn.ReadJSON(&m); err != nil {
-			t.Fatalf("agent read %s: %v", typ, err)
-		}
-		if m.Type != typ {
-			t.Fatalf("agent expected %s, got %s", typ, m.Type)
-		}
-		return m
-	}
-	readBrowser := func(typ string) WSMessage {
-		t.Helper()
-		var m WSMessage
-		if err := browserConn.ReadJSON(&m); err != nil {
-			t.Fatalf("browser read %s: %v", typ, err)
-		}
-		if m.Type != typ {
-			t.Fatalf("browser expected %s, got %s", typ, m.Type)
-		}
-		return m
-	}
-	agentReply := func(m WSMessage) {
-		t.Helper()
-		if err := agentConn.WriteJSON(m); err != nil {
-			t.Fatalf("agent write %s: %v", m.Type, err)
-		}
-	}
-	browserSend := func(m WSMessage) {
-		t.Helper()
-		if err := browserConn.WriteJSON(m); err != nil {
-			t.Fatalf("browser write %s: %v", m.Type, err)
-		}
-	}
-
 	// open
-	browserSend(WSMessage{Type: "pty.open", Payload: mustJSON(map[string]any{
-		"kind": "shell", "name": "test-shell", "cols": 80, "rows": 24,
-	})})
-	open := readAgent("pty.open")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 
-	agentReply(WSMessage{Type: "pty.opened", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1", "kind": "shell"})})
-	opened := readBrowser("pty.opened")
-	if !strings.Contains(string(opened.Payload), "sess-1") {
-		t.Fatalf("opened missing session_id: %s", opened.Payload)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1", Kind: "shell"})
+	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
+	if opened.SessionID != "sess-1" {
+		t.Fatalf("opened missing session_id: %+v", opened)
 	}
 
 	// input → output
-	browserSend(WSMessage{Type: "pty.input", Payload: mustJSON(map[string]any{"data": "ls\n"})})
-	inp := readAgent("pty.input")
-	if !strings.Contains(string(inp.Payload), "ls") {
-		t.Fatalf("input data lost: %s", inp.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, Data: []byte("ls\n")})
+	inp := readAgentPTY(t, agentConn, pty.FrameInput)
+	if string(inp.Data) != "ls\n" {
+		t.Fatalf("input data lost: %q", inp.Data)
 	}
-	agentReply(WSMessage{Type: "pty.output", StreamID: streamID, Data: "file1 file2\n"})
-	out := readBrowser("pty.output")
-	if out.Data != "file1 file2\n" {
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte("file1 file2\n")})
+	out := readBrowserPTY(t, browserConn, pty.FrameOutput)
+	if string(out.Data) != "file1 file2\n" {
 		t.Fatalf("output: %q", out.Data)
 	}
 
 	// resize
-	browserSend(WSMessage{Type: "pty.resize", Payload: mustJSON(map[string]any{"cols": 120, "rows": 40})})
-	resize := readAgent("pty.resize")
-	if !strings.Contains(string(resize.Payload), "120") {
-		t.Fatalf("resize cols lost: %s", resize.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameResize, Cols: 120, Rows: 40})
+	resize := readAgentPTY(t, agentConn, pty.FrameResize)
+	if resize.Cols != 120 || resize.Rows != 40 {
+		t.Fatalf("resize lost: %+v", resize)
 	}
 
 	// list
-	browserSend(WSMessage{Type: "pty.list"})
-	list := readAgent("pty.list")
-	agentReply(WSMessage{Type: "pty.sessions", StreamID: list.StreamID,
-		Payload: mustJSON(map[string]any{"sessions": []map[string]any{
-			{"id": "sess-1", "kind": "shell", "state": "running"},
-		}})})
-	sessions := readBrowser("pty.sessions")
-	if !strings.Contains(string(sessions.Payload), "sess-1") {
-		t.Fatalf("sessions missing: %s", sessions.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameList})
+	list := readAgentPTY(t, agentConn, pty.FrameList)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "sess-1", Kind: "shell", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "sess-1" {
+		t.Fatalf("sessions missing: %+v", sessions)
 	}
 
 	// detach
-	browserSend(WSMessage{Type: "pty.detach"})
-	det := readAgent("pty.detach")
-	agentReply(WSMessage{Type: "pty.detached", StreamID: det.StreamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	readBrowser("pty.detached")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameDetach})
+	det := readAgentPTY(t, agentConn, pty.FrameDetach)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameDetached, StreamID: det.StreamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameDetached)
 
 	// attach
-	browserSend(WSMessage{Type: "pty.attach", Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	att := readAgent("pty.attach")
-	agentReply(WSMessage{Type: "pty.attached", StreamID: att.StreamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	readBrowser("pty.attached")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, SessionID: "sess-1"})
+	att := readAgentPTY(t, agentConn, pty.FrameAttach)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: att.StreamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameAttached)
 
 	// closed
-	agentReply(WSMessage{Type: "pty.closed", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1", "state": "completed", "exit_code": 0})})
-	closed := readBrowser("pty.closed")
-	if !strings.Contains(string(closed.Payload), "completed") {
-		t.Fatalf("closed state lost: %s", closed.Payload)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: streamID,
+		SessionID: "sess-1", State: pty.StateCompleted})
+	closed := readBrowserPTY(t, browserConn, pty.FrameClosed)
+	if closed.State != pty.StateCompleted {
+		t.Fatalf("closed state lost: %+v", closed)
 	}
 }
 
@@ -636,19 +615,12 @@ func TestWSTerminalSingleton(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	browserConn.WriteJSON(WSMessage{Type: "pty.open", Payload: mustJSON(map[string]any{
-		"kind": "repl", "name": "main-repl", "singleton": true, "cols": 80, "rows": 24,
-	})})
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen,
+		Kind: "repl", Name: "main-repl", Singleton: true, Cols: 80, Rows: 24})
 
-	var open WSMessage
-	agentConn.ReadJSON(&open)
-	if open.Type != "pty.open" {
-		t.Fatalf("expected pty.open, got %s", open.Type)
-	}
-	var payload webproto.PTYPayload
-	json.Unmarshal(open.Payload, &payload)
-	if !payload.Singleton || payload.Kind != "repl" || payload.Name != "main-repl" {
-		t.Fatalf("singleton not preserved: %+v", payload)
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
+	if !open.Singleton || open.Kind != "repl" || open.Name != "main-repl" {
+		t.Fatalf("singleton not preserved: %+v", open)
 	}
 }
 
@@ -669,17 +641,15 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	browserConn.WriteJSON(WSMessage{Type: "pty.open"})
-	var open WSMessage
-	agentConn.ReadJSON(&open)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
-	agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	browserConn.ReadJSON(&open) // consume opened
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameOpened)
 
 	// Flood: agent sends 100 output messages without browser reading
 	for i := 0; i < 100; i++ {
-		agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: streamID, Data: strings.Repeat("x", 100)})
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte(strings.Repeat("x", 100))})
 	}
 	time.Sleep(100 * time.Millisecond)
 
@@ -687,11 +657,11 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	browserConn.SetReadDeadline(time.Now().Add(time.Second))
 	received := 0
 	for {
-		var m WSMessage
+		var m pty.Frame
 		if err := browserConn.ReadJSON(&m); err != nil {
 			break
 		}
-		if m.Type == "pty.output" {
+		if m.Type == pty.FrameOutput {
 			received++
 		}
 	}
@@ -796,13 +766,17 @@ func drainAgentMessages(conn *websocket.Conn, timeout time.Duration) []WSMessage
 	return msgs
 }
 
-func findMessage(msgs []WSMessage, typ string) (WSMessage, bool) {
+func findPTYFrame(msgs []WSMessage, typ pty.FrameType) (pty.Frame, bool) {
 	for _, m := range msgs {
-		if m.Type == typ {
-			return m, true
+		if m.Type != webproto.TypePTY {
+			continue
+		}
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == typ {
+			return frame, true
 		}
 	}
-	return WSMessage{}, false
+	return pty.Frame{}, false
 }
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
@@ -841,20 +815,19 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	// Drain all initial messages from the agent: pty.open (repl), pty.list (tasks)
 	initial := drainAgentMessages(agentConn, time.Second)
 
-	replOpen, ok := findMessage(initial, "pty.open")
+	replOpen, ok := findPTYFrame(initial, pty.FrameOpen)
 	if !ok {
 		t.Fatalf("no pty.open received, got: %v", initial)
 	}
 	replStreamID := replOpen.StreamID
 
 	// Reply to the pty.open for the REPL terminal
-	agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: replStreamID,
-		Payload: mustJSON(map[string]any{"session_id": "e2e-sess-1", "kind": "repl"})})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: replStreamID,
+		SessionID: "e2e-sess-1", Kind: "repl"})
 
 	// Reply to pty.list for the task panel (if received)
-	if listMsg, ok := findMessage(initial, "pty.list"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.sessions", StreamID: listMsg.StreamID,
-			Payload: mustJSON(map[string]any{"sessions": []any{}})})
+	if listMsg, ok := findPTYFrame(initial, pty.FrameList); ok {
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID})
 	}
 
 	time.Sleep(300 * time.Millisecond)
@@ -875,7 +848,8 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	inputs := drainAgentMessages(agentConn, time.Second)
 	gotInput := false
 	for _, m := range inputs {
-		if m.Type == "pty.input" && m.StreamID == replStreamID {
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
 			gotInput = true
 			break
 		}
@@ -886,12 +860,12 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	}
 
 	// Agent sends output back — verify the output path works
-	agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: replStreamID, Data: "hello\r\n"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: replStreamID, Data: []byte("hello\r\n")})
 	time.Sleep(300 * time.Millisecond)
 
 	// Agent sends pty.closed
-	agentConn.WriteJSON(WSMessage{Type: "pty.closed", StreamID: replStreamID,
-		Payload: mustJSON(map[string]any{"session_id": "e2e-sess-1", "state": "completed", "exit_code": 0})})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
+		SessionID: "e2e-sess-1", State: pty.StateCompleted})
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify xterm rendered "[session closed]"
@@ -928,13 +902,11 @@ func TestE2ETerminalResize(t *testing.T) {
 
 	// Drain initial messages and reply
 	initial := drainAgentMessages(agentConn, time.Second)
-	if open, ok := findMessage(initial, "pty.open"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: open.StreamID,
-			Payload: mustJSON(map[string]any{"session_id": "resize-sess"})})
+	if open, ok := findPTYFrame(initial, pty.FrameOpen); ok {
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "resize-sess"})
 	}
-	if list, ok := findMessage(initial, "pty.list"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.sessions", StreamID: list.StreamID,
-			Payload: mustJSON(map[string]any{"sessions": []any{}})})
+	if list, ok := findPTYFrame(initial, pty.FrameList); ok {
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID})
 	}
 
 	// Trigger resize by changing viewport
@@ -944,9 +916,10 @@ func TestE2ETerminalResize(t *testing.T) {
 	msgs := drainAgentMessages(agentConn, time.Second)
 	resizeReceived := false
 	for _, m := range msgs {
-		if m.Type == "pty.resize" {
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == pty.FrameResize {
 			resizeReceived = true
-			t.Logf("resize received: %s", m.Payload)
+			t.Logf("resize received: %+v", frame)
 			break
 		}
 	}

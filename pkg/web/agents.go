@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 )
 
@@ -114,7 +114,7 @@ type AgentPool struct {
 	records        RecordStore
 	sco            SCOStore
 	ptyMu          sync.RWMutex
-	ptySubs        map[string]chan WSMessage
+	ptySubs        map[string]chan pty.Frame
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
 	upgrader       websocket.Upgrader
@@ -124,7 +124,7 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
-		ptySubs:        make(map[string]chan WSMessage),
+		ptySubs:        make(map[string]chan pty.Frame),
 		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
 	}
@@ -338,8 +338,8 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 }
 
 // HandleTerminalWS bridges one browser terminal WebSocket to one remote agent.
-// The browser sends pty.* messages; the pool assigns a stream_id and relays
-// matching agent responses back.
+// The browser sends transport-neutral PTY frames; the pool assigns a stream_id,
+// wraps them for the mixed agent connection, and unwraps matching responses.
 func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *http.Request) {
 	if p.get(agentID) == nil {
 		writeError(w, http.StatusNotFound, "agent not connected")
@@ -361,10 +361,10 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	defer close(done)
 
 	var writeMu sync.Mutex
-	write := func(msg WSMessage) error {
+	write := func(frame pty.Frame) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		return conn.WriteJSON(msg)
+		return conn.WriteJSON(frame)
 	}
 
 	go func() {
@@ -382,37 +382,32 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	}()
 
 	for {
-		var msg WSMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		var frame pty.Frame
+		if err := conn.ReadJSON(&frame); err != nil {
 			return
 		}
-		if !isTerminalMessage(msg.Type) {
-			_ = write(WSMessage{Type: "pty.error", StreamID: terminalID, Data: "unsupported terminal message"})
+		if frame.Type == "" {
+			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: "PTY frame type is required"})
 			continue
 		}
-		msg.StreamID = terminalID
-		msg.TaskID = ""
-		if err := p.SendAgentMessage(agentID, msg); err != nil {
-			_ = write(WSMessage{Type: "pty.error", StreamID: terminalID, Data: err.Error()})
+		frame.StreamID = terminalID
+		if err := p.SendAgentMessage(agentID, webproto.NewPTYMessage(frame)); err != nil {
+			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: err.Error()})
 			return
 		}
 	}
 }
 
 func (p *AgentPool) CancelPTY(agentID, terminalID string) {
-	_ = p.SendAgentMessage(agentID, WSMessage{Type: "pty.kill", StreamID: terminalID})
+	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameKill, StreamID: terminalID}))
 }
 
 func (p *AgentPool) CloseTerminal(agentID, terminalID string) {
-	_ = p.SendAgentMessage(agentID, WSMessage{Type: "pty.detach", StreamID: terminalID})
+	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
 }
 
-func isTerminalMessage(msgType string) bool {
-	return strings.HasPrefix(msgType, "pty.")
-}
-
-func (p *AgentPool) subscribePTY(terminalID string) (<-chan WSMessage, func()) {
-	ch := make(chan WSMessage, 256)
+func (p *AgentPool) subscribePTY(terminalID string) (<-chan pty.Frame, func()) {
+	ch := make(chan pty.Frame, 256)
 	p.ptyMu.Lock()
 	p.ptySubs[terminalID] = ch
 	p.ptyMu.Unlock()
@@ -427,14 +422,18 @@ func (p *AgentPool) subscribePTY(terminalID string) (<-chan WSMessage, func()) {
 }
 
 func (p *AgentPool) forwardPTYMessage(msg WSMessage) bool {
-	if !isTerminalMessage(msg.Type) || msg.StreamID == "" {
+	if msg.Type != webproto.TypePTY {
 		return false
 	}
+	frame, err := webproto.DecodePTYMessage(msg)
+	if err != nil || frame.StreamID == "" {
+		return true
+	}
 	p.ptyMu.RLock()
-	ch := p.ptySubs[msg.StreamID]
+	ch := p.ptySubs[frame.StreamID]
 	if ch != nil {
 		select {
-		case ch <- msg:
+		case ch <- frame:
 		default:
 			p.ptyDrops.Add(1)
 			select {
@@ -442,14 +441,14 @@ func (p *AgentPool) forwardPTYMessage(msg WSMessage) bool {
 			default:
 			}
 			select {
-			case ch <- msg:
+			case ch <- frame:
 			default:
 				p.ptyDrops.Add(1)
 			}
 		}
 	}
 	p.ptyMu.RUnlock()
-	return ch != nil
+	return true
 }
 
 // --- WebSocket handler ---
