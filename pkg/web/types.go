@@ -60,11 +60,13 @@ type ConfigStatus struct {
 	ConfigPath   string `json:"config_path,omitempty"`
 	ConfigLoaded bool   `json:"config_loaded"`
 	LLM          struct {
-		Provider         string `json:"provider"`
-		BaseURL          string `json:"base_url"`
-		APIKeyConfigured bool   `json:"api_key_configured"`
-		Model            string `json:"model"`
-		Proxy            string `json:"proxy"`
+		Provider         string             `json:"provider"`
+		BaseURL          string             `json:"base_url"`
+		APIKeyConfigured bool               `json:"api_key_configured"`
+		Model            string             `json:"model"`
+		Proxy            string             `json:"proxy"`
+		ActiveProfile    string             `json:"active_profile,omitempty"`
+		Profiles         []LLMProfileStatus `json:"profiles,omitempty"`
 	} `json:"llm"`
 	Cyberhub struct {
 		URL           string `json:"url"`
@@ -99,6 +101,16 @@ type ConfigStatus struct {
 	} `json:"agent"`
 }
 
+type LLMProfileStatus struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Provider         string `json:"provider"`
+	BaseURL          string `json:"base_url"`
+	APIKeyConfigured bool   `json:"api_key_configured"`
+	Model            string `json:"model"`
+	Proxy            string `json:"proxy"`
+}
+
 // ConfigStatusFromDistribute builds a masked ConfigStatus from raw config.
 func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loaded bool) ConfigStatus {
 	var cs ConfigStatus
@@ -109,6 +121,22 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.LLM.APIKeyConfigured = d.LLM.APIKey != ""
 	cs.LLM.Model = d.LLM.Model
 	cs.LLM.Proxy = d.LLM.Proxy
+	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
+	for _, profile := range d.LLM.Providers {
+		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
+			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
+			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
+			Model: profile.Model, Proxy: profile.Proxy,
+		})
+	}
+	if len(cs.LLM.Profiles) == 0 && (d.LLM.Provider != "" || d.LLM.Model != "" || d.LLM.BaseURL != "") {
+		cs.LLM.ActiveProfile = "default"
+		cs.LLM.Profiles = []LLMProfileStatus{{
+			ID: "default", Name: d.LLM.Model, Provider: d.LLM.Provider,
+			BaseURL: d.LLM.BaseURL, APIKeyConfigured: d.LLM.APIKey != "",
+			Model: d.LLM.Model, Proxy: d.LLM.Proxy,
+		}}
+	}
 	cs.Cyberhub.URL = d.Cyberhub.URL
 	cs.Cyberhub.KeyConfigured = d.Cyberhub.Key != ""
 	cs.Cyberhub.Mode = d.Cyberhub.Mode
@@ -169,8 +197,6 @@ const (
 	ChatEventScanError      = "scan_error"
 	ChatEventAgentJoined    = "agent_joined"
 	ChatEventSessionCleared = "session_cleared"
-	ChatEventEval           = "eval"
-	ChatEventCompact        = "compact"
 	ChatEventError          = "error"
 )
 
@@ -202,17 +228,7 @@ type ChatEvent struct {
 	Error     string         `json:"error,omitempty"`
 	Code      string         `json:"code,omitempty"`
 	Params    map[string]any `json:"params,omitempty"`
-	// Goal-mode evaluator verdict, carried on ChatEventEval. EvalRound is
-	// 0-indexed (the client renders round+1).
-	EvalRound  int    `json:"eval_round,omitempty"`
-	EvalPass   bool   `json:"eval_pass,omitempty"`
-	EvalReason string `json:"eval_reason,omitempty"`
-
-	CompactTokensBefore int `json:"compact_tokens_before,omitempty"`
-	CompactTokensAfter  int `json:"compact_tokens_after,omitempty"`
-	CompactKeptMessages int `json:"compact_kept_messages,omitempty"`
-
-	Transient bool `json:"-"`
+	Transient bool           `json:"-"`
 }
 
 type SendMessageRequest struct {

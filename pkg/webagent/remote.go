@@ -13,13 +13,17 @@ import (
 )
 
 func fetchRemoteConfig(webURL string) (*cfg.Option, error) {
-	url := strings.TrimRight(webURL, "/") + "/api/config/distribute"
+	baseURL, accessKey := SplitAccessKey(webURL)
+	url := strings.TrimRight(baseURL, "/") + "/api/config/distribute"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if accessKey != "" {
+		req.Header.Set("Authorization", "Bearer "+accessKey)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

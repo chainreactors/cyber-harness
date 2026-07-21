@@ -110,7 +110,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		localAgents.StopAll()
 	}()
 
-	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub, accessKey), accessKey)
+	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub, accessKey), accessKey, ioaSvc)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -233,6 +233,7 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	}
 	var dc webproto.DistributeConfig
 	_ = yaml.Unmarshal(data, &dc)
+	webproto.NormalizeLLMConfig(&dc.LLM)
 	return p, true, dc, nil
 }
 
@@ -250,9 +251,12 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 			_ = yaml.Unmarshal(data, &current)
 		}
 	}
+	webproto.NormalizeLLMConfig(&current.LLM)
 
 	// Preserve existing secrets when incoming value is empty.
 	preserveSecret(&incoming.LLM.APIKey, current.LLM.APIKey)
+	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
+	webproto.NormalizeLLMConfig(&incoming.LLM)
 	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
 	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
 	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)
@@ -272,6 +276,27 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 func preserveSecret(incoming *string, existing string) {
 	if strings.TrimSpace(*incoming) == "" {
 		*incoming = existing
+	}
+}
+
+func preserveLLMProfileSecrets(incoming *webproto.LLMConfig, existing webproto.LLMConfig) {
+	byID := make(map[string]webproto.LLMProviderConfig, len(existing.Providers))
+	for _, profile := range existing.Providers {
+		if profile.ID != "" {
+			byID[profile.ID] = profile
+		}
+	}
+	for i := range incoming.Providers {
+		if strings.TrimSpace(incoming.Providers[i].APIKey) != "" {
+			continue
+		}
+		if current, ok := byID[incoming.Providers[i].ID]; ok {
+			incoming.Providers[i].APIKey = current.APIKey
+			continue
+		}
+		if i < len(existing.Providers) {
+			incoming.Providers[i].APIKey = existing.Providers[i].APIKey
+		}
 	}
 }
 

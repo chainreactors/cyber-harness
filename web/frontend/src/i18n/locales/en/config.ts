@@ -16,6 +16,12 @@ export default {
   // field labels
   provider: 'Provider',
   model: 'Model',
+  profileName: 'Profile name',
+  profileNameHint: 'e.g. DeepSeek production',
+  unnamedProfile: 'Unnamed LLM',
+  addLLMProfile: 'Add LLM',
+  setActiveProfile: 'Set active',
+  removeProfile: 'Remove',
   // model list auto-fetch
   fetchModels: 'Fetch model list',
   modelsEmpty: 'Endpoint returned no models — enter one manually',

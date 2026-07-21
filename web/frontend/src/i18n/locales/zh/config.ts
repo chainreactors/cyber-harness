@@ -16,6 +16,12 @@ export default {
   // field labels
   provider: 'Provider',
   model: '模型',
+  profileName: '配置名称',
+  profileNameHint: '例如：DeepSeek 生产环境',
+  unnamedProfile: '未命名 LLM',
+  addLLMProfile: '添加 LLM',
+  setActiveProfile: '设为当前',
+  removeProfile: '删除',
   // model list auto-fetch
   fetchModels: '拉取模型列表',
   modelsEmpty: '该端点未返回任何模型，请手动填写',

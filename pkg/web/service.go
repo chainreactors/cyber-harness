@@ -152,6 +152,7 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
+	webproto.NormalizeLLMConfig(&cfg.LLM)
 	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
 		return ConfigStatus{}, err
 	}
@@ -169,6 +170,31 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 		s.agents.BroadcastConfigReload()
 	}
 	return s.GetConfigStatus(ctx)
+}
+
+func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (ConfigStatus, error) {
+	if strings.TrimSpace(id) == "" {
+		return ConfigStatus{}, fmt.Errorf("LLM profile id is required")
+	}
+	if s.config == nil {
+		return ConfigStatus{}, fmt.Errorf("config store is not configured")
+	}
+	_, _, cfg, err := s.config.GetDistributeConfig(ctx)
+	if err != nil {
+		return ConfigStatus{}, err
+	}
+	found := false
+	for _, profile := range cfg.LLM.Providers {
+		if profile.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ConfigStatus{}, fmt.Errorf("LLM profile %q was not found", id)
+	}
+	cfg.LLM.ActiveProfile = id
+	return s.SaveConfig(ctx, cfg)
 }
 
 func (s *Service) GetDistributeConfig(ctx context.Context) (webproto.DistributeConfig, error) {
@@ -1107,12 +1133,9 @@ func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 		s.persistRuntimeChatEvent(sessionID, event)
 	}
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
-		Type: event.Type,
-		Data: mustJSON(event),
-		// Terminal events must never be dropped (see isTerminalChatEvent). Eval
-		// verdicts are rare, non-terminal, but each one is a discrete round marker
-		// the client can't reconstruct if lost under backpressure — send reliably.
-		Reliable: isTerminalChatEvent(event.Type) || event.Type == ChatEventEval || event.Type == ChatEventCompact,
+		Type:     event.Type,
+		Data:     mustJSON(event),
+		Reliable: isTerminalChatEvent(event.Type),
 	})
 }
 

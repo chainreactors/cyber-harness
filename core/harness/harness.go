@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/aiscan/core/runner"
 )
 
 var (
@@ -205,15 +205,14 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 		h.t.Fatalf("start aiscan agent: %v", err)
 	}
 
-	taskID := h.t.Name()
-	request := webproto.Message{Type: "chat", TaskID: taskID, Data: prompt}
+	request := runner.StdioRequest{Prompt: prompt}
 	writeErr := json.NewEncoder(stdin).Encode(request)
 	closeErr := stdin.Close()
 	if writeErr != nil || closeErr != nil {
 		cancel()
 	}
 
-	output, events, streamErr := consumeAgentStream(stdout, taskID, h.monitor)
+	output, events, streamErr := consumeAgentStream(stdout, h.monitor)
 	if streamErr != nil {
 		cancel()
 	}
@@ -223,14 +222,14 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 	exitCode := processExitCode(waitErr)
 	if writeErr != nil {
 		exitCode = -1
-		fmt.Fprintf(&stderr, "write webproto stdin: %v\n", writeErr)
+		fmt.Fprintf(&stderr, "write stdio request: %v\n", writeErr)
 	} else if closeErr != nil {
 		exitCode = -1
-		fmt.Fprintf(&stderr, "close webproto stdin: %v\n", closeErr)
+		fmt.Fprintf(&stderr, "close stdio request: %v\n", closeErr)
 	}
 	if streamErr != nil {
 		exitCode = -1
-		fmt.Fprintf(&stderr, "read webproto stdout: %v\n", streamErr)
+		fmt.Fprintf(&stderr, "read AOP stdout: %v\n", streamErr)
 	}
 
 	result := &RunResult{

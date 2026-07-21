@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 func TestJoinSystemPrompts(t *testing.T) {
@@ -20,13 +20,13 @@ func TestJoinSystemPrompts(t *testing.T) {
 	}
 }
 
-func TestResponseFormatFromWebProto(t *testing.T) {
-	format, instruction, err := responseFormatFromWebProto(&webproto.OutputSchema{
+func TestResponseFormatFromSchema(t *testing.T) {
+	format, instruction, err := responseFormatFromSchema(&StdioOutputSchema{
 		Name:   "Result",
 		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
 	}, provider.StructuredOutputJSONSchema)
 	if err != nil {
-		t.Fatalf("responseFormatFromWebProto() error = %v", err)
+		t.Fatalf("responseFormatFromSchema() error = %v", err)
 	}
 	if format.JSONSchema == nil || !format.JSONSchema.Strict || format.JSONSchema.Name != "Result" {
 		t.Fatalf("response format = %#v", format)
@@ -36,13 +36,13 @@ func TestResponseFormatFromWebProto(t *testing.T) {
 	}
 }
 
-func TestResponseFormatFromWebProtoDeepSeek(t *testing.T) {
-	format, instruction, err := responseFormatFromWebProto(&webproto.OutputSchema{
+func TestResponseFormatFromSchemaDeepSeek(t *testing.T) {
+	format, instruction, err := responseFormatFromSchema(&StdioOutputSchema{
 		Name:   "Result",
 		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
 	}, provider.StructuredOutputJSONObject)
 	if err != nil {
-		t.Fatalf("responseFormatFromWebProto() error = %v", err)
+		t.Fatalf("responseFormatFromSchema() error = %v", err)
 	}
 	if format.Type != "json_object" || format.JSONSchema != nil {
 		t.Fatalf("response format = %#v", format)
@@ -52,18 +52,23 @@ func TestResponseFormatFromWebProtoDeepSeek(t *testing.T) {
 	}
 }
 
-func TestRunStdioRejectsNonChatMessage(t *testing.T) {
+func TestRunStdioRejectsEmptyPromptWithAOPTerminal(t *testing.T) {
 	input := bytes.NewBufferString(`{"type":"exec","task_id":"task-1","data":"whoami"}`)
-	err := RunStdio(context.Background(), nil, telemetry.NopLogger(), input, &bytes.Buffer{})
-	if err == nil || err.Error() != `unsupported webproto message type "exec"` {
+	var output bytes.Buffer
+	err := RunStdio(context.Background(), nil, telemetry.NopLogger(), input, &output)
+	if err == nil || err.Error() != "stdio prompt is empty" {
 		t.Fatalf("RunStdio() error = %v", err)
+	}
+	events := decodeAOPLines(t, &output)
+	if len(events) != 2 || events[0].Type != aop.TypeError || events[1].Type != aop.TypeSessionEnd {
+		t.Fatalf("events = %#v", events)
 	}
 }
 
 func TestStdioSenderCancelsOnWriteFailure(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	sender := newStdioSender(failingWriter{}, cancel)
-	err := sender.Send(webproto.Message{Type: "complete", TaskID: "task-1"})
+	sender := newStdioSender(failingWriter{}, cancel, "session-1")
+	err := sender.Complete()
 	if err == nil {
 		t.Fatal("Send() error = nil")
 	}
@@ -72,36 +77,81 @@ func TestStdioSenderCancelsOnWriteFailure(t *testing.T) {
 	}
 }
 
-func TestStdioSenderEncodesTypedAOPFrame(t *testing.T) {
+func TestStdioSenderEncodesRawAOP(t *testing.T) {
 	_, cancel := context.WithCancelCause(context.Background())
 	var output bytes.Buffer
-	sender := newStdioSender(&output, cancel)
+	sender := newStdioSender(&output, cancel, "session-1")
 	event := aop.Event{
 		Type:      aop.TypeText,
 		TS:        "2026-07-19T00:00:00Z",
 		SessionID: "session-1",
 		Agent:     "aiscan",
-		Data:      webproto.MustJSON(aop.TextData{Content: "hello"}),
+		Data:      mustJSON(t, aop.TextData{Content: "hello"}),
 	}
 
-	if err := sender.SendAOP("task-1", event); err != nil {
-		t.Fatalf("SendAOP() error = %v", err)
+	if err := sender.Send(event); err != nil {
+		t.Fatalf("Send() error = %v", err)
 	}
 
-	var frame webproto.Message
-	if err := json.NewDecoder(&output).Decode(&frame); err != nil {
-		t.Fatalf("decode frame: %v", err)
-	}
-	if frame.Type != "aop" || frame.TaskID != "task-1" {
-		t.Fatalf("frame = %#v", frame)
-	}
 	var got aop.Event
-	if err := json.Unmarshal(frame.Payload, &got); err != nil {
-		t.Fatalf("decode AOP payload: %v", err)
+	if err := json.NewDecoder(&output).Decode(&got); err != nil {
+		t.Fatalf("decode AOP: %v", err)
 	}
 	if got.Type != event.Type || !got.Valid() {
-		t.Fatalf("AOP payload = %#v", got)
+		t.Fatalf("AOP event = %#v", got)
 	}
+}
+
+func TestStdioSenderDoesNotDuplicateRootTerminal(t *testing.T) {
+	_, cancel := context.WithCancelCause(context.Background())
+	var output bytes.Buffer
+	sender := newStdioSender(&output, cancel, "fallback")
+	start := aop.Event{
+		Type: aop.TypeSessionStart, TS: "2026-07-19T00:00:00Z", SessionID: "root", Agent: "aiscan",
+		Data: mustJSON(t, aop.SessionStartData{}),
+	}
+	end := aop.Event{
+		Type: aop.TypeSessionEnd, TS: "2026-07-19T00:00:01Z", SessionID: "root", Agent: "aiscan",
+		Data: mustJSON(t, aop.SessionEndData{Stop: "completed"}),
+	}
+	if err := sender.Send(start); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(end); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	events := decodeAOPLines(t, &output)
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func decodeAOPLines(t *testing.T, input *bytes.Buffer) []aop.Event {
+	t.Helper()
+	var events []aop.Event
+	decoder := json.NewDecoder(input)
+	for {
+		var event aop.Event
+		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	return events
 }
 
 type failingWriter struct{}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Box, Menu, Monitor, Settings } from 'lucide-react'
+import { Box, Menu, Monitor, Network, Settings } from 'lucide-react'
 import LanguageToggle from './components/LanguageToggle'
 import SessionList from './components/SessionList'
 import ChatPanel from './components/ChatPanel'
@@ -14,10 +14,11 @@ import BrandLogo from './components/brand/BrandLogo'
 // Lazy: the agent terminal drags in @xterm (~its own chunk) but only renders
 // when a node's console is opened — keep it out of the first-paint bundle.
 const AgentTerminal = lazy(() => import('./components/terminal'))
-import { Button, ThemeToggle, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
+const IOAConsole = lazy(() => import('./components/IOAConsole'))
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, ThemeToggle, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider, useTheme } from '@cyber/theme'
-import { getStatus, listSCONodes } from './api'
-import type { ServerStatus } from './api'
+import { activateLLMProfile, getConfigStatus, getStatus, listSCONodes } from './api'
+import type { LLMProfileStatus, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
 import { useChatSession, agentNodeKey } from './hooks/useChatSession'
 import { usePolling } from './hooks/usePolling'
@@ -52,9 +53,13 @@ export default function App() {
   const confirm = useConfirm()
   const chat = useChatSession()
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
+  const [llmProfiles, setLLMProfiles] = useState<LLMProfileStatus[]>([])
+  const [activeLLMProfile, setActiveLLMProfile] = useState('')
+  const [switchingLLM, setSwitchingLLM] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
   const [assetPanelOpen, setAssetPanelOpen] = useState(false)
+  const [ioaConsoleOpen, setIOAConsoleOpen] = useState(false)
   const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
@@ -65,10 +70,12 @@ export default function App() {
   const [terminalNodeKey, setTerminalNodeKey] = useState<string | null>(null)
 
   const refreshStatus = useCallback(async () => {
-    try {
-      setServerStatus(await getStatus())
-    } catch {
-      /* leave prior status; the settings panel surfaces connectivity */
+    const [statusResult, configResult] = await Promise.allSettled([getStatus(), getConfigStatus()])
+    if (statusResult.status === 'fulfilled') setServerStatus(statusResult.value)
+    if (configResult.status === 'fulfilled') {
+      const profiles = configResult.value.llm.profiles ?? []
+      setLLMProfiles(profiles)
+      setActiveLLMProfile(configResult.value.llm.active_profile || profiles[0]?.id || '')
     }
   }, [])
 
@@ -114,6 +121,22 @@ export default function App() {
   const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
 
   const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+
+  const handleSwitchLLM = useCallback(async (profileID: string) => {
+    if (!profileID || profileID === activeLLMProfile) return
+    setSwitchingLLM(true)
+    try {
+      const next = await activateLLMProfile(profileID)
+      setLLMProfiles(next.llm.profiles ?? [])
+      setActiveLLMProfile(next.llm.active_profile || profileID)
+      await refreshStatus()
+      setHealthNonce((nonce) => nonce + 1)
+    } catch {
+      setConfigOpen(true)
+    } finally {
+      setSwitchingLLM(false)
+    }
+  }, [activeLLMProfile, refreshStatus])
   const activeSession = chat.sessions.find((s) => s.id === chat.activeSessionID) || null
   // The open session's bound agent has dropped off the live roster (its node
   // exited / the hub restarted). The transcript still shows, but a new turn
@@ -186,11 +209,18 @@ export default function App() {
             </Button>
             <BrandLogo size={22} />
             <span className="truncate text-sm font-semibold tracking-tight text-foreground">AIScan</span>
-            <span className="ml-1 hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">{model}</span>
+            <LLMProfileSwitcher
+              profiles={llmProfiles}
+              activeProfileID={activeLLMProfile}
+              fallbackModel={model}
+              disabled={switchingLLM}
+              onChange={handleSwitchLLM}
+            />
             <LLMHealth onOpenSettings={() => setConfigOpen(true)} reloadSignal={healthNonce} />
           </div>
           <div className="flex items-center gap-2">
             <AssetPoolButton count={scoNodes.length} onClick={() => setAssetPanelOpen(true)} />
+            <IOAConsoleButton onClick={() => setIOAConsoleOpen(true)} />
             <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
             <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
             <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
@@ -270,6 +300,15 @@ export default function App() {
         onClose={() => setAssetPanelOpen(false)}
         onSendToChat={handleAssetSendToChat}
       />
+
+      {ioaConsoleOpen && (
+        <Suspense fallback={null}>
+          <IOAConsole
+            open={ioaConsoleOpen}
+            onClose={() => setIOAConsoleOpen(false)}
+          />
+        </Suspense>
+      )}
     </TooltipProvider>
     </ThemeProvider>
   )
@@ -278,6 +317,43 @@ export default function App() {
 function ConnectedThemeToggle() {
   const { isDark, toggle } = useTheme()
   return <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
+}
+
+function LLMProfileSwitcher({
+  profiles,
+  activeProfileID,
+  fallbackModel,
+  disabled,
+  onChange,
+}: {
+  profiles: LLMProfileStatus[]
+  activeProfileID: string
+  fallbackModel: string
+  disabled: boolean
+  onChange: (profileID: string) => void
+}) {
+  if (profiles.length === 0) {
+    return <span className="ml-1 hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">{fallbackModel}</span>
+  }
+
+  return (
+    <Select value={activeProfileID || profiles[0].id} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger
+        aria-label="Switch LLM profile"
+        className="ml-1 hidden h-7 w-auto min-w-[120px] max-w-[230px] gap-1 border-0 bg-transparent px-2 font-mono text-[10px] text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground sm:flex"
+      >
+        <SelectValue placeholder={fallbackModel} />
+      </SelectTrigger>
+      <SelectContent align="start">
+        {profiles.map(profile => (
+          <SelectItem key={profile.id} value={profile.id}>
+            {profile.name || profile.model || profile.provider}
+            {profile.model && profile.name !== profile.model ? ` · ${profile.model}` : ''}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
 }
 
 function AssetPoolButton({ count, onClick }: { count: number; onClick: () => void }) {
@@ -336,6 +412,28 @@ function AgentsButton({ count, onClick }: { count: number; onClick: () => void }
         </Button>
       </TooltipTrigger>
       <TooltipContent>{active ? t('agentsConnected', { count }) : t('noAgents')}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function IOAConsoleButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation('ioa')
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={onClick}
+          aria-label={t('openConsole')}
+          className="h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border border-border bg-secondary/50 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+        >
+          <Network className="h-3 w-3" aria-hidden="true" />
+          <span className="hidden font-mono text-[10px] font-semibold sm:inline" aria-hidden="true">IOA</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t('openConsole')}</TooltipContent>
     </Tooltip>
   )
 }

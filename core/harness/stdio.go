@@ -10,72 +10,84 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-func consumeAgentStream(input io.Reader, taskID string, monitor *Monitor) (string, []aop.Event, error) {
+func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event, error) {
 	var output string
 	var events []aop.Event
 	decoder := json.NewDecoder(input)
-	terminal := false
+	rootSessionID := ""
+	var agentErr error
 
 	for {
-		var msg webproto.Message
-		if err := decoder.Decode(&msg); err != nil {
+		var event aop.Event
+		if err := decoder.Decode(&event); err != nil {
 			if errors.Is(err, io.EOF) {
-				if !terminal {
-					return output, events, fmt.Errorf("webproto stream ended without a terminal frame")
+				if rootSessionID == "" {
+					return output, events, fmt.Errorf("AOP stream ended without a root session")
 				}
-				return output, events, nil
+				return output, events, fmt.Errorf("AOP stream ended without root session.end")
 			}
-			return output, events, fmt.Errorf("decode webproto frame: %w", err)
+			return output, events, fmt.Errorf("decode AOP event: %w", err)
 		}
-		if terminal {
-			return output, events, fmt.Errorf("received %q after terminal frame", msg.Type)
+		if !event.Valid() {
+			return output, events, fmt.Errorf("invalid AOP envelope")
 		}
-		if msg.TaskID != taskID {
-			return output, events, fmt.Errorf("webproto task_id = %q, want %q", msg.TaskID, taskID)
+		events = append(events, event)
+		if monitor != nil {
+			monitor.renderEvent(event)
 		}
 
-		switch {
-		case msg.Type == "aop":
-			event, err := decodeAOPFrame(msg)
-			if err != nil {
-				return output, events, err
+		if event.Type == aop.TypeSessionStart {
+			var data aop.SessionStartData
+			if err := json.Unmarshal(event.Data, &data); err != nil {
+				return output, events, fmt.Errorf("decode session.start: %w", err)
 			}
-			events = append(events, event)
-			if event.Type == aop.TypeText {
-				var data aop.TextData
-				if json.Unmarshal(event.Data, &data) == nil && !data.Delta && data.Channel != aop.TextChannelReasoning && data.Role != "user" {
-					output = data.Content
+			if data.ParentSessionID == "" && rootSessionID == "" {
+				rootSessionID = event.SessionID
+			}
+		}
+
+		if rootSessionID == "" {
+			if event.Type == aop.TypeError {
+				var data aop.ErrorData
+				if json.Unmarshal(event.Data, &data) == nil && strings.TrimSpace(data.Message) != "" {
+					rootSessionID = event.SessionID
+					agentErr = fmt.Errorf("agent error: %s", data.Message)
 				}
 			}
-			if monitor != nil {
-				monitor.renderEvent(event)
+			if rootSessionID == "" {
+				continue
 			}
+		}
 
-		case msg.Type == "complete":
-			terminal = true
-
-		case msg.Type == "error":
-			if strings.TrimSpace(msg.Data) == "" {
-				return output, events, fmt.Errorf("webproto error frame has empty data")
+		if event.SessionID != rootSessionID {
+			continue
+		}
+		switch event.Type {
+		case aop.TypeText:
+			var data aop.TextData
+			if json.Unmarshal(event.Data, &data) == nil && !data.Delta && data.Channel != aop.TextChannelReasoning && data.Role != "user" {
+				output = data.Content
 			}
-			return output, events, fmt.Errorf("agent error: %s", msg.Data)
-
-		default:
-			return output, events, fmt.Errorf("unsupported webproto frame type %q", msg.Type)
+		case aop.TypeError:
+			var data aop.ErrorData
+			if json.Unmarshal(event.Data, &data) != nil || strings.TrimSpace(data.Message) == "" {
+				return output, events, fmt.Errorf("root AOP error has empty message")
+			}
+			agentErr = fmt.Errorf("agent error: %s", data.Message)
+		case aop.TypeSessionEnd:
+			var data aop.SessionEndData
+			if err := json.Unmarshal(event.Data, &data); err != nil {
+				return output, events, fmt.Errorf("decode session.end: %w", err)
+			}
+			if agentErr != nil {
+				return output, events, agentErr
+			}
+			if data.Stop == "error" || data.Error != "" {
+				return output, events, fmt.Errorf("agent error: %s", strings.TrimSpace(data.Error))
+			}
+			return output, events, nil
 		}
 	}
-}
-
-func decodeAOPFrame(msg webproto.Message) (aop.Event, error) {
-	var event aop.Event
-	if err := json.Unmarshal(msg.Payload, &event); err != nil {
-		return event, fmt.Errorf("decode %s payload: %w", msg.Type, err)
-	}
-	if !event.Valid() {
-		return event, fmt.Errorf("invalid AOP envelope")
-	}
-	return event, nil
 }

@@ -228,11 +228,39 @@ export interface IOAOverview {
   messages: IOAMessage[]
 }
 
+export interface LLMProfileStatus {
+  id: string
+  name: string
+  provider: string
+  base_url: string
+  api_key_configured: boolean
+  model: string
+  proxy: string
+}
+
+export interface LLMProviderProfile {
+  id: string
+  name: string
+  provider: string
+  base_url: string
+  api_key: string
+  model: string
+  proxy: string
+}
+
 // ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
 export interface ConfigStatus {
   config_path?: string;
   config_loaded: boolean;
-  llm: { provider: string; base_url: string; api_key_configured: boolean; model: string; proxy: string };
+  llm: {
+    provider: string
+    base_url: string
+    api_key_configured: boolean
+    model: string
+    proxy: string
+    active_profile?: string
+    profiles?: LLMProfileStatus[]
+  };
   cyberhub: { url: string; key_configured: boolean; mode: string; proxy: string };
   recon: { fofa_email: string; fofa_key_configured: boolean; hunter_token_configured: boolean; hunter_api_key_configured: boolean; proxy: string; limit?: number };
   scan: { verify: string; verify_timeout: number };
@@ -243,7 +271,15 @@ export interface ConfigStatus {
 
 // DistributeConfig — PUT /api/config request body (with secret values)
 export interface DistributeConfig {
-  llm: { provider: string; base_url: string; api_key: string; model: string; proxy: string };
+  llm: {
+    provider: string
+    base_url: string
+    api_key: string
+    model: string
+    proxy: string
+    active_profile: string
+    providers: LLMProviderProfile[]
+  };
   cyberhub: { url: string; key: string; mode: string; proxy: string };
   recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number };
   scan: { verify: string; verify_timeout: number };
@@ -270,6 +306,14 @@ export async function saveConfig(config: DistributeConfig): Promise<ConfigStatus
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
+}
+
+export async function activateLLMProfile(id: string): Promise<ConfigStatus> {
+  return apiJSON('/api/config/llm/active', 'Failed to switch LLM profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
 }
 
 // LLMTestRequest — POST /api/config/llm/test body. Leave api_key blank to

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -31,8 +30,6 @@ type connectionConfig struct {
 	Name      string
 	Registry  *commands.CommandRegistry
 	AgentBus  *eventbus.Bus[agent.Event]
-	DataBus   *eventbus.Bus[output.ToolDataEvent]
-	SCO       *output.SCOSidecar
 	Logger    telemetry.Logger
 	Chat      chatHandler
 	Node      protocols.NodeRef
@@ -102,13 +99,12 @@ func connect(ctx context.Context, cc connectionConfig) error {
 		logger = telemetry.NopLogger()
 	}
 
-	pipeline := BuildDataPipeline(cc.DataBus, cc.SCO)
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := connectOnce(ctx, cc, pipeline, logger)
+		err := connectOnce(ctx, cc, logger)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -127,7 +123,7 @@ func connect(ctx context.Context, cc connectionConfig) error {
 	}
 }
 
-func connectOnce(ctx context.Context, cc connectionConfig, pipeline *DataPipeline, logger telemetry.Logger) error {
+func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logger) error {
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
@@ -170,11 +166,6 @@ func connectOnce(ctx context.Context, cc connectionConfig, pipeline *DataPipelin
 	var ack webproto.Message
 	if err := conn.ReadJSON(&ack); err != nil || ack.Type != "connected" {
 		return fmt.Errorf("expected connected ack")
-	}
-
-	if pipeline != nil {
-		pipeline.Attach(send)
-		defer pipeline.Detach()
 	}
 
 	// Writer goroutine: sendCh -> WebSocket.

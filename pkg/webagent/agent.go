@@ -75,8 +75,6 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 			Name:            rt.NodeName,
 			Registry:        rt.App.Commands,
 			AgentBus:        rt.Bus,
-			DataBus:         rt.App.DataBus,
-			SCO:             rt.App.SCOSidecar,
 			Logger:          logger,
 			Chat:            chatHandler,
 			Node:            identityRef,
@@ -174,7 +172,17 @@ func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto
 }
 
 func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webproto.Message)) {
-	_, _, _ = reloadAgentConfig(serverURL, h.rt, h.chatMgr)
+	provider, model, err := reloadAgentConfig(serverURL, h.rt, h.chatMgr)
+	result := webproto.ConfigReloadResult{OK: err == nil, Model: model}
+	if err != nil {
+		result.Error = err.Error()
+	} else {
+		result.Provider = provider.Name()
+		statusPayload, _ := json.Marshal(agentStatus(h.rt))
+		send(webproto.Message{Type: "agent.status", Payload: statusPayload})
+	}
+	resultPayload, _ := json.Marshal(result)
+	send(webproto.Message{Type: "config.result", Payload: resultPayload})
 }
 
 func (h *chatAgentHandler) CancelChat(taskID string) bool {
@@ -294,9 +302,9 @@ func (m *chatRuntimeManager) reloadProvider(option *cfg.Option) (agent.Provider,
 // true when the swap succeeded, so the caller can re-announce identity.
 // ---------------------------------------------------------------------------
 
-func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntimeManager) (agent.Provider, string, bool) {
+func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntimeManager) (agent.Provider, string, error) {
 	if rt == nil {
-		return nil, "", false
+		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}
 	logger := rt.Config.Logger
 	if logger == nil {
@@ -305,15 +313,15 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 	remoteOpt, err := fetchRemoteConfig(serverURL)
 	if err != nil {
 		logger.Warnf("config reload: fetch remote config: %s", err)
-		return nil, "", false
+		return nil, "", err
 	}
 	provider, model, err := cr.reloadProvider(remoteOpt)
 	if err != nil {
 		logger.Warnf("config reload: rebuild provider: %s", err)
-		return nil, "", false
+		return nil, "", err
 	}
 	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
-	return provider, model, true
+	return provider, model, nil
 }
 
 // ---------------------------------------------------------------------------

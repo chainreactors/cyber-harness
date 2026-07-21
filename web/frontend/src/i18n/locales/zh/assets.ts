@@ -1,6 +1,8 @@
 export default {
   title: '资产',
   openAssets: '资产池',
+  description: '统一检索、筛选、导入和复用已发现的资产',
+  refresh: '刷新资产',
   noAssets: '尚未发现资产',
   noAssetsHint: '执行一次扫描以填充资产池。',
   sendToChat: '发送到聊天',

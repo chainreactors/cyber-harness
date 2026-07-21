@@ -48,6 +48,7 @@ type remoteAgent struct {
 	commandsMenu []webproto.CommandSpec
 	conn         *websocket.Conn
 	sendCh       chan WSMessage
+	controlCh    chan WSMessage
 	connectAt    time.Time
 	node         protocols.NodeRef
 	runtime      webproto.AgentRuntime
@@ -297,17 +298,25 @@ func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-ch
 
 // BroadcastConfigReload notifies every connected agent that the hub config
 // changed so each re-fetches and hot-swaps its LLM provider without a restart.
-// Best-effort: an agent whose send channel is full picks the change up on its
-// next reconnect. Returns the number of agents notified.
+// Config notifications use a dedicated control channel so task output cannot
+// starve or silently drop a provider change. A full channel already contains a
+// pending reload, so the latest persisted config will still be fetched.
 func (p *AgentPool) BroadcastConfigReload() int {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	n := 0
+	agents := make([]*remoteAgent, 0, len(p.agents))
 	for _, a := range p.agents {
-		select { // non-blocking, so safe to send under the read lock
-		case a.sendCh <- WSMessage{Type: "config"}:
+		agents = append(agents, a)
+	}
+	p.mu.RUnlock()
+	n := 0
+	for _, a := range agents {
+		select {
+		case a.controlCh <- WSMessage{Type: "config"}:
 			n++
 		default:
+			// A pending config control frame already causes the agent to fetch the
+			// newest persisted config, so this update is effectively coalesced.
+			n++
 		}
 	}
 	return n
@@ -507,6 +516,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		commandsMenu: info.CommandsMenu,
 		conn:         conn,
 		sendCh:       make(chan WSMessage, 32),
+		controlCh:    make(chan WSMessage, 1),
 		connectAt:    time.Now(),
 		node:         info.Node,
 		runtime:      info.Runtime,
@@ -532,7 +542,20 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
+			// Give control frames priority over task/output traffic.
 			select {
+			case msg := <-agent.controlCh:
+				if err := conn.WriteJSON(msg); err != nil {
+					return
+				}
+				continue
+			default:
+			}
+			select {
+			case msg := <-agent.controlCh:
+				if err := conn.WriteJSON(msg); err != nil {
+					return
+				}
 			case msg, ok := <-agent.sendCh:
 				if !ok {
 					return
@@ -585,6 +608,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 				a.status.Model = status.Model
 			}
 			a.status.Bound = status.Bound
+			a.status.ConfigError = status.ConfigError
 			if status.Space != "" {
 				a.status.Space = status.Space
 			}
@@ -614,6 +638,20 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			scanID = "standalone"
 		}
 		_ = p.sco.UpsertSCONodes(context.Background(), scanID, payload.Nodes)
+
+	case "config.result":
+		var result webproto.ConfigReloadResult
+		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &result) == nil {
+			a.mu.Lock()
+			if result.OK {
+				a.status.Provider = result.Provider
+				a.status.Model = result.Model
+				a.status.ConfigError = ""
+			} else {
+				a.status.ConfigError = result.Error
+			}
+			a.mu.Unlock()
+		}
 
 	case "output":
 		if p.hub != nil && msg.TaskID != "" {
@@ -725,7 +763,6 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 		p.sessions.BroadcastAOPEvent(sid, aopEv)
 	}
 
-	ext := extractAgentExt(aopEv)
 	if aopEv.Type == aop.TypeTurnStart {
 		var d aop.TurnData
 		_ = json.Unmarshal(aopEv.Data, &d)
@@ -738,51 +775,6 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 		}
 	}
 
-	// Evaluator/compaction metadata belongs to the web product, so it remains a
-	// platform control event while the underlying agent event stays untouched.
-	if ext != nil {
-		if round, ok := ext["eval_round"].(float64); ok && round > 0 {
-			pass, _ := ext["eval_pass"].(bool)
-			reason, _ := ext["eval_reason"].(string)
-			if errMsg, ok := ext["eval_error"].(string); ok && errMsg != "" {
-				reason = errMsg
-			}
-			p.forwardToSession(a, msg.TaskID, ChatEvent{
-				Type:       ChatEventEval,
-				EvalRound:  int(round),
-				EvalPass:   pass,
-				EvalReason: reason,
-			})
-		}
-		if before, ok := ext["compact_tokens_before"].(float64); ok && before > 0 {
-			after, _ := ext["compact_tokens_after"].(float64)
-			kept, _ := ext["compact_kept_messages"].(float64)
-			p.forwardToSession(a, msg.TaskID, ChatEvent{
-				Type:                ChatEventCompact,
-				CompactTokensBefore: int(before),
-				CompactTokensAfter:  int(after),
-				CompactKeptMessages: int(kept),
-			})
-		}
-	}
-}
-
-func extractAgentExt(ev aop.Event) map[string]any {
-	if ev.Ext == nil {
-		return nil
-	}
-	// Try the agent name from the event first, then any namespace.
-	if ext, ok := ev.Ext[ev.Agent]; ok {
-		if m, ok := ext.(map[string]any); ok {
-			return m
-		}
-	}
-	for _, ext := range ev.Ext {
-		if m, ok := ext.(map[string]any); ok {
-			return m
-		}
-	}
-	return nil
 }
 
 func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {

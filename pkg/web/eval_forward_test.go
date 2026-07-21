@@ -9,113 +9,60 @@ import (
 )
 
 type evalSink struct {
-	sid    string
-	events []ChatEvent
+	sid        string
+	chatEvents []ChatEvent
+	aopEvents  []aop.Event
 }
 
-func (s *evalSink) TaskSession(taskID string) (string, bool) { return s.sid, true }
-func (s *evalSink) BroadcastChatEvent(sessionID string, event ChatEvent) {
-	s.events = append(s.events, event)
+func (s *evalSink) TaskSession(string) (string, bool) { return s.sid, true }
+func (s *evalSink) BroadcastChatEvent(_ string, event ChatEvent) {
+	s.chatEvents = append(s.chatEvents, event)
+}
+func (s *evalSink) BroadcastAOPEvent(_ string, event aop.Event) {
+	s.aopEvents = append(s.aopEvents, event)
 }
 
-func (s *evalSink) BroadcastAOPEvent(string, aop.Event) {}
-
-func TestForwardAgentEventSurfacesEvalVerdict(t *testing.T) {
+func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	sink := &evalSink{sid: "sess-eval"}
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
-	a := &remoteAgent{id: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
+	remote := &remoteAgent{id: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
 
-	// turn_end with eval ext
-	ev := agent.Event{Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalPass: true, EvalReason: "found SQLi"}
-	aopEvents := aop.FromAgentEvent(ev, "test-agent")
-	for _, aopEv := range aopEvents {
-		aopEv.SessionID = "agent-session"
-		payload, _ := json.Marshal(aopEv)
-		pool.forwardAOPEvent(a, WSMessage{
-			Type:    "aop",
-			TaskID:  "task-1",
-			Payload: payload,
-		})
+	event := agent.Event{
+		Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalPass: true,
+		EvalReason: "found SQLi", CompactTokensBefore: 1000,
+		CompactTokensAfter: 400, CompactKeptMessages: 8,
+	}
+	for _, protocolEvent := range aop.FromAgentEvent(event, "test-agent") {
+		protocolEvent.SessionID = "agent-session"
+		payload, _ := json.Marshal(protocolEvent)
+		pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TaskID: "task-1", Payload: payload})
 	}
 
-	var evalEvents []ChatEvent
-	for _, e := range sink.events {
-		if e.Type == ChatEventEval {
-			evalEvents = append(evalEvents, e)
-		}
+	if len(sink.chatEvents) != 0 {
+		t.Fatalf("AOP metadata was duplicated as chat events: %#v", sink.chatEvents)
 	}
-	if len(evalEvents) != 1 {
-		t.Fatalf("want 1 eval event, got %d (total forwarded: %d)", len(evalEvents), len(sink.events))
+	if len(sink.aopEvents) == 0 {
+		t.Fatal("AOP event was not forwarded")
 	}
-	got := evalEvents[0]
-	if got.EvalRound != 1 || !got.EvalPass || got.EvalReason != "found SQLi" {
-		t.Fatalf("verdict not carried: round=%d pass=%v reason=%q", got.EvalRound, got.EvalPass, got.EvalReason)
+	ext, ok := sink.aopEvents[0].Ext["test-agent"].(map[string]any)
+	if !ok {
+		t.Fatalf("extension = %#v", sink.aopEvents[0].Ext)
+	}
+	if ext["eval_round"] != float64(1) && ext["eval_round"] != 1 {
+		t.Fatalf("eval_round = %#v", ext["eval_round"])
+	}
+	if ext["eval_pass"] != true || ext["eval_reason"] != "found SQLi" {
+		t.Fatalf("eval extension = %#v", ext)
+	}
+	if ext["compact_tokens_before"] != float64(1000) && ext["compact_tokens_before"] != 1000 {
+		t.Fatalf("compact extension = %#v", ext)
 	}
 }
 
-func TestForwardAgentEventEvalErrorBecomesReason(t *testing.T) {
-	sink := &evalSink{sid: "sess-eval"}
-	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
-	a := &remoteAgent{id: "a", name: "w", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
-
-	ev := agent.Event{Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalError: "judge timed out"}
-	aopEvents := aop.FromAgentEvent(ev, "test-agent")
-	for _, aopEv := range aopEvents {
-		aopEv.SessionID = "agent-session"
-		payload, _ := json.Marshal(aopEv)
-		pool.forwardAOPEvent(a, WSMessage{
-			Type:    "aop",
-			TaskID:  "task-1",
-			Payload: payload,
-		})
-	}
-
-	var evalEvents []ChatEvent
-	for _, e := range sink.events {
-		if e.Type == ChatEventEval {
-			evalEvents = append(evalEvents, e)
-		}
-	}
-	if len(evalEvents) != 1 {
-		t.Fatalf("want 1 eval event, got %d", len(evalEvents))
-	}
-	got := evalEvents[0]
-	if got.EvalPass || got.EvalReason != "judge timed out" {
-		t.Fatalf("unexpected eval error event: %+v", got)
-	}
-}
-
-func TestForwardAgentEventEvalStartDropped(t *testing.T) {
-	sink := &evalSink{sid: "sess-eval"}
-	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
-	a := &remoteAgent{id: "a", name: "w", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
-
-	// eval_start has no AOP mapping — FromAgentEvent returns nil
-	ev := agent.Event{Type: agent.EventEvalStart, EvalRound: 0}
-	aopEvents := aop.FromAgentEvent(ev, "test-agent")
-	if len(aopEvents) != 0 {
-		// If it does produce events, forward them and check nothing leaks
-		for _, aopEv := range aopEvents {
-			aopEv.SessionID = "agent-session"
-			payload, _ := json.Marshal(aopEv)
-			pool.forwardAOPEvent(a, WSMessage{
-				Type:    "aop",
-				TaskID:  "task-1",
-				Payload: payload,
-			})
-		}
-	}
-
-	var evalEvents []ChatEvent
-	for _, e := range sink.events {
-		if e.Type == ChatEventEval {
-			evalEvents = append(evalEvents, e)
-		}
-	}
-	if len(evalEvents) != 0 {
-		t.Fatalf("eval_start should not forward eval badge, got %d events", len(evalEvents))
+func TestEvalStartStillHasNoAOPProjection(t *testing.T) {
+	events := aop.FromAgentEvent(agent.Event{Type: agent.EventEvalStart}, "test-agent")
+	if len(events) != 0 {
+		t.Fatalf("eval_start events = %#v", events)
 	}
 }

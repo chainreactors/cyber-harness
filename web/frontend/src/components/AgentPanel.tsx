@@ -11,12 +11,9 @@ import {
   EmptyState,
   Input,
   ListRow,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
   StatusDot,
 } from '@cyber/ui'
+import { ConsoleDrawer } from './layout/ConsoleDrawer'
 
 interface AgentPanelProps {
   open: boolean
@@ -32,61 +29,42 @@ export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, o
   const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusAgentID)
   const showAgentList = agents.length > 1
 
-  // Sheet is a controlled Radix dialog: it owns the overlay, right-slide
-  // animation, focus trap/restore, Esc and the corner close button — a11y the
-  // panel previously hand-rolled.
   return (
-    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 border-l border-border/70 bg-card p-0 sm:max-w-7xl"
-      >
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4 pr-12">
-          <div className="flex min-w-0 items-center gap-3">
-            <Monitor className="h-4 w-4 shrink-0 text-primary" />
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <SheetTitle className="text-sm font-medium text-foreground">{t('agentConsole')}</SheetTitle>
-                <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
-                  {agents.length}
-                </Badge>
-              </div>
-              <SheetDescription
-                className="truncate text-xs text-muted-foreground"
-                title={selected ? agentDetails(selected) : undefined}
-              >
-                {selected ? `${selected.name} · ${selected.busy ? t('busy') : t('idle')}` : t('noAgentSelected')}
-              </SheetDescription>
-            </div>
-          </div>
+    <ConsoleDrawer
+      open={open}
+      onClose={onClose}
+      icon={Monitor}
+      title={t('agentConsole')}
+      description={selected ? `${selected.name} · ${selected.busy ? t('busy') : t('idle')}` : t('noAgentSelected')}
+      titleMeta={(
+        <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
+          {agents.length}
+        </Badge>
+      )}
+    >
+      {agents.length === 0 ? (
+        <div className="flex h-full items-center justify-center">
+          <EmptyState icon={Monitor} title={t('noAgentsConnected')} />
         </div>
-
-        <div className="min-h-0 flex-1">
-          {agents.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <EmptyState icon={Monitor} title={t('noAgentsConnected')} />
-            </div>
-          ) : (
-            <div className="flex h-full min-h-0 flex-col lg:flex-row">
-              {showAgentList && (
-                <AgentList
-                  agents={agents}
-                  selectedID={selectedID}
-                  onSelect={setSelectedID}
-                />
-              )}
-              <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-                {selected && (
-                  <Suspense fallback={<div className="flex-1" />}>
-                    <AgentTerminal agent={selected} />
-                  </Suspense>
-                )}
-              </section>
-            </div>
+      ) : (
+        <div className="flex h-full min-h-0 flex-col lg:flex-row">
+          {showAgentList && (
+            <AgentList
+              agents={agents}
+              selectedID={selectedID}
+              onSelect={setSelectedID}
+            />
           )}
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {selected && (
+              <Suspense fallback={<div className="flex-1" />}>
+                <AgentTerminal agent={selected} />
+              </Suspense>
+            )}
+          </section>
         </div>
-      </SheetContent>
-    </Sheet>
+      )}
+    </ConsoleDrawer>
   )
 }
 

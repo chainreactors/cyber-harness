@@ -7,18 +7,30 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-// RunStdio executes exactly one webproto chat message. stdin and stdout use
-// the same message envelope as the websocket transport; stderr remains owned
-// by the logger configured by the caller.
+// StdioRequest describes the single agent run accepted on stdin.
+type StdioRequest struct {
+	Prompt       string             `json:"prompt"`
+	SessionID    string             `json:"session_id,omitempty"`
+	SystemPrompt string             `json:"system_prompt,omitempty"`
+	OutputSchema *StdioOutputSchema `json:"output_schema,omitempty"`
+}
+
+type StdioOutputSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+}
+
+// RunStdio executes exactly one request. stdin contains one StdioRequest and
+// stdout is raw AOP JSONL; stderr remains owned by the caller's logger.
 func RunStdio(
 	ctx context.Context,
 	option *cfg.Option,
@@ -26,57 +38,54 @@ func RunStdio(
 	input io.Reader,
 	output io.Writer,
 ) error {
-	var msg webproto.Message
-	if err := json.NewDecoder(input).Decode(&msg); err != nil {
-		return fmt.Errorf("decode webproto message: %w", err)
-	}
-	if msg.Type != "chat" {
-		return fmt.Errorf("unsupported webproto message type %q", msg.Type)
-	}
-	if strings.TrimSpace(msg.TaskID) == "" {
-		return fmt.Errorf("webproto chat task_id is required")
-	}
-	prompt := strings.TrimSpace(msg.Data)
-	if prompt == "" {
-		return fmt.Errorf("webproto chat data is empty")
-	}
-	opts, err := webproto.DecodeChatPayload(msg.Payload)
-	if err != nil {
-		return err
-	}
-
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	sender := newStdioSender(output, cancel)
+	sender := newStdioSender(output, cancel, newStdioSessionID())
+
+	var request StdioRequest
+	if err := json.NewDecoder(input).Decode(&request); err != nil {
+		runErr := fmt.Errorf("decode stdio request: %w", err)
+		_ = sender.Fail(runErr)
+		return runErr
+	}
+	request.SessionID = strings.TrimSpace(request.SessionID)
+	request.SystemPrompt = strings.TrimSpace(request.SystemPrompt)
+	sender.SetFallbackSession(request.SessionID)
+	prompt := strings.TrimSpace(request.Prompt)
+	if prompt == "" {
+		runErr := fmt.Errorf("stdio prompt is empty")
+		_ = sender.Fail(runErr)
+		return runErr
+	}
 
 	rt, err := NewAgentRuntime(runCtx, option, logger, &RuntimeConfig{NoOutput: true})
 	if err != nil {
-		_ = sender.Send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+		_ = sender.Fail(err)
 		return err
 	}
 	defer rt.Close()
 
 	unsub := rt.Bus.Subscribe(func(event agent.Event) {
 		for _, protocolEvent := range aop.FromAgentEvent(event, "aiscan") {
-			if sendErr := sender.SendAOP(msg.TaskID, protocolEvent); sendErr != nil {
+			if sendErr := sender.Send(protocolEvent); sendErr != nil {
 				return
 			}
 		}
 	})
 	defer unsub()
 
-	systemPrompt := joinSystemPrompts(rt.SystemPrompt, opts.SystemPrompt)
+	systemPrompt := joinSystemPrompts(rt.SystemPrompt, request.SystemPrompt)
 	agentConfig := rt.Config.WithStream(true)
-	if opts.SessionID != "" {
-		agentConfig = agentConfig.WithSessionID(opts.SessionID)
+	if request.SessionID != "" {
+		agentConfig = agentConfig.WithSessionID(request.SessionID)
 	}
-	if opts.OutputSchema != nil {
-		responseFormat, schemaInstruction, formatErr := responseFormatFromWebProto(
-			opts.OutputSchema,
+	if request.OutputSchema != nil {
+		responseFormat, schemaInstruction, formatErr := responseFormatFromSchema(
+			request.OutputSchema,
 			provider.StructuredOutputModeFor(rt.App.ProviderConfig),
 		)
 		if formatErr != nil {
-			_ = sender.Send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: formatErr.Error()})
+			_ = sender.Fail(formatErr)
 			return formatErr
 		}
 		agentConfig = agentConfig.WithResponseFormat(responseFormat)
@@ -86,17 +95,17 @@ func RunStdio(
 
 	_, runErr := agent.NewAgent(agentConfig).Run(runCtx, prompt)
 	if transportErr := sender.Err(); transportErr != nil {
-		return fmt.Errorf("write webproto stdout: %w", transportErr)
+		return fmt.Errorf("write AOP stdout: %w", transportErr)
 	}
 	if runErr != nil {
-		if err := sender.Send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: runErr.Error()}); err != nil {
-			return fmt.Errorf("write webproto stdout: %w", err)
+		if err := sender.Fail(runErr); err != nil {
+			return fmt.Errorf("write AOP stdout: %w", err)
 		}
 		return runErr
 	}
 
-	if err := sender.Send(webproto.Message{Type: "complete", TaskID: msg.TaskID}); err != nil {
-		return fmt.Errorf("write webproto stdout: %w", err)
+	if err := sender.Complete(); err != nil {
+		return fmt.Errorf("write AOP stdout: %w", err)
 	}
 	return nil
 }
@@ -114,8 +123,8 @@ func joinSystemPrompts(base, caller string) string {
 	}
 }
 
-func responseFormatFromWebProto(
-	schema *webproto.OutputSchema,
+func responseFormatFromSchema(
+	schema *StdioOutputSchema,
 	mode provider.StructuredOutputMode,
 ) (*agent.ResponseFormat, string, error) {
 	if schema == nil {
@@ -151,35 +160,115 @@ func responseFormatFromWebProto(
 }
 
 type stdioSender struct {
-	mu     sync.Mutex
-	enc    *json.Encoder
-	cancel context.CancelCauseFunc
-	err    error
+	mu              sync.Mutex
+	enc             *json.Encoder
+	cancel          context.CancelCauseFunc
+	err             error
+	fallbackSession string
+	rootSession     string
+	agentName       string
+	sentError       bool
+	terminal        bool
 }
 
-func newStdioSender(output io.Writer, cancel context.CancelCauseFunc) *stdioSender {
-	return &stdioSender{enc: json.NewEncoder(output), cancel: cancel}
+func newStdioSender(output io.Writer, cancel context.CancelCauseFunc, fallbackSession string) *stdioSender {
+	return &stdioSender{
+		enc:             json.NewEncoder(output),
+		cancel:          cancel,
+		fallbackSession: fallbackSession,
+		agentName:       "aiscan",
+	}
 }
 
-func (s *stdioSender) Send(msg webproto.Message) error {
-	return s.encode(msg)
+func newStdioSessionID() string {
+	return fmt.Sprintf("stdio-%d", time.Now().UnixNano())
 }
 
-func (s *stdioSender) SendAOP(taskID string, event aop.Event) error {
-	return s.encode(struct {
-		Type    string    `json:"type"`
-		TaskID  string    `json:"task_id"`
-		Payload aop.Event `json:"payload"`
-	}{
-		Type:    "aop",
-		TaskID:  taskID,
-		Payload: event,
-	})
+func (s *stdioSender) SetFallbackSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.fallbackSession = sessionID
+	s.mu.Unlock()
 }
 
-func (s *stdioSender) encode(value any) error {
+func (s *stdioSender) Send(event aop.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if event.Agent != "" {
+		s.agentName = event.Agent
+	}
+	if event.Type == aop.TypeSessionStart {
+		var data aop.SessionStartData
+		if json.Unmarshal(event.Data, &data) == nil && data.ParentSessionID == "" && s.rootSession == "" {
+			s.rootSession = event.SessionID
+		}
+	}
+	if event.Type == aop.TypeError && event.SessionID == s.sessionIDLocked() {
+		s.sentError = true
+	}
+	if event.Type == aop.TypeSessionEnd && event.SessionID == s.sessionIDLocked() {
+		s.terminal = true
+	}
+	return s.encodeLocked(event)
+}
+
+func (s *stdioSender) Fail(cause error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessionID := s.sessionIDLocked()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if !s.sentError {
+		data, _ := json.Marshal(aop.ErrorData{Message: cause.Error()})
+		if err := s.encodeLocked(aop.Event{
+			Type: aop.TypeError, TS: now, SessionID: sessionID, Agent: s.agentName, Data: data,
+		}); err != nil {
+			return err
+		}
+		s.sentError = true
+	}
+	if s.terminal {
+		return nil
+	}
+	data, _ := json.Marshal(aop.SessionEndData{Stop: string(agent.StopReasonError), Error: cause.Error()})
+	if err := s.encodeLocked(aop.Event{
+		Type: aop.TypeSessionEnd, TS: now, SessionID: sessionID, Agent: s.agentName, Data: data,
+	}); err != nil {
+		return err
+	}
+	s.terminal = true
+	return nil
+}
+
+func (s *stdioSender) Complete() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.terminal {
+		return nil
+	}
+	data, _ := json.Marshal(aop.SessionEndData{Stop: string(agent.StopReasonCompleted)})
+	if err := s.encodeLocked(aop.Event{
+		Type:      aop.TypeSessionEnd,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: s.sessionIDLocked(),
+		Agent:     s.agentName,
+		Data:      data,
+	}); err != nil {
+		return err
+	}
+	s.terminal = true
+	return nil
+}
+
+func (s *stdioSender) sessionIDLocked() string {
+	if s.rootSession != "" {
+		return s.rootSession
+	}
+	return s.fallbackSession
+}
+
+func (s *stdioSender) encodeLocked(value any) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -190,6 +279,7 @@ func (s *stdioSender) encode(value any) error {
 	}
 	return nil
 }
+
 func (s *stdioSender) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -10,12 +10,11 @@ import (
 )
 
 type Message struct {
-	Type     string          `json:"type"`
-	TaskID   string          `json:"task_id,omitempty"`
-	StreamID string          `json:"stream_id,omitempty"`
-	Data     string          `json:"data,omitempty"`
-	DataB64  string          `json:"data_b64,omitempty"`
-	Payload  json.RawMessage `json:"payload,omitempty"`
+	Type    string          `json:"type"`
+	TaskID  string          `json:"task_id,omitempty"`
+	Data    string          `json:"data,omitempty"`
+	DataB64 string          `json:"data_b64,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // ExecPayload carries structured parameters for an "exec" message.
@@ -67,10 +66,18 @@ type AgentRuntime struct {
 
 // AgentStatus contains mutable state. Identity remains the immutable NodeRef.
 type AgentStatus struct {
+	Provider    string `json:"provider,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Space       string `json:"space,omitempty"`
+	Bound       bool   `json:"bound"`
+	ConfigError string `json:"config_error,omitempty"`
+}
+
+type ConfigReloadResult struct {
+	OK       bool   `json:"ok"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
-	Space    string `json:"space,omitempty"`
-	Bound    bool   `json:"bound"`
+	Error    string `json:"error,omitempty"`
 }
 
 type AgentStats struct {

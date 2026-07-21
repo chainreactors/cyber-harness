@@ -15,10 +15,14 @@ type Handler struct {
 	handler http.Handler
 }
 
-func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
+func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHandler http.Handler, static http.Handler, accessKey string, ioaConsole ...IOAConsoleReader) *Handler {
 	mux := http.NewServeMux()
 
-	h := &handlerImpl{service: service, agents: agents, accessKey: accessKey}
+	var console IOAConsoleReader
+	if len(ioaConsole) > 0 {
+		console = ioaConsole[0]
+	}
+	h := &handlerImpl{service: service, agents: agents, ioa: console, accessKey: accessKey}
 
 	mux.HandleFunc("POST /api/scans", h.createScan)
 	mux.HandleFunc("GET /api/scans", h.listScans)
@@ -29,11 +33,15 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	mux.HandleFunc("GET /api/status", h.serviceStatus)
 	mux.HandleFunc("GET /api/config", h.getConfig)
 	mux.HandleFunc("PUT /api/config", h.saveConfig)
+	mux.HandleFunc("PUT /api/config/llm/active", h.activateLLMProfile)
 	mux.HandleFunc("GET /api/config/distribute", h.getDistributeConfig)
 	mux.HandleFunc("POST /api/config/llm/test", h.testLLM)
 	mux.HandleFunc("POST /api/config/llm/models", h.listLLMModels)
 	mux.HandleFunc("POST /api/config/{section}/test", h.testConn)
 	mux.HandleFunc("GET /api/agents", h.listAgents)
+	if console != nil {
+		mux.HandleFunc("GET /api/ioa/overview", h.ioaOverview)
+	}
 
 	mux.HandleFunc("GET /api/sco/nodes", h.listSCONodes)
 	mux.HandleFunc("GET /api/sco/nodes/{id}", h.getSCONode)
@@ -92,6 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type handlerImpl struct {
 	service   *Service
 	agents    *AgentPool
+	ioa       IOAConsoleReader
 	accessKey string
 }
 
@@ -138,6 +147,22 @@ func (h *handlerImpl) saveConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cs, err := h.service.SaveConfig(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cs)
+}
+
+func (h *handlerImpl) activateLLMProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	cs, err := h.service.ActivateLLMProfile(r.Context(), req.ID)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return

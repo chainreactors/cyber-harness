@@ -9,35 +9,22 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 func TestConsumeAgentStream(t *testing.T) {
-	taskID := "task-1"
-	event := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello", Role: "assistant"})
-	input := encodeFrames(t,
-		webproto.Message{
-			Type:    "aop",
-			TaskID:  taskID,
-			Payload: webproto.MustJSON(event),
-		},
-		webproto.Message{Type: "complete", TaskID: taskID, Data: "done"},
+	input := encodeEvents(t,
+		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
+		aopTestEvent("root", aop.TypeText, aop.TextData{Content: "hello", Role: "assistant"}),
+		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
 	)
 
 	var monitorOutput bytes.Buffer
-	output, events, err := consumeAgentStream(input, taskID, NewMonitor(&monitorOutput))
+	output, events, err := consumeAgentStream(input, NewMonitor(&monitorOutput))
 	if err != nil {
 		t.Fatalf("consumeAgentStream() error = %v", err)
 	}
-	if output != "done" {
-		t.Fatalf("output = %q", output)
-	}
-	if len(events) != 1 {
-		t.Fatalf("events = %#v", events)
-	}
-	text, err := aop.DecodeData[aop.TextData](events[0])
-	if err != nil || text.Content != "hello" {
-		t.Fatalf("text event = %#v err=%v", events[0], err)
+	if output != "hello" || len(events) != 3 {
+		t.Fatalf("output=%q events=%#v", output, events)
 	}
 	if !strings.Contains(monitorOutput.String(), "hello") {
 		t.Fatalf("monitor output = %q", monitorOutput.String())
@@ -45,34 +32,26 @@ func TestConsumeAgentStream(t *testing.T) {
 }
 
 func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
-	taskID := "task-1"
 	callID := "call-1"
-	input := encodeFrames(t,
-		webproto.Message{
-			Type:   "aop",
-			TaskID: taskID,
-			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
-				ToolCallID: callID,
-				ToolName:   "bash",
-				Args: map[string]any{
-					"command": "echo hello",
-					"nested":  []any{map[string]any{"enabled": true}},
-				},
-			})),
-		},
-		webproto.Message{
-			Type:   "aop",
-			TaskID: taskID,
-			Payload: webproto.MustJSON(aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
-				ToolCallID: callID,
-				ToolName:   "bash",
-				Content:    map[string]any{"output": []any{"hello", map[string]any{"code": float64(0)}}},
-			})),
-		},
-		webproto.Message{Type: "complete", TaskID: taskID, Data: "done"},
+	input := encodeEvents(t,
+		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
+		aopTestEvent("root", aop.TypeToolCall, aop.ToolCallData{
+			ToolCallID: callID,
+			ToolName:   "bash",
+			Args: map[string]any{
+				"command": "echo hello",
+				"nested":  []any{map[string]any{"enabled": true}},
+			},
+		}),
+		aopTestEvent("root", aop.TypeToolResult, aop.ToolResultData{
+			ToolCallID: callID,
+			ToolName:   "bash",
+			Content:    map[string]any{"output": []any{"hello", map[string]any{"code": float64(0)}}},
+		}),
+		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
 	)
 
-	_, events, err := consumeAgentStream(input, taskID, nil)
+	_, events, err := consumeAgentStream(input, nil)
 	if err != nil {
 		t.Fatalf("consumeAgentStream() error = %v", err)
 	}
@@ -89,45 +68,61 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	}
 }
 
-func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
-	taskID := "task-1"
-	validEvent := aopTestEvent(aop.TypeText, aop.TextData{Content: "hello"})
+func TestConsumeAgentStreamWaitsForRootSessionEnd(t *testing.T) {
+	input := encodeEvents(t,
+		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
+		aopTestEvent("child", aop.TypeSessionStart, aop.SessionStartData{ParentSessionID: "root"}),
+		aopTestEvent("child", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
+		aopTestEvent("root", aop.TypeText, aop.TextData{Content: "root done", Role: "assistant"}),
+		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
+	)
+	output, events, err := consumeAgentStream(input, nil)
+	if err != nil || output != "root done" || len(events) != 5 {
+		t.Fatalf("output=%q events=%d err=%v", output, len(events), err)
+	}
+}
+
+func TestConsumeAgentStreamReportsRootError(t *testing.T) {
+	input := encodeEvents(t,
+		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
+		aopTestEvent("root", aop.TypeError, aop.ErrorData{Message: "provider failed"}),
+		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "error", Error: "provider failed"}),
+	)
+	_, events, err := consumeAgentStream(input, nil)
+	if err == nil || !strings.Contains(err.Error(), "provider failed") || len(events) != 3 {
+		t.Fatalf("events=%d error=%v", len(events), err)
+	}
+}
+
+func TestConsumeAgentStreamRejectsInvalidStreams(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  *bytes.Buffer
 		needle string
 	}{
 		{
-			name: "task mismatch",
-			input: encodeFrames(t,
-				webproto.Message{Type: "complete", TaskID: "other"},
-			),
-			needle: "task_id",
+			name:   "invalid envelope",
+			input:  encodeRaw(t, map[string]any{"type": "text"}),
+			needle: "invalid AOP envelope",
 		},
 		{
-			name: "event type mismatch",
-			input: encodeFrames(t,
-				webproto.Message{Type: "aop", TaskID: taskID, Payload: webproto.MustJSON(validEvent)},
+			name: "missing root terminal",
+			input: encodeEvents(t,
+				aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
+				aopTestEvent("root", aop.TypeText, aop.TextData{Content: "hello"}),
 			),
-			needle: "contains AOP event",
+			needle: "without root session.end",
 		},
 		{
-			name: "unknown frame",
-			input: encodeFrames(t,
-				webproto.Message{Type: "log", TaskID: taskID},
-			),
-			needle: "unsupported webproto frame",
-		},
-		{
-			name:   "missing terminal",
-			input:  encodeFrames(t, webproto.Message{Type: "aop", TaskID: taskID, Payload: webproto.MustJSON(validEvent)}),
-			needle: "without a terminal frame",
+			name:   "no root session",
+			input:  encodeEvents(t, aopTestEvent("child", aop.TypeText, aop.TextData{Content: "hello"})),
+			needle: "without a root session",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := consumeAgentStream(tt.input, taskID, nil)
+			_, _, err := consumeAgentStream(tt.input, nil)
 			if err == nil || !strings.Contains(err.Error(), tt.needle) {
 				t.Fatalf("error = %v, want containing %q", err, tt.needle)
 			}
@@ -135,22 +130,32 @@ func TestConsumeAgentStreamRejectsInvalidFrames(t *testing.T) {
 	}
 }
 
-func aopTestEvent(eventType string, data any) aop.Event {
+func aopTestEvent(sessionID, eventType string, data any) aop.Event {
+	raw, _ := json.Marshal(data)
 	return aop.Event{
 		Type:      eventType,
 		TS:        "2026-07-19T00:00:00Z",
-		SessionID: "session-1",
+		SessionID: sessionID,
 		Agent:     "aiscan",
-		Data:      webproto.MustJSON(data),
+		Data:      raw,
 	}
 }
 
-func encodeFrames(t *testing.T, messages ...webproto.Message) *bytes.Buffer {
+func encodeEvents(t *testing.T, events ...aop.Event) *bytes.Buffer {
+	t.Helper()
+	values := make([]any, len(events))
+	for i := range events {
+		values[i] = events[i]
+	}
+	return encodeRaw(t, values...)
+}
+
+func encodeRaw(t *testing.T, values ...any) *bytes.Buffer {
 	t.Helper()
 	var output bytes.Buffer
 	encoder := json.NewEncoder(&output)
-	for _, message := range messages {
-		if err := encoder.Encode(message); err != nil {
+	for _, value := range values {
+		if err := encoder.Encode(value); err != nil {
 			t.Fatal(err)
 		}
 	}

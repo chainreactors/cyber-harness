@@ -2,7 +2,6 @@ package webagent
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -105,26 +104,4 @@ func (t *AgentStatsTracker) Observe(e agent.Event) (webproto.AgentStats, bool) {
 		return t.stats, false
 	}
 	return t.stats, true
-}
-
-// AgentEventSummary returns a human-readable summary for an agent event.
-func AgentEventSummary(e agent.Event) string {
-	switch e.Type {
-	case agent.EventToolExecutionStart:
-		return e.ToolName
-	case agent.EventToolExecutionEnd:
-		if e.IsError {
-			return e.ToolName + " error"
-		}
-		return e.ToolName + " done"
-	case agent.EventTurnStart:
-		return fmt.Sprintf("turn %d", e.Turn)
-	case agent.EventTurnEnd:
-		if e.Usage != nil {
-			return fmt.Sprintf("turn %d tokens=%d", e.Turn, e.Usage.TotalTokens)
-		}
-		return fmt.Sprintf("turn %d", e.Turn)
-	default:
-		return ""
-	}
 }

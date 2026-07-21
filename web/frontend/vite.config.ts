@@ -20,6 +20,8 @@ export default defineConfig({
       '@cyber/cstx': path.resolve(cyberUI, 'cstx/src'),
       '@cyber/cstx-easm': path.resolve(cyberUI, 'cstx-easm/src'),
       '@cyber/agent-protocol': path.resolve(cyberUI, 'agent-protocol/src'),
+      '@cyber/viewer': path.resolve(cyberUI, 'viewer/src'),
+      '@cyber/ioa': path.resolve(cyberUI, 'ioa/src'),
     },
   },
   server: {

@@ -102,7 +102,7 @@ func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	}
 }
 
-func TestEvalProjectionDoesNotDuplicateAOP(t *testing.T) {
+func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -117,19 +117,16 @@ func TestEvalProjectionDoesNotDuplicateAOP(t *testing.T) {
 			"eval_round": 2, "eval_pass": false, "eval_reason": "needs one more verified finding",
 		}},
 	})
-	svc.BroadcastChatEvent("sess-eval", ChatEvent{
-		Type:       ChatEventEval,
-		EvalRound:  2,
-		EvalPass:   false,
-		EvalReason: "needs one more verified finding",
-	})
-
 	events, err := store.ListAOPEvents(context.Background(), "sess-eval", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("persisted AOP events = %d, want 1", len(events))
+	}
+	ext, _ := events[0].Ext["aiscan"].(map[string]any)
+	if ext["eval_reason"] != "needs one more verified finding" {
+		t.Fatalf("persisted extension = %#v", ext)
 	}
 }
 

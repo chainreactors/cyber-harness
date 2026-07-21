@@ -1,6 +1,8 @@
 export default {
   title: 'Assets',
   openAssets: 'Asset pool',
+  description: 'Search, filter, import, and reuse discovered assets',
+  refresh: 'Refresh assets',
   noAssets: 'No assets discovered yet',
   noAssetsHint: 'Run a scan to populate the asset pool.',
   sendToChat: 'Send to chat',

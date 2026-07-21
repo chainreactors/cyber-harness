@@ -41,7 +41,7 @@ func TestPTYMessageRoundTrip(t *testing.T) {
 	}
 
 	msg := NewPTYMessage(want)
-	if msg.Type != TypePTY || msg.StreamID != "" || msg.Data != "" || msg.DataB64 != "" {
+	if msg.Type != TypePTY || msg.Data != "" || msg.DataB64 != "" {
 		t.Fatalf("PTY envelope = %+v", msg)
 	}
 	got, err := DecodePTYMessage(msg)
