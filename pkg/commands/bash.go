@@ -81,6 +81,7 @@ func (t *BashTool) Description() string {
 
 type BashArgs struct {
 	Command string `json:"command" jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands (scan, gogo, tmux, etc.): pass them directly here."`
+	Timeout int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in seconds. The command is killed when it exceeds this. Omit to use the default (300s). Commands still running after 15s are moved to background and keep running until this timeout."`
 }
 
 func (t *BashTool) Definition() ToolDefinition {
@@ -103,6 +104,9 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 
 	options := BashExecOptions{}
 	options.WorkDir = coretool.WorkDirFromContext(ctx, "")
+	if args.Timeout > 0 {
+		options.Timeout = time.Duration(args.Timeout) * time.Second
+	}
 	execution, err := t.Start(ctx, command, options)
 	if err != nil {
 		return ToolResult{}, err

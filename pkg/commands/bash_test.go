@@ -616,6 +616,25 @@ func TestBashRunForegroundStreams(t *testing.T) {
 	}
 }
 
+func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	bash := commands.NewBashTool(t.TempDir(), 300)
+	defer bash.Close()
+	started := time.Now()
+	res, err := bash.Execute(context.Background(), `{"command": "sleep 30", "timeout": 1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("timeout arg not enforced promptly, took %s", elapsed)
+	}
+	if !strings.Contains(res.Text(), "timeout after 1s") {
+		t.Fatalf("result = %q", res.Text())
+	}
+}
+
 func TestBashRunTimeoutStopsSession(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
