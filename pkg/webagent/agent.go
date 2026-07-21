@@ -74,10 +74,10 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 		_ = connect(ctx, connectionConfig{
 			ServerURL:       option.WebURL,
 			Name:            rt.NodeName,
-			DataBus:         rt.App.DataBus,
-			SCO:             rt.App.SCOSidecar,
 			Registry:        rt.App.Commands,
 			AgentBus:        rt.Bus,
+			DataBus:         rt.App.DataBus,
+			SCO:             rt.App.SCOSidecar,
 			Logger:          logger,
 			Chat:            chatHandler,
 			Node:            identityRef,
@@ -170,7 +170,7 @@ func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message,
 
 	// The node already launched us in a goroutine with a cancellable context,
 	// so we run synchronously here.
-	runChatWithAgent(ctx, msg, prompt, goal, input, ag, h.rt, send)
+	runChatWithAgent(ctx, msg, prompt, goal, input, ag, h.rt, send, router)
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
@@ -350,7 +350,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 // Chat execution
 // ---------------------------------------------------------------------------
 
-func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, input agent.Input, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
+func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, input agent.Input, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message), router *eventRouter) {
 	if rt == nil || rt.App == nil {
 		send(webproto.Message{
 			Type:   "error",
@@ -384,7 +384,7 @@ func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, 
 	// with feedback until it passes (or the round budget is spent).
 	if goal.EvalCriteria != "" {
 		ag.SetMaxTurns(rt.Config.MaxTurns) // each eval round runs to natural completion
-		runChatEval(ctx, msg, prompt, goal, ag, rt, send)
+		runChatEval(ctx, msg, prompt, goal, ag, rt, send, router)
 		return
 	}
 
@@ -398,17 +398,20 @@ func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, 
 
 	_, err := ag.Run(ctx, input)
 	if err != nil {
+		// Pre-loop failures (undecodable input, agent already running) produce
+		// no session.end, so this frame converges the task. Post-loop errors
+		// already reached the hub as AOP error + session.end, making this a
+		// no-op there.
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
 	}
-	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
+	// Success needs no frame: the root session.end converges the task.
 }
 
 // runChatEval drives the agent through the evaluator loop for a Goal with
 // natural-language acceptance criteria, using the agent's own provider/model as
 // the independent judge. Per-round progress streams over the agent's own AOP
 // emitter like any other agent run.
-func runChatEval(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
+func runChatEval(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message), router *eventRouter) {
 	maxRounds := goal.EvalMaxRounds
 	if maxRounds <= 0 {
 		maxRounds = 3
@@ -423,6 +426,13 @@ func runChatEval(ctx context.Context, msg webproto.Message, prompt string, goal 
 		Goal:          prompt,
 		Criteria:      goal.EvalCriteria,
 	}
+	// The eval loop performs N ag.Run rounds on one session, each emitting its
+	// own session.start/end pair. The hub converges chat tasks on the root
+	// session.end, so the per-round brackets are suppressed; this task keeps
+	// terminating on the complete/error frame below (same exception class as
+	// REPL lines, which never start an agent run).
+	router.SuppressSessionBrackets(ag.Cfg.SessionID)
+	defer router.UnsuppressSessionBrackets(ag.Cfg.SessionID)
 	_, _, err := evaluator.RunWithEval(ctx, ag, evalCfg)
 	if err != nil {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})

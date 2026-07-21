@@ -76,6 +76,7 @@ type chatHandler interface {
 type eventRouter struct {
 	mu         *sync.Mutex
 	eventRoute map[string]string // agent sessionID -> task messageID
+	suppressed map[string]bool   // sessionIDs whose session.start/end brackets are not forwarded (eval loops)
 }
 
 // Route registers a mapping from an agent session ID to a WebSocket task ID.
@@ -94,6 +95,36 @@ func (r *eventRouter) Unroute(taskID string) {
 		}
 	}
 	r.mu.Unlock()
+}
+
+// SuppressSessionBrackets drops session.start/session.end events for the
+// session until UnsuppressSessionBrackets. Eval loops run N agent rounds on
+// one session, and the hub converges chat tasks on the root session.end, so
+// the per-round brackets must not leave this process.
+func (r *eventRouter) SuppressSessionBrackets(sessionID string) {
+	r.mu.Lock()
+	if r.suppressed == nil {
+		r.suppressed = map[string]bool{}
+	}
+	r.suppressed[sessionID] = true
+	r.mu.Unlock()
+}
+
+// UnsuppressSessionBrackets lifts a SuppressSessionBrackets drop.
+func (r *eventRouter) UnsuppressSessionBrackets(sessionID string) {
+	r.mu.Lock()
+	delete(r.suppressed, sessionID)
+	r.mu.Unlock()
+}
+
+// suppressBrackets reports whether the event is a suppressed session bracket.
+func (r *eventRouter) suppressBrackets(e aop.Event) bool {
+	if e.Type != aop.TypeSessionStart && e.Type != aop.TypeSessionEnd {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.suppressed[e.SessionID]
 }
 
 // connect implements the reconnect loop. It calls connectOnce in a loop with
@@ -252,6 +283,9 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			if next, ok := stats.Observe(e); ok {
 				statsPayload, _ := json.Marshal(next)
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
+			}
+			if router.suppressBrackets(e) {
+				return
 			}
 			mu.Lock()
 			if e.Type == aop.TypeSessionStart {

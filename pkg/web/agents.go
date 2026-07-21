@@ -58,7 +58,11 @@ type remoteAgent struct {
 	mu    sync.Mutex
 	tasks map[string]chan taskResult
 	turns map[string]int
-	done  chan struct{}
+	// childSessions tracks derived sub-agent session IDs per task, learned from
+	// session.start's parent_session_id. Only a ROOT session.end converges the
+	// task; child ends are lifecycle noise.
+	childSessions map[string]map[string]struct{}
+	done          chan struct{}
 }
 
 func (a *remoteAgent) info() AgentInfo {
@@ -181,6 +185,7 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 		close(ch)
 	}
 	a.tasks = nil
+	a.childSessions = nil
 	a.mu.Unlock()
 }
 
@@ -545,9 +550,10 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		runtime:      info.Runtime,
 		status:       info.Status,
 		stats:        info.Stats,
-		tasks:        make(map[string]chan taskResult),
-		turns:        make(map[string]int),
-		done:         make(chan struct{}),
+		tasks:         make(map[string]chan taskResult),
+		turns:         make(map[string]int),
+		childSessions: make(map[string]map[string]struct{}),
+		done:          make(chan struct{}),
 	}
 	p.register(agent)
 	defer func() {
@@ -700,6 +706,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		if ok {
 			delete(a.tasks, msg.TaskID)
 			delete(a.turns, msg.TaskID)
+			delete(a.childSessions, msg.TaskID)
 		}
 		a.mu.Unlock()
 		if ok && ch != nil {
@@ -717,6 +724,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		if ok {
 			delete(a.tasks, msg.TaskID)
 			delete(a.turns, msg.TaskID)
+			delete(a.childSessions, msg.TaskID)
 		}
 		a.mu.Unlock()
 		if ok && ch != nil {
@@ -786,7 +794,30 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 		p.sessions.BroadcastAOPEvent(sid, aopEv)
 	}
 
-	if aopEv.Type == aop.TypeTurnStart {
+	switch aopEv.Type {
+	case aop.TypeSessionStart:
+		var d aop.SessionStartData
+		_ = json.Unmarshal(aopEv.Data, &d)
+		if d.ParentSessionID != "" {
+			a.mu.Lock()
+			if _, ok := a.tasks[msg.TaskID]; ok {
+				if a.childSessions == nil {
+					a.childSessions = map[string]map[string]struct{}{}
+				}
+				set := a.childSessions[msg.TaskID]
+				if set == nil {
+					set = map[string]struct{}{}
+					a.childSessions[msg.TaskID] = set
+				}
+				set[aopEv.SessionID] = struct{}{}
+			}
+			a.mu.Unlock()
+		}
+
+	case aop.TypeSessionEnd:
+		p.convergeTaskOnSessionEnd(a, msg.TaskID, aopEv)
+
+	case aop.TypeTurnStart:
 		var d aop.TurnData
 		_ = json.Unmarshal(aopEv.Data, &d)
 		if d.Turn > 0 {
@@ -798,6 +829,44 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 		}
 	}
 
+}
+
+// convergeTaskOnSessionEnd closes a chat task when the ROOT agent session
+// ends. Agent runs no longer send complete/error frames, so this terminal
+// event drives task cleanup; child (derived sub-agent) session ends and
+// mid-run AOP error events are not terminal. Idempotent: a complete/error
+// frame arriving after this close (mixed-version agent, pre-loop failure
+// fallback) is a no-op.
+func (p *AgentPool) convergeTaskOnSessionEnd(a *remoteAgent, taskID string, ev aop.Event) {
+	a.mu.Lock()
+	if set, ok := a.childSessions[taskID]; ok {
+		if _, isChild := set[ev.SessionID]; isChild {
+			delete(set, ev.SessionID)
+			a.mu.Unlock()
+			return
+		}
+	}
+	ch, ok := a.tasks[taskID]
+	turn := a.turns[taskID]
+	if ok {
+		delete(a.tasks, taskID)
+		delete(a.turns, taskID)
+		delete(a.childSessions, taskID)
+	}
+	a.mu.Unlock()
+	if !ok || ch == nil {
+		return
+	}
+	var d aop.SessionEndData
+	_ = json.Unmarshal(ev.Data, &d)
+	res := taskResult{Turn: turn}
+	// A canceled run still carries the ctx error ("context canceled") — only
+	// non-canceled stops surface it as a task error.
+	if d.Stop != "canceled" && d.Error != "" {
+		res.Err = d.Error
+	}
+	ch <- res
+	close(ch)
 }
 
 func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {
