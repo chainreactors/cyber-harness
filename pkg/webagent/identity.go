@@ -56,6 +56,7 @@ func RegisterPayload(name string, reg *commands.CommandRegistry, ref protocols.N
 	payload := webproto.RegisterPayload{
 		Name:         name,
 		Commands:     reg.Names(),
+		Tools:        reg.ToolDefinitions(),
 		CommandsMenu: menu,
 		Stats:        stats,
 		Node:         ref,

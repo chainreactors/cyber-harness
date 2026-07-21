@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -47,6 +48,9 @@ func (t *WriteTool) Definition() ToolDefinition {
 }
 
 func (t *WriteTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+	effective := *t
+	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	t = &effective
 	args, err := ParseArgs[WriteArgs](arguments)
 	if err != nil {
 		return ToolResult{}, err

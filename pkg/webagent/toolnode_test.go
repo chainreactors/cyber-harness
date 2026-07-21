@@ -168,6 +168,9 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	if registered.Runtime.OS == "" {
 		t.Fatalf("register runtime missing OS: %+v", registered.Runtime)
 	}
+	if len(registered.Tools) != 1 || registered.Tools[0].Function.Name != "bash" {
+		t.Fatalf("register tools = %+v", registered.Tools)
+	}
 
 	// The hub issues exec once the runner's first post-handshake message
 	// arrives; recordingBash streams one line and completes.

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -47,8 +48,10 @@ func (t *ReadTool) Definition() ToolDefinition {
 	return ToolDef("read", t.Description(), ReadArgs{})
 }
 
-
 func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+	effective := *t
+	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	t = &effective
 	args, err := ParseArgs[ReadArgs](arguments)
 	if err != nil {
 		return ToolResult{}, err

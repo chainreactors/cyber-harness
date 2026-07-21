@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
@@ -43,11 +44,11 @@ type ExecStreamPayload struct {
 // ExecResult is the structured outcome of an "exec" run, carried in the
 // "complete" message payload alongside any command-specific Details.
 type ExecResult struct {
-	ExitCode int     `json:"exit_code"`
-	State    string  `json:"state,omitempty"`
-	KillCause string `json:"kill_cause,omitempty"`
-	Duration float64 `json:"duration,omitempty"`
-	Details  any     `json:"details,omitempty"`
+	ExitCode  int     `json:"exit_code"`
+	State     string  `json:"state,omitempty"`
+	KillCause string  `json:"kill_cause,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+	Details   any     `json:"details,omitempty"`
 }
 
 // CommandSpec is the surface-neutral description of one user-facing "/verb" command.
@@ -63,6 +64,9 @@ type RegisterPayload struct {
 	// Commands is the LLM tool/pseudo-command registry (pkg/commands) the agent
 	// exposes to the model — distinct from CommandsMenu.
 	Commands []string `json:"commands,omitempty"`
+	// Tools is the structured LLM tool catalog exposed by this node. Commands
+	// remains the shell/pseudo-command catalog used by the slash menu and Bash.
+	Tools []tool.Definition `json:"tools,omitempty"`
 	// CommandsMenu is the agent's user-facing "/verb" catalog: the agent-scope,
 	// menu-visible commands it can run, plus one per loaded skill. The hub merges
 	// these with its own hub-scope commands to drive the web "/" menu and /help,

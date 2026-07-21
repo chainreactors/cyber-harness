@@ -16,9 +16,13 @@ type recordingBash struct {
 	options commands.BashExecOptions
 }
 
-func (*recordingBash) Name() string                        { return "bash" }
-func (*recordingBash) Description() string                 { return "test bash" }
-func (*recordingBash) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
+func (*recordingBash) Name() string        { return "bash" }
+func (*recordingBash) Description() string { return "test bash" }
+func (*recordingBash) Definition() commands.ToolDefinition {
+	return commands.ToolDef("bash", "test bash", struct {
+		Command string `json:"command"`
+	}{})
+}
 func (*recordingBash) Execute(context.Context, string) (commands.ToolResult, error) {
 	return commands.ToolResult{}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
@@ -100,7 +101,9 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 		return TextResult("ok"), nil
 	}
 
-	execution, err := t.Start(ctx, command, BashExecOptions{})
+	options := BashExecOptions{}
+	options.WorkDir = coretool.WorkDirFromContext(ctx, "")
+	execution, err := t.Start(ctx, command, options)
 	if err != nil {
 		return ToolResult{}, err
 	}

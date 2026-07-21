@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -41,8 +42,10 @@ func (t *GlobTool) Definition() ToolDefinition {
 	return ToolDef("glob", t.Description(), GlobArgs{})
 }
 
-
 func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+	effective := *t
+	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	t = &effective
 	args, err := ParseArgs[GlobArgs](arguments)
 	if err != nil {
 		return ToolResult{}, err

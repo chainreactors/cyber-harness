@@ -312,6 +312,24 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		}
 
 		switch msg.Type {
+		case "aop":
+			if !IsAOPToolCall(msg) {
+				continue
+			}
+			taskCtx, cancel := context.WithCancel(ctx)
+			mu.Lock()
+			execTasks[msg.TaskID] = cancel
+			mu.Unlock()
+			go func(m webproto.Message, tCtx context.Context, tCancel context.CancelFunc) {
+				defer tCancel()
+				defer func() {
+					mu.Lock()
+					delete(execTasks, m.TaskID)
+					mu.Unlock()
+				}()
+				HandleAOPToolCall(tCtx, m, cc.Registry, send)
+			}(msg, taskCtx, cancel)
+
 		case "exec":
 			taskCtx, cancel := context.WithCancel(ctx)
 			mu.Lock()
