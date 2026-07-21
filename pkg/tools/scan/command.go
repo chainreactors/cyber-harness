@@ -235,7 +235,25 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			c.Logger.Errorf("%s", err.Error())
 		}
 	}
-	return out, coll.StructuredResult(), nil
+	result := coll.StructuredResult()
+	c.emitStructuredData(ctx, result)
+	return out, result, nil
+}
+
+func (c *Command) emitStructuredData(ctx context.Context, result *output.Result) {
+	if result == nil || c.DataBus == nil {
+		return
+	}
+	for _, service := range result.Services {
+		if service != nil {
+			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, service.GetTarget(), service)
+		}
+	}
+	for _, probe := range result.WebProbes {
+		if probe != nil {
+			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, probe.UrlString, probe)
+		}
+	}
 }
 
 var scanFileFlags = map[string]bool{

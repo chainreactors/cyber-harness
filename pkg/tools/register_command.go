@@ -26,6 +26,9 @@ func init() {
 			if deps.ScannerProxy != "" {
 				scanOpts = append(scanOpts, scan.WithProxy(deps.ScannerProxy))
 			}
+			if deps.DataBus != nil {
+				scanOpts = append(scanOpts, scan.WithDataBus(deps.DataBus))
+			}
 
 			if es.Gogo != nil && es.Spray != nil {
 				impl := scan.New(es, scanOpts...)

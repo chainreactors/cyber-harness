@@ -3,6 +3,8 @@ package scan
 import (
 	"context"
 
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -17,6 +19,10 @@ func WithParent(a *agent.Agent) Option {
 
 func WithProxy(proxy string) Option {
 	return func(c *Command) { c.Proxy = proxy }
+}
+
+func WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) Option {
+	return func(c *Command) { c.DataBus = bus }
 }
 
 func WithLogger(logger telemetry.Logger) Option {
