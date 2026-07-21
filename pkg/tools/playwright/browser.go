@@ -261,7 +261,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	args = cleanArgs
 
 	if len(args) == 0 {
-		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
+		return nil, fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
 
 	sub := args[0]
@@ -517,7 +517,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		result, err = c.execTemplate(ctx, subArgs)
 
 	default:
-		return fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())
+		return nil, fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())
 	}
 
 	if err == nil && len(subArgs) > 0 {

@@ -74,6 +74,8 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 		_ = connect(ctx, connectionConfig{
 			ServerURL:       option.WebURL,
 			Name:            rt.NodeName,
+			DataBus:         rt.App.DataBus,
+			SCO:             rt.App.SCOSidecar,
 			Registry:        rt.App.Commands,
 			AgentBus:        rt.Bus,
 			Logger:          logger,
