@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -28,14 +29,21 @@ type connectionConfig struct {
 	ServerURL string
 	WSPath    string
 	Name      string
-	Registry  *commands.CommandRegistry
-	AgentBus  *eventbus.Bus[agent.Event]
-	Logger    telemetry.Logger
-	Chat      chatHandler
-	Node      protocols.NodeRef
-	Runtime   webproto.AgentRuntime
-	Status    func() webproto.AgentStatus
-	Menu      func() []webproto.CommandSpec // nil = no command menu
+	// Token is an explicit bearer token; when empty the token embedded in
+	// ServerURL's userinfo is used instead.
+	Token    string
+	Registry *commands.CommandRegistry
+	AgentBus *eventbus.Bus[agent.Event]
+	// DataBus and SCO enable tool.data / tool.sco event emission for tool-only
+	// nodes; both are optional.
+	DataBus *eventbus.Bus[output.ToolDataEvent]
+	SCO     *output.SCOSidecar
+	Logger  telemetry.Logger
+	Chat    chatHandler
+	Node    protocols.NodeRef
+	Runtime webproto.AgentRuntime
+	Status  func() webproto.AgentStatus
+	Menu    func() []webproto.CommandSpec // nil = no command menu
 
 	// ExtraPTYOpeners provides additional PTY openers (e.g. a REPL opener from
 	// the agent runtime) without requiring a core/runner import.
@@ -128,6 +136,9 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		return fmt.Errorf("command registry is nil")
 	}
 	dialURL, accessKey := SplitAccessKey(cc.ServerURL)
+	if cc.Token != "" {
+		accessKey = cc.Token
+	}
 	wsURL := HTTPToWS(dialURL) + cc.WSPath
 	var reqHeader http.Header
 	if accessKey != "" {
@@ -224,6 +235,12 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 	eventRoute := make(map[string]string)              // agent SessionID -> messageID for event routing
 
 	router := &eventRouter{mu: &mu, eventRoute: eventRoute}
+
+	// Tool telemetry: scanner tool.data and normalized tool.sco events ride the
+	// same connection, correlated to the exec task by call ID.
+	if detach := attachToolEvents(cc.DataBus, cc.SCO, send); detach != nil {
+		defer detach()
+	}
 
 	// Event bus subscription with stats tracking and event routing.
 	if cc.AgentBus != nil {

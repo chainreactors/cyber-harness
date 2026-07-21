@@ -13,10 +13,10 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/pkg/cairnrunner"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/webagent"
 )
 
 func main() {
@@ -58,23 +58,18 @@ func main() {
 
 	sco := output.NewSCOSidecar(dataBus, output.CSTXTransform)
 	defer sco.Close()
-	client, err := cairnrunner.New(cairnrunner.Config{
+	logger.Infof("tools ready: %s", strings.Join(registry.Names(), ", "))
+	if err := webagent.RunToolNode(ctx, webagent.ToolNodeConfig{
 		ServerURL: serverURL,
 		WSPath:    wsPath,
+		Name:      name,
 		Token:     token,
-		RunnerID:  name,
 		Registry:  registry,
 		DataBus:   dataBus,
 		SCO:       sco,
 		Logger:    logger,
 		Version:   cfg.Version,
-	})
-	if err != nil {
-		logger.Errorf("runner configuration: %v", err)
-		os.Exit(1)
-	}
-	logger.Infof("tools ready: %s", strings.Join(registry.Names(), ", "))
-	if err := client.Run(ctx); err != nil {
+	}); err != nil {
 		logger.Errorf("runner: %v", err)
 		os.Exit(1)
 	}

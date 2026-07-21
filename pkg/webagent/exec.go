@@ -33,7 +33,7 @@ func ExecCommand(ctx context.Context, msg webproto.Message, reg *commands.Comman
 	// Scope scanner telemetry to this remote execution. Final structured data
 	// returns normally on Execution.Details.
 	execCtx := output.ContextWithCallID(ctx, taskID)
-	writer := &StreamWriter{TaskID: taskID, SendFn: send}
+	writer := &StreamWriter{TaskID: taskID, SendFn: send, Stream: webproto.StreamStdout}
 	bash, ok := reg.GetTool("bash")
 	if !ok {
 		send(webproto.Message{Type: "error", TaskID: taskID, Data: "bash tool is not registered"})
@@ -64,9 +64,12 @@ func ExecCommand(ctx context.Context, msg webproto.Message, reg *commands.Comman
 	if result.ExitCode != 0 {
 		data = fmt.Sprintf("exit %d", result.ExitCode)
 	}
-	var payload json.RawMessage
-	if result.Details != nil {
-		payload, _ = json.Marshal(result.Details)
-	}
+	payload, _ := json.Marshal(webproto.ExecResult{
+		ExitCode:  result.ExitCode,
+		State:     string(result.State),
+		KillCause: result.KillCause,
+		Duration:  result.Duration().Seconds(),
+		Details:   result.Details,
+	})
 	send(webproto.Message{Type: "complete", TaskID: taskID, Data: data, Payload: payload})
 }

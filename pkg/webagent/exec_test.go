@@ -51,11 +51,16 @@ func TestExecCommandUsesBashForegroundExecution(t *testing.T) {
 	if len(messages) != 2 || messages[0].Type != "output" || messages[1].Type != "complete" {
 		t.Fatalf("messages = %#v", messages)
 	}
-	var structured output.Result
-	if err := json.Unmarshal(messages[1].Payload, &structured); err != nil {
-		t.Fatalf("decode structured result: %v", err)
+	var result webproto.ExecResult
+	if err := json.Unmarshal(messages[1].Payload, &result); err != nil {
+		t.Fatalf("decode exec result: %v", err)
 	}
-	if messages[1].Data != "" || structured.Summary.Targets != 2 {
+	details, _ := json.Marshal(result.Details)
+	var structured output.Result
+	if err := json.Unmarshal(details, &structured); err != nil {
+		t.Fatalf("decode structured details: %v", err)
+	}
+	if messages[1].Data != "" || result.ExitCode != 0 || structured.Summary.Targets != 2 {
 		t.Fatalf("complete = %#v", messages[1])
 	}
 }

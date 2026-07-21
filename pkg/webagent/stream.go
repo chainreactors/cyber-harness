@@ -16,7 +16,18 @@ const MaxStreamBuf = 64 << 10
 type StreamWriter struct {
 	TaskID string
 	SendFn func(webproto.Message)
+	// Stream optionally tags output messages with an ExecStreamPayload
+	// (webproto.StreamStdout/StreamStderr) for consumers that split streams.
+	Stream string
 	buf    []byte
+}
+
+func (w *StreamWriter) send(data string) {
+	msg := webproto.Message{Type: "output", TaskID: w.TaskID, Data: data}
+	if w.Stream != "" {
+		msg.Payload = webproto.MustJSON(webproto.ExecStreamPayload{Stream: w.Stream})
+	}
+	w.SendFn(msg)
 }
 
 func (w *StreamWriter) Write(p []byte) (int, error) {
@@ -34,7 +45,7 @@ func (w *StreamWriter) Write(p []byte) (int, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		w.SendFn(webproto.Message{Type: "output", TaskID: w.TaskID, Data: line})
+		w.send(line)
 	}
 	return len(p), nil
 }
@@ -47,7 +58,7 @@ func (w *StreamWriter) Flush() {
 	data := string(w.buf)
 	w.buf = w.buf[:0]
 	if strings.TrimSpace(data) != "" {
-		w.SendFn(webproto.Message{Type: "output", TaskID: w.TaskID, Data: data})
+		w.send(data)
 	}
 }
 

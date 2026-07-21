@@ -27,6 +27,29 @@ type ExecPayload struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
+// Exec stream names carried in an "output" message's ExecStreamPayload.
+const (
+	StreamStdout = "stdout"
+	StreamStderr = "stderr"
+)
+
+// ExecStreamPayload tags an exec "output" message with the stream the chunk
+// came from. Optional: consumers that only render a terminal may ignore it
+// and treat Data as one combined stream.
+type ExecStreamPayload struct {
+	Stream string `json:"stream,omitempty"`
+}
+
+// ExecResult is the structured outcome of an "exec" run, carried in the
+// "complete" message payload alongside any command-specific Details.
+type ExecResult struct {
+	ExitCode int     `json:"exit_code"`
+	State    string  `json:"state,omitempty"`
+	KillCause string `json:"kill_cause,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
+	Details  any     `json:"details,omitempty"`
+}
+
 // CommandSpec is the surface-neutral description of one user-facing "/verb" command.
 type CommandSpec struct {
 	Name        string   `json:"name"`
