@@ -1,0 +1,254 @@
+package webagent
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/webproto"
+)
+
+// hubScript simulates the cairn bridge dialect: register→connected handshake,
+// exec with a structured payload, file.read, and tool.data correlation.
+var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+type hubScript struct {
+	t *testing.T
+
+	mu           sync.Mutex
+	registered   chan webproto.RegisterPayload
+	execComplete chan webproto.ExecResult
+	execStream   chan string
+	fileData     chan []byte
+	toolData     chan webproto.Message
+}
+
+func newHubScript(t *testing.T) *hubScript {
+	return &hubScript{
+		t:            t,
+		registered:   make(chan webproto.RegisterPayload, 1),
+		execComplete: make(chan webproto.ExecResult, 1),
+		execStream:   make(chan string, 16),
+		fileData:     make(chan []byte, 1),
+		toolData:     make(chan webproto.Message, 1),
+	}
+}
+
+func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+		h.t.Errorf("authorization = %q", got)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	conn, err := testUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.t.Errorf("upgrade: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	var hello webproto.Message
+	if err := conn.ReadJSON(&hello); err != nil || hello.Type != "register" {
+		h.t.Errorf("expected register, got %q (err=%v)", hello.Type, err)
+		return
+	}
+	var reg webproto.RegisterPayload
+	if err := json.Unmarshal(hello.Payload, &reg); err != nil {
+		h.t.Errorf("register payload: %v", err)
+		return
+	}
+	h.registered <- reg
+	if err := conn.WriteJSON(webproto.Message{Type: "connected"}); err != nil {
+		return
+	}
+	go h.drive(conn)
+
+	for {
+		var msg webproto.Message
+		if err := conn.ReadJSON(&msg); err != nil {
+			return
+		}
+		switch msg.Type {
+		case "output":
+			var stream webproto.ExecStreamPayload
+			_ = json.Unmarshal(msg.Payload, &stream)
+			h.execStream <- stream.Stream + ":" + msg.Data
+		case "complete":
+			switch {
+			case strings.HasPrefix(msg.TaskID, "exec-"):
+				var result webproto.ExecResult
+				if err := json.Unmarshal(msg.Payload, &result); err != nil {
+					h.t.Errorf("exec result: %v", err)
+					return
+				}
+				h.execComplete <- result
+			case strings.HasPrefix(msg.TaskID, "read-"):
+				data, err := base64.StdEncoding.DecodeString(msg.DataB64)
+				if err != nil {
+					h.t.Errorf("file data: %v", err)
+					return
+				}
+				h.fileData <- data
+			}
+		case "tool.data":
+			h.toolData <- msg
+		}
+	}
+}
+
+// drive issues the server→runner calls once the connection is live.
+func (h *hubScript) drive(conn *websocket.Conn) {
+	execPayload, _ := json.Marshal(webproto.ExecPayload{Command: "echo hello"})
+	if err := conn.WriteJSON(webproto.Message{Type: "exec", TaskID: "exec-1", Payload: execPayload}); err != nil {
+		return
+	}
+}
+
+func (h *hubScript) driveFileRead(conn *websocket.Conn, path string) {
+	payload, _ := json.Marshal(webproto.FileRPCPayload{Path: path})
+	_ = conn.WriteJSON(webproto.Message{Type: "file.read", TaskID: "read-1", Payload: payload})
+}
+
+func wait[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		var zero T
+		return zero
+	}
+}
+
+// TestRunToolNodeWireInterop runs a tool node against a mock hub speaking the
+// cairn bridge dialect and verifies the full register/exec/file.read/tool.data
+// round trip.
+func TestRunToolNodeWireInterop(t *testing.T) {
+	reg := commands.NewRegistry()
+	reg.RegisterTool(&recordingBash{})
+	dataBus := eventbus.New[output.ToolDataEvent]()
+
+	hub := newHubScript(t)
+	server := httptest.NewServer(http.HandlerFunc(hub.serveHTTP))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunToolNode(ctx, ToolNodeConfig{
+			ServerURL: server.URL,
+			WSPath:    "/ws/runner",
+			Name:      "runner-1",
+			Token:     "test-token",
+			Registry:  reg,
+			DataBus:   dataBus,
+			Version:   "test",
+		})
+	}()
+
+	registered := wait(t, hub.registered, "register")
+	if registered.Name != "runner-1" || registered.Node.ID != "runner-1" {
+		t.Fatalf("register identity = %+v node=%+v", registered.Name, registered.Node)
+	}
+	if registered.Runtime.OS == "" {
+		t.Fatalf("register runtime missing OS: %+v", registered.Runtime)
+	}
+
+	// The hub issues exec once the runner's first post-handshake message
+	// arrives; recordingBash streams one line and completes.
+	stream := wait(t, hub.execStream, "exec output")
+	if stream != "stdout:streamed" {
+		t.Fatalf("exec stream = %q", stream)
+	}
+	result := wait(t, hub.execComplete, "exec complete")
+	if result.ExitCode != 0 {
+		t.Fatalf("exec exit code = %d", result.ExitCode)
+	}
+
+	// tool.data rides the same connection, correlated by call ID.
+	dataBus.Emit(output.ToolDataEvent{Tool: "gogo", Kind: "service", CallID: "exec-1"})
+	toolMsg := wait(t, hub.toolData, "tool.data")
+	if toolMsg.TaskID != "exec-1" {
+		t.Fatalf("tool.data task id = %q", toolMsg.TaskID)
+	}
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool node did not stop after cancel")
+	}
+}
+
+// TestRunToolNodeFileRead verifies the file.read path against a real file.
+func TestRunToolNodeFileRead(t *testing.T) {
+	reg := commands.NewRegistry()
+	reg.RegisterTool(&recordingBash{})
+
+	path := filepath.Join(t.TempDir(), "note.txt")
+	if err := os.WriteFile(path, []byte("file-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := newHubScript(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var hello webproto.Message
+		if err := conn.ReadJSON(&hello); err != nil || hello.Type != "register" {
+			return
+		}
+		hub.registered <- webproto.RegisterPayload{}
+		if err := conn.WriteJSON(webproto.Message{Type: "connected"}); err != nil {
+			return
+		}
+		hub.driveFileRead(conn, path)
+		for {
+			var msg webproto.Message
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			if msg.Type == "complete" && strings.HasPrefix(msg.TaskID, "read-") {
+				data, err := base64.StdEncoding.DecodeString(msg.DataB64)
+				if err != nil {
+					return
+				}
+				hub.fileData <- data
+			}
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = RunToolNode(ctx, ToolNodeConfig{
+			ServerURL: server.URL, WSPath: "/ws/runner", Name: "runner-1",
+			Registry: reg,
+		})
+	}()
+
+	wait(t, hub.registered, "register")
+	data := wait(t, hub.fileData, "file.read complete")
+	if string(data) != "file-body" {
+		t.Fatalf("file.read data = %q", data)
+	}
+}
