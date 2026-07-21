@@ -14,6 +14,12 @@ import (
 
 type agentRunFunc func(context.Context) (*agent.Result, error)
 
+type pendingRun struct {
+	label       string
+	displayText string
+	run         agentRunFunc
+}
+
 type EvalSettings struct {
 	Criteria string
 	Model    string
@@ -32,6 +38,7 @@ type interactiveRunController struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	onFinish func()
+	pending  []pendingRun
 
 	Eval *EvalSettings
 
@@ -55,8 +62,10 @@ func (c *interactiveRunController) SubmitPrompt(label, displayText, prompt strin
 	}
 	c.mu.Lock()
 	if c.running {
+		// Busy input joins the run-boundary FIFO: each queued prompt becomes a
+		// full Input→Run cycle, matching the stdio/web entry semantics.
+		c.pending = append(c.pending, pendingRun{label: label, displayText: displayText, run: c.buildRunFunc(prompt)})
 		c.mu.Unlock()
-		c.session.SteerUserMessage(agent.TextInput(prompt))
 		c.output.Queued(displayText)
 		return nil
 	}
@@ -70,8 +79,8 @@ func (c *interactiveRunController) Continue() error {
 	}
 	c.mu.Lock()
 	if c.running {
+		c.pending = append(c.pending, pendingRun{label: "continue", run: c.session.Continue})
 		c.mu.Unlock()
-		c.session.SteerUserMessage(agent.TextInput("Continue."))
 		c.output.Queued("Continue.")
 		return nil
 	}
@@ -130,7 +139,7 @@ func (c *interactiveRunController) start(label, displayText string, run agentRun
 func (c *interactiveRunController) run(ctx context.Context, cancel context.CancelFunc, done chan struct{}, run agentRunFunc) {
 	defer close(done)
 	defer cancel()
-	defer func() { c.finish(); c.notifyFinish() }()
+	defer func() { c.finish(); c.notifyFinish(); c.drainPending() }()
 
 	result, err := run(ctx)
 	if ctx.Err() != nil {
@@ -177,6 +186,23 @@ func (c *interactiveRunController) finish() {
 	c.cancel = nil
 }
 
+// drainPending starts the oldest queued run, if any. Queued runs chain: each
+// run's defer drains the next, preserving FIFO order.
+func (c *interactiveRunController) drainPending() {
+	c.mu.Lock()
+	if len(c.pending) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	next := c.pending[0]
+	c.pending = c.pending[1:]
+	c.mu.Unlock()
+	if err := c.start(next.label, next.displayText, next.run); err != nil {
+		c.output.Error(err)
+		c.drainPending()
+	}
+}
+
 func (c *interactiveRunController) SetOnFinish(fn func()) {
 	if c == nil {
 		return
@@ -203,6 +229,8 @@ func (c *interactiveRunController) Stop() bool {
 	}
 	cancel := c.cancel
 	c.stopping = true
+	// Cancelling the current run also drops queued input.
+	c.pending = nil
 	c.mu.Unlock()
 
 	if c.output != nil {

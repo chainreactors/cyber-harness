@@ -139,27 +139,6 @@ func (a *Agent) Derive() *Agent {
 	})
 }
 
-// SteerUserMessage pushes user input into the running agent's inbox.
-// The loop drains it at the next turn boundary.
-func (a *Agent) SteerUserMessage(input Input) error {
-	userMsg, err := input.chatMessage()
-	if err != nil {
-		return err
-	}
-	a.mu.Lock()
-	ib := a.Cfg.Inbox
-	a.mu.Unlock()
-	if ib == nil {
-		return fmt.Errorf("agent has no inbox")
-	}
-	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
-	msg.Priority = inbox.PriorityHigh
-	if input.NoEcho {
-		msg.Meta = map[string]any{"no_echo": true}
-	}
-	return ib.Push(msg)
-}
-
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
 func (a *Agent) EmitStatus(state string, ext map[string]any) {
