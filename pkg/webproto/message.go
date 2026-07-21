@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
@@ -121,36 +122,66 @@ type AgentStats struct {
 	LastEvent        string `json:"last_event,omitempty"`
 }
 
-// ChatPayload is the WS payload for a "chat" message: it scopes the remote
-// agent conversation to a web session and carries optional Goal-mode run
-// controls. Empty EvalCriteria means a plain turn; a non-empty one makes the
-// agent run the evaluator loop against the criteria for up to EvalMaxRounds.
-type ChatPayload struct {
-	SessionID       string        `json:"session_id,omitempty"`
-	EvalCriteria    string        `json:"eval_criteria,omitempty"`
-	EvalMaxRounds   int           `json:"eval_max_rounds,omitempty"`
-	PersistMaxTurns int           `json:"persist_max_turns,omitempty"`
-	SystemPrompt    string        `json:"system_prompt,omitempty"`
-	OutputSchema    *OutputSchema `json:"output_schema,omitempty"`
+// GoalExt is the aiscan ext block on an inbound AOP user message: optional
+// Goal-mode run controls parsed by the agent boundary (webagent, stdio host).
+type GoalExt struct {
+	EvalCriteria    string `json:"eval_criteria,omitempty"`
+	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
+	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
+	// NoEcho suppresses the agent-side echo of this user message; the hub
+	// already persisted and broadcast its own copy.
+	NoEcho bool `json:"no_echo,omitempty"`
 }
 
-type OutputSchema struct {
-	Name   string          `json:"name"`
-	Schema json.RawMessage `json:"schema"`
+// IsAOPUserMessage reports whether the message carries an AOP user message
+// event — the only executable inbound AOP unit — and returns the decoded event.
+func IsAOPUserMessage(msg Message) (aop.Event, bool) {
+	if msg.Type != "aop" || len(msg.Payload) == 0 {
+		return aop.Event{}, false
+	}
+	var event aop.Event
+	if err := json.Unmarshal(msg.Payload, &event); err != nil || event.Type != aop.TypeMessage {
+		return aop.Event{}, false
+	}
+	data, err := aop.DecodeData[aop.MessageData](event)
+	if err != nil || data.Role != "user" {
+		return aop.Event{}, false
+	}
+	return event, true
 }
 
-func DecodeChatPayload(raw json.RawMessage) (ChatPayload, error) {
-	var payload ChatPayload
-	if len(raw) == 0 {
-		return payload, nil
+// DecodeGoalExt extracts the aiscan GoalExt block from an inbound AOP event.
+func DecodeGoalExt(event aop.Event) GoalExt {
+	var goal GoalExt
+	raw, ok := event.Ext["aiscan"]
+	if !ok {
+		return goal
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ChatPayload{}, fmt.Errorf("decode chat payload: %w", err)
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return goal
 	}
-	payload.SessionID = strings.TrimSpace(payload.SessionID)
-	payload.EvalCriteria = strings.TrimSpace(payload.EvalCriteria)
-	payload.SystemPrompt = strings.TrimSpace(payload.SystemPrompt)
-	return payload, nil
+	_ = json.Unmarshal(data, &goal)
+	return goal
+}
+
+// UserMessageText flattens the text parts of an AOP user message event.
+func UserMessageText(event aop.Event) string {
+	data, err := aop.DecodeData[aop.MessageData](event)
+	if err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, part := range data.Parts {
+		if part.Type != aop.PartText {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(part.Text)
+	}
+	return sb.String()
 }
 
 type FileUploadPayload struct {

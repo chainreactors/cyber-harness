@@ -4,12 +4,12 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
-	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -31,8 +31,6 @@ type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
 type Choice = provider.Choice
 type Usage = provider.Usage
 type APIError = provider.APIError
-type ResponseFormat = provider.ResponseFormat
-type JSONSchemaSpec = provider.JSONSchemaSpec
 type CacheRetention = provider.CacheRetention
 type Provider = provider.Provider
 type StreamingProvider = provider.StreamingProvider
@@ -64,28 +62,6 @@ var (
 
 // Agent-specific types.
 
-type EventType string
-
-const (
-	EventAgentStart         EventType = "agent_start"
-	EventAgentEnd           EventType = "agent_end"
-	EventTurnStart          EventType = "turn_start"
-	EventTurnEnd            EventType = "turn_end"
-	EventLLMRequest         EventType = "llm_request"
-	EventMessageStart       EventType = "message_start"
-	EventMessageUpdate      EventType = "message_update"
-	EventMessageEnd         EventType = "message_end"
-	EventToolExecutionStart EventType = "tool_execution_start"
-	EventToolExecutionEnd   EventType = "tool_execution_end"
-	EventTokenBudgetWarning EventType = "token_budget_warning"
-	EventEvalStart          EventType = "eval_start"
-	EventEvalEnd            EventType = "eval_end"
-	EventEvalError          EventType = "eval_error"
-	EventCompactStart       EventType = "compact_start"
-	EventCompactEnd         EventType = "compact_end"
-	EventCompactError       EventType = "compact_error"
-)
-
 type StopReason string
 
 const (
@@ -96,40 +72,6 @@ const (
 	StopReasonError      StopReason = "error"
 	StopReasonCanceled   StopReason = "canceled"
 )
-
-type Event struct {
-	Type            EventType
-	SessionID       string
-	ParentSessionID string
-	Turn            int
-	EmittedAt       time.Time
-	Request         *ChatCompletionRequest
-	Message         ChatMessage
-	ContentDelta    string
-	ReasoningDelta  string
-	Messages        []ChatMessage
-	NewMessages     []ChatMessage
-	ToolResults     []ChatMessage
-	ToolCallID      string
-	ToolName        string
-	Arguments       string
-	Result          string
-	IsError         bool
-	Err             error
-	StartedAt       time.Time // tool execution start time (set on ToolExecutionEnd)
-	Stop            StopReason
-	Usage           *Usage
-	TotalUsage      *Usage // cumulative usage across all turns (set on TurnEnd/AgentEnd)
-	ContextTokens   int
-	EvalRound       int
-	EvalPass        bool
-	EvalReason      string
-	EvalError       string
-
-	CompactTokensBefore int
-	CompactTokensAfter  int
-	CompactKeptMessages int
-}
 
 type TransformContextFunc func([]ChatMessage) []ChatMessage
 
@@ -189,10 +131,12 @@ type Config struct {
 	Stream           bool
 	MaxRetries       int
 	TokenBudget      int
-	ResponseFormat   *ResponseFormat
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              *eventbus.Bus[Event]
+	Bus              *eventbus.Bus[aop.Event]
+	// OnRunEnd fires once per run with the final result — replaces the old
+	// EventAgentEnd Messages subscription for session persistence.
+	OnRunEnd         func(*Result)
 	BeforeToolCall   func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall    func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	MaxTurns         int
@@ -204,6 +148,13 @@ type Config struct {
 	CacheRetention   CacheRetention
 	SessionID        string
 	ParentSessionID  string
+	// AgentName tags emitted AOP events; defaults to "aiscan".
+	AgentName string
+	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
+	// restored; Result.MessageCounter carries the final value for saving.
+	MessageCounter int64
+
+	emitter *aopEmitter
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
@@ -216,7 +167,7 @@ func (c Config) WithMessages(msgs []ChatMessage) Config { c.Messages = msgs; ret
 func (c Config) WithStream(s bool) Config               { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config        { c.Inbox = ib; return c }
 func (c Config) WithLogger(l telemetry.Logger) Config   { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[Event]) Config  { c.Bus = b; return c }
+func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
 func (c Config) WithMaxTokens(n int) Config             { c.MaxTokens = n; return c }
 func (c Config) WithTemperature(t float64) Config       { c.Temperature = &t; return c }
 func (c Config) WithMaxRetries(n int) Config            { c.MaxRetries = n; return c }
@@ -228,10 +179,8 @@ func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 }
 func (c Config) WithCacheRetention(r CacheRetention) Config { c.CacheRetention = r; return c }
 func (c Config) WithSessionID(id string) Config             { c.SessionID = id; return c }
-func (c Config) WithResponseFormat(rf *ResponseFormat) Config {
-	c.ResponseFormat = rf
-	return c
-}
+func (c Config) WithAgentName(name string) Config           { c.AgentName = name; return c }
+func (c Config) WithOnRunEnd(fn func(*Result)) Config       { c.OnRunEnd = fn; return c }
 func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
 	c.LoopScheduler = s
 	return c
@@ -255,6 +204,9 @@ func (c Config) init() Config {
 		_, _ = crand.Read(b)
 		c.SessionID = hex.EncodeToString(b)
 	}
+	if c.AgentName == "" {
+		c.AgentName = "aiscan"
+	}
 	if c.Tools == nil {
 		c.Tools = tool.EmptyExecutor()
 	}
@@ -262,26 +214,12 @@ func (c Config) init() Config {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	if c.Bus == nil {
-		c.Bus = eventbus.New[Event]()
+		c.Bus = eventbus.New[aop.Event]()
+	}
+	if c.emitter == nil {
+		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.MessageCounter)
 	}
 	return c
-}
-
-type emitter struct {
-	bus             *eventbus.Bus[Event]
-	sessionID       string
-	parentSessionID string
-}
-
-func newEmitter(bus *eventbus.Bus[Event], sessionID, parentSessionID string) emitter {
-	return emitter{bus: bus, sessionID: sessionID, parentSessionID: parentSessionID}
-}
-
-func (e emitter) Emit(ev Event) {
-	ev.SessionID = e.sessionID
-	ev.ParentSessionID = e.parentSessionID
-	ev.EmittedAt = time.Now()
-	e.bus.Emit(ev)
 }
 
 // NewAgent creates an Agent from a Config.
@@ -306,15 +244,16 @@ type TurnUsage struct {
 }
 
 type Result struct {
-	Output        string
-	NewMessages   []ChatMessage
-	Messages      []ChatMessage
-	Turns         int
-	TotalUsage    Usage
-	TurnUsages    []TurnUsage
-	ContextTokens int
-	Stop          StopReason
-	Err           error
+	Output         string
+	NewMessages    []ChatMessage
+	Messages       []ChatMessage
+	Turns          int
+	TotalUsage     Usage
+	TurnUsages     []TurnUsage
+	ContextTokens  int
+	Stop           StopReason
+	Err            error
+	MessageCounter int64
 }
 
 type State struct {

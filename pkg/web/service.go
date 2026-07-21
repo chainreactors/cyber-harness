@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -1159,11 +1160,19 @@ func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
 
 func isReliableAOPEvent(event aop.Event) bool {
 	switch event.Type {
-	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd:
+	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd, aop.TypeMessage:
 		return true
-	case aop.TypeText:
-		var data aop.TextData
-		return json.Unmarshal(event.Data, &data) == nil && !data.Delta
+	case aop.TypeStatus:
+		// Status entries that drive durable UI state (eval/compact banners,
+		// budget warnings) must survive reconnect; the rest are evictable.
+		data, err := aop.DecodeData[aop.StatusData](event)
+		if err != nil {
+			return false
+		}
+		switch data.State {
+		case agent.StatusEvalEnd, agent.StatusCompactEnd, agent.StatusTokenBudgetWarning:
+			return true
+		}
 	}
 	return false
 }
@@ -1225,7 +1234,7 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	_ = s.store.AddMessage(context.Background(), msg)
 }
 
-func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.ChatPayload) (*ChatMessage, error) {
+func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.GoalExt) (*ChatMessage, error) {
 	now := time.Now()
 	msg := &ChatMessage{
 		ID:        generateID(),
@@ -1233,11 +1242,12 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		Role:      "user",
 		Content:   content,
 		CreatedAt: now,
+		Queued:    s.sessionHasActiveTask(sessionID),
 	}
 	if err := s.store.AddMessage(ctx, msg); err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
 	}
-	if event, err := aopEventFromChatMessage(msg); err == nil {
+	if event, err := messageEventFromChatMessage(msg); err == nil {
 		s.broadcastAOPEvent(sessionID, event)
 	}
 
@@ -1260,7 +1270,21 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 	return msg, nil
 }
 
-func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.ChatPayload) {
+// sessionHasActiveTask reports whether any task (chat turn or scan) is
+// currently running on the session — used to mark freshly sent messages as
+// queued rather than in-flight.
+func (s *Service) sessionHasActiveTask(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sid := range s.taskSessions {
+		if sid == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
 	content := strings.TrimSpace(msg.Content)
 
 	// A typed "/verb" is routed by scope. Hub-scope commands (scan pipeline,
@@ -1282,7 +1306,7 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 		}
 	}
 
-	s.handleChatMessage(sessionID, content, opts)
+	s.handleChatMessage(sessionID, msg, opts)
 }
 
 // handleClearCommand implements web /clear as "clear conversation": it deletes the
@@ -1291,13 +1315,19 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 // in-memory model context resets too. The agent's "Context cleared." reply lands in
 // the now-empty transcript as the sole confirmation line; with no agent bound, the
 // emptied view is itself the confirmation.
-func (s *Service) handleClearCommand(sessionID string, opts webproto.ChatPayload) {
+func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
 	_ = s.store.ClearMessages(context.Background(), sessionID)
 	// Transient: a live-only signal to connected clients — the cleared state is
 	// already durable in the store, so a reconnecting client re-derives it on load.
 	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
 	if s.sessionAgent(sessionID) != nil {
-		s.handleChatMessage(sessionID, "/clear", opts)
+		s.handleChatMessage(sessionID, &ChatMessage{
+			ID:        generateID(),
+			SessionID: sessionID,
+			Role:      "user",
+			Content:   "/clear",
+			CreatedAt: time.Now(),
+		}, opts)
 	}
 }
 
@@ -1468,7 +1498,7 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	return s.agents.get(session.AgentID)
 }
 
-func (s *Service) handleChatMessage(sessionID, content string, opts webproto.ChatPayload) {
+func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -1485,7 +1515,8 @@ func (s *Service) handleChatMessage(sessionID, content string, opts webproto.Cha
 		AgentName: agent.name,
 	})
 
-	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, sessionID, content, opts)
+	event := BuildUserMessageEvent(sessionID, msg.ID, strings.TrimSpace(msg.Content), opts)
+	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, event)
 	if err != nil {
 		s.finishSessionTask(taskID)
 		s.BroadcastChatEvent(sessionID, ChatEvent{
@@ -1537,7 +1568,7 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		CreatedAt: now,
 	}
 	_ = s.store.AddMessage(context.Background(), msg)
-	if event, err := aopEventFromChatMessage(msg); err == nil {
+	if event, err := messageEventFromChatMessage(msg); err == nil {
 		s.broadcastAOPEvent(sessionID, event)
 	}
 }

@@ -25,7 +25,8 @@ func (e Event) Valid() bool {
 const (
 	TypeSessionStart = "session.start"
 	TypeSessionEnd   = "session.end"
-	TypeText         = "text"
+	TypeMessage      = "message"
+	TypeMessageDelta = "message.delta"
 	TypeToolCall     = "tool.call"
 	TypeToolResult   = "tool.result"
 	TypeUsage        = "usage"
@@ -34,6 +35,28 @@ const (
 	TypeError        = "error"
 	TypeStatus       = "status"
 )
+
+// ── Message parts ───────────────────────────────────────────────
+
+const (
+	PartText      = "text"
+	PartReasoning = "reasoning"
+	PartImage     = "image"
+)
+
+// ImageSource carries an image by local path or inline base64. URLs are
+// not supported; exactly one of Path or Base64 is set.
+type ImageSource struct {
+	Path      string `json:"path,omitempty"`
+	Base64    string `json:"base64,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+}
+
+type MessagePart struct {
+	Type  string       `json:"type"`
+	Text  string       `json:"text,omitempty"`
+	Image *ImageSource `json:"image,omitempty"`
+}
 
 // ── Data payloads ───────────────────────────────────────────────
 
@@ -48,17 +71,22 @@ type SessionEndData struct {
 	Error string `json:"error,omitempty"`
 }
 
-type TextData struct {
-	Content string `json:"content"`
-	Role    string `json:"role,omitempty"`
-	Delta   bool   `json:"delta,omitempty"`   // append-only streaming fragment
-	Channel string `json:"channel,omitempty"` // output (default) or reasoning
+// MessageData is a complete message. Assistant streaming produces a run of
+// message.delta events followed by one authoritative message event; only the
+// complete message is persisted.
+type MessageData struct {
+	MessageID string        `json:"message_id"`
+	Role      string        `json:"role"`
+	Parts     []MessagePart `json:"parts"`
 }
 
-const (
-	TextChannelOutput    = "output"
-	TextChannelReasoning = "reasoning"
-)
+// MessageDeltaData is an incremental fragment of one message part.
+type MessageDeltaData struct {
+	MessageID string `json:"message_id"`
+	PartIndex int    `json:"part_index"`
+	PartType  string `json:"part_type"`
+	Delta     string `json:"delta"`
+}
 
 type ToolCallData struct {
 	ToolCallID string `json:"tool_call_id"`
@@ -69,9 +97,18 @@ type ToolCallData struct {
 type ToolResultData struct {
 	ToolCallID string `json:"tool_call_id"`
 	ToolName   string `json:"tool_name,omitempty"`
-	Content    any    `json:"content"`
-	IsError    bool   `json:"is_error,omitempty"`
-	DurationMs int    `json:"duration_ms,omitempty"`
+	// Content is a plain string, or a ToolResultContent when the tool
+	// returned images alongside text.
+	Content    any  `json:"content"`
+	IsError    bool `json:"is_error,omitempty"`
+	DurationMs int  `json:"duration_ms,omitempty"`
+}
+
+// ToolResultContent is the structured Content variant for tool results that
+// include images.
+type ToolResultContent struct {
+	Content string        `json:"content"`
+	Images  []ImageSource `json:"images,omitempty"`
 }
 
 type UsageData struct {

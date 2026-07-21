@@ -28,16 +28,25 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	pool.SetSessionLookup(sink)
 	remote := &remoteAgent{id: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
 
-	event := agent.Event{
-		Type: agent.EventTurnEnd, Turn: 1, EvalRound: 1, EvalPass: true,
-		EvalReason: "found SQLi", CompactTokensBefore: 1000,
-		CompactTokensAfter: 400, CompactKeptMessages: 8,
+	event := aop.Event{
+		Type:      aop.TypeStatus,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "agent-session",
+		Agent:     "test-agent",
+		Data: mustJSON(aop.StatusData{
+			State: agent.StatusEvalEnd,
+		}),
+		Ext: map[string]any{"test-agent": map[string]any{
+			"eval_round":             1,
+			"eval_pass":              true,
+			"eval_reason":            "found SQLi",
+			"compact_tokens_before":  1000,
+			"compact_tokens_after":   400,
+			"compact_kept_messages":  8,
+		}},
 	}
-	for _, protocolEvent := range aop.FromAgentEvent(event, "test-agent") {
-		protocolEvent.SessionID = "agent-session"
-		payload, _ := json.Marshal(protocolEvent)
-		pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TaskID: "task-1", Payload: payload})
-	}
+	payload, _ := json.Marshal(event)
+	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TaskID: "task-1", Payload: payload})
 
 	if len(sink.chatEvents) != 0 {
 		t.Fatalf("AOP metadata was duplicated as chat events: %#v", sink.chatEvents)
@@ -57,12 +66,5 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	}
 	if ext["compact_tokens_before"] != float64(1000) && ext["compact_tokens_before"] != 1000 {
 		t.Fatalf("compact extension = %#v", ext)
-	}
-}
-
-func TestEvalStartStillHasNoAOPProjection(t *testing.T) {
-	events := aop.FromAgentEvent(agent.Event{Type: agent.EventEvalStart}, "test-agent")
-	if len(events) != 0 {
-		t.Fatalf("eval_start events = %#v", events)
 	}
 }

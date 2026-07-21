@@ -12,6 +12,21 @@ import (
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
+// messageText flattens the text parts of a complete AOP message.
+func messageText(data aop.MessageData) string {
+	var sb strings.Builder
+	for _, part := range data.Parts {
+		if part.Type != aop.PartText || part.Text == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(part.Text)
+	}
+	return sb.String()
+}
+
 func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event, error) {
 	var output string
 	var events []aop.Event
@@ -65,10 +80,12 @@ func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event,
 			continue
 		}
 		switch event.Type {
-		case aop.TypeText:
-			var data aop.TextData
-			if json.Unmarshal(event.Data, &data) == nil && !data.Delta && data.Channel != aop.TextChannelReasoning && data.Role != "user" {
-				output = data.Content
+		case aop.TypeMessage:
+			var data aop.MessageData
+			if json.Unmarshal(event.Data, &data) == nil && data.Role != "user" {
+				if text := messageText(data); text != "" {
+					output = text
+				}
 			}
 		case aop.TypeError:
 			var data aop.ErrorData

@@ -9,124 +9,163 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
-func TestJoinSystemPrompts(t *testing.T) {
-	if got := joinSystemPrompts("aiscan", "caller"); got != "aiscan\n\ncaller" {
-		t.Fatalf("joinSystemPrompts() = %q", got)
-	}
+func newTestStdioHost(output io.Writer) *stdioHost {
+	return newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
 }
 
-func TestResponseFormatFromSchema(t *testing.T) {
-	format, instruction, err := responseFormatFromSchema(&StdioOutputSchema{
-		Name:   "Result",
-		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
-	}, provider.StructuredOutputJSONSchema)
-	if err != nil {
-		t.Fatalf("responseFormatFromSchema() error = %v", err)
-	}
-	if format.JSONSchema == nil || !format.JSONSchema.Strict || format.JSONSchema.Name != "Result" {
-		t.Fatalf("response format = %#v", format)
-	}
-	if instruction != "" {
-		t.Fatalf("instruction = %q, want empty", instruction)
-	}
-}
-
-func TestResponseFormatFromSchemaDeepSeek(t *testing.T) {
-	format, instruction, err := responseFormatFromSchema(&StdioOutputSchema{
-		Name:   "Result",
-		Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
-	}, provider.StructuredOutputJSONObject)
-	if err != nil {
-		t.Fatalf("responseFormatFromSchema() error = %v", err)
-	}
-	if format.Type != "json_object" || format.JSONSchema != nil {
-		t.Fatalf("response format = %#v", format)
-	}
-	if !strings.Contains(instruction, `"answer"`) {
-		t.Fatalf("instruction = %q", instruction)
-	}
-}
-
-func TestRunStdioRejectsEmptyPromptWithAOPTerminal(t *testing.T) {
-	input := bytes.NewBufferString(`{"type":"exec","task_id":"task-1","data":"whoami"}`)
-	var output bytes.Buffer
-	err := RunStdio(context.Background(), nil, telemetry.NopLogger(), input, &output)
-	if err == nil || err.Error() != "stdio prompt is empty" {
-		t.Fatalf("RunStdio() error = %v", err)
-	}
-	events := decodeAOPLines(t, &output)
-	if len(events) != 2 || events[0].Type != aop.TypeError || events[1].Type != aop.TypeSessionEnd {
-		t.Fatalf("events = %#v", events)
-	}
-}
-
-func TestStdioSenderCancelsOnWriteFailure(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(context.Background())
-	sender := newStdioSender(failingWriter{}, cancel, "session-1")
-	err := sender.Complete()
-	if err == nil {
-		t.Fatal("Send() error = nil")
-	}
-	if !errors.Is(context.Cause(ctx), err) {
-		t.Fatalf("context cause = %v, want %v", context.Cause(ctx), err)
-	}
-}
-
-func TestStdioSenderEncodesRawAOP(t *testing.T) {
-	_, cancel := context.WithCancelCause(context.Background())
-	var output bytes.Buffer
-	sender := newStdioSender(&output, cancel, "session-1")
+func userMessageLine(t *testing.T, sessionID, text string) string {
+	t.Helper()
 	event := aop.Event{
-		Type:      aop.TypeText,
+		Type:      aop.TypeMessage,
 		TS:        "2026-07-19T00:00:00Z",
-		SessionID: "session-1",
-		Agent:     "aiscan",
-		Data:      mustJSON(t, aop.TextData{Content: "hello"}),
+		SessionID: sessionID,
+		Agent:     "test",
+		Data: mustJSON(t, aop.MessageData{
+			MessageID: "m-1",
+			Role:      "user",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
+		}),
 	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
 
-	if err := sender.Send(event); err != nil {
-		t.Fatalf("Send() error = %v", err)
-	}
+func TestStdioAcceptRejectsMalformedJSON(t *testing.T) {
+	var output bytes.Buffer
+	h := newTestStdioHost(&output)
 
-	var got aop.Event
-	if err := json.NewDecoder(&output).Decode(&got); err != nil {
-		t.Fatalf("decode AOP: %v", err)
+	h.accept("not json")
+
+	events := decodeAOPLines(t, &output)
+	if len(events) != 1 || events[0].Type != aop.TypeError {
+		t.Fatalf("events = %#v", events)
 	}
-	if got.Type != event.Type || !got.Valid() {
-		t.Fatalf("AOP event = %#v", got)
+	data, err := aop.DecodeData[aop.ErrorData](events[0])
+	if err != nil || !strings.Contains(data.Message, "decode inbound event") {
+		t.Fatalf("error data = %+v, %v", data, err)
 	}
 }
 
-func TestStdioSenderDoesNotDuplicateRootTerminal(t *testing.T) {
-	_, cancel := context.WithCancelCause(context.Background())
+func TestStdioAcceptIgnoresNonMessageEvents(t *testing.T) {
 	var output bytes.Buffer
-	sender := newStdioSender(&output, cancel, "fallback")
-	start := aop.Event{
-		Type: aop.TypeSessionStart, TS: "2026-07-19T00:00:00Z", SessionID: "root", Agent: "aiscan",
-		Data: mustJSON(t, aop.SessionStartData{}),
+	h := newTestStdioHost(&output)
+
+	event := aop.Event{
+		Type:      aop.TypeTurnStart,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "s1",
+		Agent:     "test",
+		Data:      mustJSON(t, aop.TurnData{Turn: 1}),
 	}
-	end := aop.Event{
-		Type: aop.TypeSessionEnd, TS: "2026-07-19T00:00:01Z", SessionID: "root", Agent: "aiscan",
-		Data: mustJSON(t, aop.SessionEndData{Stop: "completed"}),
-	}
-	if err := sender.Send(start); err != nil {
+	line, err := json.Marshal(event)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.Send(end); err != nil {
+	h.accept(string(line))
+
+	if output.Len() != 0 {
+		t.Fatalf("unexpected output: %q", output.String())
+	}
+}
+
+func TestStdioAcceptRejectsNonUserMessage(t *testing.T) {
+	var output bytes.Buffer
+	h := newTestStdioHost(&output)
+
+	event := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "s1",
+		Agent:     "test",
+		Data: mustJSON(t, aop.MessageData{
+			MessageID: "m-1",
+			Role:      "assistant",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "hi"}},
+		}),
+	}
+	line, err := json.Marshal(event)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.Complete(); err != nil {
-		t.Fatal(err)
-	}
+	h.accept(string(line))
+
 	events := decodeAOPLines(t, &output)
-	if len(events) != 2 {
+	if len(events) != 1 || events[0].Type != aop.TypeError {
 		t.Fatalf("events = %#v", events)
 	}
+}
+
+func TestStdioSessionQueueFullEmitsError(t *testing.T) {
+	var output bytes.Buffer
+	h := newTestStdioHost(&output)
+	sess := &stdioSession{
+		id:    "s1",
+		queue: make(chan stdioQueuedMessage, stdioQueueCapacity),
+		done:  make(chan struct{}),
+	}
+	h.sessions["s1"] = sess
+
+	line := userMessageLine(t, "s1", "hello")
+	for i := 0; i < stdioQueueCapacity; i++ {
+		h.accept(line)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("unexpected output before overflow: %q", output.String())
+	}
+
+	h.accept(line)
+	events := decodeAOPLines(t, &output)
+	if len(events) != 1 || events[0].Type != aop.TypeError {
+		t.Fatalf("events = %#v", events)
+	}
+	data, err := aop.DecodeData[aop.ErrorData](events[0])
+	if err != nil || !strings.Contains(data.Message, "queue full") {
+		t.Fatalf("error data = %+v, %v", data, err)
+	}
+}
+
+func TestStdioRunOneRejectsEmptyPrompt(t *testing.T) {
+	var output bytes.Buffer
+	h := newTestStdioHost(&output)
+	sess := &stdioSession{id: "s1"}
+
+	h.runOne(sess, stdioQueuedMessage{
+		data: aop.MessageData{
+			Role:  "user",
+			Parts: []aop.MessagePart{{Type: aop.PartText, Text: "   "}},
+		},
+	})
+
+	events := decodeAOPLines(t, &output)
+	if len(events) != 1 || events[0].Type != aop.TypeError {
+		t.Fatalf("events = %#v", events)
+	}
+	data, err := aop.DecodeData[aop.ErrorData](events[0])
+	if err != nil || !strings.Contains(data.Message, "empty prompt") {
+		t.Fatalf("error data = %+v, %v", data, err)
+	}
+}
+
+func TestStdioHostReportsEncoderFailure(t *testing.T) {
+	h := newTestStdioHost(failingWriter{})
+	h.failAll(errors.New("broken"))
+
+	if err := h.err(); err == nil || !strings.Contains(err.Error(), "write AOP stdout") {
+		t.Fatalf("host err = %v", err)
+	}
+}
+
+func TestStdioDrainWithoutSessions(t *testing.T) {
+	var output bytes.Buffer
+	h := newTestStdioHost(&output)
+	h.drain() // must not block
 }
 
 func mustJSON(t *testing.T, value any) json.RawMessage {

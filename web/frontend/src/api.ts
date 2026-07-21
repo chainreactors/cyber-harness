@@ -591,7 +591,7 @@ export interface ChatSession {
 export interface ChatMessage {
   id: string
   session_id: string
-  role: 'user' | 'assistant' | 'system' | 'tool_call' | 'tool_result'
+  role: 'user' | 'assistant' | 'system'
   agent_id?: string
   agent_name?: string
   content: string
@@ -602,7 +602,7 @@ export interface ChatMessage {
 export type ChatEventType =
   | 'message'
   | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
-  | 'agent_joined' | 'eval' | 'session_cleared' | 'error'
+  | 'agent_joined' | 'session_cleared' | 'error'
 
 export interface ChatEvent {
   type: ChatEventType
@@ -621,9 +621,6 @@ export interface ChatEvent {
   // localize them via i18n; `content`/`error` stay as English fallbacks.
   code?: string
   params?: Record<string, unknown>
-  eval_round?: number
-  eval_pass?: boolean
-  eval_reason?: string
 }
 
 // --- Chat session API ---
@@ -752,7 +749,7 @@ export function subscribeChatEvents(
   const eventTypes: ChatEventType[] = [
     'message',
     'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
-    'agent_joined', 'eval', 'session_cleared', 'error',
+    'agent_joined', 'session_cleared', 'error',
   ]
 
   for (const type of eventTypes) {

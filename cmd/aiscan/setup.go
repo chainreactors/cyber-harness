@@ -152,7 +152,7 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 	result, err := agent.NewAgent(rt.Config.
 		WithSystemPrompt(rt.SystemPrompt).
 		WithStream(false)).
-		Run(ctx, prompt)
+		Run(ctx, agent.TextInput(prompt))
 	if err != nil {
 		return err
 	}

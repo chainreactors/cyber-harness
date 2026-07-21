@@ -17,6 +17,8 @@ type SessionData struct {
 	Model     string        `json:"model,omitempty"`
 	Provider  string        `json:"provider,omitempty"`
 	Messages  []ChatMessage `json:"messages"`
+	// MessageCounter resumes AOP message_id allocation ("m-<n>") after restore.
+	MessageCounter int64 `json:"message_counter,omitempty"`
 }
 
 type SessionInfo struct {

@@ -184,7 +184,7 @@ func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, ty
 		defer cancel()
 	}
 
-	r, err := sub.Run(subCtx, prompt)
+	r, err := sub.Run(subCtx, TextInput(prompt))
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf("subagent %q timed out after %s", name, timeoutStr), nil
@@ -208,7 +208,7 @@ func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, t
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
-		r, err := sub.Run(subCtx, prompt)
+		r, err := sub.Run(subCtx, TextInput(prompt))
 		t.pushCompletion(name, typeName, r, err)
 	}()
 
@@ -232,7 +232,7 @@ func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name,
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
-		r, err := sub.Run(subCtx, directive)
+		r, err := sub.Run(subCtx, TextInput(directive))
 		t.pushCompletion(name, typeName, r, err)
 	}()
 

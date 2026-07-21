@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -32,7 +33,7 @@ func TestRetryOnTransientError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v, want success after retry", err)
 	}
@@ -59,7 +60,7 @@ func TestNoRetryOnAuthError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 3,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want auth error")
 	}
@@ -83,7 +84,7 @@ func TestRetryExhaustedReturnsLastError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want error after retries exhausted")
 	}
@@ -117,9 +118,10 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	_, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
-		newEmitter(eventbus.New[Event](), "test", ""),
+		newAOPEmitter(eventbus.New[aop.Event](), "aiscan", "test-session", "", 0),
 		telemetry.NopLogger(),
 		1,
+		"m-1",
 	)
 	if err != context.Canceled {
 		t.Fatalf("streamAssistantMessageWithUsage() error = %v, want context.Canceled", err)
@@ -142,7 +144,7 @@ func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	result, err := a.Run(context.Background(), "hello")
+	result, err := a.Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil (fallback should succeed)", err)
 	}
@@ -166,7 +168,7 @@ func TestProviderFallbackAllExhausted(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	_, err := a.Run(context.Background(), "hello")
+	_, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want error when all providers exhausted")
 	}
@@ -191,7 +193,7 @@ func TestNoFallbackWhenPrimarySucceeds(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	result, err := a.Run(context.Background(), "hello")
+	result, err := a.Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -234,7 +236,7 @@ func TestImageErrorAutoRecovery(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze this")
+	result, err := a.Run(context.Background(), TextInput("analyze this"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -275,7 +277,7 @@ func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze the screenshot")
+	result, err := a.Run(context.Background(), TextInput("analyze the screenshot"))
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil (image error should auto-recover)", err)
 	}
@@ -312,7 +314,7 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze")
+	result, err := a.Run(context.Background(), TextInput("analyze"))
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
@@ -321,7 +323,7 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 	}
 
 	imgProvider.callCount.Store(0)
-	_, err = a.Run(context.Background(), "follow up")
+	_, err = a.Run(context.Background(), TextInput("follow up"))
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}

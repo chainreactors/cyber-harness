@@ -64,29 +64,27 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
         extensionType: 'scan_complete',
         data: { scanID: item.scanID || '', result: item.scanResult },
       }
-    case 'agent_joined':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'agent_joined',
-        data: { agentName: item.agentName || '' },
-      }
-    case 'eval':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'eval',
-        data: {
-          pass: !!item.evalPass,
-          round: item.evalRound,
-          reason: item.evalReason,
-        },
-      }
     default:
       return null
   }
+}
+
+// Scan-result markers are persisted as AOP `message` events (role=system with
+// ext metadata.event_type) so they survive reload — but the platform timeline
+// already renders them as scan cards. Drop them from the stream handed to the
+// AOP reducer so they don't also appear as bare "scan complete" bubbles.
+function isPlatformMarkerEvent(event: AOPEvent): boolean {
+  if (event.type !== 'message') return false
+  const data = event.data as { role?: string } | undefined
+  if (data?.role !== 'system') return false
+  const ext = event.ext
+  if (!ext) return false
+  for (const value of Object.values(ext)) {
+    if (!value || typeof value !== 'object') continue
+    const meta = (value as Record<string, unknown>).metadata
+    if (meta && typeof meta === 'object' && (meta as Record<string, unknown>).event_type) return true
+  }
+  return false
 }
 
 function toViewerTimelineItem(
@@ -111,41 +109,6 @@ function toViewerTimelineItem(
         metadata: message.metadata,
       }
     }
-    case 'assistant_response': {
-      const response = item.assistantResponse
-      if (!response) return null
-      return {
-        id: item.id,
-        kind: 'assistant_response',
-        timestamp: item.timestamp,
-        actorName: response.agentName || response.response?.agent_name,
-        thinking: response.thinking,
-        tools: response.tools.map((tool) => ({
-          id: tool.id,
-          toolName: tool.toolName,
-          toolArgs: tool.toolArgs,
-          result: tool.result,
-          pending: tool.pending,
-        })),
-        response: response.response
-          ? { content: response.response.content, metadata: response.response.metadata }
-          : undefined,
-        streaming: response.streaming,
-      }
-    }
-    case 'tool_call':
-      return item.toolCall ? {
-        id: item.id,
-        kind: 'tool_call',
-        timestamp: item.timestamp,
-        toolCall: {
-          id: item.toolCall.id,
-          toolName: item.toolCall.toolName,
-          toolArgs: item.toolCall.toolArgs,
-          result: item.toolCall.result,
-          pending: item.toolCall.pending,
-        },
-      } : null
     case 'thinking':
       return {
         id: item.id,
@@ -160,8 +123,6 @@ function toViewerTimelineItem(
       if (item.scanID && scanResults.has(item.scanID)) return null
       return toExtensionItem(item)
     case 'scan_complete':
-    case 'agent_joined':
-    case 'eval':
       return toExtensionItem(item)
     default:
       return null
@@ -216,20 +177,20 @@ export default function ChatPanel({
   onClearError,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
-  const hasAssistantResponse = timeline.some((item) => item.kind === 'assistant_response')
+  const agentEvents = useMemo(() => aopEvents.filter((event) => !isPlatformMarkerEvent(event)), [aopEvents])
   const liveThinkingItem = useMemo<TimelineItem | null>(() => {
-    if (!isThinking || hasAssistantResponse) return null
+    if (!isThinking) return null
     return { id: 'thinking-live', kind: 'thinking', timestamp: Date.now() }
-  }, [hasAssistantResponse, isThinking])
+  }, [isThinking])
   const viewerTimeline = useMemo<ViewerTimelineItem[]>(() => {
-    const source = liveThinkingItem && aopEvents.length === 0 ? [...timeline, liveThinkingItem] : timeline
+    const source = liveThinkingItem && agentEvents.length === 0 ? [...timeline, liveThinkingItem] : timeline
     const platformItems = source
       .map((item) => toViewerTimelineItem(item, scanResults))
       .filter((item): item is ViewerTimelineItem => item !== null)
-      .filter((item) => aopEvents.length === 0
+      .filter((item) => agentEvents.length === 0
         || item.kind === 'extension'
         || (item.kind === 'message' && item.role === 'user'))
-    const aopItems = reduceAOPToTimeline(aopEvents, { streaming: isBusy })
+    const aopItems = reduceAOPToTimeline(agentEvents, { streaming: isBusy })
       .filter((item) => item.kind !== 'message'
         || item.role !== 'user'
         || !platformItems.some(
@@ -240,7 +201,7 @@ export default function ChatPanel({
     return [...platformItems, ...aopItems].sort(
       (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
     )
-  }, [aopEvents, isBusy, liveThinkingItem, scanResults, timeline])
+  }, [agentEvents, isBusy, liveThinkingItem, scanResults, timeline])
   // The right rail carries IOA thread notes, which only a fraction of turns emit.
   // Reserve its 6rem column only when the transcript actually has one — otherwise
   // the empty rail just steals horizontal space from the conversation.
@@ -613,6 +574,23 @@ function timelineContent(
           />
         )
       }
+      if (item.extensionType === 'compact') {
+        return (
+          <CompactNote
+            before={numOrUndefined(item.data.tokens_before)}
+            after={numOrUndefined(item.data.tokens_after)}
+            kept={numOrUndefined(item.data.kept_messages)}
+          />
+        )
+      }
+      if (item.extensionType === 'token_budget') {
+        return (
+          <TokenBudgetNote
+            context={numOrUndefined(item.data.context_tokens)}
+            budget={numOrUndefined(item.data.token_budget)}
+          />
+        )
+      }
       const config = resolveTimelineRenderer(item.extensionType)
       if (!config) return null
       const Renderer = config.renderer
@@ -677,6 +655,34 @@ function EvalNote({ pass, round, reason }: { pass: boolean; round?: number; reas
         {t('evalRound', { round: (round ?? 0) + 1 })} · {pass ? t('evalPass') : t('evalFail')}
       </span>
       {reason ? <p className="mt-0.5 break-words text-muted-foreground">{reason}</p> : null}
+    </Callout>
+  )
+}
+
+function numOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function CompactNote({ before, after, kept }: { before?: number; after?: number; kept?: number }) {
+  const { t } = useTranslation('chat')
+  return (
+    <Callout tone="info" icon={<Layers className="h-3.5 w-3.5" />} className="rounded-lg">
+      <span className="font-medium">{t('compactLabel')}</span>
+      <p className="mt-0.5 break-words text-muted-foreground">
+        {t('compactDetail', { before: before ?? '?', after: after ?? '?', kept: kept ?? '?' })}
+      </p>
+    </Callout>
+  )
+}
+
+function TokenBudgetNote({ context, budget }: { context?: number; budget?: number }) {
+  const { t } = useTranslation('chat')
+  return (
+    <Callout tone="warning" icon={<AlertTriangle className="h-3.5 w-3.5" />} className="rounded-lg">
+      <span className="font-medium">{t('tokenBudgetLabel')}</span>
+      <p className="mt-0.5 break-words text-muted-foreground">
+        {t('tokenBudgetDetail', { contextTokens: context ?? '?', budget: budget ?? '?' })}
+      </p>
     </Callout>
   )
 }
@@ -871,6 +877,22 @@ function describeTimelineItem(item: ViewerTimelineItem, t: (key: string) => stri
           time,
           icon: <Sparkles className="h-3 w-3 text-ai" />,
           dotClass: item.data.pass === true ? 'border-success bg-success' : 'border-ai bg-ai',
+        }
+      }
+      if (item.extensionType === 'compact') {
+        return {
+          label: t('compactLabel'),
+          time,
+          icon: <Layers className="h-3 w-3 text-info" />,
+          dotClass: 'border-info bg-info',
+        }
+      }
+      if (item.extensionType === 'token_budget') {
+        return {
+          label: t('tokenBudgetLabel'),
+          time,
+          icon: <AlertTriangle className="h-3 w-3 text-warning" />,
+          dotClass: 'border-warning bg-warning',
         }
       }
       const config = resolveTimelineRenderer(item.extensionType)

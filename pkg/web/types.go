@@ -187,6 +187,10 @@ type ChatMessage struct {
 	Content   string          `json:"content"`
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
+	// Queued is a transient send-time hint: true when the message was accepted
+	// while another chat task is still running on the session, so the client
+	// can render it as pending-in-queue rather than in-flight.
+	Queued bool `json:"queued,omitempty"`
 }
 
 const (
@@ -235,7 +239,9 @@ type SendMessageRequest struct {
 	Content string `json:"content"`
 	// Goal-mode run controls (optional). The frontend sends these when the user
 	// enables the Goal panel; a plain chat send leaves them zero.
-	webproto.ChatPayload
+	EvalCriteria    string `json:"eval_criteria,omitempty"`
+	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
+	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
 }
 
 type CreateSessionRequest struct {

@@ -56,7 +56,7 @@ type CompactResult struct {
 func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult, error) {
 	a.mu.Lock()
 	msgs := append([]ChatMessage(nil), a.state.Messages...)
-	bus := a.Cfg.Bus
+	em := a.Cfg.emitter
 	if cfg.Provider == nil {
 		cfg.Provider = a.Cfg.Provider
 	}
@@ -72,18 +72,18 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 		cfg.KeepRecentTokens = defaultKeepRecentTokens
 	}
 
-	bus.Emit(Event{Type: EventCompactStart})
+	em.status(StatusCompactStart, nil)
 
 	tokensBefore := estimateAllTokens(msgs)
 	cutIdx := findCutPoint(msgs, cfg.KeepRecentTokens)
 	if cutIdx <= 0 {
-		bus.Emit(Event{Type: EventCompactError})
+		em.status(StatusCompactError, map[string]any{"compact_error": "context already fits"})
 		return nil, fmt.Errorf("nothing to compact (context already fits in %d tokens)", cfg.KeepRecentTokens)
 	}
 
 	summary, err := summarize(ctx, cfg.Provider, cfg.Model, msgs[:cutIdx], cfg.CustomInstructions)
 	if err != nil {
-		bus.Emit(Event{Type: EventCompactError})
+		em.status(StatusCompactError, map[string]any{"compact_error": err.Error()})
 		return nil, fmt.Errorf("compact summarize: %w", err)
 	}
 
@@ -104,11 +104,10 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	a.state.Messages = newMsgs
 	a.mu.Unlock()
 
-	bus.Emit(Event{
-		Type:                EventCompactEnd,
-		CompactTokensBefore: result.TokensBefore,
-		CompactTokensAfter:  result.TokensAfter,
-		CompactKeptMessages: result.KeptMessages,
+	em.status(StatusCompactEnd, map[string]any{
+		"compact_tokens_before": result.TokensBefore,
+		"compact_tokens_after":  result.TokensAfter,
+		"compact_kept_messages": result.KeptMessages,
 	})
 	return result, nil
 }

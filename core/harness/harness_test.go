@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/ioa/protocols"
 	ioaclient "github.com/chainreactors/ioa/client"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -41,6 +43,98 @@ func TestAgentSimplePrompt(t *testing.T) {
 		MaxTurns:       2,
 		JudgeCriteria:  "The agent must reply with the number 4. No tool calls needed. The answer must be mathematically correct.",
 	}.Run(t, h)
+}
+
+// TestAgentDualSessionInterleaved drives the stdio host with two concurrent
+// sessions: messages for sess-a and sess-b are written interleaved and both
+// sessions must run to completion independently.
+func TestAgentDualSessionInterleaved(t *testing.T) {
+	h := New(t)
+
+	fullArgs := h.agentCLIArgs()
+	fullArgs = append(fullArgs, "--transport", "stdio")
+
+	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, h.exe, fullArgs...)
+	cmd.Dir = h.workDir
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start agent: %v", err)
+	}
+
+	writeUserMessage := func(sessionID, messageID, text string) {
+		t.Helper()
+		data, _ := json.Marshal(aop.MessageData{
+			MessageID: messageID, Role: "user",
+			Parts: []aop.MessagePart{{Type: aop.PartText, Text: text}},
+		})
+		event := aop.Event{
+			Type:      aop.TypeMessage,
+			TS:        time.Now().UTC().Format(time.RFC3339Nano),
+			SessionID: sessionID,
+			Agent:     "aiscan.harness",
+			Data:      data,
+		}
+		if err := json.NewEncoder(stdin).Encode(event); err != nil {
+			t.Fatalf("write %s: %v", sessionID, err)
+		}
+	}
+	writeUserMessage("sess-a", "m-1", "Reply with exactly: ALPHA")
+	writeUserMessage("sess-b", "m-1", "Reply with exactly: BRAVO")
+	writeUserMessage("sess-a", "m-2", "Reply with exactly: ALPHA2")
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+
+	type sessionState struct {
+		ended   bool
+		outputs []string
+	}
+	sessions := map[string]*sessionState{"sess-a": {}, "sess-b": {}}
+	decoder := json.NewDecoder(stdout)
+	for {
+		var event aop.Event
+		if err := decoder.Decode(&event); err != nil {
+			break
+		}
+		state, ok := sessions[event.SessionID]
+		if !ok {
+			continue
+		}
+		switch event.Type {
+		case aop.TypeMessage:
+			data, err := aop.DecodeData[aop.MessageData](event)
+			if err == nil && data.Role == "assistant" {
+				state.outputs = append(state.outputs, messageText(data))
+			}
+		case aop.TypeSessionEnd:
+			state.ended = true
+		}
+	}
+	_ = cmd.Wait()
+
+	for id, state := range sessions {
+		if !state.ended {
+			t.Errorf("%s never reached session.end (stderr: %s)", id, clip(stderr.String(), 500))
+		}
+	}
+	if got := strings.Join(sessions["sess-a"].outputs, "\n"); !strings.Contains(got, "ALPHA") {
+		t.Errorf("sess-a outputs = %q, want ALPHA", got)
+	}
+	if got := strings.Join(sessions["sess-b"].outputs, "\n"); !strings.Contains(got, "BRAVO") {
+		t.Errorf("sess-b outputs = %q, want BRAVO", got)
+	}
 }
 
 func TestAgentEmptyReply(t *testing.T) {

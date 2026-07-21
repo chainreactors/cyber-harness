@@ -271,8 +271,15 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "chat" || cmd.Data != "hello" {
+	if cmd.Type != "aop" {
 		t.Fatalf("unexpected: %+v", cmd)
+	}
+	event, ok := webproto.IsAOPUserMessage(cmd)
+	if !ok {
+		t.Fatalf("dispatch did not carry an AOP user message: %+v", cmd)
+	}
+	if text := webproto.UserMessageText(event); text != "hello" {
+		t.Fatalf("unexpected user text: %q", text)
 	}
 
 	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-chat", Data: "hi"})
@@ -287,8 +294,8 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 }
 
 // TestDispatchChatSessionCarriesGoalOptions guards the Goal-mode wiring: the
-// eval criteria and round budget must survive into the WS chat payload so the
-// agent can run the evaluator loop. This whole channel was silently dropped
+// eval criteria and round budget must survive into the AOP user message ext so
+// the agent can run the evaluator loop. This whole channel was silently dropped
 // once (SendMessageRequest{Content} only), leaving the Goal panel a dead
 // control — this test fails loudly if that regresses.
 func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
@@ -303,8 +310,9 @@ func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	opts := webproto.ChatPayload{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5}
-	resultCh, err := pool.DispatchChatSession(agent.id, "task-goal", "sess-1", "audit target", opts)
+	event := BuildUserMessageEvent("sess-1", "msg-1", "audit target",
+		webproto.GoalExt{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	resultCh, err := pool.DispatchChatSession(agent.id, "task-goal", event)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,21 +321,25 @@ func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 	if err := conn.ReadJSON(&cmd); err != nil {
 		t.Fatal(err)
 	}
-	if cmd.Type != "chat" || cmd.Data != "audit target" {
-		t.Fatalf("unexpected message: %+v", cmd)
+	inbound, ok := webproto.IsAOPUserMessage(cmd)
+	if !ok {
+		t.Fatalf("dispatch did not carry an AOP user message: %+v", cmd)
 	}
-	var payload webproto.ChatPayload
-	if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
-		t.Fatalf("decode chat payload: %v (raw=%s)", err, cmd.Payload)
+	if inbound.SessionID != "sess-1" {
+		t.Errorf("session_id = %q, want sess-1", inbound.SessionID)
 	}
-	if payload.SessionID != "sess-1" {
-		t.Errorf("session_id = %q, want sess-1", payload.SessionID)
+	if text := webproto.UserMessageText(inbound); text != "audit target" {
+		t.Errorf("user text = %q, want %q", text, "audit target")
 	}
-	if payload.EvalCriteria != "find at least one SQLi" {
-		t.Errorf("eval_criteria = %q, want it to reach the agent", payload.EvalCriteria)
+	goal := webproto.DecodeGoalExt(inbound)
+	if goal.EvalCriteria != "find at least one SQLi" {
+		t.Errorf("eval_criteria = %q, want it to reach the agent", goal.EvalCriteria)
 	}
-	if payload.EvalMaxRounds != 5 {
-		t.Errorf("eval_max_rounds = %d, want 5", payload.EvalMaxRounds)
+	if goal.EvalMaxRounds != 5 {
+		t.Errorf("eval_max_rounds = %d, want 5", goal.EvalMaxRounds)
+	}
+	if !goal.NoEcho {
+		t.Error("hub-sent user message must set no_echo")
 	}
 	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-goal", Data: "ok"})
 	select {

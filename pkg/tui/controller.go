@@ -9,7 +9,6 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -19,7 +18,6 @@ type EvalSettings struct {
 	Criteria string
 	Model    string
 	Provider agent.Provider
-	Bus      *eventbus.Bus[agent.Event]
 	Logger   telemetry.Logger
 }
 
@@ -58,7 +56,7 @@ func (c *interactiveRunController) SubmitPrompt(label, displayText, prompt strin
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
-		c.session.SteerUserMessage(prompt)
+		c.session.SteerUserMessage(agent.TextInput(prompt))
 		c.output.Queued(displayText)
 		return nil
 	}
@@ -73,7 +71,7 @@ func (c *interactiveRunController) Continue() error {
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
-		c.session.SteerUserMessage("Continue.")
+		c.session.SteerUserMessage(agent.TextInput("Continue."))
 		c.output.Queued("Continue.")
 		return nil
 	}
@@ -84,7 +82,7 @@ func (c *interactiveRunController) Continue() error {
 func (c *interactiveRunController) buildRunFunc(prompt string) agentRunFunc {
 	if c.Eval == nil || c.Eval.Criteria == "" {
 		return func(ctx context.Context) (*agent.Result, error) {
-			return c.session.Run(ctx, prompt)
+			return c.session.Run(ctx, agent.TextInput(prompt))
 		}
 	}
 	eval := c.Eval
@@ -102,7 +100,6 @@ func (c *interactiveRunController) buildRunFunc(prompt string) agentRunFunc {
 			MaxEvalRounds: 3,
 			Goal:          prompt,
 			Criteria:      eval.Criteria,
-			Bus:           eval.Bus,
 		}
 		result, _, err := evaluator.RunWithEval(ctx, c.session, cfg)
 		return result, err

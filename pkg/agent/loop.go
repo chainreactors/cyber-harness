@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -28,9 +31,9 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 	transcript := newTranscript(cfg.Messages, 8)
 	turn := 0
 
-	bus := newEmitter(cfg.Bus, cfg.SessionID, cfg.ParentSessionID)
+	em := cfg.emitter
 	ib := cfg.Inbox
-	bus.Emit(Event{Type: EventAgentStart})
+	em.sessionStart(cfg.Model)
 	ended := false
 	end := func(result *Result, err error, stop StopReason) (*Result, error) {
 		if result == nil {
@@ -40,18 +43,16 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			result.Err = err
 		}
 		result.Stop = stop
+		result.MessageCounter = em.messageCounter()
 		if !ended {
 			ended = true
-			totalUsage := transcript.totalUsage
-			bus.Emit(Event{
-				Type:        EventAgentEnd,
-				Turn:        result.Turns,
-				Messages:    append([]ChatMessage(nil), result.Messages...),
-				NewMessages: append([]ChatMessage(nil), result.NewMessages...),
-				Err:         result.Err,
-				Stop:        stop,
-				TotalUsage:  &totalUsage,
-			})
+			if result.Err != nil && stop == StopReasonError {
+				em.errorEvt(result.Err, isRetryableError(result.Err))
+			}
+			em.sessionEnd(stop, result.Turns, result.Err)
+			if cfg.OnRunEnd != nil {
+				cfg.OnRunEnd(result)
+			}
 		}
 		return result, err
 	}
@@ -62,7 +63,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.append(failure)
 			return end(nil, err, StopReasonCanceled)
 		}
-		bus.Emit(Event{Type: EventTurnStart, Turn: turn})
+		em.turnStart(turn)
 
 		if ib != nil {
 			inboxMsgs := ib.Drain()
@@ -72,8 +73,10 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				}
 				for _, cm := range inboxMsgs[i].ToChatMessages() {
 					transcript.append(cm)
-					bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: cm})
-					bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: cm})
+					noEcho, _ := inboxMsgs[i].Meta["no_echo"].(bool)
+					if inboxMsgs[i].Origin == inbox.OriginUser && !noEcho {
+						em.message("user", messagePartsFromChat(cm))
+					}
 				}
 			}
 			if len(inboxMsgs) > 0 {
@@ -91,7 +94,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		reqMessages := requestMessages(systemPrompt, transcript.messages, cfg.TransformContext)
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistantMsg, usage, err := requestWithRetry(ctx, cfg, bus, reqMessages, cfg.Tools.ToolDefinitions(), turn)
+		assistantMsg, usage, err := requestWithRetry(ctx, cfg, em, reqMessages, cfg.Tools.ToolDefinitions(), turn)
 		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -106,10 +109,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				cfg.Model = next.Model
 				continue
 			}
-			failure := NewTextMessage("assistant", "")
-			bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: failure})
-			bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: failure})
-			bus.Emit(Event{Type: EventTurnEnd, Turn: turn, Message: failure, Err: err})
+			em.turnEnd(turn, transcript.totalUsage, transcript.contextTokens)
 			transcript.completedTurns = turn
 			return end(nil, err, StopReasonError)
 		}
@@ -122,7 +122,10 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				return end(result, result.Err, StopReasonBudget)
 			}
 			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
-				bus.Emit(Event{Type: EventTokenBudgetWarning, Turn: turn})
+				em.status(StatusTokenBudgetWarning, map[string]any{
+					"context_tokens": transcript.contextTokens,
+					"token_budget":   cfg.TokenBudget,
+				})
 				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
 			}
 		}
@@ -131,7 +134,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		terminate := false
 		if len(assistantMsg.ToolCalls) > 0 {
 			cfg.Messages = append([]ChatMessage(nil), transcript.messages...)
-			batch, err := executeToolCalls(ctx, cfg, bus, assistantMsg, turn)
+			batch, err := executeToolCalls(ctx, cfg, em, assistantMsg, turn)
 			if err != nil {
 				if ctx.Err() != nil {
 					return end(nil, ctx.Err(), StopReasonCanceled)
@@ -143,8 +146,8 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.append(toolResults...)
 		}
 
-		totalUsageCopy := transcript.totalUsage
-		bus.Emit(Event{Type: EventTurnEnd, Turn: turn, Message: assistantMsg, ToolResults: toolResults, Usage: usage, TotalUsage: &totalUsageCopy, ContextTokens: transcript.contextTokens})
+		em.usage(usage, cfg.Model)
+		em.turnEnd(turn, transcript.totalUsage, transcript.contextTokens)
 		transcript.completedTurns = turn
 
 		if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
@@ -248,7 +251,7 @@ type toolBatchResult struct {
 	terminate bool
 }
 
-func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg ChatMessage, turn int) (toolBatchResult, error) {
+func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistantMsg ChatMessage, turn int) (toolBatchResult, error) {
 	toolCalls := assistantMsg.ToolCalls
 	slots := make([]toolCallSlot, len(toolCalls))
 
@@ -257,13 +260,7 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 		slots[i] = toolCallSlot{tc: tc}
 	}
 	for _, tc := range toolCalls {
-		bus.Emit(Event{
-			Type:       EventToolExecutionStart,
-			Turn:       turn,
-			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
-			Arguments:  tc.Function.Arguments,
-		})
+		em.toolCall(tc.ID, tc.Function.Name, parseToolArgs(tc.Function.Arguments))
 	}
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
@@ -284,21 +281,10 @@ func executeToolCalls(ctx context.Context, cfg Config, bus emitter, assistantMsg
 	messages := make([]ChatMessage, 0, len(slots))
 	terminations := 0
 	for _, s := range slots {
-		bus.Emit(Event{
-			Type:       EventToolExecutionEnd,
-			Turn:       turn,
-			ToolCallID: s.tc.ID,
-			ToolName:   s.tc.Function.Name,
-			Arguments:  s.tc.Function.Arguments,
-			Result:     s.result.eventResult(),
-			IsError:    s.result.isError,
-			Err:        s.result.err,
-			StartedAt:  s.startedAt,
-		})
+		em.toolResult(s.tc.ID, s.tc.Function.Name, s.result.eventContent(), s.result.isError,
+			int(time.Since(s.startedAt).Milliseconds()))
 		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Function.Name, len(s.result.result))
 		toolMsg := toolResultToMessage(s.tc.ID, s.result)
-		bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: toolMsg})
-		bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: toolMsg})
 		messages = append(messages, toolMsg)
 		if s.result.flow == ToolFlowTerminate {
 			terminations++
@@ -355,11 +341,37 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution)
 }
 
-func (e toolExecution) eventResult() string {
+// eventContent returns the AOP tool.result payload: a plain string, or the
+// {content, images} variant when the tool returned images.
+func (e toolExecution) eventContent() any {
+	if e.fullResult != nil && e.fullResult.HasImages() {
+		trc := aop.ToolResultContent{Content: e.eventResultText()}
+		for _, block := range e.fullResult.Content {
+			if block.Type == "image" {
+				trc.Images = append(trc.Images, aop.ImageSource{Base64: block.Base64Data, MediaType: block.MimeType})
+			}
+		}
+		return trc
+	}
+	return e.eventResultText()
+}
+
+func (e toolExecution) eventResultText() string {
 	if e.rawResult != "" {
 		return e.rawResult
 	}
 	return e.result
+}
+
+func parseToolArgs(raw string) any {
+	if raw == "" {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err == nil {
+		return m
+	}
+	return raw
 }
 
 func toolResultToMessage(toolCallID string, exec toolExecution) ChatMessage {

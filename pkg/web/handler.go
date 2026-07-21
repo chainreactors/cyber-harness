@@ -343,8 +343,11 @@ func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
-	opts := req.ChatPayload
-	opts.EvalCriteria = strings.TrimSpace(opts.EvalCriteria)
+	opts := webproto.GoalExt{
+		EvalCriteria:    strings.TrimSpace(req.EvalCriteria),
+		EvalMaxRounds:   req.EvalMaxRounds,
+		PersistMaxTurns: req.PersistMaxTurns,
+	}
 	msg, err := h.service.HandleUserMessage(r.Context(), r.PathValue("id"), req.Content, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

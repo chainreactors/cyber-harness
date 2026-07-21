@@ -80,12 +80,12 @@ func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 
 	const sid = "sess-aop"
 	event := aop.Event{
-		Type:      aop.TypeText,
+		Type:      aop.TypeMessage,
 		TS:        "2026-07-19T00:00:00Z",
 		SessionID: "agent-session",
 		Agent:     "aiscan",
 		Seq:       7,
-		Data:      json.RawMessage(`{"role":"assistant","content":"hello","delta":true}`),
+		Data:      json.RawMessage(`{"message_id":"m-1","role":"assistant","parts":[{"type":"text","text":"hello"}]}`),
 	}
 	svc.BroadcastAOPEvent(sid, event)
 

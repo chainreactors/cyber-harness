@@ -40,10 +40,12 @@ func (m *Monitor) renderEvent(ev aop.Event) {
 			m.printf("\n── turn %d ──\n", data.Turn)
 		}
 
-	case aop.TypeText:
-		data, err := aop.DecodeData[aop.TextData](ev)
-		if err == nil && !data.Delta && data.Content != "" && (data.Role == "" || data.Role == "assistant") {
-			m.printf("  💬 %s\n", truncate.Clip(data.Content, 200))
+	case aop.TypeMessage:
+		data, err := aop.DecodeData[aop.MessageData](ev)
+		if err == nil && (data.Role == "" || data.Role == "assistant") {
+			if text := messageText(data); text != "" {
+				m.printf("  💬 %s\n", truncate.Clip(text, 200))
+			}
 		}
 
 	case aop.TypeToolCall:

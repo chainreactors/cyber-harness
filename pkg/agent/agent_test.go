@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
@@ -29,7 +31,7 @@ func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 		Tools:        tools,
 		Model:        "test",
 		SystemPrompt: "system",
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -66,13 +68,13 @@ func TestRunExecutesToolLoop(t *testing.T) {
 		},
 	}
 
-	var events []EventType
+	var events []string
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus:      testBus(func(e Event) { events = append(events, e.Type) }),
-	})).Run(context.Background(), "use tool")
+		Bus:      testBus(func(e aop.Event) { events = append(events, e.Type) }),
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -89,7 +91,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	if !hasToolMessage(requests[1].Messages, "call-1", "tool output") {
 		t.Fatalf("second request missing tool result: %#v", requests[1].Messages)
 	}
-	if !containsEvent(events, EventToolExecutionStart) || !containsEvent(events, EventToolExecutionEnd) {
+	if !containsEvent(events, aop.TypeToolCall) || !containsEvent(events, aop.TypeToolResult) {
 		t.Fatalf("tool events missing: %#v", events)
 	}
 }
@@ -118,10 +120,10 @@ func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
 		},
 	}
 	a := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
-	if _, err := a.Run(context.Background(), "one"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("one")); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
-	if _, err := a.Run(context.Background(), "two"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("two")); err != nil {
 		t.Fatalf("second prompt error = %v", err)
 	}
 	requests := llm.requestsSnapshot()
@@ -145,7 +147,7 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 	}
 	ag := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
 	ag.state.Messages = []ChatMessage{NewTextMessage("user", "base")}
-	result, err := ag.Run(context.Background(), "prompt")
+	result, err := ag.Run(context.Background(), TextInput("prompt"))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -160,41 +162,47 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
-	var events []Event
+	var events []aop.Event
 	a := NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event Event) {
+		Bus: testBus(func(event aop.Event) {
 			events = append(events, event)
 		}),
 	})
 
-	result, err := a.Run(context.Background(), "hello")
+	result, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Prompt() error = nil, want error")
 	}
 	if result == nil || result.Err == nil {
 		t.Fatalf("result = %#v, want result with Err", result)
 	}
-	if got := eventTypes(events); !reflect.DeepEqual(got, []EventType{
-		EventAgentStart,
-		EventTurnStart,
-		EventMessageStart,
-		EventMessageEnd,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventAgentEnd,
+	if got := eventTypes(events); !reflect.DeepEqual(got, []string{
+		aop.TypeSessionStart,
+		aop.TypeTurnStart,
+		aop.TypeMessage,
+		aop.TypeStatus,
+		aop.TypeTurnEnd,
+		aop.TypeError,
+		aop.TypeSessionEnd,
 	}) {
 		t.Fatalf("events = %#v", got)
 	}
 	if result.Turns != 1 {
 		t.Fatalf("turns = %d, want 1", result.Turns)
 	}
-	if len(events) == 0 || events[len(events)-1].Type != EventAgentEnd || events[len(events)-1].Err == nil {
-		t.Fatalf("last event = %#v, want agent_end with error", lastEvent(events))
+	last := lastEvent(events)
+	if last.Type != aop.TypeSessionEnd {
+		t.Fatalf("last event = %#v, want session.end", last)
+	}
+	var endData aop.SessionEndData
+	if err := json.Unmarshal(last.Data, &endData); err != nil {
+		t.Fatal(err)
+	}
+	if endData.Error == "" {
+		t.Fatalf("session.end missing error: %+v", endData)
 	}
 	if a.running {
 		t.Fatal("running = true, want false")
@@ -211,7 +219,7 @@ func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.Run(context.Background(), "first")
+		_, err := a.Run(context.Background(), TextInput("first"))
 		done <- err
 	}()
 
@@ -222,7 +230,7 @@ func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
 	}
 
 	a.Reset()
-	if _, err := a.Run(context.Background(), "second"); err == nil || !strings.Contains(err.Error(), "already running") {
+	if _, err := a.Run(context.Background(), TextInput("second")); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second Prompt() error = %v, want already running", err)
 	}
 
@@ -251,12 +259,12 @@ func TestSessionContinuesAfterLLMError(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	_, err := a.Run(context.Background(), "hello")
+	_, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("first Run() should fail")
 	}
 
-	result, err := a.Run(context.Background(), "try again")
+	result, err := a.Run(context.Background(), TextInput("try again"))
 	if err != nil {
 		t.Fatalf("second Run() error = %v, want nil", err)
 	}
@@ -289,7 +297,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	a.Run(context.Background(), "hello")
+	a.Run(context.Background(), TextInput("hello"))
 
 	a.mu.Lock()
 	for i, msg := range a.state.Messages {
@@ -299,7 +307,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 	}
 	a.mu.Unlock()
 
-	a.Run(context.Background(), "retry")
+	a.Run(context.Background(), TextInput("retry"))
 }
 
 // --- Scanner integration tests ---
@@ -350,7 +358,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 		Tools:        registry,
 		SystemPrompt: systemPrompt,
 		Model:        "test-model",
-	})).Run(context.Background(), "scan 127.0.0.1")
+	})).Run(context.Background(), TextInput("scan 127.0.0.1"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -388,7 +396,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		Tools:        registry,
 		SystemPrompt: systemPrompt,
 		Model:        "test-model",
-	})).Run(context.Background(), task)
+	})).Run(context.Background(), TextInput(task))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -552,7 +560,7 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 		Provider: llm,
 		Tools:    registry,
 		Model:    "test",
-	}).Run(context.Background(), "Start an interactive shell session using tmux, test multi-round interaction")
+	}).Run(context.Background(), TextInput("Start an interactive shell session using tmux, test multi-round interaction"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -658,7 +666,7 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 		Provider: llm,
 		Tools:    registry,
 		Model:    "test",
-	}).Run(context.Background(), "Test Ctrl-C interrupt in tmux session")
+	}).Run(context.Background(), TextInput("Test Ctrl-C interrupt in tmux session"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -775,7 +783,7 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 		Provider: llm,
 		Tools:    registry,
 		Model:    "test",
-	}).Run(context.Background(), "Use python3 REPL via tmux to do calculations")
+	}).Run(context.Background(), TextInput("Use python3 REPL via tmux to do calculations"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -820,18 +828,28 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	systemPrompt := buildTmuxTestPrompt(registry)
 
 	var events []string
-	handleEvent := func(event Event) {
+	handleEvent := func(event aop.Event) {
 		switch event.Type {
-		case EventToolExecutionStart:
-			events = append(events, fmt.Sprintf("[TOOL] %s → %s", event.ToolName, event.Arguments))
-		case EventToolExecutionEnd:
-			result := event.Result
-			if len(result) > 300 {
-				result = result[:300] + "..."
+		case aop.TypeToolCall:
+			var data aop.ToolCallData
+			if json.Unmarshal(event.Data, &data) == nil {
+				args, _ := json.Marshal(data.Args)
+				events = append(events, fmt.Sprintf("[TOOL] %s → %s", data.ToolName, args))
 			}
-			events = append(events, fmt.Sprintf("[RESULT] %s", result))
-		case EventTurnStart:
-			events = append(events, fmt.Sprintf("--- Turn %d ---", event.Turn))
+		case aop.TypeToolResult:
+			var data aop.ToolResultData
+			if json.Unmarshal(event.Data, &data) == nil {
+				result := fmt.Sprintf("%v", data.Content)
+				if len(result) > 300 {
+					result = result[:300] + "..."
+				}
+				events = append(events, fmt.Sprintf("[RESULT] %s", result))
+			}
+		case aop.TypeTurnStart:
+			var data aop.TurnData
+			if json.Unmarshal(event.Data, &data) == nil {
+				events = append(events, fmt.Sprintf("--- Turn %d ---", data.Turn))
+			}
 		}
 	}
 
@@ -845,7 +863,7 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 		SystemPrompt: systemPrompt,
 		Bus:          testBus(handleEvent),
 		MaxRetries:   2,
-	}).Run(ctx, `Perform the following multi-round interactive test using tmux (via the bash tool).
+	}).Run(ctx, TextInput(`Perform the following multi-round interactive test using tmux (via the bash tool).
 
 Execute these steps IN ORDER, one bash tool call per step:
 
@@ -866,7 +884,7 @@ Step 12: sleep 0.3
 Step 13: tmux ls
          → Session should show as completed
 
-Report what you observed at each step. Confirm the test passed or report failures.`)
+Report what you observed at each step. Confirm the test passed or report failures.`))
 
 	t.Log("\n=== Event Log ===")
 	for _, e := range events {
@@ -924,7 +942,7 @@ func TestCacheConfigInheritance(t *testing.T) {
 		t.Error("child SessionID should differ from parent")
 	}
 
-	_, err := child.Run(context.Background(), "hello")
+	_, err := child.Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,8 +987,8 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	systemPrompt := "You are a math tutor. " +
 		strings.Repeat("You always answer arithmetic questions with just the numeric result. ", 30)
 
-	var events []Event
-	handler := func(e Event) {
+	var events []aop.Event
+	handler := func(e aop.Event) {
 		events = append(events, e)
 	}
 
@@ -982,12 +1000,12 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e Event) { handler(e) }),
+		Bus:            testBus(func(e aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
 
-	result1, err := NewAgent(agentCfg).Run(context.Background(), "What is 10+20? Just the number.")
+	result1, err := NewAgent(agentCfg).Run(context.Background(), TextInput("What is 10+20? Just the number."))
 	if err != nil {
 		t.Fatalf("turn 1 failed: %v", err)
 	}
@@ -1006,7 +1024,7 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	events = nil
 	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(
 		context.Background(),
-		"What is 30+40? Just the number.",
+		TextInput("What is 30+40? Just the number."),
 	)
 	if err != nil {
 		t.Fatalf("turn 2 failed: %v", err)
@@ -1025,7 +1043,7 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	events = nil
 	result3, err := NewAgent(agentCfg.WithMessages(allMessages)).Run(
 		context.Background(),
-		"What is the sum of all three answers you gave? Just the number.",
+		TextInput("What is the sum of all three answers you gave? Just the number."),
 	)
 	if err != nil {
 		t.Fatalf("turn 3 failed: %v", err)
@@ -1076,14 +1094,14 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		MaxRetries:     1,
 	}
 
-	result1, err := NewAgent(agentCfg).Run(context.Background(), "Hello")
+	result1, err := NewAgent(agentCfg).Run(context.Background(), TextInput("Hello"))
 	if err != nil {
 		t.Fatalf("stream turn 1 failed: %v", err)
 	}
 	t.Logf("Stream Turn 1: output=%q prompt=%d cache_read=%d",
 		truncateOutput(result1.Output, 40), result1.TotalUsage.PromptTokens, result1.TotalUsage.CacheReadTokens)
 
-	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(context.Background(), "Goodbye")
+	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(context.Background(), TextInput("Goodbye"))
 	if err != nil {
 		t.Fatalf("stream turn 2 failed: %v", err)
 	}
@@ -1091,7 +1109,7 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		truncateOutput(result2.Output, 40), result2.TotalUsage.PromptTokens, result2.TotalUsage.CacheReadTokens)
 
 	allMsgs := append(result1.Messages, result2.NewMessages...)
-	result3, err := NewAgent(agentCfg.WithMessages(allMsgs)).Run(context.Background(), "Thank you")
+	result3, err := NewAgent(agentCfg.WithMessages(allMsgs)).Run(context.Background(), TextInput("Thank you"))
 	if err != nil {
 		t.Fatalf("stream turn 3 failed: %v", err)
 	}
@@ -1119,10 +1137,10 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	calcTool := &recordingTool{name: "calculate", output: "42"}
 	tools.RegisterTool(calcTool)
 
-	var turnEndEvents []Event
-	handler := func(e Event) {
-		if e.Type == EventTurnEnd {
-			turnEndEvents = append(turnEndEvents, e)
+	var usageEvents []aop.Event
+	handler := func(e aop.Event) {
+		if e.Type == aop.TypeUsage {
+			usageEvents = append(usageEvents, e)
 		}
 	}
 
@@ -1132,13 +1150,13 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e Event) { handler(e) }),
+		Bus:            testBus(func(e aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
 
 	result, err := NewAgent(agentCfg).Run(context.Background(),
-		"Use the calculate tool to compute 6*7. Then tell me the result.")
+		TextInput("Use the calculate tool to compute 6*7. Then tell me the result."))
 	if err != nil {
 		t.Fatalf("tool call run failed: %v", err)
 	}
@@ -1175,10 +1193,11 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 		}
 	}
 
-	for i, e := range turnEndEvents {
-		if e.Usage != nil {
-			t.Logf("TurnEnd event %d: prompt=%d cache_read=%d cache_write=%d",
-				i, e.Usage.PromptTokens, e.Usage.CacheReadTokens, e.Usage.CacheWriteTokens)
+	for i, e := range usageEvents {
+		var data aop.UsageData
+		if json.Unmarshal(e.Data, &data) == nil {
+			t.Logf("Usage event %d: prompt=%d cache_read=%d cache_write=%d",
+				i, data.InputTokens, data.CacheReadTokens, data.CacheWriteTokens)
 		}
 	}
 }

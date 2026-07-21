@@ -14,6 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
@@ -33,7 +34,7 @@ type AgentRuntime struct {
 	SystemPrompt   string
 	Option         *cfg.Option
 	Config         agent.Config
-	Bus            *eventbus.Bus[agent.Event]
+	Bus            *eventbus.Bus[aop.Event]
 	Output         *tui.AgentOutput
 	ConfigFile     string
 	ResumeMessages []agent.ChatMessage
@@ -131,7 +132,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 	}
 
-	agentBus := eventbus.New[agent.Event]()
+	agentBus := eventbus.New[aop.Event]()
 	if rt.Output != nil {
 		agentBus.Subscribe(rt.Output.HandleEvent)
 	}
@@ -198,6 +199,23 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		Bus:            agentBus,
 	}
 
+	if option.SaveSession {
+		sessDir := cfg.DataSubDir("sessions")
+		rt.Config = rt.Config.WithOnRunEnd(func(result *agent.Result) {
+			if result == nil || len(result.Messages) == 0 {
+				return
+			}
+			if err := agent.SaveSession(sessDir, &agent.SessionData{
+				Model:          option.Model,
+				Provider:       option.Provider,
+				Messages:       result.Messages,
+				MessageCounter: result.MessageCounter,
+			}); err != nil {
+				logger.Warnf("save session: %s", err)
+			}
+		})
+	}
+
 	parentAgent := agent.NewAgent(rt.Config)
 	subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.AgentType, error) {
 		if rt.App.Skills == nil {
@@ -228,22 +246,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 		rt.ResumeMessages = data.Messages
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), path)
-	}
-
-	if option.SaveSession {
-		sessDir := cfg.DataSubDir("sessions")
-		agentBus.Subscribe(func(ev agent.Event) {
-			if ev.Type != agent.EventAgentEnd || len(ev.Messages) == 0 {
-				return
-			}
-			if err := agent.SaveSession(sessDir, &agent.SessionData{
-				Model:    option.Model,
-				Provider: option.Provider,
-				Messages: ev.Messages,
-			}); err != nil {
-				logger.Warnf("save session: %s", err)
-			}
-		})
 	}
 
 	rt.cleanup = func() {
@@ -366,7 +368,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		evalCfg := buildEvalConfig(option, rt, logger, task)
 		result, _, err = evaluator.RunWithEval(ctx, a, evalCfg)
 	} else {
-		result, err = a.Run(ctx, task)
+		result, err = a.Run(ctx, agent.TextInput(task))
 	}
 	if err != nil {
 		return err
@@ -412,7 +414,7 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 			rt.Config.Model = providerConfig.Model
 		},
 		OnLoggerChange: rt.SetLogger,
-	}, session, rt.Output, rt.Bus)
+	}, session, rt.Output)
 	repl.SetOnExit(rt.Close)
 	if setInterrupt != nil {
 		setInterrupt(repl.InterruptCurrentRun)
@@ -554,7 +556,6 @@ func buildEvalConfig(option *cfg.Option, rt *AgentRuntime, logger telemetry.Logg
 		MaxEvalRounds: maxRounds,
 		Goal:          task,
 		Criteria:      option.EvalCriteria,
-		Bus:           rt.Bus,
 	}
 }
 

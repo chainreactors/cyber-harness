@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
 var (
@@ -205,7 +205,18 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 		h.t.Fatalf("start aiscan agent: %v", err)
 	}
 
-	request := runner.StdioRequest{Prompt: prompt}
+	msgData, _ := json.Marshal(aop.MessageData{
+		MessageID: "m-1",
+		Role:      "user",
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: prompt}},
+	})
+	request := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "harness",
+		Agent:     "aiscan.harness",
+		Data:      msgData,
+	}
 	writeErr := json.NewEncoder(stdin).Encode(request)
 	closeErr := stdin.Close()
 	if writeErr != nil || closeErr != nil {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
@@ -83,31 +83,34 @@ func (t *AgentStatsTracker) Snapshot() webproto.AgentStats {
 	return t.stats
 }
 
-// Observe records an agent event and returns updated stats if the stats changed.
-func (t *AgentStatsTracker) Observe(e agent.Event) (webproto.AgentStats, bool) {
+// Observe records an AOP event and returns updated stats if the stats changed.
+func (t *AgentStatsTracker) Observe(e aop.Event) (webproto.AgentStats, bool) {
 	if t == nil {
 		return webproto.AgentStats{}, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.stats.LastEvent = string(e.Type)
+	t.stats.LastEvent = e.Type
 	switch e.Type {
-	case agent.EventTurnEnd:
-		if e.Turn > t.stats.Turns {
-			t.stats.Turns = e.Turn
+	case aop.TypeTurnEnd:
+		if data, err := aop.DecodeData[aop.TurnData](e); err == nil && data.Turn > t.stats.Turns {
+			t.stats.Turns = data.Turn
 		}
-		if e.Usage != nil {
-			t.stats.PromptTokens += e.Usage.PromptTokens
-			t.stats.CompletionTokens += e.Usage.CompletionTokens
-			t.stats.TotalTokens += e.Usage.TotalTokens
-			t.stats.CacheReadTokens += e.Usage.CacheReadTokens
-			t.stats.CacheWriteTokens += e.Usage.CacheWriteTokens
+	case aop.TypeUsage:
+		data, err := aop.DecodeData[aop.UsageData](e)
+		if err != nil {
+			return t.stats, false
 		}
-	case agent.EventToolExecutionStart:
+		t.stats.PromptTokens += data.InputTokens
+		t.stats.CompletionTokens += data.OutputTokens
+		t.stats.TotalTokens += data.TotalTokens
+		t.stats.CacheReadTokens += data.CacheReadTokens
+		t.stats.CacheWriteTokens += data.CacheWriteTokens
+	case aop.TypeToolCall:
 		t.stats.ToolCalls++
 		t.stats.RunningTools++
-	case agent.EventToolExecutionEnd:
+	case aop.TypeToolResult:
 		if t.stats.RunningTools > 0 {
 			t.stats.RunningTools--
 		}

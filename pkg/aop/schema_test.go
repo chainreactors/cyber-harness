@@ -16,7 +16,11 @@ func TestCanonicalCyberUIFixtures(t *testing.T) {
 	}
 	defer file.Close()
 
-	seenReasoning := false
+	var (
+		seenReasoningDelta = false
+		seenComplete       = false
+		seenStatusExt      = false
+	)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var event Event
@@ -26,18 +30,41 @@ func TestCanonicalCyberUIFixtures(t *testing.T) {
 		if !event.Valid() {
 			t.Fatalf("invalid fixture envelope: %+v", event)
 		}
-		if event.Type == TypeText {
-			var data TextData
+		switch event.Type {
+		case TypeMessage:
+			var data MessageData
 			if err := json.Unmarshal(event.Data, &data); err != nil {
 				t.Fatal(err)
 			}
-			seenReasoning = seenReasoning || data.Channel == TextChannelReasoning
+			if data.MessageID == "" || data.Role == "" || len(data.Parts) == 0 {
+				t.Fatalf("invalid message payload: %+v", data)
+			}
+			seenComplete = true
+		case TypeMessageDelta:
+			var data MessageDeltaData
+			if err := json.Unmarshal(event.Data, &data); err != nil {
+				t.Fatal(err)
+			}
+			if data.MessageID == "" || data.PartType == "" {
+				t.Fatalf("invalid message.delta payload: %+v", data)
+			}
+			seenReasoningDelta = seenReasoningDelta || data.PartType == PartReasoning
+		case TypeStatus:
+			if len(event.Ext) > 0 {
+				seenStatusExt = true
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !seenReasoning {
-		t.Fatal("canonical fixtures do not cover reasoning text")
+	if !seenReasoningDelta {
+		t.Fatal("canonical fixtures do not cover reasoning deltas")
+	}
+	if !seenComplete {
+		t.Fatal("canonical fixtures do not cover complete messages")
+	}
+	if !seenStatusExt {
+		t.Fatal("canonical fixtures do not cover status ext payloads")
 	}
 }

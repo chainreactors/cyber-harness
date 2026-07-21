@@ -33,7 +33,7 @@ type connectionConfig struct {
 	// ServerURL's userinfo is used instead.
 	Token    string
 	Registry *commands.CommandRegistry
-	AgentBus *eventbus.Bus[agent.Event]
+	AgentBus *eventbus.Bus[aop.Event]
 	// DataBus and SCO enable tool.data / tool.sco event emission for tool-only
 	// nodes; both are optional.
 	DataBus *eventbus.Bus[output.ToolDataEvent]
@@ -54,10 +54,11 @@ type connectionConfig struct {
 // Implementations live in webagent or other packages that have access to the
 // agent runtime and provider.
 type chatHandler interface {
-	// HandleChat runs a chat turn. The node manages the cancellable context and
-	// the chatCancels map. The EventRouter lets the handler register agent
-	// session ID -> task ID mappings for event routing.
-	HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *eventRouter)
+	// HandleChat runs a chat turn for one inbound AOP user message (event is
+	// the decoded form of msg's payload). The node manages the cancellable
+	// context and the chatCancels map. The EventRouter lets the handler
+	// register agent session ID -> task ID mappings for event routing.
+	HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter)
 
 	// HandleUpload processes a file upload message.
 	HandleUpload(msg webproto.Message, send func(webproto.Message))
@@ -242,22 +243,25 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		defer detach()
 	}
 
-	// Event bus subscription with stats tracking and event routing.
+	// Event bus subscription with stats tracking and event routing. Events
+	// leave the agent kernel as AOP already; they are forwarded verbatim. The
+	// only transformation is routing: a sub-session inherits its parent's task
+	// route, learned from session.start's parent_session_id.
 	if cc.AgentBus != nil {
-		unsub := cc.AgentBus.Subscribe(func(e agent.Event) {
+		unsub := cc.AgentBus.Subscribe(func(e aop.Event) {
 			if next, ok := stats.Observe(e); ok {
 				statsPayload, _ := json.Marshal(next)
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
 			}
-			aopEvents := aop.FromAgentEvent(e, "aiscan")
 			mu.Lock()
-			msgID := eventRoute[e.SessionID]
-			if msgID == "" && e.ParentSessionID != "" {
-				msgID = eventRoute[e.ParentSessionID]
-				if msgID != "" {
-					eventRoute[e.SessionID] = msgID
+			if e.Type == aop.TypeSessionStart {
+				if data, err := aop.DecodeData[aop.SessionStartData](e); err == nil && data.ParentSessionID != "" {
+					if parentTask := eventRoute[data.ParentSessionID]; parentTask != "" {
+						eventRoute[e.SessionID] = parentTask
+					}
 				}
 			}
+			msgID := eventRoute[e.SessionID]
 			var targets []string
 			if msgID != "" {
 				targets = []string{msgID}
@@ -267,15 +271,19 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				}
 			}
 			mu.Unlock()
-			for _, aopEv := range aopEvents {
-				payload, _ := json.Marshal(aopEv)
-				for _, id := range targets {
-					send(webproto.Message{
-						Type:    "aop",
-						TaskID:  id,
-						Payload: payload,
-					})
-				}
+			if len(targets) == 0 {
+				return
+			}
+			payload, err := json.Marshal(e)
+			if err != nil {
+				return
+			}
+			for _, id := range targets {
+				send(webproto.Message{
+					Type:    "aop",
+					TaskID:  id,
+					Payload: payload,
+				})
 			}
 		})
 		defer unsub()
@@ -313,6 +321,34 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 		switch msg.Type {
 		case "aop":
+			// Inbound AOP carries two executable units on this transport: a
+			// tool.call for the tool-only node surface, and a user message
+			// (the chat surface). Everything else is ignored.
+			if event, ok := webproto.IsAOPUserMessage(msg); ok {
+				if cc.Chat == nil {
+					continue
+				}
+				chatCtx, chatCancel := context.WithCancel(ctx)
+				mu.Lock()
+				chatCancels[msg.TaskID] = chatCancel
+				mu.Unlock()
+				go func(m webproto.Message, ev aop.Event, cCtx context.Context, cCancel context.CancelFunc) {
+					defer cCancel()
+					defer func() {
+						mu.Lock()
+						delete(chatCancels, m.TaskID)
+						// Clean up eventRoute entries for this task.
+						for sid, mid := range eventRoute {
+							if mid == m.TaskID {
+								delete(eventRoute, sid)
+							}
+						}
+						mu.Unlock()
+					}()
+					cc.Chat.HandleChat(cCtx, m, ev, send, router)
+				}(msg, event, chatCtx, chatCancel)
+				continue
+			}
 			if !IsAOPToolCall(msg) {
 				continue
 			}
@@ -344,29 +380,6 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				}()
 				ExecCommand(tCtx, m, cc.Registry, send)
 			}(msg, taskCtx, cancel)
-
-		case "chat":
-			if cc.Chat != nil {
-				chatCtx, chatCancel := context.WithCancel(ctx)
-				mu.Lock()
-				chatCancels[msg.TaskID] = chatCancel
-				mu.Unlock()
-				go func(m webproto.Message, cCtx context.Context, cCancel context.CancelFunc) {
-					defer cCancel()
-					defer func() {
-						mu.Lock()
-						delete(chatCancels, m.TaskID)
-						// Clean up eventRoute entries for this task.
-						for sid, mid := range eventRoute {
-							if mid == m.TaskID {
-								delete(eventRoute, sid)
-							}
-						}
-						mu.Unlock()
-					}()
-					cc.Chat.HandleChat(cCtx, m, send, router)
-				}(msg, chatCtx, chatCancel)
-			}
 
 		case "upload":
 			if cc.Chat != nil {

@@ -14,7 +14,7 @@ import (
 func TestConsumeAgentStream(t *testing.T) {
 	input := encodeEvents(t,
 		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-		aopTestEvent("root", aop.TypeText, aop.TextData{Content: "hello", Role: "assistant"}),
+		aopMessageEvent("root", "assistant", "hello"),
 		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
 	)
 
@@ -73,7 +73,7 @@ func TestConsumeAgentStreamWaitsForRootSessionEnd(t *testing.T) {
 		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
 		aopTestEvent("child", aop.TypeSessionStart, aop.SessionStartData{ParentSessionID: "root"}),
 		aopTestEvent("child", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
-		aopTestEvent("root", aop.TypeText, aop.TextData{Content: "root done", Role: "assistant"}),
+		aopMessageEvent("root", "assistant", "root done"),
 		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
 	)
 	output, events, err := consumeAgentStream(input, nil)
@@ -109,13 +109,13 @@ func TestConsumeAgentStreamRejectsInvalidStreams(t *testing.T) {
 			name: "missing root terminal",
 			input: encodeEvents(t,
 				aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-				aopTestEvent("root", aop.TypeText, aop.TextData{Content: "hello"}),
+				aopMessageEvent("root", "assistant", "hello"),
 			),
 			needle: "without root session.end",
 		},
 		{
 			name:   "no root session",
-			input:  encodeEvents(t, aopTestEvent("child", aop.TypeText, aop.TextData{Content: "hello"})),
+			input:  encodeEvents(t, aopMessageEvent("child", "assistant", "hello")),
 			needle: "without a root session",
 		},
 	}
@@ -139,6 +139,14 @@ func aopTestEvent(sessionID, eventType string, data any) aop.Event {
 		Agent:     "aiscan",
 		Data:      raw,
 	}
+}
+
+func aopMessageEvent(sessionID, role, text string) aop.Event {
+	return aopTestEvent(sessionID, aop.TypeMessage, aop.MessageData{
+		MessageID: "m-1",
+		Role:      role,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
+	})
 }
 
 func encodeEvents(t *testing.T, events ...aop.Event) *bytes.Buffer {

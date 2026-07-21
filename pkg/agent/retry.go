@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -148,12 +149,16 @@ func computeRetryDelay(attempt int, jitterFrac float64) time.Duration {
 	return delay
 }
 
-func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []ChatMessage, tools []ToolDefinition, turn int) (ChatMessage, *Usage, error) {
+func requestWithRetry(ctx context.Context, cfg Config, em *aopEmitter, messages []ChatMessage, tools []ToolDefinition, turn int) (ChatMessage, *Usage, error) {
 	var lastErr error
 	maxAttempts := cfg.MaxRetries + 1
 	if cfg.MaxRetries < 0 {
 		maxAttempts = 1
 	}
+	// The message id is allocated once per logical assistant message so that
+	// retries (including the image-downgrade retry) reuse it — consumers merge
+	// deltas and the final message by id.
+	messageID := em.allocMessageID()
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			delay := retryDelayFor(attempt-1, lastErr)
@@ -165,7 +170,7 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 			}
 		}
 
-		msg, usage, err := requestAssistantMessageWithUsage(ctx, cfg, bus, messages, tools, turn)
+		msg, usage, err := requestAssistantMessageWithUsage(ctx, cfg, em, messages, tools, turn, messageID)
 		if err == nil {
 			return msg, usage, nil
 		}
@@ -180,7 +185,7 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 			if d, ok := cfg.Provider.(imageDisabler); ok {
 				d.DisableImages()
 			}
-			msg, usage, retryErr := requestAssistantMessageWithUsage(ctx, cfg, bus, messages, tools, turn)
+			msg, usage, retryErr := requestAssistantMessageWithUsage(ctx, cfg, em, messages, tools, turn, messageID)
 			if retryErr == nil {
 				return msg, usage, nil
 			}
@@ -194,21 +199,25 @@ func requestWithRetry(ctx context.Context, cfg Config, bus emitter, messages []C
 	return ChatMessage{}, nil, lastErr
 }
 
-func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, bus emitter, messages []ChatMessage, tools []ToolDefinition, turn int) (ChatMessage, *Usage, error) {
+func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEmitter, messages []ChatMessage, tools []ToolDefinition, turn int, messageID string) (ChatMessage, *Usage, error) {
 	req := &ChatCompletionRequest{
 		Model:          cfg.Model,
 		Messages:       messages,
 		Tools:          tools,
 		MaxTokens:      cfg.MaxTokens,
 		Temperature:    cfg.Temperature,
-		ResponseFormat: cfg.ResponseFormat,
 		CacheRetention: cfg.CacheRetention,
 		SessionID:      cfg.SessionID,
 	}
-	bus.Emit(Event{Type: EventLLMRequest, Turn: turn, Request: req})
+	em.status(StatusLLMRequest, map[string]any{
+		"llm_model":      req.Model,
+		"llm_messages":   len(req.Messages),
+		"llm_max_tokens": req.MaxTokens,
+		"llm_stream":     cfg.Stream,
+	})
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(StreamingProvider); ok {
-			return streamAssistantMessageWithUsage(ctx, streaming, req, bus, cfg.Logger, turn)
+			return streamAssistantMessageWithUsage(ctx, streaming, req, em, cfg.Logger, turn, messageID)
 		}
 	}
 
@@ -220,20 +229,21 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, bus emitt
 		return ChatMessage{}, nil, fmt.Errorf("%w at turn %d", errEmptyResponse, turn)
 	}
 	msg := resp.Choices[0].Message
-	bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: msg})
-	bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: msg})
+	if parts := messagePartsFromChat(msg); len(parts) > 0 {
+		em.messageWithID(messageID, "assistant", parts)
+	}
 	logAssistantAndUsage(cfg.Logger, msg, resp.Usage)
 	return msg, resp.Usage, nil
 }
 
-func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, req *ChatCompletionRequest, bus emitter, logger telemetry.Logger, turn int) (ChatMessage, *Usage, error) {
+func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, req *ChatCompletionRequest, em *aopEmitter, logger telemetry.Logger, turn int, messageID string) (ChatMessage, *Usage, error) {
 	events, err := p.ChatCompletionStream(ctx, req)
 	if err != nil {
 		return ChatMessage{}, nil, fmt.Errorf("LLM stream failed at turn %d: %w", turn, err)
 	}
 
 	builder := newMessageBuilder()
-	started := false
+	seenReasoning := false
 	var usage *Usage
 	for {
 		select {
@@ -250,41 +260,28 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 				usage = event.Usage
 			}
 			if event.Done {
-				if usage != nil {
-					bus.Emit(Event{Type: EventMessageUpdate, Turn: turn, Message: builder.Message(), Usage: usage})
-				}
 				goto streamDone
 			}
-			updated := builder.Apply(event.Delta)
-			contentDelta := ""
-			if event.Delta.Content != nil {
-				contentDelta = *event.Delta.Content
+			builder.Apply(event.Delta)
+			if event.Delta.ReasoningContent != nil && *event.Delta.ReasoningContent != "" {
+				seenReasoning = true
+				em.messageDelta(messageID, 0, aop.PartReasoning, *event.Delta.ReasoningContent)
 			}
-			reasoningDelta := ""
-			if event.Delta.ReasoningContent != nil {
-				reasoningDelta = *event.Delta.ReasoningContent
+			if event.Delta.Content != nil && *event.Delta.Content != "" {
+				textIndex := 0
+				if seenReasoning {
+					textIndex = 1
+				}
+				em.messageDelta(messageID, textIndex, aop.PartText, *event.Delta.Content)
 			}
-			if !started {
-				started = true
-				bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: updated})
-			}
-			bus.Emit(Event{
-				Type:           EventMessageUpdate,
-				Turn:           turn,
-				Message:        updated,
-				ContentDelta:   contentDelta,
-				ReasoningDelta: reasoningDelta,
-				Usage:          usage,
-			})
 		}
 	}
 streamDone:
 
 	msg := builder.Message()
-	if !started {
-		bus.Emit(Event{Type: EventMessageStart, Turn: turn, Message: msg})
+	if parts := messagePartsFromChat(msg); len(parts) > 0 {
+		em.messageWithID(messageID, "assistant", parts)
 	}
-	bus.Emit(Event{Type: EventMessageEnd, Turn: turn, Message: msg})
 	logAssistantAndUsage(logger, msg, usage)
 	return msg, usage, nil
 }

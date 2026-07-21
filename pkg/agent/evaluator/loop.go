@@ -5,17 +5,15 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
 const defaultMaxEvalRounds = 3
 
 type EvalLoopConfig struct {
-	Evaluator      *Evaluator
-	MaxEvalRounds  int
-	Goal           string
-	Criteria       string
-	Bus            *eventbus.Bus[agent.Event]
+	Evaluator     *Evaluator
+	MaxEvalRounds int
+	Goal          string
+	Criteria      string
 }
 
 func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agent.Result, *Verdict, error) {
@@ -23,7 +21,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 		cfg.MaxEvalRounds = defaultMaxEvalRounds
 	}
 
-	result, err := a.Run(ctx, cfg.Goal)
+	result, err := a.Run(ctx, agent.TextInput(cfg.Goal))
 	if err != nil {
 		return result, nil, err
 	}
@@ -39,7 +37,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 			return result, nil, nil
 		}
 
-		emitEvalEvent(cfg.Bus, agent.EventEvalStart, attempt, nil)
+		a.EmitStatus(agent.StatusEvalStart, map[string]any{"eval_round": attempt})
 
 		verdict, evalErr := cfg.Evaluator.Evaluate(
 			ctx, cfg.Goal, cfg.Criteria,
@@ -48,16 +46,23 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 
 		if evalErr != nil {
 			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", attempt+1, evalErr)
-			emitEvalErrorEvent(cfg.Bus, attempt, evalErr)
+			a.EmitStatus(agent.StatusEvalError, map[string]any{
+				"eval_round": attempt,
+				"eval_error": evalErr.Error(),
+			})
 			feedback := fmt.Sprintf("Evaluation could not determine if the task is complete. Original criteria: %s. Please review your work and continue if the goal is not yet fully achieved.", cfg.Criteria)
-			result, err = a.Run(ctx, feedback)
+			result, err = a.Run(ctx, agent.TextInput(feedback))
 			if err != nil {
 				return result, nil, err
 			}
 			continue
 		}
 
-		emitEvalEvent(cfg.Bus, agent.EventEvalEnd, attempt, verdict)
+		a.EmitStatus(agent.StatusEvalEnd, map[string]any{
+			"eval_round": attempt,
+			"eval_pass":  verdict.Pass,
+			"eval_reason": verdict.Reason,
+		})
 		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", attempt+1, verdict.Pass, verdict.InheritContext, verdict.Reason)
 
 		if verdict.Pass {
@@ -82,7 +87,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 
 		cfg.Evaluator.cfg.Logger.Importantf("evaluate: injecting feedback (round %d): %s", attempt+1, feedback)
 
-		result, err = a.Run(ctx, feedback)
+		result, err = a.Run(ctx, agent.TextInput(feedback))
 		if err != nil {
 			cfg.Evaluator.cfg.Logger.Warnf("evaluate: agent.Run failed after feedback: %s", err)
 			return result, verdict, err
@@ -91,30 +96,4 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 	}
 
 	return result, nil, nil
-}
-
-func emitEvalEvent(bus *eventbus.Bus[agent.Event], eventType agent.EventType, round int, verdict *Verdict) {
-	if bus == nil {
-		return
-	}
-	ev := agent.Event{
-		Type:      eventType,
-		EvalRound: round,
-	}
-	if verdict != nil {
-		ev.EvalPass = verdict.Pass
-		ev.EvalReason = verdict.Reason
-	}
-	bus.Emit(ev)
-}
-
-func emitEvalErrorEvent(bus *eventbus.Bus[agent.Event], round int, err error) {
-	if bus == nil {
-		return
-	}
-	bus.Emit(agent.Event{
-		Type:      agent.EventEvalError,
-		EvalRound: round,
-		EvalError: err.Error(),
-	})
 }

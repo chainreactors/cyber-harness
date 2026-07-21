@@ -44,58 +44,18 @@ function safeUUID(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-// Build a ChatMessage from a ChatEvent, sharing the common field mapping
-// (agent_id, agent_name, session_id, timestamps, i18n metadata) across all
-// event→message construction sites.  `contentOverride` lets callers supply a
-// value that differs from `ev.content` (e.g. an accumulated streaming buffer).
-function eventToMessage(ev: ChatEvent, fallbackId: string, contentOverride?: string): ChatMessage {
-  return {
-    id: ev.message_id || fallbackId,
-    session_id: ev.session_id,
-    role: ev.role || 'assistant',
-    content: contentOverride ?? ev.content ?? '',
-    agent_id: ev.agent_id,
-    agent_name: ev.agent_name,
-    created_at: new Date().toISOString(),
-    metadata: ev.code ? { code: ev.code, params: ev.params } : undefined,
-  }
-}
-
-export type TimelineItemKind = 'message' | 'assistant_response' | 'tool_call' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking' | 'agent_joined' | 'eval'
+export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking'
 
 export interface TimelineItem {
   id: string
   kind: TimelineItemKind
   timestamp: number
   message?: ChatMessage
-  assistantResponse?: AssistantResponseState
-  toolCall?: ToolCallState
   scanID?: string
   scanResult?: ScanResult
   scanLines?: string[]
   agentName?: string
   content?: string
-  evalRound?: number
-  evalPass?: boolean
-  evalReason?: string
-}
-
-export interface AssistantResponseState {
-  id: string
-  turn?: number
-  agentName?: string
-  thinking?: string
-  tools: ToolCallState[]
-  response?: ChatMessage
-  streaming: boolean
-}
-
-export interface ToolCallState {
-  id: string
-  toolName: string
-  toolArgs: string
-  result?: string
-  pending: boolean
 }
 
 // A per-session snapshot of the durable conversation state — everything the
@@ -149,13 +109,7 @@ export function useChatSession() {
   const [error, setError] = useState('')
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
-  const userMsgIdsRef = useRef<Set<string>>(new Set())
   const scanLinesRef = useRef<Map<string, string[]>>(new Map())
-  const activeTurnRef = useRef<string | null>(null)
-  // Bumped on every send. The backend restarts its turn counter at 1 for each
-  // user message, so without a per-run discriminator the new answer's id would
-  // collide with the previous run's turn-1 bubble and render above the message.
-  const runEpochRef = useRef(0)
   const activeSessionRef = useRef<string | null>(null)
   // Latest roster (mirrors `agents`) so click handlers can resolve an id → node
   // key without waiting for a re-render, and the stable key of the node the user
@@ -238,10 +192,7 @@ export function useChatSession() {
     setIsThinking(false)
     setPendingResponse(false)
     setError('')
-    userMsgIdsRef.current = new Set()
     scanLinesRef.current = new Map()
-    activeTurnRef.current = null
-    runEpochRef.current = 0
   }
 
   function resetSessionState() {
@@ -272,19 +223,6 @@ export function useChatSession() {
     setTimelineItems((prev) => [...prev, item])
   }
 
-  function appendMessage(msg: ChatMessage, timestamp: number) {
-    setMessages((prev) => {
-      const last = prev[prev.length - 1]
-      if (isDuplicateAssistantMessage(last, msg)) return prev
-      return [...prev, msg]
-    })
-    setTimelineItems((prev) => {
-      const last = prev[prev.length - 1]
-      if (isDuplicateAssistantTimelineItem(last, msg, timestamp)) return prev
-      return [...prev, { id: msg.id, kind: 'message', timestamp, message: msg }]
-    })
-  }
-
   function setTimelineItems(updater: (prev: TimelineItem[]) => TimelineItem[]) {
     setTimeline((prev) => {
       const next = updater(prev)
@@ -298,38 +236,15 @@ export function useChatSession() {
   }
 
   // Release the composer when AOP reports session.end/error or the user cancels.
-  // The sweep also closes any platform timeline item left streaming by a scan.
   function finalizeRun() {
     setIsThinking(false)
     setPendingResponse(false)
-    setTimelineItems((prev) => {
-      let changed = false
-      const next = prev.map((item) => {
-        if (item.kind === 'assistant_response' && item.assistantResponse?.streaming) {
-          changed = true
-          return { ...item, assistantResponse: { ...item.assistantResponse, streaming: false } }
-        }
-        return item
-      })
-      return changed ? next : prev
-    })
   }
 
   function handleChatEvent(event: ChatEvent) {
     const now = Date.now()
 
     switch (event.type) {
-      case 'message': {
-        const isUserEcho = event.message_id && userMsgIdsRef.current.has(event.message_id)
-        if (isUserEcho) break
-        if (!event.content) break
-        const msg = eventToMessage(event, safeUUID())
-        appendMessage(msg, now)
-        setIsThinking(false)
-        setPendingResponse(false)
-        break
-      }
-
       case 'session_cleared':
         // Web /clear wiped this session's transcript server-side; mirror it in the
         // UI. resetSessionState() empties messages+timeline — and since the timeline
@@ -389,26 +304,6 @@ export function useChatSession() {
       case 'agent_joined':
         break
 
-      case 'eval':
-        appendTimeline({
-          id: `eval-${event.eval_round ?? 0}-${now}`,
-          kind: 'eval',
-          timestamp: now,
-          evalRound: event.eval_round,
-          evalPass: event.eval_pass,
-          evalReason: event.eval_reason,
-        })
-        // Round boundary — mirror buildTimelineFromMessages. A non-passing verdict
-        // is followed by a re-driven round whose turn counter restarts at 1; bump
-        // the run epoch so its turn-1 opens a fresh bubble instead of upserting
-        // over this round's turn-1. (A pass ends the run, so the terminal
-        // aggregate still merges into the last round's bubble.)
-        if (!event.eval_pass) {
-          runEpochRef.current += 1
-          activeTurnRef.current = null
-        }
-        break
-
       case 'error':
         if (event.code) setError(t(`sys.${event.code}`, { ...(event.params || {}), defaultValue: event.error || '' }))
         else if (event.error) setError(event.error)
@@ -426,10 +321,13 @@ export function useChatSession() {
     })
     switch (event.type) {
       case 'turn.start':
-      case 'text':
+        setPendingResponse(true)
+        setIsThinking(true)
+        break
+      case 'message.delta':
       case 'tool.call':
         setPendingResponse(true)
-        setIsThinking(event.type === 'turn.start')
+        setIsThinking(false)
         break
       case 'turn.end':
         setIsThinking(false)
@@ -444,167 +342,23 @@ export function useChatSession() {
     }
   }
 
+  // Rebuild the platform timeline from persisted messages. Assistant content is
+  // NOT rebuilt here — the SSE AOP replay is the sole source of agent history
+  // (it carries the complete message/tool/status stream); this only restores the
+  // platform artifacts the AOP stream doesn't render: scan-result cards
+  // (persisted as system markers) and the user/system conversation shell shown
+  // before the replay arrives.
   function buildTimelineFromMessages(msgs: ChatMessage[]): TimelineItem[] {
     const built: TimelineItem[] = []
-    const responsesByTurn = new Map<string, TimelineItem>()
-    const toolsByID = new Map<string, ToolCallState>()
-    let currentResponse: TimelineItem | null = null
-    let pendingAgentName: string | undefined
-    // Reload mirror of runEpochRef: each user message opens a new run whose turn
-    // counter restarts at 1, so runIndex keeps same-turn responses from different
-    // runs in distinct slots (and thus in the right order).
-    let runIndex = 0
-    // A non-passing eval is only a boundary if another agent round follows. The
-    // terminal aggregate for a max-rounds eval run arrives after the last failed
-    // verdict; delaying this bump lets it merge back into the final round instead
-    // of rendering as a separate assistant bubble on rebuild.
-    let pendingEvalBoundary = false
-
-    function turnKey(msg: ChatMessage, turn: number): string {
-      if (!turn) return ''
-      return [
-        runIndex,
-        msg.session_id,
-        msg.agent_id || msg.agent_name || pendingAgentName || 'agent',
-        turn,
-      ].join('-')
-    }
-
-    function ensureResponse(timestamp: number, agentName?: string, turn?: number, key?: string): TimelineItem {
-      const resolvedAgentName = agentName || pendingAgentName
-      if (key) {
-        const existing = responsesByTurn.get(key)
-        if (existing?.assistantResponse) {
-          existing.agentName = resolvedAgentName || existing.agentName
-          existing.assistantResponse.agentName = resolvedAgentName || existing.assistantResponse.agentName
-          existing.assistantResponse.turn = turn || existing.assistantResponse.turn
-          return existing
-        }
-      } else if (currentResponse?.assistantResponse) {
-        currentResponse.agentName = resolvedAgentName || currentResponse.agentName
-        currentResponse.assistantResponse.agentName = resolvedAgentName || currentResponse.assistantResponse.agentName
-        currentResponse.assistantResponse.turn = turn || currentResponse.assistantResponse.turn
-        return currentResponse
-      }
-
-      const id = key ? `assistant-history-${key}` : `assistant-history-${timestamp}-${built.length}`
-      currentResponse = {
-        id,
-        kind: 'assistant_response',
-        timestamp,
-        agentName: resolvedAgentName,
-        assistantResponse: {
-          id,
-          turn,
-          agentName: resolvedAgentName,
-          tools: [],
-          streaming: false,
-        },
-      }
-      built.push(currentResponse)
-      if (key) responsesByTurn.set(key, currentResponse)
-      return currentResponse
-    }
-
-    function beginNextEvalRound() {
-      if (!pendingEvalBoundary) return
-      currentResponse = null
-      pendingAgentName = undefined
-      runIndex++
-      pendingEvalBoundary = false
-    }
-
-    function hasEvalBeforeNextUser(startIndex: number): boolean {
-      for (let j = startIndex + 1; j < msgs.length; j++) {
-        const next = msgs[j]
-        if (next.role === 'user') return false
-        if (metadataString(next.metadata, 'event_type') === 'eval') return true
-      }
-      return false
-    }
-
-    function toolMapKey(key: string, toolID: string): string {
-      return key ? `${key}:${toolID}` : toolID
-    }
-
-    for (let i = 0; i < msgs.length; i++) {
-      const msg = msgs[i]
+    for (const msg of msgs) {
       const timestamp = new Date(msg.created_at).getTime()
-      const eventType = metadataString(msg.metadata, 'event_type')
-      const turn = metadataNumber(msg.metadata, 'turn')
-      let key = turnKey(msg, turn)
-
-      if (msg.role === 'tool_call') {
-        beginNextEvalRound()
-        key = turnKey(msg, turn)
-        const response = ensureResponse(timestamp, msg.agent_name, turn, key)
-        const tcID = metadataString(msg.metadata, 'tool_call_id') || msg.id
-        const toolCall = {
-            id: tcID,
-            toolName: metadataString(msg.metadata, 'tool_name') || '',
-            toolArgs: metadataString(msg.metadata, 'tool_args') || msg.content,
-            pending: true,
-        }
-        const tools = response.assistantResponse!.tools
-        const existingIndex = tools.findIndex((tool) => tool.id === tcID)
-        if (existingIndex >= 0) {
-          tools[existingIndex] = { ...tools[existingIndex], ...toolCall }
-          toolsByID.set(toolMapKey(key, tcID), tools[existingIndex])
-        } else {
-          tools.push(toolCall)
-          toolsByID.set(toolMapKey(key, tcID), toolCall)
-        }
-        pendingAgentName = undefined
-        continue
-      }
-
-      if (msg.role === 'tool_result') {
-        beginNextEvalRound()
-        key = turnKey(msg, turn)
-        const tcID = metadataString(msg.metadata, 'tool_call_id')
-        const existing = tcID ? toolsByID.get(toolMapKey(key, tcID)) || toolsByID.get(tcID) : undefined
-        if (existing) {
-          existing.result = msg.content
-          existing.pending = false
-        } else {
-          const response = ensureResponse(timestamp, msg.agent_name, turn, key)
-          response.assistantResponse!.tools.push({
-            id: tcID || msg.id,
-            toolName: 'tool',
-            toolArgs: '',
-            result: msg.content,
-            pending: false,
-          })
-        }
-        pendingAgentName = undefined
-        continue
-      }
-
-      if (eventType === 'thinking') {
-        const content = msg.content === 'thinking' ? '' : msg.content
-        if (!content.trim()) continue
-        beginNextEvalRound()
-        key = turnKey(msg, turn)
-        const response = ensureResponse(timestamp, msg.agent_name, turn, key)
-        response.assistantResponse!.thinking = content
-        pendingAgentName = undefined
-        continue
-      }
-
-      if (eventType === 'agent_joined') {
-        beginNextEvalRound()
-        pendingAgentName = msg.agent_name || msg.content.replace(/\s+joined$/, '')
-        continue
-      }
-
-      if (eventType === 'scan_complete') {
-        beginNextEvalRound()
+      if (metadataString(msg.metadata, 'event_type') === 'scan_complete') {
         const scanID = metadataString(msg.metadata, 'scan_id')
         if (!scanID) continue
-        // The heavy Result isn't persisted in the message — the card pulls it from
-        // the scanResults map (loaded from the session's scan_ids on activation),
-        // so this item only needs to carry the scan_id. Same id as the live append
-        // so a rebuild that races the live event upserts instead of duplicating.
+        // The heavy Result isn't persisted in the marker — the card pulls it from
+        // the scanResults map (loaded from the session's scan_ids on activation).
+        // Same id as the live append so a rebuild that races the live event
+        // upserts instead of duplicating.
         built.push({
           id: `scanres-${scanID}`,
           kind: 'scan_complete',
@@ -613,60 +367,9 @@ export function useChatSession() {
         })
         continue
       }
-
-      if (eventType === 'eval') {
-        beginNextEvalRound()
-        const pass = metadataBool(msg.metadata, 'eval_pass')
-        built.push({
-          id: msg.id,
-          kind: 'eval',
-          timestamp,
-          evalRound: metadataNumber(msg.metadata, 'eval_round'),
-          evalPass: pass,
-          evalReason: metadataString(msg.metadata, 'eval_reason') || msg.content,
-        })
-        // Do not bump immediately. If this was the last failed verdict, the next
-        // persisted assistant message is the terminal aggregate for the same
-        // round. The next visible agent event (or the next eval verdict) consumes
-        // the boundary through beginNextEvalRound().
-        pendingEvalBoundary = !pass
-        continue
-      }
-
-      if (msg.role === 'assistant') {
-        // A persisted assistant after a failed eval is usually the terminal
-        // aggregate for the just-finished max-rounds run. Keep it in the same run
-        // unless another eval verdict appears before the next user message, which
-        // means this assistant belongs to an intervening round.
-        if (pendingEvalBoundary && hasEvalBeforeNextUser(i)) {
-          beginNextEvalRound()
-        } else {
-          pendingEvalBoundary = false
-        }
-        key = turnKey(msg, turn)
-        const response = ensureResponse(timestamp, msg.agent_name, turn, key)
-        response.assistantResponse!.response = msg
-        response.assistantResponse!.streaming = false
-        currentResponse = null
-        pendingAgentName = undefined
-        continue
-      }
-
-      if (msg.role === 'user') {
-        pendingEvalBoundary = false
-        currentResponse = null
-        pendingAgentName = undefined
-        runIndex++
-      }
-
-      built.push({
-        id: msg.id,
-        kind: 'message' as TimelineItemKind,
-        timestamp,
-        message: msg,
-      })
+      if (msg.role === 'assistant') continue
+      built.push({ id: msg.id, kind: 'message', timestamp, message: msg })
     }
-
     return built
   }
 
@@ -808,9 +511,6 @@ export function useChatSession() {
     if (!trimmed) return
 
     const msgID = safeUUID()
-    userMsgIdsRef.current.add(msgID)
-    activeTurnRef.current = null
-    runEpochRef.current += 1
 
     const optimistic: ChatMessage = {
       id: msgID,
@@ -830,8 +530,7 @@ export function useChatSession() {
     setPendingResponse(true)
 
     try {
-      const serverMsg = await sendChatMessage(sessionID, trimmed, opts)
-      userMsgIdsRef.current.add(serverMsg.id)
+      await sendChatMessage(sessionID, trimmed, opts)
       await refreshSessions()
     } catch (err: any) {
       setPendingResponse(false)
@@ -1006,9 +705,7 @@ export function useChatSession() {
     aopEvents,
     scanResults,
     isThinking,
-    busy: pendingResponse || isThinking || timeline.some((item) => (
-      item.kind === 'assistant_response' && item.assistantResponse?.streaming
-    )),
+    busy: pendingResponse || isThinking,
     error,
     selectAgent: (id: string) => {
       const a = agentsRef.current.find((x) => x.id === id)
@@ -1029,39 +726,7 @@ export function useChatSession() {
   }
 }
 
-function isDuplicateAssistantTimelineItem(item: TimelineItem | undefined, msg: ChatMessage, timestamp: number): boolean {
-  if (!item?.message) return false
-  if (timestamp - item.timestamp > 15000) return false
-  return isDuplicateAssistantMessage(item.message, msg)
-}
-
-function isDuplicateAssistantMessage(prev: ChatMessage | undefined, next: ChatMessage): boolean {
-  if (!prev || next.role !== 'assistant' || prev.role !== 'assistant') return false
-  if (normalizeMessageContent(prev.content) !== normalizeMessageContent(next.content)) return false
-  return (prev.agent_name || '') === (next.agent_name || '')
-}
-
-function normalizeMessageContent(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
-}
-
 function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
   const value = metadata?.[key]
   return typeof value === 'string' ? value : ''
-}
-
-function metadataNumber(metadata: Record<string, unknown> | undefined, key: string): number {
-  const value = metadata?.[key]
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  return 0
-}
-
-function metadataBool(metadata: Record<string, unknown> | undefined, key: string): boolean {
-  const value = metadata?.[key]
-  if (typeof value === 'boolean') return value
-  return value === 'true' || value === 1
 }

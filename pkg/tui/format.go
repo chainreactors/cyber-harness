@@ -13,6 +13,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
@@ -150,8 +151,8 @@ func truncateToolResultLine(value string, limit int) string {
 // Event helpers
 // ---------------------------------------------------------------------------
 
-func toolNameOrDefault(ev agent.Event) string {
-	if name := strings.TrimSpace(ev.ToolName); name != "" {
+func toolNameOrDefault(ev *toolEvent) string {
+	if name := strings.TrimSpace(ev.name); name != "" {
 		return name
 	}
 	return "tool"
@@ -218,27 +219,23 @@ func formatTokenUsage(u *agent.Usage) string {
 }
 
 // ---------------------------------------------------------------------------
-// Chat message summarisation helpers
+// Message summarisation helpers
 // ---------------------------------------------------------------------------
 
-func lastMessageSummary(messages []agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
-	if len(messages) == 0 {
-		return "", 0, 0, 0, ""
-	}
-	return summarizeChatMessage(messages[len(messages)-1])
-}
-
-func summarizeChatMessage(msg agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
+func summarizeMessageData(msg aop.MessageData) (role string, contentLen int, reasoningLen int, preview string) {
 	role = msg.Role
-	if msg.Content != nil {
-		contentLen = len(*msg.Content)
-		preview = truncate.Clip(*msg.Content, agentDebugPreviewLimit)
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case aop.PartText:
+			contentLen += len(p.Text)
+			if preview == "" {
+				preview = truncate.Clip(p.Text, agentDebugPreviewLimit)
+			}
+		case aop.PartReasoning:
+			reasoningLen += len(p.Text)
+		}
 	}
-	if msg.ReasoningContent != nil {
-		reasoningLen = len(*msg.ReasoningContent)
-	}
-	toolCalls = len(msg.ToolCalls)
-	return role, contentLen, toolCalls, reasoningLen, preview
+	return role, contentLen, reasoningLen, preview
 }
 
 // ---------------------------------------------------------------------------

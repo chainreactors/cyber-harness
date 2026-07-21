@@ -17,7 +17,6 @@ import (
 
 	"github.com/carapace-sh/carapace"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/probe"
@@ -49,7 +48,6 @@ type AgentConsole struct {
 	stdout     io.Writer
 	stderr     io.Writer
 	controller *interactiveRunController
-	bus        *eventbus.Bus[agent.Event]
 	// readlineActive is true only while the foreground goroutine is blocked in
 	// Readline. Async agent output can then refresh the prompt without changing
 	// the input buffer or creating a duplicate prompt between reads.
@@ -68,11 +66,11 @@ type AgentConsole struct {
 	split *SplitTerminal
 }
 
-func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
-	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, nil, bus...)
+func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput) *AgentConsole {
+	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, nil)
 }
 
-func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, t *rlterm.Terminal, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
+func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, t *rlterm.Terminal) *AgentConsole {
 	if t == nil {
 		t = rlterm.Local()
 	}
@@ -154,9 +152,6 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	menu.Prompt().Primary = func() string {
 		return agentPromptString(output)
 	}
-	if len(bus) > 0 && bus[0] != nil {
-		repl.bus = bus[0]
-	}
 	if option != nil && option.EvalCriteria != "" {
 		repl.evalCriteria = option.EvalCriteria
 	}
@@ -174,7 +169,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 
 // NewAgentConsoleWithWriters builds a non-interactive console that executes
 // individual REPL lines against the same command implementation as the TUI.
-func NewAgentConsoleWithWriters(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, stdout, stderr io.Writer, bus ...*eventbus.Bus[agent.Event]) *AgentConsole {
+func NewAgentConsoleWithWriters(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, stdout, stderr io.Writer) *AgentConsole {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -184,7 +179,7 @@ func NewAgentConsoleWithWriters(ctx context.Context, option *cfg.Option, appInfo
 	control := rlterm.NewControl(false, 80, 24)
 	terminal := rlterm.Stream(strings.NewReader(""), stdout, stderr, control)
 	output := NewStaticAgentOutputWithWriters(option, stdout, stderr, false)
-	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, terminal, bus...)
+	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, terminal)
 }
 
 // ExecuteLineAndWait runs one REPL input line and waits for any async agent run
@@ -874,7 +869,6 @@ func (r *AgentConsole) syncEvalToController() {
 		Criteria: r.evalCriteria,
 		Model:    model,
 		Provider: prov,
-		Bus:      r.bus,
 	}
 }
 

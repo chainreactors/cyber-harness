@@ -17,10 +17,14 @@ type Agent struct {
 	running bool
 }
 
-// Run executes the agent with a prompt and returns the result.
+// Run executes the agent with an input and returns the result.
 // For one-shot usage, create an agent and call Run once.
 // For multi-turn, call Run repeatedly — message history accumulates.
-func (a *Agent) Run(ctx context.Context, prompt string) (*Result, error) {
+func (a *Agent) Run(ctx context.Context, input Input) (*Result, error) {
+	userMsg, err := input.chatMessage()
+	if err != nil {
+		return nil, err
+	}
 	runCtx, cancel, err := a.startRun(ctx)
 	if err != nil {
 		return nil, err
@@ -34,7 +38,11 @@ func (a *Agent) Run(ctx context.Context, prompt string) (*Result, error) {
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
-	if err := cfg.Inbox.Push(inbox.NewUserMessage(prompt)); err != nil {
+	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
+	if input.NoEcho {
+		msg.Meta = map[string]any{"no_echo": true}
+	}
+	if err := cfg.Inbox.Push(msg); err != nil {
 		return nil, fmt.Errorf("push prompt: %w", err)
 	}
 
@@ -126,22 +134,41 @@ func (a *Agent) Derive() *Agent {
 		Temperature:      a.Cfg.Temperature,
 		CacheRetention:   a.Cfg.CacheRetention,
 		Bus:              a.Cfg.Bus,
+		AgentName:        a.Cfg.AgentName,
 		ParentSessionID:  a.Cfg.SessionID,
 	})
 }
 
 // SteerUserMessage pushes user input into the running agent's inbox.
 // The loop drains it at the next turn boundary.
-func (a *Agent) SteerUserMessage(content string) {
+func (a *Agent) SteerUserMessage(input Input) error {
+	userMsg, err := input.chatMessage()
+	if err != nil {
+		return err
+	}
 	a.mu.Lock()
 	ib := a.Cfg.Inbox
 	a.mu.Unlock()
 	if ib == nil {
-		return
+		return fmt.Errorf("agent has no inbox")
 	}
-	msg := inbox.NewUserMessage(content)
+	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
 	msg.Priority = inbox.PriorityHigh
-	_ = ib.Push(msg)
+	if input.NoEcho {
+		msg.Meta = map[string]any{"no_echo": true}
+	}
+	return ib.Push(msg)
+}
+
+// EmitStatus emits an AOP status event on the agent's session. Used by
+// out-of-kernel helpers (evaluator) so their events carry session/seq.
+func (a *Agent) EmitStatus(state string, ext map[string]any) {
+	a.mu.Lock()
+	em := a.Cfg.emitter
+	a.mu.Unlock()
+	if em != nil {
+		em.status(state, ext)
+	}
 }
 
 // IsRunning returns whether the agent loop is currently executing.

@@ -43,7 +43,7 @@ func NewRemoteREPLOpener(rt *AgentRuntime, mgr *tmux.Manager) pty.OpenFunc {
 		}
 		control := rlterm.NewControl(true, 80, 24)
 		info, err := mgr.CreateInteractiveFunc(ctx, spec.Name, "aiscan remote repl", pty.DefaultSessionTimeout, false, func(replCtx context.Context, input io.Reader, output io.Writer) error {
-			return tui.RunRemoteAgentConsoleWithControl(replCtx, option, appInfo, session, input, output, control, rt.Bus)
+			return tui.RunRemoteAgentConsoleWithControl(replCtx, option, appInfo, session, input, output, control)
 		})
 		if err != nil {
 			return pty.OpenResult{}, err

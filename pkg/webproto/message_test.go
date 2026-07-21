@@ -4,25 +4,50 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/utils/pty"
 )
 
-func TestDecodeChatPayloadCarriesExecutorContext(t *testing.T) {
-	raw := json.RawMessage(`{
-		"session_id":" session-1 ",
-		"system_prompt":" be concise ",
-		"output_schema":{"name":"Result","schema":{"type":"object"}}
-	}`)
-	payload, err := DecodeChatPayload(raw)
-	if err != nil {
-		t.Fatalf("DecodeChatPayload() error = %v", err)
+func TestIsAOPUserMessageDecodesGoalExt(t *testing.T) {
+	event := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "session-1",
+		Agent:     "aiscan.web",
+		Data: MustJSON(aop.MessageData{
+			MessageID: "msg-1",
+			Role:      "user",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
+		}),
+		Ext: map[string]any{"aiscan": map[string]any{
+			"eval_criteria": "find one SQLi",
+			"eval_max_rounds": 5,
+			"no_echo":         true,
+		}},
 	}
-	if payload.SessionID != "session-1" || payload.SystemPrompt != "be concise" {
-		t.Fatalf("decoded chat payload = %+v", payload)
+	msg := Message{Type: "aop", Payload: MustJSON(event)}
+
+	decoded, ok := IsAOPUserMessage(msg)
+	if !ok {
+		t.Fatal("IsAOPUserMessage() = false, want true")
 	}
-	if payload.OutputSchema == nil || payload.OutputSchema.Name != "Result" {
-		t.Fatalf("output_schema = %#v", payload.OutputSchema)
+	if got := UserMessageText(decoded); got != "audit target" {
+		t.Fatalf("UserMessageText() = %q, want %q", got, "audit target")
+	}
+	goal := DecodeGoalExt(decoded)
+	if goal.EvalCriteria != "find one SQLi" || goal.EvalMaxRounds != 5 || !goal.NoEcho {
+		t.Fatalf("DecodeGoalExt() = %+v", goal)
+	}
+
+	if _, ok := IsAOPUserMessage(Message{Type: "exec", Data: "x"}); ok {
+		t.Fatal("IsAOPUserMessage(exec) = true, want false")
+	}
+	assistant := event
+	assistant.Data = MustJSON(aop.MessageData{MessageID: "m-2", Role: "assistant", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hi"}}})
+	if _, ok := IsAOPUserMessage(Message{Type: "aop", Payload: MustJSON(assistant)}); ok {
+		t.Fatal("IsAOPUserMessage(assistant) = true, want false")
 	}
 }
 

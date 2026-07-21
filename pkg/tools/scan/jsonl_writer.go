@@ -6,7 +6,6 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/pipeline"
 )
@@ -17,7 +16,7 @@ type scanJSONLWriter struct {
 	agentUnsub func()
 }
 
-func newScanJSONLWriter(path string, scanBus *eventbus.Bus[pipeline.Observation], agentBus *eventbus.Bus[agent.Event]) (*scanJSONLWriter, error) {
+func newScanJSONLWriter(path string, scanBus *eventbus.Bus[pipeline.Observation], agentBus *eventbus.Bus[aop.Event]) (*scanJSONLWriter, error) {
 	tw, err := output.NewTimelineWriter(path)
 	if err != nil {
 		return nil, err
@@ -59,11 +58,9 @@ func (w *scanJSONLWriter) handleObservation(obs pipeline.Observation) {
 	}
 }
 
-func (w *scanJSONLWriter) handleAgentEvent(event agent.Event) {
-	for _, ev := range aop.FromAgentEvent(event, "aiscan") {
-		raw, _ := json.Marshal(ev)
-		w.w.WriteRaw(raw)
-	}
+func (w *scanJSONLWriter) handleAgentEvent(event aop.Event) {
+	raw, _ := json.Marshal(event)
+	w.w.WriteRaw(raw)
 }
 
 func observationToRecords(e event) []output.Record {

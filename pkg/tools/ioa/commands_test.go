@@ -532,7 +532,7 @@ Execute each step one at a time.`
 		WithSystemPrompt(systemPrompt).
 		WithStream(false))
 
-	result, err := ag.Run(context.Background(), "Execute the IOA integration test steps described in your instructions.")
+	result, err := ag.Run(context.Background(), agent.TextInput("Execute the IOA integration test steps described in your instructions."))
 	if err != nil {
 		t.Fatalf("agent.Run: %v", err)
 	}

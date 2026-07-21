@@ -256,16 +256,39 @@ func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan tas
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
 func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchChatSession(agentID, taskID, "", prompt, webproto.ChatPayload{})
+	return p.DispatchChatSession(agentID, taskID, BuildUserMessageEvent("", taskID, prompt, webproto.GoalExt{}))
 }
 
-// DispatchChatSession sends chat input to an agent and scopes the remote
-// agent-side conversation state to the web chat session. Goal-mode controls in
-// opts (persist / eval criteria / turn caps) ride along so the agent can run
-// the evaluator loop instead of a plain single-shot turn.
-func (p *AgentPool) DispatchChatSession(agentID, taskID, sessionID, prompt string, opts webproto.ChatPayload) (<-chan taskResult, error) {
-	opts.SessionID = sessionID
-	return p.dispatchPayload(agentID, taskID, "chat", prompt, mustJSON(opts))
+// DispatchChatSession sends an inbound AOP user message to an agent. The hub
+// builds the event (message_id, session scope, Goal-mode controls in ext) and
+// the agent treats it as the single executable chat unit.
+func (p *AgentPool) DispatchChatSession(agentID, taskID string, event aop.Event) (<-chan taskResult, error) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user message event: %w", err)
+	}
+	return p.dispatchMessage(agentID, taskID, WSMessage{Type: "aop", TaskID: taskID, Payload: payload})
+}
+
+// BuildUserMessageEvent constructs the inbound AOP user message the hub sends
+// to an agent. messageID is the hub-persisted message id; goal rides in
+// ext.aiscan with no_echo set — the hub already persisted and broadcast its own
+// copy, so the agent must not echo it back.
+func BuildUserMessageEvent(sessionID, messageID, text string, goal webproto.GoalExt) aop.Event {
+	goal.NoEcho = true
+	data, _ := json.Marshal(aop.MessageData{
+		MessageID: messageID,
+		Role:      "user",
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
+	})
+	return aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID,
+		Agent:     "aiscan.web",
+		Data:      data,
+		Ext:       map[string]any{"aiscan": goal},
+	}
 }
 
 func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {

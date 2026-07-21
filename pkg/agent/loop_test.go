@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -35,15 +36,15 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 		},
 	}
 
-	var events []EventType
+	var events []string
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event Event) {
+		Bus: testBus(func(event aop.Event) {
 			events = append(events, event.Type)
 		}),
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -51,25 +52,19 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 		t.Fatalf("turns = %d, want 2", result.Turns)
 	}
 
-	want := []EventType{
-		EventAgentStart,
-		EventTurnStart,
-		EventMessageStart,
-		EventMessageEnd,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventToolExecutionStart,
-		EventToolExecutionEnd,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventTurnStart,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventAgentEnd,
+	want := []string{
+		aop.TypeSessionStart,
+		aop.TypeTurnStart,
+		aop.TypeMessage,
+		aop.TypeStatus,
+		aop.TypeToolCall,
+		aop.TypeToolResult,
+		aop.TypeTurnEnd,
+		aop.TypeTurnStart,
+		aop.TypeStatus,
+		aop.TypeMessage,
+		aop.TypeTurnEnd,
+		aop.TypeSessionEnd,
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -95,10 +90,10 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 			return messages[len(messages)-1:]
 		},
 	})
-	if _, err := a.Run(context.Background(), "one"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("one")); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
-	if _, err := a.Run(context.Background(), "two"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("two")); err != nil {
 		t.Fatalf("second prompt error = %v", err)
 	}
 	requests := llm.requestsSnapshot()
@@ -135,7 +130,7 @@ func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		MaxTurns: 1,
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -164,15 +159,20 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate {
-				updates++
-				if event.ContentDelta != "" {
-					contentDeltas = append(contentDeltas, event.ContentDelta)
-				}
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeMessageDelta {
+				return
+			}
+			data, err := aop.DecodeData[aop.MessageDeltaData](event)
+			if err != nil {
+				return
+			}
+			updates++
+			if data.PartType == aop.PartText {
+				contentDeltas = append(contentDeltas, data.Delta)
 			}
 		}),
-	})).Run(context.Background(), "stream")
+	})).Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -202,12 +202,21 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && event.Usage != nil {
-				updateUsage = event.Usage
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeUsage {
+				return
+			}
+			data, err := aop.DecodeData[aop.UsageData](event)
+			if err != nil {
+				return
+			}
+			updateUsage = &Usage{
+				PromptTokens:     data.InputTokens,
+				CompletionTokens: data.OutputTokens,
+				TotalTokens:      data.TotalTokens,
 			}
 		}),
-	})).Run(context.Background(), "stream")
+	})).Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -215,7 +224,7 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		t.Fatalf("output = %q, want done", result.Output)
 	}
 	if updateUsage == nil || updateUsage.TotalTokens != 12 {
-		t.Fatalf("message_update usage = %#v, want total 12", updateUsage)
+		t.Fatalf("usage event = %#v, want total 12", updateUsage)
 	}
 }
 
@@ -235,14 +244,14 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && messageContent(event.Message) != "" {
+		Bus: testBus(func(event aop.Event) {
+			if event.Type == aop.TypeMessageDelta {
 				sawUpdate = true
 			}
 		}),
 	})
 
-	result, err := a.Run(context.Background(), "stream")
+	result, err := a.Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -289,7 +298,7 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-	})).Run(context.Background(), "stream tool")
+	})).Run(context.Background(), TextInput("stream tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -333,7 +342,7 @@ func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
 			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Flow: ToolFlowTerminate}, nil
 		},
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -369,7 +378,7 @@ func TestFinishToolTerminatesLoop(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Bus:      testBus(nil),
-	}).Run(context.Background(), "do something")
+	}).Run(context.Background(), TextInput("do something"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -395,12 +404,16 @@ func TestTokenBudgetWarning(t *testing.T) {
 		Tools:       tools,
 		Model:       "test",
 		TokenBudget: 1000,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTokenBudgetWarning {
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeStatus {
+				return
+			}
+			data, err := aop.DecodeData[aop.StatusData](event)
+			if err == nil && data.State == StatusTokenBudgetWarning {
 				sawWarning = true
 			}
 		}),
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -441,7 +454,7 @@ func TestTokenBudgetExceeded(t *testing.T) {
 		Tools:       tools,
 		Model:       "test",
 		TokenBudget: 1000,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want budget exceeded error")
 	}
@@ -481,7 +494,7 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -521,7 +534,7 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -557,30 +570,42 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 		},
 	}
 
-	var turnEndUsage *Usage
+	var turnEndUsage *aop.UsageData
 	var turnEndContext int
 	_, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTurnEnd {
-				turnEndUsage = event.Usage
-				turnEndContext = event.ContextTokens
+		Bus: testBus(func(event aop.Event) {
+			switch event.Type {
+			case aop.TypeUsage:
+				if data, err := aop.DecodeData[aop.UsageData](event); err == nil {
+					u := data
+					turnEndUsage = &u
+				}
+			case aop.TypeTurnEnd:
+				if ext, ok := event.Ext["aiscan"].(map[string]any); ok {
+					switch v := ext["context_tokens"].(type) {
+					case int:
+						turnEndContext = v
+					case float64:
+						turnEndContext = int(v)
+					}
+				}
 			}
 		}),
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if turnEndUsage == nil {
-		t.Fatal("EventTurnEnd.Usage is nil")
+		t.Fatal("usage event missing")
 	}
 	if turnEndUsage.TotalTokens != 540 {
-		t.Errorf("EventTurnEnd Usage.TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
+		t.Errorf("usage TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
 	}
 	if turnEndContext != 500 {
-		t.Errorf("EventTurnEnd ContextTokens = %d, want 500", turnEndContext)
+		t.Errorf("turn.end context_tokens = %d, want 500", turnEndContext)
 	}
 }
 
@@ -607,7 +632,7 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 		NewTextMessage("assistant", ""),
 	})
 
-	result, err := a.Run(context.Background(), "continue")
+	result, err := a.Run(context.Background(), TextInput("continue"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -643,7 +668,7 @@ func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "main task")
+	}).Run(context.Background(), TextInput("main task"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -686,7 +711,7 @@ func TestInboxClosedDoesNotBlock(t *testing.T) {
 		Tools:        tools,
 		Model:        "test",
 		SystemPrompt: "system",
-	}).Run(context.Background(), "task")
+	}).Run(context.Background(), TextInput("task"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -726,7 +751,7 @@ func TestInboxDrainedBetweenTurns(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "scan things")
+	}).Run(context.Background(), TextInput("scan things"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -782,7 +807,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "start background scan")
+	}).Run(context.Background(), TextInput("start background scan"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -849,7 +874,7 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "run a scan")
+	}).Run(context.Background(), TextInput("run a scan"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -970,7 +995,7 @@ func TestTurnUsageCacheAccumulation(t *testing.T) {
 		SystemPrompt:   "sys",
 		CacheRetention: CacheShort,
 		Logger:         telemetry.NopLogger(),
-	})).Run(context.Background(), "read something")
+	})).Run(context.Background(), TextInput("read something"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1013,10 +1038,14 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		},
 	}
 
-	var captured *Usage
-	handler := func(e Event) {
-		if e.Type == EventTurnEnd && e.Usage != nil {
-			captured = e.Usage
+	var captured *aop.UsageData
+	handler := func(e aop.Event) {
+		if e.Type != aop.TypeUsage {
+			return
+		}
+		if data, err := aop.DecodeData[aop.UsageData](e); err == nil {
+			u := data
+			captured = &u
 		}
 	}
 
@@ -1025,21 +1054,21 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		Tools:        commands.NewRegistry(),
 		Model:        "test",
 		SystemPrompt: "sys",
-		Bus:          testBus(func(e Event) { handler(e) }),
+		Bus:          testBus(func(e aop.Event) { handler(e) }),
 		Logger:       telemetry.NopLogger(),
-	})).Run(context.Background(), "test")
+	})).Run(context.Background(), TextInput("test"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if captured == nil {
-		t.Fatal("EventTurnEnd did not carry usage")
+		t.Fatal("usage event missing")
 	}
 	if captured.CacheReadTokens != 60 {
-		t.Errorf("EventTurnEnd CacheReadTokens = %d, want 60", captured.CacheReadTokens)
+		t.Errorf("usage CacheReadTokens = %d, want 60", captured.CacheReadTokens)
 	}
 	if captured.CacheWriteTokens != 20 {
-		t.Errorf("EventTurnEnd CacheWriteTokens = %d, want 20", captured.CacheWriteTokens)
+		t.Errorf("usage CacheWriteTokens = %d, want 20", captured.CacheWriteTokens)
 	}
 	fmt.Printf("Event carries cache usage: read=%d write=%d\n", captured.CacheReadTokens, captured.CacheWriteTokens)
 }

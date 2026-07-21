@@ -144,7 +144,7 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
-	return migrateLegacyChatMessages(db)
+	return wipeLegacyAOPEvents(db)
 }
 
 type sqliteColumnMigration struct {
@@ -180,95 +180,30 @@ func sqliteTableExists(db *sql.DB, table string) (bool, error) {
 	return count > 0, err
 }
 
-func migrateLegacyChatMessages(db *sql.DB) error {
-	exists, err := sqliteTableExists(db, "chat_messages")
+// wipeLegacyAOPEvents drops the pre-message-model event history: old rows use
+// the removed "text" event shape and are not interpretable by the current
+// schema. Idempotent — once no legacy rows remain this is a no-op.
+func wipeLegacyAOPEvents(db *sql.DB) error {
+	exists, err := sqliteTableExists(db, "chat_aop_events")
 	if err != nil || !exists {
 		return err
 	}
-	tx, err := db.Begin()
-	if err != nil {
+	var legacy int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM chat_aop_events WHERE event_json LIKE '%"type":"text"%' LIMIT 1`,
+	).Scan(&legacy); err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	existingAssistantText := map[string]map[string]bool{}
-	aopRows, err := tx.Query(`SELECT session_id, event_json FROM chat_aop_events`)
-	if err != nil {
-		return err
+	if legacy == 0 {
+		return nil
 	}
-	for aopRows.Next() {
-		var sessionID, raw string
-		if err := aopRows.Scan(&sessionID, &raw); err != nil {
-			aopRows.Close()
-			return err
-		}
-		var event aop.Event
-		var data aop.TextData
-		if json.Unmarshal([]byte(raw), &event) != nil || event.Type != aop.TypeText ||
-			json.Unmarshal(event.Data, &data) != nil || data.Delta ||
-			data.Channel == aop.TextChannelReasoning || data.Role == "user" {
-			continue
-		}
-		if existingAssistantText[sessionID] == nil {
-			existingAssistantText[sessionID] = map[string]bool{}
-		}
-		existingAssistantText[sessionID][data.Content] = true
-	}
-	if err := aopRows.Close(); err != nil {
-		return err
-	}
-
-	rows, err := tx.Query(`SELECT id, session_id, role, agent_id, agent_name, content, metadata, created_at FROM chat_messages ORDER BY created_at ASC`)
-	if err != nil {
-		return err
-	}
-	var messages []*ChatMessage
-	for rows.Next() {
-		var msg ChatMessage
-		var metadata, createdAt string
-		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.AgentID, &msg.AgentName, &msg.Content, &metadata, &createdAt); err != nil {
-			rows.Close()
-			return err
-		}
-		if metadata != "" {
-			msg.Metadata = json.RawMessage(metadata)
-		}
-		msg.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		messages = append(messages, &msg)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
-	for _, msg := range messages {
-		// Older versions dual-wrote an aggregate assistant message beside the
-		// final AOP text. Skip only that exact duplicate; unrelated AOP rows do
-		// not prove the legacy message was persisted elsewhere.
-		if msg.Role == "assistant" && existingAssistantText[msg.SessionID][msg.Content] {
-			continue
-		}
-		event, err := aopEventFromChatMessage(msg)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO chat_aop_events (id, session_id, event_json, created_at) VALUES (?, ?, ?, ?)`,
-			"legacy:"+msg.ID, msg.SessionID, string(raw), event.TS,
-		); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(`DROP TABLE chat_messages`); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = db.Exec(`DELETE FROM chat_aop_events`)
+	return err
 }
 
-func aopEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
+// messageEventFromChatMessage converts a hub-authored chat message (user input,
+// system notices) into an AOP message event for persistence and broadcast.
+func messageEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
 	if msg == nil || msg.SessionID == "" {
 		return aop.Event{}, fmt.Errorf("chat message requires session_id")
 	}
@@ -280,31 +215,40 @@ func aopEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
 	if agentName == "" {
 		agentName = "aiscan.web"
 	}
-	data, err := json.Marshal(aop.TextData{Content: msg.Content, Role: msg.Role})
+	role := msg.Role
+	if role == "" {
+		role = "user"
+	}
+	data, err := json.Marshal(aop.MessageData{
+		MessageID: msg.ID,
+		Role:      role,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: msg.Content}},
+	})
 	if err != nil {
 		return aop.Event{}, err
 	}
-	metadata := any(nil)
-	if len(msg.Metadata) > 0 {
-		if err := json.Unmarshal(msg.Metadata, &metadata); err != nil {
-			metadata = string(msg.Metadata)
-		}
-	}
-	ext := map[string]any{"message_id": msg.ID}
+	ext := map[string]any{}
 	if msg.AgentID != "" {
 		ext["agent_id"] = msg.AgentID
 	}
-	if metadata != nil {
+	if len(msg.Metadata) > 0 {
+		var metadata any
+		if err := json.Unmarshal(msg.Metadata, &metadata); err != nil {
+			metadata = string(msg.Metadata)
+		}
 		ext["metadata"] = metadata
 	}
-	return aop.Event{
-		Type:      aop.TypeText,
+	event := aop.Event{
+		Type:      aop.TypeMessage,
 		TS:        createdAt.UTC().Format(time.RFC3339Nano),
 		SessionID: msg.SessionID,
 		Agent:     agentName,
 		Data:      data,
-		Ext:       map[string]any{"aiscan": ext},
-	}, nil
+	}
+	if len(ext) > 0 {
+		event.Ext = map[string]any{"aiscan": ext}
+	}
+	return event, nil
 }
 
 func aopExtension(event aop.Event, namespace string) map[string]any {
@@ -525,7 +469,7 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 // --- Chat message CRUD ---
 
 func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
-	event, err := aopEventFromChatMessage(msg)
+	event, err := messageEventFromChatMessage(msg)
 	if err != nil {
 		return err
 	}
@@ -541,6 +485,11 @@ func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error
 }
 
 func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event aop.Event) error {
+	// Deltas are streaming fragments; only complete messages are persisted so a
+	// replayed history holds the authoritative state.
+	if event.Type == aop.TypeMessageDelta {
+		return nil
+	}
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -595,29 +544,39 @@ func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit 
 		capacity = limit
 	}
 	msgs := make([]*ChatMessage, 0, capacity)
-	for index, event := range events {
-		if event.Type != aop.TypeText {
+	for _, event := range events {
+		if event.Type != aop.TypeMessage {
 			continue
 		}
-		var data aop.TextData
-		if json.Unmarshal(event.Data, &data) != nil || data.Delta || data.Channel == aop.TextChannelReasoning {
+		var data aop.MessageData
+		if json.Unmarshal(event.Data, &data) != nil {
 			continue
+		}
+		var sb strings.Builder
+		for _, part := range data.Parts {
+			if part.Type != aop.PartText || part.Text == "" {
+				continue
+			}
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(part.Text)
 		}
 		msg := &ChatMessage{
-			ID:        fmt.Sprintf("aop:%s:%d", sessionID, index),
+			ID:        data.MessageID,
 			SessionID: sessionID,
 			Role:      data.Role,
 			AgentName: event.Agent,
-			Content:   data.Content,
+			Content:   sb.String(),
+		}
+		if msg.ID == "" {
+			msg.ID = generateID()
 		}
 		if msg.Role == "" {
 			msg.Role = "assistant"
 		}
 		msg.CreatedAt, _ = time.Parse(time.RFC3339Nano, event.TS)
 		if ext := aopExtension(event, "aiscan"); ext != nil {
-			if value, ok := ext["message_id"].(string); ok && value != "" {
-				msg.ID = value
-			}
 			msg.AgentID, _ = ext["agent_id"].(string)
 			if metadata, ok := ext["metadata"]; ok {
 				msg.Metadata, _ = json.Marshal(metadata)

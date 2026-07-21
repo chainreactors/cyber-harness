@@ -93,8 +93,7 @@ func runVerifyAgent(ctx context.Context, parent *agent.Agent, skillPrompt string
 	sub := parent.Derive()
 	sub.Cfg = sub.Cfg.WithSystemPrompt(skillPrompt).WithStream(false)
 
-	prompt := formatVerifyPrompt(loot)
-	r, err := sub.Run(ctx, prompt)
+	r, err := sub.Run(ctx, agent.TextInput(formatVerifyPrompt(loot)))
 	if err != nil {
 		logger.Debugf("verify agent error: %s", err)
 		return nil
@@ -110,8 +109,7 @@ func runSniperAgent(ctx context.Context, parent *agent.Agent, skillPrompt string
 	sub := parent.Derive()
 	sub.Cfg = sub.Cfg.WithSystemPrompt(skillPrompt).WithStream(false)
 
-	prompt := formatSniperPrompt(loot)
-	r, err := sub.Run(ctx, prompt)
+	r, err := sub.Run(ctx, agent.TextInput(formatSniperPrompt(loot)))
 	if err != nil {
 		logger.Debugf("sniper agent error: %s", err)
 		return nil

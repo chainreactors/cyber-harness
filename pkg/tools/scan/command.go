@@ -10,6 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
@@ -150,7 +151,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 
 	var scanWriter *scanJSONLWriter
 	if flags.OutputFile != "" {
-		var agentBus *eventbus.Bus[agent.Event]
+		var agentBus *eventbus.Bus[aop.Event]
 		if c.parent != nil {
 			agentBus = c.parent.Cfg.Bus
 		}

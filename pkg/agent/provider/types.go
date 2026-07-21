@@ -149,17 +149,6 @@ type ToolDefinition = tool.Definition
 
 type FunctionDefinition = tool.FuncDef
 
-type ResponseFormat struct {
-	Type       string          `json:"type"`
-	JSONSchema *JSONSchemaSpec  `json:"json_schema,omitempty"`
-}
-
-type JSONSchemaSpec struct {
-	Name   string      `json:"name"`
-	Schema interface{} `json:"schema"`
-	Strict bool        `json:"strict,omitempty"`
-}
-
 type ChatCompletionRequest struct {
 	Model          string           `json:"model"`
 	Messages       []ChatMessage    `json:"messages"`
@@ -167,7 +156,6 @@ type ChatCompletionRequest struct {
 	MaxTokens      int              `json:"max_tokens,omitempty"`
 	Temperature    *float64         `json:"temperature,omitempty"`
 	Stream         bool             `json:"stream,omitempty"`
-	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
 	CacheRetention CacheRetention   `json:"-"`
 	SessionID      string           `json:"-"`
 }

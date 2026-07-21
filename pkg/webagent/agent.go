@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -104,7 +105,7 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 	}
 
 	loopCfg := rt.Config.WithSystemPrompt(rt.SystemPrompt).WithStream(true)
-	_, err = agent.NewAgent(loopCfg).Run(ctx, task)
+	_, err = agent.NewAgent(loopCfg).Run(ctx, agent.TextInput(task))
 
 	<-connectionDone
 	return err
@@ -120,51 +121,54 @@ type chatAgentHandler struct {
 	serverURL string
 }
 
-func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, send func(webproto.Message), router *eventRouter) {
-	chatOpts, err := parseChatPayload(msg)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	webSessionID := chatOpts.SessionID
+func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) {
+	goal := webproto.DecodeGoalExt(event)
+	webSessionID := event.SessionID
 	ag, agErr := h.chatMgr.agentFor(webSessionID)
 	if agErr != nil {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: agErr.Error()})
 		return
 	}
 
-	prompt := strings.TrimSpace(msg.Data)
+	data, err := aop.DecodeData[aop.MessageData](event)
+	if err != nil {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "decode user message: " + err.Error()})
+		return
+	}
+	input := agent.InputFromAOPMessage(data)
+	input.NoEcho = goal.NoEcho
+	prompt := strings.TrimSpace(webproto.UserMessageText(event))
 	if prompt == "" {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
 		return
 	}
 
-	// Always route future events to the latest message.
-	router.Route(ag.Cfg.SessionID, msg.TaskID)
-
-	if ag.IsRunning() {
-		// Agent is busy -- append to inbox; the loop picks it up. Leave any
-		// pending upload notes queued so they ride the next idle turn rather
-		// than being drained into a steer that may not surface them.
-		ag.SteerUserMessage(prompt)
-		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
+	// Wait for this session's turn: messages to one web session run FIFO, so a
+	// message sent while the agent is busy queues here instead of steering
+	// into the running turn. Canceling the queued message's task wakes it.
+	release, ok := h.chatMgr.acquireTurn(ctx, webSessionID)
+	if !ok {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "canceled while queued"})
 		return
 	}
+	defer release()
 
-	// Idle turn: fold in files uploaded to this session since the last turn so
-	// the agent learns their absolute on-disk paths and can read them. REPL/`!`
-	// lines are left untouched so a note never corrupts a command; the note
-	// stays queued for the next natural-language turn.
+	// Route at dequeue time so this run's events reach this message's task.
+	router.Route(ag.Cfg.SessionID, msg.TaskID)
+
+	// Fold in files uploaded to this session since the last turn so the agent
+	// learns their absolute on-disk paths and can read them. REPL/`!` lines are
+	// left untouched so a note never corrupts a command.
 	if !isREPLCommand(prompt) {
 		if note := h.chatMgr.takePendingUploads(webSessionID); note != "" {
-			msg.Data = note + "\n\n" + prompt
+			input = agent.TextInput(note + "\n\n" + prompt)
+			input.NoEcho = goal.NoEcho
 		}
 	}
 
-	// Agent is idle -- start a new run with this message. The node already
-	// launched us in a goroutine with a cancellable context, so we run
-	// synchronously here.
-	runChatWithAgent(ctx, msg, chatOpts, ag, h.rt, send)
+	// The node already launched us in a goroutine with a cancellable context,
+	// so we run synchronously here.
+	runChatWithAgent(ctx, msg, prompt, goal, input, ag, h.rt, send)
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
@@ -190,15 +194,6 @@ func (h *chatAgentHandler) CancelChat(taskID string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// parseChatPayload decodes the "chat" WS payload: the web session to scope the
-// agent conversation to, plus optional Goal-mode run controls.
-// ---------------------------------------------------------------------------
-
-func parseChatPayload(msg webproto.Message) (webproto.ChatPayload, error) {
-	return webproto.DecodeChatPayload(msg.Payload)
-}
-
-// ---------------------------------------------------------------------------
 // chatRuntimeManager
 // ---------------------------------------------------------------------------
 
@@ -206,6 +201,7 @@ type chatRuntimeManager struct {
 	rt       *runner.AgentRuntime
 	mu       sync.Mutex
 	sessions map[string]*agent.Agent
+	turns    map[string]chan struct{} // web sessionID -> single-token turn lock
 
 	uploadMu sync.Mutex
 	uploads  map[string][]string // web sessionID -> notes about files uploaded since the last turn
@@ -215,7 +211,31 @@ func newChatRuntimeManager(rt *runner.AgentRuntime) *chatRuntimeManager {
 	return &chatRuntimeManager{
 		rt:       rt,
 		sessions: make(map[string]*agent.Agent),
+		turns:    make(map[string]chan struct{}),
 		uploads:  make(map[string][]string),
+	}
+}
+
+// acquireTurn takes the session's turn token, blocking (FIFO, in channel
+// receiver order) until the previous run releases it. The returned release
+// hands the turn to the next waiter. ok=false means ctx ended while queued.
+func (m *chatRuntimeManager) acquireTurn(ctx context.Context, sessionID string) (release func(), ok bool) {
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	m.mu.Lock()
+	turn, exists := m.turns[sessionID]
+	if !exists {
+		turn = make(chan struct{}, 1)
+		turn <- struct{}{}
+		m.turns[sessionID] = turn
+	}
+	m.mu.Unlock()
+	select {
+	case <-turn:
+		return func() { turn <- struct{}{} }, true
+	case <-ctx.Done():
+		return nil, false
 	}
 }
 
@@ -328,8 +348,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 // Chat execution
 // ---------------------------------------------------------------------------
 
-func runChatWithAgent(ctx context.Context, msg webproto.Message, opts webproto.ChatPayload, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
-	prompt := strings.TrimSpace(msg.Data)
+func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, input agent.Input, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
 	if rt == nil || rt.App == nil {
 		send(webproto.Message{
 			Type:   "error",
@@ -361,27 +380,23 @@ func runChatWithAgent(ctx context.Context, msg webproto.Message, opts webproto.C
 	// Goal "达成条件" mode: run the agent under an independent evaluator that
 	// judges the natural-language criteria each round and re-drives the agent
 	// with feedback until it passes (or the round budget is spent).
-	if opts.EvalCriteria != "" {
+	if goal.EvalCriteria != "" {
 		ag.SetMaxTurns(rt.Config.MaxTurns) // each eval round runs to natural completion
-		runChatEval(ctx, msg, prompt, opts, ag, rt, send)
+		runChatEval(ctx, msg, prompt, goal, ag, rt, send)
 		return
 	}
 
 	// Goal "固定轮次" mode caps this run at PersistMaxTurns; otherwise restore
 	// the session default so a prior capped message never leaks its cap forward.
-	if opts.PersistMaxTurns > 0 {
-		ag.SetMaxTurns(opts.PersistMaxTurns)
+	if goal.PersistMaxTurns > 0 {
+		ag.SetMaxTurns(goal.PersistMaxTurns)
 	} else {
 		ag.SetMaxTurns(rt.Config.MaxTurns)
 	}
 
-	result, err := ag.Run(ctx, prompt)
+	_, err := ag.Run(ctx, input)
 	if err != nil {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	if result == nil {
-		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 		return
 	}
 	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
@@ -389,27 +404,26 @@ func runChatWithAgent(ctx context.Context, msg webproto.Message, opts webproto.C
 
 // runChatEval drives the agent through the evaluator loop for a Goal with
 // natural-language acceptance criteria, using the agent's own provider/model as
-// the independent judge. The final agent output is returned as the chat reply;
-// per-round progress streams over rt.Bus like any other agent run.
-func runChatEval(ctx context.Context, msg webproto.Message, prompt string, opts webproto.ChatPayload, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
+// the independent judge. Per-round progress streams over the agent's own AOP
+// emitter like any other agent run.
+func runChatEval(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message)) {
+	maxRounds := goal.EvalMaxRounds
+	if maxRounds <= 0 {
+		maxRounds = 3
+	}
 	evalCfg := evaluator.EvalLoopConfig{
 		Evaluator: evaluator.New(evaluator.Config{
 			Provider: rt.App.Provider,
 			Model:    rt.Config.Model,
 			Logger:   rt.Config.Logger,
 		}),
-		MaxEvalRounds: opts.EvalMaxRounds,
+		MaxEvalRounds: maxRounds,
 		Goal:          prompt,
-		Criteria:      opts.EvalCriteria,
-		Bus:           rt.Bus,
+		Criteria:      goal.EvalCriteria,
 	}
-	result, _, err := evaluator.RunWithEval(ctx, ag, evalCfg)
+	_, _, err := evaluator.RunWithEval(ctx, ag, evalCfg)
 	if err != nil {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	if result == nil {
-		send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
 		return
 	}
 	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
@@ -500,7 +514,7 @@ func runChatREPLLine(ctx context.Context, line string, rt *runner.AgentRuntime, 
 			rt.Config.Model = providerConfig.Model
 		},
 	}
-	console := tui.NewAgentConsoleWithWriters(ctx, option, appInfo, ag, &stdout, &stderr, rt.Bus)
+	console := tui.NewAgentConsoleWithWriters(ctx, option, appInfo, ag, &stdout, &stderr)
 	_, err := console.ExecuteLineAndWait(line)
 	out := trimChatOutput(output.StripANSI(stdout.String()))
 	errOut := trimChatOutput(output.StripANSI(stderr.String()))

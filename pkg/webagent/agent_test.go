@@ -15,7 +15,6 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -40,7 +39,7 @@ func TestWebNodeRefUsesWebIdentity(t *testing.T) {
 	}
 }
 
-func connectForTest(ctx context.Context, serverURL, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[agent.Event]) error {
+func connectForTest(ctx context.Context, serverURL, name string, reg *commands.CommandRegistry, bus *eventbus.Bus[aop.Event]) error {
 	if _, ok := reg.GetTool("bash"); !ok {
 		bash := commands.NewBashTool(".", 5)
 		bash.SetCommandResolver(reg.Get)
@@ -57,7 +56,7 @@ func connectForTest(ctx context.Context, serverURL, name string, reg *commands.C
 }
 
 type webConnectionTestCommand struct {
-	bus *eventbus.Bus[agent.Event]
+	bus *eventbus.Bus[aop.Event]
 }
 
 func (c webConnectionTestCommand) Name() string  { return "echo" }
@@ -65,7 +64,11 @@ func (c webConnectionTestCommand) Usage() string { return "echo" }
 
 func (c webConnectionTestCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
 	if c.bus != nil {
-		c.bus.Emit(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+		c.bus.Emit(aop.Event{
+			Type:      aop.TypeTurnStart,
+			SessionID: "test-session",
+			Data:      webproto.MustJSON(aop.TurnData{Turn: 1}),
+		})
 	}
 	fmt.Fprintf(execution.Stdout, "progress: %s\n", strings.Join(execution.Args, " "))
 	return nil, nil
@@ -125,7 +128,7 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	bus := eventbus.New[agent.Event]()
+	bus := eventbus.New[aop.Event]()
 	reg := commands.NewRegistry()
 	impl := webConnectionTestCommand{bus: bus}
 	reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "test")
