@@ -41,5 +41,6 @@
     "cyber-ui/packages/agent-protocol/src",
     "cyber-ui/packages/viewer/src",
     "cyber-ui/packages/ioa/src"
-  ]
+  ],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
 }
