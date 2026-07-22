@@ -44,13 +44,12 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 | --- | --- |
 | **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | Full — adds playwright browser, passive recon, katana crawler |
-| **aiscan-agent** | Lightweight agent runtime, ideal for remote worker deployment |
 
-| OS | Arch | Standard | Full | Agent |
-| --- | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
+| OS | Arch | Standard | Full |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
 
 ```bash
 # Linux
@@ -72,14 +71,17 @@ git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
 go build -o aiscan ./cmd/aiscan                          # standard
 go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/katana/passive)
+go build -o aiscan-agent ./cmd/agent                      # developer-only lightweight agent runtime
 ```
 
-The Makefile mirrors the three release editions. The full target builds the
-frontend first so the latest `web/static` assets are embedded into the binary:
+GitHub Releases publish only the standard and full editions. The lightweight
+agent runtime remains available for developers to build from source. The full
+target builds the frontend first so the latest `web/static` assets are embedded
+into the binary:
 
 ```bash
 make                                                      # standard edition
-make agent                                                # lightweight agent edition
+make agent                                                # developer-only lightweight agent runtime
 make full                                                 # frontend + full edition
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
 ```

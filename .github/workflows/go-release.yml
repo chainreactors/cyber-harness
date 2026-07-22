@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# Three parallel build jobs (standard / full / agent) → one release job
+# Two parallel build jobs (standard / full) → one release job
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -101,12 +101,6 @@ jobs:
             binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim"
             generate: true
-          - id: aiscan-agent
-            profile: agent
-            main: ./cmd/agent
-            binary: aiscan-agent
-            tags: "forceposix emptytemplates noembed osusergo netgo"
-            generate: false
 
     env:
       GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}
@@ -210,7 +204,7 @@ jobs:
             tmpdir=$(mktemp -d)
             cp "$f" "${tmpdir}/${inner_name}"
             cp README.md "${tmpdir}/" 2>/dev/null || true
-            if [[ "$BINARY" != "aiscan-agent" ]] && [ -d docs ]; then
+            if [ -d docs ]; then
               cp -r docs "${tmpdir}/" 2>/dev/null || true
             fi
             (cd "$tmpdir" && zip -r - .) > "$zipfile"

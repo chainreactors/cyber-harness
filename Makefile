@@ -21,7 +21,7 @@ STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
 AGENT_BIN ?= $(BIN_DIR)/aiscan-agent$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 
-# Keep the local feature tiers aligned with the release workflow.
+# Standard/full match release artifacts; agent remains a developer build target.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo cstx_native $(RE2_TAGS)
 AGENT_TAGS := forceposix emptytemplates noembed osusergo netgo
 FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim $(RE2_TAGS)
@@ -30,9 +30,9 @@ BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: help prepare frontend aop-gen standard agent full web-build web-run web all clean
 
 help:
-	@echo "AIScan build targets (aligned with release editions):"
+	@echo "AIScan build targets:"
 	@echo "  make / make standard  Build the standard AIScan edition"
-	@echo "  make agent            Build the lightweight agent edition"
+	@echo "  make agent            Build the developer-only lightweight agent runtime"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"

@@ -44,13 +44,12 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 | --- | --- |
 | **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | 完整版 — 额外包含 playwright 浏览器、passive recon、katana 爬虫 |
-| **aiscan-agent** | 轻量 agent 版 — 仅 agent 运行时，适合部署为远程 worker |
 
-| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
-| --- | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
+| 系统 | 架构 | 标准版 | 完整版 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
 
 ```bash
 # Linux
@@ -72,14 +71,16 @@ git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
 go build -o aiscan ./cmd/aiscan                          # 标准版
 go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 playwright/katana/passive）
+go build -o aiscan-agent ./cmd/agent                      # 仅供开发者使用的轻量 agent 运行时
 ```
 
-Makefile 对应 Release 的三种功能层级。`make full` 会先构建前端，再将最新的
-`web/static` 嵌入 full 二进制：
+GitHub Releases 只发布标准版和完整版。轻量 agent 运行时仍保留给开发者从
+源码自行编译。`make full` 会先构建前端，再将最新的 `web/static` 嵌入 full
+二进制：
 
 ```bash
 make                                                      # Standard 默认版
-make agent                                                # Agent 轻量版
+make agent                                                # 仅供开发者使用的轻量 agent 运行时
 make full                                                 # 前端 + Full 完整版
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
 ```
