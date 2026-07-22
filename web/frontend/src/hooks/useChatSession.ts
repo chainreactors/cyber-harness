@@ -315,7 +315,11 @@ export function useChatSession() {
   function handleAOPEvent(event: AOPEvent) {
     setAOPEvents((previous) => {
       if (event.seq !== undefined && previous.some(
-        (item) => item.session_id === event.session_id && item.seq === event.seq,
+        (item) => item.session_id === event.session_id
+          && item.agent === event.agent
+          && item.seq === event.seq
+          && item.type === event.type
+          && item.ts === event.ts,
       )) return previous
       return [...previous, event]
     })

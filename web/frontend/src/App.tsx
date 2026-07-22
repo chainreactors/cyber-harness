@@ -23,6 +23,7 @@ import type { SCONode } from '@cyber/cstx-easm'
 import { useChatSession, agentNodeKey } from './hooks/useChatSession'
 import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
+import type { IOAConsoleTarget } from './lib/ioa-navigation'
 import { cn } from '@cyber/theme'
 
 const sidebarStorageKey = 'aiscan-sidebar-open'
@@ -60,6 +61,7 @@ export default function App() {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
   const [assetPanelOpen, setAssetPanelOpen] = useState(false)
   const [ioaConsoleOpen, setIOAConsoleOpen] = useState(false)
+  const [ioaConsoleTarget, setIOAConsoleTarget] = useState<IOAConsoleTarget | null>(null)
   const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
@@ -68,6 +70,11 @@ export default function App() {
   // id: the hub mints a fresh id on every reconnect, so keying on id would drop
   // the terminal (and never restore it) when a node bounces to reload config.
   const [terminalNodeKey, setTerminalNodeKey] = useState<string | null>(null)
+
+  const openIOAConsole = useCallback((target?: IOAConsoleTarget) => {
+    setIOAConsoleTarget(target ?? null)
+    setIOAConsoleOpen(true)
+  }, [])
 
   const refreshStatus = useCallback(async () => {
     const [statusResult, configResult] = await Promise.allSettled([getStatus(), getConfigStatus()])
@@ -220,7 +227,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <AssetPoolButton count={scoNodes.length} onClick={() => setAssetPanelOpen(true)} />
-            <IOAConsoleButton onClick={() => setIOAConsoleOpen(true)} />
+            <IOAConsoleButton onClick={() => openIOAConsole()} />
             <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
             <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
             <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
@@ -270,6 +277,7 @@ export default function App() {
               agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
               onCreateSession={handleCreateSession}
               onOpenTerminal={handleOpenTerminal}
+              onOpenIOA={openIOAConsole}
               mentionables={mentionables}
               renderMentionPopup={renderMentionPopup}
               injectText={composerSeed}
@@ -305,7 +313,12 @@ export default function App() {
         <Suspense fallback={null}>
           <IOAConsole
             open={ioaConsoleOpen}
-            onClose={() => setIOAConsoleOpen(false)}
+            initialSpaceID={ioaConsoleTarget?.spaceID}
+            initialMessageID={ioaConsoleTarget?.messageID}
+            onClose={() => {
+              setIOAConsoleOpen(false)
+              setIOAConsoleTarget(null)
+            }}
           />
         </Suspense>
       )}

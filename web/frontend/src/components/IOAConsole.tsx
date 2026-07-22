@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Clock3, GitBranch, MessageSquare, Network, RefreshCw, UserRound } from 'lucide-react'
+import { Clock3, GitBranch, Link2, MessageSquare, Network, RefreshCw, UserRound } from 'lucide-react'
 import {
   GraphPanel,
   MessageContent,
+  MessageFrontMatter,
   detectContentType,
   messageTitle,
   type ForumThread,
@@ -18,22 +19,25 @@ import {
 import { cn } from '@cyber/theme'
 import { getIOAOverview, type IOAMessage, type IOAOverview, type IOASpace } from '../api'
 import { usePolling } from '../hooks/usePolling'
+import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 import { ConsoleDrawer } from './layout/ConsoleDrawer'
 
 interface IOAConsoleProps {
   open: boolean
   onClose: () => void
+  initialSpaceID?: IOAConsoleTarget['spaceID']
+  initialMessageID?: IOAConsoleTarget['messageID']
 }
 
 const EMPTY_OVERVIEW: IOAOverview = { nodes: [], spaces: [], messages: [] }
 
-export default function IOAConsole({ open, onClose }: IOAConsoleProps) {
+export default function IOAConsole({ open, onClose, initialSpaceID, initialMessageID }: IOAConsoleProps) {
   const { t } = useTranslation('ioa')
   const [overview, setOverview] = useState<IOAOverview>(EMPTY_OVERVIEW)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [activeSpaceID, setActiveSpaceID] = useState('')
-  const [selectedMessageID, setSelectedMessageID] = useState('')
+  const [activeSpaceID, setActiveSpaceID] = useState(initialSpaceID ?? '')
+  const [selectedMessageID, setSelectedMessageID] = useState(initialMessageID ?? '')
 
   const refresh = useCallback(async () => {
     if (!open) return
@@ -63,8 +67,17 @@ export default function IOAConsole({ open, onClose }: IOAConsoleProps) {
       setActiveSpaceID('')
       return
     }
-    if (!spaces.some(space => space.id === activeSpaceID)) setActiveSpaceID(spaces[0].id)
-  }, [activeSpaceID, spaces])
+    if (spaces.some(space => space.id === activeSpaceID)) return
+    const messageSpaceID = initialMessageID
+      ? overview.messages.find(message => message.id === initialMessageID)?.space_id
+      : undefined
+    const preferredSpaceID = initialSpaceID || messageSpaceID
+    setActiveSpaceID(
+      preferredSpaceID && spaces.some(space => space.id === preferredSpaceID)
+        ? preferredSpaceID
+        : spaces[0].id,
+    )
+  }, [activeSpaceID, initialMessageID, initialSpaceID, overview.messages, spaces])
 
   const activeSpace = spaces.find(space => space.id === activeSpaceID) ?? spaces[0]
   const activeMessages = useMemo(
@@ -186,7 +199,11 @@ export default function IOAConsole({ open, onClose }: IOAConsoleProps) {
             )}
           </div>
 
-          <MessageInspector message={selectedMessage} senderName={sender?.name || sender?.id} />
+          <MessageInspector
+            message={selectedMessage}
+            senderName={sender?.name || sender?.id}
+            onSelectMessage={setSelectedMessageID}
+          />
         </main>
     </ConsoleDrawer>
   )
@@ -210,7 +227,15 @@ function buildSpaceThread(space: IOASpace, messages: IOAMessage[]): ForumThread 
   }
 }
 
-function MessageInspector({ message, senderName }: { message?: IOAMessage; senderName?: string }) {
+function MessageInspector({
+  message,
+  senderName,
+  onSelectMessage,
+}: {
+  message?: IOAMessage
+  senderName?: string
+  onSelectMessage: (messageID: string) => void
+}) {
   const { t } = useTranslation('ioa')
   if (!message) {
     return (
@@ -232,6 +257,31 @@ function MessageInspector({ message, senderName }: { message?: IOAMessage; sende
           <span className="font-mono text-[10px] text-muted-foreground">{message.id}</span>
         </div>
         <h3 className="mt-2 text-sm font-semibold leading-snug text-foreground">{title}</h3>
+        {refs.length > 0 && (
+          <div className="mt-2 border-t border-border/70 pt-2">
+            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">refs.messages</div>
+            <div className="flex flex-wrap gap-1.5">
+              {refs.map(ref => (
+                <button
+                  key={ref}
+                  type="button"
+                  onClick={() => onSelectMessage(ref)}
+                  aria-label={t('openReference', { id: ref })}
+                  title={ref}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/35 bg-background/80 px-1.5 py-1 font-mono text-[10px] font-medium text-primary transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Link2 className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{ref}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <MessageFrontMatter
+          content={message.content}
+          meta={message.meta}
+          className="mt-2"
+        />
       </div>
       <div className="space-y-4 p-4">
         <div className="grid gap-2 text-xs">
@@ -253,17 +303,13 @@ function MessageInspector({ message, senderName }: { message?: IOAMessage; sende
         </div>
 
         <div className="border-t border-border pt-4">
-          <MessageContent content={message.content} meta={message.meta} />
+          <MessageContent
+            content={message.content}
+            meta={message.meta}
+            showFrontMatter={false}
+            showType={false}
+          />
         </div>
-
-        {refs.length > 0 && (
-          <div className="border-t border-border pt-4">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">refs.messages</div>
-            <div className="flex flex-wrap gap-1.5">
-              {refs.map(ref => <Badge key={ref} variant="secondary" size="sm" className="font-mono">{ref}</Badge>)}
-            </div>
-          </div>
-        )}
       </div>
     </aside>
   )

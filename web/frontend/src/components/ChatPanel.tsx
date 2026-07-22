@@ -4,9 +4,12 @@ import i18n from '../i18n'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ExternalLink,
   FileText,
   GitBranch,
   Layers,
+  Link2,
   Loader2,
   MessageSquare,
   Network,
@@ -44,6 +47,7 @@ import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
 import type { TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
+import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
@@ -130,8 +134,8 @@ function toViewerTimelineItem(
 }
 
 const workspaceClass = 'mx-auto w-full max-w-[96rem] px-4 sm:px-5 lg:px-6'
-const contentOffsetClass = 'xl:ml-[6.75rem]'
-const threadOffsetClass = 'xl:mr-[6.75rem]'
+const contentOffsetClass = 'xl:ml-[8.75rem] 2xl:ml-[10.75rem]'
+const threadOffsetClass = 'lg:mr-[10.75rem] xl:mr-[11.75rem] 2xl:mr-[14.75rem]'
 
 interface Props {
   timeline: TimelineItem[]
@@ -150,6 +154,7 @@ interface Props {
   agents?: { id: string; name?: string }[]
   onCreateSession?: (agentID: string) => void
   onOpenTerminal?: (agentID: string) => void
+  onOpenIOA?: (target?: IOAConsoleTarget) => void
   onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
   onPause: () => void
   onClearError: () => void
@@ -172,6 +177,7 @@ export default function ChatPanel({
   agents = [],
   onCreateSession,
   onOpenTerminal,
+  onOpenIOA,
   onSend,
   onPause,
   onClearError,
@@ -202,14 +208,10 @@ export default function ChatPanel({
       (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
     )
   }, [agentEvents, isBusy, liveThinkingItem, scanResults, timeline])
-  // The right rail carries IOA thread notes, which only a fraction of turns emit.
-  // Reserve its 6rem column only when the transcript actually has one — otherwise
-  // the empty rail just steals horizontal space from the conversation.
-  const hasThreadNotes = useMemo(
-    () => viewerTimeline.some((item) => describeIOAThreadItem(item, t) !== null),
-    [viewerTimeline, t],
-  )
-  const inputFormClass = cn(contentOffsetClass, hasThreadNotes && threadOffsetClass)
+  // Keep the transcript geometry stable as IOA messages arrive. The right rail
+  // is part of the desktop workspace even when the current session has no IOA
+  // activity, so the conversation and composer never jump horizontally.
+  const inputFormClass = cn(contentOffsetClass, threadOffsetClass)
   const [persist, setPersist] = useState(false)
   // Goal mode: describe done-when criteria in natural language and let an
   // independent evaluator judge completion each round, re-driving the agent
@@ -351,9 +353,46 @@ export default function ChatPanel({
     (item: ViewerTimelineItem) => <TimelineMark item={item} />,
     [],
   )
+  const ioaRailItems = useMemo(() => {
+    const entries = viewerTimeline.map((item) => ({ item, note: describeIOAThreadItem(item, t) }))
+    const messageIndexes = new Map<string, number>()
+    const relations = entries.map(({ item, note }) => ({
+      item,
+      note,
+      before: false,
+      after: false,
+    }))
+
+    entries.forEach(({ note }, index) => {
+      const messageID = note?.target?.messageID
+      if (messageID) messageIndexes.set(messageID, index)
+    })
+    entries.forEach(({ note }, targetIndex) => {
+      for (const ref of note?.refs ?? []) {
+        const sourceIndex = messageIndexes.get(ref)
+        if (sourceIndex === undefined || sourceIndex >= targetIndex) continue
+        for (let index = sourceIndex; index <= targetIndex; index++) {
+          if (index > sourceIndex) relations[index].before = true
+          if (index < targetIndex) relations[index].after = true
+        }
+      }
+    })
+
+    return new Map(relations.map(relation => [relation.item.id, relation]))
+  }, [t, viewerTimeline])
   const renderViewerSideNote = useCallback(
-    (item: ViewerTimelineItem) => <IOAThreadNote item={item} />,
-    [],
+    (item: ViewerTimelineItem) => {
+      const relation = ioaRailItems.get(item.id)
+      return (
+        <IOAThreadNote
+          note={relation?.note}
+          relationBefore={relation?.before}
+          relationAfter={relation?.after}
+          onOpen={onOpenIOA}
+        />
+      )
+    },
+    [ioaRailItems, onOpenIOA],
   )
 
   const emptyState = !hasActiveSession ? (
@@ -426,10 +465,11 @@ export default function ChatPanel({
       <ViewerChatPanel.Timeline
         className="overscroll-contain !px-0 !py-0"
         contentClassName={cn(workspaceClass, 'py-4')}
+        railLayoutClassName="grid-cols-[0_minmax(0,1fr)_0] gap-x-0 lg:grid-cols-[0_minmax(0,1fr)_10rem] lg:gap-x-3 xl:grid-cols-[8rem_minmax(0,1fr)_11rem] 2xl:grid-cols-[10rem_minmax(0,1fr)_14rem]"
         emptyState={emptyState}
         renderItem={renderViewerItem}
         renderMark={renderViewerMark}
-        renderSideNote={hasThreadNotes ? renderViewerSideNote : undefined}
+        renderSideNote={renderViewerSideNote}
         stickyScroll
         memoItems
         scrollResetKey={activeSessionID}
@@ -726,10 +766,10 @@ function AssistantResponseEntry({
 function TimelineMark({ item }: { item: ViewerTimelineItem }) {
   const { t } = useTranslation('chat')
   const descriptor = describeTimelineItem(item, t)
-  if (!descriptor) return <div className="hidden xl:block" />
+  if (!descriptor) return <div className="hidden w-full xl:block" />
 
   return (
-    <div className="hidden pr-2 pt-1 xl:block">
+    <div className="hidden w-full pr-2 pt-1 xl:block">
       <div className="relative min-h-8 border-r border-border/70 pr-3 text-right">
         <span
           className={cn(
@@ -747,24 +787,165 @@ function TimelineMark({ item }: { item: ViewerTimelineItem }) {
   )
 }
 
-function IOAThreadNote({ item }: { item: ViewerTimelineItem }) {
+interface IOAThreadNoteProps {
+  note?: IOAThreadDescriptor | null
+  relationBefore?: boolean
+  relationAfter?: boolean
+  onOpen?: (target?: IOAConsoleTarget) => void
+}
+
+function IOAThreadNote({ note, relationBefore, relationAfter, onOpen }: IOAThreadNoteProps) {
   const { t } = useTranslation('chat')
-  const note = describeIOAThreadItem(item, t)
-  if (!note) return <div className="hidden 2xl:block" />
+  const [expanded, setExpanded] = useState(false)
+  if (!note) {
+    if (!relationBefore && !relationAfter) return null
+    return (
+      <div className="relative hidden min-h-6 w-full self-stretch lg:block" aria-hidden="true">
+        <span className="absolute -bottom-3 -top-3 left-1 border-l border-dashed border-primary/40" />
+      </div>
+    )
+  }
+  const refs = note.refs ?? []
 
   return (
-    <div className="hidden pt-1 2xl:block">
-      <div className="rounded-md border border-primary/25 bg-primary/5 px-2.5 py-2">
-        <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-primary">
-          <GitBranch className="h-3 w-3 shrink-0" />
-          <span className="truncate">{note.label}</span>
+    <div className="relative hidden w-full self-stretch py-1 pl-3 lg:block">
+      {relationBefore && (
+        <span className="absolute -top-3 left-1 h-8 border-l border-dashed border-primary/40" aria-hidden="true" />
+      )}
+      {relationAfter && (
+        <span className="absolute -bottom-3 left-1 top-5 border-l border-dashed border-primary/40" aria-hidden="true" />
+      )}
+      {(relationBefore || relationAfter) && (
+        <>
+          <span className="absolute left-0 top-[17px] h-2 w-2 rounded-full border border-primary/50 bg-background" aria-hidden="true" />
+          <span className="absolute left-1 top-5 w-2 border-t border-dashed border-primary/40" aria-hidden="true" />
+        </>
+      )}
+      <div className="w-full rounded-lg border border-primary/25 bg-card shadow-sm">
+        <div className="flex min-w-0 items-center gap-1.5 border-b border-border/70 px-2.5 py-1.5">
+          <GitBranch className="h-3 w-3 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-primary">
+            {note.kind || note.label}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onOpen?.(note.target)}
+                disabled={!onOpen}
+                aria-label={t('ioaOpenConsole')}
+                className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+              >
+                <ExternalLink className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{t('ioaOpenConsole')}</TooltipContent>
+          </Tooltip>
         </div>
-        {note.detail && (
-          <p className="mt-1 line-clamp-3 text-[11px] leading-4 text-muted-foreground">{note.detail}</p>
-        )}
+        <div className="px-2.5 py-2">
+          {note.title && (
+            <h3 className={cn(
+              'break-words text-[11px] font-semibold leading-4 text-foreground',
+              (refs.length > 0 || note.content) && 'mb-1.5',
+            )}>{note.title}</h3>
+          )}
+          {refs.length > 0 && (
+            <div className="flex flex-wrap gap-1 border-t border-border/60 pt-1.5">
+              {refs.map(ref => (
+                <Tooltip key={ref}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onOpen?.({ spaceID: note.target?.spaceID, messageID: ref })}
+                      disabled={!onOpen}
+                      aria-label={t('ioaOpenReference', { id: ref })}
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-dashed border-primary/55 bg-primary/10 px-2 py-1 font-mono text-[10px] leading-3 text-primary transition-colors hover:border-primary/80 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <Link2 className="h-3 w-3 shrink-0" />
+                      <span className="font-sans text-[8px] font-semibold uppercase tracking-wide">ref</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="truncate">{compactReference(ref)}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">{ref}</TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          )}
+          {note.content && (
+            <>
+              {expanded && (
+                <div className="mt-1.5 break-words border-t border-border/60 pt-1.5 text-[11px] leading-4">
+                  <MarkdownContent content={note.content} compact className="text-[11px]" />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setExpanded(value => !value)}
+                aria-expanded={expanded}
+                className="mt-1.5 flex w-full items-center justify-between rounded px-1 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                <span>{expanded ? t('ioaCollapseMarkdown') : t('ioaExpandMarkdown')}</span>
+                <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+              </button>
+            </>
+          )}
+          {!note.title && !note.content && (
+            <p className="text-[11px] leading-4 text-muted-foreground">{note.label}</p>
+          )}
+        </div>
       </div>
     </div>
   )
+}
+
+interface IOAMessagePayload {
+  title?: string
+  content?: string
+  kind?: string
+}
+
+function ioaMessagePayload(value: unknown): IOAMessagePayload {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return {}
+    const parsed = serializedRecord(text)
+    return parsed ? ioaMessagePayload(parsed) : { content: text }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+
+  const record = value as Record<string, unknown>
+  const nested = record.content && typeof record.content === 'object' && !Array.isArray(record.content)
+    ? record.content as Record<string, unknown>
+    : undefined
+  const payload = nested ?? record
+  const directContent = typeof record.content === 'string' ? record.content.trim() : undefined
+
+  return {
+    title: firstString(payload, ['title', 'subject', 'name']) || firstString(record, ['title', 'subject', 'name']),
+    content: firstString(payload, ['content', 'message', 'body', 'text', 'markdown']) || directContent,
+    kind: firstString(payload, ['type', 'kind', 'content_type']) || firstString(record, ['type', 'kind', 'content_type']),
+  }
+}
+
+function ioaPayloadFromToolArgs(toolArgs: string): IOAMessagePayload {
+  const args = serializedRecord(toolArgs)
+  const direct = ioaMessagePayload(args?.content)
+  if (direct.title || direct.content || direct.kind) return direct
+
+  const command = firstString(args, ['command']) || toolArgs
+  const match = command.match(/--content\s+(['"])(\{[\s\S]*\})\1/)
+  return match ? ioaMessagePayload(match[2]) : {}
+}
+
+function mergeIOAPayload(primary: IOAMessagePayload, fallback: IOAMessagePayload): IOAMessagePayload {
+  return {
+    title: primary.title || fallback.title,
+    content: primary.content || fallback.content,
+    kind: primary.kind || fallback.kind,
+  }
 }
 
 function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: ReactNode }) {
@@ -918,36 +1099,137 @@ function describeTimelineItem(item: ViewerTimelineItem, t: (key: string) => stri
   }
 }
 
-function describeIOAThreadItem(item: ViewerTimelineItem, t: (key: string) => string): { label: string; detail?: string } | null {
+interface IOAThreadDescriptor {
+  label: string
+  title?: string
+  content?: string
+  kind?: string
+  refs: string[]
+  target?: IOAConsoleTarget
+}
+
+function describeIOAThreadItem(item: ViewerTimelineItem, t: (key: string) => string): IOAThreadDescriptor | null {
   if (item.kind === 'assistant_response') {
-    const ioaTool = item.tools.find((tool) => isIOATool(tool.toolName, tool.toolArgs))
+    const ioaTools = item.tools.filter((tool) => isIOATool(tool.toolName, tool.toolArgs))
+    const ioaTool = [...ioaTools].reverse().find(
+      (tool) => ioaTargetFromTool(tool.toolArgs, tool.result) !== undefined,
+    ) ?? ioaTools[ioaTools.length - 1]
     if (ioaTool) {
-      return {
-        label: ioaTool.toolName || 'server',
-        detail: previewText(summarizeArgs(ioaTool.toolArgs) || ioaTool.result || '', 140),
-      }
+      return describeIOATool(ioaTool.toolName, ioaTool.toolArgs, ioaTool.result)
     }
   }
 
   if (item.kind === 'tool_call' && isIOATool(item.toolCall.toolName, item.toolCall.toolArgs)) {
-    return {
-      label: item.toolCall.toolName || 'server',
-      detail: previewText(summarizeArgs(item.toolCall.toolArgs) || item.toolCall.result || '', 140),
-    }
+    return describeIOATool(item.toolCall.toolName, item.toolCall.toolArgs, item.toolCall.result)
   }
 
   if (item.kind === 'message') {
     const metadata = item.metadata || {}
     const thread = metadata.ioa_thread || metadata.ioa_message || metadata.thread
     if (thread) {
+      const payload = ioaMessagePayload(thread)
       return {
         label: t('ioaMessage'),
-        detail: previewText(typeof thread === 'string' ? thread : JSON.stringify(thread), 140),
+        title: payload.title,
+        content: payload.content || (typeof thread === 'string' ? thread : undefined),
+        kind: payload.kind,
+        refs: ioaMessageRefs(thread, metadata),
+        target: ioaTargetFromMetadata(metadata, thread),
       }
     }
   }
 
   return null
+}
+
+function describeIOATool(toolName: string, toolArgs: string, result?: string): IOAThreadDescriptor {
+  const resultRecord = serializedRecord(result)
+  const payload = mergeIOAPayload(ioaMessagePayload(resultRecord), ioaPayloadFromToolArgs(toolArgs))
+  return {
+    label: ioaOperationName(toolName, toolArgs),
+    title: payload.title,
+    content: payload.content || (!payload.title ? result || summarizeArgs(toolArgs) : undefined),
+    kind: payload.kind,
+    refs: ioaMessageRefs(resultRecord),
+    target: ioaTargetFromTool(toolArgs, result),
+  }
+}
+
+function ioaMessageRefs(...values: unknown[]): string[] {
+  const refs: string[] = []
+  for (const value of values) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const record = value as Record<string, unknown>
+    const refRecord = record.refs && typeof record.refs === 'object' && !Array.isArray(record.refs)
+      ? record.refs as Record<string, unknown>
+      : undefined
+    const messages = refRecord?.messages
+    if (!Array.isArray(messages)) continue
+    for (const message of messages) {
+      if (typeof message === 'string' && message.trim() && !refs.includes(message.trim())) refs.push(message.trim())
+    }
+  }
+  return refs
+}
+
+function compactReference(value: string): string {
+  if (value.length <= 18) return value
+  return `${value.slice(0, 8)}…${value.slice(-5)}`
+}
+
+function ioaOperationName(toolName: string, toolArgs: string): string {
+  const normalized = toolName.toLowerCase()
+  if (normalized === 'ioa' || normalized.startsWith('ioa_') || normalized.startsWith('ioa.')) return toolName
+  const args = serializedRecord(toolArgs)
+  const command = firstString(args, ['command']) || toolArgs
+  return command.match(/\b(ioa_(?:space|send|read))\b/i)?.[1] || toolName || 'server'
+}
+
+function ioaTargetFromTool(toolArgs: string, result?: string): IOAConsoleTarget | undefined {
+  const args = serializedRecord(toolArgs)
+  const resultRecord = serializedRecord(result)
+  const spaceID = firstString(args, ['space_id', 'spaceId', 'space'])
+    || firstString(resultRecord, ['space_id', 'spaceId', 'space'])
+  const messageID = firstString(resultRecord, ['message_id', 'messageId', 'id', 'thread_id', 'threadId'])
+    || plainIdentifier(result)
+  return spaceID || messageID ? { spaceID, messageID } : undefined
+}
+
+function ioaTargetFromMetadata(metadata: Record<string, unknown>, thread: unknown): IOAConsoleTarget | undefined {
+  const record = thread && typeof thread === 'object' ? thread as Record<string, unknown> : undefined
+  const spaceID = firstString(metadata, ['ioa_space_id', 'space_id', 'spaceId', 'space'])
+    || firstString(record, ['space_id', 'spaceId', 'space'])
+  const messageID = firstString(metadata, ['ioa_message_id', 'message_id', 'messageId'])
+    || firstString(record, ['message_id', 'messageId', 'id', 'thread_id', 'threadId'])
+    || (typeof thread === 'string' ? plainIdentifier(thread) : undefined)
+  return spaceID || messageID ? { spaceID, messageID } : undefined
+}
+
+function serializedRecord(value?: string): Record<string, unknown> | undefined {
+  if (!value?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function firstString(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!record) return undefined
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function plainIdentifier(value?: string): string | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed || trimmed.length > 160 || /[\s{}\[\]"]/u.test(trimmed)) return undefined
+  return trimmed
 }
 
 function isIOATool(toolName: string, toolArgs: string): boolean {
@@ -960,12 +1242,6 @@ function formatRailTime(item: ViewerTimelineItem): string {
   const date = new Date(item.timestamp)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })
-}
-
-function previewText(value: string, max: number): string {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  if (compact.length <= max) return compact
-  return `${compact.slice(0, Math.max(0, max - 1))}...`
 }
 
 function trimDisplayContent(value: string): string {

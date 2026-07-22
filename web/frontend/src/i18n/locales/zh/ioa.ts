@@ -23,4 +23,5 @@ export default {
   sender: '发送者',
   createdAt: '创建时间',
   references: '引用消息',
+  openReference: '打开引用消息 {{id}}',
 }

@@ -23,4 +23,5 @@ export default {
   sender: 'Sender',
   createdAt: 'Created',
   references: 'References',
+  openReference: 'Open referenced message {{id}}',
 }

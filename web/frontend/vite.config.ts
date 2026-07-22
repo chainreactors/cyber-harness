@@ -2,6 +2,29 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const backendURL = 'http://127.0.0.1:8080'
+
+// The production Go server injects window.__AISCAN_ACCESS_KEY__ into index.html.
+// Vite serves its own index during development, so mirror that existing inline
+// script from the local backend; otherwise every proxied API call is anonymous.
+const devAccessKeyPlugin = {
+  name: 'aiscan-dev-access-key',
+  apply: 'serve' as const,
+  async transformIndexHtml(html: string) {
+    try {
+      const response = await fetch(backendURL)
+      if (!response.ok) return html
+      const backendHTML = await response.text()
+      const injection = backendHTML.match(
+        /<script>window\.__AISCAN_ACCESS_KEY__=.*?<\/script>/s,
+      )?.[0]
+      return injection ? html.replace('</head>', `${injection}\n  </head>`) : html
+    } catch {
+      return html
+    }
+  },
+}
+
 // Design-system primitives + the terminal view are consumed from the cyber-ui
 // submodule (single source of truth for what aiscan contributes upstream). The
 // remaining composite views (markdown/viewer) stay vendored under @/ because
@@ -9,7 +32,7 @@ import path from 'path'
 const cyberUI = path.resolve(__dirname, './cyber-ui/packages')
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), devAccessKeyPlugin],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -27,7 +50,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: backendURL,
         ws: true,
       },
     },
