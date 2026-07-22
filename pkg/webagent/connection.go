@@ -44,13 +44,16 @@ type connectionConfig struct {
 	Runtime webproto.AgentRuntime
 	Status  func() webproto.AgentStatus
 	Menu    func() []webproto.CommandSpec // nil = no command menu
+	// RunnerFileRPC enables runner-only native directory operations. Regular
+	// aiscan agents neither advertise nor accept these RPCs.
+	RunnerFileRPC bool
 
-	// ExtraPTYOpeners provides additional PTY openers (e.g. a REPL opener from
-	// the agent runtime) without requiring a core/runner import.
-	ExtraPTYOpeners map[string]pty.OpenFunc
+	// PTYRouter creates a connection-scoped router. Agent transports receive it
+	// from AgentRuntime; tool-only nodes fall back to their registry manager.
+	PTYRouter func() (*pty.Router, error)
 }
 
-// chatHandler defines the WebAgent-owned chat callbacks.
+// chatHandler defines the Agent Runtime chat callbacks used by WebSocket transport.
 // Implementations live in webagent or other packages that have access to the
 // agent runtime and provider.
 type chatHandler interface {
@@ -58,7 +61,10 @@ type chatHandler interface {
 	// the decoded form of msg's payload). The node manages the cancellable
 	// context and the chatCancels map. The EventRouter lets the handler
 	// register agent session ID -> task ID mappings for event routing.
-	HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter)
+	// HandleChat admits the turn synchronously and returns the work that waits
+	// for completion. This preserves WebSocket arrival order without blocking
+	// the connection read loop for the duration of an agent run.
+	HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) func()
 
 	// HandleUpload processes a file upload message.
 	HandleUpload(msg webproto.Message, send func(webproto.Message))
@@ -76,7 +82,6 @@ type chatHandler interface {
 type eventRouter struct {
 	mu         *sync.Mutex
 	eventRoute map[string]string // agent sessionID -> task messageID
-	suppressed map[string]bool   // sessionIDs whose session.start/end brackets are not forwarded (eval loops)
 }
 
 // Route registers a mapping from an agent session ID to a WebSocket task ID.
@@ -95,36 +100,6 @@ func (r *eventRouter) Unroute(taskID string) {
 		}
 	}
 	r.mu.Unlock()
-}
-
-// SuppressSessionBrackets drops session.start/session.end events for the
-// session until UnsuppressSessionBrackets. Eval loops run N agent rounds on
-// one session, and the hub converges chat tasks on the root session.end, so
-// the per-round brackets must not leave this process.
-func (r *eventRouter) SuppressSessionBrackets(sessionID string) {
-	r.mu.Lock()
-	if r.suppressed == nil {
-		r.suppressed = map[string]bool{}
-	}
-	r.suppressed[sessionID] = true
-	r.mu.Unlock()
-}
-
-// UnsuppressSessionBrackets lifts a SuppressSessionBrackets drop.
-func (r *eventRouter) UnsuppressSessionBrackets(sessionID string) {
-	r.mu.Lock()
-	delete(r.suppressed, sessionID)
-	r.mu.Unlock()
-}
-
-// suppressBrackets reports whether the event is a suppressed session bracket.
-func (r *eventRouter) suppressBrackets(e aop.Event) bool {
-	if e.Type != aop.TypeSessionStart && e.Type != aop.TypeSessionEnd {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.suppressed[e.SessionID]
 }
 
 // connect implements the reconnect loop. It calls connectOnce in a loop with
@@ -187,6 +162,7 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 	sendCh := make(chan webproto.Message, 64)
 	done := make(chan struct{})
+	writeErr := make(chan error, 1)
 	defer close(done)
 
 	send := func(m webproto.Message) {
@@ -213,16 +189,32 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 	// Writer goroutine: sendCh -> WebSocket.
 	go func() {
+		fail := func(err error) {
+			select {
+			case writeErr <- err:
+			default:
+			}
+			// A failed writer must wake the reader so connectOnce returns and the
+			// outer loop establishes a fresh connection.
+			_ = conn.Close()
+		}
 		for {
 			select {
 			case msg, ok := <-sendCh:
 				if !ok {
 					return
 				}
-				_ = conn.WriteJSON(msg)
+				if err := conn.WriteJSON(msg); err != nil {
+					fail(err)
+					return
+				}
 			case <-ctx.Done():
-				_ = conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				if err := conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+					fail(err)
+					return
+				}
+				_ = conn.Close()
 				return
 			case <-done:
 				return
@@ -284,9 +276,6 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				statsPayload, _ := json.Marshal(next)
 				send(webproto.Message{Type: "agent.stats", Payload: statsPayload})
 			}
-			if router.suppressBrackets(e) {
-				return
-			}
 			mu.Lock()
 			if e.Type == aop.TypeSessionStart {
 				if data, err := aop.DecodeData[aop.SessionStartData](e); err == nil && data.ParentSessionID != "" {
@@ -324,17 +313,32 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 	}
 
 	// PTY router setup.
-	ptyRouter := NewPTYRouter(cc.Registry, cc.ExtraPTYOpeners)
+	var ptyRouter *pty.Router
+	if cc.PTYRouter != nil {
+		ptyRouter, err = cc.PTYRouter()
+	} else {
+		ptyRouter = NewPTYRouter(cc.Registry)
+	}
+	if err != nil {
+		return err
+	}
 	defer ptyRouter.Close()
-	if mgr := RegistryPTYManager(cc.Registry); mgr != nil {
-		unsub := SubscribePTYSessions(ctx, mgr, ptyRouter, send)
-		defer unsub()
+	if cc.PTYRouter == nil {
+		if mgr := RegistryPTYManager(cc.Registry); mgr != nil {
+			unsub := SubscribePTYSessions(ctx, mgr, ptyRouter, send)
+			defer unsub()
+		}
 	}
 
 	// Main message dispatch loop.
 	for {
 		var msg webproto.Message
 		if err := conn.ReadJSON(&msg); err != nil {
+			select {
+			case writerErr := <-writeErr:
+				return fmt.Errorf("ws write: %w", writerErr)
+			default:
+			}
 			return err
 		}
 		if ctx.Err() != nil {
@@ -358,7 +362,15 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			// Inbound AOP carries two executable units on this transport: a
 			// tool.call for the tool-only node surface, and a user message
 			// (the chat surface). Everything else is ignored.
-			if event, ok := webproto.IsAOPUserMessage(msg); ok {
+			var event aop.Event
+			if json.Unmarshal(msg.Payload, &event) != nil {
+				continue
+			}
+			inbound, err := agent.Classify(event)
+			if err != nil {
+				continue
+			}
+			if inbound.Kind == agent.InboundUserMessage {
 				if cc.Chat == nil {
 					continue
 				}
@@ -366,7 +378,8 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				mu.Lock()
 				chatCancels[msg.TaskID] = chatCancel
 				mu.Unlock()
-				go func(m webproto.Message, ev aop.Event, cCtx context.Context, cCancel context.CancelFunc) {
+				run := cc.Chat.HandleChat(chatCtx, msg, event, send, router)
+				go func(m webproto.Message, cCancel context.CancelFunc) {
 					defer cCancel()
 					defer func() {
 						mu.Lock()
@@ -379,26 +392,26 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 						}
 						mu.Unlock()
 					}()
-					cc.Chat.HandleChat(cCtx, m, ev, send, router)
-				}(msg, event, chatCtx, chatCancel)
+					run()
+				}(msg, chatCancel)
 				continue
 			}
-			if !IsAOPToolCall(msg) {
+			if inbound.Kind != agent.InboundToolCall {
 				continue
 			}
 			taskCtx, cancel := context.WithCancel(ctx)
 			mu.Lock()
 			execTasks[msg.TaskID] = cancel
 			mu.Unlock()
-			go func(m webproto.Message, tCtx context.Context, tCancel context.CancelFunc) {
+			go func(m webproto.Message, inbound agent.Inbound, tCtx context.Context, tCancel context.CancelFunc) {
 				defer tCancel()
 				defer func() {
 					mu.Lock()
 					delete(execTasks, m.TaskID)
 					mu.Unlock()
 				}()
-				HandleAOPToolCall(tCtx, m, cc.Registry, send)
-			}(msg, taskCtx, cancel)
+				handleAOPToolCall(tCtx, m, inbound, cc.Registry, send)
+			}(msg, inbound, taskCtx, cancel)
 
 		case "exec":
 			taskCtx, cancel := context.WithCancel(ctx)
@@ -421,10 +434,20 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			}
 
 		case "file.read":
-			go HandleFileRead(msg, send)
+			go HandleFileRead(msg, cc.Runtime.WorkingDir, send)
 
 		case "file.write":
-			go HandleFileWrite(msg, send)
+			go HandleFileWrite(msg, cc.Runtime.WorkingDir, send)
+
+		case "file.list":
+			if cc.RunnerFileRPC {
+				go HandleFileList(msg, cc.Runtime.WorkingDir, send)
+			}
+
+		case "file.mkdir":
+			if cc.RunnerFileRPC {
+				go HandleFileMkdir(msg, cc.Runtime.WorkingDir, send)
+			}
 
 		case "config":
 			if cc.Chat != nil {

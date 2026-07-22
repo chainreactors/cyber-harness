@@ -16,8 +16,8 @@ import (
 )
 
 // ToolNodeConfig configures a tool-only node: an outbound WebSocket connection
-// exposing exec / file.read / file.write / pty plus tool.data / tool.sco
-// events, with no LLM provider, agent loop, or IOA dependency.
+// exposing exec / native file RPCs / pty plus tool.data / tool.sco events,
+// with no LLM provider, agent loop, or IOA dependency.
 type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string
@@ -53,18 +53,20 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		logger = telemetry.NopLogger()
 	}
 	runtime := DefaultRuntime()
+	runtime.Capabilities = append(runtime.Capabilities, "file.read", "file.write", "file.list", "file.mkdir")
 	runtime.Meta = map[string]any{"version": cfg.Version, "mode": "tool"}
 	return connect(ctx, connectionConfig{
-		ServerURL: cfg.ServerURL,
-		WSPath:    cfg.WSPath,
-		Name:      name,
-		Token:     cfg.Token,
-		Registry:  cfg.Registry,
-		DataBus:   cfg.DataBus,
-		SCO:       cfg.SCO,
-		Logger:    logger,
-		Node:      protocols.NodeRef{ID: name, Authority: authority},
-		Runtime:   runtime,
+		ServerURL:     cfg.ServerURL,
+		WSPath:        cfg.WSPath,
+		Name:          name,
+		Token:         cfg.Token,
+		Registry:      cfg.Registry,
+		DataBus:       cfg.DataBus,
+		SCO:           cfg.SCO,
+		Logger:        logger,
+		Node:          protocols.NodeRef{ID: name, Authority: authority},
+		Runtime:       runtime,
+		RunnerFileRPC: true,
 	})
 }
 

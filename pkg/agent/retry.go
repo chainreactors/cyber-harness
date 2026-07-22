@@ -209,12 +209,7 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		CacheRetention: cfg.CacheRetention,
 		SessionID:      cfg.SessionID,
 	}
-	em.status(StatusLLMRequest, map[string]any{
-		"llm_model":      req.Model,
-		"llm_messages":   len(req.Messages),
-		"llm_max_tokens": req.MaxTokens,
-		"llm_stream":     cfg.Stream,
-	})
+	em.status(aop.StatusLLMRequest, aop.NSAOP, aop.LLMRequest{Model: req.Model, Messages: len(req.Messages), MaxTokens: req.MaxTokens, Stream: cfg.Stream})
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(StreamingProvider); ok {
 			return streamAssistantMessageWithUsage(ctx, streaming, req, em, cfg.Logger, turn, messageID)

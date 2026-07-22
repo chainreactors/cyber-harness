@@ -8,9 +8,10 @@ import {
 } from 'lucide-react'
 import {
   Button, Callout, Tooltip, TooltipTrigger, TooltipContent,
-  Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot,
+  Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot, ThemeToggle,
 } from '@cyber/ui'
-import { cn } from '@cyber/theme'
+import { cn, useTheme } from '@cyber/theme'
+import LanguageToggle from './LanguageToggle'
 import { launchLocalAgent, listLocalAgents, stopLocalAgent } from '../api'
 import type { AgentInfo, ChatSession, LocalAgentView } from '../api'
 import { agentActivity } from '../lib/agentActivity'
@@ -197,8 +198,28 @@ export default function SessionList({
             ))}
           </div>
         )}
+
+        <SidebarPreferences expanded={open} />
       </aside>
     </>
+  )
+}
+
+function SidebarPreferences({ expanded }: { expanded: boolean }) {
+  const { isDark, toggle } = useTheme()
+
+  return (
+    <div className={cn(
+      'mt-auto shrink-0 border-t border-border/60',
+      expanded
+        ? 'flex items-center justify-end gap-1 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+        : 'flex flex-col items-center gap-1 p-2',
+    )}>
+      <LanguageToggle />
+      <div data-sidebar-theme-toggle>
+        <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
+      </div>
+    </div>
   )
 }
 

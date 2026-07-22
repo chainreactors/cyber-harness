@@ -63,24 +63,32 @@ func lastUserText(messages []agent.ChatMessage) string {
 }
 
 func newStdioTestSession(h *stdioHost, output *bytes.Buffer, id string, prov agent.Provider) {
-	if h.rt == nil {
-		h.rt = &AgentRuntime{Config: agent.Config{MaxTurns: 4}}
+	_ = id
+	if h.rt == nil || h.rt.ctx == nil {
+		initialized := newRuntimeStdioHost(output, prov)
+		h.rt = initialized.rt
 	}
+}
+
+func newRuntimeStdioHost(output *bytes.Buffer, prov agent.Provider) *stdioHost {
+	h := newStdioHost(context.Background(), nil, nil, output)
+	ctx, cancel := context.WithCancel(context.Background())
 	bus := eventbus.New[aop.Event]()
 	bus.Subscribe(func(e aop.Event) { _ = h.emit(e) })
-	sess := &stdioSession{
-		id: id,
-		agent: agent.NewAgent(agent.Config{
-			Provider:  prov,
-			Model:     "test",
-			Bus:       bus,
-			SessionID: id,
-		}),
-		queue: make(chan stdioQueuedMessage, stdioQueueCapacity),
-		done:  make(chan struct{}),
+	h.rt = &AgentRuntime{
+		ctx:      ctx,
+		cancel:   cancel,
+		sessions: make(map[string]*sessionState),
+		requests: make(map[string]runtimeRequestState),
+		Config: agent.Config{
+			Provider: prov,
+			Model:    "test",
+			Bus:      bus,
+			Logger:   h.logger,
+			MaxTurns: 4,
+		},
 	}
-	h.sessions[id] = sess
-	go h.runSession(sess)
+	return h
 }
 
 func waitForCalls(t *testing.T, prov *stdioGateProvider, n int, what string) {
@@ -100,6 +108,7 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
 	newStdioTestSession(h, &output, "s1", prov)
+	defer h.rt.Close()
 
 	for _, text := range []string{"first", "second", "third"} {
 		h.accept(userMessageLine(t, "s1", text))
@@ -116,21 +125,17 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 
 func TestStdioSessionsRunConcurrently(t *testing.T) {
 	var output bytes.Buffer
-	h := newTestStdioHost(&output)
-	prov1 := newStdioGateProvider()
-	prov2 := newStdioGateProvider()
-	newStdioTestSession(h, &output, "s1", prov1)
-	newStdioTestSession(h, &output, "s2", prov2)
+	prov := newStdioGateProvider()
+	h := newRuntimeStdioHost(&output, prov)
+	defer h.rt.Close()
 
 	h.accept(userMessageLine(t, "s1", "one"))
 	h.accept(userMessageLine(t, "s2", "two"))
 
 	// Both sessions are mid-run at the same time: neither FIFO blocks the other.
-	waitForCalls(t, prov1, 1, "s1 run to start")
-	waitForCalls(t, prov2, 1, "s2 run to start")
+	waitForCalls(t, prov, 2, "both session runs to start")
 
-	close(prov1.gate)
-	close(prov2.gate)
+	close(prov.gate)
 	h.drain()
 
 	// Interleaved output must stay valid AOP: every line decodes, and both
@@ -159,6 +164,7 @@ func TestStdioDrainWaitsForInFlightAndQueued(t *testing.T) {
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
 	newStdioTestSession(h, &output, "s1", prov)
+	defer h.rt.Close()
 
 	h.accept(userMessageLine(t, "s1", "first"))
 	h.accept(userMessageLine(t, "s1", "second"))

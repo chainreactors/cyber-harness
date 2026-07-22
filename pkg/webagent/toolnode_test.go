@@ -168,6 +168,13 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	if registered.Runtime.OS == "" {
 		t.Fatalf("register runtime missing OS: %+v", registered.Runtime)
 	}
+	capabilities := map[string]bool{}
+	for _, capability := range registered.Runtime.Capabilities {
+		capabilities[capability] = true
+	}
+	if !capabilities["file.list"] || !capabilities["file.mkdir"] {
+		t.Fatalf("runner runtime missing native file capabilities: %+v", registered.Runtime.Capabilities)
+	}
 	if len(registered.Tools) != 1 || registered.Tools[0].Function.Name != "bash" {
 		t.Fatalf("register tools = %+v", registered.Tools)
 	}

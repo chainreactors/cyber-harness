@@ -47,6 +47,7 @@ import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
 import type { TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
+import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
@@ -604,6 +605,15 @@ function timelineContent(
         />
       )
 
+    case 'subagent_run':
+      return (
+        <SubagentRunCard run={item}>
+          {item.items.map((child) => (
+            <div key={child.id}>{timelineContent(child, scanResults)}</div>
+          ))}
+        </SubagentRunCard>
+      )
+
     case 'extension': {
       if (item.extensionType === 'eval') {
         return (
@@ -1049,6 +1059,18 @@ function describeTimelineItem(item: ViewerTimelineItem, t: (key: string) => stri
         time,
         icon: <Wrench className="h-3 w-3 text-warning" />,
         dotClass: item.toolCall.pending ? 'border-warning bg-warning animate-pulse' : 'border-primary bg-primary',
+      }
+
+    case 'subagent_run':
+      return {
+        label: item.name,
+        time,
+        icon: <GitBranch className={cn('h-3 w-3', item.status === 'running' || item.status === 'starting' ? 'text-blue-500' : 'text-success')} />,
+        dotClass: item.status === 'running' || item.status === 'starting'
+          ? 'border-blue-500 bg-background animate-pulse'
+          : item.status === 'failed' || item.status === 'canceled'
+            ? 'border-destructive bg-destructive'
+            : 'border-success bg-success',
       }
 
     case 'extension': {

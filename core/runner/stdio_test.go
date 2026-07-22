@@ -14,7 +14,9 @@ import (
 )
 
 func newTestStdioHost(output io.Writer) *stdioHost {
-	return newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
+	host := newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
+	host.rt = &AgentRuntime{}
+	return host
 }
 
 func userMessageLine(t *testing.T, sessionID, text string) string {
@@ -53,7 +55,7 @@ func TestStdioAcceptRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestStdioAcceptIgnoresNonMessageEvents(t *testing.T) {
+func TestStdioAcceptRejectsNonMessageEvents(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
 
@@ -70,8 +72,9 @@ func TestStdioAcceptIgnoresNonMessageEvents(t *testing.T) {
 	}
 	h.accept(string(line))
 
-	if output.Len() != 0 {
-		t.Fatalf("unexpected output: %q", output.String())
+	events := decodeAOPLines(t, &output)
+	if len(events) != 1 || events[0].Type != aop.TypeError {
+		t.Fatalf("events = %#v", events)
 	}
 }
 
@@ -102,46 +105,12 @@ func TestStdioAcceptRejectsNonUserMessage(t *testing.T) {
 	}
 }
 
-func TestStdioSessionQueueFullEmitsError(t *testing.T) {
-	var output bytes.Buffer
-	h := newTestStdioHost(&output)
-	sess := &stdioSession{
-		id:    "s1",
-		queue: make(chan stdioQueuedMessage, stdioQueueCapacity),
-		done:  make(chan struct{}),
-	}
-	h.sessions["s1"] = sess
-
-	line := userMessageLine(t, "s1", "hello")
-	for i := 0; i < stdioQueueCapacity; i++ {
-		h.accept(line)
-	}
-	if output.Len() != 0 {
-		t.Fatalf("unexpected output before overflow: %q", output.String())
-	}
-
-	h.accept(line)
-	events := decodeAOPLines(t, &output)
-	if len(events) != 1 || events[0].Type != aop.TypeError {
-		t.Fatalf("events = %#v", events)
-	}
-	data, err := aop.DecodeData[aop.ErrorData](events[0])
-	if err != nil || !strings.Contains(data.Message, "queue full") {
-		t.Fatalf("error data = %+v, %v", data, err)
-	}
-}
-
 func TestStdioRunOneRejectsEmptyPrompt(t *testing.T) {
 	var output bytes.Buffer
-	h := newTestStdioHost(&output)
-	sess := &stdioSession{id: "s1"}
-
-	h.runOne(sess, stdioQueuedMessage{
-		data: aop.MessageData{
-			Role:  "user",
-			Parts: []aop.MessagePart{{Type: aop.PartText, Text: "   "}},
-		},
-	})
+	h := newRuntimeStdioHost(&output, nil)
+	defer h.rt.Close()
+	h.accept(userMessageLine(t, "s1", "   "))
+	h.drain()
 
 	events := decodeAOPLines(t, &output)
 	if len(events) != 1 || events[0].Type != aop.TypeError {

@@ -17,6 +17,7 @@ type Deps struct {
 	WorkDir     string
 	BashTimeout int
 	SkillStore  any
+	RunnerMode  bool
 
 	EngineSet    any
 	Resources    any

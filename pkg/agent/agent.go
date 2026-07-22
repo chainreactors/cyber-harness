@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/aop/x/delegation"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -20,7 +21,21 @@ type Agent struct {
 // Run executes the agent with an input and returns the result.
 // For one-shot usage, create an agent and call Run once.
 // For multi-turn, call Run repeatedly — message history accumulates.
-func (a *Agent) Run(ctx context.Context, input Input) (*Result, error) {
+type RunOption func(*Config)
+
+func InSession(sessionID, parentSessionID string) RunOption {
+	return func(cfg *Config) {
+		cfg.SessionID = sessionID
+		cfg.ParentSessionID = parentSessionID
+		cfg.emitter = cfg.emitter.scoped(sessionID, parentSessionID, "", nil)
+	}
+}
+
+func WithRunMaxTurns(maxTurns int) RunOption {
+	return func(cfg *Config) { cfg.MaxTurns = maxTurns }
+}
+
+func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Result, error) {
 	userMsg, err := input.chatMessage()
 	if err != nil {
 		return nil, err
@@ -34,6 +49,11 @@ func (a *Agent) Run(ctx context.Context, input Input) (*Result, error) {
 
 	cfg := a.configSnapshot()
 	cfg = cfg.init()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
 	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
@@ -49,6 +69,28 @@ func (a *Agent) Run(ctx context.Context, input Input) (*Result, error) {
 	result, runErr := runLoop(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr
+}
+
+func (a *Agent) SessionID() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Cfg.SessionID
+}
+
+// BeginEvalSession opens the root bracket used by the evaluator coordinator.
+func (a *Agent) BeginEvalSession() {
+	a.mu.Lock()
+	em, model := a.Cfg.emitter, a.Cfg.Model
+	a.mu.Unlock()
+	em.sessionStart(model)
+}
+
+// EndEvalSession closes the evaluator coordinator's root bracket.
+func (a *Agent) EndEvalSession(stop StopReason, turns int, usage Usage, err error) {
+	a.mu.Lock()
+	em := a.Cfg.emitter
+	a.mu.Unlock()
+	em.sessionEnd(stop, turns, usage, err)
 }
 
 // Continue resumes the agent without a new prompt (e.g. after tool results).
@@ -122,6 +164,16 @@ func (a *Agent) configSnapshot() Config {
 // Derive creates a new Agent with the same infrastructure (provider, tools,
 // model, logger) but clean state. Use for spawning independent agent tasks.
 func (a *Agent) Derive() *Agent {
+	return a.DeriveNamed(a.Cfg.AgentName)
+}
+
+// DeriveNamed creates an isolated child agent and gives its AOP stream a
+// distinct actor name while preserving the current session as its parent.
+func (a *Agent) DeriveNamed(name string) *Agent {
+	return a.deriveNamed(name, "", nil)
+}
+
+func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
 	return NewAgent(Config{
 		Provider:         a.Cfg.Provider,
 		Fallbacks:        a.Cfg.Fallbacks,
@@ -134,19 +186,21 @@ func (a *Agent) Derive() *Agent {
 		Temperature:      a.Cfg.Temperature,
 		CacheRetention:   a.Cfg.CacheRetention,
 		Bus:              a.Cfg.Bus,
-		AgentName:        a.Cfg.AgentName,
+		AgentName:        name,
 		ParentSessionID:  a.Cfg.SessionID,
+		ParentToolCallID: parentToolCallID,
+		Delegation:       detail,
 	})
 }
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state string, ext map[string]any) {
+func (a *Agent) EmitStatus(state, namespace string, detail any) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
 	if em != nil {
-		em.status(state, ext)
+		em.status(state, namespace, detail)
 	}
 }
 

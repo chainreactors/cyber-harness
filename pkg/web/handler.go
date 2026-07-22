@@ -23,6 +23,7 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 		console = ioaConsole[0]
 	}
 	h := &handlerImpl{service: service, agents: agents, ioa: console, accessKey: accessKey}
+	registerAuthRoutes(mux, accessKey)
 
 	mux.HandleFunc("POST /api/scans", h.createScan)
 	mux.HandleFunc("GET /api/scans", h.listScans)

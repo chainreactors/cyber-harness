@@ -6,6 +6,7 @@ import './i18n'
 import { useTranslation } from 'react-i18next'
 import { registerChatExtensions } from './lib/chat-extensions'
 import ErrorBoundary from './components/ErrorBoundary'
+import AuthGate from './components/AuthGate'
 import { ConfirmProvider } from '@cyber/ui'
 import './index.css'
 
@@ -40,7 +41,9 @@ root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <LocalizedConfirmProvider>
-        <App />
+        <AuthGate>
+          <App />
+        </AuthGate>
       </LocalizedConfirmProvider>
     </ErrorBoundary>
   </React.StrictMode>,

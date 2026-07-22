@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	_ "modernc.org/sqlite"
 )
 
@@ -227,16 +228,13 @@ func messageEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
 	if err != nil {
 		return aop.Event{}, err
 	}
-	ext := map[string]any{}
-	if msg.AgentID != "" {
-		ext["agent_id"] = msg.AgentID
-	}
+	ext := webproto.WebMessageExt{AgentID: msg.AgentID}
 	if len(msg.Metadata) > 0 {
-		var metadata any
-		if err := json.Unmarshal(msg.Metadata, &metadata); err != nil {
-			metadata = string(msg.Metadata)
+		if json.Valid(msg.Metadata) {
+			ext.Metadata = msg.Metadata
+		} else if raw, err := json.Marshal(string(msg.Metadata)); err == nil {
+			ext.Metadata = raw
 		}
-		ext["metadata"] = metadata
 	}
 	event := aop.Event{
 		Type:      aop.TypeMessage,
@@ -245,18 +243,10 @@ func messageEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
 		Agent:     agentName,
 		Data:      data,
 	}
-	if len(ext) > 0 {
-		event.Ext = map[string]any{"aiscan": ext}
+	if ext.AgentID != "" || len(ext.Metadata) > 0 {
+		_ = webproto.SetWebExt(&event, ext)
 	}
 	return event, nil
-}
-
-func aopExtension(event aop.Event, namespace string) map[string]any {
-	if event.Ext == nil {
-		return nil
-	}
-	ext, _ := event.Ext[namespace].(map[string]any)
-	return ext
 }
 
 func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
@@ -576,11 +566,9 @@ func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit 
 			msg.Role = "assistant"
 		}
 		msg.CreatedAt, _ = time.Parse(time.RFC3339Nano, event.TS)
-		if ext := aopExtension(event, "aiscan"); ext != nil {
-			msg.AgentID, _ = ext["agent_id"].(string)
-			if metadata, ok := ext["metadata"]; ok {
-				msg.Metadata, _ = json.Marshal(metadata)
-			}
+		if ext, ok, err := webproto.GetWebExt(event); err == nil && ok {
+			msg.AgentID = ext.AgentID
+			msg.Metadata = ext.Metadata
 		}
 		msgs = append(msgs, msg)
 		if len(msgs) >= limit {

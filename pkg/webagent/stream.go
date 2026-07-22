@@ -94,7 +94,7 @@ func (t *AgentStatsTracker) Observe(e aop.Event) (webproto.AgentStats, bool) {
 	t.stats.LastEvent = e.Type
 	switch e.Type {
 	case aop.TypeTurnEnd:
-		if data, err := aop.DecodeData[aop.TurnData](e); err == nil && data.Turn > t.stats.Turns {
+		if data, err := aop.DecodeData[aop.TurnEndData](e); err == nil && data.Turn > t.stats.Turns {
 			t.stats.Turns = data.Turn
 		}
 	case aop.TypeUsage:

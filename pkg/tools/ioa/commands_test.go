@@ -343,6 +343,24 @@ func TestSendCheckpointWithoutSpace(t *testing.T) {
 	}
 }
 
+func TestSendHandoff(t *testing.T) {
+	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
+	cmds := NewCommands(client, "tester", nil)
+	joinSpace(t, cmds)
+
+	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+		"handoff", "--title", "Delegate scan", "--message", "Inspect the target",
+	}); err != nil {
+		t.Fatalf("ioa_send handoff: %v", err)
+	}
+	if client.lastSentBody.ContentType != "handoff" {
+		t.Fatalf("content_type = %q, want handoff", client.lastSentBody.ContentType)
+	}
+	if client.lastSentBody.Content["title"] != "Delegate scan" || client.lastSentBody.Content["message"] != "Inspect the target" {
+		t.Fatalf("content = %#v", client.lastSentBody.Content)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ioa_read subcommands
 // ---------------------------------------------------------------------------

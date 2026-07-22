@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 type evalSink struct {
@@ -33,18 +34,10 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 		TS:        "2026-07-19T00:00:00Z",
 		SessionID: "agent-session",
 		Agent:     "test-agent",
-		Data: mustJSON(aop.StatusData{
-			State: agent.StatusEvalEnd,
-		}),
-		Ext: map[string]any{"test-agent": map[string]any{
-			"eval_round":             1,
-			"eval_pass":              true,
-			"eval_reason":            "found SQLi",
-			"compact_tokens_before":  1000,
-			"compact_tokens_after":   400,
-			"compact_kept_messages":  8,
-		}},
+		Data:      mustJSON(aop.StatusData{State: xeval.StateEnd}),
 	}
+	_ = xeval.SetDetail(&event, xeval.Detail{Round: 1, Pass: true, Reason: "found SQLi"})
+	_ = xcompact.SetDetail(&event, xcompact.Detail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
 	payload, _ := json.Marshal(event)
 	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TaskID: "task-1", Payload: payload})
 
@@ -54,17 +47,15 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	if len(sink.aopEvents) == 0 {
 		t.Fatal("AOP event was not forwarded")
 	}
-	ext, ok := sink.aopEvents[0].Ext["test-agent"].(map[string]any)
-	if !ok {
-		t.Fatalf("extension = %#v", sink.aopEvents[0].Ext)
+	evalDetail, ok, err := xeval.GetDetail(sink.aopEvents[0])
+	if err != nil || !ok {
+		t.Fatalf("eval extension = %#v, %v, %v", sink.aopEvents[0].Ext, ok, err)
 	}
-	if ext["eval_round"] != float64(1) && ext["eval_round"] != 1 {
-		t.Fatalf("eval_round = %#v", ext["eval_round"])
+	if evalDetail.Round != 1 || !evalDetail.Pass || evalDetail.Reason != "found SQLi" {
+		t.Fatalf("eval detail = %#v", evalDetail)
 	}
-	if ext["eval_pass"] != true || ext["eval_reason"] != "found SQLi" {
-		t.Fatalf("eval extension = %#v", ext)
-	}
-	if ext["compact_tokens_before"] != float64(1000) && ext["compact_tokens_before"] != 1000 {
-		t.Fatalf("compact extension = %#v", ext)
+	compactDetail, ok, err := xcompact.GetDetail(sink.aopEvents[0])
+	if err != nil || !ok || compactDetail.TokensBefore != 1000 || compactDetail.KeptMessages != 8 {
+		t.Fatalf("compact detail = %#v, %v, %v", compactDetail, ok, err)
 	}
 }

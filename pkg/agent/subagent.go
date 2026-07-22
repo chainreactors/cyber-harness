@@ -10,8 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/aop/x/delegation"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -33,40 +35,16 @@ type subAgentInfo struct {
 }
 
 type SubAgentTool struct {
-	agent    *Agent
-	inbox    inbox.Inbox
-	messages func() []ChatMessage
-	resolve  AgentTypeResolver
-	mu       sync.Mutex
-	running  map[string]*subAgentInfo
+	resolve AgentTypeResolver
+	mu      sync.Mutex
+	running map[string]*subAgentInfo
 }
 
-func NewSubAgentTool(agent *Agent, parentInbox inbox.Inbox, resolve AgentTypeResolver) *SubAgentTool {
+func NewSubAgentTool(resolve AgentTypeResolver) *SubAgentTool {
 	return &SubAgentTool{
-		agent:   agent,
-		inbox:   parentInbox,
 		resolve: resolve,
 		running: make(map[string]*subAgentInfo),
 	}
-}
-
-func (t *SubAgentTool) SetMessages(fn func() []ChatMessage) {
-	t.messages = fn
-}
-
-func (t *SubAgentTool) InitLogger(logger telemetry.Logger) {
-	if t == nil || t.agent == nil {
-		return
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	t.agent.mu.Lock()
-	t.agent.Cfg.Logger = logger
-	if t.agent.Cfg.LoopScheduler != nil {
-		t.agent.Cfg.LoopScheduler.SetLogger(logger)
-	}
-	t.agent.mu.Unlock()
 }
 
 func (t *SubAgentTool) Name() string { return "subagent" }
@@ -125,6 +103,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 	if strings.TrimSpace(prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
+	task := prompt
 
 	var resolved *AgentType
 	if typeName != "" && t.resolve != nil {
@@ -151,7 +130,16 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 		}
 	}
 
-	sub := t.agent.Derive()
+	parent, parentInbox, err := t.executionParent(ctx)
+	if err != nil {
+		return "", err
+	}
+	parentToolCallID := output.CallIDFromContext(ctx)
+	if parentToolCallID == "" {
+		return "", fmt.Errorf("subagent create requires the spawning tool call id")
+	}
+	detail := delegationDetail(task, typeName, name, mode)
+	sub := parent.deriveNamed(name, parentToolCallID, &detail)
 	if resolved != nil {
 		if resolved.FormattedPrompt != "" {
 			prompt = resolved.FormattedPrompt + "\n\n" + prompt
@@ -160,15 +148,60 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 			sub.Cfg.Model = resolved.Model
 		}
 	}
+	if mode == "fork" {
+		sub.Cfg.Messages = truncateToLastCompleteBoundary(parent.Cfg.Messages)
+		sub.Cfg.SystemPrompt = parent.Cfg.SystemPrompt
+	}
 
 	switch mode {
 	case "sync":
 		return t.runSync(ctx, sub, prompt, name, typeName, timeout)
 	case "fork":
-		return t.runFork(ctx, sub, prompt, name, typeName)
+		return t.runFork(ctx, sub, prompt, name, typeName, parentInbox, parent.Cfg.Logger)
 	default:
-		return t.runAsync(ctx, sub, prompt, name, typeName)
+		return t.runAsync(ctx, sub, prompt, name, typeName, parentInbox, parent.Cfg.Logger)
 	}
+}
+
+func delegationFromToolCall(toolName string, args any) (delegation.DelegationDetail, bool) {
+	if toolName != "subagent" {
+		return delegation.DelegationDetail{}, false
+	}
+	values, ok := args.(map[string]any)
+	if !ok {
+		return delegation.DelegationDetail{}, false
+	}
+	if action, _ := values["action"].(string); action != "" && action != "create" {
+		return delegation.DelegationDetail{}, false
+	}
+	task, _ := values["prompt"].(string)
+	if strings.TrimSpace(task) == "" {
+		return delegation.DelegationDetail{}, false
+	}
+	name, _ := values["name"].(string)
+	typeName, _ := values["type"].(string)
+	mode, _ := values["mode"].(string)
+	return delegationDetail(task, typeName, name, mode), true
+}
+
+func delegationDetail(task, typeName, name, mode string) delegation.DelegationDetail {
+	detail := delegation.DelegationDetail{
+		Task:      task,
+		AgentName: name,
+		AgentType: typeName,
+	}
+	switch mode {
+	case "sync":
+		detail.RunMode = delegation.DelegationDetailRunModeForeground
+		detail.ContextMode = delegation.DelegationDetailContextModeFresh
+	case "async":
+		detail.RunMode = delegation.DelegationDetailRunModeBackground
+		detail.ContextMode = delegation.DelegationDetailContextModeFresh
+	case "fork":
+		detail.RunMode = delegation.DelegationDetailRunModeBackground
+		detail.ContextMode = delegation.DelegationDetailContextModeFork
+	}
+	return detail
 }
 
 func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, typeName, timeoutStr string) (string, error) {
@@ -191,76 +224,84 @@ func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, ty
 		}
 		return fmt.Sprintf("subagent %q failed: %s", name, err), nil
 	}
-	output := ""
-	if r != nil {
-		output = r.Output
-	}
-	return fmt.Sprintf("<subagent_result name=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, typeName, output), nil
+	return fmt.Sprintf("<subagent_result name=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, typeName, resultOutput(r)), nil
 }
 
-func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, typeName string) (string, error) {
+func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	t.track(name, typeName, "async", cancel, sub.Cfg.Inbox)
-	producer := t.inbox.RegisterProducer("subagent:" + name)
+	producer := parentInbox.RegisterProducer("subagent:" + name)
 
 	go func() {
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
 		r, err := sub.Run(subCtx, TextInput(prompt))
-		t.pushCompletion(name, typeName, r, err)
+		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
 	}()
 
 	return fmt.Sprintf("Started subagent %q (mode=async, type=%s). Will notify on completion.", name, typeName), nil
 }
 
-func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name, typeName string) (string, error) {
-	if t.messages != nil {
-		sub.Cfg.Messages = truncateToLastCompleteBoundary(t.messages())
-	}
-	if t.agent.Cfg.SystemPrompt != "" {
-		sub.Cfg.SystemPrompt = t.agent.Cfg.SystemPrompt
-	}
-
+func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	t.track(name, typeName, "fork", cancel, sub.Cfg.Inbox)
-	producer := t.inbox.RegisterProducer("subagent:" + name)
+	producer := parentInbox.RegisterProducer("subagent:" + name)
 
 	go func() {
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
 		r, err := sub.Run(subCtx, TextInput(directive))
-		t.pushCompletion(name, typeName, r, err)
+		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
 	}()
 
 	return fmt.Sprintf("Started subagent %q (mode=fork, type=%s). Inherits parent context. Will notify on completion.", name, typeName), nil
 }
 
-func (t *SubAgentTool) pushCompletion(name, typeName string, r *Result, err error) {
-	result := ""
-	if r != nil {
-		result = r.Output
-	}
-	status := "completed"
-	content := result
-	if err != nil {
-		status = "failed"
-		if result != "" {
-			content = fmt.Sprintf("Error: %s\n\nPartial output:\n%s", err, result)
-		} else {
-			content = fmt.Sprintf("Error: %s", err)
-		}
-	}
+func (t *SubAgentTool) pushCompletion(parentInbox inbox.Inbox, logger telemetry.Logger, name, typeName string, r *Result, err error) {
+	status, content := subagentCompletion(r, err)
 
 	msg := inbox.NewMessage(inbox.OriginSystem, "user",
 		fmt.Sprintf("<subagent_completion name=%q type=%q status=%q>\n%s\n</subagent_completion>", name, typeName, status, content))
 	msg.Meta = map[string]any{"subagent": name, "type": typeName, "status": status}
-	if err := t.inbox.Push(msg); err != nil {
-		t.agent.Cfg.Logger.Warnf("inbox push subagent completion %s: %s", name, err)
+	if err := parentInbox.Push(msg); err != nil {
+		logger.Warnf("inbox push subagent completion %s: %s", name, err)
 	}
+}
+
+func (t *SubAgentTool) executionParent(ctx context.Context) (*Agent, inbox.Inbox, error) {
+	cfg, ok := toolAgentConfig(ctx)
+	if !ok {
+		return nil, nil, fmt.Errorf("subagent create requires the executing agent context")
+	}
+	return NewAgent(cfg), cfg.Inbox, nil
+}
+
+func resultOutput(r *Result) string {
+	if r == nil {
+		return ""
+	}
+	return r.Output
+}
+
+func subagentCompletion(r *Result, err error) (string, string) {
+	result := resultOutput(r)
+	if err == nil {
+		return "completed", result
+	}
+	status := "failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		status = "timed_out"
+	} else if errors.Is(err, context.Canceled) {
+		status = "canceled"
+	}
+	if result != "" {
+		return status, fmt.Sprintf("Error: %s\n\nPartial output:\n%s", err, result)
+	}
+	return status, fmt.Sprintf("Error: %s", err)
 }
 
 func (t *SubAgentTool) sendMessage(name, message string) (string, error) {

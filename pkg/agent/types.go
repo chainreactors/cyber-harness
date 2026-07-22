@@ -10,6 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/aop/x/delegation"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -148,6 +149,8 @@ type Config struct {
 	CacheRetention   CacheRetention
 	SessionID        string
 	ParentSessionID  string
+	ParentToolCallID string
+	Delegation       *delegation.DelegationDetail
 	// AgentName tags emitted AOP events; defaults to "aiscan".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
@@ -159,20 +162,20 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config         { c.Provider = p; return c }
-func (c Config) WithTools(t tool.Executor) Config       { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config              { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config       { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config               { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config        { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config   { c.Logger = l; return c }
+func (c Config) WithProvider(p Provider) Config            { c.Provider = p; return c }
+func (c Config) WithTools(t tool.Executor) Config          { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config                 { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config          { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []ChatMessage) Config    { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                  { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config           { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config      { c.Logger = l; return c }
 func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config             { c.MaxTokens = n; return c }
-func (c Config) WithTemperature(t float64) Config       { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config            { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config           { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config  { c.Expander = e; return c }
+func (c Config) WithMaxTokens(n int) Config                { c.MaxTokens = n; return c }
+func (c Config) WithTemperature(t float64) Config          { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config               { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config              { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config     { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
@@ -217,7 +220,7 @@ func (c Config) init() Config {
 		c.Bus = eventbus.New[aop.Event]()
 	}
 	if c.emitter == nil {
-		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.MessageCounter)
+		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)
 	}
 	return c
 }

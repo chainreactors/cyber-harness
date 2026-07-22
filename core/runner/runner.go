@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
@@ -38,9 +39,27 @@ type AgentRuntime struct {
 	Output         *tui.AgentOutput
 	ConfigFile     string
 	ResumeMessages []agent.ChatMessage
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
+	sessions       map[string]*sessionState
+	requests       map[string]runtimeRequestState
+	requestSeq     uint64
+	closeOnce      sync.Once
+	wg             sync.WaitGroup
+	ptyManager     *tmuxpkg.Manager
+	replMode       REPLMode
 	ownsApp        bool
 	cleanup        func()
 }
+
+type REPLMode uint8
+
+const (
+	REPLDisabled REPLMode = iota
+	REPLEphemeral
+	REPLPersistent
+)
 
 type RuntimeConfig struct {
 	ExistingApp       *App
@@ -49,10 +68,23 @@ type RuntimeConfig struct {
 	NoOutput          bool
 	InteractiveOutput bool
 	ProviderOptional  bool
+	REPLMode          REPLMode
 }
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
-	rt := &AgentRuntime{}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtimeCtx, runtimeCancel := context.WithCancel(ctx)
+	rt := &AgentRuntime{
+		ctx:      runtimeCtx,
+		cancel:   runtimeCancel,
+		sessions: make(map[string]*sessionState),
+		requests: make(map[string]runtimeRequestState),
+	}
+	if rc != nil {
+		rt.replMode = rc.REPLMode
+	}
 	if option != nil {
 		optCopy := *option
 		rt.Option = &optCopy
@@ -141,22 +173,9 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	ib := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 
 	var ioaCancel func()
-	if rt.App.IOAStreamClient != nil && option.Space != "" {
-		nodeID := ""
-		if rt.App.IOAClient != nil {
-			nodeID = rt.App.IOAClient.NodeID()
-		}
-		spaceInfo, err := rt.App.IOAStreamClient.Space(ctx, option.Space, "aiscan agent")
-		if err != nil {
-			logger.Warnf("ioa space resolve: %s", err)
-		} else {
-			ioaCtx, cancel := context.WithCancel(ctx)
-			ioaCancel = cancel
-			go subscribeIOASpace(ioaCtx, rt.App.IOAStreamClient, spaceInfo.ID, nodeID, ib, logger)
-		}
-	}
 
 	sessMgr, bashTool := bashToolAndManager(rt.App.Commands)
+	rt.ptyManager = sessMgr
 	if bashTool != nil {
 		bashTool.SetInbox(ib)
 	}
@@ -170,22 +189,13 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 				"session_name": info.Name,
 				"exit_code":    info.ExitCode,
 			}
-			if err := ib.Push(msg); err != nil {
+			if err := rt.inboxPush()(msg); err != nil {
 				logger.Warnf("inbox push session completion: %s", err)
 			}
 		})
 	}
 
 	scheduler := agent.NewLoopScheduler(ib, logger)
-
-	if option.Heartbeat > 0 {
-		_, _ = scheduler.Add(ctx, agent.LoopEntry{
-			Name:     "heartbeat",
-			Interval: time.Duration(option.Heartbeat) * time.Minute,
-			Mode:     agent.ModeInbox,
-			Prompt:   "Heartbeat: review current context, check on any running sessions, and decide if action is needed.",
-		})
-	}
 
 	rt.Config = agent.Config{
 		Provider:       rt.App.Provider,
@@ -216,8 +226,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		})
 	}
 
-	parentAgent := agent.NewAgent(rt.Config)
-	subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.AgentType, error) {
+	subAgentTool := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
 		if rt.App.Skills == nil {
 			return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
 		}
@@ -234,6 +243,11 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			Background:      s.AgentBackground,
 		}, nil
 	})
+	ioaSpace := option.Space
+	if ioaSpace == "" && rc != nil && rc.IOA != nil {
+		ioaSpace = rc.IOA.Space
+	}
+	subscribeIOAHandoff(agentBus, rt.App.IOAClient, ioaSpace, logger)
 	rt.App.Commands.RegisterTool(subAgentTool)
 	loop := agent.NewLoopCommand(scheduler)
 	rt.App.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
@@ -248,6 +262,21 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), path)
 	}
 
+	if rt.App.IOAStreamClient != nil && option.Space != "" {
+		nodeID := ""
+		if rt.App.IOAClient != nil {
+			nodeID = rt.App.IOAClient.NodeID()
+		}
+		spaceInfo, err := rt.App.IOAStreamClient.Space(ctx, option.Space, "aiscan agent")
+		if err != nil {
+			logger.Warnf("ioa space resolve: %s", err)
+		} else {
+			ioaCtx, cancel := context.WithCancel(ctx)
+			ioaCancel = cancel
+			go subscribeIOASpace(ioaCtx, rt.App.IOAStreamClient, spaceInfo.ID, nodeID, rt.inboxPush(), logger)
+		}
+	}
+
 	rt.cleanup = func() {
 		if ioaCancel != nil {
 			ioaCancel()
@@ -258,16 +287,38 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 	}
 
+	if rt.replMode != REPLDisabled {
+		if err := rt.startMainREPL(); err != nil {
+			runtimeCancel()
+			rt.cleanup()
+			if rt.ownsApp && rt.App != nil {
+				rt.App.Close()
+			}
+			return nil, fmt.Errorf("start main repl: %w", err)
+		}
+	}
+
 	return rt, nil
 }
 
 func (rt *AgentRuntime) Close() {
-	if rt.cleanup != nil {
-		rt.cleanup()
+	if rt == nil {
+		return
 	}
-	if rt.ownsApp && rt.App != nil {
-		rt.App.Close()
-	}
+	rt.closeOnce.Do(func() {
+		if rt.cancel != nil {
+			rt.cancel()
+		}
+		rt.cancelAllRequests()
+		rt.wg.Wait()
+		rt.closeSessions()
+		if rt.cleanup != nil {
+			rt.cleanup()
+		}
+		if rt.ownsApp && rt.App != nil {
+			rt.App.Close()
+		}
+	})
 }
 
 func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
@@ -281,6 +332,7 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 		rt.App.SetLogger(logger)
 		logger = rt.App.Logger()
 	}
+	rt.mu.Lock()
 	rt.Config.Logger = logger
 	if rt.Config.LoopScheduler != nil {
 		rt.Config.LoopScheduler.SetLogger(logger)
@@ -288,6 +340,10 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 	if sl, ok := rt.Config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
 		sl.SetLogger(logger)
 	}
+	for _, sess := range rt.sessions {
+		sess.agent.SetLogger(logger)
+	}
+	rt.mu.Unlock()
 }
 
 // ReloadProvider rebuilds the LLM provider from option and hot-swaps it into the
@@ -308,11 +364,29 @@ func (rt *AgentRuntime) ReloadProvider(option *cfg.Option) (agent.Provider, stri
 	if err != nil {
 		return nil, "", err
 	}
-	rt.App.Provider = provider
-	rt.App.ProviderConfig = *resolved
-	rt.Config.Provider = provider
-	rt.Config.Model = resolved.Model
+	rt.SetProvider(provider, *resolved)
 	return provider, resolved.Model, nil
+}
+
+// SetProvider atomically updates the runtime template and every existing
+// conversation session. Runs already in flight keep their provider snapshot.
+func (rt *AgentRuntime) SetProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
+	if rt == nil {
+		return
+	}
+	rt.mu.Lock()
+	if rt.App != nil {
+		rt.App.Provider = provider
+		rt.App.ProviderConfig = providerConfig
+	}
+	rt.Config.Provider = provider
+	if providerConfig.Model != "" {
+		rt.Config.Model = providerConfig.Model
+	}
+	for _, sess := range rt.sessions {
+		sess.agent.SetProvider(provider, providerConfig.Model)
+	}
+	rt.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +458,10 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{InteractiveOutput: true})
+	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{
+		NoOutput: true,
+		REPLMode: REPLEphemeral,
+	})
 	if err != nil {
 		return err
 	}
@@ -394,32 +471,10 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 		return err
 	}
 
-	session := agent.NewAgent(rt.Config.
-		WithSystemPrompt(rt.SystemPrompt).
-		WithStream(true))
-	if len(rt.ResumeMessages) > 0 {
-		session.LoadMessages(rt.ResumeMessages)
-	}
-
-	repl := tui.NewAgentConsole(ctx, option, tui.AppInfo{
-		Provider:          rt.App.Provider,
-		ProviderConfig:    rt.App.ProviderConfig,
-		ProviderFallbacks: rt.App.ProviderFallbacks,
-		Commands:          rt.App.Commands,
-		Skills:            rt.App.Skills,
-		OnProviderChange: func(provider agent.Provider, providerConfig agent.ProviderConfig) {
-			rt.App.Provider = provider
-			rt.App.ProviderConfig = providerConfig
-			rt.Config.Provider = provider
-			rt.Config.Model = providerConfig.Model
-		},
-		OnLoggerChange: rt.SetLogger,
-	}, session, rt.Output)
-	repl.SetOnExit(rt.Close)
 	if setInterrupt != nil {
-		setInterrupt(repl.InterruptCurrentRun)
+		setInterrupt(func() bool { return rt.CancelSession(MainREPLName) })
 	}
-	return repl.Start()
+	return rt.AttachLocalREPL(ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -543,27 +598,14 @@ func buildEvalConfig(option *cfg.Option, rt *AgentRuntime, logger telemetry.Logg
 	if option.EvalModel != "" {
 		model = option.EvalModel
 	}
-	maxRounds := option.EvalMaxRetries
-	if maxRounds <= 0 {
-		maxRounds = 3
-	}
-	return evaluator.EvalLoopConfig{
-		Evaluator: evaluator.New(evaluator.Config{
-			Provider: rt.App.Provider,
-			Model:    model,
-			Logger:   logger,
-		}),
-		MaxEvalRounds: maxRounds,
-		Goal:          task,
-		Criteria:      option.EvalCriteria,
-	}
+	return evaluator.NewLoopConfig(rt.App.Provider, model, logger, task, option.EvalCriteria, option.EvalMaxRetries)
 }
 
 // ---------------------------------------------------------------------------
 // IOA inbox subscription
 // ---------------------------------------------------------------------------
 
-func subscribeIOASpace(ctx context.Context, stream ioaclient.StreamAPI, spaceID, nodeID string, ib *inboxpkg.Buffered, logger telemetry.Logger) {
+func subscribeIOASpace(ctx context.Context, stream ioaclient.StreamAPI, spaceID, nodeID string, push func(inboxpkg.Message) error, logger telemetry.Logger) {
 	for attempt := 0; ctx.Err() == nil; attempt++ {
 		msgs, errs, cancel, err := stream.Subscribe(ctx, spaceID)
 		if err != nil {
@@ -589,7 +631,7 @@ func subscribeIOASpace(ctx context.Context, stream ioaclient.StreamAPI, spaceID,
 				}
 				m := inboxpkg.NewMessage(inboxpkg.OriginPeer, "user", formatIOAMessage(msg))
 				m.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID}
-				if err := ib.Push(m); err != nil {
+				if err := push(m); err != nil {
 					logger.Warnf("inbox push ioa: %s", err)
 				}
 			case <-errs:

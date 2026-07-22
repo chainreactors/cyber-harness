@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -21,12 +22,9 @@ func TestIsAOPUserMessageDecodesGoalExt(t *testing.T) {
 			Role:      "user",
 			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
 		}),
-		Ext: map[string]any{"aiscan": map[string]any{
-			"eval_criteria": "find one SQLi",
-			"eval_max_rounds": 5,
-			"no_echo":         true,
-		}},
 	}
+	_ = aop.SetExt(&event, aop.NSAOP, aop.RunControl{NoEcho: true})
+	_ = xeval.Set(&event, xeval.Control{Criteria: "find one SQLi", MaxRounds: 5})
 	msg := Message{Type: "aop", Payload: MustJSON(event)}
 
 	decoded, ok := IsAOPUserMessage(msg)

@@ -1,7 +1,6 @@
 package webagent
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -9,22 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
+	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
-	"github.com/chainreactors/utils/pty"
 )
 
-func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
+func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
 	if option.WebURL != "" {
 		remoteOpt, err := fetchRemoteConfig(option.WebURL)
 		if err != nil {
@@ -46,6 +42,7 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 		NoOutput:         true,
 		IOA:              remoteIOAConfig(option, identityRef),
 		ProviderOptional: true,
+		REPLMode:         runner.REPLPersistent,
 	})
 	if err != nil {
 		return err
@@ -54,7 +51,6 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 
 	chatHandler := &chatAgentHandler{
 		rt:        rt,
-		chatMgr:   newChatRuntimeManager(rt),
 		serverURL: option.WebURL,
 	}
 
@@ -62,29 +58,22 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 	go func() {
 		defer close(connectionDone)
 		_ = rt.App.WaitEngines(ctx)
-		logger.Debugf("web agent connection to %s", option.WebURL)
-
-		var extraPTYOpeners map[string]pty.OpenFunc
-		if mgr := RegistryPTYManager(rt.App.Commands); mgr != nil {
-			extraPTYOpeners = map[string]pty.OpenFunc{
-				"repl": runner.NewRemoteREPLOpener(rt, mgr),
-			}
-		}
+		logger.Debugf("websocket transport connection to %s", option.WebURL)
 
 		_ = connect(ctx, connectionConfig{
-			ServerURL:       option.WebURL,
-			Name:            rt.NodeName,
-			Registry:        rt.App.Commands,
-			AgentBus:        rt.Bus,
-			DataBus:         rt.App.DataBus,
-			SCO:             rt.App.SCOSidecar,
-			Logger:          logger,
-			Chat:            chatHandler,
-			Node:            identityRef,
-			Runtime:         DefaultRuntime(),
-			Status:          func() webproto.AgentStatus { return agentStatus(rt) },
-			Menu:            func() []webproto.CommandSpec { return agentCommandCatalog(rt) },
-			ExtraPTYOpeners: extraPTYOpeners,
+			ServerURL: option.WebURL,
+			Name:      rt.NodeName,
+			Registry:  rt.App.Commands,
+			AgentBus:  rt.Bus,
+			DataBus:   rt.App.DataBus,
+			SCO:       rt.App.SCOSidecar,
+			Logger:    logger,
+			Chat:      chatHandler,
+			Node:      identityRef,
+			Runtime:   DefaultRuntime(),
+			Status:    func() webproto.AgentStatus { return agentStatus(rt) },
+			Menu:      func() []webproto.CommandSpec { return agentCommandCatalog(rt) },
+			PTYRouter: rt.NewPTYRouter,
 		})
 	}()
 
@@ -100,14 +89,21 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 		return err
 	}
 	if task == "" {
-		logger.Infof("web agent connected; remote REPL and PTY are available")
+		logger.Infof("websocket transport connected; remote REPL and PTY are available")
 		<-ctx.Done()
 		<-connectionDone
 		return nil
 	}
 
-	loopCfg := rt.Config.WithSystemPrompt(rt.SystemPrompt).WithStream(true)
-	_, err = agent.NewAgent(loopCfg).Run(ctx, agent.TextInput(task))
+	_, err = rt.Execute(ctx, "startup", agent.Inbound{
+		Kind:  agent.InboundUserMessage,
+		Event: aop.Event{SessionID: "startup"},
+		Message: aop.MessageData{
+			MessageID: "startup",
+			Role:      "user",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: task}},
+		},
+	}, nil)
 
 	<-connectionDone
 	return err
@@ -119,66 +115,57 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error
 
 type chatAgentHandler struct {
 	rt        *runner.AgentRuntime
-	chatMgr   *chatRuntimeManager
 	serverURL string
 }
 
-func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) {
-	goal := webproto.DecodeGoalExt(event)
-	webSessionID := event.SessionID
-	ag, agErr := h.chatMgr.agentFor(webSessionID)
-	if agErr != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: agErr.Error()})
-		return
+func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) func() {
+	inbound, err := agent.Classify(event)
+	if err != nil || inbound.Kind != agent.InboundUserMessage {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "invalid inbound user message"})
+		return func() {}
 	}
-
-	data, err := aop.DecodeData[aop.MessageData](event)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "decode user message: " + err.Error()})
-		return
-	}
-	input := agent.InputFromAOPMessage(data)
-	input.NoEcho = goal.NoEcho
 	prompt := strings.TrimSpace(webproto.UserMessageText(event))
 	if prompt == "" {
 		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
-		return
+		return func() {}
 	}
 
-	// Wait for this session's turn: messages to one web session run FIFO, so a
-	// message sent while the agent is busy queues here instead of steering
-	// into the running turn. Canceling the queued message's task wakes it.
-	release, ok := h.chatMgr.acquireTurn(ctx, webSessionID)
-	if !ok {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "canceled while queued"})
-		return
-	}
-	defer release()
-
-	// Route at dequeue time so this run's events reach this message's task.
-	router.Route(ag.Cfg.SessionID, msg.TaskID)
-
-	// Fold in files uploaded to this session since the last turn so the agent
-	// learns their absolute on-disk paths and can read them. REPL/`!` lines are
-	// left untouched so a note never corrupts a command.
-	if !isREPLCommand(prompt) {
-		if note := h.chatMgr.takePendingUploads(webSessionID); note != "" {
-			input = agent.TextInput(note + "\n\n" + prompt)
-			input.NoEcho = goal.NoEcho
+	if isREPLCommand(prompt) {
+		wait, submitErr := h.rt.SubmitLine(ctx, msg.TaskID, event.SessionID, prompt)
+		if submitErr != nil {
+			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: submitErr.Error()})
+			return func() {}
+		}
+		return func() {
+			out, execErr := wait()
+			if execErr != nil {
+				send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: execErr.Error()})
+				return
+			}
+			send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: fenceTerminalOutput(out)})
 		}
 	}
 
-	// The node already launched us in a goroutine with a cancellable context,
-	// so we run synchronously here.
-	runChatWithAgent(ctx, msg, prompt, goal, input, ag, h.rt, send, router)
+	wait, err := h.rt.Submit(ctx, msg.TaskID, inbound, func(sessionID string) {
+		router.Route(sessionID, msg.TaskID)
+	})
+	if err != nil {
+		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+		return func() {}
+	}
+	return func() {
+		if _, err := wait(); err != nil {
+			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+		}
+	}
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
-	handleFileUpload(msg, send, h.chatMgr)
+	handleFileUpload(msg, send, h.rt)
 }
 
 func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webproto.Message)) {
-	provider, model, err := reloadAgentConfig(serverURL, h.rt, h.chatMgr)
+	provider, model, err := reloadAgentConfig(serverURL, h.rt)
 	result := webproto.ConfigReloadResult{OK: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
@@ -192,128 +179,7 @@ func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webpro
 }
 
 func (h *chatAgentHandler) CancelChat(taskID string) bool {
-	return false // cancel is handled by node's context cancellation
-}
-
-// ---------------------------------------------------------------------------
-// chatRuntimeManager
-// ---------------------------------------------------------------------------
-
-type chatRuntimeManager struct {
-	rt       *runner.AgentRuntime
-	mu       sync.Mutex
-	sessions map[string]*agent.Agent
-	turns    map[string]chan struct{} // web sessionID -> single-token turn lock
-
-	uploadMu sync.Mutex
-	uploads  map[string][]string // web sessionID -> notes about files uploaded since the last turn
-}
-
-func newChatRuntimeManager(rt *runner.AgentRuntime) *chatRuntimeManager {
-	return &chatRuntimeManager{
-		rt:       rt,
-		sessions: make(map[string]*agent.Agent),
-		turns:    make(map[string]chan struct{}),
-		uploads:  make(map[string][]string),
-	}
-}
-
-// acquireTurn takes the session's turn token, blocking (FIFO, in channel
-// receiver order) until the previous run releases it. The returned release
-// hands the turn to the next waiter. ok=false means ctx ended while queued.
-func (m *chatRuntimeManager) acquireTurn(ctx context.Context, sessionID string) (release func(), ok bool) {
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	m.mu.Lock()
-	turn, exists := m.turns[sessionID]
-	if !exists {
-		turn = make(chan struct{}, 1)
-		turn <- struct{}{}
-		m.turns[sessionID] = turn
-	}
-	m.mu.Unlock()
-	select {
-	case <-turn:
-		return func() { turn <- struct{}{} }, true
-	case <-ctx.Done():
-		return nil, false
-	}
-}
-
-// notePendingUpload records that a file was written to the agent's local disk for
-// a web session. The hub's SysFileUploaded broadcast only reaches the UI, so the
-// LLM never learns the path on its own; the note is folded into the session's next
-// natural-language turn (see the "chat" dispatch) so "read the file" resolves to
-// the real absolute path instead of a bare filename against the cwd.
-func (m *chatRuntimeManager) notePendingUpload(sessionID, note string) {
-	if m == nil || note == "" {
-		return
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	m.uploadMu.Lock()
-	m.uploads[sessionID] = append(m.uploads[sessionID], note)
-	m.uploadMu.Unlock()
-}
-
-// takePendingUploads drains and joins the pending upload notes for a session,
-// returning "" when there are none. Draining is one-shot so each note reaches
-// exactly one turn. The empty session ID normalizes to "default" to match agentFor.
-func (m *chatRuntimeManager) takePendingUploads(sessionID string) string {
-	if m == nil {
-		return ""
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	m.uploadMu.Lock()
-	notes := m.uploads[sessionID]
-	delete(m.uploads, sessionID)
-	m.uploadMu.Unlock()
-	return strings.Join(notes, "\n")
-}
-
-func (m *chatRuntimeManager) agentFor(sessionID string) (*agent.Agent, error) {
-	if m == nil || m.rt == nil || m.rt.App == nil {
-		return nil, fmt.Errorf("agent runtime is not configured")
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if ag := m.sessions[sessionID]; ag != nil {
-		return ag, nil
-	}
-	ag := agent.NewAgent(m.rt.Config.
-		WithSystemPrompt(m.rt.SystemPrompt).
-		WithStream(true).
-		WithInbox(nil))
-	m.sessions[sessionID] = ag
-	return ag, nil
-}
-
-// reloadProvider rebuilds the LLM provider from option and hot-swaps it across
-// the runtime template (rt.App + rt.Config) and every live session, all under
-// m.mu so a concurrent agentFor never clones a half-updated template. A run
-// already in flight finishes on its old provider; the next message uses the new
-// one.
-func (m *chatRuntimeManager) reloadProvider(option *cfg.Option) (agent.Provider, string, error) {
-	if m == nil || m.rt == nil {
-		return nil, "", fmt.Errorf("agent runtime is not configured")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	provider, model, err := m.rt.ReloadProvider(option)
-	if err != nil {
-		return nil, "", err
-	}
-	for _, ag := range m.sessions {
-		ag.SetProvider(provider, model)
-	}
-	return provider, model, nil
+	return h.rt.Cancel(taskID)
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +190,7 @@ func (m *chatRuntimeManager) reloadProvider(option *cfg.Option) (agent.Provider,
 // true when the swap succeeded, so the caller can re-announce identity.
 // ---------------------------------------------------------------------------
 
-func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntimeManager) (agent.Provider, string, error) {
+func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime) (agent.Provider, string, error) {
 	if rt == nil {
 		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}
@@ -337,7 +203,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 		logger.Warnf("config reload: fetch remote config: %s", err)
 		return nil, "", err
 	}
-	provider, model, err := cr.reloadProvider(remoteOpt)
+	provider, model, err := rt.ReloadProvider(remoteOpt)
 	if err != nil {
 		logger.Warnf("config reload: rebuild provider: %s", err)
 		return nil, "", err
@@ -347,105 +213,10 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, cr *chatRuntim
 }
 
 // ---------------------------------------------------------------------------
-// Chat execution
-// ---------------------------------------------------------------------------
-
-func runChatWithAgent(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, input agent.Input, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message), router *eventRouter) {
-	if rt == nil || rt.App == nil {
-		send(webproto.Message{
-			Type:   "error",
-			TaskID: msg.TaskID,
-			Data:   "LLM provider is not configured on this agent; configure aiscan.yaml and restart the agent, or prefix commands with !",
-		})
-		return
-	}
-
-	if isREPLCommand(prompt) {
-		out, err := runChatREPLLine(ctx, prompt, rt, ag)
-		if err != nil {
-			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-			return
-		}
-		send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: out})
-		return
-	}
-
-	if rt.App.Provider == nil {
-		send(webproto.Message{
-			Type:   "error",
-			TaskID: msg.TaskID,
-			Data:   "LLM provider is not configured on this agent; configure aiscan.yaml and restart the agent, or prefix commands with !",
-		})
-		return
-	}
-
-	// Goal "达成条件" mode: run the agent under an independent evaluator that
-	// judges the natural-language criteria each round and re-drives the agent
-	// with feedback until it passes (or the round budget is spent).
-	if goal.EvalCriteria != "" {
-		ag.SetMaxTurns(rt.Config.MaxTurns) // each eval round runs to natural completion
-		runChatEval(ctx, msg, prompt, goal, ag, rt, send, router)
-		return
-	}
-
-	// Goal "固定轮次" mode caps this run at PersistMaxTurns; otherwise restore
-	// the session default so a prior capped message never leaks its cap forward.
-	if goal.PersistMaxTurns > 0 {
-		ag.SetMaxTurns(goal.PersistMaxTurns)
-	} else {
-		ag.SetMaxTurns(rt.Config.MaxTurns)
-	}
-
-	_, err := ag.Run(ctx, input)
-	if err != nil {
-		// Pre-loop failures (undecodable input, agent already running) produce
-		// no session.end, so this frame converges the task. Post-loop errors
-		// already reached the hub as AOP error + session.end, making this a
-		// no-op there.
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-	}
-	// Success needs no frame: the root session.end converges the task.
-}
-
-// runChatEval drives the agent through the evaluator loop for a Goal with
-// natural-language acceptance criteria, using the agent's own provider/model as
-// the independent judge. Per-round progress streams over the agent's own AOP
-// emitter like any other agent run.
-func runChatEval(ctx context.Context, msg webproto.Message, prompt string, goal webproto.GoalExt, ag *agent.Agent, rt *runner.AgentRuntime, send func(webproto.Message), router *eventRouter) {
-	maxRounds := goal.EvalMaxRounds
-	if maxRounds <= 0 {
-		maxRounds = 3
-	}
-	evalCfg := evaluator.EvalLoopConfig{
-		Evaluator: evaluator.New(evaluator.Config{
-			Provider: rt.App.Provider,
-			Model:    rt.Config.Model,
-			Logger:   rt.Config.Logger,
-		}),
-		MaxEvalRounds: maxRounds,
-		Goal:          prompt,
-		Criteria:      goal.EvalCriteria,
-	}
-	// The eval loop performs N ag.Run rounds on one session, each emitting its
-	// own session.start/end pair. The hub converges chat tasks on the root
-	// session.end, so the per-round brackets are suppressed; this task keeps
-	// terminating on the complete/error frame below (same exception class as
-	// REPL lines, which never start an agent run).
-	router.SuppressSessionBrackets(ag.Cfg.SessionID)
-	defer router.UnsuppressSessionBrackets(ag.Cfg.SessionID)
-	_, _, err := evaluator.RunWithEval(ctx, ag, evalCfg)
-	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return
-	}
-	send(webproto.Message{Type: "complete", TaskID: msg.TaskID})
-}
-
-// ---------------------------------------------------------------------------
 // File upload
 // ---------------------------------------------------------------------------
 
-func handleFileUpload(msg webproto.Message, send func(webproto.Message), cr *chatRuntimeManager) {
+func handleFileUpload(msg webproto.Message, send func(webproto.Message), rt *runner.AgentRuntime) {
 	var payload webproto.FileUploadPayload
 	if len(msg.Payload) > 0 {
 		_ = json.Unmarshal(msg.Payload, &payload)
@@ -477,12 +248,20 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message), cr *cha
 		return
 	}
 
-	// Surface the absolute on-disk path to the agent's next turn. Without this the
-	// LLM only ever sees the hub's UI-only "file uploaded" notice and, asked to read
-	// the file, guesses the bare filename against its cwd — which is not the upload dir.
-	cr.notePendingUpload(payload.SessionID, fmt.Sprintf(
+	// Surface the path through the target session's Inbox. Slash/direct commands
+	// do not consume the Inbox, so the note remains available for the next agent
+	// turn without a Web-specific pending-upload map.
+	note := fmt.Sprintf(
 		"[已上传文件] 名称=%q 大小=%d 字节 · agent 本地绝对路径: %s\n（该文件已保存在 agent 磁盘上，需要查看内容时用 read 工具打开上述绝对路径。）",
-		payload.Filename, len(data), dest))
+		payload.Filename, len(data), dest)
+	if err := rt.PushInbox(payload.SessionID, inboxpkg.NewMessage(inboxpkg.OriginSystem, "user", note)); err != nil {
+		send(webproto.Message{
+			Type:    "complete",
+			TaskID:  msg.TaskID,
+			Payload: webproto.MustJSON(webproto.FileUploadResult{Filename: payload.Filename, Error: err.Error()}),
+		})
+		return
+	}
 
 	send(webproto.Message{
 		Type:   "complete",
@@ -502,48 +281,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message), cr *cha
 
 func isREPLCommand(prompt string) bool {
 	return strings.HasPrefix(prompt, "/") || strings.HasPrefix(prompt, "!")
-}
-
-func runChatREPLLine(ctx context.Context, line string, rt *runner.AgentRuntime, ag *agent.Agent) (string, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	option := rt.Option
-	if option != nil {
-		copy := *option
-		copy.NoColor = true
-		option = &copy
-	}
-	appInfo := tui.AppInfo{
-		Provider:          rt.App.Provider,
-		ProviderConfig:    rt.App.ProviderConfig,
-		ProviderFallbacks: rt.App.ProviderFallbacks,
-		Commands:          rt.App.Commands,
-		Skills:            rt.App.Skills,
-		OnProviderChange: func(provider agent.Provider, providerConfig agent.ProviderConfig) {
-			rt.App.Provider = provider
-			rt.App.ProviderConfig = providerConfig
-			rt.Config.Provider = provider
-			rt.Config.Model = providerConfig.Model
-		},
-	}
-	console := tui.NewAgentConsoleWithWriters(ctx, option, appInfo, ag, &stdout, &stderr)
-	_, err := console.ExecuteLineAndWait(line)
-	out := trimChatOutput(output.StripANSI(stdout.String()))
-	errOut := trimChatOutput(output.StripANSI(stderr.String()))
-	if err != nil {
-		if errOut != "" {
-			return "", fmt.Errorf("%s: %w", errOut, err)
-		}
-		return "", err
-	}
-	combined := out
-	switch {
-	case out == "":
-		combined = errOut
-	case errOut != "":
-		combined = trimChatOutput(out + "\n" + errOut)
-	}
-	return fenceTerminalOutput(combined), nil
 }
 
 // fenceTerminalOutput wraps multi-line REPL/`!` command output in a Markdown
@@ -567,10 +304,6 @@ func fenceTerminalOutput(s string) string {
 		fence += "`"
 	}
 	return fence + "\n" + s + "\n" + fence
-}
-
-func trimChatOutput(value string) string {
-	return strings.TrimRight(value, " \t\r\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +405,7 @@ func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *cfg.IOAConfig {
 		Space:         option.Space,
 		RegisterTools: true,
 		AutoRegister:  true,
-		NodeMeta:      map[string]any{"client": "aiscan", "transport": "web-agent"},
+		NodeMeta:      map[string]any{"client": "aiscan", "transport": "websocket"},
 		Identity:      webIdentity{ref: ref},
 	}
 }

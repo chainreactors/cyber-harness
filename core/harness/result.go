@@ -97,12 +97,21 @@ func (r *RunResult) ToolCallsNamed(name string) []ToolExecution {
 func (r *RunResult) Turns() int {
 	max := 0
 	for _, event := range r.Events {
-		if event.Type != aop.TypeTurnStart && event.Type != aop.TypeTurnEnd {
+		turn := 0
+		switch event.Type {
+		case aop.TypeTurnStart:
+			if data, err := aop.DecodeData[aop.TurnData](event); err == nil {
+				turn = data.Turn
+			}
+		case aop.TypeTurnEnd:
+			if data, err := aop.DecodeData[aop.TurnEndData](event); err == nil {
+				turn = data.Turn
+			}
+		default:
 			continue
 		}
-		data, err := aop.DecodeData[aop.TurnData](event)
-		if err == nil && data.Turn > max {
-			max = data.Turn
+		if turn > max {
+			max = turn
 		}
 	}
 	return max

@@ -12,15 +12,9 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
-
-// stdioQueueCapacity bounds each session's pending inbound messages. A full
-// queue rejects the message with an error event instead of growing unbounded.
-const stdioQueueCapacity = 64
 
 // RunStdio hosts a persistent multi-session AOP endpoint. stdin carries AOP
 // JSONL; each inbound user message selects (or creates) the agent session named
@@ -56,43 +50,27 @@ func RunStdio(
 	return host.err()
 }
 
-// stdioQueuedMessage is one inbound user message waiting on a session's FIFO.
-type stdioQueuedMessage struct {
-	event aop.Event
-	data  aop.MessageData
-	goal  webproto.GoalExt
-}
-
-type stdioSession struct {
-	id    string
-	agent *agent.Agent
-	queue chan stdioQueuedMessage
-	done  chan struct{} // closed when the FIFO goroutine exits
-}
-
 type stdioHost struct {
 	ctx    context.Context
 	option *cfg.Option
 	logger telemetry.Logger
 
-	encMu sync.Mutex
-	enc   *json.Encoder
+	encMu  sync.Mutex
+	enc    *json.Encoder
 	encErr error
 
-	rt  *AgentRuntime
+	rt    *AgentRuntime
 	rtErr error
 
-	mu       sync.Mutex
-	sessions map[string]*stdioSession
+	wg sync.WaitGroup
 }
 
 func newStdioHost(ctx context.Context, option *cfg.Option, logger telemetry.Logger, output io.Writer) *stdioHost {
 	return &stdioHost{
-		ctx:      ctx,
-		option:   option,
-		logger:   logger,
-		enc:      json.NewEncoder(output),
-		sessions: make(map[string]*stdioSession),
+		ctx:    ctx,
+		option: option,
+		logger: logger,
+		enc:    json.NewEncoder(output),
 	}
 }
 
@@ -163,114 +141,30 @@ func (h *stdioHost) accept(line string) {
 		h.emitLocal(aop.TypeError, "stdio", aop.ErrorData{Message: "decode inbound event: " + err.Error()})
 		return
 	}
-	if event.Type != aop.TypeMessage {
-		return // only user messages are executable inbound units
-	}
-	data, err := aop.DecodeData[aop.MessageData](event)
-	if err != nil || data.Role != "user" {
-		h.emitLocal(aop.TypeError, event.SessionID, aop.ErrorData{Message: "inbound message must be a user message"})
-		return
-	}
-	goal := webproto.DecodeGoalExt(event)
-
-	h.mu.Lock()
-	sess := h.sessions[event.SessionID]
-	if sess == nil {
-		sess = h.startSessionLocked(event.SessionID)
-	}
-	select {
-	case sess.queue <- stdioQueuedMessage{event: event, data: data, goal: goal}:
-	default:
-		h.emitLocal(aop.TypeError, sess.id, aop.ErrorData{Message: "session queue full"})
-	}
-	h.mu.Unlock()
-}
-
-func (h *stdioHost) startSessionLocked(id string) *stdioSession {
-	if id == "" {
-		id = fmt.Sprintf("stdio-%d", time.Now().UnixNano())
-	}
-	agentCfg := h.rt.Config.
-		WithSystemPrompt(h.rt.SystemPrompt).
-		WithStream(true).
-		WithInbox(nil).
-		WithSessionID(id)
-	sess := &stdioSession{
-		id:    id,
-		agent: agent.NewAgent(agentCfg),
-		queue: make(chan stdioQueuedMessage, stdioQueueCapacity),
-		done:  make(chan struct{}),
-	}
-	h.sessions[id] = sess
-	go h.runSession(sess)
-	return sess
-}
-
-// runSession is the per-session FIFO: one run at a time, in arrival order.
-func (h *stdioHost) runSession(sess *stdioSession) {
-	defer close(sess.done)
-	for {
-		select {
-		case <-h.ctx.Done():
-			return
-		case queued, ok := <-sess.queue:
-			if !ok {
-				return
-			}
-			h.runOne(sess, queued)
-		}
-	}
-}
-
-func (h *stdioHost) runOne(sess *stdioSession, queued stdioQueuedMessage) {
-	input := agent.InputFromAOPMessage(queued.data)
-	input.NoEcho = queued.goal.NoEcho
-	text := strings.TrimSpace(inputText(input))
-	if text == "" {
-		h.emitLocal(aop.TypeError, sess.id, aop.ErrorData{Message: "empty prompt"})
+	inbound, err := agent.Classify(event)
+	if err != nil || inbound.Kind != agent.InboundUserMessage {
+		h.emitLocal(aop.TypeError, event.SessionID, aop.ErrorData{Message: "invalid inbound event"})
 		return
 	}
 
-	if queued.goal.EvalCriteria != "" {
-		maxRounds := queued.goal.EvalMaxRounds
-		if maxRounds <= 0 {
-			maxRounds = 3
-		}
-		sess.agent.SetMaxTurns(h.rt.Config.MaxTurns)
-		evalCfg := evaluator.EvalLoopConfig{
-			Evaluator: evaluator.New(evaluator.Config{
-				Provider: h.rt.App.Provider,
-				Model:    h.rt.Config.Model,
-				Logger:   h.rt.Config.Logger,
-			}),
-			MaxEvalRounds: maxRounds,
-			Goal:          text,
-			Criteria:      queued.goal.EvalCriteria,
-		}
-		_, _, _ = evaluator.RunWithEval(h.ctx, sess.agent, evalCfg)
+	wait, err := h.rt.Submit(h.ctx, "", inbound, nil)
+	if err != nil {
+		h.emitLocal(aop.TypeError, event.SessionID, aop.ErrorData{Message: err.Error()})
 		return
 	}
-
-	if queued.goal.PersistMaxTurns > 0 {
-		sess.agent.SetMaxTurns(queued.goal.PersistMaxTurns)
-	} else {
-		sess.agent.SetMaxTurns(h.rt.Config.MaxTurns)
-	}
-	_, _ = sess.agent.Run(h.ctx, input)
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		if _, err := wait(); err != nil {
+			h.emitLocal(aop.TypeError, event.SessionID, aop.ErrorData{Message: err.Error()})
+		}
+	}()
 }
 
-// drain closes every session queue and waits for the FIFO goroutines to exit.
+// drain waits for every accepted Runtime request. Session workers themselves
+// remain Runtime-owned and are stopped by Runtime.Close.
 func (h *stdioHost) drain() {
-	h.mu.Lock()
-	sessions := make([]*stdioSession, 0, len(h.sessions))
-	for _, sess := range h.sessions {
-		close(sess.queue)
-		sessions = append(sessions, sess)
-	}
-	h.mu.Unlock()
-	for _, sess := range sessions {
-		<-sess.done
-	}
+	h.wg.Wait()
 }
 
 // inputText flattens the text parts of an agent Input.

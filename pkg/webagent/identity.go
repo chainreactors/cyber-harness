@@ -21,7 +21,7 @@ func DefaultRuntime() webproto.AgentRuntime {
 		Arch:         runtime.GOARCH,
 		PID:          os.Getpid(),
 		Capabilities: []string{"repl", "pty", "tmux", "ioa"},
-		Meta:         map[string]any{"client": "aiscan", "transport": "web-agent"},
+		Meta:         map[string]any{"client": "aiscan", "transport": "websocket"},
 	}
 	if host, err := os.Hostname(); err == nil {
 		runtimeInfo.Hostname = host

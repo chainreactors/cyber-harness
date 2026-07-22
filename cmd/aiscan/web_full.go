@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -110,7 +109,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		localAgents.StopAll()
 	}()
 
-	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub, accessKey), accessKey, ioaSvc)
+	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -124,7 +123,8 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		_ = srv.Shutdown(shutCtx)
 	}()
 
-	logger.Infof("aiscan server listening on http://%s?access_key=%s", listenAddr, accessKey)
+	logger.Infof("aiscan server listening on http://%s", listenAddr)
+	logger.Infof("  web access token: %s", accessKey)
 	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, listenAddr)
 	if localAgent, err := localAgents.Launch(ctx); err != nil {
 		logger.Warnf("auto-start local agent: %s", err)
@@ -137,13 +137,8 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	return nil
 }
 
-func newSPAFileServer(fsys fs.FS, accessKey string) http.HandlerFunc {
-	// Read index.html and inject the access key so the frontend can authenticate API calls.
+func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	indexBytes, _ := fs.ReadFile(fsys, "index.html")
-	if accessKey != "" && len(indexBytes) > 0 {
-		injection := []byte(`<script>window.__AISCAN_ACCESS_KEY__="` + accessKey + `";</script>`)
-		indexBytes = bytes.Replace(indexBytes, []byte("</head>"), append(injection, []byte("</head>")...), 1)
-	}
 	fileServer := http.FileServer(http.FS(fsys))
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -160,10 +155,8 @@ func newSPAFileServer(fsys fs.FS, accessKey string) http.HandlerFunc {
 				return
 			}
 		}
-		// Serve injected index.html for SPA routes. Never cache it: it's the one
-		// unfingerprinted document, it carries the per-start access key, and it
-		// points at the current asset hashes — a cached shell would keep loading a
-		// stale bundle (or a dead access key after a restart) until a hard refresh.
+		// Serve index.html for SPA routes. Never cache it: it is the one
+		// unfingerprinted document and points at the current asset hashes.
 		if len(indexBytes) > 0 {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-cache")

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token';
 const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
@@ -8,6 +8,15 @@ const LLM_MODEL = process.env.LLM_MODEL || '';
 
 function apiHeaders() {
   return { Authorization: `Bearer ${API_TOKEN}` };
+}
+
+async function openAuthenticatedApp(page: Page) {
+  const login = await page.request.post('/api/auth/login', {
+    data: { token: API_TOKEN },
+  });
+  expect(login.ok()).toBeTruthy();
+  await page.goto('/');
+  await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible();
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +59,11 @@ test.describe('Auth', () => {
     const res = await request.get('/api/status', { headers: apiHeaders() });
     expect(res.ok()).toBeTruthy();
   });
+
+  test('does not accept tokens from URL query parameters', async ({ request }) => {
+    const res = await request.get(`/api/status?access_key=${API_TOKEN}`);
+    expect(res.status()).toBe(401);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -57,16 +71,16 @@ test.describe('Auth', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Static Assets', () => {
-  test('index.html is served with access key script injected', async ({ request }) => {
-    const res = await request.get(`/?access_key=${API_TOKEN}`);
+  test('index.html never exposes the access token', async ({ request }) => {
+    const res = await request.get('/');
     expect(res.ok()).toBeTruthy();
     const html = await res.text();
-    expect(html).toContain('__AISCAN_ACCESS_KEY__');
-    expect(html).toContain(API_TOKEN);
+    expect(html).not.toContain('__AISCAN_ACCESS_KEY__');
+    expect(html).not.toContain(API_TOKEN);
   });
 
   test('JS bundle is served', async ({ request }) => {
-    const indexRes = await request.get(`/?access_key=${API_TOKEN}`);
+    const indexRes = await request.get('/');
     const html = await indexRes.text();
     const jsMatch = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
     expect(jsMatch).toBeTruthy();
@@ -76,12 +90,36 @@ test.describe('Static Assets', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Page Load & UI Shell
+// 4. Login
+// ---------------------------------------------------------------------------
+
+test.describe('Login', () => {
+  test('validates a token without putting it in URL or localStorage', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Access AIScan' })).toBeVisible();
+
+    const token = page.getByLabel('Access token');
+    await token.fill('wrong-token');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByRole('alert')).toContainText('invalid');
+
+    await token.fill(API_TOKEN);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible();
+
+    expect(page.url()).not.toContain(API_TOKEN);
+    const storedToken = await page.evaluate(() => localStorage.getItem('aiscan-access-key'));
+    expect(storedToken).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Page Load & UI Shell
 // ---------------------------------------------------------------------------
 
 test.describe('Page Load', () => {
   test('index page loads and renders AIScan header', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     // Use a specific selector for the brand name in the header
     const brand = page.locator('header span.font-semibold');
     await expect(brand).toBeVisible({ timeout: 10_000 });
@@ -89,12 +127,12 @@ test.describe('Page Load', () => {
   });
 
   test('header shows model name', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await expect(page.locator('header')).toContainText(/deepseek/i, { timeout: 10_000 });
   });
 
   test('LLM health indicator does not show offline or error', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     const header = page.locator('header');
     await expect(header).toBeVisible();
     // Wait for the async health probe to complete
@@ -106,19 +144,19 @@ test.describe('Page Load', () => {
   });
 
   test('settings button is visible', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     const settingsBtn = page.locator('button[aria-label="Open settings"]');
     await expect(settingsBtn).toBeVisible({ timeout: 10_000 });
   });
 });
 
 // ---------------------------------------------------------------------------
-// 5. Config Panel
+// 6. Config Panel
 // ---------------------------------------------------------------------------
 
 test.describe('Config Panel', () => {
   test('opens settings dialog and shows tabs', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.locator('button[aria-label="Open settings"]').click();
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible({ timeout: 5_000 });
@@ -128,7 +166,7 @@ test.describe('Config Panel', () => {
   });
 
   test('closes settings dialog', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.locator('button[aria-label="Open settings"]').click();
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
@@ -138,7 +176,7 @@ test.describe('Config Panel', () => {
   });
 
   test('LLM tab shows Provider and Model fields', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.locator('button[aria-label="Open settings"]').click();
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
@@ -339,7 +377,7 @@ test.describe('Scans API', () => {
 
 test.describe('Chat UI', () => {
   test('UI renders the main chat area', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.waitForLoadState('networkidle');
     // The page should have a main content area
     const main = page.locator('main').first();
@@ -352,7 +390,7 @@ test.describe('Chat UI', () => {
   });
 
   test('sidebar shows session list or agent nodes', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
     // The sidebar should show sessions or agent nodes
@@ -363,7 +401,7 @@ test.describe('Chat UI', () => {
   });
 
   test('can find and interact with chat input', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
@@ -384,19 +422,14 @@ test.describe('Chat UI', () => {
 
 test.describe('Theme', () => {
   test('can toggle between light and dark theme', async ({ page }) => {
-    await page.goto('/');
+    await openAuthenticatedApp(page);
     await page.waitForLoadState('networkidle');
 
     const initialDark = await page.evaluate(() =>
       document.documentElement.classList.contains('dark')
     );
 
-    // The theme toggle is one of the last buttons in the header
-    // Look for it by its sun/moon icon or aria label
-    const headerButtons = page.locator('header button');
-    const count = await headerButtons.count();
-    // Theme toggle is typically the last or second-to-last button
-    const themeBtn = headerButtons.nth(count - 1);
+    const themeBtn = page.locator('[data-sidebar-theme-toggle] button');
     await themeBtn.click();
     await page.waitForTimeout(500);
 

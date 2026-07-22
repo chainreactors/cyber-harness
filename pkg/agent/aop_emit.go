@@ -8,98 +8,109 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/aop"
-)
-
-// Status states emitted on the AOP status channel. Internal agent semantics
-// (eval, compact, token budget, llm request summaries) ride here with detail
-// in ext.<agent>.* rather than as first-class event types.
-const (
-	StatusEvalStart          = "eval_start"
-	StatusEvalEnd            = "eval_end"
-	StatusEvalError          = "eval_error"
-	StatusCompactStart       = "compact_start"
-	StatusCompactEnd         = "compact_end"
-	StatusCompactError       = "compact_error"
-	StatusTokenBudgetWarning = "token_budget_warning"
-	StatusLLMRequest         = "llm_request"
+	"github.com/chainreactors/aiscan/pkg/aop/x/delegation"
 )
 
 // aopEmitter is the agent kernel's single event-emission path. Every event
 // leaves through it so seq numbering, message_id allocation, and session
 // tagging stay consistent per session. Safe for concurrent use.
 type aopEmitter struct {
-	bus             *eventbus.Bus[aop.Event]
-	agentName       string
-	sessionID       string
-	parentSessionID string
-	seq             atomic.Int64
-	msgCounter      atomic.Int64
+	bus              *eventbus.Bus[aop.Event]
+	agentName        string
+	sessionID        string
+	parentSessionID  string
+	parentToolCallID string
+	delegation       *delegation.DelegationDetail
+	state            *emitState
 }
 
-func newAOPEmitter(bus *eventbus.Bus[aop.Event], agentName, sessionID, parentSessionID string, msgCounter int64) *aopEmitter {
+type emitState struct {
+	seq        atomic.Int64
+	messageSeq atomic.Int64
+}
+
+func newAOPEmitter(bus *eventbus.Bus[aop.Event], agentName, sessionID, parentSessionID, parentToolCallID string, detail *delegation.DelegationDetail, msgCounter int64) *aopEmitter {
 	em := &aopEmitter{
-		bus:             bus,
-		agentName:       agentName,
-		sessionID:       sessionID,
-		parentSessionID: parentSessionID,
+		bus:              bus,
+		agentName:        agentName,
+		sessionID:        sessionID,
+		parentSessionID:  parentSessionID,
+		parentToolCallID: parentToolCallID,
+		delegation:       detail,
+		state:            &emitState{},
 	}
-	em.msgCounter.Store(msgCounter)
+	em.state.messageSeq.Store(msgCounter)
 	return em
 }
 
-func (e *aopEmitter) emit(typ string, data any, ext map[string]any) {
+func (e *aopEmitter) scoped(sessionID, parentSessionID, parentToolCallID string, detail *delegation.DelegationDetail) *aopEmitter {
+	return &aopEmitter{bus: e.bus, agentName: e.agentName, sessionID: sessionID, parentSessionID: parentSessionID, parentToolCallID: parentToolCallID, delegation: detail, state: e.state}
+}
+
+func (e *aopEmitter) event(typ string, data any) aop.Event {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		raw, _ = json.Marshal(map[string]string{"marshal_error": err.Error()})
 	}
-	ev := aop.Event{
+	return aop.Event{
 		Type:      typ,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: e.sessionID,
 		Agent:     e.agentName,
-		Seq:       int(e.seq.Add(1)),
+		Seq:       int(e.state.seq.Add(1)),
 		Data:      raw,
 	}
-	if len(ext) > 0 {
-		ev.Ext = map[string]any{e.agentName: ext}
+
+}
+
+func (e *aopEmitter) emit(typ string, data any) {
+	ev := e.event(typ, data)
+	e.bus.Emit(ev)
+}
+
+func (e *aopEmitter) emitWithExt(typ string, data any, namespace string, ext any) {
+	ev := e.event(typ, data)
+	if err := aop.SetExt(&ev, namespace, ext); err != nil {
+		return
 	}
 	e.bus.Emit(ev)
 }
 
 func (e *aopEmitter) allocMessageID() string {
-	return fmt.Sprintf("m-%d", e.msgCounter.Add(1))
+	return fmt.Sprintf("m-%d", e.state.messageSeq.Add(1))
 }
 
 func (e *aopEmitter) messageCounter() int64 {
-	return e.msgCounter.Load()
+	return e.state.messageSeq.Load()
 }
 
 func (e *aopEmitter) sessionStart(model string) {
-	e.emit(aop.TypeSessionStart, aop.SessionStartData{
-		Model:           model,
-		ParentSessionID: e.parentSessionID,
-	}, nil)
+	data := aop.SessionStartData{
+		Model:            model,
+		ParentSessionID:  e.parentSessionID,
+		ParentToolCallID: e.parentToolCallID,
+	}
+	if e.delegation != nil {
+		e.emitWithExt(aop.TypeSessionStart, data, delegation.NS, *e.delegation)
+		return
+	}
+	e.emit(aop.TypeSessionStart, data)
 }
 
-func (e *aopEmitter) sessionEnd(stop StopReason, turns int, runErr error) {
-	data := aop.SessionEndData{Stop: string(stop), Turns: turns}
+func (e *aopEmitter) sessionEnd(stop StopReason, turns int, usage Usage, runErr error) {
+	data := aop.SessionEndData{Stop: string(stop), Turns: turns, Usage: usageData(usage)}
 	if runErr != nil {
 		data.Error = runErr.Error()
 	}
-	e.emit(aop.TypeSessionEnd, data, nil)
+	e.emit(aop.TypeSessionEnd, data)
 }
 
 func (e *aopEmitter) turnStart(turn int) {
-	e.emit(aop.TypeTurnStart, aop.TurnData{Turn: turn}, nil)
+	e.emit(aop.TypeTurnStart, aop.TurnData{Turn: turn})
 }
 
 func (e *aopEmitter) turnEnd(turn int, totalUsage Usage, contextTokens int) {
-	e.emit(aop.TypeTurnEnd, aop.TurnData{Turn: turn}, map[string]any{
-		"total_input_tokens":  totalUsage.PromptTokens,
-		"total_output_tokens": totalUsage.CompletionTokens,
-		"total_tokens":        totalUsage.TotalTokens,
-		"context_tokens":      contextTokens,
-	})
+	e.emit(aop.TypeTurnEnd, aop.TurnEndData{Turn: turn, Usage: usageData(totalUsage), ContextTokens: contextTokens})
 }
 
 // message emits a complete message event, allocating a fresh message_id.
@@ -114,7 +125,7 @@ func (e *aopEmitter) message(role string, parts []aop.MessagePart) string {
 // used when a streaming message's id was allocated before the retry loop so
 // deltas and the final message share it across retries.
 func (e *aopEmitter) messageWithID(id, role string, parts []aop.MessagePart) {
-	e.emit(aop.TypeMessage, aop.MessageData{MessageID: id, Role: role, Parts: parts}, nil)
+	e.emit(aop.TypeMessage, aop.MessageData{MessageID: id, Role: role, Parts: parts})
 }
 
 func (e *aopEmitter) messageDelta(messageID string, partIndex int, partType, delta string) {
@@ -123,25 +134,33 @@ func (e *aopEmitter) messageDelta(messageID string, partIndex int, partType, del
 		PartIndex: partIndex,
 		PartType:  partType,
 		Delta:     delta,
-	}, nil)
+	})
 }
 
-func (e *aopEmitter) toolCall(toolCallID, toolName string, args any) {
-	e.emit(aop.TypeToolCall, aop.ToolCallData{
+func (e *aopEmitter) toolCall(toolCallID, toolName string, args any, workDir string) {
+	data := aop.ToolCallData{
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
 		Args:       args,
-	}, nil)
+		WorkDir:    workDir,
+	}
+	if detail, ok := delegationFromToolCall(toolName, args); ok {
+		e.emitWithExt(aop.TypeToolCall, data, delegation.NS, detail)
+		return
+	}
+	e.emit(aop.TypeToolCall, data)
 }
 
-func (e *aopEmitter) toolResult(toolCallID, toolName string, content any, isError bool, durationMs int) {
+func (e *aopEmitter) toolResult(toolCallID, toolName string, content, details any, terminate, isError bool, durationMs int) {
 	e.emit(aop.TypeToolResult, aop.ToolResultData{
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
 		Content:    content,
+		Details:    details,
+		Terminate:  terminate,
 		IsError:    isError,
 		DurationMs: durationMs,
-	}, nil)
+	})
 }
 
 func (e *aopEmitter) usage(u *Usage, model string) {
@@ -155,15 +174,26 @@ func (e *aopEmitter) usage(u *Usage, model string) {
 		CacheReadTokens:  u.CacheReadTokens,
 		CacheWriteTokens: u.CacheWriteTokens,
 		Model:            model,
-	}, nil)
+	})
 }
 
 func (e *aopEmitter) errorEvt(err error, retryable bool) {
-	e.emit(aop.TypeError, aop.ErrorData{Message: err.Error(), Retryable: retryable}, nil)
+	e.emit(aop.TypeError, aop.ErrorData{Message: err.Error(), Retryable: retryable})
 }
 
-func (e *aopEmitter) status(state string, ext map[string]any) {
-	e.emit(aop.TypeStatus, aop.StatusData{State: state}, ext)
+func (e *aopEmitter) status(state, namespace string, detail any) {
+	if detail == nil {
+		e.emit(aop.TypeStatus, aop.StatusData{State: state})
+		return
+	}
+	e.emitWithExt(aop.TypeStatus, aop.StatusData{State: state}, namespace, detail)
+}
+
+func usageData(u Usage) *aop.UsageData {
+	if u == (Usage{}) {
+		return nil
+	}
+	return &aop.UsageData{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens}
 }
 
 // messagePartsFromChat flattens a ChatMessage into AOP parts for echo/persist.

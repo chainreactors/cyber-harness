@@ -16,8 +16,8 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	transportpkg "github.com/chainreactors/aiscan/core/transport"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webagent"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -164,20 +164,7 @@ func aiscan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		var err error
-		transport, transportErr := cfg.ResolveAgentTransport(&option)
-		if transportErr != nil {
-			logger.Errorf("agent failed: %s", transportErr)
-			os.Exit(1)
-		}
-		switch transport {
-		case cfg.AgentTransportWeb:
-			err = webagent.Run(ctx, &option, logger)
-		case cfg.AgentTransportStdio:
-			err = runner.RunStdio(ctx, &option, logger, os.Stdin, os.Stdout)
-		default:
-			err = runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc)
-		}
+		err := transportpkg.Run(ctx, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)

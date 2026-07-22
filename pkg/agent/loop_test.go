@@ -409,7 +409,7 @@ func TestTokenBudgetWarning(t *testing.T) {
 				return
 			}
 			data, err := aop.DecodeData[aop.StatusData](event)
-			if err == nil && data.State == StatusTokenBudgetWarning {
+			if err == nil && data.State == aop.StatusTokenBudgetWarning {
 				sawWarning = true
 			}
 		}),
@@ -584,13 +584,8 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 					turnEndUsage = &u
 				}
 			case aop.TypeTurnEnd:
-				if ext, ok := event.Ext["aiscan"].(map[string]any); ok {
-					switch v := ext["context_tokens"].(type) {
-					case int:
-						turnEndContext = v
-					case float64:
-						turnEndContext = int(v)
-					}
+				if data, err := aop.DecodeData[aop.TurnEndData](event); err == nil {
+					turnEndContext = data.ContextTokens
 				}
 			}
 		}),

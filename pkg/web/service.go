@@ -18,8 +18,9 @@ import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
@@ -1170,7 +1171,7 @@ func isReliableAOPEvent(event aop.Event) bool {
 			return false
 		}
 		switch data.State {
-		case agent.StatusEvalEnd, agent.StatusCompactEnd, agent.StatusTokenBudgetWarning:
+		case xeval.StateEnd, xcompact.StateEnd, aop.StatusTokenBudgetWarning:
 			return true
 		}
 	}

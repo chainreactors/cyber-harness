@@ -27,7 +27,7 @@ AGENT_TAGS := forceposix emptytemplates noembed osusergo netgo
 FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim $(RE2_TAGS)
 BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: help prepare frontend standard agent full web-build web-run web all clean
+.PHONY: help prepare frontend aop-gen standard agent full web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets (aligned with release editions):"
@@ -45,6 +45,9 @@ help:
 
 prepare:
 	mkdir -p "$(BIN_DIR)"
+
+aop-gen:
+	$(GO) generate ./pkg/aop/...
 
 frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build

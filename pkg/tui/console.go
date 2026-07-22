@@ -80,7 +80,10 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	// while all agent output routes to the upper scroll region.
 	var split *SplitTerminal
 	isTerminal := t.Control != nil && t.Control.IsTerminal()
-	useSplit := isTerminal && splitEnabled(int(os.Stdout.Fd()), resolveRenderMode())
+	// Split rendering owns the process' physical terminal and cannot be reused
+	// for remote terminals with independent dimensions and cursor state.
+	useSplit := isTerminal && isLocalAgentTerminal(t) &&
+		splitEnabled(int(os.Stdout.Fd()), resolveRenderMode())
 
 	var consoleTerminal *rlterm.Terminal
 	if useSplit {
@@ -165,6 +168,15 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	menu.Command = repl.rootCommand()
 	c.SwitchMenu("agent")
 	return repl
+}
+
+func isLocalAgentTerminal(t *rlterm.Terminal) bool {
+	if t == nil {
+		return false
+	}
+	in, inOK := t.In.(*os.File)
+	out, outOK := t.Out.(*os.File)
+	return inOK && outOK && in == os.Stdin && out == os.Stdout
 }
 
 // NewAgentConsoleWithWriters builds a non-interactive console that executes
@@ -1407,6 +1419,9 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 		}
 		if text := result.Text(); text != "" {
 			fmt.Fprint(r.stdout, text)
+			if !strings.HasSuffix(text, "\n") {
+				fmt.Fprintln(r.stdout)
+			}
 		}
 		return nil
 	}

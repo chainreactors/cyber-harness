@@ -11,19 +11,15 @@ import (
 	"github.com/chainreactors/utils/pty"
 )
 
-// NewPTYRouter creates a PTY router with default openers plus any caller-supplied
-// extra openers (e.g. a REPL opener from the agent runtime). The caller does not
-// need to import core/runner; instead it passes the extra openers map.
-func NewPTYRouter(reg *commands.CommandRegistry, extraOpeners map[string]pty.OpenFunc) *pty.Router {
+// NewPTYRouter creates the tool-node fallback router. Agent transports receive
+// their router directly from AgentRuntime and do not inspect the bash tool.
+func NewPTYRouter(reg *commands.CommandRegistry) *pty.Router {
 	mgr := RegistryPTYManager(reg)
 	var baseMgr *pty.Manager
 	if mgr != nil {
 		baseMgr = mgr.Manager
 	}
 	openers := pty.DefaultOpeners(baseMgr, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	for k, v := range extraOpeners {
-		openers[k] = v
-	}
 	return pty.NewRouter(baseMgr, pty.WithOpeners(openers))
 }
 

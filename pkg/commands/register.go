@@ -24,6 +24,9 @@ func init() {
 			}
 			reg.RegisterTool(NewReadTool(workDir, readers...))
 			reg.RegisterTool(NewWriteTool(workDir))
+			if deps.RunnerMode {
+				reg.RegisterTool(NewListTool(workDir))
+			}
 			reg.RegisterTool(NewGlobTool(workDir, globbers...))
 
 			bash := NewBashTool(workDir, timeout).WithScannerProxy(deps.ScannerProxy)

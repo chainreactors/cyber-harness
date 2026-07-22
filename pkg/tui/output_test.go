@@ -11,8 +11,8 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 type syncedBuffer struct {
@@ -48,26 +48,20 @@ func stripANSI(s string) string {
 // AOP event builders
 // ---------------------------------------------------------------------------
 
-func aopTestEvent(typ string, data any, ext map[string]any) aop.Event {
+func aopTestEvent(typ string, data any) aop.Event {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		panic(err)
 	}
-	ev := aop.Event{Type: typ, Data: raw}
-	if ext != nil {
-		ev.Ext = map[string]any{"aiscan": ext}
-	}
-	return ev
+	return aop.Event{Type: typ, Data: raw}
 }
 
 func turnStartEvent(turn int) aop.Event {
-	return aopTestEvent(aop.TypeTurnStart, aop.TurnData{Turn: turn}, nil)
+	return aopTestEvent(aop.TypeTurnStart, aop.TurnData{Turn: turn})
 }
 
 func turnEndEvent(turn, contextTokens int) aop.Event {
-	return aopTestEvent(aop.TypeTurnEnd, aop.TurnData{Turn: turn}, map[string]any{
-		"context_tokens": contextTokens,
-	})
+	return aopTestEvent(aop.TypeTurnEnd, aop.TurnEndData{Turn: turn, ContextTokens: contextTokens})
 }
 
 func textDeltaEvent(messageID, delta string) aop.Event {
@@ -75,7 +69,7 @@ func textDeltaEvent(messageID, delta string) aop.Event {
 		MessageID: messageID,
 		PartType:  aop.PartText,
 		Delta:     delta,
-	}, nil)
+	})
 }
 
 func reasoningDeltaEvent(messageID, delta string) aop.Event {
@@ -83,7 +77,7 @@ func reasoningDeltaEvent(messageID, delta string) aop.Event {
 		MessageID: messageID,
 		PartType:  aop.PartReasoning,
 		Delta:     delta,
-	}, nil)
+	})
 }
 
 func messageEvent(messageID, role string, parts ...aop.MessagePart) aop.Event {
@@ -91,7 +85,7 @@ func messageEvent(messageID, role string, parts ...aop.MessagePart) aop.Event {
 		MessageID: messageID,
 		Role:      role,
 		Parts:     parts,
-	}, nil)
+	})
 }
 
 func toolCallEvent(id, name, args string) aop.Event {
@@ -99,7 +93,7 @@ func toolCallEvent(id, name, args string) aop.Event {
 		ToolCallID: id,
 		ToolName:   name,
 		Args:       args,
-	}, nil)
+	})
 }
 
 func toolResultEvent(id, name, result string, isError bool) aop.Event {
@@ -108,7 +102,7 @@ func toolResultEvent(id, name, result string, isError bool) aop.Event {
 		ToolName:   name,
 		Content:    result,
 		IsError:    isError,
-	}, nil)
+	})
 }
 
 func usageEvent(input, outputTok, total int) aop.Event {
@@ -116,11 +110,7 @@ func usageEvent(input, outputTok, total int) aop.Event {
 		InputTokens:  input,
 		OutputTokens: outputTok,
 		TotalTokens:  total,
-	}, nil)
-}
-
-func statusEvent(state string, ext map[string]any) aop.Event {
-	return aopTestEvent(aop.TypeStatus, aop.StatusData{State: state}, ext)
+	})
 }
 
 func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
@@ -620,9 +610,9 @@ func TestEvalEndRendering(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(statusEvent(agent.StatusEvalEnd, map[string]any{
-		"eval_round": 0, "eval_pass": true, "eval_reason": "all checks passed",
-	}))
+	passed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
+	_ = xeval.SetDetail(&passed, xeval.Detail{Round: 0, Pass: true, Reason: "all checks passed"})
+	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
 		t.Fatalf("eval pass missing expected markers: %q", got)
@@ -632,9 +622,9 @@ func TestEvalEndRendering(t *testing.T) {
 	}
 
 	stderr.Reset()
-	o.HandleEvent(statusEvent(agent.StatusEvalEnd, map[string]any{
-		"eval_round": 1, "eval_pass": false, "eval_reason": "port 443 not scanned",
-	}))
+	failed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
+	_ = xeval.SetDetail(&failed, xeval.Detail{Round: 1, Pass: false, Reason: "port 443 not scanned"})
+	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {
 		t.Fatalf("eval fail missing expected markers: %q", got)

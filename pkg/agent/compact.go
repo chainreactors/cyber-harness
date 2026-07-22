@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
 )
 
 const defaultKeepRecentTokens = 20000
@@ -72,18 +73,18 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 		cfg.KeepRecentTokens = defaultKeepRecentTokens
 	}
 
-	em.status(StatusCompactStart, nil)
+	em.status(xcompact.StateStart, "", nil)
 
 	tokensBefore := estimateAllTokens(msgs)
 	cutIdx := findCutPoint(msgs, cfg.KeepRecentTokens)
 	if cutIdx <= 0 {
-		em.status(StatusCompactError, map[string]any{"compact_error": "context already fits"})
+		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: "context already fits"})
 		return nil, fmt.Errorf("nothing to compact (context already fits in %d tokens)", cfg.KeepRecentTokens)
 	}
 
 	summary, err := summarize(ctx, cfg.Provider, cfg.Model, msgs[:cutIdx], cfg.CustomInstructions)
 	if err != nil {
-		em.status(StatusCompactError, map[string]any{"compact_error": err.Error()})
+		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: err.Error()})
 		return nil, fmt.Errorf("compact summarize: %w", err)
 	}
 
@@ -104,11 +105,7 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	a.state.Messages = newMsgs
 	a.mu.Unlock()
 
-	em.status(StatusCompactEnd, map[string]any{
-		"compact_tokens_before": result.TokensBefore,
-		"compact_tokens_after":  result.TokensAfter,
-		"compact_kept_messages": result.KeptMessages,
-	})
+	em.status(xcompact.StateEnd, xcompact.NS, xcompact.Detail{TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter, KeptMessages: result.KeptMessages})
 	return result, nil
 }
 

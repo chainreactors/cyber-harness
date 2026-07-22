@@ -11,6 +11,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -120,6 +121,7 @@ type AgentPool struct {
 	sco            SCOStore
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan pty.Frame
+	ptyAgents      map[string]string
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
 	upgrader       websocket.Upgrader
@@ -130,6 +132,7 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
 		ptySubs:        make(map[string]chan pty.Frame),
+		ptyAgents:      make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
 	}
@@ -169,6 +172,7 @@ func (p *AgentPool) register(a *remoteAgent) {
 	if old != nil && old != a {
 		_ = old.conn.Close()
 	}
+	p.rebindPTY(a)
 }
 
 func (p *AgentPool) unregister(a *remoteAgent) {
@@ -176,10 +180,14 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 	// Only vacate the slot if it still holds THIS instance. After a reconnect the
 	// slot was already reassigned to the replacement under the same key; the old
 	// instance tearing down must not evict its successor.
-	if p.agents[a.id] == a {
+	removed := p.agents[a.id] == a
+	if removed {
 		delete(p.agents, a.id)
 	}
 	p.mu.Unlock()
+	if removed {
+		p.notifyPTY(a.id, pty.Frame{Type: pty.FrameDetached})
+	}
 	a.mu.Lock()
 	for _, ch := range a.tasks {
 		close(ch)
@@ -286,14 +294,18 @@ func BuildUserMessageEvent(sessionID, messageID, text string, goal webproto.Goal
 		Role:      "user",
 		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
 	})
-	return aop.Event{
+	event := aop.Event{
 		Type:      aop.TypeMessage,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: sessionID,
 		Agent:     "aiscan.web",
 		Data:      data,
-		Ext:       map[string]any{"aiscan": goal},
 	}
+	_ = aop.SetExt(&event, aop.NSAOP, aop.RunControl{NoEcho: goal.NoEcho, MaxTurns: goal.PersistMaxTurns})
+	if goal.EvalCriteria != "" {
+		_ = xeval.Set(&event, xeval.Control{Criteria: goal.EvalCriteria, MaxRounds: goal.EvalMaxRounds})
+	}
+	return event
 }
 
 func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {
@@ -378,11 +390,6 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 // The browser sends transport-neutral PTY frames; the pool assigns a stream_id,
 // wraps them for the mixed agent connection, and unwraps matching responses.
 func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *http.Request) {
-	if p.get(agentID) == nil {
-		writeError(w, http.StatusNotFound, "agent not connected")
-		return
-	}
-
 	conn, err := p.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -390,7 +397,7 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	defer conn.Close()
 
 	terminalID := generateID()
-	events, unsubscribe := p.subscribePTY(terminalID)
+	events, unsubscribe := p.subscribePTY(agentID, terminalID)
 	defer unsubscribe()
 	defer p.CloseTerminal(agentID, terminalID)
 
@@ -411,12 +418,18 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 				if !ok {
 					return
 				}
-				_ = write(msg)
+				if err := write(msg); err != nil {
+					_ = conn.Close()
+					return
+				}
 			case <-done:
 				return
 			}
 		}
 	}()
+	if p.get(agentID) == nil {
+		_ = write(pty.Frame{Type: pty.FrameDetached, StreamID: terminalID})
+	}
 
 	for {
 		var frame pty.Frame
@@ -430,7 +443,7 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 		frame.StreamID = terminalID
 		if err := p.SendAgentMessage(agentID, webproto.NewPTYMessage(frame)); err != nil {
 			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: err.Error()})
-			return
+			continue
 		}
 	}
 }
@@ -443,18 +456,62 @@ func (p *AgentPool) CloseTerminal(agentID, terminalID string) {
 	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
 }
 
-func (p *AgentPool) subscribePTY(terminalID string) (<-chan pty.Frame, func()) {
+func (p *AgentPool) subscribePTY(agentID, terminalID string) (<-chan pty.Frame, func()) {
 	ch := make(chan pty.Frame, 256)
 	p.ptyMu.Lock()
 	p.ptySubs[terminalID] = ch
+	p.ptyAgents[terminalID] = agentID
 	p.ptyMu.Unlock()
 	return ch, func() {
 		p.ptyMu.Lock()
 		if p.ptySubs[terminalID] == ch {
 			delete(p.ptySubs, terminalID)
+			delete(p.ptyAgents, terminalID)
 			close(ch)
 		}
 		p.ptyMu.Unlock()
+	}
+}
+
+func (p *AgentPool) notifyPTY(agentID string, frame pty.Frame) {
+	p.ptyMu.RLock()
+	defer p.ptyMu.RUnlock()
+	for terminalID, boundAgentID := range p.ptyAgents {
+		if boundAgentID != agentID {
+			continue
+		}
+		out := frame
+		out.StreamID = terminalID
+		if ch := p.ptySubs[terminalID]; ch != nil {
+			select {
+			case ch <- out:
+			default:
+				p.ptyDrops.Add(1)
+			}
+		}
+	}
+}
+
+func (p *AgentPool) rebindPTY(agent *remoteAgent) {
+	if agent == nil {
+		return
+	}
+	p.ptyMu.RLock()
+	terminalIDs := make([]string, 0)
+	for terminalID, agentID := range p.ptyAgents {
+		if agentID == agent.id {
+			terminalIDs = append(terminalIDs, terminalID)
+		}
+	}
+	p.ptyMu.RUnlock()
+	for _, terminalID := range terminalIDs {
+		terminalID := terminalID
+		go func() {
+			select {
+			case agent.sendCh <- webproto.NewPTYMessage(pty.Frame{Type: pty.FrameList, StreamID: terminalID}):
+			case <-agent.done:
+			}
+		}()
 	}
 }
 
@@ -538,18 +595,18 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent := &remoteAgent{
-		id:           id,
-		name:         info.Name,
-		commands:     info.Commands,
-		commandsMenu: info.CommandsMenu,
-		conn:         conn,
-		sendCh:       make(chan WSMessage, 32),
-		controlCh:    make(chan WSMessage, 1),
-		connectAt:    time.Now(),
-		node:         info.Node,
-		runtime:      info.Runtime,
-		status:       info.Status,
-		stats:        info.Stats,
+		id:            id,
+		name:          info.Name,
+		commands:      info.Commands,
+		commandsMenu:  info.CommandsMenu,
+		conn:          conn,
+		sendCh:        make(chan WSMessage, 32),
+		controlCh:     make(chan WSMessage, 1),
+		connectAt:     time.Now(),
+		node:          info.Node,
+		runtime:       info.Runtime,
+		status:        info.Status,
+		stats:         info.Stats,
 		tasks:         make(map[string]chan taskResult),
 		turns:         make(map[string]int),
 		childSessions: make(map[string]map[string]struct{}),
@@ -564,17 +621,27 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Send connected ack.
 	ack, _ := json.Marshal(map[string]string{"agent_id": agent.id, "name": agent.name})
-	_ = conn.WriteJSON(WSMessage{Type: "connected", Payload: ack})
+	if err := conn.WriteJSON(WSMessage{Type: "connected", Payload: ack}); err != nil {
+		return
+	}
 
 	// Write goroutine: sendCh → WebSocket.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
+		closeBrokenConnection := func() {
+			// A failed writer must tear down the shared WebSocket so the read
+			// loop exits, unregisters this agent, and lets the client reconnect.
+			// Otherwise the pool keeps a zombie "online" agent whose sendCh has
+			// no consumer; PTY open/list requests then disappear indefinitely.
+			_ = conn.Close()
+		}
 		for {
 			// Give control frames priority over task/output traffic.
 			select {
 			case msg := <-agent.controlCh:
 				if err := conn.WriteJSON(msg); err != nil {
+					closeBrokenConnection()
 					return
 				}
 				continue
@@ -583,6 +650,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 			select {
 			case msg := <-agent.controlCh:
 				if err := conn.WriteJSON(msg); err != nil {
+					closeBrokenConnection()
 					return
 				}
 			case msg, ok := <-agent.sendCh:
@@ -590,10 +658,12 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err := conn.WriteJSON(msg); err != nil {
+					closeBrokenConnection()
 					return
 				}
 			case <-ticker.C:
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					closeBrokenConnection()
 					return
 				}
 			case <-agent.done:

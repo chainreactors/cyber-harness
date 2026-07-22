@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -28,21 +29,20 @@ func IsAOPToolCall(msg webproto.Message) bool {
 // agent always observes one terminal event for every accepted tool.call.
 func HandleAOPToolCall(ctx context.Context, msg webproto.Message, executor aopToolExecutor, send func(webproto.Message)) {
 	var callEvent aop.Event
-	if json.Unmarshal(msg.Payload, &callEvent) != nil || !callEvent.Valid() || callEvent.Type != aop.TypeToolCall {
+	if json.Unmarshal(msg.Payload, &callEvent) != nil {
 		return
 	}
-	var call aop.ToolCallData
-	if json.Unmarshal(callEvent.Data, &call) != nil || call.ToolCallID == "" || call.ToolName == "" {
+	inbound, err := agent.Classify(callEvent)
+	if err != nil || inbound.Kind != agent.InboundToolCall {
 		return
 	}
-	if raw, ok := callEvent.Ext["cairn"]; ok {
-		var extension struct {
-			WorkDir string `json:"cwd"`
-		}
-		encoded, _ := json.Marshal(raw)
-		if json.Unmarshal(encoded, &extension) == nil && extension.WorkDir != "" {
-			ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: extension.WorkDir})
-		}
+	handleAOPToolCall(ctx, msg, inbound, executor, send)
+}
+
+func handleAOPToolCall(ctx context.Context, msg webproto.Message, inbound agent.Inbound, executor aopToolExecutor, send func(webproto.Message)) {
+	callEvent, call := inbound.Event, inbound.ToolCall
+	if call.WorkDir != "" {
+		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkDir})
 	}
 
 	arguments, err := json.Marshal(call.Args)
@@ -60,11 +60,20 @@ func HandleAOPToolCall(ctx context.Context, msg webproto.Message, executor aopTo
 		resultData.Content = execErr.Error()
 		resultData.IsError = true
 	} else {
-		resultData.Content = map[string]any{
-			"content":   result.Content,
-			"details":   result.Details,
-			"terminate": result.Terminate,
+		resultData.Content = result.Text()
+		if result.HasImages() {
+			content := aop.ToolResultContent{Content: result.Text()}
+			for _, block := range result.Content {
+				if block.Type == "image" {
+					content.Images = append(content.Images, aop.ImageSource{Base64: block.Base64Data, MediaType: block.MimeType})
+				}
+			}
+			resultData.Content = content
 		}
+		if result.Details != nil {
+			resultData.Details = result.Details
+		}
+		resultData.Terminate = result.Terminate
 		resultData.IsError = result.IsError
 	}
 	data, _ := json.Marshal(resultData)

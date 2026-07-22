@@ -628,11 +628,74 @@ func TestWSTerminalSingleton(t *testing.T) {
 	defer browserConn.Close()
 
 	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen,
-		Kind: "repl", Name: "main-repl", Singleton: true, Cols: 80, Rows: 24})
+		Kind: "shell", Name: "singleton-shell", Singleton: true, Cols: 80, Rows: 24})
 
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	if !open.Singleton || open.Kind != "repl" || open.Name != "main-repl" {
+	if !open.Singleton || open.Kind != "shell" || open.Name != "singleton-shell" {
 		t.Fatalf("singleton not preserved: %+v", open)
+	}
+}
+
+func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	agentConn := dialAgent(t, srv, "generation-agent", []string{"tmux"})
+
+	time.Sleep(50 * time.Millisecond)
+	agentID := pool.List()[0].ID
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
+	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial terminal: %v", err)
+	}
+	defer browserConn.Close()
+
+	if err := agentConn.Close(); err != nil {
+		t.Fatalf("close agent: %v", err)
+	}
+	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
+	if detached.StreamID == "" {
+		t.Fatalf("disconnect notification missing stream id: %+v", detached)
+	}
+
+	reconnected := dialAgent(t, srv, "generation-agent", []string{"tmux"})
+	defer reconnected.Close()
+	list := readAgentPTY(t, reconnected, pty.FrameList)
+	if list.StreamID != detached.StreamID {
+		t.Fatalf("rebound stream = %s, want %s", list.StreamID, detached.StreamID)
+	}
+	writeAgentPTY(t, reconnected, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
+		t.Fatalf("reconnected sessions not forwarded: %+v", sessions)
+	}
+}
+
+func TestWSTerminalCanWaitForOfflineAgent(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	agentID := protocols.NodeRef{ID: "node-offline-agent", Authority: srv.URL}.URI()
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
+	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial offline terminal: %v", err)
+	}
+	defer browserConn.Close()
+	readBrowserPTY(t, browserConn, pty.FrameDetached)
+
+	agentConn := dialAgent(t, srv, "offline-agent", []string{"tmux"})
+	defer agentConn.Close()
+	list := readAgentPTY(t, agentConn, pty.FrameList)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
+		t.Fatalf("offline subscription did not rebind: %+v", sessions)
 	}
 }
 
@@ -823,24 +886,20 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 
 	openFirstAgentTerminal(t, page)
 
-	// Two WebSocket terminals connect (ReplTerminal + TaskPTYPanel).
-	// Drain all initial messages from the agent: pty.open (repl), pty.list (tasks)
+	// The terminal discovers the Runtime-owned REPL through pty.list; the browser
+	// never creates it.
 	initial := drainAgentMessages(agentConn, time.Second)
 
-	replOpen, ok := findPTYFrame(initial, pty.FrameOpen)
+	listMsg, ok := findPTYFrame(initial, pty.FrameList)
 	if !ok {
-		t.Fatalf("no pty.open received, got: %v", initial)
+		t.Fatalf("no pty.list received, got: %v", initial)
 	}
-	replStreamID := replOpen.StreamID
-
-	// Reply to the pty.open for the REPL terminal
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: replStreamID,
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID,
+		Sessions: []pty.Info{{ID: "e2e-sess-1", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	attach := readAgentPTY(t, agentConn, pty.FrameAttach)
+	replStreamID := attach.StreamID
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
 		SessionID: "e2e-sess-1", Kind: "repl"})
-
-	// Reply to pty.list for the task panel (if received)
-	if listMsg, ok := findPTYFrame(initial, pty.FrameList); ok {
-		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID})
-	}
 
 	time.Sleep(300 * time.Millisecond)
 

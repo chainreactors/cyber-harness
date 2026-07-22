@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 // A saturated subscriber buffer must never swallow a reliable terminal event.
@@ -110,13 +111,12 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
-	svc.BroadcastAOPEvent("sess-eval", aop.Event{
+	event := aop.Event{
 		Type: "turn.end", TS: time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: "sess-eval", Agent: "aiscan", Data: json.RawMessage(`{"turn":1}`),
-		Ext: map[string]any{"aiscan": map[string]any{
-			"eval_round": 2, "eval_pass": false, "eval_reason": "needs one more verified finding",
-		}},
-	})
+	}
+	_ = xeval.SetDetail(&event, xeval.Detail{Round: 2, Pass: false, Reason: "needs one more verified finding"})
+	svc.BroadcastAOPEvent("sess-eval", event)
 	events, err := store.ListAOPEvents(context.Background(), "sess-eval", 100)
 	if err != nil {
 		t.Fatal(err)
@@ -124,9 +124,12 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("persisted AOP events = %d, want 1", len(events))
 	}
-	ext, _ := events[0].Ext["aiscan"].(map[string]any)
-	if ext["eval_reason"] != "needs one more verified finding" {
-		t.Fatalf("persisted extension = %#v", ext)
+	detail, ok, err := xeval.GetDetail(events[0])
+	if err != nil || !ok {
+		t.Fatalf("persisted extension = %#v, %v, %v", events[0].Ext, ok, err)
+	}
+	if detail.Round != 2 || detail.Pass || detail.Reason != "needs one more verified finding" {
+		t.Fatalf("persisted detail = %#v", detail)
 	}
 }
 

@@ -41,7 +41,8 @@
     "react-syntax-highlighter": "^15.6.1",
     "recharts": "^2.15.4",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

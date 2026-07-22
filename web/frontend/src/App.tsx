@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Box, Menu, Monitor, Network, Settings } from 'lucide-react'
-import LanguageToggle from './components/LanguageToggle'
+import { Box, LogOut, Menu, Monitor, Network, Settings } from 'lucide-react'
 import SessionList from './components/SessionList'
 import ChatPanel from './components/ChatPanel'
 import ConfigPanel from './components/ConfigPanel'
@@ -11,16 +10,13 @@ import AssetMentionPicker from './components/AssetMentionPicker'
 import LLMHealth from './components/LLMHealth'
 import QuickConnect from './components/QuickConnect'
 import BrandLogo from './components/brand/BrandLogo'
-// Lazy: the agent terminal drags in @xterm (~its own chunk) but only renders
-// when a node's console is opened — keep it out of the first-paint bundle.
-const AgentTerminal = lazy(() => import('./components/terminal'))
 const IOAConsole = lazy(() => import('./components/IOAConsole'))
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, ThemeToggle, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
-import { ThemeProvider, useTheme } from '@cyber/theme'
-import { activateLLMProfile, getConfigStatus, getStatus, listSCONodes } from './api'
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
+import { ThemeProvider } from '@cyber/theme'
+import { activateLLMProfile, getConfigStatus, getStatus, listSCONodes, logout } from './api'
 import type { LLMProfileStatus, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
-import { useChatSession, agentNodeKey } from './hooks/useChatSession'
+import { useChatSession } from './hooks/useChatSession'
 import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
 import type { IOAConsoleTarget } from './lib/ioa-navigation'
@@ -66,10 +62,6 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
   const [healthNonce, setHealthNonce] = useState(0)
-  // Track the terminal target by the node's STABLE key, not its transient agent
-  // id: the hub mints a fresh id on every reconnect, so keying on id would drop
-  // the terminal (and never restore it) when a node bounces to reload config.
-  const [terminalNodeKey, setTerminalNodeKey] = useState<string | null>(null)
 
   const openIOAConsole = useCallback((target?: IOAConsoleTarget) => {
     setIOAConsoleTarget(target ?? null)
@@ -125,8 +117,6 @@ export default function App() {
     )
   }, [scoNodes])
 
-  const terminalAgent = terminalNodeKey ? chat.agents.find((a) => agentNodeKey(a) === terminalNodeKey) ?? null : null
-
   const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
 
   const handleSwitchLLM = useCallback(async (profileID: string) => {
@@ -160,20 +150,20 @@ export default function App() {
   }
 
   function handleOpenTerminal(agentID: string) {
-    const a = chat.agents.find((x) => x.id === agentID)
-    setTerminalNodeKey(a ? agentNodeKey(a) : agentID)
+    setAgentPanelFocusID(agentID)
+    setAgentPanelOpen(true)
     chat.selectAgent(agentID)
     closeSidebarOnMobile()
   }
 
   function handleSelectSession(id: string) {
-    setTerminalNodeKey(null)
+    setAgentPanelOpen(false)
     chat.selectSession(id)
     closeSidebarOnMobile()
   }
 
   function handleCreateSession(agentID: string) {
-    setTerminalNodeKey(null)
+    setAgentPanelOpen(false)
     chat.createSession(agentID)
     closeSidebarOnMobile()
   }
@@ -233,8 +223,9 @@ export default function App() {
             <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
               <Settings className="h-3.5 w-3.5" />
             </HeaderIconButton>
-            <LanguageToggle />
-            <ConnectedThemeToggle />
+            <HeaderIconButton label={t('logout')} onClick={() => { void logout() }}>
+              <LogOut className="h-3.5 w-3.5" />
+            </HeaderIconButton>
           </div>
         </header>
 
@@ -246,7 +237,7 @@ export default function App() {
             sessions={chat.sessions}
             activeSessionID={chat.activeSessionID}
             selectedAgentID={chat.selectedAgentID}
-            terminalAgentID={terminalAgent?.id ?? null}
+            terminalAgentID={agentPanelOpen ? agentPanelFocusID : null}
             onSelectAgent={chat.selectAgent}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}
@@ -254,38 +245,28 @@ export default function App() {
             onOpenTerminal={handleOpenTerminal}
           />
 
-          {terminalAgent ? (
-            <section className="relative min-h-0 min-w-0 flex-1">
-              <div className="absolute inset-0 flex flex-col">
-                <Suspense fallback={<div className="flex-1" />}>
-                  <AgentTerminal agent={terminalAgent} />
-                </Suspense>
-              </div>
-            </section>
-          ) : (
-            <ChatPanel
-              timeline={chat.timeline}
-              aopEvents={chat.aopEvents}
-              scanResults={chat.scanResults}
-              isThinking={chat.isThinking}
-              isBusy={chat.busy}
-              error={chat.error}
-              activeSessionID={chat.activeSessionID}
-              hasActiveSession={chat.activeSessionID !== null}
-              agentOffline={activeAgentOffline}
-              agentName={activeSession?.agent_name}
-              agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
-              onCreateSession={handleCreateSession}
-              onOpenTerminal={handleOpenTerminal}
-              onOpenIOA={openIOAConsole}
-              mentionables={mentionables}
-              renderMentionPopup={renderMentionPopup}
-              injectText={composerSeed}
-              onSend={chat.sendMessage}
-              onPause={chat.cancelMessage}
-              onClearError={chat.clearError}
-            />
-          )}
+          <ChatPanel
+            timeline={chat.timeline}
+            aopEvents={chat.aopEvents}
+            scanResults={chat.scanResults}
+            isThinking={chat.isThinking}
+            isBusy={chat.busy}
+            error={chat.error}
+            activeSessionID={chat.activeSessionID}
+            hasActiveSession={chat.activeSessionID !== null}
+            agentOffline={activeAgentOffline}
+            agentName={activeSession?.agent_name}
+            agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
+            onCreateSession={handleCreateSession}
+            onOpenTerminal={handleOpenTerminal}
+            onOpenIOA={openIOAConsole}
+            mentionables={mentionables}
+            renderMentionPopup={renderMentionPopup}
+            injectText={composerSeed}
+            onSend={chat.sendMessage}
+            onPause={chat.cancelMessage}
+            onClearError={chat.clearError}
+          />
         </div>
       </div>
 
@@ -325,11 +306,6 @@ export default function App() {
     </TooltipProvider>
     </ThemeProvider>
   )
-}
-
-function ConnectedThemeToggle() {
-  const { isDark, toggle } = useTheme()
-  return <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
 }
 
 function LLMProfileSwitcher({

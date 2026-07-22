@@ -36,4 +36,18 @@ export default {
   llmHealthSettings: 'Click to open settings',
   // Mobile session drawer (opened from the header menu button)
   openSessions: 'Chat history',
+  authChecking: 'Checking session…',
+  loginTitle: 'Access AIScan',
+  loginDescription: 'Enter the access token generated at startup or configured on the command line.',
+  loginTokenLabel: 'Access token',
+  loginTokenPlaceholder: 'Enter token',
+  loginTokenRequired: 'Enter an access token',
+  loginShowToken: 'Show token',
+  loginHideToken: 'Hide token',
+  loginSecurityHint: 'The token is used only for login and kept by the server in an HttpOnly session.',
+  loginSubmit: 'Sign in',
+  loginSubmitting: 'Verifying…',
+  loginInvalid: 'The token is invalid. Check it and try again.',
+  loginUnavailable: 'The server could not be reached. Try again shortly.',
+  logout: 'Sign out',
 }

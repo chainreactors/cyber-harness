@@ -1,11 +1,26 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { Monitor, Search } from 'lucide-react'
+import { LoaderCircle, Monitor, Search } from 'lucide-react'
 import type { AgentInfo } from '../api'
-// Lazy — same @xterm chunk App splits; a static import here would pull it back
-// into the first-paint bundle.
-const AgentTerminal = lazy(() => import('./terminal'))
+const terminalChunkReloadKey = 'aiscan-terminal-chunk-reload'
+const loadAgentTerminal = () => import('./terminal')
+async function loadAgentTerminalWithRecovery() {
+  try {
+    const module = await loadAgentTerminal()
+    window.sessionStorage.removeItem(terminalChunkReloadKey)
+    return module
+  } catch (error) {
+    if (!window.sessionStorage.getItem(terminalChunkReloadKey)) {
+      window.sessionStorage.setItem(terminalChunkReloadKey, '1')
+      window.location.reload()
+      return new Promise<Awaited<ReturnType<typeof loadAgentTerminal>>>(() => {})
+    }
+    window.sessionStorage.removeItem(terminalChunkReloadKey)
+    throw error
+  }
+}
+const AgentTerminal = lazy(loadAgentTerminalWithRecovery)
 import {
   Badge,
   EmptyState,
@@ -57,7 +72,12 @@ export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, o
           )}
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
             {selected && (
-              <Suspense fallback={<div className="flex-1" />}>
+              <Suspense fallback={(
+                <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
+                  <LoaderCircle className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                  <span>{t('openingTerminal')}</span>
+                </div>
+              )}>
                 <AgentTerminal agent={selected} />
               </Suspense>
             )}

@@ -132,6 +132,41 @@ export interface ServerStatus {
   ioa_url?: string;
 }
 
+export const AUTH_REQUIRED_EVENT = 'aiscan:auth-required'
+
+export class APIError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message)
+    this.name = 'APIError'
+  }
+}
+
+export async function getAuthSession(): Promise<boolean> {
+  const res = await fetch('/api/auth/session', { cache: 'no-store' })
+  if (!res.ok) return false
+  const body = await res.json() as { authenticated?: boolean }
+  return body.authenticated === true
+}
+
+export async function login(token: string): Promise<void> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    throw new APIError(await errorMessage(res, 'Login failed'), res.status)
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' })
+  } finally {
+    notifyAuthRequired()
+  }
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -518,27 +553,48 @@ export async function deleteScan(id: string): Promise<void> {
   await apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Failed to delete scan', { method: 'DELETE' });
 }
 
+// subscribeSSE is the module-private EventSource primitive: one place that
+// wires named handlers, extracts the data string, and manages lifecycle.
+// Handlers receive the raw data string (possibly empty) and decide on parsing.
+function subscribeSSE(
+  url: string,
+  handlers: Record<string, (data: string, raw: Event) => void>,
+  opts?: { onOpen?: () => void; onError?: () => void },
+): EventSource {
+  const es = new EventSource(url)
+  if (opts?.onOpen) es.addEventListener('open', () => opts.onOpen!())
+  if (opts?.onError) es.addEventListener('error', () => opts.onError!())
+  for (const [type, handler] of Object.entries(handlers)) {
+    es.addEventListener(type, (e: Event) => {
+      const data = 'data' in e ? (e as MessageEvent).data : undefined
+      if (typeof data !== 'string') return
+      handler(data, e)
+    })
+  }
+  return es
+}
+
 export function subscribeScanEvents(
   id: string,
   onEvent: (event: ScanEvent) => void,
 ): () => void {
-  const es = new EventSource(authURL(`/api/scans/${encodeURIComponent(id)}/events`));
-  const handler = (type: RawScanEventType) => (e: Event) => {
-    const data = 'data' in e ? (e as MessageEvent).data : undefined;
-    if (typeof data !== 'string' || data === '') {
+  let es: EventSource | null = null
+  const close = () => es?.close()
+  const handler = (type: RawScanEventType) => (data: string) => {
+    if (data === '') {
       if (type === 'error') {
         void getScan(id)
           .then((job) => {
             if (job.status === 'completed') {
               onEvent({ type: 'complete', scan_id: id, status: job.status });
-              es.close();
+              close();
             } else if (job.status === 'failed' || job.status === 'canceled') {
               onEvent({
                 type: 'error',
                 scan_id: id,
                 error: job.error || `Scan ${job.status}`,
               });
-              es.close();
+              close();
             }
           })
           .catch(() => {});
@@ -562,17 +618,19 @@ export function subscribeScanEvents(
 
     onEvent(event);
     if (event.type === 'complete' || event.type === 'error') {
-      es.close();
+      close();
     }
   };
-  es.addEventListener('progress', handler('progress'));
-  es.addEventListener('status', handler('status'));
-  es.addEventListener('stats', handler('stats'));
-  es.addEventListener('complete', handler('complete'));
-  es.addEventListener('error', handler('error'));
-  es.addEventListener('output', handler('output'));
+  es = subscribeSSE(`/api/scans/${encodeURIComponent(id)}/events`, {
+    progress: handler('progress'),
+    status: handler('status'),
+    stats: handler('stats'),
+    complete: handler('complete'),
+    error: handler('error'),
+    output: handler('output'),
+  });
 
-  return () => es.close();
+  return () => es?.close();
 }
 
 // --- Chat session types ---
@@ -703,12 +761,8 @@ export interface FileUploadResult {
 export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
   const form = new FormData()
   form.append('file', file)
-  const headers: Record<string, string> = {}
-  const key = getAccessKey()
-  if (key) headers['Authorization'] = `Bearer ${key}`
-  const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
+  const resp = await authenticatedFetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
     method: 'POST',
-    headers,
     body: form,
   })
   if (!resp.ok) {
@@ -726,10 +780,7 @@ export async function listChatMessages(sessionID: string): Promise<ChatMessage[]
 // ('en' | 'zh'). Returns '' when the report isn't ready yet (404) so callers can
 // just show a placeholder.
 export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
-  const headers: Record<string, string> = {}
-  const key = getAccessKey()
-  if (key) headers['Authorization'] = `Bearer ${key}`
-  const res = await fetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`, { headers })
+  const res = await authenticatedFetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`)
   if (!res.ok) return ''
   return res.text()
 }
@@ -741,54 +792,48 @@ export function subscribeChatEvents(
   onAOP?: (event: AOPEvent) => void,
   onOpen?: () => void,
 ): () => void {
-  const url = authURL(`/api/chat/sessions/${encodeURIComponent(sessionID)}/events`)
-  const es = new EventSource(url)
-
-  es.addEventListener('open', () => onOpen?.())
-
   const eventTypes: ChatEventType[] = [
     'message',
     'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
     'agent_joined', 'session_cleared', 'error',
   ]
 
+  const handlers: Record<string, (data: string) => void> = {}
   for (const type of eventTypes) {
-    es.addEventListener(type, (e: Event) => {
-      const data = 'data' in e ? (e as MessageEvent).data : undefined
-      if (typeof data !== 'string' || data === '') return
+    handlers[type] = (data: string) => {
+      if (data === '') return
       try {
         const parsed = JSON.parse(data)
         onEvent({ ...parsed, type })
       } catch {
         onEvent({ type, session_id: sessionID, data } as ChatEvent)
       }
-    })
+    }
   }
-
-  es.addEventListener('aop', (e: Event) => {
-    const data = 'data' in e ? (e as MessageEvent).data : undefined
-    if (typeof data !== 'string' || data === '') return
+  handlers['aop'] = (data: string) => {
+    if (data === '') return
     try {
       const parsed = JSON.parse(data) as AOPEvent
       if (parsed.session_id && parsed.agent && parsed.type && parsed.ts && parsed.data) onAOP?.(parsed)
     } catch {
       // Ignore malformed protocol frames; platform events continue normally.
     }
-  })
+  }
 
-  es.addEventListener('error', () => {
-    // EventSource reconnects automatically. Reconcile platform-domain state
-    // from REST; AOP itself is replayed from durable storage by the SSE endpoint.
-    onReconnect?.()
-  })
+  // EventSource reconnects automatically. Reconcile platform-domain state
+  // from REST; AOP itself is replayed from durable storage by the SSE endpoint.
+  const es = subscribeSSE(
+    `/api/chat/sessions/${encodeURIComponent(sessionID)}/events`,
+    handlers,
+    { onOpen, onError: onReconnect },
+  )
 
   return () => es.close()
 }
 
 export function agentTerminalWebSocketURL(agentID: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const base = `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
-  return authURL(base);
+  return `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
 }
 
 // ── SCO Nodes ──
@@ -823,7 +868,7 @@ export async function importSCOData(
   form.append('file', file);
   form.append('artifact', artifact);
   form.append('scan_id', scanId);
-  const resp = await fetch('/api/sco/import', { method: 'POST', body: form });
+  const resp = await authenticatedFetch('/api/sco/import', { method: 'POST', body: form });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error(err.error || `Import failed: ${resp.status}`);
@@ -831,29 +876,22 @@ export async function importSCOData(
   return resp.json();
 }
 
-function getAccessKey(): string {
-  return (window as any).__AISCAN_ACCESS_KEY__ || ''
-}
-
-// For SSE/WebSocket, append access_key as query param since EventSource/WebSocket can't set headers.
-function authURL(path: string): string {
-  const key = getAccessKey()
-  if (!key) return path
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}access_key=${encodeURIComponent(key)}`
-}
-
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {
-  const key = getAccessKey()
-  const headers = new Headers(init?.headers)
-  if (key) {
-    headers.set('Authorization', `Bearer ${key}`)
-  }
-  const res = await fetch(path, { ...init, headers });
+  const res = await authenticatedFetch(path, init)
   if (!res.ok) {
-    throw new Error(await errorMessage(res, fallbackMessage));
+    throw new APIError(await errorMessage(res, fallbackMessage), res.status)
   }
   return res.json();
+}
+
+async function authenticatedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init)
+  if (res.status === 401) notifyAuthRequired()
+  return res
+}
+
+function notifyAuthRequired() {
+  window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
 }
 
 async function errorMessage(res: Response, fallback: string) {

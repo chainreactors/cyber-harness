@@ -9,14 +9,30 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/tui/readline/inputrc"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
+
+func TestIsLocalAgentTerminal(t *testing.T) {
+	local := rlterm.Local()
+	if !isLocalAgentTerminal(local) {
+		t.Fatal("local terminal should be eligible for split rendering")
+	}
+
+	var output bytes.Buffer
+	remote := rlterm.Stream(bytes.NewReader(nil), &output, &output, rlterm.NewControl(true, 80, 24))
+	if isLocalAgentTerminal(remote) {
+		t.Fatal("remote terminal must not use local split rendering")
+	}
+}
 
 type captureConsoleProvider struct {
 	requests []*agent.ChatCompletionRequest
@@ -43,6 +59,25 @@ func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
 	want := []string{"!", "echo chat_pass"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("AgentConsoleArgsForLine = %#v, want %#v", got, want)
+	}
+}
+
+func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertion is unix-only")
+	}
+	var stdout, stderr bytes.Buffer
+	registry := commands.NewRegistry()
+	bash := commands.NewBashTool(t.TempDir(), 5)
+	defer bash.Close()
+	registry.RegisterTool(bash)
+	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{Commands: registry}, nil, &stdout, &stderr)
+
+	if _, err := repl.ExecuteLineAndWait("!printf DIRECT_OK"); err != nil {
+		t.Fatalf("bang command: %v", err)
+	}
+	if got := stdout.String(); got != "DIRECT_OK\n" {
+		t.Fatalf("stdout = %q, want a prompt-safe trailing newline", got)
 	}
 }
 

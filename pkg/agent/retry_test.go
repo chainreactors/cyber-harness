@@ -118,7 +118,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	_, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
-		newAOPEmitter(eventbus.New[aop.Event](), "aiscan", "test-session", "", 0),
+		newAOPEmitter(eventbus.New[aop.Event](), "aiscan", "test-session", "", "", nil, 0),
 		telemetry.NopLogger(),
 		1,
 		"m-1",

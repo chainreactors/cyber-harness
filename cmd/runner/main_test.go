@@ -19,4 +19,7 @@ func TestInitToolsRegistersBash(t *testing.T) {
 	if _, ok := registry.GetTool("bash"); !ok {
 		t.Fatal("bash tool is not registered")
 	}
+	if _, ok := registry.GetTool("ls"); !ok {
+		t.Fatal("native ls tool is not registered")
+	}
 }

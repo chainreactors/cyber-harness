@@ -3,8 +3,12 @@ package evaluator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 const defaultMaxEvalRounds = 3
@@ -16,17 +20,53 @@ type EvalLoopConfig struct {
 	Criteria      string
 }
 
+// NewLoopConfig builds an EvalLoopConfig around a fresh Evaluator. A
+// maxRounds of zero (or negative) defers to RunWithEval's default.
+func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal, criteria string, maxRounds int) EvalLoopConfig {
+	return EvalLoopConfig{
+		Evaluator:     New(Config{Provider: p, Model: model, Logger: logger}),
+		MaxEvalRounds: maxRounds,
+		Goal:          goal,
+		Criteria:      criteria,
+	}
+}
+
 func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agent.Result, *Verdict, error) {
 	if cfg.MaxEvalRounds <= 0 {
 		cfg.MaxEvalRounds = defaultMaxEvalRounds
 	}
+	rootID := a.SessionID()
+	runID := fmt.Sprintf("%s-eval-%d", rootID, time.Now().UnixNano())
+	a.BeginEvalSession()
+	var (
+		totalUsage agent.Usage
+		totalTurns int
+		rootStop   = agent.StopReasonStopped
+		rootErr    error
+	)
+	defer func() { a.EndEvalSession(rootStop, totalTurns, totalUsage, rootErr) }()
 
-	result, err := a.Run(ctx, agent.TextInput(cfg.Goal))
-	if err != nil {
-		return result, nil, err
-	}
-
-	for attempt := 0; attempt < cfg.MaxEvalRounds; attempt++ {
+	input := agent.TextInput(cfg.Goal)
+	var lastVerdict *Verdict
+	for round := 1; round <= cfg.MaxEvalRounds; round++ {
+		result, err := a.Run(ctx, input, agent.InSession(fmt.Sprintf("%s-round-%d", runID, round), rootID))
+		if result != nil {
+			totalTurns += result.Turns
+			totalUsage.PromptTokens += result.TotalUsage.PromptTokens
+			totalUsage.CompletionTokens += result.TotalUsage.CompletionTokens
+			totalUsage.TotalTokens += result.TotalUsage.TotalTokens
+			totalUsage.CacheReadTokens += result.TotalUsage.CacheReadTokens
+			totalUsage.CacheWriteTokens += result.TotalUsage.CacheWriteTokens
+		}
+		if err != nil {
+			rootErr = err
+			if ctx.Err() != nil {
+				rootStop = agent.StopReasonCanceled
+			} else {
+				rootStop = agent.StopReasonError
+			}
+			return result, lastVerdict, err
+		}
 		// Judge whenever the run produced work worth evaluating. Only bail on a
 		// hard error or a user cancel — a run that merely hit its turn or token
 		// budget (Stopped/Budget) still did work the criteria should be checked
@@ -34,10 +74,12 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 		// (The old gate skipped everything but Terminated/Completed, so a
 		// turn-capped agent silently never got evaluated.)
 		if result.Stop == agent.StopReasonError || result.Stop == agent.StopReasonCanceled {
-			return result, nil, nil
+			rootStop = result.Stop
+			rootErr = result.Err
+			return result, lastVerdict, result.Err
 		}
 
-		a.EmitStatus(agent.StatusEvalStart, map[string]any{"eval_round": attempt})
+		a.EmitStatus(xeval.StateStart, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds})
 
 		verdict, evalErr := cfg.Evaluator.Evaluate(
 			ctx, cfg.Goal, cfg.Criteria,
@@ -45,27 +87,27 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 		)
 
 		if evalErr != nil {
-			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", attempt+1, evalErr)
-			a.EmitStatus(agent.StatusEvalError, map[string]any{
-				"eval_round": attempt,
-				"eval_error": evalErr.Error(),
-			})
-			feedback := fmt.Sprintf("Evaluation could not determine if the task is complete. Original criteria: %s. Please review your work and continue if the goal is not yet fully achieved.", cfg.Criteria)
-			result, err = a.Run(ctx, agent.TextInput(feedback))
-			if err != nil {
-				return result, nil, err
+			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", round, evalErr)
+			a.EmitStatus(xeval.StateError, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds, Error: evalErr.Error()})
+			if round == cfg.MaxEvalRounds {
+				rootStop, rootErr = agent.StopReasonError, evalErr
+				return result, lastVerdict, evalErr
 			}
+			feedback := fmt.Sprintf("Evaluation could not determine if the task is complete. Original criteria: %s. Please review your work and continue if the goal is not yet fully achieved.", cfg.Criteria)
+			input = agent.TextInput(feedback)
 			continue
 		}
 
-		a.EmitStatus(agent.StatusEvalEnd, map[string]any{
-			"eval_round": attempt,
-			"eval_pass":  verdict.Pass,
-			"eval_reason": verdict.Reason,
-		})
-		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", attempt+1, verdict.Pass, verdict.InheritContext, verdict.Reason)
+		lastVerdict = verdict
+		a.EmitStatus(xeval.StateEnd, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds, Pass: verdict.Pass, Reason: verdict.Reason})
+		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", round, verdict.Pass, verdict.InheritContext, verdict.Reason)
 
 		if verdict.Pass {
+			rootStop = agent.StopReasonCompleted
+			return result, verdict, nil
+		}
+		if round == cfg.MaxEvalRounds {
+			rootStop = agent.StopReasonStopped
 			return result, verdict, nil
 		}
 
@@ -75,7 +117,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 		}
 
 		if !verdict.InheritContext {
-			cfg.Evaluator.cfg.Logger.Importantf("evaluate: compacting context (round %d)", attempt+1)
+			cfg.Evaluator.cfg.Logger.Importantf("evaluate: compacting context (round %d)", round)
 			if _, err := a.Compact(ctx, agent.CompactConfig{
 				Provider: cfg.Evaluator.cfg.Provider,
 				Model:    cfg.Evaluator.cfg.Model,
@@ -85,15 +127,8 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig) (*agen
 			}
 		}
 
-		cfg.Evaluator.cfg.Logger.Importantf("evaluate: injecting feedback (round %d): %s", attempt+1, feedback)
-
-		result, err = a.Run(ctx, agent.TextInput(feedback))
-		if err != nil {
-			cfg.Evaluator.cfg.Logger.Warnf("evaluate: agent.Run failed after feedback: %s", err)
-			return result, verdict, err
-		}
-		cfg.Evaluator.cfg.Logger.Importantf("evaluate: agent completed after feedback (round %d), stop=%s turns=%d", attempt+1, result.Stop, result.Turns)
+		cfg.Evaluator.cfg.Logger.Importantf("evaluate: injecting feedback (round %d): %s", round, feedback)
+		input = agent.TextInput(feedback)
 	}
-
-	return result, nil, nil
+	return nil, lastVerdict, nil
 }

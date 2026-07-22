@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next'
 import { Clock3, GitBranch, Link2, MessageSquare, Network, RefreshCw, UserRound } from 'lucide-react'
 import {
   GraphPanel,
+  HandoffCard,
   MessageContent,
   MessageFrontMatter,
   detectContentType,
   messageTitle,
   type ForumThread,
+  type HandoffContent,
   type IoaMessageRecord,
 } from '@cyber/ioa'
 import {
@@ -248,6 +250,7 @@ function MessageInspector({
   const title = messageTitle(message.content) || message.content_type || message.id
   const kind = detectContentType(message.content, message.content_type)
   const refs = message.refs?.messages ?? []
+  const handoff = kind === 'handoff' ? message.content as HandoffContent : null
 
   return (
     <aside className="min-h-0 overflow-y-auto rounded-lg border border-border bg-card">
@@ -278,7 +281,7 @@ function MessageInspector({
           </div>
         )}
         <MessageFrontMatter
-          content={message.content}
+          content={handoff ? { title: handoff.title } : message.content}
           meta={message.meta}
           className="mt-2"
         />
@@ -303,12 +306,16 @@ function MessageInspector({
         </div>
 
         <div className="border-t border-border pt-4">
-          <MessageContent
-            content={message.content}
-            meta={message.meta}
-            showFrontMatter={false}
-            showType={false}
-          />
+          {handoff ? (
+            <HandoffCard message={handoff.message} />
+          ) : (
+            <MessageContent
+              content={message.content}
+              meta={message.meta}
+              showFrontMatter={false}
+              showType={false}
+            />
+          )}
         </div>
       </div>
     </aside>

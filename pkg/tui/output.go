@@ -14,6 +14,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/util"
 	"golang.org/x/term"
 )
@@ -370,7 +372,7 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.agentStart = time.Now()
 
 	case aop.TypeTurnStart:
-		data, err := aop.DecodeData[aop.TurnData](event)
+		data, err := aop.DecodeData[aop.TurnEndData](event)
 		if err != nil {
 			return
 		}
@@ -526,15 +528,14 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.live.SetTurnUsage(usage)
 
 	case aop.TypeTurnEnd:
-		data, err := aop.DecodeData[aop.TurnData](event)
+		data, err := aop.DecodeData[aop.TurnEndData](event)
 		if err != nil {
 			return
 		}
-		ext := aopExt(event)
-		o.contextTokens = extInt(ext, "context_tokens")
+		o.contextTokens = data.ContextTokens
 		o.live.FinishTurn(o.contextTokens)
 		o.stopLive()
-		o.turnEnd(data.Turn, ext)
+		o.turnEnd(data.Turn)
 	case aop.TypeSessionEnd:
 		data, err := aop.DecodeData[aop.SessionEndData](event)
 		if err != nil {
@@ -547,24 +548,27 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		if err != nil {
 			return
 		}
-		ext := aopExt(event)
 		switch data.State {
-		case agent.StatusEvalStart:
+		case xeval.StateStart:
+			detail, _, _ := xeval.GetDetail(event)
 			o.stopLive()
-			o.evalStart(extInt(ext, "eval_round"))
-		case agent.StatusEvalEnd:
+			o.evalStart(detail.Round)
+		case xeval.StateEnd:
+			detail, _, _ := xeval.GetDetail(event)
 			o.stopLive()
-			o.evalEnd(extInt(ext, "eval_round"), extBool(ext, "eval_pass"), extString(ext, "eval_reason"))
-		case agent.StatusEvalError:
+			o.evalEnd(detail.Round, detail.Pass, detail.Reason)
+		case xeval.StateError:
+			detail, _, _ := xeval.GetDetail(event)
 			o.stopLive()
-			o.evalError(extInt(ext, "eval_round"), extString(ext, "eval_error"))
-		case agent.StatusCompactStart:
+			o.evalError(detail.Round, detail.Error)
+		case xcompact.StateStart:
 			o.stopLive()
 			o.compactStart()
-		case agent.StatusCompactEnd:
+		case xcompact.StateEnd:
+			detail, _, _ := xcompact.GetDetail(event)
 			o.stopLive()
-			o.compactEnd(extInt(ext, "compact_tokens_before"), extInt(ext, "compact_tokens_after"), extInt(ext, "compact_kept_messages"))
-		case agent.StatusCompactError:
+			o.compactEnd(detail.TokensBefore, detail.TokensAfter, detail.KeptMessages)
+		case xcompact.StateError:
 			o.stopLive()
 			o.compactError()
 		}
@@ -732,7 +736,7 @@ func (o *AgentOutput) coloredElapsed(started time.Time) string {
 // Turn / agent end — stats come from events, not accumulated
 // ---------------------------------------------------------------------------
 
-func (o *AgentOutput) turnEnd(turn int, ext map[string]any) {
+func (o *AgentOutput) turnEnd(turn int) {
 	if o.verbosity < 0 {
 		return
 	}
@@ -965,52 +969,6 @@ func (o *AgentOutput) renderUserIntent(body string) {
 		}
 	}
 	fmt.Fprintln(w, o.dim("╰─"))
-}
-
-// ---------------------------------------------------------------------------
-// AOP event helpers
-// ---------------------------------------------------------------------------
-
-// aopExt unwraps the single <agent-name> ext block the emitter nests detail
-// under. The TUI doesn't care which agent name produced the event.
-func aopExt(event aop.Event) map[string]any {
-	for _, v := range event.Ext {
-		if m, ok := v.(map[string]any); ok {
-			return m
-		}
-	}
-	return nil
-}
-
-// extInt reads an int from an ext map, tolerating the float64 widening a JSON
-// roundtrip applies (in-memory bus events carry Go ints).
-func extInt(ext map[string]any, key string) int {
-	switch v := ext[key].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case json.Number:
-		n, _ := v.Int64()
-		return int(n)
-	}
-	return 0
-}
-
-func extString(ext map[string]any, key string) string {
-	if s, ok := ext[key].(string); ok {
-		return s
-	}
-	return ""
-}
-
-func extBool(ext map[string]any, key string) bool {
-	if b, ok := ext[key].(bool); ok {
-		return b
-	}
-	return false
 }
 
 // marshalToolArgs normalizes a tool.call Args payload (raw JSON string or a

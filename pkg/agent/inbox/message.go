@@ -11,10 +11,10 @@ import (
 type Origin string
 
 const (
-	OriginUser   Origin = "user"
-	OriginPeer   Origin = "peer"
+	OriginUser    Origin = "user"
+	OriginPeer    Origin = "peer"
 	OriginSession Origin = "session"
-	OriginSystem Origin = "system"
+	OriginSystem  Origin = "system"
 )
 
 type Priority int

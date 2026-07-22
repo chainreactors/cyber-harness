@@ -49,7 +49,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			if result.Err != nil && stop == StopReasonError {
 				em.errorEvt(result.Err, isRetryableError(result.Err))
 			}
-			em.sessionEnd(stop, result.Turns, result.Err)
+			em.sessionEnd(stop, result.Turns, result.TotalUsage, result.Err)
 			if cfg.OnRunEnd != nil {
 				cfg.OnRunEnd(result)
 			}
@@ -122,10 +122,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				return end(result, result.Err, StopReasonBudget)
 			}
 			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
-				em.status(StatusTokenBudgetWarning, map[string]any{
-					"context_tokens": transcript.contextTokens,
-					"token_budget":   cfg.TokenBudget,
-				})
+				em.status(aop.StatusTokenBudgetWarning, aop.NSAOP, aop.BudgetWarning{ContextTokens: transcript.contextTokens, TokenBudget: cfg.TokenBudget})
 				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
 			}
 		}
@@ -260,7 +257,7 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 		slots[i] = toolCallSlot{tc: tc}
 	}
 	for _, tc := range toolCalls {
-		em.toolCall(tc.ID, tc.Function.Name, parseToolArgs(tc.Function.Arguments))
+		em.toolCall(tc.ID, tc.Function.Name, parseToolArgs(tc.Function.Arguments), "")
 	}
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
@@ -281,7 +278,11 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 	messages := make([]ChatMessage, 0, len(slots))
 	terminations := 0
 	for _, s := range slots {
-		em.toolResult(s.tc.ID, s.tc.Function.Name, s.result.eventContent(), s.result.isError,
+		var details any
+		if s.result.fullResult != nil {
+			details = s.result.fullResult.Details
+		}
+		em.toolResult(s.tc.ID, s.tc.Function.Name, s.result.eventContent(), details, s.result.flow == ToolFlowTerminate, s.result.isError,
 			int(time.Since(s.startedAt).Milliseconds()))
 		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Function.Name, len(s.result.result))
 		toolMsg := toolResultToMessage(s.tc.ID, s.result)
@@ -313,6 +314,7 @@ type toolExecution struct {
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, turn int) toolExecution {
 	toolCtx := output.ContextWithCallID(ctx, tc.ID)
+	toolCtx = withToolAgentConfig(toolCtx, cfg)
 	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
 		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Function.Name, tc.Function.Arguments)
@@ -326,7 +328,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
-		if toolResult.HasImages() {
+		if toolResult.HasImages() || toolResult.Details != nil || toolResult.Terminate {
 			execution.fullResult = &toolResult
 		}
 	}

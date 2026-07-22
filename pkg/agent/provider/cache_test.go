@@ -902,8 +902,8 @@ func newAnthropicMockServer(t *testing.T, cache *cachedPrefix) *httptest.Server 
 					"usage": map[string]interface{}{
 						"input_tokens":                promptTokens,
 						"output_tokens":               0,
-						"cache_creation_input_tokens":  cacheWrite,
-						"cache_read_input_tokens":      cacheRead,
+						"cache_creation_input_tokens": cacheWrite,
+						"cache_read_input_tokens":     cacheRead,
 					},
 				},
 			}))
@@ -948,8 +948,8 @@ func newAnthropicMockServer(t *testing.T, cache *cachedPrefix) *httptest.Server 
 				"usage": map[string]interface{}{
 					"input_tokens":                promptTokens,
 					"output_tokens":               completionTokens,
-					"cache_creation_input_tokens":  cacheWrite,
-					"cache_read_input_tokens":      cacheRead,
+					"cache_creation_input_tokens": cacheWrite,
+					"cache_read_input_tokens":     cacheRead,
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -1004,8 +1004,8 @@ func newAnthropicToolMockServer(t *testing.T, cache *cachedPrefix) *httptest.Ser
 				"usage": map[string]interface{}{
 					"input_tokens":                promptTokens,
 					"output_tokens":               completionTokens,
-					"cache_creation_input_tokens":  cacheWrite,
-					"cache_read_input_tokens":      cacheRead,
+					"cache_creation_input_tokens": cacheWrite,
+					"cache_read_input_tokens":     cacheRead,
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -1021,8 +1021,8 @@ func newAnthropicToolMockServer(t *testing.T, cache *cachedPrefix) *httptest.Ser
 				"usage": map[string]interface{}{
 					"input_tokens":                promptTokens,
 					"output_tokens":               completionTokens,
-					"cache_creation_input_tokens":  cacheWrite,
-					"cache_read_input_tokens":      cacheRead,
+					"cache_creation_input_tokens": cacheWrite,
+					"cache_read_input_tokens":     cacheRead,
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -1096,7 +1096,7 @@ func TestAnthropicProtocol_ToolCallCache(t *testing.T) {
 	// Turn 1: triggers tool_use
 	req1 := &ChatCompletionRequest{
 		Messages: []ChatMessage{sys, user1},
-		Tools: tools, CacheRetention: CacheShort, SessionID: "sess-tool",
+		Tools:    tools, CacheRetention: CacheShort, SessionID: "sess-tool",
 	}
 	resp1, err := prov.ChatCompletion(ctx, req1)
 	if err != nil {
@@ -1111,7 +1111,7 @@ func TestAnthropicProtocol_ToolCallCache(t *testing.T) {
 
 	req2 := &ChatCompletionRequest{
 		Messages: []ChatMessage{sys, user1, assistant1, toolResult, user2},
-		Tools: tools, CacheRetention: CacheShort, SessionID: "sess-tool",
+		Tools:    tools, CacheRetention: CacheShort, SessionID: "sess-tool",
 	}
 	resp2, err := prov.ChatCompletion(ctx, req2)
 	if err != nil {
@@ -1172,7 +1172,7 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 
 	// Turn 1
 	req1 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1},
+		Messages:  []ChatMessage{sys, user1},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp1, err := prov.ChatCompletion(ctx, req1)
@@ -1185,7 +1185,7 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	a1 := resp1.Choices[0].Message
 	user2 := NewTextMessage("user", "What is 3+3?")
 	req2 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1, a1, user2},
+		Messages:  []ChatMessage{sys, user1, a1, user2},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp2, err := prov.ChatCompletion(ctx, req2)
@@ -1198,7 +1198,7 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	a2 := resp2.Choices[0].Message
 	user3 := NewTextMessage("user", "What is 4+4?")
 	req3 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1, a1, user2, a2, user3},
+		Messages:  []ChatMessage{sys, user1, a1, user2, a2, user3},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp3, err := prov.ChatCompletion(ctx, req3)
@@ -1236,7 +1236,7 @@ func runStreamingMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	// Turn 1
 	user1 := NewTextMessage("user", "Hello")
 	req1 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1},
+		Messages:  []ChatMessage{sys, user1},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-stream", Stream: true,
 	}
 	msg1, usage1 := collectStream(t, sp, ctx, req1)
@@ -1245,7 +1245,7 @@ func runStreamingMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	a1 := NewTextMessage("assistant", msg1)
 	user2 := NewTextMessage("user", "Goodbye")
 	req2 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1, a1, user2},
+		Messages:  []ChatMessage{sys, user1, a1, user2},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-stream", Stream: true,
 	}
 	_, usage2 := collectStream(t, sp, ctx, req2)
@@ -1279,7 +1279,7 @@ func runForkScenario(t *testing.T, prov Provider, label string) {
 
 	// Parent's next request
 	parentReq := &ChatCompletionRequest{
-		Messages: append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "parent question 4")),
+		Messages:  append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "parent question 4")),
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-fork",
 	}
 	parentResp, err := prov.ChatCompletion(ctx, parentReq)
@@ -1289,7 +1289,7 @@ func runForkScenario(t *testing.T, prov Provider, label string) {
 
 	// Fork child: inherits parent messages, new prompt
 	childReq := &ChatCompletionRequest{
-		Messages: append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "forked child task")),
+		Messages:  append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "forked child task")),
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-fork",
 	}
 	childResp, err := prov.ChatCompletion(ctx, childReq)

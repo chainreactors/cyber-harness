@@ -90,6 +90,7 @@ func initTools(ctx context.Context, option *cfg.Option, logger telemetry.Logger,
 	registry := commands.NewRegistry()
 	deps := &commands.Deps{
 		WorkDir:      workDir,
+		RunnerMode:   true,
 		EngineSet:    engineSet,
 		Logger:       logger,
 		DataBus:      dataBus,

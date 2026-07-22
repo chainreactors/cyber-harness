@@ -7,6 +7,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
@@ -133,6 +134,26 @@ type GoalExt struct {
 	NoEcho bool `json:"no_echo,omitempty"`
 }
 
+// NSWeb is the AOP extension namespace the hub uses to attach its own message
+// metadata (originating agent id, persisted metadata) to message events.
+const NSWeb = "aiscan.web"
+
+// WebMessageExt is the hub-owned message extension stored under NSWeb.
+type WebMessageExt struct {
+	AgentID  string          `json:"agent_id,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
+// SetWebExt writes the hub message extension onto an event.
+func SetWebExt(event *aop.Event, ext WebMessageExt) error {
+	return aop.SetExt(event, NSWeb, ext)
+}
+
+// GetWebExt reads the hub message extension from an event.
+func GetWebExt(event aop.Event) (WebMessageExt, bool, error) {
+	return aop.Ext[WebMessageExt](event, NSWeb)
+}
+
 // IsAOPUserMessage reports whether the message carries an AOP user message
 // event — the only executable inbound AOP unit — and returns the decoded event.
 func IsAOPUserMessage(msg Message) (aop.Event, bool) {
@@ -150,18 +171,17 @@ func IsAOPUserMessage(msg Message) (aop.Event, bool) {
 	return event, true
 }
 
-// DecodeGoalExt extracts the aiscan GoalExt block from an inbound AOP event.
+// DecodeGoalExt decodes the protocol-owned run and eval namespaces.
 func DecodeGoalExt(event aop.Event) GoalExt {
 	var goal GoalExt
-	raw, ok := event.Ext["aiscan"]
-	if !ok {
-		return goal
+	if run, ok, err := aop.Ext[aop.RunControl](event, aop.NSAOP); err == nil && ok {
+		goal.NoEcho = run.NoEcho
+		goal.PersistMaxTurns = run.MaxTurns
 	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return goal
+	if control, ok, err := xeval.Get(event); err == nil && ok {
+		goal.EvalCriteria = control.Criteria
+		goal.EvalMaxRounds = control.MaxRounds
 	}
-	_ = json.Unmarshal(data, &goal)
 	return goal
 }
 
@@ -203,6 +223,21 @@ type FileUploadResult struct {
 type FileRPCPayload struct {
 	Path string `json:"path"`
 	Size int64  `json:"size,omitempty"`
+}
+
+// FileEntry is one structured directory entry returned by a file.list RPC.
+// Names are transported as JSON strings, so unusual characters never need to
+// be inferred from shell output.
+type FileEntry struct {
+	Name        string `json:"name"`
+	IsDirectory bool   `json:"isDirectory"`
+	Size        int64  `json:"size"`
+}
+
+// FileListResult is carried in the completion payload for file.list.
+type FileListResult struct {
+	Path    string      `json:"path"`
+	Entries []FileEntry `json:"entries"`
 }
 
 const TypePTY = "pty"

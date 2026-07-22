@@ -19,8 +19,8 @@ func TestEstimateMessageTokens(t *testing.T) {
 		want int
 	}{
 		{"empty", ChatMessage{Role: "user"}, 0},
-		{"short text", msg("user", "hello"), 2},               // 5 chars → ceil(5/4) = 2
-		{"exact boundary", msg("user", "abcd"), 1},             // 4 chars → 1
+		{"short text", msg("user", "hello"), 2},                                // 5 chars → ceil(5/4) = 2
+		{"exact boundary", msg("user", "abcd"), 1},                             // 4 chars → 1
 		{"longer text", msg("user", "hello world, this is a test message"), 9}, // 35 chars → ceil(35/4) = 9
 		{"with tool calls", ChatMessage{
 			Role: "assistant",
@@ -41,8 +41,8 @@ func TestEstimateMessageTokens(t *testing.T) {
 
 func TestEstimateAllTokens(t *testing.T) {
 	msgs := []ChatMessage{
-		msg("user", "hello"),        // 2
-		msg("assistant", "world"),   // 2
+		msg("user", "hello"),       // 2
+		msg("assistant", "world"),  // 2
 		msg("user", "how are you"), // 3
 	}
 	got := estimateAllTokens(msgs)

@@ -1,50 +1,46 @@
 package webagent
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-// Pending upload notes must drain exactly once per session, stay scoped to their
-// own session, and normalize the empty session ID to "default" (matching agentFor)
-// so an upload and the chat turn that references it land in the same bucket.
-func TestPendingUploadsDrainOncePerSession(t *testing.T) {
-	m := newChatRuntimeManager(nil)
-
-	m.notePendingUpload("s1", "note-a")
-	m.notePendingUpload("s1", "note-b")
-	m.notePendingUpload("s2", "note-c")
-
-	got := m.takePendingUploads("s1")
-	if got != "note-a\nnote-b" {
-		t.Fatalf("s1 first drain = %q, want %q", got, "note-a\nnote-b")
-	}
-	if again := m.takePendingUploads("s1"); again != "" {
-		t.Fatalf("s1 second drain = %q, want empty (drain is one-shot)", again)
-	}
-	if got := m.takePendingUploads("s2"); got != "note-c" {
-		t.Fatalf("s2 drain = %q, want %q", got, "note-c")
-	}
-
-	// Empty session ID collapses to "default" on both sides.
-	m.notePendingUpload("", "note-default")
-	if got := m.takePendingUploads("default"); got != "note-default" {
-		t.Fatalf("default drain = %q, want %q", got, "note-default")
-	}
+type uploadCaptureProvider struct {
+	mu       sync.Mutex
+	messages []agent.ChatMessage
 }
 
-func TestPendingUploadsNilManagerSafe(t *testing.T) {
-	var m *chatRuntimeManager
-	m.notePendingUpload("s1", "note") // must not panic
-	if got := m.takePendingUploads("s1"); got != "" {
-		t.Fatalf("nil manager drain = %q, want empty", got)
+func (p *uploadCaptureProvider) Name() string { return "upload-capture" }
+
+func (p *uploadCaptureProvider) ChatCompletion(_ context.Context, req *agent.ChatCompletionRequest) (*agent.ChatCompletionResponse, error) {
+	p.mu.Lock()
+	p.messages = append([]agent.ChatMessage(nil), req.Messages...)
+	p.mu.Unlock()
+	return &agent.ChatCompletionResponse{Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}}}, nil
+}
+
+func (p *uploadCaptureProvider) contains(text string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, message := range p.messages {
+		if message.Content != nil && strings.Contains(*message.Content, text) {
+			return true
+		}
 	}
+	return false
 }
 
 // handleFileUpload must write the bytes to the agent's local disk AND queue a note
@@ -52,7 +48,16 @@ func TestPendingUploadsNilManagerSafe(t *testing.T) {
 // only ever seeing the hub's UI-only "file uploaded" notice and then guessing a
 // bare filename against its cwd.
 func TestHandleFileUploadRecordsAbsolutePathForNextTurn(t *testing.T) {
-	m := newChatRuntimeManager(nil)
+	rt, err := runner.NewAgentRuntime(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &runner.RuntimeConfig{
+		NoOutput:         true,
+		ProviderOptional: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	provider := &uploadCaptureProvider{}
+	rt.SetProvider(provider, agent.ProviderConfig{Provider: provider.Name(), Model: "test"})
 
 	const filename = "aiscan_test_upload_probe.txt"
 	const body = "codex public proof\nkey=appImage/probe"
@@ -68,7 +73,7 @@ func TestHandleFileUploadRecordsAbsolutePathForNextTurn(t *testing.T) {
 	}
 
 	var got webproto.Message
-	handleFileUpload(msg, func(out webproto.Message) { got = out }, m)
+	handleFileUpload(msg, func(out webproto.Message) { got = out }, rt)
 
 	// The agent replied with the written path and no error.
 	var res webproto.FileUploadResult
@@ -87,12 +92,25 @@ func TestHandleFileUploadRecordsAbsolutePathForNextTurn(t *testing.T) {
 		t.Fatalf("file on disk = %q, err=%v; want %q", data, err, body)
 	}
 
-	// The next turn for this session carries the absolute path so `read` resolves.
-	note := m.takePendingUploads("sess-1")
-	if !strings.Contains(note, dest) {
-		t.Fatalf("pending note %q does not carry absolute path %q", note, dest)
+	event := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        "2026-07-22T00:00:00Z",
+		SessionID: "sess-1",
+		Agent:     "test",
+		Data: webproto.MustJSON(aop.MessageData{
+			MessageID: "m-1",
+			Role:      "user",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "read the uploaded file"}},
+		}),
 	}
-	if !strings.Contains(note, filename) {
-		t.Fatalf("pending note %q does not name the file %q", note, filename)
+	inbound, err := agent.Classify(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Execute(context.Background(), "request-1", inbound, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.contains(dest) || !provider.contains(filename) {
+		t.Fatalf("provider request did not receive upload note for %q", dest)
 	}
 }
