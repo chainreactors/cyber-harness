@@ -43,7 +43,7 @@ One-shot 模式接收一次性任务，agent 执行完成后自动退出。
 
 | 方式 | 参数 | 说明 |
 | --- | --- | --- |
-| 自然语言 prompt | `-p, --prompt` | 任务描述 |
+| Prompt | `-p, --prompt` | 任务描述；若值是已存在的文件路径，则读取文件内容 |
 | 目标 | `-i, --input` | IP、URL、IP:port、CIDR，可重复 |
 | 任务文件 | `--task-file` | 从文件读取任务描述（支持 Markdown） |
 | 指定 skill | `-s, --skill` | 加载指定 skill，可重复 |
@@ -62,6 +62,9 @@ aiscan agent -p "枚举服务并输出风险摘要" -i 10.0.0.10 -i http://10.0.
 
 # 从文件读取任务
 aiscan agent --task-file task.md -i 192.168.1.0/24
+
+# -p 也会自动读取已存在的 prompt 文件
+aiscan agent -p task.md -i 192.168.1.0/24
 
 # 仅提供目标（自动生成扫描任务）
 aiscan agent -i http://target.example

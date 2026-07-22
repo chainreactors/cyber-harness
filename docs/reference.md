@@ -113,7 +113,7 @@ misc:
 
 | 参数 | 说明 |
 | --- | --- |
-| `-p, --prompt` | 自然语言任务描述 |
+| `-p, --prompt` | 自然语言任务描述，或已存在的 prompt 文件路径 |
 | `-i, --input` | 目标输入（IP、URL、IP:port、CIDR），可重复 |
 | `-s, --skill` | 指定 skill 名称或文件路径，可重复 |
 | `--task-file` | 从文件读取任务描述 |

@@ -171,7 +171,10 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 		}
 	}
 
-	intent := strings.TrimSpace(option.Prompt)
+	intent, err := cfg.ResolvePrompt(option.Prompt)
+	if err != nil {
+		return "", err
+	}
 	if intent == "" && option.TaskFile != "" {
 		data, err := os.ReadFile(option.TaskFile)
 		if err != nil {
@@ -182,7 +185,7 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 	if intent == "" {
 		intent = "Process the scanner output according to the user's intent. If no specific intent is provided, briefly explain the important evidence in the output."
 	}
-	intent, err := cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
+	intent, err = cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
 	if err != nil {
 		return "", err
 	}

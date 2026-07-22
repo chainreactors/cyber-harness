@@ -56,7 +56,7 @@ type ScannerOptions struct {
 }
 
 type AgentOptions struct {
-	Prompt         string   `short:"p" long:"prompt" description:"Natural language task for the agent"`
+	Prompt         string   `short:"p" long:"prompt" description:"Natural language task or existing file path for the agent"`
 	Inputs         []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
 	Skills         []string `short:"s" long:"skill" description:"Skill to apply (name or file path). Can specify multiple"`
 	Tools          []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable (search, browser). Arsenal is always loaded"`
@@ -161,7 +161,10 @@ func StdinIsTerminal() bool {
 }
 
 func ResolveTask(opt *Option) (string, error) {
-	prompt := strings.TrimSpace(opt.Prompt)
+	prompt, err := ResolvePrompt(opt.Prompt)
+	if err != nil {
+		return "", err
+	}
 	if prompt != "" {
 		if len(opt.Inputs) > 0 {
 			return fmt.Sprintf("%s\n\nTargets:\n%s", prompt, FormatInputs(opt.Inputs)), nil
@@ -200,6 +203,27 @@ func ResolveTask(opt *Option) (string, error) {
 	}
 
 	return "", fmt.Errorf("no prompt specified: use -p, --prompt, --task-file, or pipe via stdin")
+}
+
+// ResolvePrompt treats a non-empty prompt as a file path when it names an
+// existing regular file. Values that do not name a file remain natural
+// language prompts.
+func ResolvePrompt(value string) (string, error) {
+	prompt := strings.TrimSpace(value)
+	if prompt == "" {
+		return "", nil
+	}
+
+	info, err := os.Stat(prompt)
+	if err != nil || !info.Mode().IsRegular() {
+		return prompt, nil
+	}
+
+	data, err := os.ReadFile(prompt)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %s: %w", prompt, err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func FormatInputs(inputs []string) string {
