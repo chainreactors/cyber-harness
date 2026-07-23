@@ -85,5 +85,9 @@ export default {
     agents_connected: '已连接 {{n}} 个 agent：',
     agent_status_idle: '空闲',
     agent_status_busy: '忙碌',
+    scan_usage: '用法：/scan <target> [--mode full] [--verify] [--sniper] [--deep]',
+    scan_submit: '扫描失败：{{error}}',
+    dispatch_failed: '任务下发到 agent 失败。',
+    agent_disconnected: 'Agent 已断开连接。',
   },
 }

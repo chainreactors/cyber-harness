@@ -296,18 +296,7 @@ export function useChatSession() {
         setPendingResponse(false)
         break
 
-      case 'scan_error':
-        if (event.error) setError(event.error)
-        setPendingResponse(false)
-        break
-
       case 'agent_joined':
-        break
-
-      case 'error':
-        if (event.code) setError(t(`sys.${event.code}`, { ...(event.params || {}), defaultValue: event.error || '' }))
-        else if (event.error) setError(event.error)
-        finalizeRun()
         break
     }
   }
@@ -339,10 +328,16 @@ export function useChatSession() {
       case 'session.end':
         finalizeRun()
         break
-      case 'error':
-        setError(String((event.data as Record<string, unknown>).message ?? 'Agent error'))
+      case 'error': {
+        const data = event.data as { code?: string; message?: string }
+        // Hub-originated failures carry a translatable code plus i18n params
+        // in the aiscan.web extension; agent errors are plain text.
+        const params = event.ext?.['aiscan.web']?.params as Record<string, unknown> | undefined
+        if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
+        else setError(String(data.message ?? 'Agent error'))
         finalizeRun()
         break
+      }
     }
   }
 

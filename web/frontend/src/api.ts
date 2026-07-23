@@ -307,11 +307,6 @@ export interface ConfigStatus {
 // DistributeConfig — PUT /api/config request body (with secret values)
 export interface DistributeConfig {
   llm: {
-    provider: string
-    base_url: string
-    api_key: string
-    model: string
-    proxy: string
     active_profile: string
     providers: LLMProviderProfile[]
   };
@@ -658,9 +653,8 @@ export interface ChatMessage {
 }
 
 export type ChatEventType =
-  | 'message'
-  | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
-  | 'agent_joined' | 'session_cleared' | 'error'
+  | 'scan_started' | 'scan_progress' | 'scan_complete'
+  | 'agent_joined' | 'session_cleared'
 
 export interface ChatEvent {
   type: ChatEventType
@@ -674,11 +668,6 @@ export interface ChatEvent {
   scan_id?: string
   result?: ScanResult
   data?: string
-  error?: string
-  // System/error messages carry a stable code (+ params) so the client can
-  // localize them via i18n; `content`/`error` stay as English fallbacks.
-  code?: string
-  params?: Record<string, unknown>
 }
 
 // --- Chat session API ---
@@ -793,9 +782,8 @@ export function subscribeChatEvents(
   onOpen?: () => void,
 ): () => void {
   const eventTypes: ChatEventType[] = [
-    'message',
-    'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
-    'agent_joined', 'session_cleared', 'error',
+    'scan_started', 'scan_progress', 'scan_complete',
+    'agent_joined', 'session_cleared',
   ]
 
   const handlers: Record<string, (data: string) => void> = {}

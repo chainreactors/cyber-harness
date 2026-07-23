@@ -86,5 +86,9 @@ export default {
     agents_connected: '{{n}} agent(s) connected:',
     agent_status_idle: 'idle',
     agent_status_busy: 'busy',
+    scan_usage: 'usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]',
+    scan_submit: 'Scan failed: {{error}}',
+    dispatch_failed: 'Failed to dispatch the task to the agent.',
+    agent_disconnected: 'Agent disconnected.',
   },
 }

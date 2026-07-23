@@ -29,7 +29,7 @@ const TABS: { key: TabKey; label: string }[] = [
 function emptyForm(): DistributeConfig {
   const profile = blankLLMProfile('default')
   return {
-    llm: { provider: '', base_url: '', api_key: '', model: '', proxy: '', active_profile: profile.id, providers: [profile] },
+    llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
     recon: { fofa_email: '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: '' },
     scan: { verify: '', verify_timeout: 0 },
@@ -51,16 +51,9 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
         model: cs.llm.model,
         proxy: cs.llm.proxy,
       }]
-  const activeID = cs.llm.active_profile || profiles[0].id
-  const active = profiles.find(profile => profile.id === activeID) || profiles[0]
   return {
     llm: {
-      provider: active.provider,
-      base_url: active.base_url,
-      api_key: '',
-      model: active.model,
-      proxy: active.proxy,
-      active_profile: activeID,
+      active_profile: cs.llm.active_profile || profiles[0].id,
       providers: profiles,
     },
     cyberhub: { url: cs.cyberhub.url, key: '', mode: cs.cyberhub.mode, proxy: cs.cyberhub.proxy },
@@ -74,22 +67,6 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
 
 function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
   return { id, name: 'New LLM', provider: 'openai', base_url: '', api_key: '', model: '', proxy: '' }
-}
-
-function prepareConfigForSave(form: DistributeConfig): DistributeConfig {
-  const active = form.llm.providers.find(profile => profile.id === form.llm.active_profile) || form.llm.providers[0]
-  if (!active) return form
-  return {
-    ...form,
-    llm: {
-      ...form.llm,
-      provider: active.provider,
-      base_url: active.base_url,
-      api_key: active.api_key,
-      model: active.model,
-      proxy: active.proxy,
-    },
-  }
 }
 
 // sectionStatus returns the readiness badges for the active settings section.
@@ -159,7 +136,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
     setError('')
     setSaved(false)
     try {
-      const next = await saveConfig(prepareConfigForSave(form))
+      const next = await saveConfig(form)
       setCs(next)
       setForm(statusToForm(next))
       setSaved(true)
