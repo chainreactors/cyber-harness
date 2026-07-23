@@ -16,8 +16,8 @@ import (
 // Output goes to the provided Writer (typically os.Stderr for live
 // terminal view, or a test log adapter).
 type Monitor struct {
-	out      io.Writer
-	turnSeen int
+	out     io.Writer
+	runSeen string
 }
 
 func NewMonitor(out io.Writer) *Monitor {
@@ -31,13 +31,12 @@ func (m *Monitor) printf(format string, args ...any) {
 func (m *Monitor) renderEvent(ev aop.Event) {
 	switch ev.Type {
 	case aop.TypeSessionStart:
-		m.turnSeen = 0
+		m.runSeen = ""
 
 	case aop.TypeTurnStart:
-		data, err := aop.DecodeData[aop.TurnData](ev)
-		if err == nil && data.Turn != m.turnSeen {
-			m.turnSeen = data.Turn
-			m.printf("\n── turn %d ──\n", data.Turn)
+		if ev.TurnID != "" && ev.TurnID != m.runSeen {
+			m.runSeen = ev.TurnID
+			m.printf("\n── run %s ──\n", ev.TurnID)
 		}
 
 	case aop.TypeMessage:
@@ -68,10 +67,10 @@ func (m *Monitor) renderEvent(ev aop.Event) {
 			}
 		}
 
-	case aop.TypeSessionEnd:
-		data, err := aop.DecodeData[aop.SessionEndData](ev)
+	case aop.TypeTurnEnd:
+		data, err := aop.DecodeData[aop.TurnEndData](ev)
 		if err == nil {
-			m.printf("\n── agent done (stop=%s) ──\n", data.Stop)
+			m.printf("\n── run done (stop=%s) ──\n", data.Stop)
 		}
 	}
 }

@@ -181,24 +181,25 @@ func sqliteTableExists(db *sql.DB, table string) (bool, error) {
 	return count > 0, err
 }
 
-// wipeLegacyAOPEvents drops the pre-message-model event history: old rows use
-// the removed "text" event shape and are not interpretable by the current
-// schema. Idempotent — once no legacy rows remain this is a no-op.
+// wipeLegacyAOPEvents performs the one-time breaking AOP lifecycle cutover.
+// Sessions/messages/assets/records stay intact; only protocol event history is
+// cleared because old session/turn boundaries cannot be reinterpreted safely.
 func wipeLegacyAOPEvents(db *sql.DB) error {
 	exists, err := sqliteTableExists(db, "chat_aop_events")
 	if err != nil || !exists {
 		return err
 	}
-	var legacy int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM chat_aop_events WHERE event_json LIKE '%"type":"text"%' LIMIT 1`,
-	).Scan(&legacy); err != nil {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if legacy == 0 {
+	if version >= 2 {
 		return nil
 	}
-	_, err = db.Exec(`DELETE FROM chat_aop_events`)
+	if _, err := db.Exec(`DELETE FROM chat_aop_events`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`PRAGMA user_version = 2`)
 	return err
 }
 

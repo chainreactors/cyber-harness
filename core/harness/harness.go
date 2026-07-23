@@ -19,6 +19,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 var (
@@ -205,19 +206,21 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 		h.t.Fatalf("start aiscan agent: %v", err)
 	}
 
-	msgData, _ := json.Marshal(aop.MessageData{
-		MessageID: "m-1",
-		Role:      "user",
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: prompt}},
+	encoder := json.NewEncoder(stdin)
+	openErr := encoder.Encode(webproto.Message{
+		Type:    webproto.TypeSessionOpen,
+		Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "harness"}),
 	})
-	request := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: "harness",
-		Agent:     "aiscan.harness",
-		Data:      msgData,
+	writeErr := openErr
+	if writeErr == nil {
+		writeErr = encoder.Encode(webproto.Message{
+			Type: webproto.TypeRun, RunID: "run-1",
+			Payload: webproto.MustJSON(webproto.RunPayload{
+				SessionID: "harness",
+				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: prompt}},
+			}),
+		})
 	}
-	writeErr := json.NewEncoder(stdin).Encode(request)
 	closeErr := stdin.Close()
 	if writeErr != nil || closeErr != nil {
 		cancel()

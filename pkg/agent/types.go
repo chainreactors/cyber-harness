@@ -148,6 +148,7 @@ type Config struct {
 	MaxParallelTools int
 	CacheRetention   CacheRetention
 	SessionID        string
+	TurnID           string
 	ParentSessionID  string
 	ParentToolCallID string
 	Delegation       *delegation.DelegationDetail
@@ -182,6 +183,7 @@ func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 }
 func (c Config) WithCacheRetention(r CacheRetention) Config { c.CacheRetention = r; return c }
 func (c Config) WithSessionID(id string) Config             { c.SessionID = id; return c }
+func (c Config) WithTurnID(id string) Config                { c.TurnID = id; return c }
 func (c Config) WithAgentName(name string) Config           { c.AgentName = name; return c }
 func (c Config) WithOnRunEnd(fn func(*Result)) Config       { c.OnRunEnd = fn; return c }
 func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
@@ -203,9 +205,7 @@ func (c Config) init() Config {
 		c.MaxParallelTools = DefaultMaxParallelTools
 	}
 	if c.SessionID == "" {
-		b := make([]byte, 8)
-		_, _ = crand.Read(b)
-		c.SessionID = hex.EncodeToString(b)
+		c.SessionID = randomID()
 	}
 	if c.AgentName == "" {
 		c.AgentName = "aiscan"
@@ -223,6 +223,12 @@ func (c Config) init() Config {
 		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)
 	}
 	return c
+}
+
+func randomID() string {
+	b := make([]byte, 8)
+	_, _ = crand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // NewAgent creates an Agent from a Config.

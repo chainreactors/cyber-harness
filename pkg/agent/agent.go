@@ -23,16 +23,15 @@ type Agent struct {
 // For multi-turn, call Run repeatedly — message history accumulates.
 type RunOption func(*Config)
 
-func InSession(sessionID, parentSessionID string) RunOption {
-	return func(cfg *Config) {
-		cfg.SessionID = sessionID
-		cfg.ParentSessionID = parentSessionID
-		cfg.emitter = cfg.emitter.scoped(sessionID, parentSessionID, "", nil)
-	}
-}
-
 func WithRunMaxTurns(maxTurns int) RunOption {
 	return func(cfg *Config) { cfg.MaxTurns = maxTurns }
+}
+
+func WithTurnID(turnID string) RunOption {
+	return func(cfg *Config) {
+		cfg.TurnID = turnID
+		cfg.emitter = cfg.emitter.turn(turnID)
+	}
 }
 
 func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Result, error) {
@@ -53,6 +52,10 @@ func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Resul
 		if opt != nil {
 			opt(&cfg)
 		}
+	}
+	if cfg.TurnID == "" {
+		cfg.TurnID = randomID()
+		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
 	}
 	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
@@ -77,24 +80,22 @@ func (a *Agent) SessionID() string {
 	return a.Cfg.SessionID
 }
 
-// BeginEvalSession opens the root bracket used by the evaluator coordinator.
-func (a *Agent) BeginEvalSession() {
+func (a *Agent) beginSession() {
 	a.mu.Lock()
 	em, model := a.Cfg.emitter, a.Cfg.Model
 	a.mu.Unlock()
 	em.sessionStart(model)
 }
 
-// EndEvalSession closes the evaluator coordinator's root bracket.
-func (a *Agent) EndEvalSession(stop StopReason, turns int, usage Usage, err error) {
+func (a *Agent) endSession(reason string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
-	em.sessionEnd(stop, turns, usage, err)
+	em.sessionEnd(reason)
 }
 
 // Continue resumes the agent without a new prompt (e.g. after tool results).
-func (a *Agent) Continue(ctx context.Context) (*Result, error) {
+func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error) {
 	if err := a.validateContinue(); err != nil {
 		return nil, err
 	}
@@ -108,6 +109,15 @@ func (a *Agent) Continue(ctx context.Context) (*Result, error) {
 
 	cfg := a.configSnapshot()
 	cfg = cfg.init()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	if cfg.TurnID == "" {
+		cfg.TurnID = randomID()
+		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
+	}
 	cfg.Messages = a.MessagesSnapshot()
 	result, runErr := runLoop(runCtx, cfg)
 	a.saveState(result, runErr)
@@ -132,6 +142,15 @@ func (a *Agent) SetMaxTurns(n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Cfg.MaxTurns = n
+}
+
+func (a *Agent) Model() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Cfg.Model
 }
 
 func (a *Agent) SetLogger(logger telemetry.Logger) {
@@ -164,7 +183,8 @@ func (a *Agent) configSnapshot() Config {
 // Derive creates a new Agent with the same infrastructure (provider, tools,
 // model, logger) but clean state. Use for spawning independent agent tasks.
 func (a *Agent) Derive() *Agent {
-	return a.DeriveNamed(a.Cfg.AgentName)
+	cfg := a.configSnapshot()
+	return deriveNamedFromConfig(cfg, cfg.AgentName, "", nil)
 }
 
 // DeriveNamed creates an isolated child agent and gives its AOP stream a
@@ -174,20 +194,24 @@ func (a *Agent) DeriveNamed(name string) *Agent {
 }
 
 func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
+	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
+}
+
+func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
 	return NewAgent(Config{
-		Provider:         a.Cfg.Provider,
-		Fallbacks:        a.Cfg.Fallbacks,
-		Tools:            a.Cfg.Tools,
-		Model:            a.Cfg.Model,
-		Logger:           a.Cfg.Logger,
-		MaxRetries:       a.Cfg.MaxRetries,
-		MaxParallelTools: a.Cfg.MaxParallelTools,
-		Stream:           a.Cfg.Stream,
-		Temperature:      a.Cfg.Temperature,
-		CacheRetention:   a.Cfg.CacheRetention,
-		Bus:              a.Cfg.Bus,
+		Provider:         cfg.Provider,
+		Fallbacks:        cfg.Fallbacks,
+		Tools:            cfg.Tools,
+		Model:            cfg.Model,
+		Logger:           cfg.Logger,
+		MaxRetries:       cfg.MaxRetries,
+		MaxParallelTools: cfg.MaxParallelTools,
+		Stream:           cfg.Stream,
+		Temperature:      cfg.Temperature,
+		CacheRetention:   cfg.CacheRetention,
+		Bus:              cfg.Bus,
 		AgentName:        name,
-		ParentSessionID:  a.Cfg.SessionID,
+		ParentSessionID:  cfg.SessionID,
 		ParentToolCallID: parentToolCallID,
 		Delegation:       detail,
 	})
@@ -195,11 +219,14 @@ func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.De
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state, namespace string, detail any) {
+func (a *Agent) EmitStatus(state, namespace string, detail any, turnID ...string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
 	if em != nil {
+		if len(turnID) > 0 && turnID[0] != "" {
+			em = em.turn(turnID[0])
+		}
 		em.status(state, namespace, detail)
 	}
 }
@@ -228,6 +255,9 @@ func (a *Agent) LoadMessages(messages []ChatMessage) {
 func (a *Agent) validateContinue() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.Cfg.Inbox != nil && a.Cfg.Inbox.Len() > 0 {
+		return nil
+	}
 	if len(a.state.Messages) == 0 {
 		return fmt.Errorf("cannot continue: no messages in context")
 	}

@@ -30,25 +30,28 @@ import (
 // ---------------------------------------------------------------------------
 
 type AgentRuntime struct {
-	App            *App
-	NodeName       string
-	SystemPrompt   string
-	Option         *cfg.Option
-	Config         agent.Config
-	Bus            *eventbus.Bus[aop.Event]
-	Output         *tui.AgentOutput
-	ConfigFile     string
-	ResumeMessages []agent.ChatMessage
+	app            *App
+	nodeName       string
+	systemPrompt   string
+	option         *cfg.Option
+	config         agent.Config
+	bus            *eventbus.Bus[aop.Event]
+	kernelBus      *eventbus.Bus[aop.Event]
+	sessionEvents  *sessionEmitter
+	output         *tui.AgentOutput
+	configFile     string
+	resumeMessages []agent.ChatMessage
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
 	sessions       map[string]*sessionState
-	requests       map[string]runtimeRequestState
+	runIDs         map[string]struct{}
 	requestSeq     uint64
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
 	ptyManager     *tmuxpkg.Manager
 	replMode       REPLMode
+	maxPending     int
 	ownsApp        bool
 	cleanup        func()
 }
@@ -69,6 +72,7 @@ type RuntimeConfig struct {
 	InteractiveOutput bool
 	ProviderOptional  bool
 	REPLMode          REPLMode
+	MaxPending        int
 }
 
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
@@ -76,23 +80,28 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		ctx = context.Background()
 	}
 	runtimeCtx, runtimeCancel := context.WithCancel(ctx)
+	if option == nil {
+		runtimeCancel()
+		return nil, fmt.Errorf("agent runtime option is required")
+	}
 	rt := &AgentRuntime{
 		ctx:      runtimeCtx,
 		cancel:   runtimeCancel,
 		sessions: make(map[string]*sessionState),
-		requests: make(map[string]runtimeRequestState),
+		runIDs:   make(map[string]struct{}),
 	}
 	if rc != nil {
 		rt.replMode = rc.REPLMode
+		rt.maxPending = rc.MaxPending
 	}
 	if option != nil {
 		optCopy := *option
-		rt.Option = &optCopy
-		rt.ConfigFile = option.ConfigFile
+		rt.option = &optCopy
+		rt.configFile = option.ConfigFile
 	}
 
 	if rc != nil && rc.ExistingApp != nil {
-		rt.App = rc.ExistingApp
+		rt.app = rc.ExistingApp
 	} else {
 		providerOptional := rc != nil && (rc.IOA != nil || rc.ProviderOptional)
 		appCfg := cfg.AppConfig(option, cfg.RuntimeFeatures{
@@ -108,7 +117,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		if err != nil {
 			return nil, fmt.Errorf("init app: %w", err)
 		}
-		rt.App = application
+		rt.app = application
 		rt.ownsApp = true
 		cfg.ApplyResolvedProviderOptions(option, application.ProviderConfig)
 
@@ -123,23 +132,23 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			}
 		}
 	}
-	if rt.App != nil {
-		rt.App.SetLogger(logger)
-		logger = rt.App.Logger()
+	if rt.app != nil {
+		rt.app.SetLogger(logger)
+		logger = rt.app.Logger()
 	}
 
 	nodeName := ResolveIOANodeName(option)
-	rt.NodeName = nodeName
+	rt.nodeName = nodeName
 
 	pc := &PromptConfig{
-		Tools:       rt.App.Commands,
-		ScannerDocs: rt.App.Commands.UsageDocs(),
-		Skills:      rt.App.Skills.Skills,
+		Tools:       rt.app.Commands,
+		ScannerDocs: rt.app.Commands.UsageDocs(),
+		Skills:      rt.app.Skills.Skills,
 		NodeName:    nodeName,
 		Space:       option.Space,
 	}
 	for _, name := range option.Skills {
-		body := rt.App.Skills.ReadBody(name)
+		body := rt.app.Skills.ReadBody(name)
 		if body == "" {
 			body = skills.ReadFile("skills/" + name + ".md")
 		}
@@ -153,65 +162,65 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	if rc != nil && rc.PromptConfig != nil {
 		pc = rc.PromptConfig
 	}
-	rt.SystemPrompt = BuildSystemPrompt(pc, nil)
-	logger.Debugf("system prompt length: %d chars", len(rt.SystemPrompt))
+	rt.systemPrompt = BuildSystemPrompt(pc, nil)
+	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
 	if rc == nil || !rc.NoOutput {
 		if rc != nil && rc.InteractiveOutput {
-			rt.Output = tui.NewAgentOutput(option)
+			rt.output = tui.NewAgentOutput(option)
 		} else {
-			rt.Output = tui.NewStaticAgentOutput(option)
+			rt.output = tui.NewStaticAgentOutput(option)
 		}
 	}
 
-	agentBus := eventbus.New[aop.Event]()
-	if rt.Output != nil {
-		agentBus.Subscribe(rt.Output.HandleEvent)
+	publicBus := eventbus.New[aop.Event]()
+	if rt.output != nil {
+		publicBus.Subscribe(rt.output.HandleEvent)
 	}
-	rt.Bus = agentBus
+	rt.bus = publicBus
+	rt.kernelBus = eventbus.New[aop.Event]()
+	rt.sessionEvents = newSessionEmitter(publicBus)
+	rt.kernelBus.Subscribe(rt.sessionEvents.emit)
 
 	ib := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 
 	var ioaCancel func()
+	var handoffCancel func()
 
-	sessMgr, bashTool := bashToolAndManager(rt.App.Commands)
+	sessMgr, bashTool := bashToolAndManager(rt.app.Commands)
 	rt.ptyManager = sessMgr
 	if bashTool != nil {
 		bashTool.SetInbox(ib)
 	}
-	if sessMgr != nil {
-		sessMgr.SetOnDone(func(info tmuxpkg.Info) {
-			tail := sessMgr.PeekOrEmpty(info.ID, 20)
-			msg := inboxpkg.NewMessage(inboxpkg.OriginSession, "user",
-				tmuxpkg.FormatCompletion(info, tail))
-			msg.Meta = map[string]any{
-				"session_id":   info.ID,
-				"session_name": info.Name,
-				"exit_code":    info.ExitCode,
-			}
-			if err := rt.inboxPush()(msg); err != nil {
-				logger.Warnf("inbox push session completion: %s", err)
-			}
-		})
+	scheduler := agent.NewLoopScheduler(ib, logger)
+	rt.cleanup = func() {
+		if handoffCancel != nil {
+			handoffCancel()
+		}
+		if ioaCancel != nil {
+			ioaCancel()
+		}
+		scheduler.Stop()
+		if sessMgr != nil {
+			sessMgr.Shutdown()
+		}
 	}
 
-	scheduler := agent.NewLoopScheduler(ib, logger)
-
-	rt.Config = agent.Config{
-		Provider:       rt.App.Provider,
-		Fallbacks:      rt.App.ProviderFallbacks,
-		Tools:          rt.App.Commands,
+	rt.config = agent.Config{
+		Provider:       rt.app.Provider,
+		Fallbacks:      rt.app.ProviderFallbacks,
+		Tools:          rt.app.Commands,
 		Model:          option.Model,
 		Logger:         logger,
 		Inbox:          ib,
 		LoopScheduler:  scheduler,
 		CacheRetention: agent.CacheShort,
-		Bus:            agentBus,
+		Bus:            rt.kernelBus,
 	}
 
 	if option.SaveSession {
 		sessDir := cfg.DataSubDir("sessions")
-		rt.Config = rt.Config.WithOnRunEnd(func(result *agent.Result) {
+		rt.config = rt.config.WithOnRunEnd(func(result *agent.Result) {
 			if result == nil || len(result.Messages) == 0 {
 				return
 			}
@@ -227,10 +236,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	}
 
 	subAgentTool := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
-		if rt.App.Skills == nil {
+		if rt.app.Skills == nil {
 			return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
 		}
-		s, ok := rt.App.Skills.ByName(name)
+		s, ok := rt.app.Skills.ByName(name)
 		if !ok {
 			return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
 		}
@@ -238,7 +247,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			return agent.AgentType{}, fmt.Errorf("skill %q is not configured as an agent type", name)
 		}
 		return agent.AgentType{
-			FormattedPrompt: rt.App.Skills.FormatInvocation(s, ""),
+			FormattedPrompt: rt.app.Skills.FormatInvocation(s, ""),
 			Model:           s.AgentModel,
 			Background:      s.AgentBackground,
 		}, nil
@@ -247,43 +256,34 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	if ioaSpace == "" && rc != nil && rc.IOA != nil {
 		ioaSpace = rc.IOA.Space
 	}
-	subscribeIOAHandoff(agentBus, rt.App.IOAClient, ioaSpace, logger)
-	rt.App.Commands.RegisterTool(subAgentTool)
+	handoffCancel = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
+	rt.app.Commands.RegisterTool(subAgentTool)
 	loop := agent.NewLoopCommand(scheduler)
-	rt.App.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
+	rt.app.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
 
 	if option.Resume != "" {
 		path := option.Resume
 		data, err := agent.LoadSession(path)
 		if err != nil {
+			rt.Close()
 			return nil, fmt.Errorf("resume session: %w", err)
 		}
-		rt.ResumeMessages = data.Messages
+		rt.resumeMessages = data.Messages
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), path)
 	}
 
-	if rt.App.IOAStreamClient != nil && option.Space != "" {
+	if rt.app.IOAStreamClient != nil && option.Space != "" {
 		nodeID := ""
-		if rt.App.IOAClient != nil {
-			nodeID = rt.App.IOAClient.NodeID()
+		if rt.app.IOAClient != nil {
+			nodeID = rt.app.IOAClient.NodeID()
 		}
-		spaceInfo, err := rt.App.IOAStreamClient.Space(ctx, option.Space, "aiscan agent")
+		spaceInfo, err := rt.app.IOAStreamClient.Space(ctx, option.Space, "aiscan agent")
 		if err != nil {
 			logger.Warnf("ioa space resolve: %s", err)
 		} else {
 			ioaCtx, cancel := context.WithCancel(ctx)
 			ioaCancel = cancel
-			go subscribeIOASpace(ioaCtx, rt.App.IOAStreamClient, spaceInfo.ID, nodeID, rt.inboxPush(), logger)
-		}
-	}
-
-	rt.cleanup = func() {
-		if ioaCancel != nil {
-			ioaCancel()
-		}
-		scheduler.Stop()
-		if sessMgr != nil {
-			sessMgr.Shutdown()
+			go subscribeIOASpace(ioaCtx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
 		}
 	}
 
@@ -292,11 +292,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	// control sequences are never buffered and replayed as PTY logs.
 	if rt.replMode == REPLPersistent {
 		if err := rt.startMainREPL(); err != nil {
-			runtimeCancel()
-			rt.cleanup()
-			if rt.ownsApp && rt.App != nil {
-				rt.App.Close()
-			}
+			rt.Close()
 			return nil, fmt.Errorf("start main repl: %w", err)
 		}
 	}
@@ -312,14 +308,21 @@ func (rt *AgentRuntime) Close() {
 		if rt.cancel != nil {
 			rt.cancel()
 		}
-		rt.cancelAllRequests()
+		rt.mu.RLock()
+		ids := make([]string, 0, len(rt.sessions))
+		for id := range rt.sessions {
+			ids = append(ids, id)
+		}
+		rt.mu.RUnlock()
+		for _, id := range ids {
+			_ = rt.CloseSession(context.Background(), id, SessionCloseRuntime)
+		}
 		rt.wg.Wait()
-		rt.closeSessions()
 		if rt.cleanup != nil {
 			rt.cleanup()
 		}
-		if rt.ownsApp && rt.App != nil {
-			rt.App.Close()
+		if rt.ownsApp && rt.app != nil {
+			rt.app.Close()
 		}
 	})
 }
@@ -331,16 +334,16 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	if rt.App != nil {
-		rt.App.SetLogger(logger)
-		logger = rt.App.Logger()
+	if rt.app != nil {
+		rt.app.SetLogger(logger)
+		logger = rt.app.Logger()
 	}
 	rt.mu.Lock()
-	rt.Config.Logger = logger
-	if rt.Config.LoopScheduler != nil {
-		rt.Config.LoopScheduler.SetLogger(logger)
+	rt.config.Logger = logger
+	if rt.config.LoopScheduler != nil {
+		rt.config.LoopScheduler.SetLogger(logger)
 	}
-	if sl, ok := rt.Config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
+	if sl, ok := rt.config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
 		sl.SetLogger(logger)
 	}
 	for _, sess := range rt.sessions {
@@ -350,16 +353,16 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 }
 
 // ReloadProvider rebuilds the LLM provider from option and hot-swaps it into the
-// running runtime: rt.App (used by the REPL and scan paths) and rt.Config (the
+// running runtime application and session template. It returns the live provider
 // template every new chat agent is cloned from). It returns the live provider
 // and resolved model so callers can propagate the swap to already-running
 // agents. On a build failure the runtime is left untouched and the error is
 // returned, so a bad config push never knocks out a working provider.
 func (rt *AgentRuntime) ReloadProvider(option *cfg.Option) (agent.Provider, string, error) {
-	if rt == nil || rt.App == nil {
+	if rt == nil || rt.app == nil {
 		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}
-	logger := rt.Config.Logger
+	logger := rt.config.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
@@ -378,13 +381,13 @@ func (rt *AgentRuntime) SetProvider(provider agent.Provider, providerConfig agen
 		return
 	}
 	rt.mu.Lock()
-	if rt.App != nil {
-		rt.App.Provider = provider
-		rt.App.ProviderConfig = providerConfig
+	if rt.app != nil {
+		rt.app.Provider = provider
+		rt.app.ProviderConfig = providerConfig
 	}
-	rt.Config.Provider = provider
+	rt.config.Provider = provider
 	if providerConfig.Model != "" {
-		rt.Config.Model = providerConfig.Model
+		rt.config.Model = providerConfig.Model
 	}
 	for _, sess := range rt.sessions {
 		sess.agent.SetProvider(provider, providerConfig.Model)
@@ -423,37 +426,33 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	}
 	defer rt.Close()
 
-	task = skills.ExpandCommand(task, rt.App.Skills)
-	task, err = cfg.ApplySelectedSkills(task, option.Skills, rt.App.Skills)
+	task = skills.ExpandCommand(task, rt.app.Skills)
+	task, err = cfg.ApplySelectedSkills(task, option.Skills, rt.app.Skills)
 	if err != nil {
 		return err
 	}
 
-	if rt.Output != nil {
-		rt.Output.Start("task", task)
+	if rt.output != nil {
+		rt.output.Start("task", task)
 	}
 
-	a := agent.NewAgent(rt.Config.
-		WithSystemPrompt(rt.SystemPrompt).
-		WithStream(true))
-	if len(rt.ResumeMessages) > 0 {
-		a.LoadMessages(rt.ResumeMessages)
-	}
-
-	var result *agent.Result
-	if option.EvalCriteria != "" {
-		evalCfg := buildEvalConfig(option, rt, logger, task)
-		result, _, err = evaluator.RunWithEval(ctx, a, evalCfg)
-	} else {
-		result, err = a.Run(ctx, agent.TextInput(task))
-	}
+	session, err := rt.OpenSession(ctx, SessionOptions{ID: "task", Messages: rt.resumeMessages})
 	if err != nil {
 		return err
 	}
-	if rt.Output != nil && result != nil && strings.TrimSpace(result.Output) != "" {
-		rt.Output.Final(result.Output)
+	run, err := session.Run(ctx, RunInput{
+		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: task}},
+		MaxTurns: rt.config.MaxTurns, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
+	})
+	if err != nil {
+		return err
 	}
-	return nil
+	result, err := run.Wait()
+	if rt.output != nil && strings.TrimSpace(result.Output) != "" {
+		rt.output.Final(result.Output)
+	}
+	_ = rt.CloseSession(context.Background(), "task", SessionCloseCompleted)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -470,12 +469,12 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 	}
 	defer rt.Close()
 
-	if _, err := cfg.ApplySelectedSkills("", option.Skills, rt.App.Skills); err != nil {
+	if _, err := cfg.ApplySelectedSkills("", option.Skills, rt.app.Skills); err != nil {
 		return err
 	}
 
 	if setInterrupt != nil {
-		setInterrupt(func() bool { return rt.CancelSession(MainREPLName) })
+		setInterrupt(func() bool { return false })
 	}
 	return rt.AttachLocalREPL(ctx)
 }
@@ -601,7 +600,7 @@ func buildEvalConfig(option *cfg.Option, rt *AgentRuntime, logger telemetry.Logg
 	if option.EvalModel != "" {
 		model = option.EvalModel
 	}
-	return evaluator.NewLoopConfig(rt.App.Provider, model, logger, task, option.EvalCriteria, option.EvalMaxRetries)
+	return evaluator.NewLoopConfig(rt.app.Provider, model, logger, task, option.EvalCriteria, option.EvalMaxRetries)
 }
 
 // ---------------------------------------------------------------------------

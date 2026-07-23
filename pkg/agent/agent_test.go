@@ -180,13 +180,9 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("result = %#v, want result with Err", result)
 	}
 	if got := eventTypes(events); !reflect.DeepEqual(got, []string{
-		aop.TypeSessionStart,
-		aop.TypeTurnStart,
 		aop.TypeMessage,
 		aop.TypeStatus,
-		aop.TypeTurnEnd,
 		aop.TypeError,
-		aop.TypeSessionEnd,
 	}) {
 		t.Fatalf("events = %#v", got)
 	}
@@ -194,15 +190,15 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("turns = %d, want 1", result.Turns)
 	}
 	last := lastEvent(events)
-	if last.Type != aop.TypeSessionEnd {
-		t.Fatalf("last event = %#v, want session.end", last)
+	if last.Type != aop.TypeError {
+		t.Fatalf("last event = %#v, want error", last)
 	}
-	var endData aop.SessionEndData
+	var endData aop.ErrorData
 	if err := json.Unmarshal(last.Data, &endData); err != nil {
 		t.Fatal(err)
 	}
-	if endData.Error == "" {
-		t.Fatalf("session.end missing error: %+v", endData)
+	if endData.Message == "" {
+		t.Fatalf("error event missing message: %+v", endData)
 	}
 	if a.running {
 		t.Fatal("running = true, want false")
@@ -844,11 +840,6 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 					result = result[:300] + "..."
 				}
 				events = append(events, fmt.Sprintf("[RESULT] %s", result))
-			}
-		case aop.TypeTurnStart:
-			var data aop.TurnData
-			if json.Unmarshal(event.Data, &data) == nil {
-				events = append(events, fmt.Sprintf("--- Turn %d ---", data.Turn))
 			}
 		}
 	}

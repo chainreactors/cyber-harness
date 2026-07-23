@@ -333,13 +333,15 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 				}
 			case "session.end":
 				m.endTS = e.Timestamp
-				var sd struct {
-					Stop string `json:"stop"`
-				}
-				_ = json.Unmarshal(d.Data, &sd)
-				m.stop = sd.Stop
 			case "turn.start":
 				m.turns++
+			case "turn.end":
+				m.endTS = e.Timestamp
+				var td struct {
+					Stop string `json:"stop"`
+				}
+				_ = json.Unmarshal(d.Data, &td)
+				m.stop = td.Stop
 			case "usage":
 				var ud struct {
 					TotalTokens int `json:"total_tokens"`
@@ -482,6 +484,7 @@ type AOPTimelineEntry struct {
 	Type      string          `json:"type"`
 	Timestamp time.Time       `json:"ts"`
 	SessionID string          `json:"session_id"`
+	TurnID    string          `json:"turn_id,omitempty"`
 	Agent     string          `json:"agent"`
 	Data      json.RawMessage `json:"data"`
 }
@@ -493,11 +496,7 @@ func (e AOPTimelineEntry) Valid() bool {
 func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
 	switch e.Type {
 	case "turn.start":
-		var d struct {
-			Turn int `json:"turn"`
-		}
-		_ = json.Unmarshal(e.Data, &d)
-		sb.WriteString(fmt.Sprintf("## Turn %d\n\n", d.Turn))
+		sb.WriteString(fmt.Sprintf("## Run %s\n\n", e.TurnID))
 
 	case "text":
 		var d struct {
@@ -569,11 +568,18 @@ func (e *AOPTimelineEntry) writeMarkdown(sb *strings.Builder) {
 			sb.WriteString("\n" + usage + "*\n\n")
 		}
 
-	case "session.end":
+	case "turn.end":
 		var d struct {
 			Stop string `json:"stop"`
 		}
 		_ = json.Unmarshal(e.Data, &d)
-		sb.WriteString(fmt.Sprintf("\n> **agent done** (stop=%s)\n\n", d.Stop))
+		sb.WriteString(fmt.Sprintf("\n> **run done** (stop=%s)\n\n", d.Stop))
+
+	case "session.end":
+		var d struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		sb.WriteString(fmt.Sprintf("\n> **session closed** (reason=%s)\n\n", d.Reason))
 	}
 }

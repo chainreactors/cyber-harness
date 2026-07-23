@@ -33,11 +33,3 @@ type MessageMeta struct {
 }
 
 type MessageMetaMetadata map[string]interface{}
-
-type RunControl struct {
-	// MaxTurns corresponds to the JSON schema field "max_turns".
-	MaxTurns int `json:"max_turns,omitempty,omitzero"`
-
-	// NoEcho corresponds to the JSON schema field "no_echo".
-	NoEcho bool `json:"no_echo,omitempty,omitzero"`
-}

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type handoffClient struct {
+	mu         sync.Mutex
 	spaceCalls int
 	bodies     []protocols.SendMessage
 }
@@ -22,15 +24,40 @@ func (c *handoffClient) RegisterNode(context.Context, string, string, map[string
 	return protocols.Node{ID: c.NodeID()}, nil
 }
 func (c *handoffClient) Space(context.Context, string, string, ...string) (protocols.SpaceInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.spaceCalls++
 	return protocols.SpaceInfo{ID: "space-1", Name: "test"}, nil
 }
 func (c *handoffClient) Send(_ context.Context, spaceID string, body protocols.SendMessage) (protocols.Message, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.bodies = append(c.bodies, body)
 	return protocols.Message{ID: "message-" + string(rune('0'+len(c.bodies))), SpaceID: spaceID}, nil
 }
 func (c *handoffClient) Read(context.Context, string, protocols.ReadOptions) ([]protocols.Message, error) {
 	return nil, nil
+}
+
+func (c *handoffClient) snapshot() (int, []protocols.SendMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.spaceCalls, append([]protocols.SendMessage(nil), c.bodies...)
+}
+
+func waitHandoffBodies(t *testing.T, client *handoffClient, count int) (int, []protocols.SendMessage) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		spaceCalls, bodies := client.snapshot()
+		if len(bodies) >= count {
+			return spaceCalls, bodies
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	spaceCalls, bodies := client.snapshot()
+	t.Fatalf("messages = %d, want %d", len(bodies), count)
+	return spaceCalls, bodies
 }
 
 func handoffEvent(t *testing.T, typ, sessionID, agentName string, data any) aop.Event {
@@ -65,19 +92,13 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 		MessageID: "m-1", Role: "assistant",
 		Parts: []aop.MessagePart{{Type: aop.PartText, Text: "inspection complete"}},
 	}))
-	bus.Emit(handoffEvent(t, aop.TypeSessionEnd, "child-session", "worker", aop.SessionEndData{Stop: "completed"}))
+	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "child-session", "worker", aop.TurnEndData{Stop: "completed"}))
 
-	deadline := time.Now().Add(2 * time.Second)
-	for len(client.bodies) < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	spaceCalls, bodies := waitHandoffBodies(t, client, 2)
+	if spaceCalls != 1 {
+		t.Fatalf("space calls = %d, want 1", spaceCalls)
 	}
-	if client.spaceCalls != 1 {
-		t.Fatalf("space calls = %d, want 1", client.spaceCalls)
-	}
-	if len(client.bodies) != 2 {
-		t.Fatalf("messages = %d, want 2", len(client.bodies))
-	}
-	for i, body := range client.bodies {
+	for i, body := range bodies {
 		if body.ContentType != "handoff" {
 			t.Fatalf("message %d content_type = %q", i, body.ContentType)
 		}
@@ -85,7 +106,7 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 			t.Fatalf("message %d content = %#v, want native handoff title/message", i, body.Content)
 		}
 	}
-	delegate, returned := client.bodies[0], client.bodies[1]
+	delegate, returned := bodies[0], bodies[1]
 	if delegate.Refs != nil {
 		t.Fatalf("delegate refs = %#v, want nil", delegate.Refs)
 	}
@@ -129,21 +150,15 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	bus.Emit(start)
-	bus.Emit(handoffEvent(t, aop.TypeSessionEnd, "child-session", "worker", aop.SessionEndData{Stop: "error", Error: "boom"}))
+	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "child-session", "worker", aop.TurnEndData{Stop: "error", Error: "boom"}))
 
-	deadline := time.Now().Add(2 * time.Second)
-	for len(client.bodies) < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if len(client.bodies) != 2 {
-		t.Fatalf("messages = %d, want 2", len(client.bodies))
-	}
-	retMeta, ok := client.bodies[1].Meta["subagent"].(map[string]any)
+	_, bodies := waitHandoffBodies(t, client, 2)
+	retMeta, ok := bodies[1].Meta["subagent"].(map[string]any)
 	if !ok || retMeta["status"] != "failed" || retMeta["mode"] != "async" {
-		t.Fatalf("return meta = %#v", client.bodies[1].Meta)
+		t.Fatalf("return meta = %#v", bodies[1].Meta)
 	}
-	if client.bodies[1].Content["message"] != "boom" {
-		t.Fatalf("return message = %#v", client.bodies[1].Content["message"])
+	if bodies[1].Content["message"] != "boom" {
+		t.Fatalf("return message = %#v", bodies[1].Content["message"])
 	}
 }
 
@@ -153,12 +168,13 @@ func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
 	subscribeIOAHandoff(bus, client, "test", nil)
 
 	bus.Emit(handoffEvent(t, aop.TypeSessionStart, "root-session", "aiscan", aop.SessionStartData{Model: "test-model"}))
-	bus.Emit(handoffEvent(t, aop.TypeSessionEnd, "root-session", "aiscan", aop.SessionEndData{Stop: "completed"}))
+	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "root-session", "aiscan", aop.TurnEndData{Stop: "completed"}))
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if len(client.bodies) > 0 {
-			t.Fatalf("unexpected handoff messages: %#v", client.bodies)
+		_, bodies := client.snapshot()
+		if len(bodies) > 0 {
+			t.Fatalf("unexpected handoff messages: %#v", bodies)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

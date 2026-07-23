@@ -235,7 +235,8 @@ export function useChatSession() {
     setTimelineItems((prev) => prev.map((item) => item.id === id ? updater(item) : item))
   }
 
-  // Release the composer when AOP reports session.end/error or the user cancels.
+  // A Run converges only on turn.end. Session lifecycle is independent and a
+  // turn-scoped error is diagnostic until its terminal turn.end arrives.
   function finalizeRun() {
     setIsThinking(false)
     setPendingResponse(false)
@@ -323,10 +324,9 @@ export function useChatSession() {
         setIsThinking(false)
         break
       case 'turn.end':
-        setIsThinking(false)
+        finalizeRun()
         break
       case 'session.end':
-        finalizeRun()
         break
       case 'error': {
         const data = event.data as { code?: string; message?: string }
@@ -335,7 +335,7 @@ export function useChatSession() {
         const params = event.ext?.['aiscan.web']?.params as Record<string, unknown> | undefined
         if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
         else setError(String(data.message ?? 'Agent error'))
-        finalizeRun()
+        if (!event.turn_id) finalizeRun()
         break
       }
     }

@@ -4,22 +4,21 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+	"sync"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/utils/pty"
 )
 
 func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
@@ -40,11 +39,18 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return err
 	}
 
+	appConfig := cfg.AppConfig(option, cfg.RuntimeFeatures{
+		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
+	}, logger)
+	appConfig.IOA = remoteIOAConfig(option, identityRef)
+	application, err := runner.NewApp(ctx, appConfig)
+	if err != nil {
+		return err
+	}
+	defer application.Close()
+	cfg.ApplyResolvedProviderOptions(option, application.ProviderConfig)
 	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
-		NoOutput:         true,
-		IOA:              remoteIOAConfig(option, identityRef),
-		ProviderOptional: true,
-		REPLMode:         runner.REPLPersistent,
+		ExistingApp: application, NoOutput: true, REPLMode: runner.REPLPersistent,
 	})
 	if err != nil {
 		return err
@@ -54,32 +60,36 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 	chatHandler := &chatAgentHandler{
 		rt:        rt,
 		serverURL: option.WebURL,
+		sessions:  make(map[string]*runner.Session),
+		app:       application,
+		option:    option,
+		logger:    logger,
 	}
 
 	connectionDone := make(chan struct{})
 	go func() {
 		defer close(connectionDone)
-		_ = rt.App.WaitEngines(ctx)
+		_ = application.WaitEngines(ctx)
 		logger.Debugf("websocket transport connection to %s", option.WebURL)
 
 		_ = connect(ctx, connectionConfig{
-			ServerURL: option.WebURL,
-			Name:      rt.NodeName,
-			Registry:  rt.App.Commands,
-			AgentBus:  rt.Bus,
-			DataBus:   rt.App.DataBus,
-			SCO:       rt.App.SCOSidecar,
-			Logger:    logger,
-			Chat:      chatHandler,
-			Node:      identityRef,
-			Runtime:   DefaultRuntime(),
-			Status:    func() webproto.AgentStatus { return agentStatus(rt) },
-			Menu:      func() []webproto.CommandSpec { return agentCommandCatalog(rt) },
-			PTYRouter: rt.NewPTYRouter,
+			ServerURL:      option.WebURL,
+			Name:           runner.ResolveIOANodeName(option),
+			Registry:       application.Commands,
+			AgentSubscribe: rt.Subscribe,
+			DataBus:        application.DataBus,
+			SCO:            application.SCOSidecar,
+			Logger:         logger,
+			Chat:           chatHandler,
+			Node:           identityRef,
+			Runtime:        DefaultRuntime(),
+			Status:         func() webproto.AgentStatus { return agentStatus(option, application) },
+			Menu:           func() []webproto.CommandSpec { return agentCommandCatalog(application) },
+			PTYRouter:      func() (*pty.Router, error) { return NewPTYRouter(application.Commands), nil },
 		})
 	}()
 
-	if rt.App.Provider == nil {
+	if application.Provider == nil {
 		logger.Warnf("no LLM provider configured; remote REPL and PTY are available, autonomous agent loop is disabled")
 		<-ctx.Done()
 		<-connectionDone
@@ -97,15 +107,16 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return nil
 	}
 
-	_, err = rt.Execute(ctx, "startup", agent.Inbound{
-		Kind:  agent.InboundUserMessage,
-		Event: aop.Event{SessionID: "startup"},
-		Message: aop.MessageData{
-			MessageID: "startup",
-			Role:      "user",
-			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: task}},
-		},
-	}, nil)
+	startup, err := rt.OpenSession(ctx, runner.SessionOptions{ID: "startup"})
+	if err != nil {
+		return err
+	}
+	chatHandler.sessions["startup"] = startup
+	run, err := startup.Run(ctx, runner.RunInput{ID: "startup", Parts: []aop.MessagePart{{Type: aop.PartText, Text: task}}})
+	if err == nil {
+		_, err = run.Wait()
+	}
+	_ = rt.CloseSession(context.Background(), "startup", runner.SessionCloseCompleted)
 
 	<-connectionDone
 	return err
@@ -118,120 +129,141 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 type chatAgentHandler struct {
 	rt        *runner.AgentRuntime
 	serverURL string
+	mu        sync.Mutex
+	sessions  map[string]*runner.Session
+	app       *runner.App
+	option    *cfg.Option
+	logger    telemetry.Logger
 }
 
-func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) func() {
-	inbound, err := agent.Classify(event)
-	if err != nil || inbound.Kind != agent.InboundUserMessage {
-		router.Route(replSessionID(msg.TaskID), msg.TaskID)
-		return func() {
-			h.emitREPLSession(msg.TaskID, "", fmt.Errorf("invalid inbound user message"))
-		}
+func (h *chatAgentHandler) HandleSessionOpen(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
+	var payload webproto.SessionOpenPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		sendProtocolError(send, "", "", err)
+		return
 	}
-	prompt := strings.TrimSpace(webproto.UserMessageText(event))
-	if prompt == "" {
-		router.Route(replSessionID(msg.TaskID), msg.TaskID)
-		return func() {
-			h.emitREPLSession(msg.TaskID, "", fmt.Errorf("empty prompt"))
-		}
-	}
-
-	if isREPLCommand(prompt) {
-		router.Route(replSessionID(msg.TaskID), msg.TaskID)
-		wait, submitErr := h.rt.SubmitLine(ctx, msg.TaskID, event.SessionID, prompt)
-		return func() {
-			if submitErr != nil {
-				h.emitREPLSession(msg.TaskID, "", submitErr)
-				return
-			}
-			out, execErr := wait()
-			h.emitREPLSession(msg.TaskID, out, execErr)
-		}
-	}
-
-	wait, err := h.rt.Submit(ctx, msg.TaskID, inbound, func(sessionID string) {
-		router.Route(sessionID, msg.TaskID)
+	session, err := h.rt.OpenSession(ctx, runner.SessionOptions{
+		ID: payload.SessionID, ParentSessionID: payload.ParentSessionID, ParentToolCallID: payload.ParentToolCallID,
 	})
 	if err != nil {
-		router.Route(replSessionID(msg.TaskID), msg.TaskID)
+		sendProtocolError(send, "", "", err)
+		return
+	}
+	sessionID := session.Snapshot().ID
+	h.mu.Lock()
+	h.sessions[sessionID] = session
+	h.mu.Unlock()
+	encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID})
+	send(webproto.Message{Type: webproto.TypeSessionOpened, Payload: encoded})
+}
+
+func (h *chatAgentHandler) HandleSessionClose(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
+	var payload webproto.SessionLifecyclePayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		sendProtocolError(send, "", "", err)
+		return
+	}
+	reason := runner.SessionCloseReason(payload.Reason)
+	if err := h.rt.CloseSession(ctx, payload.SessionID, reason); err != nil {
+		sendProtocolError(send, "", "", err)
+		return
+	}
+	h.mu.Lock()
+	delete(h.sessions, payload.SessionID)
+	h.mu.Unlock()
+	encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: payload.SessionID, Reason: payload.Reason})
+	send(webproto.Message{Type: webproto.TypeSessionClosed, Payload: encoded})
+}
+
+func (h *chatAgentHandler) HandleRun(ctx context.Context, msg webproto.Message, send func(webproto.Message)) func() {
+	var payload webproto.RunPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		return func() { sendProtocolError(send, msg.RunID, "", err) }
+	}
+	h.mu.Lock()
+	session := h.sessions[payload.SessionID]
+	h.mu.Unlock()
+	if session == nil {
 		return func() {
-			h.emitREPLSession(msg.TaskID, "", err)
+			sendProtocolError(send, msg.RunID, "", fmt.Errorf("session %q is not open", payload.SessionID))
 		}
 	}
-	return func() {
-		// Run failures are terminal on the root session.end emitted by the
-		// agent kernel; nothing to send here.
-		_, _ = wait()
+	input := runner.RunInput{
+		ID: msg.RunID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
+		EvalCriteria: payload.EvalCriteria, EvalMaxRounds: payload.EvalMaxRounds,
 	}
+	prompt := strings.TrimSpace(partsText(payload.Parts))
+	if prompt == "/continue" {
+		input.Continue = true
+		input.Parts = nil
+	} else if strings.HasPrefix(prompt, "/followup ") {
+		input.Parts = []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(strings.TrimPrefix(prompt, "/followup "))}}
+	}
+	run, err := session.Run(ctx, input)
+	if err != nil {
+		return func() { sendProtocolError(send, msg.RunID, "", err) }
+	}
+	return func() { _, _ = run.Wait() }
 }
 
-// replSessionID names the self-contained AOP session that reports one
-// REPL/slash-command run. It has no parent session so the hub converges the
-// chat task on its session.end.
-func replSessionID(taskID string) string {
-	return "repl-" + taskID
+func (h *chatAgentHandler) HandleCommand(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
+	var payload webproto.CommandPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		sendProtocolError(send, "", msg.TaskID, err)
+		return
+	}
+	h.mu.Lock()
+	session := h.sessions[payload.SessionID]
+	h.mu.Unlock()
+	if session == nil {
+		sendProtocolError(send, "", msg.TaskID, fmt.Errorf("session %q is not open", payload.SessionID))
+		return
+	}
+	result, err := session.Command(ctx, runner.CommandInput{Line: payload.Line})
+	if err != nil {
+		sendProtocolError(send, "", msg.TaskID, err)
+		return
+	}
+	for i := range result.Parts {
+		if result.Parts[i].Type == aop.PartText {
+			result.Parts[i].Text = fenceTerminalOutput(result.Parts[i].Text)
+		}
+	}
+	encoded, _ := json.Marshal(webproto.CommandResultPayload{SessionID: payload.SessionID, Parts: result.Parts, Metadata: result.Metadata})
+	send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: msg.TaskID, Payload: encoded})
 }
 
-// emitREPLSession publishes a REPL command run as a three-event AOP session on
-// the runtime bus: session.start, one assistant message with the fenced
-// output (skipped on error), and session.end carrying the stop reason.
-func (h *chatAgentHandler) emitREPLSession(taskID, out string, runErr error) {
-	sessionID := replSessionID(taskID)
-	seq := 0
-	emit := func(typ string, data any) {
-		raw, err := json.Marshal(data)
-		if err != nil {
-			return
+func sendProtocolError(send func(webproto.Message), runID, taskID string, err error) {
+	payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
+	send(webproto.Message{Type: webproto.TypeError, RunID: runID, TaskID: taskID, Payload: payload})
+}
+
+func partsText(parts []aop.MessagePart) string {
+	var values []string
+	for _, part := range parts {
+		if part.Type == aop.PartText && part.Text != "" {
+			values = append(values, part.Text)
 		}
-		seq++
-		h.rt.Bus.Emit(aop.Event{
-			Type:      typ,
-			TS:        time.Now().UTC().Format(time.RFC3339Nano),
-			SessionID: sessionID,
-			Agent:     h.rt.NodeName,
-			Seq:       seq,
-			Data:      raw,
-		})
 	}
-	emit(aop.TypeSessionStart, aop.SessionStartData{})
-	if runErr == nil && out != "" {
-		emit(aop.TypeMessage, aop.MessageData{
-			MessageID: sessionID + "-output",
-			Role:      "assistant",
-			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: fenceTerminalOutput(out)}},
-		})
-	}
-	end := aop.SessionEndData{Stop: string(agent.StopReasonCompleted)}
-	if runErr != nil {
-		end.Stop = string(agent.StopReasonError)
-		if errors.Is(runErr, context.Canceled) {
-			end.Stop = string(agent.StopReasonCanceled)
-		}
-		end.Error = runErr.Error()
-	}
-	emit(aop.TypeSessionEnd, end)
+	return strings.Join(values, "\n")
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
-	handleFileUpload(msg, send, h.rt)
+	handleFileUpload(msg, send)
 }
 
 func (h *chatAgentHandler) HandleConfigReload(serverURL string, send func(webproto.Message)) {
-	provider, model, err := reloadAgentConfig(serverURL, h.rt)
+	provider, model, err := reloadAgentConfig(serverURL, h.rt, h.app, h.logger)
 	result := webproto.ConfigReloadResult{OK: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
 	} else {
 		result.Provider = provider.Name()
-		statusPayload, _ := json.Marshal(agentStatus(h.rt))
+		statusPayload, _ := json.Marshal(agentStatus(h.option, h.app))
 		send(webproto.Message{Type: "agent.status", Payload: statusPayload})
 	}
 	resultPayload, _ := json.Marshal(result)
 	send(webproto.Message{Type: "config.result", Payload: resultPayload})
-}
-
-func (h *chatAgentHandler) CancelChat(taskID string) bool {
-	return h.rt.Cancel(taskID)
 }
 
 // ---------------------------------------------------------------------------
@@ -242,11 +274,10 @@ func (h *chatAgentHandler) CancelChat(taskID string) bool {
 // true when the swap succeeded, so the caller can re-announce identity.
 // ---------------------------------------------------------------------------
 
-func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime) (agent.Provider, string, error) {
+func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, app *runner.App, logger telemetry.Logger) (agent.Provider, string, error) {
 	if rt == nil {
 		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}
-	logger := rt.Config.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
@@ -255,11 +286,21 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime) (agent.Provide
 		logger.Warnf("config reload: fetch remote config: %s", err)
 		return nil, "", err
 	}
-	provider, model, err := rt.ReloadProvider(remoteOpt)
+	providerConfig := cfg.ProviderConfig(remoteOpt)
+	resolved, err := agent.ResolveProvider(&providerConfig)
+	if err != nil {
+		logger.Warnf("config reload: resolve provider: %s", err)
+		return nil, "", err
+	}
+	provider, err := agent.NewProviderFromResolved(resolved)
 	if err != nil {
 		logger.Warnf("config reload: rebuild provider: %s", err)
 		return nil, "", err
 	}
+	model := resolved.Model
+	app.Provider = provider
+	app.ProviderConfig = *resolved
+	rt.SetProvider(provider, *resolved)
 	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
 	return provider, model, nil
 }
@@ -268,7 +309,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime) (agent.Provide
 // File upload
 // ---------------------------------------------------------------------------
 
-func handleFileUpload(msg webproto.Message, send func(webproto.Message), rt *runner.AgentRuntime) {
+func handleFileUpload(msg webproto.Message, send func(webproto.Message)) {
 	var payload webproto.FileUploadPayload
 	if len(msg.Payload) > 0 {
 		_ = json.Unmarshal(msg.Payload, &payload)
@@ -296,21 +337,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message), rt *run
 			Type:    "complete",
 			TaskID:  msg.TaskID,
 			Payload: webproto.MustJSON(webproto.FileUploadResult{Filename: payload.Filename, Error: "write failed: " + err.Error()}),
-		})
-		return
-	}
-
-	// Surface the path through the target session's Inbox. Slash/direct commands
-	// do not consume the Inbox, so the note remains available for the next agent
-	// turn without a Web-specific pending-upload map.
-	note := fmt.Sprintf(
-		"[已上传文件] 名称=%q 大小=%d 字节 · agent 本地绝对路径: %s\n（该文件已保存在 agent 磁盘上，需要查看内容时用 read 工具打开上述绝对路径。）",
-		payload.Filename, len(data), dest)
-	if err := rt.PushInbox(payload.SessionID, inboxpkg.NewMessage(inboxpkg.OriginSystem, "user", note)); err != nil {
-		send(webproto.Message{
-			Type:    "complete",
-			TaskID:  msg.TaskID,
-			Payload: webproto.MustJSON(webproto.FileUploadResult{Filename: payload.Filename, Error: err.Error()}),
 		})
 		return
 	}
@@ -365,14 +391,14 @@ func fenceTerminalOutput(s string) string {
 // hub on register: the static agent-scope menu commands plus one per loaded (and
 // non-internal) skill. The hub merges it with its hub-scope commands to build
 // the web "/" menu and /help, so the menu reflects what this agent can run.
-func agentCommandCatalog(rt *runner.AgentRuntime) []webproto.CommandSpec {
+func agentCommandCatalog(app *runner.App) []webproto.CommandSpec {
 	// Build a zero-value console to extract command metadata without a live session.
 	r := &tui.AgentConsole{}
 	specs := tui.WebMenuSpecs(r.StaticCommands())
-	if rt == nil || rt.App == nil || rt.App.Skills == nil {
+	if app == nil || app.Skills == nil {
 		return specs
 	}
-	for _, sk := range rt.App.Skills.Skills {
+	for _, sk := range app.Skills.Skills {
 		if strings.TrimSpace(sk.Name) == "" || sk.Internal {
 			continue
 		}
@@ -384,27 +410,24 @@ func agentCommandCatalog(rt *runner.AgentRuntime) []webproto.CommandSpec {
 	return specs
 }
 
-func agentStatus(rt *runner.AgentRuntime) webproto.AgentStatus {
+func agentStatus(option *cfg.Option, app *runner.App) webproto.AgentStatus {
 	var status webproto.AgentStatus
-	if rt == nil {
-		return status
+	if option != nil {
+		status.Space = option.Space
 	}
-	if rt.Option != nil {
-		status.Space = rt.Option.Space
-	}
-	if rt.App != nil {
-		status.Provider = rt.App.ProviderConfig.Provider
-		status.Model = rt.App.ProviderConfig.Model
-		status.Bound = ioaBound(rt)
+	if app != nil {
+		status.Provider = app.ProviderConfig.Provider
+		status.Model = app.ProviderConfig.Model
+		status.Bound = ioaBound(app)
 	}
 	return status
 }
 
-func ioaBound(rt *runner.AgentRuntime) bool {
-	if rt == nil || rt.App == nil || rt.App.IOAClient == nil {
+func ioaBound(app *runner.App) bool {
+	if app == nil || app.IOAClient == nil {
 		return false
 	}
-	return rt.App.IOAClient.Bound()
+	return app.IOAClient.Bound()
 }
 
 // ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ func forwardEvent(t *testing.T, pool *AgentPool, remote *remoteAgent, taskID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TaskID: taskID, Payload: payload})
+	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", RunID: taskID, Payload: payload})
 }
 
 func newChatTaskRemote() (*remoteAgent, chan taskResult) {
@@ -74,18 +74,15 @@ func assertTaskOpen(t *testing.T, remote *remoteAgent, ch chan taskResult) {
 	}
 }
 
-func TestChatTaskConvergesOnRootSessionEnd(t *testing.T) {
+func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnStart, "agent-session", aop.TurnData{Turn: 2}))
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "agent-session", aop.SessionEndData{Stop: "completed", Turns: 2}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnStart, "agent-session", aop.TurnStartData{}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
 
 	res := readResult(t, ch)
-	if res.Turn != 2 {
-		t.Fatalf("turn = %d, want 2", res.Turn)
-	}
 	if res.Err != "" {
 		t.Fatalf("err = %q, want empty", res.Err)
 	}
@@ -94,30 +91,30 @@ func TestChatTaskConvergesOnRootSessionEnd(t *testing.T) {
 	}
 }
 
-func TestChatTaskSessionEndErrorPopulatesErr(t *testing.T) {
+func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	// A mid-run AOP error is display-only; the terminal session.end carries
+	// A mid-run AOP error is display-only; the terminal turn.end carries
 	// the failure.
 	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeError, "agent-session", aop.ErrorData{Message: "boom"}))
 	assertTaskOpen(t, remote, ch)
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "agent-session", aop.SessionEndData{Stop: "error", Error: "boom"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "error", Error: "boom"}))
 	res := readResult(t, ch)
 	if res.Err != "boom" {
 		t.Fatalf("err = %q, want %q", res.Err, "boom")
 	}
 }
 
-func TestChatTaskCanceledSessionEndHasNoErr(t *testing.T) {
+func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	// The agent reports the ctx error on cancel; it must not surface as a task error.
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "agent-session", aop.SessionEndData{Stop: "canceled", Error: "context canceled"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "canceled", Error: "context canceled"}))
 	res := readResult(t, ch)
 	if res.Err != "" {
 		t.Fatalf("err = %q, want empty for canceled run", res.Err)
@@ -130,19 +127,19 @@ func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
 	remote, ch := newChatTaskRemote()
 
 	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionStart, "child-1", aop.SessionStartData{ParentSessionID: "agent-session"}))
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "child-1", aop.SessionEndData{Stop: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "child-1", aop.SessionEndData{Reason: "completed"}))
 	assertTaskOpen(t, remote, ch)
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "agent-session", aop.SessionEndData{Stop: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
 	readResult(t, ch)
 }
 
-func TestTaskConvergesOnceWhenSessionEndAndCompleteArrive(t *testing.T) {
+func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "agent-session", aop.SessionEndData{Stop: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
 	res := readResult(t, ch)
 	if res.Err != "" {
 		t.Fatalf("err = %q, want empty", res.Err)

@@ -197,6 +197,21 @@ func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
 	return done, err
 }
 
+func (r *AgentConsole) SetEvalCriteria(criteria string) {
+	if r == nil {
+		return
+	}
+	r.evalCriteria = criteria
+	r.syncEvalToController()
+}
+
+func (r *AgentConsole) EvalCriteria() string {
+	if r == nil {
+		return ""
+	}
+	return r.evalCriteria
+}
+
 func (r *AgentConsole) Start() error {
 	r.activateConsoleLogger()
 	r.renderBanner()
@@ -386,6 +401,9 @@ func (r *AgentConsole) resolvePastedText(input string) (string, string) {
 }
 
 func (r *AgentConsole) handleInputLine(line string) (bool, error) {
+	if r.appInfo.Run != nil && r.appInfo.Command != nil {
+		return r.handleRuntimeInputLine(line)
+	}
 	args, err := AgentConsoleArgsForLine(line)
 	if err != nil {
 		return false, err
@@ -401,6 +419,42 @@ func (r *AgentConsole) handleInputLine(line string) (bool, error) {
 		return false, err
 	}
 	return false, nil
+}
+
+func (r *AgentConsole) handleRuntimeInputLine(line string) (bool, error) {
+	text := strings.TrimSpace(line)
+	if text == "" {
+		return false, nil
+	}
+	switch text {
+	case "/exit", "/quit":
+		return true, nil
+	case "/stop":
+		if !r.InterruptCurrentRun() {
+			fmt.Fprintln(r.stderr, "No running task.")
+		}
+		return false, nil
+	case "/continue":
+		return false, r.controller.submit("continue", "", func(ctx context.Context) (*agent.Result, error) {
+			return r.appInfo.Run(ctx, "", true)
+		})
+	}
+	if strings.HasPrefix(text, "/followup ") {
+		prompt := strings.TrimSpace(strings.TrimPrefix(text, "/followup "))
+		return false, r.controller.submit("follow-up", prompt, func(ctx context.Context) (*agent.Result, error) {
+			return r.appInfo.Run(ctx, prompt, false)
+		})
+	}
+	if strings.HasPrefix(text, "!") {
+		return false, r.appInfo.Command(r.ctx, text)
+	}
+	if !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "/skill:") {
+		display, prompt := r.resolvePastedText(text)
+		return false, r.controller.submit("prompt", display, func(ctx context.Context) (*agent.Result, error) {
+			return r.appInfo.Run(ctx, prompt, false)
+		})
+	}
+	return false, r.appInfo.Command(r.ctx, text)
 }
 
 func (r *AgentConsole) promptString() string {
@@ -1385,8 +1439,7 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 		r.appInfo.OnProviderChange(prov, *resolved)
 	}
 	if r.agent != nil {
-		r.agent.Cfg.Provider = prov
-		r.agent.Cfg.Model = resolved.Model
+		r.agent.SetProvider(prov, resolved.Model)
 	}
 	if r.option != nil {
 		cfg.ApplyResolvedProviderOptions(r.option, *resolved)

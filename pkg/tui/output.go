@@ -67,6 +67,7 @@ type AgentOutput struct {
 	totalUsage    agent.Usage
 	turnToolCalls int
 	contextTokens int
+	runCount      int
 
 	// Transient UI.
 	mode                   RenderMode
@@ -365,17 +366,16 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.agentStart = time.Now()
 
 	case aop.TypeTurnStart:
-		data, err := aop.DecodeData[aop.TurnData](event)
-		if err != nil {
-			return
-		}
+		o.agentStart = time.Now()
+		o.runCount++
 		o.stream.NewTurn()
 		o.turnUsage = nil
+		o.totalUsage = agent.Usage{}
 		o.turnToolCalls = 0
 		o.lastAssistant = aop.MessageData{}
 		o.hasAssistant = false
 		if o.canAnimate() {
-			o.live.BeginTurn(data.Turn)
+			o.live.BeginTurn(o.runCount)
 		}
 
 	case aop.TypeMessageDelta:
@@ -427,6 +427,13 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		if data.Role == "assistant" {
 			o.lastAssistant = data
 			o.hasAssistant = true
+			if event.TurnID == "" {
+				if content := strings.TrimSpace(messagePartText(data, aop.PartText)); content != "" {
+					if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
+						fmt.Fprintln(o.Stdout(), rendered)
+					}
+				}
+			}
 		}
 
 	case aop.TypeToolCall:
@@ -533,14 +540,10 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.contextTokens = data.ContextTokens
 		o.live.FinishTurn(o.contextTokens)
 		o.stopLive()
-		o.turnEnd(data.Turn)
-	case aop.TypeSessionEnd:
-		data, err := aop.DecodeData[aop.SessionEndData](event)
-		if err != nil {
-			return
-		}
-		o.stopLive()
+		o.turnEnd(o.runCount)
 		o.agentEnd(data)
+	case aop.TypeSessionEnd:
+		o.stopLive()
 	case aop.TypeStatus:
 		data, err := aop.DecodeData[aop.StatusData](event)
 		if err != nil {
@@ -788,14 +791,13 @@ func (o *AgentOutput) turnEnd(turn int) {
 	}
 }
 
-func (o *AgentOutput) agentEnd(data aop.SessionEndData) {
+func (o *AgentOutput) agentEnd(data aop.TurnEndData) {
 	o.stream.EnsureNewline()
 	w := o.Stderr()
-	if w != nil && data.Turns > 0 {
+	if w != nil && o.debug {
 		elapsed := time.Since(o.agentStart)
 		parts := []string{
 			fmt.Sprintf("agent %s", data.Stop),
-			fmt.Sprintf("turns=%d", data.Turns),
 		}
 		if o.toolCallCount > 0 {
 			toolPart := fmt.Sprintf("tools=%d", o.toolCallCount)
@@ -825,8 +827,8 @@ func (o *AgentOutput) agentEnd(data aop.SessionEndData) {
 	if data.Error != "" {
 		errText = fmt.Sprintf(" err=%q", data.Error)
 	}
-	fmt.Fprintf(w, "%s[debug] [agent] stop=%s turns=%d last_role=%s content=%d reasoning=%d tools=%d preview=%q%s%s%s\n",
-		o.color.Code(output.ANSIDim), data.Stop, data.Turns,
+	fmt.Fprintf(w, "%s[debug] [agent] stop=%s last_role=%s content=%d reasoning=%d tools=%d preview=%q%s%s%s\n",
+		o.color.Code(output.ANSIDim), data.Stop,
 		lastRole, lastContentLen, lastReasoningLen, o.turnToolCalls,
 		lastPreview, hint, errText, o.color.Code(output.ANSIReset))
 }

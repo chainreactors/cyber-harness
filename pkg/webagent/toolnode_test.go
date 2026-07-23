@@ -22,26 +22,26 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-// hubScript simulates the hub dialect: register→connected handshake, an
-// inbound AOP tool.call, file.read, and tool.data correlation.
+// hubScript simulates the hub dialect: register→connected handshake, a
+// structured Command, file.read, and tool.data correlation.
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 type hubScript struct {
 	t *testing.T
 
-	mu           sync.Mutex
-	registered   chan webproto.RegisterPayload
-	toolResult   chan aop.ToolResultData
-	progress     chan string
-	fileData     chan []byte
-	toolData     chan webproto.Message
+	mu         sync.Mutex
+	registered chan webproto.RegisterPayload
+	toolResult chan webproto.CommandResultPayload
+	progress   chan string
+	fileData   chan []byte
+	toolData   chan webproto.Message
 }
 
 func newHubScript(t *testing.T) *hubScript {
 	return &hubScript{
 		t:          t,
 		registered: make(chan webproto.RegisterPayload, 1),
-		toolResult: make(chan aop.ToolResultData, 1),
+		toolResult: make(chan webproto.CommandResultPayload, 1),
 		progress:   make(chan string, 16),
 		fileData:   make(chan []byte, 1),
 		toolData:   make(chan webproto.Message, 4),
@@ -83,14 +83,10 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch msg.Type {
-		case "aop":
-			var event aop.Event
-			if err := json.Unmarshal(msg.Payload, &event); err != nil || event.Type != aop.TypeToolResult {
-				continue
-			}
-			var result aop.ToolResultData
-			if err := json.Unmarshal(event.Data, &result); err != nil {
-				h.t.Errorf("tool.result: %v", err)
+		case webproto.TypeCommandResult:
+			var result webproto.CommandResultPayload
+			if err := json.Unmarshal(msg.Payload, &result); err != nil {
+				h.t.Errorf("command.result: %v", err)
 				return
 			}
 			h.toolResult <- result
@@ -118,20 +114,13 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 // drive issues the server→runner calls once the connection is live.
 func (h *hubScript) drive(conn *websocket.Conn) {
-	callData, _ := json.Marshal(aop.ToolCallData{
+	call := aop.ToolCallData{
 		ToolCallID: "call-1",
 		ToolName:   "bash",
 		Args:       map[string]any{"command": "echo hello"},
-	})
-	event := aop.Event{
-		Type:      aop.TypeToolCall,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: "exec-1",
-		Agent:     "aiscan.web",
-		Data:      callData,
 	}
-	payload, _ := json.Marshal(event)
-	if err := conn.WriteJSON(webproto.Message{Type: "aop", TaskID: "exec-1", Payload: payload}); err != nil {
+	payload, _ := json.Marshal(webproto.CommandPayload{SessionID: "exec-1", ToolCall: &call})
+	if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeCommand, TaskID: "exec-1", Payload: payload}); err != nil {
 		return
 	}
 }
@@ -171,7 +160,7 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 		errCh <- RunToolNode(ctx, ToolNodeConfig{
 			ServerURL: server.URL,
 			WSPath:    "/ws/runner",
-			Name:      "runner-1",
+			ID:        "runner-1",
 			Token:     "test-token",
 			Registry:  reg,
 			DataBus:   dataBus,
@@ -197,15 +186,15 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 		t.Fatalf("register tools = %+v", registered.Tools)
 	}
 
-	// The hub issues an AOP tool.call once the runner's first post-handshake
+	// The hub issues a structured Command once the runner's first post-handshake
 	// message arrives; recordingBash streams one progress line and returns.
 	line := wait(t, hub.progress, "tool.data progress")
 	if line != "streamed" {
 		t.Fatalf("progress line = %q", line)
 	}
-	result := wait(t, hub.toolResult, "tool.result")
-	if result.IsError || result.ToolCallID != "call-1" || result.ToolName != "bash" {
-		t.Fatalf("tool.result = %+v", result)
+	result := wait(t, hub.toolResult, "command.result")
+	if isError, _ := result.Metadata["is_error"].(bool); isError || result.Metadata["tool_call_id"] != "call-1" || result.Metadata["tool_name"] != "bash" {
+		t.Fatalf("command.result = %+v", result)
 	}
 
 	// tool.data rides the same connection, correlated by call ID.
@@ -269,7 +258,7 @@ func TestRunToolNodeFileRead(t *testing.T) {
 	defer cancel()
 	go func() {
 		_ = RunToolNode(ctx, ToolNodeConfig{
-			ServerURL: server.URL, WSPath: "/ws/runner", Name: "runner-1",
+			ServerURL: server.URL, WSPath: "/ws/runner", ID: "runner-1",
 			Registry: reg,
 		})
 	}()

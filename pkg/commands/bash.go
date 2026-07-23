@@ -112,7 +112,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 		return ToolResult{}, err
 	}
 
-	return t.waitOrBackground(execution, ctx), nil
+	return t.waitOrBackground(execution, ctx, inboxFromContext(ctx, t.inbox)), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
@@ -408,7 +408,7 @@ func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 	}
 }
 
-func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context) ToolResult {
+func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) ToolResult {
 	done := t.tasks.Done(execution.ID)
 	select {
 	case <-done:
@@ -416,7 +416,7 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context) T
 		return t.collectResult(execution)
 	case <-time.After(autoBackgroundThreshold):
 		info, _ := t.tasks.Get(execution.ID)
-		t.startMonitor(info)
+		t.startMonitor(info, targetInbox)
 		return TextResult(fmt.Sprintf(
 			"Command auto-backgrounded (exceeded %s).\nsession id=%s name=%s\nIncremental output will be delivered automatically. Use `tmux kill -t %s` to stop.",
 			autoBackgroundThreshold, info.ID, info.Name, info.ID))
@@ -483,8 +483,8 @@ func (t *BashTool) proxyEnv() []string {
 	}
 }
 
-func (t *BashTool) startMonitor(info tmux.Info) {
-	if t.inbox == nil {
+func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {
+	if targetInbox == nil {
 		return
 	}
 	t.tasks.Monitor(info.ID, monitorInterval, func(output string) {
@@ -492,8 +492,23 @@ func (t *BashTool) startMonitor(info tmux.Info) {
 			fmt.Sprintf("<session_output id=%q name=%q>\n%s\n</session_output>", info.ID, info.Name, output))
 		msg.Priority = inbox.PriorityLow
 		msg.Meta = map[string]any{"session_id": info.ID, "session_name": info.Name, "type": "incremental"}
-		_ = t.inbox.Push(msg)
+		_ = targetInbox.Push(msg)
 	})
+	go func() {
+		<-t.tasks.Done(info.ID)
+		final, ok := t.tasks.Get(info.ID)
+		if !ok {
+			return
+		}
+		tail := t.tasks.PeekOrEmpty(info.ID, 20)
+		msg := inbox.NewMessage(inbox.OriginSession, "user", tmux.FormatCompletion(final, tail))
+		msg.Meta = map[string]any{
+			"session_id":   final.ID,
+			"session_name": final.Name,
+			"exit_code":    final.ExitCode,
+		}
+		_ = targetInbox.Push(msg)
+	}()
 }
 
 func isOnlyCommentsOrBlank(cmdLine string) bool {

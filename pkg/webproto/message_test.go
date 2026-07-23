@@ -4,48 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/utils/pty"
 )
 
-func TestIsAOPUserMessageDecodesGoalExt(t *testing.T) {
-	event := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: "session-1",
-		Agent:     "aiscan.web",
-		Data: MustJSON(aop.MessageData{
-			MessageID: "msg-1",
-			Role:      "user",
-			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
-		}),
+func TestRunFrameRoundTrip(t *testing.T) {
+	want := RunPayload{SessionID: "session-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}}, NoEcho: true, EvalCriteria: "find one SQLi", EvalMaxRounds: 5}
+	msg := Message{Type: TypeRun, RunID: "run-1", Payload: MustJSON(want)}
+	var got RunPayload
+	if err := json.Unmarshal(msg.Payload, &got); err != nil {
+		t.Fatal(err)
 	}
-	_ = aop.SetExt(&event, aop.NSAOP, aop.RunControl{NoEcho: true})
-	_ = xeval.Set(&event, xeval.Control{Criteria: "find one SQLi", MaxRounds: 5})
-	msg := Message{Type: "aop", Payload: MustJSON(event)}
-
-	decoded, ok := IsAOPUserMessage(msg)
-	if !ok {
-		t.Fatal("IsAOPUserMessage() = false, want true")
-	}
-	if got := UserMessageText(decoded); got != "audit target" {
-		t.Fatalf("UserMessageText() = %q, want %q", got, "audit target")
-	}
-	goal := DecodeGoalExt(decoded)
-	if goal.EvalCriteria != "find one SQLi" || goal.EvalMaxRounds != 5 || !goal.NoEcho {
-		t.Fatalf("DecodeGoalExt() = %+v", goal)
-	}
-
-	if _, ok := IsAOPUserMessage(Message{Type: "exec", Data: "x"}); ok {
-		t.Fatal("IsAOPUserMessage(exec) = true, want false")
-	}
-	assistant := event
-	assistant.Data = MustJSON(aop.MessageData{MessageID: "m-2", Role: "assistant", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hi"}}})
-	if _, ok := IsAOPUserMessage(Message{Type: "aop", Payload: MustJSON(assistant)}); ok {
-		t.Fatal("IsAOPUserMessage(assistant) = true, want false")
+	if msg.RunID != "run-1" || got.SessionID != want.SessionID || len(got.Parts) != 1 || got.Parts[0].Text != "audit target" || !got.NoEcho || got.EvalMaxRounds != 5 {
+		t.Fatalf("run frame = %+v %+v", msg, got)
 	}
 }
 

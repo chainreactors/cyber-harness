@@ -41,9 +41,8 @@ func TextInput(text string) Input {
 	return Input{Parts: []InputPart{{Text: text}}}
 }
 
-// InputFromAOPMessage converts an inbound AOP user message into an agent
-// Input. Boundaries (stdio host, webagent) share this so text/image part
-// handling stays identical across transports.
+// InputFromAOPMessage maps the protocol's typed message parts into the Agent's
+// provider input. Session.Run is the only runtime entry point that calls it.
 func InputFromAOPMessage(data aop.MessageData) Input {
 	input := Input{}
 	for _, part := range data.Parts {

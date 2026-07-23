@@ -1116,6 +1116,7 @@ func (s *Service) ListSessions(ctx context.Context) ([]*ChatSession, error) {
 }
 
 func (s *Service) DeleteSession(ctx context.Context, id string) error {
+	s.closeRemoteSession(id)
 	return s.store.DeleteSession(ctx, id)
 }
 
@@ -1299,6 +1300,10 @@ func (s *Service) sessionHasActiveTask(sessionID string) bool {
 
 func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
 	content := strings.TrimSpace(msg.Content)
+	if strings.HasPrefix(content, "!") {
+		s.handleAgentCommand(sessionID, content)
+		return
+	}
 
 	// A typed "/verb" is routed by scope. Hub-scope commands (scan pipeline,
 	// agent roster, merged help) run here. Agent-scope commands (/status,
@@ -1317,6 +1322,21 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 			s.runHubCommand(sessionID, verb, args)
 			return
 		}
+		switch verb {
+		case "stop":
+			_ = s.CancelSession(context.Background(), sessionID)
+			return
+		case "exit", "quit":
+			s.closeRemoteSession(sessionID)
+			return
+		case "continue", "followup":
+			// These are Runs: the adapter normalizes their prompt semantics.
+		default:
+			if !strings.HasPrefix(content, "/skill:") {
+				s.handleAgentCommand(sessionID, content)
+				return
+			}
+		}
 	}
 
 	s.handleChatMessage(sessionID, msg, opts)
@@ -1334,13 +1354,7 @@ func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
 	// already durable in the store, so a reconnecting client re-derives it on load.
 	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
 	if s.sessionAgent(sessionID) != nil {
-		s.handleChatMessage(sessionID, &ChatMessage{
-			ID:        generateID(),
-			SessionID: sessionID,
-			Role:      "user",
-			Content:   "/clear",
-			CreatedAt: time.Now(),
-		}, opts)
+		s.handleAgentCommand(sessionID, "/clear")
 	}
 }
 
@@ -1522,8 +1536,13 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 		AgentName: agent.name,
 	})
 
-	event := BuildUserMessageEvent(sessionID, msg.ID, strings.TrimSpace(msg.Content), opts)
-	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, event)
+	run := webproto.RunPayload{
+		SessionID: sessionID,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
+		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
+		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+	}
+	resultCh, err := s.agents.DispatchRun(agent.id, taskID, run)
 	if err != nil {
 		s.finishSessionTask(taskID)
 		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
@@ -1547,6 +1566,42 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 			s.broadcastHubError(sessionID, "", res.Err, nil)
 		}
 	}()
+}
+
+func (s *Service) handleAgentCommand(sessionID, line string) {
+	agent := s.sessionAgent(sessionID)
+	if agent == nil {
+		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
+			"Agent is not connected. Reconnect the agent to continue chatting.", nil)
+		return
+	}
+	taskID := generateID()
+	s.registerSessionTask(taskID, sessionID, agent.id)
+	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, webproto.CommandPayload{SessionID: sessionID, Line: line})
+	if err != nil {
+		s.finishSessionTask(taskID)
+		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
+		return
+	}
+	go func() {
+		res, ok := <-resultCh
+		canceled := s.finishSessionTask(taskID)
+		if !ok || canceled {
+			return
+		}
+		if res.Err != "" {
+			s.broadcastHubError(sessionID, "", res.Err, nil)
+		}
+	}()
+}
+
+func (s *Service) closeRemoteSession(sessionID string) {
+	session, err := s.store.GetSession(context.Background(), sessionID)
+	if err != nil || s.agents == nil || session.AgentID == "" {
+		return
+	}
+	payload, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID, Reason: "completed"})
+	_ = s.agents.SendAgentMessage(session.AgentID, WSMessage{Type: webproto.TypeSessionClose, Payload: payload})
 }
 
 // broadcastSystemMessage persists + broadcasts a system message. code names a

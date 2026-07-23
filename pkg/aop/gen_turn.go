@@ -2,7 +2,4 @@
 
 package aop
 
-type TurnData struct {
-	// Turn corresponds to the JSON schema field "turn".
-	Turn int `json:"turn"`
-}
+type TurnStartData struct{}

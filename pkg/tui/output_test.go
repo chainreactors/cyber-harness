@@ -55,15 +55,15 @@ func aopTestEvent(typ string, data any) aop.Event {
 	if err != nil {
 		panic(err)
 	}
-	return aop.Event{Type: typ, Data: raw}
+	return aop.Event{Type: typ, TurnID: "run-test", Data: raw}
 }
 
 func turnStartEvent(turn int) aop.Event {
-	return aopTestEvent(aop.TypeTurnStart, aop.TurnData{Turn: turn})
+	return aopTestEvent(aop.TypeTurnStart, aop.TurnStartData{})
 }
 
 func turnEndEvent(turn, contextTokens int) aop.Event {
-	return aopTestEvent(aop.TypeTurnEnd, aop.TurnEndData{Turn: turn, ContextTokens: contextTokens})
+	return aopTestEvent(aop.TypeTurnEnd, aop.TurnEndData{Stop: string(agent.StopReasonCompleted), ContextTokens: contextTokens})
 }
 
 func textDeltaEvent(messageID, delta string) aop.Event {

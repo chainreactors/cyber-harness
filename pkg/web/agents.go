@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -56,9 +56,10 @@ type remoteAgent struct {
 	status       webproto.AgentStatus
 	stats        webproto.AgentStats
 
-	mu    sync.Mutex
-	tasks map[string]chan taskResult
-	turns map[string]int
+	mu           sync.Mutex
+	tasks        map[string]chan taskResult
+	turns        map[string]int
+	openSessions map[string]struct{}
 	// toolCalls marks tasks dispatched via DispatchToolCall: only they converge
 	// on a tool.result. Chat tasks see tool.result events too (LLM tool use)
 	// and must ignore them as terminals.
@@ -267,24 +268,13 @@ func (p *AgentPool) PickChat() *remoteAgent {
 	return fallback
 }
 
-// DispatchToolCall sends an AOP tool.call to an agent and returns a channel
-// for the result. The call session id is the task id, so every event the call
-// produces (progress telemetry, tool.result) routes back to this task.
+// DispatchToolCall sends a structured Command to a tool-capable node and
+// returns a channel for the result. taskID correlates this non-Run RPC and its
+// progress telemetry.
 func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallData) (<-chan taskResult, error) {
-	data, err := json.Marshal(call)
+	payload, err := json.Marshal(webproto.CommandPayload{SessionID: taskID, ToolCall: &call})
 	if err != nil {
-		return nil, fmt.Errorf("marshal tool.call data: %w", err)
-	}
-	event := aop.Event{
-		Type:      aop.TypeToolCall,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: taskID,
-		Agent:     "aiscan.web",
-		Data:      data,
-	}
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return nil, fmt.Errorf("marshal tool.call event: %w", err)
+		return nil, fmt.Errorf("marshal command: %w", err)
 	}
 	if a := p.get(agentID); a != nil {
 		a.mu.Lock()
@@ -294,7 +284,7 @@ func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallDa
 		a.toolCalls[taskID] = struct{}{}
 		a.mu.Unlock()
 	}
-	ch, err := p.dispatchMessage(agentID, taskID, WSMessage{Type: "aop", TaskID: taskID, Payload: payload})
+	ch, err := p.dispatchMessage(agentID, taskID, WSMessage{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
 	if err != nil {
 		if a := p.get(agentID); a != nil {
 			a.mu.Lock()
@@ -308,43 +298,69 @@ func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallDa
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
 func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchChatSession(agentID, taskID, BuildUserMessageEvent("", taskID, prompt, webproto.GoalExt{}))
+	return p.DispatchRun(agentID, taskID, webproto.RunPayload{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
 }
 
-// DispatchChatSession sends an inbound AOP user message to an agent. The hub
-// builds the event (message_id, session scope, Goal-mode controls in ext) and
-// the agent treats it as the single executable chat unit.
-func (p *AgentPool) DispatchChatSession(agentID, taskID string, event aop.Event) (<-chan taskResult, error) {
-	payload, err := json.Marshal(event)
+func (p *AgentPool) DispatchRun(agentID, runID string, run webproto.RunPayload) (<-chan taskResult, error) {
+	a := p.get(agentID)
+	if a == nil {
+		return nil, fmt.Errorf("agent %s not connected", agentID)
+	}
+	if run.SessionID != "" {
+		a.mu.Lock()
+		_, opened := a.openSessions[run.SessionID]
+		if !opened {
+			a.openSessions[run.SessionID] = struct{}{}
+		}
+		a.mu.Unlock()
+		if !opened {
+			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: run.SessionID})
+			select {
+			case a.sendCh <- WSMessage{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			default:
+				a.mu.Lock()
+				delete(a.openSessions, run.SessionID)
+				a.mu.Unlock()
+				return nil, fmt.Errorf("agent %s send channel full", agentID)
+			}
+		}
+	}
+	payload, err := json.Marshal(run)
 	if err != nil {
-		return nil, fmt.Errorf("marshal user message event: %w", err)
+		return nil, fmt.Errorf("marshal run: %w", err)
 	}
-	return p.dispatchMessage(agentID, taskID, WSMessage{Type: "aop", TaskID: taskID, Payload: payload})
+	return p.dispatchMessage(agentID, runID, WSMessage{Type: webproto.TypeRun, RunID: runID, Payload: payload})
 }
 
-// BuildUserMessageEvent constructs the inbound AOP user message the hub sends
-// to an agent. messageID is the hub-persisted message id; goal rides in
-// ext.aiscan with no_echo set — the hub already persisted and broadcast its own
-// copy, so the agent must not echo it back.
-func BuildUserMessageEvent(sessionID, messageID, text string, goal webproto.GoalExt) aop.Event {
-	goal.NoEcho = true
-	data, _ := json.Marshal(aop.MessageData{
-		MessageID: messageID,
-		Role:      "user",
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
-	})
-	event := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: sessionID,
-		Agent:     "aiscan.web",
-		Data:      data,
+func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.CommandPayload) (<-chan taskResult, error) {
+	a := p.get(agentID)
+	if a == nil {
+		return nil, fmt.Errorf("agent %s not connected", agentID)
 	}
-	_ = aop.SetExt(&event, aop.NSAOP, aop.RunControl{NoEcho: goal.NoEcho, MaxTurns: goal.PersistMaxTurns})
-	if goal.EvalCriteria != "" {
-		_ = xeval.Set(&event, xeval.Control{Criteria: goal.EvalCriteria, MaxRounds: goal.EvalMaxRounds})
+	if command.SessionID != "" {
+		a.mu.Lock()
+		_, opened := a.openSessions[command.SessionID]
+		if !opened {
+			a.openSessions[command.SessionID] = struct{}{}
+		}
+		a.mu.Unlock()
+		if !opened {
+			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: command.SessionID})
+			select {
+			case a.sendCh <- WSMessage{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			default:
+				a.mu.Lock()
+				delete(a.openSessions, command.SessionID)
+				a.mu.Unlock()
+				return nil, fmt.Errorf("agent %s send channel full", agentID)
+			}
+		}
 	}
-	return event
+	payload, err := json.Marshal(command)
+	if err != nil {
+		return nil, fmt.Errorf("marshal command: %w", err)
+	}
+	return p.dispatchMessage(agentID, taskID, WSMessage{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
 }
 
 func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-chan taskResult, error) {
@@ -415,9 +431,27 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 	if a == nil {
 		return
 	}
+	a.mu.Lock()
+	resultCh, pending := a.tasks[taskID]
+	_, isToolCall := a.toolCalls[taskID]
+	if pending {
+		delete(a.tasks, taskID)
+		delete(a.turns, taskID)
+		delete(a.toolCalls, taskID)
+		delete(a.childSessions, taskID)
+	}
+	a.mu.Unlock()
 	select {
-	case a.sendCh <- WSMessage{Type: "cancel", TaskID: taskID}:
+	case a.sendCh <- func() WSMessage {
+		if isToolCall {
+			return WSMessage{Type: "cancel", TaskID: taskID}
+		}
+		return WSMessage{Type: webproto.TypeRunCancel, RunID: taskID}
+	}():
 	default:
+	}
+	if pending && resultCh != nil {
+		close(resultCh)
 	}
 }
 
@@ -644,6 +678,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		stats:         info.Stats,
 		tasks:         make(map[string]chan taskResult),
 		turns:         make(map[string]int),
+		openSessions:  make(map[string]struct{}),
 		childSessions: make(map[string]map[string]struct{}),
 		done:          make(chan struct{}),
 	}
@@ -811,6 +846,56 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			a.mu.Unlock()
 		}
 
+	case webproto.TypeSessionOpened:
+		var payload webproto.SessionLifecyclePayload
+		if json.Unmarshal(msg.Payload, &payload) == nil && payload.SessionID != "" {
+			a.mu.Lock()
+			a.openSessions[payload.SessionID] = struct{}{}
+			a.mu.Unlock()
+		}
+
+	case webproto.TypeSessionClosed:
+		var payload webproto.SessionLifecyclePayload
+		if json.Unmarshal(msg.Payload, &payload) == nil && payload.SessionID != "" {
+			a.mu.Lock()
+			delete(a.openSessions, payload.SessionID)
+			a.mu.Unlock()
+		}
+
+	case webproto.TypeCommandResult:
+		a.mu.Lock()
+		ch, ok := a.tasks[msg.TaskID]
+		_, isToolCall := a.toolCalls[msg.TaskID]
+		if ok {
+			delete(a.tasks, msg.TaskID)
+			delete(a.turns, msg.TaskID)
+			delete(a.toolCalls, msg.TaskID)
+		}
+		a.mu.Unlock()
+		if ok && ch != nil {
+			result := taskResult{Result: msg.Payload}
+			if isToolCall {
+				var command webproto.CommandResultPayload
+				if err := json.Unmarshal(msg.Payload, &command); err != nil {
+					result.Err = "decode command.result: " + err.Error()
+				} else {
+					result.Output = commandPartsText(command.Parts)
+					if isError, _ := command.Metadata["is_error"].(bool); isError {
+						result.Err, result.Output = result.Output, ""
+					}
+					if details := command.Metadata["details"]; details != nil {
+						result.Result, _ = json.Marshal(details)
+					}
+				}
+			}
+			ch <- result
+			close(ch)
+			if isToolCall {
+				p.recordScanResultStats(a, result.Result)
+				p.persistResultRecords(a, msg.TaskID, result.Result)
+			}
+		}
+
 	// complete/error are the terminal envelopes of the file RPCs only; agent
 	// semantics (chat, tool calls) converge on AOP events.
 	case "complete":
@@ -831,18 +916,27 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		}
 
 	case "error":
+		correlationID := msg.RunID
+		if correlationID == "" {
+			correlationID = msg.TaskID
+		}
 		a.mu.Lock()
-		ch, ok := a.tasks[msg.TaskID]
-		turn := a.turns[msg.TaskID]
+		ch, ok := a.tasks[correlationID]
+		turn := a.turns[correlationID]
 		if ok {
-			delete(a.tasks, msg.TaskID)
-			delete(a.turns, msg.TaskID)
-			delete(a.toolCalls, msg.TaskID)
-			delete(a.childSessions, msg.TaskID)
+			delete(a.tasks, correlationID)
+			delete(a.turns, correlationID)
+			delete(a.toolCalls, correlationID)
+			delete(a.childSessions, correlationID)
 		}
 		a.mu.Unlock()
 		if ok && ch != nil {
-			ch <- taskResult{Err: msg.Data, Turn: turn}
+			var payload webproto.ErrorPayload
+			errText := msg.Data
+			if json.Unmarshal(msg.Payload, &payload) == nil && payload.Message != "" {
+				errText = payload.Message
+			}
+			ch <- taskResult{Err: errText, Turn: turn}
 			close(ch)
 		}
 
@@ -893,10 +987,6 @@ func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEv
 }
 
 func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
-	if msg.TaskID == "" {
-		return
-	}
-
 	var aopEv aop.Event
 	if len(msg.Payload) > 0 {
 		_ = json.Unmarshal(msg.Payload, &aopEv)
@@ -907,47 +997,19 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 	// Session-topic broadcast is optional (scans dispatched outside chat have
 	// no chat session); task convergence below is not.
 	if p.sessions != nil {
-		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
+		if sid, ok := p.sessions.TaskSession(msg.RunID); ok {
 			p.sessions.BroadcastAOPEvent(sid, aopEv)
+		} else if aopEv.SessionID != "" {
+			p.sessions.BroadcastAOPEvent(aopEv.SessionID, aopEv)
 		}
 	}
 
 	switch aopEv.Type {
-	case aop.TypeSessionStart:
-		var d aop.SessionStartData
-		_ = json.Unmarshal(aopEv.Data, &d)
-		if d.ParentSessionID != "" {
-			a.mu.Lock()
-			if _, ok := a.tasks[msg.TaskID]; ok {
-				if a.childSessions == nil {
-					a.childSessions = map[string]map[string]struct{}{}
-				}
-				set := a.childSessions[msg.TaskID]
-				if set == nil {
-					set = map[string]struct{}{}
-					a.childSessions[msg.TaskID] = set
-				}
-				set[aopEv.SessionID] = struct{}{}
-			}
-			a.mu.Unlock()
-		}
-
-	case aop.TypeSessionEnd:
-		p.convergeTaskOnSessionEnd(a, msg.TaskID, aopEv)
+	case aop.TypeTurnEnd:
+		p.convergeTaskOnTurnEnd(a, msg.RunID, aopEv)
 
 	case aop.TypeToolResult:
 		p.convergeTaskOnToolResult(a, msg.TaskID, aopEv)
-
-	case aop.TypeTurnStart:
-		var d aop.TurnData
-		_ = json.Unmarshal(aopEv.Data, &d)
-		if d.Turn > 0 {
-			a.mu.Lock()
-			if _, ok := a.tasks[msg.TaskID]; ok {
-				a.turns[msg.TaskID] = d.Turn
-			}
-			a.mu.Unlock()
-		}
 	}
 
 }
@@ -1010,19 +1072,25 @@ func toolResultText(content any) string {
 	return ""
 }
 
+func commandPartsText(parts []aop.MessagePart) string {
+	var values []string
+	for _, part := range parts {
+		if part.Type == aop.PartText && part.Text != "" {
+			values = append(values, part.Text)
+		}
+	}
+	return strings.Join(values, "\n")
+}
+
 // convergeTaskOnSessionEnd closes a chat task when the ROOT agent session
 // ends: this terminal event drives task cleanup; child (derived sub-agent)
 // session ends and mid-run AOP error events are not terminal. Idempotent —
 // a file-RPC complete frame arriving after this close is a no-op.
-func (p *AgentPool) convergeTaskOnSessionEnd(a *remoteAgent, taskID string, ev aop.Event) {
-	a.mu.Lock()
-	if set, ok := a.childSessions[taskID]; ok {
-		if _, isChild := set[ev.SessionID]; isChild {
-			delete(set, ev.SessionID)
-			a.mu.Unlock()
-			return
-		}
+func (p *AgentPool) convergeTaskOnTurnEnd(a *remoteAgent, taskID string, ev aop.Event) {
+	if taskID == "" {
+		return
 	}
+	a.mu.Lock()
 	ch, ok := a.tasks[taskID]
 	turn := a.turns[taskID]
 	if ok {
@@ -1035,7 +1103,7 @@ func (p *AgentPool) convergeTaskOnSessionEnd(a *remoteAgent, taskID string, ev a
 	if !ok || ch == nil {
 		return
 	}
-	var d aop.SessionEndData
+	var d aop.TurnEndData
 	_ = json.Unmarshal(ev.Data, &d)
 	res := taskResult{Turn: turn}
 	// A canceled run still carries the ctx error ("context canceled") — only

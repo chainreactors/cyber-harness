@@ -14,6 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -33,7 +34,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 
 	em := cfg.emitter
 	ib := cfg.Inbox
-	em.sessionStart(cfg.Model)
 	ended := false
 	end := func(result *Result, err error, stop StopReason) (*Result, error) {
 		if result == nil {
@@ -49,7 +49,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			if result.Err != nil && stop == StopReasonError {
 				em.errorEvt(result.Err, isRetryableError(result.Err))
 			}
-			em.sessionEnd(stop, result.Turns, result.TotalUsage, result.Err)
 			if cfg.OnRunEnd != nil {
 				cfg.OnRunEnd(result)
 			}
@@ -63,8 +62,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.append(failure)
 			return end(nil, err, StopReasonCanceled)
 		}
-		em.turnStart(turn)
-
 		if ib != nil {
 			inboxMsgs := ib.Drain()
 			for i, msg := range inboxMsgs {
@@ -109,7 +106,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				cfg.Model = next.Model
 				continue
 			}
-			em.turnEnd(turn, transcript.totalUsage, transcript.contextTokens)
 			transcript.completedTurns = turn
 			return end(nil, err, StopReasonError)
 		}
@@ -144,7 +140,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		}
 
 		em.usage(usage, cfg.Model)
-		em.turnEnd(turn, transcript.totalUsage, transcript.contextTokens)
 		transcript.completedTurns = turn
 
 		if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
@@ -314,6 +309,7 @@ type toolExecution struct {
 func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, turn int) toolExecution {
 	toolCtx := output.ContextWithCallID(ctx, tc.ID)
 	toolCtx = withToolAgentConfig(toolCtx, cfg)
+	toolCtx = commands.ContextWithInbox(toolCtx, cfg.Inbox)
 	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
 		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Function.Name, tc.Function.Arguments)

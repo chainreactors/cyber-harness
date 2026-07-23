@@ -232,20 +232,17 @@ func TestWSDispatchAndComplete(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "aop" {
+	if cmd.Type != webproto.TypeCommand {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	var callEvent aop.Event
-	if err := json.Unmarshal(cmd.Payload, &callEvent); err != nil {
+	var command webproto.CommandPayload
+	if err := json.Unmarshal(cmd.Payload, &command); err != nil {
 		t.Fatal(err)
 	}
-	if callEvent.Type != aop.TypeToolCall || callEvent.SessionID != "task-1" {
-		t.Fatalf("unexpected tool.call event: %+v", callEvent)
+	if command.ToolCall == nil || command.SessionID != "task-1" {
+		t.Fatalf("unexpected command: %+v", command)
 	}
-	var call aop.ToolCallData
-	if err := json.Unmarshal(callEvent.Data, &call); err != nil {
-		t.Fatal(err)
-	}
+	call := *command.ToolCall
 	args, _ := call.Args.(map[string]any)
 	if call.ToolName != "bash" || args["command"] != "scan -i 1.2.3.4" {
 		t.Fatalf("unexpected tool.call data: %+v", call)
@@ -262,20 +259,11 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	resultData, _ := json.Marshal(aop.ToolResultData{
-		ToolCallID: "task-1",
-		ToolName:   "bash",
-		Content:    "done",
-		Details:    map[string]int{"ports": 3},
+	resultPayload, _ := json.Marshal(webproto.CommandResultPayload{
+		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: "done"}},
+		Metadata: map[string]any{"tool_call_id": "task-1", "tool_name": "bash", "details": map[string]int{"ports": 3}},
 	})
-	resultEvent, _ := json.Marshal(aop.Event{
-		Type:      aop.TypeToolResult,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: "task-1",
-		Agent:     "worker",
-		Data:      resultData,
-	})
-	conn.WriteJSON(WSMessage{Type: "aop", TaskID: "task-1", Payload: resultEvent})
+	conn.WriteJSON(WSMessage{Type: webproto.TypeCommandResult, TaskID: "task-1", Payload: resultPayload})
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {
@@ -308,18 +296,18 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "aop" {
+	if cmd.Type != webproto.TypeRun || cmd.RunID != "task-chat" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	event, ok := webproto.IsAOPUserMessage(cmd)
-	if !ok {
-		t.Fatalf("dispatch did not carry an AOP user message: %+v", cmd)
+	var run webproto.RunPayload
+	if err := json.Unmarshal(cmd.Payload, &run); err != nil {
+		t.Fatal(err)
 	}
-	if text := webproto.UserMessageText(event); text != "hello" {
-		t.Fatalf("unexpected user text: %q", text)
+	if len(run.Parts) != 1 || run.Parts[0].Text != "hello" {
+		t.Fatalf("unexpected run input: %+v", run)
 	}
 
-	conn.WriteJSON(sessionEndMessage("task-chat", "sess-chat", "completed"))
+	conn.WriteJSON(turnEndMessage("task-chat", "sess-chat", "completed"))
 	select {
 	case res := <-resultCh:
 		if res.Err != "" {
@@ -330,26 +318,27 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 	}
 }
 
-// sessionEndMessage builds the agent→hub AOP session.end frame that converges
+// turnEndMessage builds the agent→hub AOP turn.end frame that converges
 // a chat task.
-func sessionEndMessage(taskID, sessionID, stop string) WSMessage {
-	data, _ := json.Marshal(aop.SessionEndData{Stop: stop})
+func turnEndMessage(runID, sessionID, stop string) WSMessage {
+	data, _ := json.Marshal(aop.TurnEndData{Stop: stop})
 	payload, _ := json.Marshal(aop.Event{
-		Type:      aop.TypeSessionEnd,
+		Type:      aop.TypeTurnEnd,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: sessionID,
+		TurnID:    runID,
 		Agent:     "agent",
 		Data:      data,
 	})
-	return WSMessage{Type: "aop", TaskID: taskID, Payload: payload}
+	return WSMessage{Type: "aop", RunID: runID, Payload: payload}
 }
 
-// TestDispatchChatSessionCarriesGoalOptions guards the Goal-mode wiring: the
+// TestDispatchRunCarriesGoalOptions guards the Goal-mode wiring: the
 // eval criteria and round budget must survive into the AOP user message ext so
 // the agent can run the evaluator loop. This whole channel was silently dropped
 // once (SendMessageRequest{Content} only), leaving the Goal panel a dead
 // control — this test fails loudly if that regresses.
-func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
+func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
 		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
@@ -361,38 +350,39 @@ func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	event := BuildUserMessageEvent("sess-1", "msg-1", "audit target",
-		webproto.GoalExt{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
-	resultCh, err := pool.DispatchChatSession(agent.id, "task-goal", event)
+	resultCh, err := pool.DispatchRun(agent.id, "task-goal", webproto.RunPayload{
+		SessionID: "sess-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
+		NoEcho: true, EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	var opened WSMessage
+	if err := conn.ReadJSON(&opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.Type != webproto.TypeSessionOpen {
+		t.Fatalf("first frame = %+v, want session.open", opened)
+	}
 	var cmd WSMessage
 	if err := conn.ReadJSON(&cmd); err != nil {
 		t.Fatal(err)
 	}
-	inbound, ok := webproto.IsAOPUserMessage(cmd)
-	if !ok {
-		t.Fatalf("dispatch did not carry an AOP user message: %+v", cmd)
+	var inbound webproto.RunPayload
+	if cmd.Type != webproto.TypeRun || json.Unmarshal(cmd.Payload, &inbound) != nil {
+		t.Fatalf("dispatch did not carry a Run: %+v", cmd)
 	}
-	if inbound.SessionID != "sess-1" {
-		t.Errorf("session_id = %q, want sess-1", inbound.SessionID)
+	if inbound.SessionID != "sess-1" || len(inbound.Parts) != 1 || inbound.Parts[0].Text != "audit target" {
+		t.Errorf("run = %+v", inbound)
 	}
-	if text := webproto.UserMessageText(inbound); text != "audit target" {
-		t.Errorf("user text = %q, want %q", text, "audit target")
+	if inbound.EvalCriteria != "find at least one SQLi" || inbound.EvalMaxRounds != 5 {
+		t.Errorf("goal options = %+v", inbound)
 	}
-	goal := webproto.DecodeGoalExt(inbound)
-	if goal.EvalCriteria != "find at least one SQLi" {
-		t.Errorf("eval_criteria = %q, want it to reach the agent", goal.EvalCriteria)
-	}
-	if goal.EvalMaxRounds != 5 {
-		t.Errorf("eval_max_rounds = %d, want 5", goal.EvalMaxRounds)
-	}
-	if !goal.NoEcho {
+	if !inbound.NoEcho {
 		t.Error("hub-sent user message must set no_echo")
 	}
-	conn.WriteJSON(sessionEndMessage("task-goal", "sess-1", "completed"))
+	conn.WriteJSON(turnEndMessage("task-goal", "sess-1", "completed"))
 	select {
 	case <-resultCh:
 	case <-time.After(time.Second):
@@ -1046,4 +1036,43 @@ func TestE2ETerminalResize(t *testing.T) {
 		}
 	}
 	t.Logf("resize message received: %v", resizeReceived)
+}
+
+func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
+	pool := NewAgentPool(nil)
+	resultCh := make(chan taskResult, 1)
+	remote := &remoteAgent{
+		id:            "agent-1",
+		sendCh:        make(chan WSMessage, 1),
+		tasks:         map[string]chan taskResult{"task-1": resultCh},
+		turns:         map[string]int{"task-1": 1},
+		toolCalls:     make(map[string]struct{}),
+		childSessions: make(map[string]map[string]struct{}),
+	}
+	pool.agents[remote.id] = remote
+
+	pool.CancelTask(remote.id, "task-1")
+
+	select {
+	case frame := <-remote.sendCh:
+		if frame.Type != webproto.TypeRunCancel || frame.RunID != "task-1" {
+			t.Fatalf("cancel frame = %+v", frame)
+		}
+	default:
+		t.Fatal("cancel frame was not sent")
+	}
+	select {
+	case _, ok := <-resultCh:
+		if ok {
+			t.Fatal("canceled task result channel remained open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled task did not converge")
+	}
+	remote.mu.Lock()
+	_, exists := remote.tasks["task-1"]
+	remote.mu.Unlock()
+	if exists {
+		t.Fatal("canceled task remained registered")
+	}
 }

@@ -48,7 +48,7 @@ func TestRuntimeOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 
 	messages := make(chan pty.Frame, 64)
-	router, err := rt.NewPTYRouter()
+	router, err := rt.newPTYRouter()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestRuntimeOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
 		t.Fatalf("router close terminated resident repl: %+v ok=%v", info, ok)
 	}
-	router2, err := rt.NewPTYRouter()
+	router2, err := rt.newPTYRouter()
 	if err != nil {
 		t.Fatal(err)
 	}

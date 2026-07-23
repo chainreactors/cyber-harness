@@ -9,13 +9,16 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 func TestConsumeAgentStream(t *testing.T) {
-	input := encodeEvents(t,
-		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-		aopMessageEvent("root", "assistant", "hello"),
-		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
+	input := encodeFrames(t,
+		sessionOpenedFrame("root"),
+		aopFrame(aopTestEvent("root", "", aop.TypeSessionStart, aop.SessionStartData{})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopMessageEvent("root", "run-1", "assistant", "hello")),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 
 	var monitorOutput bytes.Buffer
@@ -23,32 +26,33 @@ func TestConsumeAgentStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consumeAgentStream() error = %v", err)
 	}
-	if output != "hello" || len(events) != 3 {
+	if output != "hello" || len(events) != 4 {
 		t.Fatalf("output=%q events=%#v", output, events)
 	}
-	if !strings.Contains(monitorOutput.String(), "hello") {
+	if !strings.Contains(monitorOutput.String(), "hello") || !strings.Contains(monitorOutput.String(), "run run-1") {
 		t.Fatalf("monitor output = %q", monitorOutput.String())
 	}
 }
 
 func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	callID := "call-1"
-	input := encodeEvents(t,
-		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-		aopTestEvent("root", aop.TypeToolCall, aop.ToolCallData{
+	input := encodeFrames(t,
+		sessionOpenedFrame("root"),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeToolCall, aop.ToolCallData{
 			ToolCallID: callID,
 			ToolName:   "bash",
 			Args: map[string]any{
 				"command": "echo hello",
 				"nested":  []any{map[string]any{"enabled": true}},
 			},
-		}),
-		aopTestEvent("root", aop.TypeToolResult, aop.ToolResultData{
+		})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeToolResult, aop.ToolResultData{
 			ToolCallID: callID,
 			ToolName:   "bash",
 			Content:    map[string]any{"output": []any{"hello", map[string]any{"code": float64(0)}}},
-		}),
-		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
+		})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 
 	_, events, err := consumeAgentStream(input, nil)
@@ -68,13 +72,14 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	}
 }
 
-func TestConsumeAgentStreamWaitsForRootSessionEnd(t *testing.T) {
-	input := encodeEvents(t,
-		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-		aopTestEvent("child", aop.TypeSessionStart, aop.SessionStartData{ParentSessionID: "root"}),
-		aopTestEvent("child", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
-		aopMessageEvent("root", "assistant", "root done"),
-		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "completed"}),
+func TestConsumeAgentStreamWaitsForRootRunEnd(t *testing.T) {
+	input := encodeFrames(t,
+		sessionOpenedFrame("root"),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("child", "child-run", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("child", "child-run", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
+		aopFrame(aopMessageEvent("root", "run-1", "assistant", "root done")),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 	output, events, err := consumeAgentStream(input, nil)
 	if err != nil || output != "root done" || len(events) != 5 {
@@ -83,14 +88,26 @@ func TestConsumeAgentStreamWaitsForRootSessionEnd(t *testing.T) {
 }
 
 func TestConsumeAgentStreamReportsRootError(t *testing.T) {
-	input := encodeEvents(t,
-		aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-		aopTestEvent("root", aop.TypeError, aop.ErrorData{Message: "provider failed"}),
-		aopTestEvent("root", aop.TypeSessionEnd, aop.SessionEndData{Stop: "error", Error: "provider failed"}),
+	input := encodeFrames(t,
+		sessionOpenedFrame("root"),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeError, aop.ErrorData{Message: "provider failed"})),
+		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "error", Error: "provider failed"})),
 	)
 	_, events, err := consumeAgentStream(input, nil)
 	if err == nil || !strings.Contains(err.Error(), "provider failed") || len(events) != 3 {
 		t.Fatalf("events=%d error=%v", len(events), err)
+	}
+}
+
+func TestConsumeAgentStreamReportsProtocolError(t *testing.T) {
+	input := encodeFrames(t, webproto.Message{
+		Type:    webproto.TypeError,
+		Payload: webproto.MustJSON(webproto.ErrorPayload{Message: "session rejected"}),
+	})
+	_, _, err := consumeAgentStream(input, nil)
+	if err == nil || !strings.Contains(err.Error(), "session rejected") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -101,22 +118,26 @@ func TestConsumeAgentStreamRejectsInvalidStreams(t *testing.T) {
 		needle string
 	}{
 		{
-			name:   "invalid envelope",
-			input:  encodeRaw(t, map[string]any{"type": "text"}),
+			name: "invalid envelope",
+			input: encodeFrames(t,
+				sessionOpenedFrame("root"),
+				webproto.Message{Type: webproto.TypeAOP, Payload: webproto.MustJSON(map[string]any{"type": "text"})},
+			),
 			needle: "invalid AOP envelope",
 		},
 		{
-			name: "missing root terminal",
-			input: encodeEvents(t,
-				aopTestEvent("root", aop.TypeSessionStart, aop.SessionStartData{}),
-				aopMessageEvent("root", "assistant", "hello"),
+			name: "missing run terminal",
+			input: encodeFrames(t,
+				sessionOpenedFrame("root"),
+				aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
+				aopFrame(aopMessageEvent("root", "run-1", "assistant", "hello")),
 			),
-			needle: "without root session.end",
+			needle: "without run turn.end",
 		},
 		{
-			name:   "no root session",
-			input:  encodeEvents(t, aopMessageEvent("child", "assistant", "hello")),
-			needle: "without a root session",
+			name:   "no opened session",
+			input:  encodeFrames(t),
+			needle: "without session.opened",
 		},
 	}
 
@@ -130,40 +151,43 @@ func TestConsumeAgentStreamRejectsInvalidStreams(t *testing.T) {
 	}
 }
 
-func aopTestEvent(sessionID, eventType string, data any) aop.Event {
+func aopTestEvent(sessionID, turnID, eventType string, data any) aop.Event {
 	raw, _ := json.Marshal(data)
 	return aop.Event{
 		Type:      eventType,
 		TS:        "2026-07-19T00:00:00Z",
 		SessionID: sessionID,
+		TurnID:    turnID,
 		Agent:     "aiscan",
 		Data:      raw,
 	}
 }
 
-func aopMessageEvent(sessionID, role, text string) aop.Event {
-	return aopTestEvent(sessionID, aop.TypeMessage, aop.MessageData{
+func aopMessageEvent(sessionID, turnID, role, text string) aop.Event {
+	return aopTestEvent(sessionID, turnID, aop.TypeMessage, aop.MessageData{
 		MessageID: "m-1",
 		Role:      role,
 		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
 	})
 }
 
-func encodeEvents(t *testing.T, events ...aop.Event) *bytes.Buffer {
-	t.Helper()
-	values := make([]any, len(events))
-	for i := range events {
-		values[i] = events[i]
+func sessionOpenedFrame(sessionID string) webproto.Message {
+	return webproto.Message{
+		Type:    webproto.TypeSessionOpened,
+		Payload: webproto.MustJSON(webproto.SessionLifecyclePayload{SessionID: sessionID}),
 	}
-	return encodeRaw(t, values...)
 }
 
-func encodeRaw(t *testing.T, values ...any) *bytes.Buffer {
+func aopFrame(event aop.Event) webproto.Message {
+	return webproto.Message{Type: webproto.TypeAOP, RunID: event.TurnID, Payload: webproto.MustJSON(event)}
+}
+
+func encodeFrames(t *testing.T, messages ...webproto.Message) *bytes.Buffer {
 	t.Helper()
 	var output bytes.Buffer
 	encoder := json.NewEncoder(&output)
-	for _, value := range values {
-		if err := encoder.Encode(value); err != nil {
+	for _, message := range messages {
+		if err := encoder.Encode(message); err != nil {
 			t.Fatal(err)
 		}
 	}

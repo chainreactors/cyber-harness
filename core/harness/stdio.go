@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 // messageText flattens the text parts of a complete AOP message.
@@ -31,80 +32,97 @@ func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event,
 	var output string
 	var events []aop.Event
 	decoder := json.NewDecoder(input)
-	rootSessionID := ""
+	sessionID := ""
+	runID := ""
 	var agentErr error
 
 	for {
-		var event aop.Event
-		if err := decoder.Decode(&event); err != nil {
+		var message webproto.Message
+		if err := decoder.Decode(&message); err != nil {
 			if errors.Is(err, io.EOF) {
-				if rootSessionID == "" {
-					return output, events, fmt.Errorf("AOP stream ended without a root session")
+				if sessionID == "" {
+					return output, events, fmt.Errorf("stdio stream ended without session.opened")
 				}
-				return output, events, fmt.Errorf("AOP stream ended without root session.end")
+				return output, events, fmt.Errorf("stdio stream ended without run turn.end")
 			}
-			return output, events, fmt.Errorf("decode AOP event: %w", err)
+			return output, events, fmt.Errorf("decode stdio frame: %w", err)
 		}
-		if !event.Valid() {
-			return output, events, fmt.Errorf("invalid AOP envelope")
-		}
-		events = append(events, event)
-		if monitor != nil {
-			monitor.renderEvent(event)
-		}
+		switch message.Type {
+		case webproto.TypeSessionOpened:
+			var data webproto.SessionLifecyclePayload
+			if err := json.Unmarshal(message.Payload, &data); err != nil {
+				return output, events, fmt.Errorf("decode session.opened: %w", err)
+			}
+			if data.SessionID == "" {
+				return output, events, fmt.Errorf("session.opened has empty session_id")
+			}
+			if sessionID == "" {
+				sessionID = data.SessionID
+			} else if sessionID != data.SessionID {
+				return output, events, fmt.Errorf("unexpected session.opened for %q", data.SessionID)
+			}
 
-		if event.Type == aop.TypeSessionStart {
-			var data aop.SessionStartData
-			if err := json.Unmarshal(event.Data, &data); err != nil {
-				return output, events, fmt.Errorf("decode session.start: %w", err)
+		case webproto.TypeError:
+			var data webproto.ErrorPayload
+			if err := json.Unmarshal(message.Payload, &data); err != nil {
+				return output, events, fmt.Errorf("decode error frame: %w", err)
 			}
-			if data.ParentSessionID == "" && rootSessionID == "" {
-				rootSessionID = event.SessionID
+			if strings.TrimSpace(data.Message) == "" {
+				return output, events, fmt.Errorf("stdio error frame has empty message")
 			}
-		}
+			return output, events, fmt.Errorf("agent error: %s", data.Message)
 
-		if rootSessionID == "" {
-			if event.Type == aop.TypeError {
-				var data aop.ErrorData
-				if json.Unmarshal(event.Data, &data) == nil && strings.TrimSpace(data.Message) != "" {
-					rootSessionID = event.SessionID
-					agentErr = fmt.Errorf("agent error: %s", data.Message)
-				}
+		case webproto.TypeAOP:
+			var event aop.Event
+			if err := json.Unmarshal(message.Payload, &event); err != nil {
+				return output, events, fmt.Errorf("decode AOP payload: %w", err)
 			}
-			if rootSessionID == "" {
+			if !event.Valid() {
+				return output, events, fmt.Errorf("invalid AOP envelope")
+			}
+			events = append(events, event)
+			if monitor != nil {
+				monitor.renderEvent(event)
+			}
+			if sessionID == "" && event.Type == aop.TypeSessionStart {
+				sessionID = event.SessionID
+			}
+			if event.SessionID != sessionID {
 				continue
 			}
-		}
-
-		if event.SessionID != rootSessionID {
-			continue
-		}
-		switch event.Type {
-		case aop.TypeMessage:
-			var data aop.MessageData
-			if json.Unmarshal(event.Data, &data) == nil && data.Role != "user" {
-				if text := messageText(data); text != "" {
-					output = text
+			if runID == "" && event.Type == aop.TypeTurnStart {
+				runID = event.TurnID
+			}
+			if runID != "" && event.TurnID != "" && event.TurnID != runID {
+				continue
+			}
+			switch event.Type {
+			case aop.TypeMessage:
+				var data aop.MessageData
+				if json.Unmarshal(event.Data, &data) == nil && data.Role != "user" {
+					if text := messageText(data); text != "" {
+						output = text
+					}
 				}
+			case aop.TypeError:
+				var data aop.ErrorData
+				if json.Unmarshal(event.Data, &data) != nil || strings.TrimSpace(data.Message) == "" {
+					return output, events, fmt.Errorf("run AOP error has empty message")
+				}
+				agentErr = fmt.Errorf("agent error: %s", data.Message)
+			case aop.TypeTurnEnd:
+				var data aop.TurnEndData
+				if err := json.Unmarshal(event.Data, &data); err != nil {
+					return output, events, fmt.Errorf("decode turn.end: %w", err)
+				}
+				if agentErr != nil {
+					return output, events, agentErr
+				}
+				if data.Stop == "error" || data.Error != "" {
+					return output, events, fmt.Errorf("agent error: %s", strings.TrimSpace(data.Error))
+				}
+				return output, events, nil
 			}
-		case aop.TypeError:
-			var data aop.ErrorData
-			if json.Unmarshal(event.Data, &data) != nil || strings.TrimSpace(data.Message) == "" {
-				return output, events, fmt.Errorf("root AOP error has empty message")
-			}
-			agentErr = fmt.Errorf("agent error: %s", data.Message)
-		case aop.TypeSessionEnd:
-			var data aop.SessionEndData
-			if err := json.Unmarshal(event.Data, &data); err != nil {
-				return output, events, fmt.Errorf("decode session.end: %w", err)
-			}
-			if agentErr != nil {
-				return output, events, agentErr
-			}
-			if data.Stop == "error" || data.Error != "" {
-				return output, events, fmt.Errorf("agent error: %s", strings.TrimSpace(data.Error))
-			}
-			return output, events, nil
 		}
 	}
 }

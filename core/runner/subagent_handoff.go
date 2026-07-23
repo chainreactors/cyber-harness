@@ -23,9 +23,17 @@ import (
 // other IOA implementations can reconstruct the thread without aiscan-specific
 // APIs.
 func subscribeIOAHandoff(bus *eventbus.Bus[aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) {
+	_ = subscribeIOAHandoffContext(context.Background(), bus, client, spaceName, logger)
+}
+
+func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
 	if bus == nil || client == nil || spaceName == "" {
-		return
+		return func() {}
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
@@ -37,14 +45,19 @@ func subscribeIOAHandoff(bus *eventbus.Bus[aop.Event], client protocols.ClientAP
 		pending:   make(map[string]*handoffState),
 		bySession: make(map[string]string),
 	}
-	bus.Subscribe(func(event aop.Event) {
+	unsub := bus.Subscribe(func(event aop.Event) {
 		select {
 		case r.events <- event:
+		case <-ctx.Done():
 		default:
 			r.logger.Warnf("ioa handoff queue full, dropping %s", event.Type)
 		}
 	})
-	go r.run()
+	go r.run(ctx)
+	return func() {
+		cancel()
+		unsub()
+	}
 }
 
 type handoffState struct {
@@ -71,15 +84,20 @@ type ioaHandoffRecorder struct {
 	bySession map[string]string        // child session id -> parent tool call id
 }
 
-func (r *ioaHandoffRecorder) run() {
-	for event := range r.events {
-		switch event.Type {
-		case aop.TypeSessionStart:
-			r.onSessionStart(event)
-		case aop.TypeMessage:
-			r.onMessage(event)
-		case aop.TypeSessionEnd:
-			r.onSessionEnd(event)
+func (r *ioaHandoffRecorder) run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-r.events:
+			switch event.Type {
+			case aop.TypeSessionStart:
+				r.onSessionStart(event)
+			case aop.TypeMessage:
+				r.onMessage(event)
+			case aop.TypeTurnEnd:
+				r.onTurnEnd(event)
+			}
 		}
 	}
 }
@@ -142,7 +160,7 @@ func (r *ioaHandoffRecorder) onMessage(event aop.Event) {
 	r.mu.Unlock()
 }
 
-func (r *ioaHandoffRecorder) onSessionEnd(event aop.Event) {
+func (r *ioaHandoffRecorder) onTurnEnd(event aop.Event) {
 	r.mu.Lock()
 	toolCallID, ok := r.bySession[event.SessionID]
 	var state *handoffState
@@ -155,7 +173,7 @@ func (r *ioaHandoffRecorder) onSessionEnd(event aop.Event) {
 	if state == nil {
 		return
 	}
-	data, err := aop.DecodeData[aop.SessionEndData](event)
+	data, err := aop.DecodeData[aop.TurnEndData](event)
 	if err != nil {
 		return
 	}

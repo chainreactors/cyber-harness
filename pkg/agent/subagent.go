@@ -139,27 +139,28 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 		return "", fmt.Errorf("subagent create requires the spawning tool call id")
 	}
 	detail := delegationDetail(task, typeName, name, mode)
-	sub := parent.deriveNamed(name, parentToolCallID, &detail)
+	parentCfg := parent.configSnapshot()
+	sub := deriveNamedFromConfig(parentCfg, name, parentToolCallID, &detail)
 	if resolved != nil {
 		if resolved.FormattedPrompt != "" {
 			prompt = resolved.FormattedPrompt + "\n\n" + prompt
 		}
 		if resolved.Model != "" {
-			sub.Cfg.Model = resolved.Model
+			sub.SetProvider(parentCfg.Provider, resolved.Model)
 		}
 	}
 	if mode == "fork" {
-		sub.Cfg.Messages = truncateToLastCompleteBoundary(parent.Cfg.Messages)
-		sub.Cfg.SystemPrompt = parent.Cfg.SystemPrompt
+		sub.Cfg.Messages = truncateToLastCompleteBoundary(parentCfg.Messages)
+		sub.Cfg.SystemPrompt = parentCfg.SystemPrompt
 	}
 
 	switch mode {
 	case "sync":
 		return t.runSync(ctx, sub, prompt, name, typeName, timeout)
 	case "fork":
-		return t.runFork(ctx, sub, prompt, name, typeName, parentInbox, parent.Cfg.Logger)
+		return t.runFork(ctx, sub, prompt, name, typeName, parentInbox, parentCfg.Logger)
 	default:
-		return t.runAsync(ctx, sub, prompt, name, typeName, parentInbox, parent.Cfg.Logger)
+		return t.runAsync(ctx, sub, prompt, name, typeName, parentInbox, parentCfg.Logger)
 	}
 }
 
@@ -217,7 +218,7 @@ func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, ty
 		defer cancel()
 	}
 
-	r, err := sub.Run(subCtx, TextInput(prompt))
+	r, err := runDerivedSession(subCtx, sub, prompt)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf("subagent %q timed out after %s", name, timeoutStr), nil
@@ -237,7 +238,7 @@ func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, t
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
-		r, err := sub.Run(subCtx, TextInput(prompt))
+		r, err := runDerivedSession(subCtx, sub, prompt)
 		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
 	}()
 
@@ -254,11 +255,36 @@ func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name,
 		defer producer.Done()
 		defer t.untrack(name)
 		defer cancel()
-		r, err := sub.Run(subCtx, TextInput(directive))
+		r, err := runDerivedSession(subCtx, sub, directive)
 		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
 	}()
 
 	return fmt.Sprintf("Started subagent %q (mode=fork, type=%s). Inherits parent context. Will notify on completion.", name, typeName), nil
+}
+
+func runDerivedSession(ctx context.Context, sub *Agent, prompt string) (*Result, error) {
+	turnID := randomID()
+	sub.beginSession()
+	emitter := sub.configSnapshot().emitter.turn(turnID)
+	emitter.turnStart()
+	result, err := sub.Run(ctx, TextInput(prompt), WithTurnID(turnID))
+	stop := StopReasonError
+	usage := Usage{}
+	contextTokens := 0
+	if result != nil {
+		stop = result.Stop
+		usage = result.TotalUsage
+		contextTokens = result.ContextTokens
+	} else if errors.Is(err, context.Canceled) {
+		stop = StopReasonCanceled
+	}
+	emitter.turnEnd(stop, usage, contextTokens, err)
+	reason := string(stop)
+	if reason == "" {
+		reason = string(StopReasonCompleted)
+	}
+	sub.endSession(reason)
+	return result, err
 }
 
 func (t *SubAgentTool) pushCompletion(parentInbox inbox.Inbox, logger telemetry.Logger, name, typeName string, r *Result, err error) {

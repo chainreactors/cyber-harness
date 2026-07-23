@@ -60,18 +60,22 @@ func (c *interactiveRunController) SubmitPrompt(label, displayText, prompt strin
 	if strings.TrimSpace(prompt) == "" {
 		return nil
 	}
+	return c.submit(label, displayText, c.buildRunFunc(prompt))
+}
+
+func (c *interactiveRunController) submit(label, displayText string, run agentRunFunc) error {
 	c.mu.Lock()
 	if c.running {
 		// Busy input joins the run-boundary FIFO: each queued prompt becomes a
 		// full Input→Run cycle, matching the stdio/web entry semantics.
-		c.pending = append(c.pending, pendingRun{label: label, displayText: displayText, run: c.buildRunFunc(prompt)})
+		c.pending = append(c.pending, pendingRun{label: label, displayText: displayText, run: run})
 		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
 		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
-	return c.start(label, displayText, c.buildRunFunc(prompt))
+	return c.start(label, displayText, run)
 }
 
 func (c *interactiveRunController) Continue() error {
@@ -80,14 +84,18 @@ func (c *interactiveRunController) Continue() error {
 	}
 	c.mu.Lock()
 	if c.running {
-		c.pending = append(c.pending, pendingRun{label: "continue", run: c.session.Continue})
+		c.pending = append(c.pending, pendingRun{label: "continue", run: func(ctx context.Context) (*agent.Result, error) {
+			return c.session.Continue(ctx)
+		}})
 		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
 		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
-	return c.start("continue", "", c.session.Continue)
+	return c.start("continue", "", func(ctx context.Context) (*agent.Result, error) {
+		return c.session.Continue(ctx)
+	})
 }
 
 func (c *interactiveRunController) buildRunFunc(prompt string) agentRunFunc {
@@ -158,7 +166,7 @@ func (c *interactiveRunController) checkContextUsage(result *agent.Result) {
 	if result == nil || result.ContextTokens <= 0 {
 		return
 	}
-	contextWindow := agent.ModelContextWindow(c.session.Cfg.Model)
+	contextWindow := agent.ModelContextWindow(c.session.Model())
 	if result.ContextTokens*100/contextWindow >= 80 {
 		c.mu.Lock()
 		c.compactContextTokens = result.ContextTokens

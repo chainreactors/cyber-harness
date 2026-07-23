@@ -11,130 +11,121 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 func newTestStdioHost(output io.Writer) *stdioHost {
-	host := newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
-	host.rt = &AgentRuntime{}
-	return host
+	return newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
 }
 
-func userMessageLine(t *testing.T, sessionID, text string) string {
+func protocolLine(t *testing.T, message webproto.Message) string {
 	t.Helper()
-	event := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        "2026-07-19T00:00:00Z",
-		SessionID: sessionID,
-		Agent:     "test",
-		Data: mustJSON(t, aop.MessageData{
-			MessageID: "m-1",
-			Role:      "user",
-			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
-		}),
-	}
-	data, err := json.Marshal(event)
+	data, err := json.Marshal(message)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(data)
 }
 
+func openSessionLine(t *testing.T, sessionID string) string {
+	return protocolLine(t, webproto.Message{Type: webproto.TypeSessionOpen, Payload: mustJSON(t, webproto.SessionOpenPayload{SessionID: sessionID})})
+}
+
+func runLine(t *testing.T, sessionID, runID, text string) string {
+	return protocolLine(t, webproto.Message{
+		Type: webproto.TypeRun, RunID: runID,
+		Payload: mustJSON(t, webproto.RunPayload{SessionID: sessionID, Parts: []aop.MessagePart{{Type: aop.PartText, Text: text}}}),
+	})
+}
+
 func TestStdioAcceptRejectsMalformedJSON(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
-
 	h.accept("not json")
-
-	events := decodeAOPLines(t, &output)
-	if len(events) != 1 || events[0].Type != aop.TypeError {
-		t.Fatalf("events = %#v", events)
+	messages := decodeProtocolLines(t, &output)
+	if len(messages) != 1 || messages[0].Type != webproto.TypeError {
+		t.Fatalf("messages = %#v", messages)
 	}
-	data, err := aop.DecodeData[aop.ErrorData](events[0])
-	if err != nil || !strings.Contains(data.Message, "decode inbound event") {
-		t.Fatalf("error data = %+v, %v", data, err)
+	var data webproto.ErrorPayload
+	_ = json.Unmarshal(messages[0].Payload, &data)
+	if !strings.Contains(data.Message, "decode frame") {
+		t.Fatalf("error data = %+v", data)
 	}
 }
 
-func TestStdioAcceptRejectsNonMessageEvents(t *testing.T) {
+func TestStdioAcceptRejectsUnsupportedFrame(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
-
-	event := aop.Event{
-		Type:      aop.TypeTurnStart,
-		TS:        "2026-07-19T00:00:00Z",
-		SessionID: "s1",
-		Agent:     "test",
-		Data:      mustJSON(t, aop.TurnData{Turn: 1}),
-	}
-	line, err := json.Marshal(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.accept(string(line))
-
-	events := decodeAOPLines(t, &output)
-	if len(events) != 1 || events[0].Type != aop.TypeError {
-		t.Fatalf("events = %#v", events)
+	h.accept(protocolLine(t, webproto.Message{Type: "future.frame"}))
+	messages := decodeProtocolLines(t, &output)
+	if len(messages) != 1 || messages[0].Type != webproto.TypeError {
+		t.Fatalf("messages = %#v", messages)
 	}
 }
 
-func TestStdioAcceptRejectsNonUserMessage(t *testing.T) {
+func TestStdioRunRequiresOpenSession(t *testing.T) {
 	var output bytes.Buffer
-	h := newTestStdioHost(&output)
-
-	event := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        "2026-07-19T00:00:00Z",
-		SessionID: "s1",
-		Agent:     "test",
-		Data: mustJSON(t, aop.MessageData{
-			MessageID: "m-1",
-			Role:      "assistant",
-			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: "hi"}},
-		}),
-	}
-	line, err := json.Marshal(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.accept(string(line))
-
-	events := decodeAOPLines(t, &output)
-	if len(events) != 1 || events[0].Type != aop.TypeError {
-		t.Fatalf("events = %#v", events)
-	}
-}
-
-func TestStdioRunOneRejectsEmptyPrompt(t *testing.T) {
-	var output bytes.Buffer
-	h := newRuntimeStdioHost(&output, nil)
+	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
-	h.accept(userMessageLine(t, "s1", "   "))
-	h.drain()
+	h.accept(runLine(t, "s1", "run-1", "hello"))
+	messages := decodeProtocolLines(t, &output)
+	if len(messages) != 1 || messages[0].Type != webproto.TypeError {
+		t.Fatalf("messages = %#v", messages)
+	}
+}
 
-	events := decodeAOPLines(t, &output)
-	if len(events) != 1 || events[0].Type != aop.TypeError {
-		t.Fatalf("events = %#v", events)
+func TestStdioRunRejectsEmptyPrompt(t *testing.T) {
+	var output bytes.Buffer
+	h := newRuntimeStdioHost(t, &output, nil)
+	defer h.rt.Close()
+	h.accept(openSessionLine(t, "s1"))
+	h.accept(runLine(t, "s1", "run-1", "   "))
+	h.drain()
+	messages := decodeProtocolLines(t, &output)
+	if messages[len(messages)-1].Type != webproto.TypeError {
+		t.Fatalf("messages = %#v", messages)
 	}
-	data, err := aop.DecodeData[aop.ErrorData](events[0])
-	if err != nil || !strings.Contains(data.Message, "empty prompt") {
-		t.Fatalf("error data = %+v, %v", data, err)
+}
+
+func TestStdioCommandUsesTaskIDCorrelation(t *testing.T) {
+	var output bytes.Buffer
+	h := newRuntimeStdioHost(t, &output, nil)
+	defer h.rt.Close()
+	h.accept(openSessionLine(t, "s1"))
+	h.accept(protocolLine(t, webproto.Message{
+		Type:   webproto.TypeCommand,
+		TaskID: "command-1",
+		Payload: mustJSON(t, webproto.CommandPayload{
+			SessionID: "s1",
+			Line:      "/help",
+		}),
+	}))
+	h.drain()
+	messages := decodeProtocolLines(t, &output)
+	for _, message := range messages {
+		if message.Type != webproto.TypeCommandResult {
+			continue
+		}
+		if message.TaskID != "command-1" || message.RunID != "" {
+			t.Fatalf("command result correlation = %+v", message)
+		}
+		return
 	}
+	t.Fatalf("messages = %#v", messages)
 }
 
 func TestStdioHostReportsEncoderFailure(t *testing.T) {
 	h := newTestStdioHost(failingWriter{})
-	h.failAll(errors.New("broken"))
-
-	if err := h.err(); err == nil || !strings.Contains(err.Error(), "write AOP stdout") {
+	h.emitError("", errors.New("broken"))
+	if err := h.err(); err == nil || !strings.Contains(err.Error(), "write stdio protocol") {
 		t.Fatalf("host err = %v", err)
 	}
 }
 
-func TestStdioDrainWithoutSessions(t *testing.T) {
+func TestStdioDrainWithoutRuns(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
-	h.drain() // must not block
+	h.drain()
 }
 
 func mustJSON(t *testing.T, value any) json.RawMessage {
@@ -146,15 +137,31 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 	return data
 }
 
-func decodeAOPLines(t *testing.T, input *bytes.Buffer) []aop.Event {
+func decodeProtocolLines(t *testing.T, input *bytes.Buffer) []webproto.Message {
 	t.Helper()
-	var events []aop.Event
+	var messages []webproto.Message
 	decoder := json.NewDecoder(input)
 	for {
-		var event aop.Event
-		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+		var message webproto.Message
+		if err := decoder.Decode(&message); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func decodeAOPMessages(t *testing.T, messages []webproto.Message) []aop.Event {
+	t.Helper()
+	var events []aop.Event
+	for _, message := range messages {
+		if message.Type != webproto.TypeAOP {
+			continue
+		}
+		var event aop.Event
+		if err := json.Unmarshal(message.Payload, &event); err != nil {
 			t.Fatal(err)
 		}
 		events = append(events, event)

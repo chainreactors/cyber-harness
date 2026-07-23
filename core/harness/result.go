@@ -95,26 +95,13 @@ func (r *RunResult) ToolCallsNamed(name string) []ToolExecution {
 }
 
 func (r *RunResult) Turns() int {
-	max := 0
+	seen := make(map[string]struct{})
 	for _, event := range r.Events {
-		turn := 0
-		switch event.Type {
-		case aop.TypeTurnStart:
-			if data, err := aop.DecodeData[aop.TurnData](event); err == nil {
-				turn = data.Turn
-			}
-		case aop.TypeTurnEnd:
-			if data, err := aop.DecodeData[aop.TurnEndData](event); err == nil {
-				turn = data.Turn
-			}
-		default:
-			continue
-		}
-		if turn > max {
-			max = turn
+		if event.Type == aop.TypeTurnStart && event.TurnID != "" {
+			seen[event.TurnID] = struct{}{}
 		}
 	}
-	return max
+	return len(seen)
 }
 
 func (r *RunResult) ToolCallSequence() []string {
@@ -164,10 +151,10 @@ func (r *RunResult) ErroredToolCalls() []ToolExecution {
 
 func (r *RunResult) StopReason() string {
 	for i := len(r.Events) - 1; i >= 0; i-- {
-		if r.Events[i].Type != aop.TypeSessionEnd {
+		if r.Events[i].Type != aop.TypeTurnEnd {
 			continue
 		}
-		data, err := aop.DecodeData[aop.SessionEndData](r.Events[i])
+		data, err := aop.DecodeData[aop.TurnEndData](r.Events[i])
 		if err == nil {
 			return data.Stop
 		}

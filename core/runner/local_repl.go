@@ -16,23 +16,23 @@ import (
 // corrupt native scrollback. Persistent remote REPLs continue to use the PTY;
 // the ephemeral local console binds directly to the process terminal.
 func (rt *AgentRuntime) AttachLocalREPL(ctx context.Context) error {
-	if rt == nil || rt.App == nil {
+	if rt == nil || rt.app == nil {
 		return fmt.Errorf("local repl requires an agent runtime")
 	}
-	sess, err := rt.session(MainREPLName)
+	sess, err := rt.OpenSession(ctx, SessionOptions{ID: MainREPLName})
 	if err != nil {
 		return err
 	}
-	option := rt.Option
+	option := rt.option
 	if option == nil {
 		option = &cfg.Option{}
 	}
 	return tui.RunAgentConsoleWithTerminal(
 		ctx,
 		option,
-		rt.consoleAppInfo(),
-		sess.agent,
+		rt.consoleAppInfoForSession(sess),
+		sess.state.agent,
 		rlterm.Local(),
-		rt.Bus.Subscribe,
+		rt.Subscribe,
 	)
 }

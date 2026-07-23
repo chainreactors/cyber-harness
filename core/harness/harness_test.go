@@ -15,8 +15,9 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
-	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	ioaclient "github.com/chainreactors/ioa/client"
+	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
@@ -73,40 +74,49 @@ func TestAgentDualSessionInterleaved(t *testing.T) {
 		t.Fatalf("start agent: %v", err)
 	}
 
-	writeUserMessage := func(sessionID, messageID, text string) {
+	encoder := json.NewEncoder(stdin)
+	writeFrame := func(message webproto.Message) {
 		t.Helper()
-		data, _ := json.Marshal(aop.MessageData{
-			MessageID: messageID, Role: "user",
-			Parts: []aop.MessagePart{{Type: aop.PartText, Text: text}},
-		})
-		event := aop.Event{
-			Type:      aop.TypeMessage,
-			TS:        time.Now().UTC().Format(time.RFC3339Nano),
-			SessionID: sessionID,
-			Agent:     "aiscan.harness",
-			Data:      data,
-		}
-		if err := json.NewEncoder(stdin).Encode(event); err != nil {
-			t.Fatalf("write %s: %v", sessionID, err)
+		if err := encoder.Encode(message); err != nil {
+			t.Fatalf("write %s: %v", message.Type, err)
 		}
 	}
-	writeUserMessage("sess-a", "m-1", "Reply with exactly: ALPHA")
-	writeUserMessage("sess-b", "m-1", "Reply with exactly: BRAVO")
-	writeUserMessage("sess-a", "m-2", "Reply with exactly: ALPHA2")
+	writeRun := func(sessionID, runID, text string) {
+		writeFrame(webproto.Message{
+			Type: webproto.TypeRun, RunID: runID,
+			Payload: webproto.MustJSON(webproto.RunPayload{
+				SessionID: sessionID,
+				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
+			}),
+		})
+	}
+	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-a"})})
+	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-b"})})
+	writeRun("sess-a", "run-a1", "Reply with exactly: ALPHA")
+	writeRun("sess-b", "run-b1", "Reply with exactly: BRAVO")
+	writeRun("sess-a", "run-a2", "Reply with exactly: ALPHA2")
 	if err := stdin.Close(); err != nil {
 		t.Fatalf("close stdin: %v", err)
 	}
 
 	type sessionState struct {
-		ended   bool
+		ended   int
+		wantEnd int
 		outputs []string
 	}
-	sessions := map[string]*sessionState{"sess-a": {}, "sess-b": {}}
+	sessions := map[string]*sessionState{"sess-a": {wantEnd: 2}, "sess-b": {wantEnd: 1}}
 	decoder := json.NewDecoder(stdout)
 	for {
-		var event aop.Event
-		if err := decoder.Decode(&event); err != nil {
+		var message webproto.Message
+		if err := decoder.Decode(&message); err != nil {
 			break
+		}
+		if message.Type != webproto.TypeAOP {
+			continue
+		}
+		var event aop.Event
+		if err := json.Unmarshal(message.Payload, &event); err != nil {
+			t.Fatalf("decode AOP payload: %v", err)
 		}
 		state, ok := sessions[event.SessionID]
 		if !ok {
@@ -118,15 +128,15 @@ func TestAgentDualSessionInterleaved(t *testing.T) {
 			if err == nil && data.Role == "assistant" {
 				state.outputs = append(state.outputs, messageText(data))
 			}
-		case aop.TypeSessionEnd:
-			state.ended = true
+		case aop.TypeTurnEnd:
+			state.ended++
 		}
 	}
 	_ = cmd.Wait()
 
 	for id, state := range sessions {
-		if !state.ended {
-			t.Errorf("%s never reached session.end (stderr: %s)", id, clip(stderr.String(), 500))
+		if state.ended != state.wantEnd {
+			t.Errorf("%s completed %d/%d runs (stderr: %s)", id, state.ended, state.wantEnd, clip(stderr.String(), 500))
 		}
 	}
 	if got := strings.Join(sessions["sess-a"].outputs, "\n"); !strings.Contains(got, "ALPHA") {
@@ -234,8 +244,8 @@ func TestAgentMultiStepTask(t *testing.T) {
 func TestAgentMultiTurn(t *testing.T) {
 	h := New(t)
 	Intent{
-		Name:   "multi-turn-file-ops",
-		Prompt: "Step 1: Create file /tmp/aiscan_multi.txt with content 'step1'. Step 2: Append ' step2' to it. Step 3: Read it and confirm it says 'step1 step2'.",
+		Name:     "multi-turn-file-ops",
+		Prompt:   "Step 1: Create file /tmp/aiscan_multi.txt with content 'step1'. Step 2: Append ' step2' to it. Step 3: Read it and confirm it says 'step1 step2'.",
 		NoErrors: true,
 		MaxTurns: 8,
 		JudgeCriteria: "The agent must perform three sequential file operations: " +

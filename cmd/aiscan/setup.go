@@ -14,6 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -147,19 +148,24 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 	defer rt.Close()
 
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	rt.Output.Start("scanner", strings.Join(scannerArgs, " "))
-
-	result, err := agent.NewAgent(rt.Config.
-		WithSystemPrompt(rt.SystemPrompt).
-		WithStream(false)).
-		Run(ctx, agent.TextInput(prompt))
+	agentOutput := tui.NewStaticAgentOutput(option)
+	unsubscribe := rt.Subscribe(agentOutput.HandleEvent)
+	defer unsubscribe()
+	agentOutput.Start("scanner", strings.Join(scannerArgs, " "))
+	session, err := rt.OpenSession(ctx, runner.SessionOptions{ID: "scanner"})
 	if err != nil {
 		return err
 	}
-	if result != nil && strings.TrimSpace(result.Output) != "" {
-		rt.Output.Final(result.Output)
+	run, err := session.Run(ctx, runner.RunInput{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
+	if err != nil {
+		return err
 	}
-	return nil
+	result, err := run.Wait()
+	if strings.TrimSpace(result.Output) != "" {
+		agentOutput.Final(result.Output)
+	}
+	_ = rt.CloseSession(context.Background(), "scanner", runner.SessionCloseCompleted)
+	return err
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {

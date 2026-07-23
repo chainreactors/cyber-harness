@@ -20,6 +20,25 @@ type LoopCommand struct {
 	scheduler *LoopScheduler
 }
 
+type loopSchedulerContextKey struct{}
+
+// ContextWithLoopScheduler scopes direct REPL command execution to one runtime
+// session. Agent tool calls obtain the scheduler from their Config snapshot.
+func ContextWithLoopScheduler(ctx context.Context, scheduler *LoopScheduler) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, loopSchedulerContextKey{}, scheduler)
+}
+
+func loopSchedulerFromContext(ctx context.Context) *LoopScheduler {
+	if ctx == nil {
+		return nil
+	}
+	scheduler, _ := ctx.Value(loopSchedulerContextKey{}).(*LoopScheduler)
+	return scheduler
+}
+
 func NewLoopCommand(scheduler *LoopScheduler) *LoopCommand {
 	return &LoopCommand{scheduler: scheduler}
 }
@@ -48,6 +67,18 @@ Examples:
 }
 
 func (c *LoopCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
+	scheduler := loopSchedulerFromContext(ctx)
+	if scheduler == nil {
+		if cfg, ok := toolAgentConfig(ctx); ok {
+			scheduler = cfg.LoopScheduler
+		}
+	}
+	if scheduler == nil {
+		scheduler = c.scheduler
+	}
+	if scheduler == nil {
+		return nil, fmt.Errorf("loop scheduler is not configured")
+	}
 	args := execution.Args
 	output := execution.Stdout
 	if output == nil {
@@ -60,22 +91,22 @@ func (c *LoopCommand) Run(ctx context.Context, execution *commands.Execution) (a
 
 	switch strings.ToLower(args[0]) {
 	case "list", "ls":
-		return nil, c.list(output)
+		return nil, c.list(scheduler, output)
 	case "stop", "rm", "remove":
 		if len(args) < 2 {
 			return nil, fmt.Errorf("usage: loop stop <name>")
 		}
-		return nil, c.stop(output, args[1])
+		return nil, c.stop(scheduler, output, args[1])
 	case "stop-all":
-		c.scheduler.Stop()
+		scheduler.Stop()
 		_, _ = fmt.Fprint(output, "All loops stopped.\n")
 		return nil, nil
 	default:
-		return nil, c.create(ctx, output, args)
+		return nil, c.create(ctx, scheduler, output, args)
 	}
 }
 
-func (c *LoopCommand) create(ctx context.Context, output io.Writer, args []string) error {
+func (c *LoopCommand) create(ctx context.Context, scheduler *LoopScheduler, output io.Writer, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
@@ -97,7 +128,7 @@ func (c *LoopCommand) create(ctx context.Context, output io.Writer, args []strin
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
 
-	name, err := c.scheduler.Add(ctx, entry)
+	name, err := scheduler.Add(ctx, entry)
 	if err != nil {
 		return err
 	}
@@ -124,8 +155,8 @@ func tryCronPrefix(args []string) (*CronExpr, []string, bool) {
 	return cron, args[5:], true
 }
 
-func (c *LoopCommand) list(output io.Writer) error {
-	loops := c.scheduler.List()
+func (c *LoopCommand) list(scheduler *LoopScheduler, output io.Writer) error {
+	loops := scheduler.List()
 	if len(loops) == 0 {
 		_, _ = fmt.Fprint(output, "No active loops.\n")
 		return nil
@@ -143,8 +174,8 @@ func (c *LoopCommand) list(output io.Writer) error {
 	return nil
 }
 
-func (c *LoopCommand) stop(output io.Writer, name string) error {
-	if err := c.scheduler.Remove(name); err != nil {
+func (c *LoopCommand) stop(scheduler *LoopScheduler, output io.Writer, name string) error {
+	if err := scheduler.Remove(name); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(output, "Loop %q stopped.\n", name)

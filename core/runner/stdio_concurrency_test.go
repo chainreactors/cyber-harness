@@ -3,13 +3,14 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 // stdioGateProvider blocks every call until the gate closes, recording the
@@ -62,32 +63,27 @@ func lastUserText(messages []agent.ChatMessage) string {
 	return ""
 }
 
-func newStdioTestSession(h *stdioHost, output *bytes.Buffer, id string, prov agent.Provider) {
-	_ = id
+func newStdioTestSession(t *testing.T, h *stdioHost, output *bytes.Buffer, id string, prov agent.Provider) {
+	t.Helper()
 	if h.rt == nil || h.rt.ctx == nil {
-		initialized := newRuntimeStdioHost(output, prov)
+		initialized := newRuntimeStdioHost(t, output, prov)
 		h.rt = initialized.rt
+		h.sessions = initialized.sessions
+		h.runs = initialized.runs
 	}
+	h.accept(openSessionLine(t, id))
 }
 
-func newRuntimeStdioHost(output *bytes.Buffer, prov agent.Provider) *stdioHost {
+func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider) *stdioHost {
+	t.Helper()
 	h := newStdioHost(context.Background(), nil, nil, output)
-	ctx, cancel := context.WithCancel(context.Background())
-	bus := eventbus.New[aop.Event]()
-	bus.Subscribe(func(e aop.Event) { _ = h.emit(e) })
-	h.rt = &AgentRuntime{
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[string]*sessionState),
-		requests: make(map[string]runtimeRequestState),
-		Config: agent.Config{
-			Provider: prov,
-			Model:    "test",
-			Bus:      bus,
-			Logger:   h.logger,
-			MaxTurns: 4,
-		},
-	}
+	h.rt = newBareRuntime(t, nil, prov)
+	h.rt.config.Model = "test"
+	h.rt.config.MaxTurns = 4
+	h.rt.Subscribe(func(event aop.Event) {
+		payload, _ := json.Marshal(event)
+		_ = h.emit(webproto.Message{Type: webproto.TypeAOP, RunID: event.TurnID, Payload: payload})
+	})
 	return h
 }
 
@@ -107,11 +103,11 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
-	newStdioTestSession(h, &output, "s1", prov)
+	newStdioTestSession(t, h, &output, "s1", prov)
 	defer h.rt.Close()
 
 	for _, text := range []string{"first", "second", "third"} {
-		h.accept(userMessageLine(t, "s1", text))
+		h.accept(runLine(t, "s1", "run-"+text, text))
 	}
 	waitForCalls(t, prov, 1, "first run to start")
 	close(prov.gate)
@@ -126,21 +122,25 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 func TestStdioSessionsRunConcurrently(t *testing.T) {
 	var output bytes.Buffer
 	prov := newStdioGateProvider()
-	h := newRuntimeStdioHost(&output, prov)
+	h := newRuntimeStdioHost(t, &output, prov)
 	defer h.rt.Close()
 
-	h.accept(userMessageLine(t, "s1", "one"))
-	h.accept(userMessageLine(t, "s2", "two"))
+	h.accept(openSessionLine(t, "s1"))
+	h.accept(openSessionLine(t, "s2"))
+	h.accept(runLine(t, "s1", "run-one", "one"))
+	h.accept(runLine(t, "s2", "run-two", "two"))
 
 	// Both sessions are mid-run at the same time: neither FIFO blocks the other.
 	waitForCalls(t, prov, 2, "both session runs to start")
 
 	close(prov.gate)
 	h.drain()
+	h.accept(protocolLine(t, webproto.Message{Type: webproto.TypeSessionClose, Payload: mustJSON(t, webproto.SessionLifecyclePayload{SessionID: "s1", Reason: "completed"})}))
+	h.accept(protocolLine(t, webproto.Message{Type: webproto.TypeSessionClose, Payload: mustJSON(t, webproto.SessionLifecyclePayload{SessionID: "s2", Reason: "completed"})}))
 
 	// Interleaved output must stay valid AOP: every line decodes, and both
 	// sessions produced their session brackets.
-	events := decodeAOPLines(t, &output)
+	events := decodeAOPMessages(t, decodeProtocolLines(t, &output))
 	starts := map[string]bool{}
 	ends := map[string]bool{}
 	for _, e := range events {
@@ -163,11 +163,11 @@ func TestStdioDrainWaitsForInFlightAndQueued(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
-	newStdioTestSession(h, &output, "s1", prov)
+	newStdioTestSession(t, h, &output, "s1", prov)
 	defer h.rt.Close()
 
-	h.accept(userMessageLine(t, "s1", "first"))
-	h.accept(userMessageLine(t, "s1", "second"))
+	h.accept(runLine(t, "s1", "run-first", "first"))
+	h.accept(runLine(t, "s1", "run-second", "second"))
 	waitForCalls(t, prov, 1, "first run to start")
 
 	drained := make(chan struct{})

@@ -11,6 +11,7 @@ type Event struct {
 	Type      string                     `json:"type"`
 	TS        string                     `json:"ts"`
 	SessionID string                     `json:"session_id"`
+	TurnID    string                     `json:"turn_id,omitempty"`
 	Agent     string                     `json:"agent"`
 	Seq       int                        `json:"seq,omitempty"`
 	Data      json.RawMessage            `json:"data"`

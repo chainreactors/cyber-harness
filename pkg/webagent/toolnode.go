@@ -15,9 +15,9 @@ import (
 	"github.com/chainreactors/ioa/protocols"
 )
 
-// ToolNodeConfig configures a tool-only node: an outbound WebSocket connection
-// exposing AOP tool calls / native file RPCs / pty plus tool.data / tool.sco
-// events, with no LLM provider, agent loop, or IOA dependency.
+// ToolNodeConfig configures a tool-only runner: an outbound WebSocket
+// connection exposing Command, native file RPCs, PTY, tool.data and tool.sco,
+// with no LLM provider, agent loop, or IOA dependency.
 type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string

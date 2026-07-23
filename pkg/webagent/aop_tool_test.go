@@ -20,54 +20,37 @@ func (aopTestExecutor) ExecuteTool(_ context.Context, name, arguments string) (t
 	return tool.TextResult(name + ":" + arguments), nil
 }
 
-func aopToolCallMessage(t *testing.T, taskID, toolCallID, toolName string, args map[string]any) webproto.Message {
-	t.Helper()
-	callData, _ := json.Marshal(aop.ToolCallData{
+func toolCommand(toolCallID, toolName string, args map[string]any) aop.ToolCallData {
+	return aop.ToolCallData{
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
 		Args:       args,
-	})
-	call := aop.Event{
-		Type: aop.TypeToolCall, TS: "2026-07-21T00:00:00Z",
-		SessionID: taskID, Agent: "aiscan.web", Data: callData,
 	}
-	payload, _ := json.Marshal(call)
-	return webproto.Message{Type: "aop", TaskID: taskID, Payload: payload}
 }
 
-func decodeToolResult(t *testing.T, msg webproto.Message) (aop.Event, aop.ToolResultData) {
+func decodeCommandResult(t *testing.T, msg webproto.Message) webproto.CommandResultPayload {
 	t.Helper()
-	if msg.Type != "aop" {
+	if msg.Type != webproto.TypeCommandResult {
 		t.Fatalf("result envelope = %+v", msg)
 	}
-	var event aop.Event
-	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+	var result webproto.CommandResultPayload
+	if err := json.Unmarshal(msg.Payload, &result); err != nil {
 		t.Fatal(err)
 	}
-	if event.Type != aop.TypeToolResult {
-		t.Fatalf("result event = %+v", event)
-	}
-	var result aop.ToolResultData
-	if err := json.Unmarshal(event.Data, &result); err != nil {
-		t.Fatal(err)
-	}
-	return event, result
+	return result
 }
 
-func TestHandleAOPToolCall(t *testing.T) {
+func TestHandleToolCommand(t *testing.T) {
 	var got webproto.Message
-	HandleAOPToolCall(context.Background(),
-		aopToolCallMessage(t, "call-1", "call-1", "echo", map[string]any{"value": "hello"}),
+	HandleToolCommand(context.Background(), webproto.Message{Type: webproto.TypeCommand, TaskID: "call-1"},
+		toolCommand("call-1", "echo", map[string]any{"value": "hello"}),
 		aopTestExecutor{}, nil, func(msg webproto.Message) { got = msg })
 
 	if got.TaskID != "call-1" {
 		t.Fatalf("result envelope = %+v", got)
 	}
-	event, result := decodeToolResult(t, got)
-	if event.SessionID != "call-1" || event.Agent != "aiscan.web" {
-		t.Fatalf("result event = %+v", event)
-	}
-	if result.ToolCallID != "call-1" || result.ToolName != "echo" || result.IsError {
+	result := decodeCommandResult(t, got)
+	if result.Metadata["tool_call_id"] != "call-1" || result.Metadata["tool_name"] != "echo" || len(result.Parts) != 1 {
 		t.Fatalf("result data = %+v", result)
 	}
 }
@@ -96,11 +79,11 @@ func (b *recordingBash) RunForegroundTool(_ context.Context, command string, opt
 	return result, nil
 }
 
-// TestHandleAOPToolCallForeground verifies that a foreground-capable tool is
+// TestHandleToolCommandForeground verifies that a foreground-capable tool is
 // run via RunForegroundTool, that output lines stream as tool.data progress
 // events correlated by the call session id, and that the tool.result carries
 // the text content plus structured Details.
-func TestHandleAOPToolCallForeground(t *testing.T) {
+func TestHandleToolCommandForeground(t *testing.T) {
 	reg := commands.NewRegistry()
 	bash := &recordingBash{}
 	reg.RegisterTool(bash)
@@ -114,8 +97,8 @@ func TestHandleAOPToolCallForeground(t *testing.T) {
 	})
 
 	var got webproto.Message
-	HandleAOPToolCall(context.Background(),
-		aopToolCallMessage(t, "task-1", "call-1", "bash", map[string]any{"command": "echo test", "timeout": 7}),
+	HandleToolCommand(context.Background(), webproto.Message{Type: webproto.TypeCommand, TaskID: "task-1"},
+		toolCommand("call-1", "bash", map[string]any{"command": "echo test", "timeout": 7}),
 		reg, dataBus, func(msg webproto.Message) { got = msg })
 
 	if bash.command != "echo test" || bash.options.Timeout != 7*time.Second {
@@ -125,14 +108,11 @@ func TestHandleAOPToolCallForeground(t *testing.T) {
 		t.Fatalf("progress events = %+v", progress)
 	}
 
-	event, result := decodeToolResult(t, got)
-	if event.SessionID != "task-1" {
-		t.Fatalf("result event = %+v", event)
-	}
-	if result.IsError || result.Content != "streamed" {
+	result := decodeCommandResult(t, got)
+	if isError, _ := result.Metadata["is_error"].(bool); isError || len(result.Parts) == 0 || result.Parts[0].Text != "streamed" {
 		t.Fatalf("result data = %+v", result)
 	}
-	details, _ := json.Marshal(result.Details)
+	details, _ := json.Marshal(result.Metadata["details"])
 	var structured output.Result
 	if err := json.Unmarshal(details, &structured); err != nil {
 		t.Fatalf("decode structured details: %v", err)

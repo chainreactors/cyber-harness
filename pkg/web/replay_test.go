@@ -3,14 +3,53 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
+
+type lockedResponseRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func newLockedResponseRecorder() *lockedResponseRecorder {
+	return &lockedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *lockedResponseRecorder) Header() http.Header {
+	return r.ResponseRecorder.Header()
+}
+
+func (r *lockedResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.WriteHeader(statusCode)
+}
+
+func (r *lockedResponseRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(data)
+}
+
+func (r *lockedResponseRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *lockedResponseRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Body.String()
+}
 
 // Replay (SQLite → SSE) must be a pure read: no frames to agents, no task
 // lifecycle changes, no new events persisted.
@@ -52,8 +91,8 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 			Data: mustJSON(aop.ToolCallData{ToolCallID: "tc-1", ToolName: "bash", Args: map[string]string{"command": "ls"}}),
 		},
 		{
-			Type: aop.TypeSessionEnd, TS: "2026-07-19T00:00:03Z", SessionID: session.ID, Agent: "aiscan",
-			Data: mustJSON(aop.SessionEndData{Stop: "completed", Turns: 1}),
+			Type: aop.TypeTurnEnd, TS: "2026-07-19T00:00:03Z", SessionID: session.ID, TurnID: "run-1", Agent: "aiscan",
+			Data: mustJSON(aop.TurnEndData{Stop: "completed"}),
 		},
 	}
 	for _, ev := range stored {
@@ -69,7 +108,7 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 	reqCtx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest("GET", "/api/chat/sessions/"+session.ID+"/events", nil).WithContext(reqCtx)
 	req.SetPathValue("id", session.ID)
-	rec := httptest.NewRecorder()
+	rec := newLockedResponseRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -79,7 +118,7 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(rec.Body.String(), "session.end") {
+		if strings.Contains(rec.BodyString(), "turn.end") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -91,7 +130,7 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 		t.Fatal("sessionEvents did not return after request cancel")
 	}
 
-	body := rec.Body.String()
+	body := rec.BodyString()
 	for _, ev := range stored {
 		raw, _ := json.Marshal(ev.Data)
 		if !strings.Contains(body, string(raw)) {

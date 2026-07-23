@@ -3,25 +3,19 @@
 package aop
 
 type SessionEndData struct {
-	// Error corresponds to the JSON schema field "error".
-	Error string `json:"error,omitempty,omitzero"`
-
-	// Stop corresponds to the JSON schema field "stop".
-	Stop string `json:"stop"`
-
-	// Turns corresponds to the JSON schema field "turns".
-	Turns int `json:"turns,omitempty,omitzero"`
-
-	// Usage corresponds to the JSON schema field "usage".
-	Usage *UsageData `json:"usage,omitempty,omitzero"`
+	// Reason corresponds to the JSON schema field "reason".
+	Reason string `json:"reason"`
 }
 
 type TurnEndData struct {
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error,omitempty,omitzero"`
+
 	// ContextTokens corresponds to the JSON schema field "context_tokens".
 	ContextTokens int `json:"context_tokens,omitempty,omitzero"`
 
-	// Turn corresponds to the JSON schema field "turn".
-	Turn int `json:"turn"`
+	// Stop corresponds to the JSON schema field "stop".
+	Stop string `json:"stop"`
 
 	// Usage corresponds to the JSON schema field "usage".
 	Usage *UsageData `json:"usage,omitempty,omitzero"`

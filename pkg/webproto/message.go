@@ -3,21 +3,69 @@ package webproto
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/aop"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
 
 type Message struct {
 	Type    string          `json:"type"`
+	RunID   string          `json:"run_id,omitempty"`
 	TaskID  string          `json:"task_id,omitempty"`
 	Data    string          `json:"data,omitempty"`
 	DataB64 string          `json:"data_b64,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+const (
+	TypeSessionOpen   = "session.open"
+	TypeSessionOpened = "session.opened"
+	TypeSessionClose  = "session.close"
+	TypeSessionClosed = "session.closed"
+	TypeRun           = "run"
+	TypeRunCancel     = "run.cancel"
+	TypeCommand       = "command"
+	TypeCommandResult = "command.result"
+	TypeAOP           = "aop"
+	TypeError         = "error"
+)
+
+type SessionOpenPayload struct {
+	SessionID        string `json:"session_id"`
+	ParentSessionID  string `json:"parent_session_id,omitempty"`
+	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+}
+
+type SessionLifecyclePayload struct {
+	SessionID string `json:"session_id"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type RunPayload struct {
+	SessionID     string            `json:"session_id"`
+	Parts         []aop.MessagePart `json:"parts"`
+	NoEcho        bool              `json:"no_echo,omitempty"`
+	MaxTurns      int               `json:"max_turns,omitempty"`
+	EvalCriteria  string            `json:"eval_criteria,omitempty"`
+	EvalMaxRounds int               `json:"eval_max_rounds,omitempty"`
+}
+
+type CommandPayload struct {
+	SessionID string            `json:"session_id"`
+	Line      string            `json:"line"`
+	ToolCall  *aop.ToolCallData `json:"tool_call,omitempty"`
+}
+
+type CommandResultPayload struct {
+	SessionID string            `json:"session_id"`
+	Parts     []aop.MessagePart `json:"parts,omitempty"`
+	Metadata  map[string]any    `json:"metadata,omitempty"`
+}
+
+type ErrorPayload struct {
+	Message string `json:"message"`
 }
 
 // CommandSpec is the surface-neutral description of one user-facing "/verb" command.
@@ -90,8 +138,8 @@ type AgentStats struct {
 	LastEvent        string `json:"last_event,omitempty"`
 }
 
-// GoalExt is the aiscan ext block on an inbound AOP user message: optional
-// Goal-mode run controls parsed by the agent boundary (webagent, stdio host).
+// GoalExt carries HTTP chat options that are copied into a RunPayload by the
+// web boundary. It is not an AOP RPC envelope or a separate runtime lifecycle.
 type GoalExt struct {
 	EvalCriteria    string `json:"eval_criteria,omitempty"`
 	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
@@ -122,56 +170,6 @@ func SetWebExt(event *aop.Event, ext WebMessageExt) error {
 // GetWebExt reads the hub message extension from an event.
 func GetWebExt(event aop.Event) (WebMessageExt, bool, error) {
 	return aop.Ext[WebMessageExt](event, NSWeb)
-}
-
-// IsAOPUserMessage reports whether the message carries an AOP user message
-// event — the only executable inbound AOP unit — and returns the decoded event.
-func IsAOPUserMessage(msg Message) (aop.Event, bool) {
-	if msg.Type != "aop" || len(msg.Payload) == 0 {
-		return aop.Event{}, false
-	}
-	var event aop.Event
-	if err := json.Unmarshal(msg.Payload, &event); err != nil || event.Type != aop.TypeMessage {
-		return aop.Event{}, false
-	}
-	data, err := aop.DecodeData[aop.MessageData](event)
-	if err != nil || data.Role != "user" {
-		return aop.Event{}, false
-	}
-	return event, true
-}
-
-// DecodeGoalExt decodes the protocol-owned run and eval namespaces.
-func DecodeGoalExt(event aop.Event) GoalExt {
-	var goal GoalExt
-	if run, ok, err := aop.Ext[aop.RunControl](event, aop.NSAOP); err == nil && ok {
-		goal.NoEcho = run.NoEcho
-		goal.PersistMaxTurns = run.MaxTurns
-	}
-	if control, ok, err := xeval.Get(event); err == nil && ok {
-		goal.EvalCriteria = control.Criteria
-		goal.EvalMaxRounds = control.MaxRounds
-	}
-	return goal
-}
-
-// UserMessageText flattens the text parts of an AOP user message event.
-func UserMessageText(event aop.Event) string {
-	data, err := aop.DecodeData[aop.MessageData](event)
-	if err != nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, part := range data.Parts {
-		if part.Type != aop.PartText {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(part.Text)
-	}
-	return sb.String()
 }
 
 type FileUploadPayload struct {

@@ -53,18 +53,12 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	}
 
 	want := []string{
-		aop.TypeSessionStart,
-		aop.TypeTurnStart,
 		aop.TypeMessage,
 		aop.TypeStatus,
 		aop.TypeToolCall,
 		aop.TypeToolResult,
-		aop.TypeTurnEnd,
-		aop.TypeTurnStart,
 		aop.TypeStatus,
 		aop.TypeMessage,
-		aop.TypeTurnEnd,
-		aop.TypeSessionEnd,
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -571,7 +565,6 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 	}
 
 	var turnEndUsage *aop.UsageData
-	var turnEndContext int
 	_, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
@@ -582,10 +575,6 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 				if data, err := aop.DecodeData[aop.UsageData](event); err == nil {
 					u := data
 					turnEndUsage = &u
-				}
-			case aop.TypeTurnEnd:
-				if data, err := aop.DecodeData[aop.TurnEndData](event); err == nil {
-					turnEndContext = data.ContextTokens
 				}
 			}
 		}),
@@ -598,9 +587,6 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 	}
 	if turnEndUsage.TotalTokens != 540 {
 		t.Errorf("usage TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
-	}
-	if turnEndContext != 500 {
-		t.Errorf("turn.end context_tokens = %d, want 500", turnEndContext)
 	}
 }
 

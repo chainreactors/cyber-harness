@@ -18,6 +18,7 @@ type aopEmitter struct {
 	bus              *eventbus.Bus[aop.Event]
 	agentName        string
 	sessionID        string
+	turnID           string
 	parentSessionID  string
 	parentToolCallID string
 	delegation       *delegation.DelegationDetail
@@ -43,8 +44,8 @@ func newAOPEmitter(bus *eventbus.Bus[aop.Event], agentName, sessionID, parentSes
 	return em
 }
 
-func (e *aopEmitter) scoped(sessionID, parentSessionID, parentToolCallID string, detail *delegation.DelegationDetail) *aopEmitter {
-	return &aopEmitter{bus: e.bus, agentName: e.agentName, sessionID: sessionID, parentSessionID: parentSessionID, parentToolCallID: parentToolCallID, delegation: detail, state: e.state}
+func (e *aopEmitter) turn(turnID string) *aopEmitter {
+	return &aopEmitter{bus: e.bus, agentName: e.agentName, sessionID: e.sessionID, turnID: turnID, parentSessionID: e.parentSessionID, parentToolCallID: e.parentToolCallID, delegation: e.delegation, state: e.state}
 }
 
 func (e *aopEmitter) event(typ string, data any) aop.Event {
@@ -56,6 +57,7 @@ func (e *aopEmitter) event(typ string, data any) aop.Event {
 		Type:      typ,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: e.sessionID,
+		TurnID:    e.turnID,
 		Agent:     e.agentName,
 		Seq:       int(e.state.seq.Add(1)),
 		Data:      raw,
@@ -97,20 +99,20 @@ func (e *aopEmitter) sessionStart(model string) {
 	e.emit(aop.TypeSessionStart, data)
 }
 
-func (e *aopEmitter) sessionEnd(stop StopReason, turns int, usage Usage, runErr error) {
-	data := aop.SessionEndData{Stop: string(stop), Turns: turns, Usage: usageData(usage)}
+func (e *aopEmitter) sessionEnd(reason string) {
+	e.emit(aop.TypeSessionEnd, aop.SessionEndData{Reason: reason})
+}
+
+func (e *aopEmitter) turnStart() {
+	e.emit(aop.TypeTurnStart, aop.TurnStartData{})
+}
+
+func (e *aopEmitter) turnEnd(stop StopReason, totalUsage Usage, contextTokens int, runErr error) {
+	data := aop.TurnEndData{Stop: string(stop), Usage: usageData(totalUsage), ContextTokens: contextTokens}
 	if runErr != nil {
 		data.Error = runErr.Error()
 	}
-	e.emit(aop.TypeSessionEnd, data)
-}
-
-func (e *aopEmitter) turnStart(turn int) {
-	e.emit(aop.TypeTurnStart, aop.TurnData{Turn: turn})
-}
-
-func (e *aopEmitter) turnEnd(turn int, totalUsage Usage, contextTokens int) {
-	e.emit(aop.TypeTurnEnd, aop.TurnEndData{Turn: turn, Usage: usageData(totalUsage), ContextTokens: contextTokens})
+	e.emit(aop.TypeTurnEnd, data)
 }
 
 // message emits a complete message event, allocating a fresh message_id.
