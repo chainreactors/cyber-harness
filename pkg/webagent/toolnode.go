@@ -21,13 +21,17 @@ import (
 type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string
-	Name      string
-	Token     string
-	Registry  *commands.CommandRegistry
-	DataBus   *eventbus.Bus[output.ToolDataEvent]
-	SCO       *output.SCOSidecar
-	Logger    telemetry.Logger
-	Version   string
+	// ID is the stable node identity used by Cairn as the runner primary key.
+	ID string
+	// Name is kept as a compatibility alias for callers created before ID was
+	// made explicit. New callers should set ID.
+	Name     string
+	Token    string
+	Registry *commands.CommandRegistry
+	DataBus  *eventbus.Bus[output.ToolDataEvent]
+	SCO      *output.SCOSidecar
+	Logger   telemetry.Logger
+	Version  string
 }
 
 // RunToolNode connects to the hub as a tool-only node and serves until ctx is
@@ -39,9 +43,12 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	if cfg.Registry == nil {
 		return fmt.Errorf("command registry is required")
 	}
-	name := strings.TrimSpace(cfg.Name)
-	if name == "" {
-		name, _ = os.Hostname()
+	runnerID := strings.TrimSpace(cfg.ID)
+	if runnerID == "" {
+		runnerID = strings.TrimSpace(cfg.Name)
+	}
+	if runnerID == "" {
+		runnerID, _ = os.Hostname()
 	}
 	baseURL, _ := SplitAccessKey(cfg.ServerURL)
 	authority, err := protocols.CanonicalAuthority(baseURL)
@@ -58,13 +65,13 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	return connect(ctx, connectionConfig{
 		ServerURL:     cfg.ServerURL,
 		WSPath:        cfg.WSPath,
-		Name:          name,
+		Name:          runnerID,
 		Token:         cfg.Token,
 		Registry:      cfg.Registry,
 		DataBus:       cfg.DataBus,
 		SCO:           cfg.SCO,
 		Logger:        logger,
-		Node:          protocols.NodeRef{ID: name, Authority: authority},
+		Node:          protocols.NodeRef{ID: runnerID, Authority: authority},
 		Runtime:       runtime,
 		RunnerFileRPC: true,
 	})

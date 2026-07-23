@@ -428,6 +428,21 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				go HandleFileMkdir(msg, cc.Runtime.WorkingDir, send)
 			}
 
+		case "exec":
+			taskCtx, cancel := context.WithCancel(ctx)
+			mu.Lock()
+			execTasks[msg.TaskID] = cancel
+			mu.Unlock()
+			go func(m webproto.Message) {
+				defer cancel()
+				defer func() {
+					mu.Lock()
+					delete(execTasks, m.TaskID)
+					mu.Unlock()
+				}()
+				HandleExec(taskCtx, m, cc.Runtime.WorkingDir, send)
+			}(msg)
+
 		case "config":
 			if cc.Chat != nil {
 				go cc.Chat.HandleConfigReload(cc.ServerURL, send)

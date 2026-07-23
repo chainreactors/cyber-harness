@@ -23,18 +23,26 @@ func main() {
 	var (
 		serverURL  string
 		token      string
-		name       string
+		runnerID   string
+		legacyName string
 		wsPath     string
 		configFile string
 	)
 	flag.StringVar(&serverURL, "server", "", "Cairn server URL, e.g. http://host:8080")
-	flag.StringVar(&token, "token", "", "runner enrollment token")
-	flag.StringVar(&name, "name", "", "runner ID (default: hostname)")
+	flag.StringVar(&token, "token", "", "runner token")
+	flag.StringVar(&runnerID, "id", "", "stable runner ID (default: hostname)")
+	flag.StringVar(&legacyName, "name", "", "deprecated alias for --id")
 	flag.StringVar(&wsPath, "ws-path", "/ws/runner", "runner WebSocket path")
 	flag.StringVar(&configFile, "config", "", "path to aiscan.yaml")
 	flag.Parse()
 	if serverURL == "" || token == "" {
-		fmt.Fprintln(os.Stderr, "usage: aiscan-runner --server <url> --token <token>")
+		fmt.Fprintln(os.Stderr, "usage: aiscan-runner --server <url> --token <token> [--id <runner-id>]")
+		os.Exit(2)
+	}
+	if runnerID == "" {
+		runnerID = legacyName
+	} else if legacyName != "" && legacyName != runnerID {
+		fmt.Fprintln(os.Stderr, "--id and --name must match when both are provided")
 		os.Exit(2)
 	}
 
@@ -62,7 +70,7 @@ func main() {
 	if err := webagent.RunToolNode(ctx, webagent.ToolNodeConfig{
 		ServerURL: serverURL,
 		WSPath:    wsPath,
-		Name:      name,
+		ID:        runnerID,
 		Token:     token,
 		Registry:  registry,
 		DataBus:   dataBus,
