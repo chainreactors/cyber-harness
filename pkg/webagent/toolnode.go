@@ -16,8 +16,8 @@ import (
 )
 
 // ToolNodeConfig configures a tool-only node: an outbound WebSocket connection
-// exposing exec / native file RPCs / pty plus tool.data / tool.sco events,
-// with no LLM provider, agent loop, or IOA dependency.
+// exposing AOP tool calls / native file RPCs / pty plus tool.data / tool.sco
+// events, with no LLM provider, agent loop, or IOA dependency.
 type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string

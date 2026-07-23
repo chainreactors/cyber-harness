@@ -1,66 +1,11 @@
 package webagent
 
 import (
-	"bytes"
-	"strings"
 	"sync"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
-
-// MaxStreamBuf is the maximum buffer size before a StreamWriter flushes.
-const MaxStreamBuf = 64 << 10
-
-// StreamWriter buffers tool output and sends it line-by-line over the WebSocket.
-type StreamWriter struct {
-	TaskID string
-	SendFn func(webproto.Message)
-	// Stream optionally tags output messages with an ExecStreamPayload
-	// (webproto.StreamStdout/StreamStderr) for consumers that split streams.
-	Stream string
-	buf    []byte
-}
-
-func (w *StreamWriter) send(data string) {
-	msg := webproto.Message{Type: "output", TaskID: w.TaskID, Data: data}
-	if w.Stream != "" {
-		msg.Payload = webproto.MustJSON(webproto.ExecStreamPayload{Stream: w.Stream})
-	}
-	w.SendFn(msg)
-}
-
-func (w *StreamWriter) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	for {
-		idx := bytes.IndexByte(w.buf, '\n')
-		if idx < 0 {
-			if len(w.buf) >= MaxStreamBuf {
-				w.Flush()
-			}
-			break
-		}
-		line := string(w.buf[:idx])
-		w.buf = w.buf[idx+1:]
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		w.send(line)
-	}
-	return len(p), nil
-}
-
-// Flush sends any remaining buffered data.
-func (w *StreamWriter) Flush() {
-	if len(w.buf) == 0 {
-		return
-	}
-	data := string(w.buf)
-	w.buf = w.buf[:0]
-	if strings.TrimSpace(data) != "" {
-		w.send(data)
-	}
-}
 
 // AgentStatsTracker tracks agent event statistics for the WebSocket connection.
 type AgentStatsTracker struct {

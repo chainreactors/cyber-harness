@@ -32,4 +32,7 @@ const (
 	ToolDataWeb      = "web"
 	ToolDataWeakpass = "weakpass"
 	ToolDataVuln     = "vuln"
+	// ToolDataProgress carries one raw stdout/stderr line of a foreground
+	// command, streamed while it runs.
+	ToolDataProgress = "progress"
 )

@@ -180,6 +180,18 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 	}
 }
 
+// RunForegroundTool executes a command in the foreground and returns the
+// collected ToolResult (bounded text plus structured Details), streaming raw
+// output through options.OnOutput. Transports that must not auto-background
+// (AOP tool.call) use this instead of Execute.
+func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (ToolResult, error) {
+	execution, err := t.RunForeground(ctx, command, options)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	return t.collectResult(execution), nil
+}
+
 // Start resolves command through the built-in registry or the system shell and
 // always returns an Execution backed by one PTY session.
 func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {

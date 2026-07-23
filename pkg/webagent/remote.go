@@ -44,11 +44,8 @@ func fetchRemoteConfig(webURL string) (*cfg.Option, error) {
 func distributeToOption(d *webproto.DistributeConfig) *cfg.Option {
 	opt := &cfg.Option{
 		LLMOptions: cfg.LLMOptions{
-			Provider: d.LLM.Provider,
-			BaseURL:  d.LLM.BaseURL,
-			APIKey:   d.LLM.APIKey,
-			Model:    d.LLM.Model,
-			LLMProxy: d.LLM.Proxy,
+			ActiveProfile: d.LLM.ActiveProfile,
+			Providers:     llmProviderEntries(d.LLM.Providers),
 		},
 		ScannerOptions: cfg.ScannerOptions{
 			CyberhubURL:  d.Cyberhub.URL,
@@ -81,4 +78,20 @@ func distributeToOption(d *webproto.DistributeConfig) *cfg.Option {
 		cfg.DefaultTavilyKeys = cfg.ResolveString(cfg.DefaultTavilyKeys, d.Search.TavilyKeys)
 	}
 	return opt
+}
+
+func llmProviderEntries(profiles []webproto.LLMProviderConfig) []cfg.LLMProviderEntry {
+	entries := make([]cfg.LLMProviderEntry, 0, len(profiles))
+	for _, p := range profiles {
+		entries = append(entries, cfg.LLMProviderEntry{
+			ID:       p.ID,
+			Name:     p.Name,
+			Provider: p.Provider,
+			BaseURL:  p.BaseURL,
+			APIKey:   p.APIKey,
+			Model:    p.Model,
+			Proxy:    p.Proxy,
+		})
+	}
+	return entries
 }

@@ -15,6 +15,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -51,6 +52,7 @@ func connectForTest(ctx context.Context, serverURL, name string, reg *commands.C
 		Name:      name,
 		Registry:  reg,
 		AgentBus:  bus,
+		DataBus:   eventbus.New[output.ToolDataEvent](),
 		Node:      protocols.NodeRef{ID: "node-" + name, Authority: serverURL},
 	})
 }
@@ -62,11 +64,11 @@ type webConnectionTestCommand struct {
 func (c webConnectionTestCommand) Name() string  { return "echo" }
 func (c webConnectionTestCommand) Usage() string { return "echo" }
 
-func (c webConnectionTestCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c webConnectionTestCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
 	if c.bus != nil {
 		c.bus.Emit(aop.Event{
 			Type:      aop.TypeTurnStart,
-			SessionID: "test-session",
+			SessionID: output.CallIDFromContext(ctx),
 			Data:      webproto.MustJSON(aop.TurnData{Turn: 1}),
 		})
 	}
@@ -108,8 +110,21 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 		}
 		registeredOnce.Do(func() { close(registered) })
 
-		if err := conn.WriteJSON(webproto.Message{Type: "exec", TaskID: "task-1", Data: `echo "hello world"`}); err != nil {
-			t.Errorf("exec write: %v", err)
+		callData, _ := json.Marshal(aop.ToolCallData{
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Args:       map[string]any{"command": `echo "hello world"`},
+		})
+		event := aop.Event{
+			Type:      aop.TypeToolCall,
+			TS:        time.Now().UTC().Format(time.RFC3339Nano),
+			SessionID: "task-1",
+			Agent:     "aiscan.web",
+			Data:      callData,
+		}
+		payload, _ := json.Marshal(event)
+		if err := conn.WriteJSON(webproto.Message{Type: "aop", TaskID: "task-1", Payload: payload}); err != nil {
+			t.Errorf("tool.call write: %v", err)
 			return
 		}
 		for {
@@ -118,8 +133,11 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 				return
 			}
 			messages <- msg
-			if msg.Type == "complete" {
-				return
+			if msg.Type == "aop" {
+				var ev aop.Event
+				if json.Unmarshal(msg.Payload, &ev) == nil && ev.Type == aop.TypeToolResult {
+					return
+				}
 			}
 		}
 	}))
@@ -146,26 +164,35 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 
 	seenOutput := false
 	seenTelemetry := false
-	seenComplete := false
+	seenResult := false
 	deadline := time.After(3 * time.Second)
-	for !seenComplete {
+	for !seenResult {
 		select {
 		case msg := <-messages:
 			if msg.TaskID != "task-1" {
 				t.Fatalf("message missing task id: %+v", msg)
 			}
 			switch msg.Type {
-			case "output":
-				seenOutput = strings.Contains(msg.Data, "hello world")
+			case "tool.data":
+				var ev output.ToolDataEvent
+				if json.Unmarshal(msg.Payload, &ev) == nil && ev.Kind == output.ToolDataProgress {
+					if line, ok := ev.Data.(string); ok && strings.Contains(line, "hello world") {
+						seenOutput = true
+					}
+				}
 			case "aop":
 				var event aop.Event
-				if json.Unmarshal(msg.Payload, &event) == nil && event.Type == aop.TypeTurnStart {
+				if json.Unmarshal(msg.Payload, &event) != nil {
+					continue
+				}
+				switch event.Type {
+				case aop.TypeTurnStart:
 					var data aop.TurnData
 					_ = json.Unmarshal(event.Data, &data)
-					seenTelemetry = data.Turn == 1
+					seenTelemetry = data.Turn == 1 && event.SessionID == "task-1"
+				case aop.TypeToolResult:
+					seenResult = true
 				}
-			case "complete":
-				seenComplete = true
 			}
 		case <-deadline:
 			t.Fatal("timeout waiting for web agent messages")

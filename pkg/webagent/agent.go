@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/runner"
@@ -121,28 +123,29 @@ type chatAgentHandler struct {
 func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message, event aop.Event, send func(webproto.Message), router *eventRouter) func() {
 	inbound, err := agent.Classify(event)
 	if err != nil || inbound.Kind != agent.InboundUserMessage {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "invalid inbound user message"})
-		return func() {}
+		router.Route(replSessionID(msg.TaskID), msg.TaskID)
+		return func() {
+			h.emitREPLSession(msg.TaskID, "", fmt.Errorf("invalid inbound user message"))
+		}
 	}
 	prompt := strings.TrimSpace(webproto.UserMessageText(event))
 	if prompt == "" {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: "empty prompt"})
-		return func() {}
+		router.Route(replSessionID(msg.TaskID), msg.TaskID)
+		return func() {
+			h.emitREPLSession(msg.TaskID, "", fmt.Errorf("empty prompt"))
+		}
 	}
 
 	if isREPLCommand(prompt) {
+		router.Route(replSessionID(msg.TaskID), msg.TaskID)
 		wait, submitErr := h.rt.SubmitLine(ctx, msg.TaskID, event.SessionID, prompt)
-		if submitErr != nil {
-			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: submitErr.Error()})
-			return func() {}
-		}
 		return func() {
-			out, execErr := wait()
-			if execErr != nil {
-				send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: execErr.Error()})
+			if submitErr != nil {
+				h.emitREPLSession(msg.TaskID, "", submitErr)
 				return
 			}
-			send(webproto.Message{Type: "complete", TaskID: msg.TaskID, Data: fenceTerminalOutput(out)})
+			out, execErr := wait()
+			h.emitREPLSession(msg.TaskID, out, execErr)
 		}
 	}
 
@@ -150,14 +153,63 @@ func (h *chatAgentHandler) HandleChat(ctx context.Context, msg webproto.Message,
 		router.Route(sessionID, msg.TaskID)
 	})
 	if err != nil {
-		send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
-		return func() {}
-	}
-	return func() {
-		if _, err := wait(); err != nil {
-			send(webproto.Message{Type: "error", TaskID: msg.TaskID, Data: err.Error()})
+		router.Route(replSessionID(msg.TaskID), msg.TaskID)
+		return func() {
+			h.emitREPLSession(msg.TaskID, "", err)
 		}
 	}
+	return func() {
+		// Run failures are terminal on the root session.end emitted by the
+		// agent kernel; nothing to send here.
+		_, _ = wait()
+	}
+}
+
+// replSessionID names the self-contained AOP session that reports one
+// REPL/slash-command run. It has no parent session so the hub converges the
+// chat task on its session.end.
+func replSessionID(taskID string) string {
+	return "repl-" + taskID
+}
+
+// emitREPLSession publishes a REPL command run as a three-event AOP session on
+// the runtime bus: session.start, one assistant message with the fenced
+// output (skipped on error), and session.end carrying the stop reason.
+func (h *chatAgentHandler) emitREPLSession(taskID, out string, runErr error) {
+	sessionID := replSessionID(taskID)
+	seq := 0
+	emit := func(typ string, data any) {
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return
+		}
+		seq++
+		h.rt.Bus.Emit(aop.Event{
+			Type:      typ,
+			TS:        time.Now().UTC().Format(time.RFC3339Nano),
+			SessionID: sessionID,
+			Agent:     h.rt.NodeName,
+			Seq:       seq,
+			Data:      raw,
+		})
+	}
+	emit(aop.TypeSessionStart, aop.SessionStartData{})
+	if runErr == nil && out != "" {
+		emit(aop.TypeMessage, aop.MessageData{
+			MessageID: sessionID + "-output",
+			Role:      "assistant",
+			Parts:     []aop.MessagePart{{Type: aop.PartText, Text: fenceTerminalOutput(out)}},
+		})
+	}
+	end := aop.SessionEndData{Stop: string(agent.StopReasonCompleted)}
+	if runErr != nil {
+		end.Stop = string(agent.StopReasonError)
+		if errors.Is(runErr, context.Canceled) {
+			end.Stop = string(agent.StopReasonCanceled)
+		}
+		end.Error = runErr.Error()
+	}
+	emit(aop.TypeSessionEnd, end)
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
@@ -266,7 +318,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message), rt *run
 	send(webproto.Message{
 		Type:   "complete",
 		TaskID: msg.TaskID,
-		Data:   dest,
 		Payload: webproto.MustJSON(webproto.FileUploadResult{
 			Filename: payload.Filename,
 			Path:     dest,

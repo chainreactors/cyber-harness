@@ -17,12 +17,13 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-// hubScript simulates the cairn bridge dialect: register→connected handshake,
-// exec with a structured payload, file.read, and tool.data correlation.
+// hubScript simulates the hub dialect: register→connected handshake, an
+// inbound AOP tool.call, file.read, and tool.data correlation.
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 type hubScript struct {
@@ -30,20 +31,20 @@ type hubScript struct {
 
 	mu           sync.Mutex
 	registered   chan webproto.RegisterPayload
-	execComplete chan webproto.ExecResult
-	execStream   chan string
+	toolResult   chan aop.ToolResultData
+	progress     chan string
 	fileData     chan []byte
 	toolData     chan webproto.Message
 }
 
 func newHubScript(t *testing.T) *hubScript {
 	return &hubScript{
-		t:            t,
-		registered:   make(chan webproto.RegisterPayload, 1),
-		execComplete: make(chan webproto.ExecResult, 1),
-		execStream:   make(chan string, 16),
-		fileData:     make(chan []byte, 1),
-		toolData:     make(chan webproto.Message, 1),
+		t:          t,
+		registered: make(chan webproto.RegisterPayload, 1),
+		toolResult: make(chan aop.ToolResultData, 1),
+		progress:   make(chan string, 16),
+		fileData:   make(chan []byte, 1),
+		toolData:   make(chan webproto.Message, 4),
 	}
 }
 
@@ -82,20 +83,19 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch msg.Type {
-		case "output":
-			var stream webproto.ExecStreamPayload
-			_ = json.Unmarshal(msg.Payload, &stream)
-			h.execStream <- stream.Stream + ":" + msg.Data
+		case "aop":
+			var event aop.Event
+			if err := json.Unmarshal(msg.Payload, &event); err != nil || event.Type != aop.TypeToolResult {
+				continue
+			}
+			var result aop.ToolResultData
+			if err := json.Unmarshal(event.Data, &result); err != nil {
+				h.t.Errorf("tool.result: %v", err)
+				return
+			}
+			h.toolResult <- result
 		case "complete":
-			switch {
-			case strings.HasPrefix(msg.TaskID, "exec-"):
-				var result webproto.ExecResult
-				if err := json.Unmarshal(msg.Payload, &result); err != nil {
-					h.t.Errorf("exec result: %v", err)
-					return
-				}
-				h.execComplete <- result
-			case strings.HasPrefix(msg.TaskID, "read-"):
+			if strings.HasPrefix(msg.TaskID, "read-") {
 				data, err := base64.StdEncoding.DecodeString(msg.DataB64)
 				if err != nil {
 					h.t.Errorf("file data: %v", err)
@@ -104,6 +104,13 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 				h.fileData <- data
 			}
 		case "tool.data":
+			var event output.ToolDataEvent
+			if err := json.Unmarshal(msg.Payload, &event); err == nil && event.Kind == output.ToolDataProgress {
+				if line, ok := event.Data.(string); ok {
+					h.progress <- line
+					continue
+				}
+			}
 			h.toolData <- msg
 		}
 	}
@@ -111,8 +118,20 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 // drive issues the server→runner calls once the connection is live.
 func (h *hubScript) drive(conn *websocket.Conn) {
-	execPayload, _ := json.Marshal(webproto.ExecPayload{Command: "echo hello"})
-	if err := conn.WriteJSON(webproto.Message{Type: "exec", TaskID: "exec-1", Payload: execPayload}); err != nil {
+	callData, _ := json.Marshal(aop.ToolCallData{
+		ToolCallID: "call-1",
+		ToolName:   "bash",
+		Args:       map[string]any{"command": "echo hello"},
+	})
+	event := aop.Event{
+		Type:      aop.TypeToolCall,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "exec-1",
+		Agent:     "aiscan.web",
+		Data:      callData,
+	}
+	payload, _ := json.Marshal(event)
+	if err := conn.WriteJSON(webproto.Message{Type: "aop", TaskID: "exec-1", Payload: payload}); err != nil {
 		return
 	}
 }
@@ -134,9 +153,8 @@ func wait[T any](t *testing.T, ch <-chan T, what string) T {
 	}
 }
 
-// TestRunToolNodeWireInterop runs a tool node against a mock hub speaking the
-// cairn bridge dialect and verifies the full register/exec/file.read/tool.data
-// round trip.
+// TestRunToolNodeWireInterop runs a tool node against a mock hub and verifies
+// the full register / AOP tool.call / file.read / tool.data round trip.
 func TestRunToolNodeWireInterop(t *testing.T) {
 	reg := commands.NewRegistry()
 	reg.RegisterTool(&recordingBash{})
@@ -179,15 +197,15 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 		t.Fatalf("register tools = %+v", registered.Tools)
 	}
 
-	// The hub issues exec once the runner's first post-handshake message
-	// arrives; recordingBash streams one line and completes.
-	stream := wait(t, hub.execStream, "exec output")
-	if stream != "stdout:streamed" {
-		t.Fatalf("exec stream = %q", stream)
+	// The hub issues an AOP tool.call once the runner's first post-handshake
+	// message arrives; recordingBash streams one progress line and returns.
+	line := wait(t, hub.progress, "tool.data progress")
+	if line != "streamed" {
+		t.Fatalf("progress line = %q", line)
 	}
-	result := wait(t, hub.execComplete, "exec complete")
-	if result.ExitCode != 0 {
-		t.Fatalf("exec exit code = %d", result.ExitCode)
+	result := wait(t, hub.toolResult, "tool.result")
+	if result.IsError || result.ToolCallID != "call-1" || result.ToolName != "bash" {
+		t.Fatalf("tool.result = %+v", result)
 	}
 
 	// tool.data rides the same connection, correlated by call ID.

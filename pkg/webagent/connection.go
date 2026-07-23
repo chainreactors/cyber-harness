@@ -254,14 +254,14 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 	}()
 
 	var mu sync.Mutex
-	execTasks := make(map[string]context.CancelFunc)   // tmux-managed exec tasks
+	execTasks := make(map[string]context.CancelFunc)   // active tool.call tasks
 	chatCancels := make(map[string]context.CancelFunc) // active chat messageID -> cancel
 	eventRoute := make(map[string]string)              // agent SessionID -> messageID for event routing
 
 	router := &eventRouter{mu: &mu, eventRoute: eventRoute}
 
 	// Tool telemetry: scanner tool.data and normalized tool.sco events ride the
-	// same connection, correlated to the exec task by call ID.
+	// same connection, correlated to the calling task by call ID.
 	if detach := attachToolEvents(cc.DataBus, cc.SCO, send); detach != nil {
 		defer detach()
 	}
@@ -285,29 +285,21 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 				}
 			}
 			msgID := eventRoute[e.SessionID]
-			var targets []string
-			if msgID != "" {
-				targets = []string{msgID}
-			} else {
-				for tid := range execTasks {
-					targets = append(targets, tid)
-				}
-			}
 			mu.Unlock()
-			if len(targets) == 0 {
+			// Events without a route belong to no hub task (resident REPL,
+			// heartbeat); they reach the user through the PTY stream.
+			if msgID == "" {
 				return
 			}
 			payload, err := json.Marshal(e)
 			if err != nil {
 				return
 			}
-			for _, id := range targets {
-				send(webproto.Message{
-					Type:    "aop",
-					TaskID:  id,
-					Payload: payload,
-				})
-			}
+			send(webproto.Message{
+				Type:    "aop",
+				TaskID:  msgID,
+				Payload: payload,
+			})
 		})
 		defer unsub()
 	}
@@ -403,30 +395,17 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			mu.Lock()
 			execTasks[msg.TaskID] = cancel
 			mu.Unlock()
+			router.Route(inbound.Event.SessionID, msg.TaskID)
 			go func(m webproto.Message, inbound agent.Inbound, tCtx context.Context, tCancel context.CancelFunc) {
 				defer tCancel()
 				defer func() {
 					mu.Lock()
 					delete(execTasks, m.TaskID)
 					mu.Unlock()
+					router.Unroute(m.TaskID)
 				}()
-				handleAOPToolCall(tCtx, m, inbound, cc.Registry, send)
+				handleAOPToolCall(tCtx, m, inbound, cc.Registry, cc.DataBus, send)
 			}(msg, inbound, taskCtx, cancel)
-
-		case "exec":
-			taskCtx, cancel := context.WithCancel(ctx)
-			mu.Lock()
-			execTasks[msg.TaskID] = cancel
-			mu.Unlock()
-			go func(m webproto.Message, tCtx context.Context, tCancel context.CancelFunc) {
-				defer tCancel()
-				defer func() {
-					mu.Lock()
-					delete(execTasks, m.TaskID)
-					mu.Unlock()
-				}()
-				ExecCommand(tCtx, m, cc.Registry, send)
-			}(msg, taskCtx, cancel)
 
 		case "upload":
 			if cc.Chat != nil {
