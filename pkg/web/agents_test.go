@@ -15,6 +15,8 @@ import (
 
 	webstatic "github.com/chainreactors/aiscan/web"
 
+	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -219,18 +221,38 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	progressCh, unsub := pool.hub.Subscribe("task-1")
 	defer unsub()
 
-	resultCh, err := pool.DispatchCommand(agentID, "task-1", "scan -i 1.2.3.4")
+	resultCh, err := pool.DispatchToolCall(agentID, "task-1", aop.ToolCallData{
+		ToolCallID: "task-1",
+		ToolName:   "bash",
+		Args:       map[string]any{"command": "scan -i 1.2.3.4"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "exec" || cmd.Data != "scan -i 1.2.3.4" {
+	if cmd.Type != "aop" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
+	var callEvent aop.Event
+	if err := json.Unmarshal(cmd.Payload, &callEvent); err != nil {
+		t.Fatal(err)
+	}
+	if callEvent.Type != aop.TypeToolCall || callEvent.SessionID != "task-1" {
+		t.Fatalf("unexpected tool.call event: %+v", callEvent)
+	}
+	var call aop.ToolCallData
+	if err := json.Unmarshal(callEvent.Data, &call); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := call.Args.(map[string]any)
+	if call.ToolName != "bash" || args["command"] != "scan -i 1.2.3.4" {
+		t.Fatalf("unexpected tool.call data: %+v", call)
+	}
 
-	conn.WriteJSON(WSMessage{Type: "output", TaskID: "task-1", Data: "port 80 open"})
+	progress, _ := json.Marshal(output.ToolDataEvent{Tool: "bash", Kind: output.ToolDataProgress, Data: "port 80 open", CallID: "task-1"})
+	conn.WriteJSON(WSMessage{Type: "tool.data", TaskID: "task-1", Payload: progress})
 	select {
 	case evt := <-progressCh:
 		if !strings.Contains(string(evt.Data), "port 80 open") {
@@ -240,12 +262,27 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	result, _ := json.Marshal(map[string]int{"ports": 3})
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-1", Data: "done", Payload: result})
+	resultData, _ := json.Marshal(aop.ToolResultData{
+		ToolCallID: "task-1",
+		ToolName:   "bash",
+		Content:    "done",
+		Details:    map[string]int{"ports": 3},
+	})
+	resultEvent, _ := json.Marshal(aop.Event{
+		Type:      aop.TypeToolResult,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "task-1",
+		Agent:     "worker",
+		Data:      resultData,
+	})
+	conn.WriteJSON(WSMessage{Type: "aop", TaskID: "task-1", Payload: resultEvent})
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {
 			t.Fatalf("unexpected result: %+v", res)
+		}
+		if !strings.Contains(string(res.Result), `"ports":3`) {
+			t.Fatalf("result details not propagated: %s", res.Result)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
@@ -282,15 +319,29 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 		t.Fatalf("unexpected user text: %q", text)
 	}
 
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-chat", Data: "hi"})
+	conn.WriteJSON(sessionEndMessage("task-chat", "sess-chat", "completed"))
 	select {
 	case res := <-resultCh:
-		if res.Err != "" || res.Output != "hi" {
+		if res.Err != "" {
 			t.Fatalf("unexpected result: %+v", res)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+// sessionEndMessage builds the agent→hub AOP session.end frame that converges
+// a chat task.
+func sessionEndMessage(taskID, sessionID, stop string) WSMessage {
+	data, _ := json.Marshal(aop.SessionEndData{Stop: stop})
+	payload, _ := json.Marshal(aop.Event{
+		Type:      aop.TypeSessionEnd,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID,
+		Agent:     "agent",
+		Data:      data,
+	})
+	return WSMessage{Type: "aop", TaskID: taskID, Payload: payload}
 }
 
 // TestDispatchChatSessionCarriesGoalOptions guards the Goal-mode wiring: the
@@ -341,7 +392,7 @@ func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 	if !goal.NoEcho {
 		t.Error("hub-sent user message must set no_echo")
 	}
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-goal", Data: "ok"})
+	conn.WriteJSON(sessionEndMessage("task-goal", "sess-1", "completed"))
 	select {
 	case <-resultCh:
 	case <-time.After(time.Second):

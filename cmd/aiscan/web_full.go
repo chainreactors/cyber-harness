@@ -224,10 +224,22 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	if err != nil {
 		return p, false, webproto.DistributeConfig{}, err
 	}
+	dc := parseDistributeConfig(data)
+	return p, true, dc, nil
+}
+
+// parseDistributeConfig decodes the YAML settings file and migrates a legacy
+// flat llm section into the provider profile list — the only place the flat
+// representation is still accepted.
+func parseDistributeConfig(data []byte) webproto.DistributeConfig {
 	var dc webproto.DistributeConfig
 	_ = yaml.Unmarshal(data, &dc)
-	webproto.NormalizeLLMConfig(&dc.LLM)
-	return p, true, dc, nil
+	var legacy struct {
+		LLM webproto.LLMProviderConfig `yaml:"llm"`
+	}
+	_ = yaml.Unmarshal(data, &legacy)
+	webproto.MigrateLLMConfig(&dc.LLM, legacy.LLM)
+	return dc
 }
 
 func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) error {
@@ -241,15 +253,12 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 	var current webproto.DistributeConfig
 	if loaded {
 		if data, err := os.ReadFile(p); err == nil {
-			_ = yaml.Unmarshal(data, &current)
+			current = parseDistributeConfig(data)
 		}
 	}
-	webproto.NormalizeLLMConfig(&current.LLM)
 
 	// Preserve existing secrets when incoming value is empty.
-	preserveSecret(&incoming.LLM.APIKey, current.LLM.APIKey)
 	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
-	webproto.NormalizeLLMConfig(&incoming.LLM)
 	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
 	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
 	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)

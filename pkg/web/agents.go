@@ -59,6 +59,10 @@ type remoteAgent struct {
 	mu    sync.Mutex
 	tasks map[string]chan taskResult
 	turns map[string]int
+	// toolCalls marks tasks dispatched via DispatchToolCall: only they converge
+	// on a tool.result. Chat tasks see tool.result events too (LLM tool use)
+	// and must ignore them as terminals.
+	toolCalls map[string]struct{}
 	// childSessions tracks derived sub-agent session IDs per task, learned from
 	// session.start's parent_session_id. Only a ROOT session.end converges the
 	// task; child ends are lifecycle noise.
@@ -193,6 +197,7 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 		close(ch)
 	}
 	a.tasks = nil
+	a.toolCalls = nil
 	a.childSessions = nil
 	a.mu.Unlock()
 }
@@ -262,9 +267,43 @@ func (p *AgentPool) PickChat() *remoteAgent {
 	return fallback
 }
 
-// DispatchCommand sends a command to an agent and returns a channel for the result.
-func (p *AgentPool) DispatchCommand(agentID, taskID, command string) (<-chan taskResult, error) {
-	return p.dispatchPayload(agentID, taskID, "exec", command, nil)
+// DispatchToolCall sends an AOP tool.call to an agent and returns a channel
+// for the result. The call session id is the task id, so every event the call
+// produces (progress telemetry, tool.result) routes back to this task.
+func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallData) (<-chan taskResult, error) {
+	data, err := json.Marshal(call)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool.call data: %w", err)
+	}
+	event := aop.Event{
+		Type:      aop.TypeToolCall,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: taskID,
+		Agent:     "aiscan.web",
+		Data:      data,
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool.call event: %w", err)
+	}
+	if a := p.get(agentID); a != nil {
+		a.mu.Lock()
+		if a.toolCalls == nil {
+			a.toolCalls = map[string]struct{}{}
+		}
+		a.toolCalls[taskID] = struct{}{}
+		a.mu.Unlock()
+	}
+	ch, err := p.dispatchMessage(agentID, taskID, WSMessage{Type: "aop", TaskID: taskID, Payload: payload})
+	if err != nil {
+		if a := p.get(agentID); a != nil {
+			a.mu.Lock()
+			delete(a.toolCalls, taskID)
+			a.mu.Unlock()
+		}
+		return nil, err
+	}
+	return ch, nil
 }
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
@@ -306,10 +345,6 @@ func BuildUserMessageEvent(sessionID, messageID, text string, goal webproto.Goal
 		_ = xeval.Set(&event, xeval.Control{Criteria: goal.EvalCriteria, MaxRounds: goal.EvalMaxRounds})
 	}
 	return event
-}
-
-func (p *AgentPool) dispatchPayload(agentID, taskID, typ, data string, payload json.RawMessage) (<-chan taskResult, error) {
-	return p.dispatchMessage(agentID, taskID, WSMessage{Type: typ, TaskID: taskID, Data: data, Payload: payload})
 }
 
 func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-chan taskResult, error) {
@@ -715,8 +750,32 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		}
 
 	case "tool.data":
-		// Raw typed scanner data is transported for live consumers. The durable
-		// asset path uses the corresponding libcstx-normalized tool.sco message.
+		// Progress lines stream live to the scan/console topics; structured
+		// scanner data persists through the libcstx-normalized tool.sco path.
+		if p.hub == nil || msg.TaskID == "" {
+			return
+		}
+		var event output.ToolDataEvent
+		if json.Unmarshal(msg.Payload, &event) != nil || event.Kind != output.ToolDataProgress {
+			return
+		}
+		line, ok := event.Data.(string)
+		if !ok {
+			return
+		}
+		data := output.StripANSI(line)
+		if data == "" {
+			return
+		}
+		p.hub.Broadcast(msg.TaskID, HubEvent{
+			Type: "progress",
+			Data: mustJSON(map[string]string{"scan_id": msg.TaskID, "data": data}),
+		})
+		p.forwardToSession(a, msg.TaskID, ChatEvent{
+			Type:   ChatEventScanProgress,
+			ScanID: msg.TaskID,
+			Data:   data,
+		})
 
 	case "tool.sco":
 		if p.sco == nil || len(msg.Payload) == 0 {
@@ -752,23 +811,8 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			a.mu.Unlock()
 		}
 
-	case "output":
-		if p.hub != nil && msg.TaskID != "" {
-			data := output.StripANSI(msg.Data)
-			if data == "" {
-				return
-			}
-			p.hub.Broadcast(msg.TaskID, HubEvent{
-				Type: "progress",
-				Data: mustJSON(map[string]string{"scan_id": msg.TaskID, "data": data}),
-			})
-			p.forwardToSession(a, msg.TaskID, ChatEvent{
-				Type:   ChatEventScanProgress,
-				ScanID: msg.TaskID,
-				Data:   data,
-			})
-		}
-
+	// complete/error are the terminal envelopes of the file RPCs only; agent
+	// semantics (chat, tool calls) converge on AOP events.
 	case "complete":
 		a.mu.Lock()
 		ch, ok := a.tasks[msg.TaskID]
@@ -776,6 +820,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		if ok {
 			delete(a.tasks, msg.TaskID)
 			delete(a.turns, msg.TaskID)
+			delete(a.toolCalls, msg.TaskID)
 			delete(a.childSessions, msg.TaskID)
 		}
 		a.mu.Unlock()
@@ -784,8 +829,6 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 			ch <- res
 			close(ch)
 		}
-		p.recordScanResultStats(a, msg.Payload)
-		p.persistResultRecords(a, msg.TaskID, msg.Payload)
 
 	case "error":
 		a.mu.Lock()
@@ -794,6 +837,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		if ok {
 			delete(a.tasks, msg.TaskID)
 			delete(a.turns, msg.TaskID)
+			delete(a.toolCalls, msg.TaskID)
 			delete(a.childSessions, msg.TaskID)
 		}
 		a.mu.Unlock()
@@ -849,7 +893,7 @@ func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEv
 }
 
 func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
-	if p.sessions == nil || msg.TaskID == "" {
+	if msg.TaskID == "" {
 		return
 	}
 
@@ -860,8 +904,12 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 	if !aopEv.Valid() {
 		return
 	}
-	if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
-		p.sessions.BroadcastAOPEvent(sid, aopEv)
+	// Session-topic broadcast is optional (scans dispatched outside chat have
+	// no chat session); task convergence below is not.
+	if p.sessions != nil {
+		if sid, ok := p.sessions.TaskSession(msg.TaskID); ok {
+			p.sessions.BroadcastAOPEvent(sid, aopEv)
+		}
 	}
 
 	switch aopEv.Type {
@@ -887,6 +935,9 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 	case aop.TypeSessionEnd:
 		p.convergeTaskOnSessionEnd(a, msg.TaskID, aopEv)
 
+	case aop.TypeToolResult:
+		p.convergeTaskOnToolResult(a, msg.TaskID, aopEv)
+
 	case aop.TypeTurnStart:
 		var d aop.TurnData
 		_ = json.Unmarshal(aopEv.Data, &d)
@@ -901,12 +952,68 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 
 }
 
+// convergeTaskOnToolResult closes a tool.call task on its terminal
+// tool.result: text content becomes the task output, structured Details the
+// scan result, and an is_error content the task error. tool.result events of
+// chat tasks (LLM tool use) are not terminals and pass through.
+func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev aop.Event) {
+	a.mu.Lock()
+	if _, isToolCall := a.toolCalls[taskID]; !isToolCall {
+		a.mu.Unlock()
+		return
+	}
+	ch, ok := a.tasks[taskID]
+	turn := a.turns[taskID]
+	if ok {
+		delete(a.tasks, taskID)
+		delete(a.turns, taskID)
+		delete(a.toolCalls, taskID)
+		delete(a.childSessions, taskID)
+	}
+	a.mu.Unlock()
+	if !ok || ch == nil {
+		return
+	}
+	var d aop.ToolResultData
+	if err := json.Unmarshal(ev.Data, &d); err != nil {
+		ch <- taskResult{Err: "decode tool.result: " + err.Error(), Turn: turn}
+		close(ch)
+		return
+	}
+	res := taskResult{Output: toolResultText(d.Content), Turn: turn}
+	if d.IsError {
+		res.Err = res.Output
+		res.Output = ""
+	}
+	var details json.RawMessage
+	if d.Details != nil {
+		details, _ = json.Marshal(d.Details)
+		res.Result = details
+	}
+	ch <- res
+	close(ch)
+	p.recordScanResultStats(a, details)
+	p.persistResultRecords(a, taskID, details)
+}
+
+// toolResultText flattens tool.result content: a plain string, or the text of
+// a structured ToolResultContent (text plus images).
+func toolResultText(content any) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case map[string]any:
+		if text, ok := c["content"].(string); ok {
+			return text
+		}
+	}
+	return ""
+}
+
 // convergeTaskOnSessionEnd closes a chat task when the ROOT agent session
-// ends. Agent runs no longer send complete/error frames, so this terminal
-// event drives task cleanup; child (derived sub-agent) session ends and
-// mid-run AOP error events are not terminal. Idempotent: a complete/error
-// frame arriving after this close (mixed-version agent, pre-loop failure
-// fallback) is a no-op.
+// ends: this terminal event drives task cleanup; child (derived sub-agent)
+// session ends and mid-run AOP error events are not terminal. Idempotent —
+// a file-RPC complete frame arriving after this close is a no-op.
 func (p *AgentPool) convergeTaskOnSessionEnd(a *remoteAgent, taskID string, ev aop.Event) {
 	a.mu.Lock()
 	if set, ok := a.childSessions[taskID]; ok {
@@ -921,6 +1028,7 @@ func (p *AgentPool) convergeTaskOnSessionEnd(a *remoteAgent, taskID string, ev a
 	if ok {
 		delete(a.tasks, taskID)
 		delete(a.turns, taskID)
+		delete(a.toolCalls, taskID)
 		delete(a.childSessions, taskID)
 	}
 	a.mu.Unlock()

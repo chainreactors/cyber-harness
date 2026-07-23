@@ -57,16 +57,15 @@ func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 }
 
 // isTerminalChatEvent is the only test of the reliability classification: the
-// run-ending signals must all qualify, or the stuck-cursor bug returns. Whether
-// mid-stream types stay droppable is low-stakes (a mis-marked delta only adds
-// eviction churn), so it isn't asserted.
+// run-ending platform signal must qualify, or the stuck-cursor bug returns.
+// Agent lifecycle terminals are AOP events and covered by isReliableAOPEvent.
 func TestIsTerminalChatEvent(t *testing.T) {
-	for _, ty := range []string{
-		ChatEventMessage, ChatEventError,
-		ChatEventScanComplete, ChatEventScanError,
-	} {
-		if !isTerminalChatEvent(ty) {
-			t.Errorf("%q should be terminal (reliable)", ty)
+	if !isTerminalChatEvent(ChatEventScanComplete) {
+		t.Errorf("%q should be terminal (reliable)", ChatEventScanComplete)
+	}
+	for _, ty := range []string{ChatEventScanStarted, ChatEventScanProgress, ChatEventAgentJoined} {
+		if isTerminalChatEvent(ty) {
+			t.Errorf("%q should not be terminal", ty)
 		}
 	}
 }

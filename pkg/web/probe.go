@@ -31,26 +31,26 @@ func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
 // TestLLM probes the supplied LLM settings, falling back to the stored API key
 // when the request leaves it blank, then delegates to pkg/probe.
 func (s *Service) TestLLM(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMTestResult, error) {
-	var storedKey string
-	if s.config != nil {
-		if dc, err := s.GetDistributeConfig(ctx); err == nil {
-			storedKey = strings.TrimSpace(dc.LLM.APIKey)
-		}
-	}
-	return probe.TestLLM(ctx, req, storedKey)
+	return probe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx))
 }
 
 // ListLLMModels enumerates the models the supplied LLM endpoint advertises,
 // falling back to the stored API key when the request leaves it blank, then
 // delegates to pkg/probe.
 func (s *Service) ListLLMModels(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMModelsResult, error) {
-	var storedKey string
-	if s.config != nil {
-		if dc, err := s.GetDistributeConfig(ctx); err == nil {
-			storedKey = strings.TrimSpace(dc.LLM.APIKey)
-		}
+	return probe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx))
+}
+
+// storedLLMAPIKey returns the active profile's API key from the persisted
+// config, or "" when unavailable.
+func (s *Service) storedLLMAPIKey(ctx context.Context) string {
+	if s.config == nil {
+		return ""
 	}
-	return probe.ListLLMModels(ctx, req, storedKey)
+	if dc, err := s.GetDistributeConfig(ctx); err == nil {
+		return strings.TrimSpace(dc.LLM.Active().APIKey)
+	}
+	return ""
 }
 
 // storedConfig returns the config persisted on the server, or ok=false when no

@@ -127,13 +127,14 @@ func (s *Service) Status() ServiceStatus {
 		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
 			status.ConfigPath = path
 			status.ConfigLoaded = loaded
+			active := dc.LLM.Active()
 			if status.LLMProvider == "" {
-				status.LLMProvider = dc.LLM.Provider
+				status.LLMProvider = active.Provider
 			}
 			if status.LLMModel == "" {
-				status.LLMModel = dc.LLM.Model
+				status.LLMModel = active.Model
 			}
-			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || dc.LLM.APIKey != ""
+			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || active.APIKey != ""
 		}
 	}
 	return status
@@ -154,7 +155,6 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
-	webproto.NormalizeLLMConfig(&cfg.LLM)
 	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
 		return ConfigStatus{}, err
 	}
@@ -352,14 +352,19 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	}
 
 	cmd := "scan " + strings.Join(scanArgsForJob(job), " ")
-	resultCh, err := s.agents.DispatchCommand(agent.id, job.ID, cmd)
+	resultCh, err := s.agents.DispatchToolCall(agent.id, job.ID, aop.ToolCallData{
+		ToolCallID: job.ID,
+		ToolName:   "bash",
+		Args:       map[string]any{"command": cmd},
+	})
 	if err != nil {
 		s.failJob(job, err.Error())
 		return
 	}
 
-	// Wait for agent to complete. Output is forwarded to SSE hub by
-	// AgentPool.HandleOutput as the agent POSTs progress lines.
+	// Progress lines stream to the SSE hub as tool.data events while the scan
+	// runs; the terminal tool.result carries the full text and the structured
+	// scan result in its details.
 	res, ok := <-resultCh
 	if !ok {
 		s.failJob(job, "agent disconnected")
@@ -1064,15 +1069,8 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			return nil, fmt.Errorf("agent disconnected during upload")
 		}
 		var result webproto.FileUploadResult
-		// The agent normally returns a JSON-encoded FileUploadResult. If it sent
-		// nothing structured (or non-JSON output), synthesize one from the raw
-		// output path — the upload still succeeded, just without an envelope.
 		if len(res.Result) == 0 || json.Unmarshal(res.Result, &result) != nil {
-			result = webproto.FileUploadResult{
-				Filename: filename,
-				Path:     res.Output,
-				Size:     int64(len(data)),
-			}
+			return nil, fmt.Errorf("agent upload returned no result envelope")
 		}
 		if result.Error != "" {
 			return nil, fmt.Errorf("agent upload error: %s", result.Error)
@@ -1159,6 +1157,25 @@ func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
 	})
 }
 
+// broadcastHubError emits a hub-originated failure as an AOP error event: the
+// code names a translatable template (mirrored under `sys.*` in the frontend
+// locales), message is the English fallback, and params feed i18n
+// interpolation via the aiscan.web extension.
+func (s *Service) broadcastHubError(sessionID, code, message string, params map[string]any) {
+	data, _ := json.Marshal(aop.ErrorData{Code: code, Message: message})
+	event := aop.Event{
+		Type:      aop.TypeError,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID,
+		Agent:     "aiscan.web",
+		Data:      data,
+	}
+	if len(params) > 0 {
+		_ = webproto.SetWebExt(&event, webproto.WebMessageExt{Params: params})
+	}
+	s.BroadcastAOPEvent(sessionID, event)
+}
+
 func isReliableAOPEvent(event aop.Event) bool {
 	switch event.Type {
 	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd, aop.TypeMessage:
@@ -1179,14 +1196,9 @@ func isReliableAOPEvent(event aop.Event) bool {
 }
 
 // isTerminalChatEvent classifies terminal platform events. Agent run lifecycle
-// is carried exclusively by AOP.
+// (including hub-originated failures) is carried exclusively by AOP.
 func isTerminalChatEvent(t string) bool {
-	switch t {
-	case ChatEventMessage, ChatEventError,
-		ChatEventScanComplete, ChatEventScanError:
-		return true
-	}
-	return false
+	return t == ChatEventScanComplete
 }
 
 func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
@@ -1410,10 +1422,7 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 	ctx := context.Background()
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]",
-		})
+		s.broadcastHubError(sessionID, "scan_usage", "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]", nil)
 		return
 	}
 
@@ -1442,10 +1451,7 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 	job, err := s.SubmitScan(ctx, target, mode, verify, sniper, deep)
 	if err != nil {
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: fmt.Sprintf("scan failed: %s", err),
-		})
+		s.broadcastHubError(sessionID, "scan_submit", fmt.Sprintf("scan failed: %s", err), map[string]any{"error": err.Error()})
 		return
 	}
 
@@ -1520,10 +1526,7 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, event)
 	if err != nil {
 		s.finishSessionTask(taskID)
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: err.Error(),
-		})
+		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
 		return
 	}
 
@@ -1534,17 +1537,14 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 			// Agent dropped mid-run: signal completion so the composer releases
 			// instead of hanging on the streaming indicator (mirrors the command
 			// path above).
-			s.BroadcastChatEvent(sessionID, ChatEvent{
-				Type:  ChatEventError,
-				Error: "agent disconnected",
-			})
+			s.broadcastHubError(sessionID, "agent_disconnected", "agent disconnected", nil)
 			return
 		}
 		if canceled {
 			return
 		}
 		if res.Err != "" {
-			s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventError, Error: res.Err})
+			s.broadcastHubError(sessionID, "", res.Err, nil)
 		}
 	}()
 }

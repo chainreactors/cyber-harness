@@ -2,9 +2,9 @@ package webproto
 
 import "fmt"
 
-// LLMProviderConfig is one named LLM profile. The first profile is the
-// runtime primary provider; the remaining entries are available for switching
-// and are also compatible with core/config's existing fallback provider list.
+// LLMProviderConfig is one named LLM profile. The profile selected by
+// ActiveProfile is the runtime primary provider; the remaining entries are
+// available for switching.
 type LLMProviderConfig struct {
 	ID       string `json:"id" yaml:"id,omitempty"`
 	Name     string `json:"name" yaml:"name,omitempty"`
@@ -15,32 +15,40 @@ type LLMProviderConfig struct {
 	Proxy    string `json:"proxy" yaml:"proxy"`
 }
 
+// LLMConfig is the provider profile list — the single representation of LLM
+// settings. Selection is by ActiveProfile id, never by list position.
 type LLMConfig struct {
-	Provider      string              `json:"provider" yaml:"provider"`
-	BaseURL       string              `json:"base_url" yaml:"base_url"`
-	APIKey        string              `json:"api_key,omitempty" yaml:"api_key"`
-	Model         string              `json:"model" yaml:"model"`
-	Proxy         string              `json:"proxy" yaml:"proxy"`
 	ActiveProfile string              `json:"active_profile,omitempty" yaml:"active_profile,omitempty"`
 	Providers     []LLMProviderConfig `json:"providers,omitempty" yaml:"providers,omitempty"`
 }
 
-// NormalizeLLMConfig ensures the selected profile is first (the runtime
-// primary provider) and mirrors it into the legacy single-provider fields.
-func NormalizeLLMConfig(llm *LLMConfig) {
+// Active returns the selected primary provider profile (Providers[0] when
+// ActiveProfile is unset or unknown).
+func (c LLMConfig) Active() LLMProviderConfig {
+	if len(c.Providers) == 0 {
+		return LLMProviderConfig{}
+	}
+	for _, p := range c.Providers {
+		if p.ID == c.ActiveProfile {
+			return p
+		}
+	}
+	return c.Providers[0]
+}
+
+// MigrateLLMConfig normalizes a freshly loaded config exactly once: a legacy
+// flat provider section becomes a single profile, missing ids/names are
+// filled, and ActiveProfile is validated. It never writes back into flat.
+func MigrateLLMConfig(llm *LLMConfig, flat LLMProviderConfig) {
 	if len(llm.Providers) == 0 {
-		if llm.Provider == "" && llm.BaseURL == "" && llm.Model == "" {
+		if flat.Provider == "" && flat.BaseURL == "" && flat.Model == "" {
 			return
 		}
-		id := llm.ActiveProfile
-		if id == "" {
-			id = "default"
+		flat.ID = llm.ActiveProfile
+		if flat.ID == "" {
+			flat.ID = "default"
 		}
-		llm.ActiveProfile = id
-		llm.Providers = []LLMProviderConfig{{
-			ID: id, Name: llm.Model, Provider: llm.Provider, BaseURL: llm.BaseURL,
-			APIKey: llm.APIKey, Model: llm.Model, Proxy: llm.Proxy,
-		}}
+		llm.Providers = []LLMProviderConfig{flat}
 	}
 	for i := range llm.Providers {
 		if llm.Providers[i].ID == "" {
@@ -53,27 +61,8 @@ func NormalizeLLMConfig(llm *LLMConfig) {
 			}
 		}
 	}
-	if llm.ActiveProfile == "" {
-		llm.ActiveProfile = llm.Providers[0].ID
-	}
-	active := 0
-	for i := range llm.Providers {
-		if llm.Providers[i].ID == llm.ActiveProfile {
-			active = i
-			break
-		}
-	}
-	if active > 0 {
-		selected := llm.Providers[active]
-		llm.Providers = append([]LLMProviderConfig{selected}, append(llm.Providers[:active], llm.Providers[active+1:]...)...)
-	}
-	primary := llm.Providers[0]
-	llm.ActiveProfile = primary.ID
-	llm.Provider = primary.Provider
-	llm.BaseURL = primary.BaseURL
-	llm.APIKey = primary.APIKey
-	llm.Model = primary.Model
-	llm.Proxy = primary.Proxy
+	active := llm.Active()
+	llm.ActiveProfile = active.ID
 }
 
 // DistributeConfig is the configuration payload sent from the web server

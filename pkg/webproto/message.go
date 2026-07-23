@@ -20,39 +20,6 @@ type Message struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// ExecPayload carries structured parameters for an "exec" message.
-// When Payload is populated, Command/Cwd/Timeout/Env are used instead of
-// the legacy Data field. If Payload is empty, Data is treated as the command.
-type ExecPayload struct {
-	Command string            `json:"command"`
-	Cwd     string            `json:"cwd,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-}
-
-// Exec stream names carried in an "output" message's ExecStreamPayload.
-const (
-	StreamStdout = "stdout"
-	StreamStderr = "stderr"
-)
-
-// ExecStreamPayload tags an exec "output" message with the stream the chunk
-// came from. Optional: consumers that only render a terminal may ignore it
-// and treat Data as one combined stream.
-type ExecStreamPayload struct {
-	Stream string `json:"stream,omitempty"`
-}
-
-// ExecResult is the structured outcome of an "exec" run, carried in the
-// "complete" message payload alongside any command-specific Details.
-type ExecResult struct {
-	ExitCode  int     `json:"exit_code"`
-	State     string  `json:"state,omitempty"`
-	KillCause string  `json:"kill_cause,omitempty"`
-	Duration  float64 `json:"duration,omitempty"`
-	Details   any     `json:"details,omitempty"`
-}
-
 // CommandSpec is the surface-neutral description of one user-facing "/verb" command.
 type CommandSpec struct {
 	Name        string   `json:"name"`
@@ -142,6 +109,9 @@ const NSWeb = "aiscan.web"
 type WebMessageExt struct {
 	AgentID  string          `json:"agent_id,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
+	// Params carries i18n interpolation values for hub-emitted error events
+	// (paired with ErrorData.Code).
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // SetWebExt writes the hub message extension onto an event.

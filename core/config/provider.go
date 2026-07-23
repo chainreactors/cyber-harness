@@ -53,9 +53,22 @@ func entryToProviderConfig(entry LLMProviderEntry) agent.ProviderConfig {
 	return cfg
 }
 
+// activeProviderIndex resolves the primary provider profile by ActiveProfile
+// id; list position is meaningless, so an unset or unknown id selects index 0.
+func activeProviderIndex(option *Option) int {
+	if option.ActiveProfile != "" {
+		for i, entry := range option.Providers {
+			if entry.ID == option.ActiveProfile {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
 func ProviderConfig(option *Option) agent.ProviderConfig {
 	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
-		return entryToProviderConfig(option.Providers[0])
+		return entryToProviderConfig(option.Providers[activeProviderIndex(option)])
 	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
@@ -81,9 +94,13 @@ func ProviderConfig(option *Option) agent.ProviderConfig {
 }
 
 func FallbackProviderConfigs(option *Option) []agent.ProviderConfig {
-	if !hasSingleProviderFields(option) && len(option.Providers) > 1 {
+	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
+		active := activeProviderIndex(option)
 		var configs []agent.ProviderConfig
-		for _, entry := range option.Providers[1:] {
+		for i, entry := range option.Providers {
+			if i == active {
+				continue
+			}
 			configs = append(configs, entryToProviderConfig(entry))
 		}
 		return configs

@@ -116,11 +116,12 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	var cs ConfigStatus
 	cs.ConfigPath = path
 	cs.ConfigLoaded = loaded
-	cs.LLM.Provider = d.LLM.Provider
-	cs.LLM.BaseURL = d.LLM.BaseURL
-	cs.LLM.APIKeyConfigured = d.LLM.APIKey != ""
-	cs.LLM.Model = d.LLM.Model
-	cs.LLM.Proxy = d.LLM.Proxy
+	active := d.LLM.Active()
+	cs.LLM.Provider = active.Provider
+	cs.LLM.BaseURL = active.BaseURL
+	cs.LLM.APIKeyConfigured = active.APIKey != ""
+	cs.LLM.Model = active.Model
+	cs.LLM.Proxy = active.Proxy
 	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
 	for _, profile := range d.LLM.Providers {
 		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
@@ -128,14 +129,6 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
 			Model: profile.Model, Proxy: profile.Proxy,
 		})
-	}
-	if len(cs.LLM.Profiles) == 0 && (d.LLM.Provider != "" || d.LLM.Model != "" || d.LLM.BaseURL != "") {
-		cs.LLM.ActiveProfile = "default"
-		cs.LLM.Profiles = []LLMProfileStatus{{
-			ID: "default", Name: d.LLM.Model, Provider: d.LLM.Provider,
-			BaseURL: d.LLM.BaseURL, APIKeyConfigured: d.LLM.APIKey != "",
-			Model: d.LLM.Model, Proxy: d.LLM.Proxy,
-		}}
 	}
 	cs.Cyberhub.URL = d.Cyberhub.URL
 	cs.Cyberhub.KeyConfigured = d.Cyberhub.Key != ""
@@ -194,14 +187,11 @@ type ChatMessage struct {
 }
 
 const (
-	ChatEventMessage        = "message"
 	ChatEventScanStarted    = "scan_started"
 	ChatEventScanProgress   = "scan_progress"
 	ChatEventScanComplete   = "scan_complete"
-	ChatEventScanError      = "scan_error"
 	ChatEventAgentJoined    = "agent_joined"
 	ChatEventSessionCleared = "session_cleared"
-	ChatEventError          = "error"
 )
 
 // System message codes. A backend-generated system message carries a stable
@@ -229,9 +219,6 @@ type ChatEvent struct {
 	ScanID    string         `json:"scan_id,omitempty"`
 	Result    *output.Result `json:"result,omitempty"`
 	Data      string         `json:"data,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	Code      string         `json:"code,omitempty"`
-	Params    map[string]any `json:"params,omitempty"`
 	Transient bool           `json:"-"`
 }
 

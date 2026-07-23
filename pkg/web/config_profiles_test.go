@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-func TestActivateLLMProfileReordersPrimaryProvider(t *testing.T) {
+func TestActivateLLMProfileSelectsByID(t *testing.T) {
 	store := &fakeConfigStore{}
 	store.cfg.LLM.ActiveProfile = "primary"
 	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
@@ -20,11 +20,13 @@ func TestActivateLLMProfileReordersPrimaryProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.cfg.LLM.ActiveProfile != "fast" || store.cfg.LLM.Providers[0].ID != "fast" {
-		t.Fatalf("active profile was not promoted: %+v", store.cfg.LLM)
+	// Selection is by id: the list order is untouched and Active() resolves
+	// the chosen profile.
+	if store.cfg.LLM.ActiveProfile != "fast" || store.cfg.LLM.Providers[0].ID != "primary" {
+		t.Fatalf("active profile not switched by id: %+v", store.cfg.LLM)
 	}
-	if store.cfg.LLM.Model != "deepseek-fast" || store.cfg.LLM.APIKey != "key-2" {
-		t.Fatalf("legacy primary fields not synchronized: %+v", store.cfg.LLM)
+	if active := store.cfg.LLM.Active(); active.Model != "deepseek-fast" || active.APIKey != "key-2" {
+		t.Fatalf("Active() did not resolve the selected profile: %+v", active)
 	}
 	if status.LLM.ActiveProfile != "fast" || status.LLM.Model != "deepseek-fast" {
 		t.Fatalf("status not synchronized: %+v", status.LLM)
