@@ -226,6 +226,8 @@ github.com/chainreactors/utils/pty v0.0.0-20260720064434-8bb63d351632 h1:/Oo4JDp
 github.com/chainreactors/utils/pty v0.0.0-20260720064434-8bb63d351632/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
 github.com/chainreactors/utils/pty v0.0.0-20260722063955-84fd9fbf150a h1:189konWQqDt1Zxy4CVbTdKlzXHpRZd2RbNs8EawY6C8=
 github.com/chainreactors/utils/pty v0.0.0-20260722063955-84fd9fbf150a/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
+github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721 h1:gxkedbTvFEFTtel7XJEPMVh1iznfD+91woPkGBXZMNk=
+github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.3.0 h1:gUIrV3syRlqGmNptAi5oKvrctxU/MybWMAVwIfd77SY=
