@@ -9,24 +9,50 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
-func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, control *rlterm.StreamControl) error {
+// AgentEventSubscriber connects a console-local renderer to the runtime AOP
+// bus and returns an unsubscribe function owned by that console attachment.
+type AgentEventSubscriber func(func(aop.Event)) func()
+
+// RunRemoteAgentConsoleWithControl adapts a byte-stream terminal while keeping
+// event rendering scoped to the attached agent session.
+func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, control *rlterm.StreamControl, subscribers ...AgentEventSubscriber) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
 	}
 	terminal := &remoteTerminalWriter{w: output}
-	return RunAgentConsoleWithTerminal(ctx, option, appInfo, session, rlterm.Stream(input, terminal, terminal, control))
+	return RunAgentConsoleWithTerminal(ctx, option, appInfo, session, rlterm.Stream(input, terminal, terminal, control), subscribers...)
 }
 
-func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, terminal *rlterm.Terminal) error {
+// RunAgentConsoleWithTerminal creates the renderer and readline console for an
+// explicit terminal. Local callers pass the process terminal directly so
+// control sequences are never buffered and replayed through a PTY.
+func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, terminal *rlterm.Terminal, subscribers ...AgentEventSubscriber) error {
 	if terminal == nil {
 		return fmt.Errorf("terminal is nil")
 	}
 	agentOutput := NewAgentOutputWithWriters(option, terminal.Out, terminal.Err, terminal.Control == nil || terminal.Control.IsTerminal())
+	unsubscribe := subscribeAgentOutput(agentOutput, session, subscribers...)
+	defer unsubscribe()
 	repl := NewAgentConsoleWithTerminal(ctx, option, appInfo, session, agentOutput, terminal)
 	return repl.Start()
+}
+
+// subscribeAgentOutput filters the shared runtime bus by session ID so a
+// remote or local REPL cannot render sibling/subagent events accidentally.
+func subscribeAgentOutput(output *AgentOutput, session *agent.Agent, subscribers ...AgentEventSubscriber) func() {
+	if output == nil || session == nil || len(subscribers) == 0 || subscribers[0] == nil {
+		return func() {}
+	}
+	sessionID := session.SessionID()
+	return subscribers[0](func(event aop.Event) {
+		if sessionID == "" || event.SessionID == sessionID {
+			output.HandleEvent(event)
+		}
+	})
 }
 
 type remoteTerminalWriter struct {

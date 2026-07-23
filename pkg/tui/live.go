@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/util"
 )
 
@@ -14,6 +15,8 @@ const (
 	liveStatusThinking = "thinking"
 	liveStatusTooling  = "tooling"
 	liveStatusTalking  = "talking"
+	inboxPreviewItems  = 3
+	inboxPreviewRunes  = 64
 )
 
 // toolEvent is the TUI's merged view of one AOP tool.call/tool.result pair.
@@ -34,13 +37,16 @@ type LiveStatus struct {
 	status string
 	note   string
 
+	turn           int
+	turnToolCalls  int
 	turnUsage      *agent.Usage
-	completedUsage agent.Usage
+	outputEstimate int
 	contextTokens  int
 	contextWindow  int
 
 	tools map[string]*toolEvent
 	order []string
+	inbox []string
 
 	dim            func(string) string
 	renderToolLine func(*toolEvent) string
@@ -76,35 +82,42 @@ func (l *LiveStatus) Reset() {
 	l.Stop()
 	l.status = liveStatusThinking
 	l.note = ""
+	l.turn = 0
+	l.turnToolCalls = 0
 	l.turnUsage = nil
-	l.completedUsage = agent.Usage{}
+	l.outputEstimate = 0
 	l.contextTokens = 0
 	l.tools = make(map[string]*toolEvent)
 	l.order = nil
 }
 
-func (l *LiveStatus) BeginTurn() {
+func (l *LiveStatus) BeginTurn(turn int) {
 	if l == nil {
 		return
 	}
 	l.status = liveStatusThinking
 	l.note = ""
+	l.turn = turn
+	l.turnToolCalls = 0
 	l.turnUsage = nil
+	l.outputEstimate = 0
 	l.clearTools()
+	l.view.SetElapsedStart(time.Now())
 	l.Render()
 }
 
-// NoteDelta reflects streaming progress: text output flips the status to
-// talking unless tools are running.
+// NoteDelta switches the shared status row from thinking to talking once
+// assistant response text begins. It remains the same transient composer row;
+// response text itself is committed separately to terminal scrollback.
 func (l *LiveStatus) NoteDelta(textDelta bool) {
 	if l == nil {
 		return
 	}
-	if textDelta && !l.HasTools() {
+	if textDelta && !l.HasTools() && l.status != liveStatusTalking {
 		l.status = liveStatusTalking
 		l.note = ""
+		l.Render()
 	}
-	l.Render()
 }
 
 func (l *LiveStatus) SetTurnUsage(usage agent.Usage) {
@@ -112,6 +125,41 @@ func (l *LiveStatus) SetTurnUsage(usage agent.Usage) {
 		return
 	}
 	l.turnUsage = &usage
+}
+
+func (l *LiveStatus) SetOutputEstimate(tokens int) {
+	if l == nil {
+		return
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	l.outputEstimate = tokens
+	if l.view != nil {
+		// The animation timer performs the actual redraw. Keeping its pending
+		// lines current makes token changes visible at the configured cadence
+		// without repainting once per provider delta.
+		l.view.UpdateDeferred(l.lines())
+	}
+}
+
+func (l *LiveStatus) SetTurnToolCalls(count int) {
+	if l == nil {
+		return
+	}
+	l.turnToolCalls = count
+}
+
+// SetInbox updates the pending user input preview. The inbox intentionally
+// survives Reset so a queued run remains visible while the next run starts.
+func (l *LiveStatus) SetInbox(items []string, render bool) {
+	if l == nil {
+		return
+	}
+	l.inbox = append(l.inbox[:0], items...)
+	if render {
+		l.Render()
+	}
 }
 
 func (l *LiveStatus) ShowEvalRound(round int) {
@@ -168,14 +216,11 @@ func (l *LiveStatus) UpdateTool(ev *toolEvent) (tracked bool, done bool) {
 	return true, false
 }
 
-// FinishTurn folds the turn's usage into the completed totals and records the
-// latest context size.
+// FinishTurn records the latest context size. Per-turn statistics remain in
+// the transient status line and are intentionally not committed to history.
 func (l *LiveStatus) FinishTurn(contextTokens int) {
 	if l == nil {
 		return
-	}
-	if l.turnUsage != nil {
-		l.addCompleted(l.turnUsage)
 	}
 	if contextTokens > 0 {
 		l.contextTokens = contextTokens
@@ -264,16 +309,42 @@ func (l *LiveStatus) lines() []string {
 func (l *LiveStatus) statusLine() string {
 	line := spinnerSentinel + " " + fmt.Sprintf("%-*s", liveStatusWidth, l.Status())
 	var details []string
-	if usage := l.formatTokenDetails(); usage != "" {
-		details = append(details, l.dim(usage))
+	if turn := l.formatTurnDetails(); turn != "" {
+		details = append(details, l.dim(turn))
 	}
 	if l.note != "" {
 		details = append(details, l.dim(l.note))
+	}
+	if inbox := l.formatInbox(); inbox != "" {
+		details = append(details, l.dim(inbox))
 	}
 	if len(details) > 0 {
 		line += " · " + strings.Join(details, " · ")
 	}
 	return line
+}
+
+func (l *LiveStatus) formatInbox() string {
+	if l == nil || len(l.inbox) == 0 {
+		return ""
+	}
+	count := len(l.inbox)
+	limit := count
+	if limit > inboxPreviewItems {
+		limit = inboxPreviewItems
+	}
+	previews := make([]string, 0, limit+1)
+	for _, item := range l.inbox[:limit] {
+		item = strings.Join(strings.Fields(item), " ")
+		if item == "" {
+			item = "continue"
+		}
+		previews = append(previews, truncate.ClipRunes(item, inboxPreviewRunes))
+	}
+	if hidden := count - limit; hidden > 0 {
+		previews = append(previews, fmt.Sprintf("+%d", hidden))
+	}
+	return fmt.Sprintf("inbox[%d] %s", count, strings.Join(previews, " | "))
 }
 
 func (l *LiveStatus) toolLines() []string {
@@ -288,43 +359,28 @@ func (l *LiveStatus) toolLines() []string {
 	return lines
 }
 
-func (l *LiveStatus) addCompleted(usage *agent.Usage) {
-	if usage == nil {
-		return
+func (l *LiveStatus) formatTurnDetails() string {
+	if l == nil || l.turn <= 0 {
+		return ""
 	}
-	l.completedUsage.PromptTokens += usage.PromptTokens
-	l.completedUsage.CompletionTokens += usage.CompletionTokens
-	l.completedUsage.TotalTokens += usageTotal(usage)
-	l.completedUsage.CacheReadTokens += usage.CacheReadTokens
-	l.completedUsage.CacheWriteTokens += usage.CacheWriteTokens
-}
-
-func (l *LiveStatus) formatTokenDetails() string {
-	total := usageTotal(&l.completedUsage)
-	output := 0
+	parts := []string{fmt.Sprintf("turn %d", l.turn)}
+	if l.turnToolCalls > 0 {
+		parts = append(parts, fmt.Sprintf("tools=%d", l.turnToolCalls))
+	}
 	contextTokens := l.contextTokens
 	if l.turnUsage != nil {
-		total += usageTotal(l.turnUsage)
-		output = l.turnUsage.CompletionTokens
+		parts = append(parts, formatTokenUsage(l.turnUsage))
 		if l.turnUsage.PromptTokens > 0 {
 			contextTokens = l.turnUsage.PromptTokens
 		}
-	}
-	if total == 0 && output == 0 && contextTokens == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, 3)
-	if total > 0 {
-		parts = append(parts, "tokens="+util.FormatNumber(total))
+	} else if l.outputEstimate > 0 {
+		parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
 	}
 	if context := l.ContextUsage(contextTokens); context != "" {
 		parts = append(parts, context)
 	}
-	if output > 0 {
-		parts = append(parts, "out="+util.FormatNumber(output))
-	}
-	return strings.Join(parts, " ")
+	parts = append(parts, elapsedSentinel)
+	return "[" + strings.Join(parts, " | ") + "]"
 }
 
 func (l *LiveStatus) ContextUsage(tokens int) string {
@@ -337,7 +393,8 @@ func (l *LiveStatus) ContextUsage(tokens int) string {
 	if tokens <= 0 || l.contextWindow <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("ctx=%s/%s (%s)",
+	return fmt.Sprintf("%s%s/%s (%s)",
+		contextMarker,
 		util.FormatNumber(tokens),
 		util.FormatNumber(l.contextWindow),
 		formatUsagePercent(tokens, l.contextWindow))

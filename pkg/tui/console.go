@@ -34,20 +34,29 @@ const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
 const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
 const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 
+// Some terminal applications leave focus reporting or Windows Terminal's
+// Win32 input mode enabled. Readline does not consume those protocols; if they
+// remain active, ordinary keys can arrive as strings such as
+// "\x1b[191;53;47;1;0;1_" and leak into the editable line. Reset them at the
+// application boundary before every read rather than teaching the shared
+// readline package about an aiscan-specific terminal lifecycle.
+const agentConsoleResetInputModes = "\x1b[?1004l\x1b[?9001l"
+
 var errAgentConsoleExit = errors.New("agent console exit")
 
 type AgentConsole struct {
-	ctx        context.Context
-	option     *cfg.Option
-	appInfo    AppInfo
-	agent      *agent.Agent
-	console    *console.Console
-	terminal   *rlterm.Terminal
-	menu       *console.Menu
-	output     *AgentOutput
-	stdout     io.Writer
-	stderr     io.Writer
-	controller *interactiveRunController
+	ctx            context.Context
+	option         *cfg.Option
+	appInfo        AppInfo
+	agent          *agent.Agent
+	console        *console.Console
+	terminal       *rlterm.Terminal
+	menu           *console.Menu
+	output         *AgentOutput
+	readlineBridge *readlineConsoleBridge
+	stdout         io.Writer
+	stderr         io.Writer
+	controller     *interactiveRunController
 	// readlineActive is true only while the foreground goroutine is blocked in
 	// Readline. Async agent output can then refresh the prompt without changing
 	// the input buffer or creating a duplicate prompt between reads.
@@ -62,8 +71,6 @@ type AgentConsole struct {
 	directCancel context.CancelFunc
 	pendingExit  atomic.Bool
 	onExit       func()
-
-	split *SplitTerminal
 }
 
 func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput) *AgentConsole {
@@ -75,32 +82,9 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		t = rlterm.Local()
 	}
 
-	// Determine whether to activate the split-pane layout. When enabled,
-	// readline uses an input-area writer (serialized via the same mutex)
-	// while all agent output routes to the upper scroll region.
-	var split *SplitTerminal
 	isTerminal := t.Control != nil && t.Control.IsTerminal()
-	// Split rendering owns the process' physical terminal and cannot be reused
-	// for remote terminals with independent dimensions and cursor state.
-	useSplit := isTerminal && isLocalAgentTerminal(t) &&
-		splitEnabled(int(os.Stdout.Fd()), resolveRenderMode())
-
-	var consoleTerminal *rlterm.Terminal
-	if useSplit {
-		split = NewSplitTerminal(t.Out, int(os.Stdout.Fd()))
-		// Readline gets a terminal whose Out/Err go through the split
-		// input writer so that prompt rendering is serialized with output.
-		consoleTerminal = rlterm.Stream(t.In, split.InputWriter(), split.InputWriter(), t.Control)
-	} else {
-		consoleTerminal = t
-	}
-
-	c := console.NewWithTerminal("aiscan", consoleTerminal)
-	if useSplit {
-		c.NewlineAfter = false
-	} else {
-		c.NewlineAfter = true
-	}
+	c := console.NewWithTerminal("aiscan", t)
+	c.NewlineAfter = true
 	configureAgentReadline(c)
 	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
 
@@ -114,19 +98,11 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		}
 	}
 
-	// In split mode, redirect AgentOutput into the scroll region and
-	// point console stdout/stderr there too.
-	if split != nil {
-		output.SetSplitMode(split)
-		stdout = split.OutputWriter()
-		stderr = split.OutputWriter()
-	} else {
-		if stdout == nil {
-			stdout = output.Stdout()
-		}
-		if stderr == nil {
-			stderr = output.Stderr()
-		}
+	if stdout == nil {
+		stdout = output.Stdout()
+	}
+	if stderr == nil {
+		stderr = output.Stderr()
 	}
 
 	menu := c.NewMenu("agent")
@@ -150,10 +126,26 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		output:   output,
 		stdout:   stdout,
 		stderr:   stderr,
-		split:    split,
+	}
+	if isTerminal && isLocalAgentTerminal(t) && resolveRenderMode() == ModeInteractive {
+		bridge := newReadlineConsoleBridge(c.Shell(), t.Out, func() bool {
+			return repl.readlineActive.Load()
+		})
+		output.SetReadlineMode(bridge, bridge.UpdateStatus)
+		repl.readlineBridge = bridge
+		c.Shell().OnReadlineReady = func() {
+			bridge.SetReady(true)
+		}
+		c.Shell().OnReadlineDone = func() {
+			bridge.SetReady(false)
+		}
+		stdout = bridge
+		stderr = bridge
+		repl.stdout = bridge
+		repl.stderr = bridge
 	}
 	menu.Prompt().Primary = func() string {
-		return agentPromptString(output)
+		return agentComposerPrompt(output, repl.readlineBridge)
 	}
 	if option != nil && option.EvalCriteria != "" {
 		repl.evalCriteria = option.EvalCriteria
@@ -206,11 +198,7 @@ func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
 }
 
 func (r *AgentConsole) Start() error {
-	if r.split != nil {
-		r.split.Setup()
-		r.activateSplitLogger()
-		defer r.split.Teardown()
-	}
+	r.activateConsoleLogger()
 	r.renderBanner()
 	defer r.stopController()
 	if r.fastInputEnabled() {
@@ -219,24 +207,24 @@ func (r *AgentConsole) Start() error {
 	return r.startReadline()
 }
 
-func (r *AgentConsole) activateSplitLogger() {
-	if r == nil || r.split == nil {
+func (r *AgentConsole) activateConsoleLogger() {
+	if r == nil {
 		return
 	}
-	splitLogger := telemetry.GlobalLogger(telemetry.LogConfig{
+	consoleLogger := telemetry.GlobalLogger(telemetry.LogConfig{
 		Debug:  r.option != nil && r.option.Debug,
 		Quiet:  r.option != nil && r.option.Quiet,
 		Output: r.stderr,
 		Color:  r.option == nil || !r.option.NoColor,
 	})
 	if r.appInfo.OnLoggerChange != nil {
-		r.appInfo.OnLoggerChange(splitLogger)
+		r.appInfo.OnLoggerChange(consoleLogger)
 	}
 	if r.agent != nil {
-		r.agent.SetLogger(splitLogger)
+		r.agent.SetLogger(consoleLogger)
 	}
 	if r.appInfo.Commands != nil {
-		r.appInfo.Commands.SetLogger(splitLogger)
+		r.appInfo.Commands.SetLogger(consoleLogger)
 	}
 }
 
@@ -334,11 +322,8 @@ func (r *AgentConsole) startReadline() error {
 
 		r.promptCompactIfNeeded()
 
-		if r.split != nil {
-			r.split.PrepareInputArea()
-		}
-
 		r.setReadlineActive(true)
+		r.resetTerminalInputModes()
 		line, err := r.console.Readline()
 		r.setReadlineActive(false)
 		if err != nil {
@@ -370,11 +355,24 @@ func (r *AgentConsole) startReadline() error {
 	}
 }
 
+func (r *AgentConsole) resetTerminalInputModes() {
+	if r == nil || r.terminal == nil || r.terminal.Out == nil {
+		return
+	}
+	if r.terminal.Control == nil || !r.terminal.Control.IsTerminal() {
+		return
+	}
+	_, _ = io.WriteString(r.terminal.Out, agentConsoleResetInputModes)
+}
+
 func (r *AgentConsole) setReadlineActive(active bool) {
 	if r == nil {
 		return
 	}
 	r.readlineActive.Store(active)
+	if !active && r.readlineBridge != nil {
+		r.readlineBridge.SetReady(false)
+	}
 	if r.output != nil {
 		r.output.SetInteractiveInputActive(active && (r.controller == nil || !r.controller.Running()))
 	}
@@ -415,6 +413,17 @@ func agentPromptString(output *AgentOutput) string {
 			output.color.Code(outputpkg.ANSIReset) + " " + output.color.Dim("❯") + " "
 	}
 	return "aiscan> "
+}
+
+func agentComposerPrompt(output *AgentOutput, bridge *readlineConsoleBridge) string {
+	prompt := agentPromptString(output)
+	if bridge == nil {
+		return prompt
+	}
+	if status := bridge.Status(); status != "" {
+		return status + "\n" + prompt
+	}
+	return prompt
 }
 
 func (r *AgentConsole) fastInputEnabled() bool {
@@ -885,7 +894,7 @@ func (r *AgentConsole) syncEvalToController() {
 }
 
 func (r *AgentConsole) refreshPromptAfterAsyncRun() {
-	if r == nil || !r.readlineActive.Load() {
+	if r == nil || r.readlineBridge != nil || !r.readlineActive.Load() {
 		return
 	}
 	if r.ctx != nil && r.ctx.Err() != nil {
@@ -900,7 +909,7 @@ func (r *AgentConsole) refreshPromptAfterAsyncRun() {
 	if r.console == nil || r.console.Shell() == nil || r.console.Shell().Display == nil {
 		return
 	}
-	r.console.Shell().Refresh()
+	r.console.Shell().RefreshWithoutAutocomplete()
 }
 
 func (r *AgentConsole) promptCompactIfNeeded() {

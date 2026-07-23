@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
@@ -139,6 +141,17 @@ func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 	}
 }
 
+func TestFormatTokenUsageUsesCompactMarkers(t *testing.T) {
+	got := formatTokenUsage(&agent.Usage{
+		PromptTokens:     1832,
+		CompletionTokens: 63,
+		CacheReadTokens:  1026,
+	})
+	if got != "↑1,832 ↓63 ↻56%" {
+		t.Fatalf("formatTokenUsage() = %q", got)
+	}
+}
+
 func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 	var stdout bytes.Buffer
 	color := output.NewColor(false)
@@ -192,6 +205,41 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 	}
 }
 
+func TestInboxPreviewKeepsThinkingLiveAndTruncates(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.SetInbox([]string{
+		strings.Repeat("very long pending prompt ", 10),
+		"second pending prompt",
+	})
+
+	if !liveRunning(o.live) {
+		t.Fatal("inbox update stopped the thinking status")
+	}
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "inbox[2]") || !strings.Contains(got, "second pending prompt") {
+		t.Fatalf("live inbox preview missing status or content: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Fatalf("long inbox entry was not truncated: %q", got)
+	}
+	if strings.Contains(got, "queued:") {
+		t.Fatalf("legacy queued line leaked into inbox rendering: %q", got)
+	}
+
+	// Starting the next run resets turn state but must retain inputs that are
+	// still waiting behind it.
+	o.Start("prompt", "")
+	o.HandleEvent(turnStartEvent(1))
+	if got := stripANSI(stderr.String()); !strings.Contains(got, "inbox[2]") {
+		t.Fatalf("inbox preview did not survive run reset: %q", got)
+	}
+}
+
 func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
@@ -236,7 +284,7 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 	}
 }
 
-func TestThinkingLineShowsTokenUsage(t *testing.T) {
+func TestThinkingLineShowsTurnUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
@@ -247,11 +295,131 @@ func TestThinkingLineShowsTokenUsage(t *testing.T) {
 	o.HandleEvent(textDeltaEvent("m-1", ""))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "thinking") || !strings.Contains(got, "tokens=1,234") {
-		t.Fatalf("thinking line missing token usage: %q", got)
+	if !strings.Contains(got, "thinking") ||
+		!strings.Contains(got, "[turn 1 | ↑1,000 ↓234") {
+		t.Fatalf("thinking line missing turn usage: %q", got)
 	}
 	if !liveRunning(o.live) {
 		t.Fatal("usage update stopped thinking spinner")
+	}
+}
+
+func TestThinkingLineShowsChangingStreamTokenEstimate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	first := stripANSI(stderr.String())
+	if !strings.Contains(first, "↓≈2") {
+		t.Fatalf("initial stream token estimate missing: %q", first)
+	}
+
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+	second := stripANSI(stderr.String())
+	if !strings.Contains(second, "↓≈4") {
+		t.Fatalf("updated stream token estimate missing: %q", second)
+	}
+
+	o.HandleEvent(usageEvent(100, 7, 107))
+	exact := stripANSI(stderr.String())
+	if strings.LastIndex(exact, "↓7") <= strings.LastIndex(exact, "↓≈4") {
+		t.Fatalf("formal usage did not replace the estimate: %q", exact)
+	}
+}
+
+func TestThinkingLineRefreshesElapsedTimeWithoutHistoryStats(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	time.Sleep(150 * time.Millisecond)
+
+	got := stripANSI(stderr.String())
+	if !regexp.MustCompile(`\[turn 1 \| (?:[1-9][0-9]*ms|[1-9][0-9]*\.[0-9]s)\]`).MatchString(got) {
+		t.Fatalf("thinking line did not refresh elapsed time: %q", got)
+	}
+}
+
+func TestReadlineFooterRefreshesAtConfiguredRate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	var statuses []string
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		statuses = append(statuses, status)
+		mu.Unlock()
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	mu.Lock()
+	initial := len(statuses)
+	mu.Unlock()
+	if initial != 1 {
+		t.Fatalf("readline footer rendered %d times at turn start, want exactly 1", initial)
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	mu.Lock()
+	after := len(statuses)
+	mu.Unlock()
+	if after <= initial {
+		t.Fatalf("readline footer did not refresh: before=%d after=%d", initial, after)
+	}
+}
+
+func TestReadlineFooterCoalescesStreamTokenUpdates(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	var statuses []string
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		statuses = append(statuses, stripANSI(status))
+		mu.Unlock()
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	mu.Lock()
+	afterFirst := len(statuses)
+	mu.Unlock()
+
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	mu.Lock()
+	afterSmallUpdate := len(statuses)
+	mu.Unlock()
+	if afterSmallUpdate != afterFirst {
+		t.Fatalf("small token delta forced a footer refresh: before=%d after=%d", afterFirst, afterSmallUpdate)
+	}
+
+	o.HandleEvent(textDeltaEvent("m-1", strings.Repeat("x", 512)))
+	mu.Lock()
+	afterMilestone := len(statuses)
+	mu.Unlock()
+	if afterMilestone != afterSmallUpdate {
+		t.Fatalf("token delta bypassed footer ticker: before=%d after=%d", afterSmallUpdate, afterMilestone)
+	}
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+	mu.Lock()
+	afterTick := len(statuses)
+	latest := statuses[len(statuses)-1]
+	mu.Unlock()
+	if afterTick <= afterMilestone {
+		t.Fatalf("footer ticker did not publish token update: before=%d after=%d", afterMilestone, afterTick)
+	}
+	if !strings.Contains(latest, "↓≈") {
+		t.Fatalf("token milestone footer missing estimate: %q", latest)
 	}
 }
 
@@ -267,7 +435,7 @@ func TestInteractiveInputSuppressesLiveStatus(t *testing.T) {
 	o.HandleEvent(textDeltaEvent("m-1", "hello"))
 
 	got := stripANSI(stderr.String())
-	if strings.Contains(got, "thinking") || strings.Contains(got, "tokens=1,234") {
+	if strings.Contains(got, "thinking") || strings.Contains(got, "↑1,000 ↓234") {
 		t.Fatalf("live status leaked while input active: %q", got)
 	}
 	if liveRunning(o.live) {
@@ -275,7 +443,7 @@ func TestInteractiveInputSuppressesLiveStatus(t *testing.T) {
 	}
 }
 
-func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
+func TestLiveStatusShowsCurrentTurnContextAndOutputTokens(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
@@ -292,21 +460,18 @@ func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
 	o.HandleEvent(textDeltaEvent("m-2", ""))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "tokens=3,000") {
-		t.Fatalf("live line missing cumulative tokens: %q", got)
+	if !strings.Contains(got, "turn 2") || !strings.Contains(got, "↑4,096 ↓50") {
+		t.Fatalf("live line missing current turn usage: %q", got)
 	}
-	if !strings.Contains(got, "ctx=4,096/8,192 (50%)") {
+	if !strings.Contains(got, "◐4,096/8,192 (50%)") {
 		t.Fatalf("live line missing context percentage: %q", got)
-	}
-	if !strings.Contains(got, "out=50") {
-		t.Fatalf("live line missing current output tokens: %q", got)
 	}
 }
 
-func TestTurnStatsShowsContextWindowUse(t *testing.T) {
+func TestTurnStatsStayTransientInStaticMode(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
-	o := NewAgentOutputWithWriters(&cfg.Option{
+	o := NewStaticAgentOutputWithWriters(&cfg.Option{
 		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
 	}, &stdout, &stderr, true)
 
@@ -315,10 +480,8 @@ func TestTurnStatsShowsContextWindowUse(t *testing.T) {
 	o.HandleEvent(turnEndEvent(1, 4096))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "turn 1") ||
-		!strings.Contains(got, "input=4,096 output=50") ||
-		!strings.Contains(got, "ctx=4,096/8,192 (50%)") {
-		t.Fatalf("turn stats missing context window use: %q", got)
+	if strings.Contains(got, "turn 1") || strings.Contains(got, "↑4,096 ↓50") {
+		t.Fatalf("turn stats were committed to static output: %q", got)
 	}
 }
 
@@ -337,6 +500,9 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	if o.live.Status() != liveStatusTalking {
 		t.Fatalf("live status = %q, want talking", o.live.Status())
 	}
+	if !liveRunning(o.live) {
+		t.Fatal("talking should keep using the shared live status row")
+	}
 
 	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo hi"}`))
 	if o.live.Status() != liveStatusTooling {
@@ -346,6 +512,65 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, liveStatusTalking) || !strings.Contains(got, liveStatusTooling) {
 		t.Fatalf("live output missing status labels: %q", got)
+	}
+}
+
+func TestReadlineFooterRendersLiveToolLines(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	latest := ""
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		latest = stripANSI(status)
+		mu.Unlock()
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"spray -u https://example.com -j"}`))
+
+	mu.Lock()
+	got := latest
+	mu.Unlock()
+	if !strings.Contains(got, "tooling") || !strings.Contains(got, "bash") ||
+		!strings.Contains(got, "spray -u https://example.com -j") {
+		t.Fatalf("live tool footer missing progress: %q", got)
+	}
+	if !strings.Contains(got, "\n") {
+		t.Fatalf("tool progress was not rendered on its own composer row: %q", got)
+	}
+}
+
+func TestReadlineToolSpinnerRefreshesWithoutToolEvents(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	frames := make(map[string]struct{})
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		plain := stripANSI(status)
+		if strings.Contains(plain, "bash") {
+			mu.Lock()
+			frames[plain] = struct{}{}
+			mu.Unlock()
+		}
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"sleep 1"}`))
+	// The first configured interval must advance the frame. Previously the
+	// ticker repainted frame zero once, so the first visible change took two
+	// intervals and made tool progress look event-driven or sluggish.
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+
+	mu.Lock()
+	count := len(frames)
+	mu.Unlock()
+	if count < 2 {
+		t.Fatalf("tool spinner produced %d distinct frames, want at least 2", count)
 	}
 }
 
@@ -394,6 +619,133 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	}
 	if !strings.Contains(got, "me to test redhaze.top") {
 		t.Fatalf("reasoning delta not streamed correctly: %q", got)
+	}
+}
+
+func TestReadlineThinkingAppendsWithoutSyntheticNewlines(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+	}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", "The user wants"))
+	o.HandleEvent(reasoningDeltaEvent("m-1", " me to inspect the image"))
+
+	if len(committed) != 0 {
+		t.Fatalf("partial reasoning was committed as separate lines: %#v", committed)
+	}
+
+	o.HandleEvent(reasoningDeltaEvent("m-1", "\nthen report"))
+	if len(committed) != 1 || committed[0] != "The user wants me to inspect the image" {
+		t.Fatalf("reasoning line commits = %#v", committed)
+	}
+
+	reasoning := "The user wants me to inspect the image\nthen report"
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(turnEndEvent(1, 0))
+	if len(committed) != 2 || committed[1] != "then report" {
+		t.Fatalf("final reasoning commits = %#v", committed)
+	}
+}
+
+func TestReadlineDefaultDoesNotCommitThinking(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	reasoning := "private chain of thought\nsecond line"
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(turnEndEvent(1, 0))
+
+	if joined := strings.Join(committed, "\n"); strings.Contains(joined, "private chain of thought") {
+		t.Fatalf("default verbosity committed thinking: %#v", committed)
+	}
+}
+
+func TestReadlineShowsAndCommitsIntermediateAssistantTextBeforeTool(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	text := "I will inspect the image before running the scanner."
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", text))
+
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: text}))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"scan image.png"}`))
+	if len(committed) != 1 || !strings.Contains(committed[0], text) {
+		t.Fatalf("intermediate assistant text was not committed before tool: %#v", committed)
+	}
+}
+
+func TestReadlineCommitsFinalTextForImageResponse(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(messageEvent("m-1", "assistant",
+		aop.MessagePart{Type: aop.PartText, Text: "The screenshot shows an exposed admin login."},
+		aop.MessagePart{Type: aop.PartText, Text: "No credentials are visible."},
+	))
+	o.HandleEvent(turnEndEvent(1, 0))
+
+	joined := strings.Join(committed, "\n")
+	if !strings.Contains(joined, "The screenshot shows an exposed admin login.") ||
+		!strings.Contains(joined, "No credentials are visible.") {
+		t.Fatalf("image response text missing from readline output: %#v", committed)
 	}
 }
 
@@ -585,7 +937,7 @@ func TestToolCallCounting(t *testing.T) {
 	}
 }
 
-func TestTurnStartMarker(t *testing.T) {
+func TestTurnStartDoesNotWritePermanentMarker(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
@@ -601,8 +953,8 @@ func TestTurnStartMarker(t *testing.T) {
 	}
 
 	got2 := stripANSI(turn2Output)
-	if !strings.Contains(got2, "turn 2") {
-		t.Fatalf("turn 2 should show turn marker, got: %q", got2)
+	if strings.Contains(got2, "turn 2") {
+		t.Fatalf("turn 2 marker should stay transient, got: %q", got2)
 	}
 }
 

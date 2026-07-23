@@ -227,7 +227,7 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 	if parts := messagePartsFromChat(msg); len(parts) > 0 {
 		em.messageWithID(messageID, "assistant", parts)
 	}
-	logAssistantAndUsage(cfg.Logger, msg, resp.Usage)
+	logUsage(cfg.Logger, resp.Usage)
 	return msg, resp.Usage, nil
 }
 
@@ -277,6 +277,6 @@ streamDone:
 	if parts := messagePartsFromChat(msg); len(parts) > 0 {
 		em.messageWithID(messageID, "assistant", parts)
 	}
-	logAssistantAndUsage(logger, msg, usage)
+	logUsage(logger, usage)
 	return msg, usage, nil
 }

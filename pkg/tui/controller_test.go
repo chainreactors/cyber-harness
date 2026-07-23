@@ -79,6 +79,12 @@ func TestSubmitPromptQueuesWhileRunning(t *testing.T) {
 	if queued != 2 {
 		t.Fatalf("pending = %d, want 2", queued)
 	}
+	c.output.mu.Lock()
+	inbox := append([]string(nil), c.output.live.inbox...)
+	c.output.mu.Unlock()
+	if len(inbox) != 2 || inbox[0] != "second" || inbox[1] != "third" {
+		t.Fatalf("inbox preview = %v, want [second third]", inbox)
+	}
 
 	close(prov.release)
 	// Queued runs chain through drainPending; each performs one provider call.
@@ -90,6 +96,12 @@ func TestSubmitPromptQueuesWhileRunning(t *testing.T) {
 	c.mu.Unlock()
 	if left != 0 {
 		t.Fatalf("pending after drain = %d, want 0", left)
+	}
+	c.output.mu.Lock()
+	inbox = append([]string(nil), c.output.live.inbox...)
+	c.output.mu.Unlock()
+	if len(inbox) != 0 {
+		t.Fatalf("inbox preview after drain = %v, want empty", inbox)
 	}
 }
 

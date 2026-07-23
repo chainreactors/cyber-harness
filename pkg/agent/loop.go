@@ -148,13 +148,13 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		transcript.completedTurns = turn
 
 		if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
-			cfg.Logger.Importantf("agent status=stopped turns=%d/%d tokens=%d", turn, cfg.MaxTurns, transcript.totalUsage.TotalTokens)
+			cfg.Logger.Debugf("agent status=stopped turns=%d/%d tokens=%d", turn, cfg.MaxTurns, transcript.totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			return end(result, nil, StopReasonStopped)
 		}
 
 		if terminate {
-			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
+			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			return end(result, nil, StopReasonTerminated)
 		}
@@ -176,7 +176,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				}
 			}
 
-			cfg.Logger.Importantf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
+			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
 			result := transcript.result(messageContent(assistantMsg), turn, nil)
 			return end(result, nil, StopReasonCompleted)
 		}
@@ -253,7 +253,6 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 	slots := make([]toolCallSlot, len(toolCalls))
 
 	for i, tc := range toolCalls {
-		cfg.Logger.Infof("[turn %d] tool_call name=%s args=%q", turn, tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
 		slots[i] = toolCallSlot{tc: tc}
 	}
 	for _, tc := range toolCalls {
@@ -480,10 +479,7 @@ func messageContent(msg ChatMessage) string {
 	return *msg.Content
 }
 
-func logAssistantAndUsage(logger telemetry.Logger, msg ChatMessage, usage *Usage) {
-	if content := messageContent(msg); content != "" {
-		logger.Infof("assistant output=%q", truncate.Clip(compactLogContent(content), 500))
-	}
+func logUsage(logger telemetry.Logger, usage *Usage) {
 	if usage != nil {
 		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
 			logger.Debugf("usage prompt=%d completion=%d total=%d cache_read=%d cache_write=%d",
@@ -494,10 +490,6 @@ func logAssistantAndUsage(logger telemetry.Logger, msg ChatMessage, usage *Usage
 				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 		}
 	}
-}
-
-func compactLogContent(value string) string {
-	return strings.Join(strings.Fields(value), " ")
 }
 
 func schedulerActive(s *LoopScheduler) int {

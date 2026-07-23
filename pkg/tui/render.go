@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/util"
 	bspinner "github.com/charmbracelet/bubbles/spinner"
 )
 
@@ -73,14 +74,16 @@ func eraseLines(w io.Writer, n int) {
 // spinnerSentinel marks where the animated frame should be injected.
 const spinnerSentinel = "\x00"
 
-var defaultFrames = bspinner.Dot
+// elapsedSentinel is replaced whenever a status line is rendered, so elapsed
+// time stays transient instead of entering terminal history.
+const elapsedSentinel = "\x01"
 
-// LiveView manages a transient, animated region on the terminal. Lines
-// containing spinnerSentinel get the current animation frame injected on each
-// tick. Stop erases the region cleanly.
-//
-// When split is non-nil the view renders into the split terminal's status bar
-// instead of using inline cursor-up/erase tricks.
+var defaultFrames = bspinner.Dot
+var readlineFooterInterval = 100 * time.Millisecond
+
+// LiveView manages transient status output. Both direct terminal rendering and
+// the readline composer animate on a timer; the composer redraw stays inside
+// readline so it does not replace the terminal's native scrollback.
 type LiveView struct {
 	w      io.Writer
 	accent string // ANSI color for spinner frames
@@ -91,31 +94,51 @@ type LiveView struct {
 	hidden   bool
 	frame    string
 	rendered int
+	elapsed  time.Time
 	stop     chan struct{}
 	done     chan struct{}
 
-	split *SplitTerminal // set once; safe to read without mu
+	sink func(string) // event-driven readline footer
 }
 
 func NewLiveView(w io.Writer, accent string) *LiveView {
 	return &LiveView{w: w, accent: accent}
 }
 
-// SetSplitTerminal puts the view into split mode: status is rendered to the
-// split terminal's fixed status bar instead of inline. Must be called before
-// Start and never changed afterwards.
-func (v *LiveView) SetSplitTerminal(st *SplitTerminal) {
+// SetStatusSink renders the live line through an external inline-composer
+// footer instead of writing cursor-control sequences directly to the terminal.
+func (v *LiveView) SetStatusSink(sink func(string)) {
 	if v == nil {
 		return
 	}
-	v.split = st
-	// Redirect the fallback writer into the scroll region so any code
-	// path that writes to v.w directly can never leak into the raw
-	// terminal (which would appear in the input area).
-	v.w = st.OutputWriter()
+	v.mu.Lock()
+	v.sink = sink
+	v.mu.Unlock()
+}
+
+// EventDriven reports whether rendering is delegated to readline. This mode
+// coalesces stream events and uses the dedicated composer refresh interval.
+func (v *LiveView) EventDriven() bool {
+	if v == nil {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.sink != nil
 }
 
 func (v *LiveView) Update(lines []string) {
+	v.update(lines, true)
+}
+
+// UpdateDeferred replaces the next animation frame without forcing an
+// immediate terminal redraw. Readline stream deltas use this to coalesce many
+// token events into the composer's 100ms refresh cadence.
+func (v *LiveView) UpdateDeferred(lines []string) {
+	v.update(lines, false)
+}
+
+func (v *LiveView) update(lines []string, render bool) {
 	if v == nil {
 		return
 	}
@@ -123,9 +146,19 @@ func (v *LiveView) Update(lines []string) {
 	defer v.mu.Unlock()
 	v.lines = make([]string, len(lines))
 	copy(v.lines, lines)
-	if v.running && !v.hidden {
+	if render && v.running && !v.hidden {
 		v.renderLocked(v.currentFrame())
 	}
+}
+
+// SetElapsedStart controls the live duration placeholder used by status lines.
+func (v *LiveView) SetElapsedStart(start time.Time) {
+	if v == nil {
+		return
+	}
+	v.mu.Lock()
+	v.elapsed = start
+	v.mu.Unlock()
 }
 
 func (v *LiveView) Start() {
@@ -137,27 +170,39 @@ func (v *LiveView) Start() {
 	if v.running {
 		return
 	}
-	v.stop = make(chan struct{})
-	v.done = make(chan struct{})
 	v.running = true
 	v.frame = defaultFrames.Frames[0]
 	v.renderLocked(v.frame)
-	go v.tick()
+	v.stop = make(chan struct{})
+	v.done = make(chan struct{})
+	interval := defaultFrames.FPS
+	if v.sink != nil {
+		// The composer interval is independent from other terminal renderers so
+		// it can be tuned without changing tool/output animation globally.
+		interval = readlineFooterInterval
+	}
+	go v.tick(interval)
 }
 
-func (v *LiveView) tick() {
+func (v *LiveView) tick(interval time.Duration) {
 	defer close(v.done)
 	frames := defaultFrames.Frames
-	t := time.NewTicker(defaultFrames.FPS)
+	t := time.NewTicker(interval)
 	defer t.Stop()
+	// Start already rendered frames[0]. Advance to the next frame on the first
+	// tick so a 100ms refresh interval produces a visible change after 100ms,
+	// rather than repainting the same frame and appearing to run at 200ms.
 	idx := 0
+	if len(frames) > 1 {
+		idx = 1
+	}
 	for {
-		v.render(frames[idx])
-		idx = (idx + 1) % len(frames)
 		select {
 		case <-v.stop:
 			return
 		case <-t.C:
+			v.render(frames[idx])
+			idx = (idx + 1) % len(frames)
 		}
 	}
 }
@@ -170,8 +215,8 @@ func (v *LiveView) render(frame string) {
 
 func (v *LiveView) renderLocked(frame string) {
 	v.frame = frame
-	if v.split != nil {
-		v.renderSplitLocked(frame)
+	if v.sink != nil {
+		v.renderSinkLocked(frame)
 		return
 	}
 	if v.hidden {
@@ -191,11 +236,10 @@ func (v *LiveView) renderLocked(frame string) {
 		return
 	}
 
-	marker := v.accent + frame + "\x1b[0m"
 	writeSynced(v.w, func() {
 		eraseLines(v.w, prev)
 		for i, line := range lines {
-			replaced := strings.Replace(line, spinnerSentinel, marker, 1)
+			replaced := v.expandLineLocked(line, frame)
 			if i < len(lines)-1 {
 				fmt.Fprintf(v.w, "%s\n", replaced)
 			} else {
@@ -207,18 +251,29 @@ func (v *LiveView) renderLocked(frame string) {
 	v.rendered = len(lines)
 }
 
-// renderSplitLocked renders the first status line to the split terminal's
-// status bar. Tool-progress lines are omitted (they appear permanently in
-// the output area when completed).
-func (v *LiveView) renderSplitLocked(frame string) {
-	lines := v.lines
-	if len(lines) == 0 {
-		v.split.UpdateStatus("")
+func (v *LiveView) renderSinkLocked(frame string) {
+	if len(v.lines) == 0 {
+		v.sink("")
 		return
 	}
+	lines := make([]string, 0, len(v.lines))
+	for _, line := range v.lines {
+		lines = append(lines, v.expandLineLocked(line, frame))
+	}
+	v.sink(strings.Join(lines, "\n"))
+}
+
+func (v *LiveView) expandLineLocked(line, frame string) string {
 	marker := v.accent + frame + "\x1b[0m"
-	text := strings.Replace(lines[0], spinnerSentinel, marker, 1)
-	v.split.UpdateStatus(" " + text)
+	line = strings.Replace(line, spinnerSentinel, marker, 1)
+	if strings.Contains(line, elapsedSentinel) {
+		elapsed := time.Duration(0)
+		if !v.elapsed.IsZero() {
+			elapsed = time.Since(v.elapsed)
+		}
+		line = strings.ReplaceAll(line, elapsedSentinel, util.FormatDuration(elapsed))
+	}
+	return line
 }
 
 func (v *LiveView) WithHidden(fn func()) {
@@ -228,9 +283,7 @@ func (v *LiveView) WithHidden(fn func()) {
 		}
 		return
 	}
-	// In split mode output and status areas don't overlap; no need to
-	// hide the status bar while writing content to the scroll region.
-	if v.split != nil {
+	if v.sink != nil {
 		if fn != nil {
 			fn()
 		}
@@ -274,17 +327,17 @@ func (v *LiveView) Stop() {
 		v.mu.Unlock()
 		return
 	}
-	close(v.stop)
 	v.running = false
 	v.hidden = false
 	n := v.rendered
 	v.rendered = 0
+	sink := v.sink
+	close(v.stop)
 	done := v.done
-	isSplit := v.split != nil
 	v.mu.Unlock()
 	<-done
-	if isSplit {
-		v.split.ClearStatus()
+	if sink != nil {
+		sink("")
 		return
 	}
 	if n > 0 {

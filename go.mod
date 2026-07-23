@@ -21,7 +21,7 @@ require (
 	github.com/chainreactors/sdk/zombie v0.0.0-20260708104745-dcad8620f5e9
 	github.com/chainreactors/spray v1.3.3-0.20260704194611-7ce7b850d447
 	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
-	github.com/chainreactors/tui/readline v0.0.0-20260712082522-2ba36ad7841f
+	github.com/chainreactors/tui/readline v0.0.0-20260723062039-ed89e758c21b
 	github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/parsers v0.0.3-0.20260707181750-8aa6ca296863
@@ -312,7 +312,5 @@ require (
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320
-
-replace github.com/chainreactors/tui/readline => ../tui/readline
 
 replace github.com/chainreactors/utils/pty => ../utils/pty

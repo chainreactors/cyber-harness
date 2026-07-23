@@ -65,8 +65,9 @@ func (c *interactiveRunController) SubmitPrompt(label, displayText, prompt strin
 		// Busy input joins the run-boundary FIFO: each queued prompt becomes a
 		// full Input→Run cycle, matching the stdio/web entry semantics.
 		c.pending = append(c.pending, pendingRun{label: label, displayText: displayText, run: c.buildRunFunc(prompt)})
+		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
-		c.output.Queued(displayText)
+		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
@@ -80,8 +81,9 @@ func (c *interactiveRunController) Continue() error {
 	c.mu.Lock()
 	if c.running {
 		c.pending = append(c.pending, pendingRun{label: "continue", run: c.session.Continue})
+		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
-		c.output.Queued("Continue.")
+		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
@@ -183,7 +185,9 @@ func (c *interactiveRunController) drainPending() {
 	}
 	next := c.pending[0]
 	c.pending = c.pending[1:]
+	inbox := pendingDisplayTexts(c.pending)
 	c.mu.Unlock()
+	c.output.SetInbox(inbox)
 	if err := c.start(next.label, next.displayText, next.run); err != nil {
 		c.output.Error(err)
 		c.drainPending()
@@ -221,10 +225,25 @@ func (c *interactiveRunController) Stop() bool {
 	c.mu.Unlock()
 
 	if c.output != nil {
+		c.output.SetInbox(nil)
 		c.output.AbortCurrentRun()
 	}
 	cancel()
 	return true
+}
+
+// pendingDisplayTexts extracts stable, user-facing inbox previews without
+// exposing expanded prompts or internal run closures in the status row.
+func pendingDisplayTexts(pending []pendingRun) []string {
+	items := make([]string, 0, len(pending))
+	for _, run := range pending {
+		text := strings.TrimSpace(run.displayText)
+		if text == "" {
+			text = strings.TrimSpace(run.label)
+		}
+		items = append(items, text)
+	}
+	return items
 }
 
 func (c *interactiveRunController) Running() bool {

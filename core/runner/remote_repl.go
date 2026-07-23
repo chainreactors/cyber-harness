@@ -35,7 +35,7 @@ func (rt *AgentRuntime) startMainREPL() error {
 		Resize:    control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		for {
-			err := tui.RunRemoteAgentConsoleWithControl(replCtx, option, rt.consoleAppInfo(), sess.agent, input, output, control)
+			err := tui.RunRemoteAgentConsoleWithControl(replCtx, option, rt.consoleAppInfo(), sess.agent, input, output, control, rt.Bus.Subscribe)
 			if replCtx.Err() != nil {
 				return replCtx.Err()
 			}

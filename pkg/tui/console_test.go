@@ -24,13 +24,37 @@ import (
 func TestIsLocalAgentTerminal(t *testing.T) {
 	local := rlterm.Local()
 	if !isLocalAgentTerminal(local) {
-		t.Fatal("local terminal should be eligible for split rendering")
+		t.Fatal("local terminal should be eligible for native readline rendering")
 	}
 
 	var output bytes.Buffer
 	remote := rlterm.Stream(bytes.NewReader(nil), &output, &output, rlterm.NewControl(true, 80, 24))
 	if isLocalAgentTerminal(remote) {
-		t.Fatal("remote terminal must not use local split rendering")
+		t.Fatal("remote terminal must not use local readline rendering")
+	}
+}
+
+func TestAgentComposerPromptPlacesStatusAboveInput(t *testing.T) {
+	bridge := &readlineConsoleBridge{}
+	bridge.UpdateStatus("thinking")
+
+	if got, want := agentComposerPrompt(nil, bridge), "thinking\naiscan> "; got != want {
+		t.Fatalf("composer prompt = %q, want %q", got, want)
+	}
+}
+
+func TestAgentConsoleResetsUnsupportedTerminalInputModes(t *testing.T) {
+	var output bytes.Buffer
+	repl := &AgentConsole{terminal: rlterm.Stream(
+		bytes.NewReader(nil),
+		&output,
+		&output,
+		rlterm.NewControl(true, 80, 24),
+	)}
+
+	repl.resetTerminalInputModes()
+	if got := output.String(); got != agentConsoleResetInputModes {
+		t.Fatalf("terminal input-mode reset = %q, want %q", got, agentConsoleResetInputModes)
 	}
 }
 

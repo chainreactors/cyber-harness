@@ -53,7 +53,6 @@ type AgentOutput struct {
 	aborted bool
 
 	// Stats (tool call/error counts tracked here; token usage comes from events).
-	turnStart      time.Time
 	agentStart     time.Time
 	toolCallCount  int
 	toolErrorCount int
@@ -74,7 +73,7 @@ type AgentOutput struct {
 	tty                    bool
 	interactiveInputActive bool
 	live                   *LiveStatus
-	split                  *SplitTerminal
+	readline               bool
 }
 
 func NewAgentOutput(option *cfg.Option) *AgentOutput {
@@ -149,19 +148,19 @@ func (o *AgentOutput) Stdout() io.Writer { return o.stream.stdout }
 // Markdown returns whether markdown rendering is enabled.
 func (o *AgentOutput) Markdown() bool { return o.stream.markdown }
 
-// SetSplitMode redirects all output through the split terminal's scroll region
-// and wires the live status into the fixed status bar.
-func (o *AgentOutput) SetSplitMode(st *SplitTerminal) {
-	if o == nil || st == nil {
+// SetReadlineMode commits finalized output above the current prompt and sends
+// transient status frames through readline's composer. The terminal still owns
+// scrollback; the 100ms animation only redraws the active composer.
+func (o *AgentOutput) SetReadlineMode(output io.Writer, status func(string)) {
+	if o == nil || output == nil {
 		return
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.split = st
-	outW := st.OutputWriter()
-	o.stream.stdout = outW
-	o.stream.stderr = outW
-	o.live.view.SetSplitTerminal(st)
+	o.readline = true
+	o.stream.stdout = output
+	o.stream.stderr = output
+	o.live.view.SetStatusSink(status)
 }
 
 // ---------------------------------------------------------------------------
@@ -268,21 +267,17 @@ func (o *AgentOutput) Final(content string) {
 	}
 }
 
-func (o *AgentOutput) Queued(text string) {
-	if o == nil || o.verbosity < 0 {
+// SetInbox updates the transient preview of prompts waiting behind the active
+// run without stopping the live status.
+func (o *AgentOutput) SetInbox(items []string) {
+	if o == nil {
 		return
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stopLive()
-	o.stream.Flush()
-	w := o.Stderr()
-	text = truncate.Clip(text, agentStatusPreviewLimit)
-	if text == "" {
-		fmt.Fprintln(w, o.bold("queued"))
-	} else {
-		fmt.Fprintf(w, "%s %s\n", o.bold("queued:"), text)
-	}
+	running := o.live.Running()
+	render := o.canAnimate() && (running || len(items) > 0)
+	o.live.SetInbox(items, render)
 }
 
 func (o *AgentOutput) Stopping() {
@@ -347,9 +342,7 @@ func (o *AgentOutput) SetInteractiveInputActive(active bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.interactiveInputActive = active
-	// In split mode the live status renders to a separate area, so we
-	// never need to stop it when readline becomes active.
-	if active && o.split == nil {
+	if active && !o.readline {
 		o.stopLive()
 	}
 }
@@ -372,22 +365,17 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.agentStart = time.Now()
 
 	case aop.TypeTurnStart:
-		data, err := aop.DecodeData[aop.TurnEndData](event)
+		data, err := aop.DecodeData[aop.TurnData](event)
 		if err != nil {
 			return
 		}
 		o.stream.NewTurn()
-		o.turnStart = time.Now()
 		o.turnUsage = nil
 		o.turnToolCalls = 0
 		o.lastAssistant = aop.MessageData{}
 		o.hasAssistant = false
-		if o.verbosity >= 1 && data.Turn > 1 {
-			o.stream.EnsureNewline()
-			fmt.Fprintln(o.Stderr(), o.dim("  turn "+fmt.Sprint(data.Turn)))
-		}
 		if o.canAnimate() {
-			o.live.BeginTurn()
+			o.live.BeginTurn(data.Turn)
 		}
 
 	case aop.TypeMessageDelta:
@@ -405,6 +393,7 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		} else {
 			acc.text += data.Delta
 		}
+		o.live.SetOutputEstimate(estimateStreamTokens(acc.text, acc.reasoning))
 		contentDelta := o.stream.WouldPrintContentDelta(&acc.text)
 		visible := o.stream.WouldPrintDelta(&acc.text, &acc.reasoning)
 		if o.verbosity >= 0 {
@@ -414,7 +403,12 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			if o.canAnimate() && !o.live.HasTools() && visible {
 				o.live.WithHidden(func() {
 					writeDelta()
-					o.stream.EnsureLiveBoundary()
+					// The readline bridge already commits complete lines above the
+					// prompt. Forcing a boundary here turned every reasoning token
+					// delta into a separate line under -vv.
+					if !o.readline {
+						o.stream.EnsureLiveBoundary()
+					}
 				})
 			} else {
 				writeDelta()
@@ -441,6 +435,7 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			return
 		}
 		o.turnToolCalls++
+		o.live.SetTurnToolCalls(o.turnToolCalls)
 		ev := &toolEvent{
 			id:        data.ToolCallID,
 			name:      data.ToolName,
@@ -526,6 +521,9 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.totalUsage.CacheReadTokens += usage.CacheReadTokens
 		o.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
 		o.live.SetTurnUsage(usage)
+		if o.canAnimate() {
+			o.live.Render()
+		}
 
 	case aop.TypeTurnEnd:
 		data, err := aop.DecodeData[aop.TurnEndData](event)
@@ -575,6 +573,17 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 	}
 }
 
+func estimateStreamTokens(parts ...string) int {
+	chars := 0
+	for _, part := range parts {
+		chars += len(part)
+	}
+	if chars == 0 {
+		return 0
+	}
+	return (chars + 3) / 4
+}
+
 // ---------------------------------------------------------------------------
 // Tool rendering
 // ---------------------------------------------------------------------------
@@ -583,9 +592,7 @@ func (o *AgentOutput) canAnimate() bool {
 	if o == nil || o.mode != ModeInteractive || !o.tty || o.verbosity < 0 {
 		return false
 	}
-	// In split mode the status bar never overlaps the input area, so
-	// animation can continue while readline is active.
-	if o.split != nil {
+	if o.readline {
 		return true
 	}
 	return !o.interactiveInputActive
@@ -614,6 +621,9 @@ func (o *AgentOutput) renderToolLine(ev *toolEvent) string {
 	line := spinnerSentinel + " " + o.bold(name)
 	if summary != "" {
 		line += "  " + o.dim(summary)
+	}
+	if elapsed := o.coloredElapsed(ev.startedAt); elapsed != "" {
+		line += "  " + elapsed
 	}
 	return toolBlockIndent + line
 }
@@ -756,7 +766,6 @@ func (o *AgentOutput) turnEnd(turn int) {
 			o.stream.MarkStreamed()
 		}
 	}
-	o.renderTurnStats(w, turn)
 	if o.debug {
 		role, contentLen, reasoningLen, preview := summarizeMessageData(o.lastAssistant)
 		if role != "" || contentLen > 0 || reasoningLen > 0 {
@@ -777,26 +786,6 @@ func (o *AgentOutput) turnEnd(turn int) {
 				o.contextTokens, cache, o.color.Code(output.ANSIReset))
 		}
 	}
-}
-
-func (o *AgentOutput) renderTurnStats(w io.Writer, turn int) {
-	if w == nil {
-		return
-	}
-	elapsed := time.Since(o.turnStart)
-	parts := []string{fmt.Sprintf("turn %d", turn)}
-	if o.turnToolCalls > 0 {
-		parts = append(parts, fmt.Sprintf("tools=%d", o.turnToolCalls))
-	}
-	if o.turnUsage != nil {
-		parts = append(parts, formatTokenUsage(o.turnUsage))
-	}
-	if context := o.live.ContextUsage(o.contextTokens); context != "" {
-		parts = append(parts, context)
-	}
-	parts = append(parts, util.FormatDuration(elapsed))
-	fmt.Fprintln(w, o.dim("  ["+strings.Join(parts, " | ")+"]"))
-	fmt.Fprintln(w)
 }
 
 func (o *AgentOutput) agentEnd(data aop.SessionEndData) {

@@ -287,7 +287,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 	}
 
-	if rt.replMode != REPLDisabled {
+	// A persistent REPL is transport-owned and must survive remote detach. The
+	// ephemeral local REPL is started directly by AttachLocalREPL so readline
+	// control sequences are never buffered and replayed as PTY logs.
+	if rt.replMode == REPLPersistent {
 		if err := rt.startMainREPL(); err != nil {
 			runtimeCancel()
 			rt.cleanup()

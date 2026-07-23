@@ -206,14 +206,23 @@ func shouldRenderUserIntent(body string) bool {
 // Formatting helpers for stats
 // ---------------------------------------------------------------------------
 
-// formatTokenUsage formats token usage like: "input=2,378 output=27 cache 95%"
+const (
+	inputTokenMarker  = "↑"
+	outputTokenMarker = "↓"
+	cacheHitMarker    = "↻"
+	contextMarker     = "◐"
+)
+
+// formatTokenUsage formats token usage like: "↑2,378 ↓27 ↻95%".
 func formatTokenUsage(u *agent.Usage) string {
 	if u == nil {
 		return ""
 	}
-	s := fmt.Sprintf("input=%s output=%s", util.FormatNumber(u.PromptTokens), util.FormatNumber(u.CompletionTokens))
+	s := fmt.Sprintf("%s%s %s%s",
+		inputTokenMarker, util.FormatNumber(u.PromptTokens),
+		outputTokenMarker, util.FormatNumber(u.CompletionTokens))
 	if ratio := u.CacheHitRatio(); ratio > 0 {
-		s += fmt.Sprintf(" cache %.0f%%", ratio*100)
+		s += fmt.Sprintf(" %s%.0f%%", cacheHitMarker, ratio*100)
 	}
 	return s
 }

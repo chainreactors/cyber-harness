@@ -133,6 +133,28 @@ func TestRuntimeOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 }
 
+func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	t.Setenv("AISCAN_REPL", "fast")
+	rt, err := NewAgentRuntime(ctx, &cfg.Option{}, telemetry.NopLogger(), &RuntimeConfig{
+		ProviderOptional: true,
+		NoOutput:         true,
+		REPLMode:         REPLEphemeral,
+	})
+	if err != nil {
+		t.Fatalf("runtime without provider: %v", err)
+	}
+	defer rt.Close()
+
+	for _, info := range rt.ptyManager.List() {
+		if info.Kind == "repl" && info.Name == MainREPLName {
+			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
+		}
+	}
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, predicate func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
