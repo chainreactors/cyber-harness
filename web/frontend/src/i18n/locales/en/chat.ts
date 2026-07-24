@@ -1,5 +1,6 @@
 export default {
   chat: 'Chat',
+  terminal: 'Terminal',
   llmConfig: 'LLM Config',
   agentsConnected: '{{count}} agent(s) connected',
   noAgents: 'No agents connected',
@@ -75,6 +76,18 @@ export default {
   a11yThinking: 'AIScan is working',
   a11yResponding: 'AIScan is responding',
   a11yTurnDone: 'Response complete',
+  // "@" mention picker (categorized: CSTX assets / IOA nodes + messages / File).
+  mention: {
+    cstx: 'Assets',
+    ioa: 'IOA',
+    file: 'File',
+    nodes: 'Nodes',
+    messages: 'Messages',
+    insert: 'Insert selected',
+    chooseFile: 'Choose file…',
+    fileHint: 'Attach a file to this message — inlined as context or uploaded to the agent.',
+    empty: 'No matches',
+  },
   // Backend system messages (localized by code; English here is also the fallback).
   // Mirrors the Sys* codes in pkg/web.
   sys: {

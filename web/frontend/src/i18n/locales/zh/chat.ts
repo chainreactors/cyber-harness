@@ -1,5 +1,6 @@
 export default {
   chat: '对话',
+  terminal: '终端',
   llmConfig: 'LLM 配置',
   agentsConnected: '已连接 {{count}} 个 agent',
   noAgents: '未连接 agent',
@@ -75,6 +76,18 @@ export default {
   a11yThinking: 'AIScan 正在处理',
   a11yResponding: 'AIScan 正在回复',
   a11yTurnDone: '回复完成',
+  // “@” 提及选择器(分类:CSTX 资产 / IOA 节点+消息 / 文件)。
+  mention: {
+    cstx: '资产',
+    ioa: 'IOA',
+    file: '文件',
+    nodes: '节点',
+    messages: '消息',
+    insert: '插入所选',
+    chooseFile: '选择文件…',
+    fileHint: '为本条消息附加文件 —— 作为上下文内联,或上传给 agent。',
+    empty: '无匹配',
+  },
   // 后端系统消息(按 code 本地化;英文原文仅作兜底)。与 pkg/web 的 Sys* 常量一一对应。
   sys: {
     no_running_task: '当前没有正在运行的任务。',

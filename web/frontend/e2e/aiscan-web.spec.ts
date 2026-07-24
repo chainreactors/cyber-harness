@@ -121,7 +121,7 @@ test.describe('Page Load', () => {
   test('index page loads and renders AIScan header', async ({ page }) => {
     await openAuthenticatedApp(page);
     // Use a specific selector for the brand name in the header
-    const brand = page.locator('header span.font-semibold');
+    const brand = page.locator('header').getByText('AIScan', { exact: true });
     await expect(brand).toBeVisible({ timeout: 10_000 });
     await expect(brand).toHaveText('AIScan');
   });

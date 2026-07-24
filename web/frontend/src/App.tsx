@@ -6,16 +6,17 @@ import ChatPanel from './components/ChatPanel'
 import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
 import AssetPanel, { assetMentionables } from './components/AssetPanel'
-import AssetMentionPicker from './components/AssetMentionPicker'
+import MentionPicker from './components/MentionPicker'
 import LLMHealth from './components/LLMHealth'
 import QuickConnect from './components/QuickConnect'
 import BrandLogo from './components/brand/BrandLogo'
 const IOAConsole = lazy(() => import('./components/IOAConsole'))
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider } from '@cyber/theme'
-import { activateLLMProfile, getConfigStatus, getStatus, listSCONodes, logout } from './api'
-import type { LLMProfileStatus, ServerStatus } from './api'
+import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, listSCONodes, logout } from './api'
+import type { IOAMessage, IOANode, LLMProfileStatus, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
+import type { MentionPopupApi } from './viewer'
 import { useChatSession } from './hooks/useChatSession'
 import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
@@ -89,8 +90,12 @@ export default function App() {
     window.localStorage.setItem(sidebarStorageKey, String(sidebarOpen))
   }, [sidebarOpen])
 
-  // SCO nodes for @-mention in chat input
+  // Sources for the chat composer's "@" picker: CSTX assets, plus IOA
+  // nodes/messages. Both refresh when the timeline advances — a finished scan or
+  // agent turn often means new assets landed or new IOA traffic was exchanged.
   const [scoNodes, setScoNodes] = useState<SCONode[]>([])
+  const [ioaNodes, setIoaNodes] = useState<IOANode[]>([])
+  const [ioaMessages, setIoaMessages] = useState<IOAMessage[]>([])
   const [composerSeed, setComposerSeed] = useState(EMPTY_SEED)
 
   const refreshSCONodes = useCallback(async () => {
@@ -100,9 +105,17 @@ export default function App() {
     } catch { /* non-critical */ }
   }, [])
 
-  useEffect(() => { void refreshSCONodes() }, [refreshSCONodes])
+  const refreshIOA = useCallback(async () => {
+    try {
+      const overview = await getIOAOverview()
+      setIoaNodes(overview.nodes)
+      setIoaMessages(overview.messages)
+    } catch { /* non-critical — the hub may be unconfigured or offline */ }
+  }, [])
+
+  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [refreshSCONodes, refreshIOA])
   // Refresh mentionables when scans finish (timeline changes often signal new results)
-  useEffect(() => { void refreshSCONodes() }, [chat.timeline.length, refreshSCONodes])
+  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [chat.timeline.length, refreshSCONodes, refreshIOA])
 
   const mentionables = useMemo(() => assetMentionables(scoNodes), [scoNodes])
 
@@ -110,12 +123,15 @@ export default function App() {
     setComposerSeed({ text, nonce: Date.now() })
   }, [])
 
-  const renderMentionPopup = useMemo(() => {
-    if (scoNodes.length === 0) return undefined
-    return (api: { query: string; onSelect: (targets: string[]) => void; onDismiss: () => void }) => (
-      <AssetMentionPicker {...api} nodes={scoNodes} />
-    )
-  }, [scoNodes])
+  // Always render the picker: even with no assets or IOA traffic yet, the File
+  // category (attach) is available inside a live session, so "@" is never a
+  // dead key. The picker itself decides which category tabs to show.
+  const renderMentionPopup = useCallback(
+    (api: MentionPopupApi) => (
+      <MentionPicker {...api} nodes={scoNodes} ioaNodes={ioaNodes} ioaMessages={ioaMessages} />
+    ),
+    [scoNodes, ioaNodes, ioaMessages],
+  )
 
   const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
 
@@ -205,7 +221,7 @@ export default function App() {
               <Menu className="h-4 w-4" />
             </Button>
             <BrandLogo size={22} />
-            <span className="truncate text-sm font-semibold tracking-tight text-foreground">AIScan</span>
+            <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">AIScan</span>
             <LLMProfileSwitcher
               profiles={llmProfiles}
               activeProfileID={activeLLMProfile}
@@ -220,6 +236,9 @@ export default function App() {
             <IOAConsoleButton onClick={() => openIOAConsole()} />
             <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
             <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
+            {/* Separate workspace nav (assets / IOA / agents / connect) from the
+                account utilities (settings / logout) so the row reads as two groups. */}
+            <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
             <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
               <Settings className="h-3.5 w-3.5" />
             </HeaderIconButton>
