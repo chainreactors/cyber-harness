@@ -963,11 +963,14 @@ func TestEvalEndRendering(t *testing.T) {
 	o := testOutput(&stderr, 1, false)
 
 	passed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
-	_ = xeval.SetDetail(&passed, xeval.Detail{Round: 0, Pass: true, Reason: "all checks passed"})
+	_ = xeval.SetDetail(&passed, xeval.Detail{Round: 1, Pass: true, Reason: "all checks passed"})
 	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
 		t.Fatalf("eval pass missing expected markers: %q", got)
+	}
+	if !strings.Contains(got, "round 1") {
+		t.Fatalf("eval pass used wrong round: %q", got)
 	}
 	if !strings.Contains(got, "all checks passed") {
 		t.Fatalf("eval pass missing reason: %q", got)
@@ -975,11 +978,22 @@ func TestEvalEndRendering(t *testing.T) {
 
 	stderr.Reset()
 	failed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
-	_ = xeval.SetDetail(&failed, xeval.Detail{Round: 1, Pass: false, Reason: "port 443 not scanned"})
+	_ = xeval.SetDetail(&failed, xeval.Detail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
 	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {
 		t.Fatalf("eval fail missing expected markers: %q", got)
+	}
+	if !strings.Contains(got, "round 2") {
+		t.Fatalf("eval fail used wrong round: %q", got)
+	}
+}
+
+func TestLiveStatusEvalRoundUsesProtocolValue(t *testing.T) {
+	live := &LiveStatus{}
+	live.ShowEvalRound(1)
+	if live.note != "eval · round 1" {
+		t.Fatalf("eval live status used wrong round: %q", live.note)
 	}
 }
 

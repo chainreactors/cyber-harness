@@ -876,7 +876,7 @@ func (o *AgentOutput) evalStart(round int) {
 	} else {
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
-			o.color.Wrap("⋯", output.ANSICyan)+" "+o.bold("eval")+"  "+o.dim(fmt.Sprintf("round %d", round+1)))
+			o.color.Wrap("⋯", output.ANSICyan)+" "+o.bold("eval")+"  "+o.dim(fmt.Sprintf("round %d", round)))
 	}
 }
 
@@ -892,7 +892,7 @@ func (o *AgentOutput) evalEnd(round int, pass bool, reason string) {
 	}
 	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
 		o.color.Wrap(marker, mc)+" "+o.bold("eval")+"  "+
-			o.dim(fmt.Sprintf("round %d", round+1))+"  "+o.dim(status))
+			o.dim(fmt.Sprintf("round %d", round))+"  "+o.dim(status))
 	if reason := strings.TrimSpace(reason); reason != "" {
 		fmt.Fprintf(w, "%s%s\n", toolResultIndent, o.dim(reason))
 	}
@@ -906,7 +906,7 @@ func (o *AgentOutput) evalError(round int, evalErr string) {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
 		o.color.Wrap("⚠", output.ANSIYellow)+" "+o.bold("eval")+"  "+
-			o.dim(fmt.Sprintf("round %d", round+1))+"  "+o.dim("error"))
+			o.dim(fmt.Sprintf("round %d", round))+"  "+o.dim("error"))
 	detail := "evaluator LLM call failed"
 	if evalErr != "" {
 		detail = evalErr

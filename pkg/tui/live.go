@@ -167,7 +167,7 @@ func (l *LiveStatus) ShowEvalRound(round int) {
 		return
 	}
 	l.status = liveStatusTooling
-	l.note = fmt.Sprintf("eval · round %d", round+1)
+	l.note = fmt.Sprintf("eval · round %d", round)
 	l.clearTools()
 	l.Render()
 }
