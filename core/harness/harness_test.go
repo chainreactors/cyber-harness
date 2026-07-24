@@ -81,9 +81,9 @@ func TestAgentDualSessionInterleaved(t *testing.T) {
 			t.Fatalf("write %s: %v", message.Type, err)
 		}
 	}
-	writeRun := func(sessionID, runID, text string) {
+	writeRun := func(sessionID, turnID, text string) {
 		writeFrame(webproto.Message{
-			Type: webproto.TypeRun, RunID: runID,
+			Type: webproto.TypeRun, TurnID: turnID,
 			Payload: webproto.MustJSON(webproto.RunPayload{
 				SessionID: sessionID,
 				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
@@ -92,9 +92,9 @@ func TestAgentDualSessionInterleaved(t *testing.T) {
 	}
 	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-a"})})
 	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-b"})})
-	writeRun("sess-a", "run-a1", "Reply with exactly: ALPHA")
-	writeRun("sess-b", "run-b1", "Reply with exactly: BRAVO")
-	writeRun("sess-a", "run-a2", "Reply with exactly: ALPHA2")
+	writeRun("sess-a", "turn-a1", "Reply with exactly: ALPHA")
+	writeRun("sess-b", "turn-b1", "Reply with exactly: BRAVO")
+	writeRun("sess-a", "turn-a2", "Reply with exactly: ALPHA2")
 	if err := stdin.Close(); err != nil {
 		t.Fatalf("close stdin: %v", err)
 	}

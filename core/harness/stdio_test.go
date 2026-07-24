@@ -16,9 +16,9 @@ func TestConsumeAgentStream(t *testing.T) {
 	input := encodeFrames(t,
 		sessionOpenedFrame("root"),
 		aopFrame(aopTestEvent("root", "", aop.TypeSessionStart, aop.SessionStartData{})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
-		aopFrame(aopMessageEvent("root", "run-1", "assistant", "hello")),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopMessageEvent("root", "turn-1", "assistant", "hello")),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 
 	var monitorOutput bytes.Buffer
@@ -29,7 +29,7 @@ func TestConsumeAgentStream(t *testing.T) {
 	if output != "hello" || len(events) != 4 {
 		t.Fatalf("output=%q events=%#v", output, events)
 	}
-	if !strings.Contains(monitorOutput.String(), "hello") || !strings.Contains(monitorOutput.String(), "run run-1") {
+	if !strings.Contains(monitorOutput.String(), "hello") || !strings.Contains(monitorOutput.String(), "run turn-1") {
 		t.Fatalf("monitor output = %q", monitorOutput.String())
 	}
 }
@@ -38,8 +38,8 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 	callID := "call-1"
 	input := encodeFrames(t,
 		sessionOpenedFrame("root"),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeToolCall, aop.ToolCallData{
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeToolCall, aop.ToolCallData{
 			ToolCallID: callID,
 			ToolName:   "bash",
 			Args: map[string]any{
@@ -47,12 +47,12 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 				"nested":  []any{map[string]any{"enabled": true}},
 			},
 		})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeToolResult, aop.ToolResultData{
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeToolResult, aop.ToolResultData{
 			ToolCallID: callID,
 			ToolName:   "bash",
 			Content:    map[string]any{"output": []any{"hello", map[string]any{"code": float64(0)}}},
 		})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 
 	_, events, err := consumeAgentStream(input, nil)
@@ -75,11 +75,11 @@ func TestConsumeAgentStreamKeepsTypedToolData(t *testing.T) {
 func TestConsumeAgentStreamWaitsForRootRunEnd(t *testing.T) {
 	input := encodeFrames(t,
 		sessionOpenedFrame("root"),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
-		aopFrame(aopTestEvent("child", "child-run", aop.TypeTurnStart, aop.TurnStartData{})),
-		aopFrame(aopTestEvent("child", "child-run", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
-		aopFrame(aopMessageEvent("root", "run-1", "assistant", "root done")),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("child", "child-turn", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("child", "child-turn", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
+		aopFrame(aopMessageEvent("root", "turn-1", "assistant", "root done")),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "completed"})),
 	)
 	output, events, err := consumeAgentStream(input, nil)
 	if err != nil || output != "root done" || len(events) != 5 {
@@ -90,9 +90,9 @@ func TestConsumeAgentStreamWaitsForRootRunEnd(t *testing.T) {
 func TestConsumeAgentStreamReportsRootError(t *testing.T) {
 	input := encodeFrames(t,
 		sessionOpenedFrame("root"),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeError, aop.ErrorData{Message: "provider failed"})),
-		aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "error", Error: "provider failed"})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnStart, aop.TurnStartData{})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeError, aop.ErrorData{Message: "provider failed"})),
+		aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnEnd, aop.TurnEndData{Stop: "error", Error: "provider failed"})),
 	)
 	_, events, err := consumeAgentStream(input, nil)
 	if err == nil || !strings.Contains(err.Error(), "provider failed") || len(events) != 3 {
@@ -129,8 +129,8 @@ func TestConsumeAgentStreamRejectsInvalidStreams(t *testing.T) {
 			name: "missing run terminal",
 			input: encodeFrames(t,
 				sessionOpenedFrame("root"),
-				aopFrame(aopTestEvent("root", "run-1", aop.TypeTurnStart, aop.TurnStartData{})),
-				aopFrame(aopMessageEvent("root", "run-1", "assistant", "hello")),
+				aopFrame(aopTestEvent("root", "turn-1", aop.TypeTurnStart, aop.TurnStartData{})),
+				aopFrame(aopMessageEvent("root", "turn-1", "assistant", "hello")),
 			),
 			needle: "without run turn.end",
 		},
@@ -179,7 +179,7 @@ func sessionOpenedFrame(sessionID string) webproto.Message {
 }
 
 func aopFrame(event aop.Event) webproto.Message {
-	return webproto.Message{Type: webproto.TypeAOP, RunID: event.TurnID, Payload: webproto.MustJSON(event)}
+	return webproto.Message{Type: webproto.TypeAOP, TurnID: event.TurnID, Payload: webproto.MustJSON(event)}
 }
 
 func encodeFrames(t *testing.T, messages ...webproto.Message) *bytes.Buffer {

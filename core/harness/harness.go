@@ -214,7 +214,7 @@ func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraAr
 	writeErr := openErr
 	if writeErr == nil {
 		writeErr = encoder.Encode(webproto.Message{
-			Type: webproto.TypeRun, RunID: "run-1",
+			Type: webproto.TypeRun, TurnID: "turn-1",
 			Payload: webproto.MustJSON(webproto.RunPayload{
 				SessionID: "harness",
 				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: prompt}},

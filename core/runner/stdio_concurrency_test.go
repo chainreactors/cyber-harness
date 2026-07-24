@@ -82,7 +82,7 @@ func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider
 	h.rt.config.MaxTurns = 4
 	h.rt.Subscribe(func(event aop.Event) {
 		payload, _ := json.Marshal(event)
-		_ = h.emit(webproto.Message{Type: webproto.TypeAOP, RunID: event.TurnID, Payload: payload})
+		_ = h.emit(webproto.Message{Type: webproto.TypeAOP, TurnID: event.TurnID, Payload: payload})
 	})
 	return h
 }
@@ -107,7 +107,7 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 	defer h.rt.Close()
 
 	for _, text := range []string{"first", "second", "third"} {
-		h.accept(runLine(t, "s1", "run-"+text, text))
+		h.accept(runLine(t, "s1", "turn-"+text, text))
 	}
 	waitForCalls(t, prov, 1, "first run to start")
 	close(prov.gate)
@@ -127,8 +127,8 @@ func TestStdioSessionsRunConcurrently(t *testing.T) {
 
 	h.accept(openSessionLine(t, "s1"))
 	h.accept(openSessionLine(t, "s2"))
-	h.accept(runLine(t, "s1", "run-one", "one"))
-	h.accept(runLine(t, "s2", "run-two", "two"))
+	h.accept(runLine(t, "s1", "turn-one", "one"))
+	h.accept(runLine(t, "s2", "turn-two", "two"))
 
 	// Both sessions are mid-run at the same time: neither FIFO blocks the other.
 	waitForCalls(t, prov, 2, "both session runs to start")
@@ -166,8 +166,8 @@ func TestStdioDrainWaitsForInFlightAndQueued(t *testing.T) {
 	newStdioTestSession(t, h, &output, "s1", prov)
 	defer h.rt.Close()
 
-	h.accept(runLine(t, "s1", "run-first", "first"))
-	h.accept(runLine(t, "s1", "run-second", "second"))
+	h.accept(runLine(t, "s1", "turn-first", "first"))
+	h.accept(runLine(t, "s1", "turn-second", "second"))
 	waitForCalls(t, prov, 1, "first run to start")
 
 	drained := make(chan struct{})

@@ -60,7 +60,7 @@ func TestConnectOnceCancelsChatWhenSocketDisconnects(t *testing.T) {
 			return
 		}
 		payload, _ := json.Marshal(webproto.RunPayload{SessionID: "chat-1"})
-		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeRun, RunID: "run-1", Payload: payload}); err != nil {
+		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeRun, TurnID: "turn-1", Payload: payload}); err != nil {
 			t.Errorf("write task: %v", err)
 			return
 		}

@@ -296,7 +296,7 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != webproto.TypeRun || cmd.RunID != "task-chat" {
+	if cmd.Type != webproto.TypeRun || cmd.TurnID != "task-chat" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
 	var run webproto.RunPayload
@@ -320,17 +320,17 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 // turnEndMessage builds the agent→hub AOP turn.end frame that converges
 // a chat task.
-func turnEndMessage(runID, sessionID, stop string) WSMessage {
+func turnEndMessage(turnID, sessionID, stop string) WSMessage {
 	data, _ := json.Marshal(aop.TurnEndData{Stop: stop})
 	payload, _ := json.Marshal(aop.Event{
 		Type:      aop.TypeTurnEnd,
 		TS:        time.Now().UTC().Format(time.RFC3339Nano),
 		SessionID: sessionID,
-		TurnID:    runID,
+		TurnID:    turnID,
 		Agent:     "agent",
 		Data:      data,
 	})
-	return WSMessage{Type: "aop", RunID: runID, Payload: payload}
+	return WSMessage{Type: "aop", TurnID: turnID, Payload: payload}
 }
 
 // TestDispatchRunCarriesGoalOptions guards the Goal-mode wiring: the
@@ -1055,7 +1055,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 
 	select {
 	case frame := <-remote.sendCh:
-		if frame.Type != webproto.TypeRunCancel || frame.RunID != "task-1" {
+		if frame.Type != webproto.TypeRunCancel || frame.TurnID != "task-1" {
 			t.Fatalf("cancel frame = %+v", frame)
 		}
 	default:

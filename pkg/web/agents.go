@@ -301,7 +301,7 @@ func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskRes
 	return p.DispatchRun(agentID, taskID, webproto.RunPayload{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
 }
 
-func (p *AgentPool) DispatchRun(agentID, runID string, run webproto.RunPayload) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchRun(agentID, turnID string, run webproto.RunPayload) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
@@ -329,7 +329,7 @@ func (p *AgentPool) DispatchRun(agentID, runID string, run webproto.RunPayload) 
 	if err != nil {
 		return nil, fmt.Errorf("marshal run: %w", err)
 	}
-	return p.dispatchMessage(agentID, runID, WSMessage{Type: webproto.TypeRun, RunID: runID, Payload: payload})
+	return p.dispatchMessage(agentID, turnID, WSMessage{Type: webproto.TypeRun, TurnID: turnID, Payload: payload})
 }
 
 func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.CommandPayload) (<-chan taskResult, error) {
@@ -446,7 +446,7 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 		if isToolCall {
 			return WSMessage{Type: "cancel", TaskID: taskID}
 		}
-		return WSMessage{Type: webproto.TypeRunCancel, RunID: taskID}
+		return WSMessage{Type: webproto.TypeRunCancel, TurnID: taskID}
 	}():
 	default:
 	}
@@ -916,7 +916,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
 		}
 
 	case "error":
-		correlationID := msg.RunID
+		correlationID := msg.TurnID
 		if correlationID == "" {
 			correlationID = msg.TaskID
 		}
@@ -997,7 +997,7 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 	// Session-topic broadcast is optional (scans dispatched outside chat have
 	// no chat session); task convergence below is not.
 	if p.sessions != nil {
-		if sid, ok := p.sessions.TaskSession(msg.RunID); ok {
+		if sid, ok := p.sessions.TaskSession(msg.TurnID); ok {
 			p.sessions.BroadcastAOPEvent(sid, aopEv)
 		} else if aopEv.SessionID != "" {
 			p.sessions.BroadcastAOPEvent(aopEv.SessionID, aopEv)
@@ -1006,7 +1006,7 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
 
 	switch aopEv.Type {
 	case aop.TypeTurnEnd:
-		p.convergeTaskOnTurnEnd(a, msg.RunID, aopEv)
+		p.convergeTaskOnTurnEnd(a, msg.TurnID, aopEv)
 
 	case aop.TypeToolResult:
 		p.convergeTaskOnToolResult(a, msg.TaskID, aopEv)

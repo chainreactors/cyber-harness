@@ -41,15 +41,15 @@ const (
 )
 
 type SessionSnapshot struct {
-	ID          string
-	ActiveRunID string
-	Pending     int
-	Closed      bool
-	Messages    []agent.ChatMessage
+	ID           string
+	ActiveTurnID string
+	Pending      int
+	Closed       bool
+	Messages     []agent.ChatMessage
 }
 
 type RunInput struct {
-	ID            string
+	TurnID        string
 	Parts         []aop.MessagePart
 	NoEcho        bool
 	MaxTurns      int
@@ -80,7 +80,7 @@ type Session struct {
 }
 
 type Run struct {
-	id     string
+	turnID string
 	log    *runEventLog
 	done   chan struct{}
 	mu     sync.Mutex
@@ -88,11 +88,11 @@ type Run struct {
 	err    error
 }
 
-func (r *Run) ID() string {
+func (r *Run) TurnID() string {
 	if r == nil {
 		return ""
 	}
-	return r.id
+	return r.turnID
 }
 
 func (r *Run) Events(ctx context.Context) <-chan aop.Event {
@@ -395,10 +395,10 @@ type sessionState struct {
 	ops       chan *sessionOperation
 	done      chan struct{}
 
-	mu          sync.Mutex
-	activeRunID string
-	pending     int
-	closed      bool
+	mu           sync.Mutex
+	activeTurnID string
+	pending      int
+	closed       bool
 }
 
 func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
@@ -552,7 +552,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 	}
 	state := s.state
 	state.mu.Lock()
-	snapshot := SessionSnapshot{ID: state.id, ActiveRunID: state.activeRunID, Pending: state.pending, Closed: state.closed}
+	snapshot := SessionSnapshot{ID: state.id, ActiveTurnID: state.activeTurnID, Pending: state.pending, Closed: state.closed}
 	state.mu.Unlock()
 	snapshot.Messages = state.agent.MessagesSnapshot()
 	return snapshot
@@ -562,31 +562,31 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	if !input.automatic && !input.Continue && !hasRunInput(input.Parts) {
 		return nil, fmt.Errorf("run input is empty")
 	}
-	runID := strings.TrimSpace(input.ID)
-	if runID == "" {
-		runID = s.runtime.nextRuntimeID("run")
+	turnID := strings.TrimSpace(input.TurnID)
+	if turnID == "" {
+		turnID = s.runtime.nextRuntimeID("turn")
 	}
 	s.runtime.mu.Lock()
-	if _, exists := s.runtime.runIDs[runID]; exists {
+	if _, exists := s.runtime.turnIDs[turnID]; exists {
 		s.runtime.mu.Unlock()
-		return nil, fmt.Errorf("run %q already exists", runID)
+		return nil, fmt.Errorf("turn %q already exists", turnID)
 	}
-	s.runtime.runIDs[runID] = struct{}{}
+	s.runtime.turnIDs[turnID] = struct{}{}
 	s.runtime.mu.Unlock()
 	log := newRunEventLog()
-	run := &Run{id: runID, log: log, done: make(chan struct{})}
-	emitter := &turnEmitter{sessionID: s.id, turnID: runID, agentName: s.agentName, emitter: s.runtime.sessionEvents, log: log}
+	run := &Run{turnID: turnID, log: log, done: make(chan struct{})}
+	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents, log: log}
 	unsubscribe := s.runtime.Subscribe(emitter.observe)
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
-			defer s.runtime.releaseRunID(runID)
+			defer s.runtime.releaseTurnID(turnID)
 			defer unsubscribe()
 			s.mu.Lock()
-			s.activeRunID = runID
+			s.activeTurnID = turnID
 			s.mu.Unlock()
 			s.inbox.setActive(true)
 			emitter.start()
-			result, runErr := s.executeRun(runCtx, runID, input)
+			result, runErr := s.executeRun(runCtx, turnID, input)
 			runResult := RunResult{}
 			contextTokens := 0
 			if result != nil {
@@ -600,12 +600,12 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			emitter.end(runResult, contextTokens, runErr)
 			s.inbox.setActive(false)
 			s.mu.Lock()
-			s.activeRunID = ""
+			s.activeTurnID = ""
 			s.mu.Unlock()
 			run.finish(runResult, runErr)
 		},
 		reject: func(err error) {
-			defer s.runtime.releaseRunID(runID)
+			defer s.runtime.releaseTurnID(turnID)
 			defer unsubscribe()
 			result := RunResult{Stop: agent.StopReasonCanceled}
 			if !errors.Is(err, context.Canceled) {
@@ -618,7 +618,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	}
 	if err := s.admit(ctx, op); err != nil {
 		unsubscribe()
-		s.runtime.releaseRunID(runID)
+		s.runtime.releaseTurnID(turnID)
 		return nil, err
 	}
 	return run, nil
@@ -636,9 +636,9 @@ func hasRunInput(parts []aop.MessagePart) bool {
 	return false
 }
 
-func (s *sessionState) executeRun(ctx context.Context, runID string, input RunInput) (*agent.Result, error) {
+func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunInput) (*agent.Result, error) {
 	if input.automatic || input.Continue {
-		return s.agent.Continue(ctx, agent.WithTurnID(runID), agent.WithRunMaxTurns(input.MaxTurns))
+		return s.agent.Continue(ctx, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 	}
 	if input.EvalCriteria == "" {
 		input.EvalCriteria = s.commands.evalCriteria
@@ -652,12 +652,12 @@ func (s *sessionState) executeRun(ctx context.Context, runID string, input RunIn
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
 		evalConfig := evaluator.NewLoopConfig(provider, model, logger, inputText(agentInput), input.EvalCriteria, input.EvalMaxRounds)
-		evalConfig.TurnID = runID
+		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
-			agent.WithTurnID(runID), agent.WithRunMaxTurns(input.MaxTurns))
+			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 		return result, err
 	}
-	return s.agent.Run(ctx, agentInput, agent.WithTurnID(runID), agent.WithRunMaxTurns(input.MaxTurns))
+	return s.agent.Run(ctx, agentInput, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 }
 
 func (s *sessionState) startAutomaticRun() {
@@ -782,9 +782,9 @@ func (rt *AgentRuntime) nextRuntimeID(prefix string) string {
 	return id
 }
 
-func (rt *AgentRuntime) releaseRunID(runID string) {
+func (rt *AgentRuntime) releaseTurnID(turnID string) {
 	rt.mu.Lock()
-	delete(rt.runIDs, runID)
+	delete(rt.turnIDs, turnID)
 	rt.mu.Unlock()
 }
 

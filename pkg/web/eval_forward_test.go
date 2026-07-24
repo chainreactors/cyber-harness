@@ -39,7 +39,7 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	_ = xeval.SetDetail(&event, xeval.Detail{Round: 1, Pass: true, Reason: "found SQLi"})
 	_ = xcompact.SetDetail(&event, xcompact.Detail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
 	payload, _ := json.Marshal(event)
-	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", RunID: "run-1", Payload: payload})
+	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TurnID: "turn-1", Payload: payload})
 
 	if len(sink.chatEvents) != 0 {
 		t.Fatalf("AOP metadata was duplicated as chat events: %#v", sink.chatEvents)

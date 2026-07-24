@@ -46,10 +46,10 @@ func TestRunAndCommandErrorsKeepDistinctCorrelationIDs(t *testing.T) {
 
 	var runError webproto.Message
 	wait := h.HandleRun(context.Background(), webproto.Message{
-		Type: webproto.TypeRun, RunID: "run-1", Payload: json.RawMessage(`{`),
+		Type: webproto.TypeRun, TurnID: "turn-1", Payload: json.RawMessage(`{`),
 	}, func(message webproto.Message) { runError = message })
 	wait()
-	if runError.Type != webproto.TypeError || runError.RunID != "run-1" || runError.TaskID != "" {
+	if runError.Type != webproto.TypeError || runError.TurnID != "turn-1" || runError.TaskID != "" {
 		t.Fatalf("run error correlation = %+v", runError)
 	}
 
@@ -57,7 +57,7 @@ func TestRunAndCommandErrorsKeepDistinctCorrelationIDs(t *testing.T) {
 	h.HandleCommand(context.Background(), webproto.Message{
 		Type: webproto.TypeCommand, TaskID: "command-1", Payload: json.RawMessage(`{`),
 	}, func(message webproto.Message) { commandError = message })
-	if commandError.Type != webproto.TypeError || commandError.TaskID != "command-1" || commandError.RunID != "" {
+	if commandError.Type != webproto.TypeError || commandError.TaskID != "command-1" || commandError.TurnID != "" {
 		t.Fatalf("command error correlation = %+v", commandError)
 	}
 }

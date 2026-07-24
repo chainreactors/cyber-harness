@@ -29,7 +29,7 @@ func forwardEvent(t *testing.T, pool *AgentPool, remote *remoteAgent, taskID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", RunID: taskID, Payload: payload})
+	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TurnID: taskID, Payload: payload})
 }
 
 func newChatTaskRemote() (*remoteAgent, chan taskResult) {

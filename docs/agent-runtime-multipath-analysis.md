@@ -10,7 +10,7 @@ Session
 ```
 
 - `Session` 持有累计对话、Inbox、LoopScheduler 和命令状态；
-- 一次 `Run` 是一个完整 ReAct loop，对外使用 `run_id`，AOP 使用同值的 `turn_id`；
+- 一次 `Run` 是一个完整 ReAct loop；`Run` 只是 API 名，唯一执行标识始终是 `turn_id`；
 - `Command` 是唯一不创建 Turn 的直接执行接口；
 - REPL、stdio、WebSocket、one-shot 和 scanner 均通过 `OpenSession`、`Session.Run`、`Session.Command` 执行。
 
@@ -24,7 +24,7 @@ Session 必须显式打开和关闭：
 
 ```text
 session.start
-  turn.start (turn_id = run_id)
+  turn.start (turn_id)
     message / status / tool.call / tool.result / usage
   turn.end
   ... more Runs ...
@@ -61,8 +61,8 @@ aop
 error
 ```
 
-- Web Run 只使用 `run_id` 关联；AOP envelope 的 `turn_id` 与其严格相等；
-- Runner 身份使用注册消息中的 `NodeRef.ID`；它是节点路由身份，不进入 `Session → Run` 领域模型，也不与 `run_id` 混用；
+- Web Run API 只使用 `turn_id` 关联；协议中不存在独立的 `run_id`；
+- Runner 身份使用注册消息中的 `NodeRef.ID`；它是节点路由身份，不进入 `Session → Run` 领域模型，也不与 `turn_id` 混用；
 - direct structured tool execution 使用 `command / command.result`，不再把 inbound AOP 当 RPC；
 - PTY、file RPC、node status/config 仍属于各自控制或终端平面，不伪装成 Agent Turn。
 

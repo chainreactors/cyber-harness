@@ -33,7 +33,7 @@ func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event,
 	var events []aop.Event
 	decoder := json.NewDecoder(input)
 	sessionID := ""
-	runID := ""
+	turnID := ""
 	var agentErr error
 
 	for {
@@ -90,10 +90,10 @@ func consumeAgentStream(input io.Reader, monitor *Monitor) (string, []aop.Event,
 			if event.SessionID != sessionID {
 				continue
 			}
-			if runID == "" && event.Type == aop.TypeTurnStart {
-				runID = event.TurnID
+			if turnID == "" && event.Type == aop.TypeTurnStart {
+				turnID = event.TurnID
 			}
-			if runID != "" && event.TurnID != "" && event.TurnID != runID {
+			if turnID != "" && event.TurnID != "" && event.TurnID != turnID {
 				continue
 			}
 			switch event.Type {

@@ -12,7 +12,7 @@ import (
 
 type Message struct {
 	Type    string          `json:"type"`
-	RunID   string          `json:"run_id,omitempty"`
+	TurnID  string          `json:"turn_id,omitempty"`
 	TaskID  string          `json:"task_id,omitempty"`
 	Data    string          `json:"data,omitempty"`
 	DataB64 string          `json:"data_b64,omitempty"`

@@ -112,7 +112,7 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return err
 	}
 	chatHandler.sessions["startup"] = startup
-	run, err := startup.Run(ctx, runner.RunInput{ID: "startup", Parts: []aop.MessagePart{{Type: aop.PartText, Text: task}}})
+	run, err := startup.Run(ctx, runner.RunInput{TurnID: "startup", Parts: []aop.MessagePart{{Type: aop.PartText, Text: task}}})
 	if err == nil {
 		_, err = run.Wait()
 	}
@@ -178,18 +178,18 @@ func (h *chatAgentHandler) HandleSessionClose(ctx context.Context, msg webproto.
 func (h *chatAgentHandler) HandleRun(ctx context.Context, msg webproto.Message, send func(webproto.Message)) func() {
 	var payload webproto.RunPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		return func() { sendProtocolError(send, msg.RunID, "", err) }
+		return func() { sendProtocolError(send, msg.TurnID, "", err) }
 	}
 	h.mu.Lock()
 	session := h.sessions[payload.SessionID]
 	h.mu.Unlock()
 	if session == nil {
 		return func() {
-			sendProtocolError(send, msg.RunID, "", fmt.Errorf("session %q is not open", payload.SessionID))
+			sendProtocolError(send, msg.TurnID, "", fmt.Errorf("session %q is not open", payload.SessionID))
 		}
 	}
 	input := runner.RunInput{
-		ID: msg.RunID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
+		TurnID: msg.TurnID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
 		EvalCriteria: payload.EvalCriteria, EvalMaxRounds: payload.EvalMaxRounds,
 	}
 	prompt := strings.TrimSpace(partsText(payload.Parts))
@@ -201,7 +201,7 @@ func (h *chatAgentHandler) HandleRun(ctx context.Context, msg webproto.Message, 
 	}
 	run, err := session.Run(ctx, input)
 	if err != nil {
-		return func() { sendProtocolError(send, msg.RunID, "", err) }
+		return func() { sendProtocolError(send, msg.TurnID, "", err) }
 	}
 	return func() { _, _ = run.Wait() }
 }
@@ -233,9 +233,9 @@ func (h *chatAgentHandler) HandleCommand(ctx context.Context, msg webproto.Messa
 	send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: msg.TaskID, Payload: encoded})
 }
 
-func sendProtocolError(send func(webproto.Message), runID, taskID string, err error) {
+func sendProtocolError(send func(webproto.Message), turnID, taskID string, err error) {
 	payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
-	send(webproto.Message{Type: webproto.TypeError, RunID: runID, TaskID: taskID, Payload: payload})
+	send(webproto.Message{Type: webproto.TypeError, TurnID: turnID, TaskID: taskID, Payload: payload})
 }
 
 func partsText(parts []aop.MessagePart) string {

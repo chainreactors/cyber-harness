@@ -27,7 +27,7 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 	kernelBus.Subscribe(events.emit)
 	rt := &AgentRuntime{
 		app: &App{Commands: reg}, option: &cfg.Option{}, ctx: ctx, cancel: cancel,
-		sessions: make(map[string]*sessionState), runIDs: make(map[string]struct{}),
+		sessions: make(map[string]*sessionState), turnIDs: make(map[string]struct{}),
 		bus: publicBus, kernelBus: kernelBus, sessionEvents: events,
 		config: agent.Config{Provider: provider, Tools: reg, Bus: kernelBus, Logger: telemetry.NopLogger()},
 	}

@@ -31,9 +31,9 @@ func openSessionLine(t *testing.T, sessionID string) string {
 	return protocolLine(t, webproto.Message{Type: webproto.TypeSessionOpen, Payload: mustJSON(t, webproto.SessionOpenPayload{SessionID: sessionID})})
 }
 
-func runLine(t *testing.T, sessionID, runID, text string) string {
+func runLine(t *testing.T, sessionID, turnID, text string) string {
 	return protocolLine(t, webproto.Message{
-		Type: webproto.TypeRun, RunID: runID,
+		Type: webproto.TypeRun, TurnID: turnID,
 		Payload: mustJSON(t, webproto.RunPayload{SessionID: sessionID, Parts: []aop.MessagePart{{Type: aop.PartText, Text: text}}}),
 	})
 }
@@ -67,7 +67,7 @@ func TestStdioRunRequiresOpenSession(t *testing.T) {
 	var output bytes.Buffer
 	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
-	h.accept(runLine(t, "s1", "run-1", "hello"))
+	h.accept(runLine(t, "s1", "turn-1", "hello"))
 	messages := decodeProtocolLines(t, &output)
 	if len(messages) != 1 || messages[0].Type != webproto.TypeError {
 		t.Fatalf("messages = %#v", messages)
@@ -79,7 +79,7 @@ func TestStdioRunRejectsEmptyPrompt(t *testing.T) {
 	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
 	h.accept(openSessionLine(t, "s1"))
-	h.accept(runLine(t, "s1", "run-1", "   "))
+	h.accept(runLine(t, "s1", "turn-1", "   "))
 	h.drain()
 	messages := decodeProtocolLines(t, &output)
 	if messages[len(messages)-1].Type != webproto.TypeError {
@@ -106,7 +106,7 @@ func TestStdioCommandUsesTaskIDCorrelation(t *testing.T) {
 		if message.Type != webproto.TypeCommandResult {
 			continue
 		}
-		if message.TaskID != "command-1" || message.RunID != "" {
+		if message.TaskID != "command-1" || message.TurnID != "" {
 			t.Fatalf("command result correlation = %+v", message)
 		}
 		return

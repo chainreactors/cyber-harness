@@ -91,7 +91,7 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 			Data: mustJSON(aop.ToolCallData{ToolCallID: "tc-1", ToolName: "bash", Args: map[string]string{"command": "ls"}}),
 		},
 		{
-			Type: aop.TypeTurnEnd, TS: "2026-07-19T00:00:03Z", SessionID: session.ID, TurnID: "run-1", Agent: "aiscan",
+			Type: aop.TypeTurnEnd, TS: "2026-07-19T00:00:03Z", SessionID: session.ID, TurnID: "turn-1", Agent: "aiscan",
 			Data: mustJSON(aop.TurnEndData{Stop: "completed"}),
 		},
 	}

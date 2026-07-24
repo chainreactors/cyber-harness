@@ -3,6 +3,7 @@ package webproto
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
@@ -11,13 +12,20 @@ import (
 
 func TestRunFrameRoundTrip(t *testing.T) {
 	want := RunPayload{SessionID: "session-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}}, NoEcho: true, EvalCriteria: "find one SQLi", EvalMaxRounds: 5}
-	msg := Message{Type: TypeRun, RunID: "run-1", Payload: MustJSON(want)}
+	msg := Message{Type: TypeRun, TurnID: "turn-1", Payload: MustJSON(want)}
 	var got RunPayload
 	if err := json.Unmarshal(msg.Payload, &got); err != nil {
 		t.Fatal(err)
 	}
-	if msg.RunID != "run-1" || got.SessionID != want.SessionID || len(got.Parts) != 1 || got.Parts[0].Text != "audit target" || !got.NoEcho || got.EvalMaxRounds != 5 {
+	if msg.TurnID != "turn-1" || got.SessionID != want.SessionID || len(got.Parts) != 1 || got.Parts[0].Text != "audit target" || !got.NoEcho || got.EvalMaxRounds != 5 {
 		t.Fatalf("run frame = %+v %+v", msg, got)
+	}
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"turn_id":"turn-1"`) || strings.Contains(string(encoded), "run_id") {
+		t.Fatalf("run frame JSON = %s", encoded)
 	}
 }
 

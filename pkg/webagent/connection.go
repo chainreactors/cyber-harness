@@ -224,7 +224,7 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 	var mu sync.Mutex
 	execTasks := make(map[string]context.CancelFunc) // active tool.call tasks
-	runCancels := make(map[string]context.CancelFunc)
+	turnCancels := make(map[string]context.CancelFunc)
 
 	// Tool telemetry: scanner tool.data and normalized tool.sco events ride the
 	// same connection, correlated to the calling task by call ID.
@@ -232,9 +232,8 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		defer detach()
 	}
 
-	// Runtime AOP is forwarded verbatim. Run correlation is the protocol's
-	// run_id/turn_id identity, so no connection-local session routing table is
-	// needed.
+	// Runtime AOP is forwarded verbatim. A Run API is correlated exclusively by
+	// turn_id, so no connection-local session routing table is needed.
 	if cc.AgentSubscribe != nil {
 		unsub := cc.AgentSubscribe(func(e aop.Event) {
 			if next, ok := stats.Observe(e); ok {
@@ -247,7 +246,7 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			}
 			send(webproto.Message{
 				Type:    webproto.TypeAOP,
-				RunID:   e.TurnID,
+				TurnID:  e.TurnID,
 				Payload: payload,
 			})
 		})
@@ -311,23 +310,23 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			}
 
 		case webproto.TypeRun:
-			if cc.Chat == nil || msg.RunID == "" {
+			if cc.Chat == nil || msg.TurnID == "" {
 				continue
 			}
 			runCtx, runCancel := context.WithCancel(connectionCtx)
 			mu.Lock()
-			runCancels[msg.RunID] = runCancel
+			turnCancels[msg.TurnID] = runCancel
 			mu.Unlock()
 			wait := cc.Chat.HandleRun(runCtx, msg, send)
-			go func(runID string) {
+			go func(turnID string) {
 				defer runCancel()
 				defer func() {
 					mu.Lock()
-					delete(runCancels, runID)
+					delete(turnCancels, turnID)
 					mu.Unlock()
 				}()
 				wait()
-			}(msg.RunID)
+			}(msg.TurnID)
 
 		case webproto.TypeCommand:
 			var command webproto.CommandPayload
@@ -395,7 +394,7 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 		case webproto.TypeRunCancel:
 			mu.Lock()
-			cancel := runCancels[msg.RunID]
+			cancel := turnCancels[msg.TurnID]
 			mu.Unlock()
 			if cancel != nil {
 				cancel()

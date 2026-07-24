@@ -72,7 +72,7 @@ func (h *stdioHost) init() error {
 	rt.Subscribe(func(event aop.Event) {
 		payload, err := json.Marshal(event)
 		if err == nil {
-			_ = h.emit(webproto.Message{Type: webproto.TypeAOP, RunID: event.TurnID, Payload: payload})
+			_ = h.emit(webproto.Message{Type: webproto.TypeAOP, TurnID: event.TurnID, Payload: payload})
 		}
 	})
 	return nil
@@ -97,9 +97,9 @@ func (h *stdioHost) emit(message webproto.Message) error {
 	return nil
 }
 
-func (h *stdioHost) emitError(runID string, err error) {
+func (h *stdioHost) emitError(turnID string, err error) {
 	payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
-	_ = h.emit(webproto.Message{Type: webproto.TypeError, RunID: runID, Payload: payload})
+	_ = h.emit(webproto.Message{Type: webproto.TypeError, TurnID: turnID, Payload: payload})
 }
 
 func (h *stdioHost) emitTaskError(taskID string, err error) {
@@ -162,29 +162,29 @@ func (h *stdioHost) accept(line string) {
 	case webproto.TypeRun:
 		var payload webproto.RunPayload
 		if err := json.Unmarshal(message.Payload, &payload); err != nil {
-			h.emitError(message.RunID, err)
+			h.emitError(message.TurnID, err)
 			return
 		}
 		h.mu.Lock()
 		session := h.sessions[payload.SessionID]
 		h.mu.Unlock()
 		if session == nil {
-			h.emitError(message.RunID, fmt.Errorf("session %q is not open", payload.SessionID))
+			h.emitError(message.TurnID, fmt.Errorf("session %q is not open", payload.SessionID))
 			return
 		}
 		runCtx, cancel := context.WithCancel(h.ctx)
 		run, err := session.Run(runCtx, RunInput{
-			ID: message.RunID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
+			TurnID: message.TurnID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
 			EvalCriteria: payload.EvalCriteria, EvalMaxRounds: payload.EvalMaxRounds,
 		})
 		if err != nil {
 			cancel()
-			h.emitError(message.RunID, err)
+			h.emitError(message.TurnID, err)
 			return
 		}
-		runID := run.ID()
+		turnID := run.TurnID()
 		h.mu.Lock()
-		h.runs[runID] = cancel
+		h.runs[turnID] = cancel
 		h.mu.Unlock()
 		h.wg.Add(1)
 		go func() {
@@ -192,16 +192,16 @@ func (h *stdioHost) accept(line string) {
 			defer cancel()
 			_, _ = run.Wait()
 			h.mu.Lock()
-			delete(h.runs, runID)
+			delete(h.runs, turnID)
 			h.mu.Unlock()
 		}()
 
 	case webproto.TypeRunCancel:
 		h.mu.Lock()
-		cancel := h.runs[message.RunID]
+		cancel := h.runs[message.TurnID]
 		h.mu.Unlock()
 		if cancel == nil {
-			h.emitError(message.RunID, fmt.Errorf("run %q is not active", message.RunID))
+			h.emitError(message.TurnID, fmt.Errorf("turn %q is not active", message.TurnID))
 			return
 		}
 		cancel()
@@ -234,7 +234,7 @@ func (h *stdioHost) accept(line string) {
 		}()
 
 	default:
-		h.emitError(message.RunID, fmt.Errorf("unsupported frame type %q", message.Type))
+		h.emitError(message.TurnID, fmt.Errorf("unsupported frame type %q", message.Type))
 	}
 }
 

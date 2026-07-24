@@ -56,9 +56,12 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{ID: "run-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hello"}}})
+	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hello"}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if run.TurnID() != "turn-1" {
+		t.Fatalf("turn id = %q", run.TurnID())
 	}
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
@@ -67,7 +70,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	var replay []aop.Event
 	for event := range run.Events(context.Background()) {
 		replay = append(replay, event)
-		if event.SessionID != "session-1" || event.TurnID != "run-1" {
+		if event.SessionID != "session-1" || event.TurnID != "turn-1" {
 			t.Fatalf("run event identity = %+v", event)
 		}
 	}
@@ -132,7 +135,7 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{ID: "run-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "start"}}})
+	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "start"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

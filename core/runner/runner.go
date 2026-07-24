@@ -45,7 +45,7 @@ type AgentRuntime struct {
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
 	sessions       map[string]*sessionState
-	runIDs         map[string]struct{}
+	turnIDs        map[string]struct{}
 	requestSeq     uint64
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
@@ -88,7 +88,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		ctx:      runtimeCtx,
 		cancel:   runtimeCancel,
 		sessions: make(map[string]*sessionState),
-		runIDs:   make(map[string]struct{}),
+		turnIDs:  make(map[string]struct{}),
 	}
 	if rc != nil {
 		rt.replMode = rc.REPLMode
