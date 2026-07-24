@@ -115,6 +115,20 @@ func (c *Command) Usage() string {
 	return toolargs.GoFlagsHelp("neutron", &options)
 }
 
+func (c *Command) QuickReference() string {
+	return `### neutron — POC/vulnerability scanner (nuclei-style)
+  -i, -u <target>  Target URL/host (repeatable, -l for list file)
+  -t <path>        Extra template file or directory
+  --finger <name>  Only run templates matching these fingerprints
+  --tags <tags>    Filter templates by tag;  -s <sev>  Filter by severity
+  --id <ids>       Run specific template IDs;  --template-list  List and exit
+  -j               JSON Lines output
+  Examples:
+    neutron -i http://target.com
+    neutron -i http://target.com --finger nginx --tags cve
+    neutron -l targets.txt -s high,critical -j`
+}
+
 func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("neutron", &err)
 	args := execution.Args
@@ -233,23 +247,23 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
-				sb.WriteString(formatNeutronResult(record, jsonOutput))
+				line := formatNeutronResult(record, jsonOutput)
+				sb.WriteString(line)
+				fmt.Fprint(execution.Stdout, line)
 			}
 		}
 		if ctx.Err() != nil {
-			fmt.Fprint(execution.Stdout, sb.String())
 			return nil, fmt.Errorf("neutron: %w", ctx.Err())
 		}
 	}
 
 	if statsEnabled && !flags.Silent && !jsonOutput {
-		sb.WriteString(fmt.Sprintf("[neutron] completed targets=%d templates=%d executed=%d matched=%d errors=%d\n",
-			summary.Targets, summary.Templates, summary.Executed, summary.Matched, summary.Errors))
+		line := fmt.Sprintf("[neutron] completed targets=%d templates=%d executed=%d matched=%d errors=%d\n",
+			summary.Targets, summary.Templates, summary.Executed, summary.Matched, summary.Errors)
+		sb.WriteString(line)
+		fmt.Fprint(execution.Stdout, line)
 	}
-	result, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
-	if result != "" {
-		fmt.Fprint(execution.Stdout, result)
-	}
+	_, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
 	return nil, wErr
 }
 

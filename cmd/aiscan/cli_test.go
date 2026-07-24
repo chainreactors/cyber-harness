@@ -208,6 +208,30 @@ func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 	}
 }
 
+func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
+	help, ok := cfg.StaticScannerUsage("proton")
+	if !ok {
+		t.Fatal("proton scanner help was not registered")
+	}
+	for _, want := range []string{"Usage: proton", "--template-list", "--severity"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("proton help missing %q:\n%s", want, help)
+		}
+	}
+
+	parsed, err := parseCLI([]string{"proton", "-i", "config.yaml", "-j"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Mode != cfg.RunModeScanner {
+		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeScanner)
+	}
+	wantArgs := []string{"proton", "-i", "config.yaml", "-j"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
 func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"scan",

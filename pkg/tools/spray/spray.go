@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -70,6 +71,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
+	jsonOut := toolargs.BoolFlagEnabled(args, "-j") || toolargs.BoolFlagEnabled(args, "--json")
 	if debug {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
@@ -109,6 +111,11 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		},
 		OnResult: func(r *parsers.SprayResult) {
 			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, r.UrlString, r)
+			if debug {
+				// spray core prints results itself when not quiet
+				return
+			}
+			writeResult(execution.Stdout, r, jsonOut)
 		},
 	}
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), runOpts); err != nil {
@@ -117,6 +124,19 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	}
 	fmt.Fprint(execution.Stdout, buf.String())
 	return nil, nil
+}
+
+func writeResult(w io.Writer, result *parsers.SprayResult, jsonOutput bool) {
+	if result == nil {
+		return
+	}
+	line := result.String()
+	if jsonOutput {
+		line = result.ToJson()
+	}
+	if line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // TestInjectProxy is exported for cross-package testing.

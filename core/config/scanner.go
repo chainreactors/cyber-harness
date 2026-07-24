@@ -23,6 +23,7 @@ type ScannerCommands struct {
 	Katana  struct{} `command:"katana" description:"Run katana web crawler"`
 	Zombie  struct{} `command:"zombie" description:"Run zombie weakpass scanner"`
 	Neutron struct{} `command:"neutron" description:"Run neutron POC scanner"`
+	Proton  struct{} `command:"proton" description:"Run proton sensitive info scanner"`
 	Passive struct{} `command:"passive" description:"Run passive cyberspace recon"`
 }
 

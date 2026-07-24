@@ -420,7 +420,7 @@ func summarizeToolArgs(name, arguments string) string {
 		return TruncateStr(arguments, 80)
 	}
 	switch name {
-	case "bash", "scan", "gogo", "spray", "zombie", "neutron", "katana", "passive":
+	case "bash", "scan", "gogo", "spray", "zombie", "neutron", "proton", "katana", "passive":
 		if cmd, ok := args["command"].(string); ok {
 			return TruncateStr(cmd, 120)
 		}

@@ -171,7 +171,7 @@ func isToolMetaLine(line string) bool {
 
 var knownScanners = map[string]bool{
 	"scan": true, "gogo": true, "spray": true, "zombie": true,
-	"neutron": true, "katana": true, "passive": true,
+	"neutron": true, "proton": true, "katana": true, "passive": true,
 }
 
 func extractPseudoCommand(cmdLine string) (tool, target string) {

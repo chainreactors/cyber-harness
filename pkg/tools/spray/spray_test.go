@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	spraypkg "github.com/chainreactors/spray/pkg"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func TestWithDefaultNoBarAppendsFlag(t *testing.T) {
@@ -52,6 +53,26 @@ func TestWithDefaultScannerFlagsAppendsFlags(t *testing.T) {
 	want := []string{"-u", "http://127.0.0.1", "--no-bar", "--no-stat"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withDefaultScannerFlags() = %#v, want %#v", got, want)
+	}
+}
+
+func TestWriteResultSupportsTextAndJSON(t *testing.T) {
+	result := &parsers.SprayResult{
+		UrlString: "http://example.test",
+		Status:    200,
+		Source:    parsers.CheckSource,
+	}
+
+	var textOutput bytes.Buffer
+	writeResult(&textOutput, result, false)
+	if got := textOutput.String(); !strings.Contains(got, "http://example.test") || !strings.Contains(got, "200") {
+		t.Fatalf("text output = %q", got)
+	}
+
+	var jsonOutput bytes.Buffer
+	writeResult(&jsonOutput, result, true)
+	if got := jsonOutput.String(); !strings.Contains(got, `"url":"http://example.test"`) || !strings.Contains(got, `"status":200`) {
+		t.Fatalf("JSON output = %q", got)
 	}
 }
 

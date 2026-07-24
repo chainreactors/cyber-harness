@@ -592,7 +592,7 @@ func directScannerDebugEnabled(option *cfg.Option, scannerArgs []string) bool {
 
 func scannerCommandSupportsDebug(name string) bool {
 	switch name {
-	case "scan", "gogo", "spray", "zombie", "neutron":
+	case "scan", "gogo", "spray", "zombie", "neutron", "proton":
 		return true
 	default:
 		return false
