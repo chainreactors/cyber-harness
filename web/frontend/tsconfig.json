@@ -25,9 +25,9 @@
       "@cyber/terminal": ["./cyber-ui/packages/terminal/src"],
       "@cyber/cstx": ["./cyber-ui/packages/cstx/src"],
       "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"],
-      "@cyber/agent-protocol": ["./cyber-ui/packages/agent-protocol/src"],
+      "@cyber/agent-protocol": ["./src/compat/agent-protocol.ts"],
       "@cyber/viewer": ["./cyber-ui/packages/viewer/src"],
-      "@cyber/ioa": ["./cyber-ui/packages/ioa/src"]
+      "@cyber/ioa": ["./src/compat/ioa.tsx"]
     }
   },
   "include": [

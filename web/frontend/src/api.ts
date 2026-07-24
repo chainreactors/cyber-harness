@@ -19,7 +19,7 @@ export interface ScanJob {
 }
 
 import type { SCONode } from '@cyber/cstx-easm';
-import type { AOPEvent } from '../cyber-ui/packages/agent-protocol/src/types';
+import type { AOPEvent } from '@cyber/agent-protocol';
 export type { SCONode };
 export type { AOPEvent };
 
