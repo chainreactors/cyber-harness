@@ -39,6 +39,7 @@ import {
   type ExtensionTimelineItem,
   type Mentionable,
   type ChatInputProps,
+  type CyberTimelineItem,
   type ViewerTimelineItem,
   type AOPEvent,
 } from '@/viewer'
@@ -49,6 +50,8 @@ import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
+
+const webUserAgent = 'aiscan.web'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
@@ -92,6 +95,111 @@ function isPlatformMarkerEvent(event: AOPEvent): boolean {
   return false
 }
 
+// Agent and evaluator prompts also use role=user in AOP, but they are internal
+// execution inputs, not operator-authored chat messages. The hub is the sole
+// author of user messages on this surface, so keep only its canonical copy.
+function isInternalUserEvent(event: AOPEvent): boolean {
+  if (event.type !== 'message' || event.agent === webUserAgent) return false
+  const data = event.data as { role?: string } | undefined
+  return data?.role === 'user'
+}
+
+function eventText(event: AOPEvent): string {
+  const data = event.data as {
+    content?: string
+    parts?: Array<{ type?: string; text?: string }>
+  } | undefined
+  if (typeof data?.content === 'string') return data.content
+  return (data?.parts ?? [])
+    .filter((part) => part.type === 'text' && part.text)
+    .map((part) => part.text as string)
+    .join('\n')
+}
+
+function extensionBlock(event: AOPEvent): Record<string, unknown> {
+  for (const value of Object.values(event.ext ?? {})) {
+    if (value && typeof value === 'object') return value as Record<string, unknown>
+  }
+  return {}
+}
+
+function reduceConversationAOP(
+  events: AOPEvent[],
+  sourceEvents: AOPEvent[],
+  streaming: boolean,
+): ViewerTimelineItem[] {
+  const childStarts = new Map<string, AOPEvent>()
+  const visibleSessionIDs = new Set(events.map((event) => event.session_id))
+  for (const event of events) {
+    if (event.type !== 'session.start') continue
+    const data = event.data as { parent_session_id?: string; parent_tool_call_id?: string }
+    const ext = extensionBlock(event)
+    const delegated = !!data.parent_tool_call_id
+      || (ext.delegation !== null && typeof ext.delegation === 'object')
+    // The root agent also points at the platform chat session, which is not an
+    // AOP stream. Only fold a run when its parent is another visible AOP session.
+    if (delegated && data.parent_session_id && visibleSessionIDs.has(data.parent_session_id)) {
+      childStarts.set(event.session_id, event)
+    }
+  }
+
+  const childIDs = new Set(childStarts.keys())
+  const topLevel = reduceAOPToTimeline(
+    events.filter((event) => !childIDs.has(event.session_id)),
+    { streaming, lifecycle: 'errors' },
+  ) as ViewerTimelineItem[]
+
+  const childRuns: ViewerTimelineItem[] = []
+  for (const [sessionID, start] of childStarts) {
+    const childEvents = events.filter((event) => event.session_id === sessionID)
+    const end = [...childEvents].reverse().find((event) => event.type === 'session.end')
+    const endData = end?.data as { stop?: string; error?: string } | undefined
+    const ext = extensionBlock(start)
+    const delegation = ext.delegation && typeof ext.delegation === 'object'
+      ? ext.delegation as Record<string, unknown>
+      : ext
+    const promptEvent = sourceEvents.find(
+      (event) => event.session_id === sessionID && isInternalUserEvent(event),
+    )
+    const stop = endData?.stop
+    const status = !end
+      ? 'running'
+      : stop === 'error'
+        ? 'failed'
+        : stop === 'canceled' || stop === 'terminated' || stop === 'stopped'
+          ? 'canceled'
+          : 'completed'
+    const timestamp = Date.parse(start.ts)
+    const items = reduceAOPToTimeline(childEvents, {
+      streaming: streaming && !end,
+      lifecycle: 'errors',
+    }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[]
+
+    childRuns.push({
+      id: `subagent:${sessionID}`,
+      kind: 'subagent_run',
+      timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+      actorName: start.agent,
+      name: typeof delegation.agent_name === 'string' ? delegation.agent_name : start.agent || 'Sub-agent',
+      prompt: typeof delegation.task === 'string' ? delegation.task : (promptEvent ? eventText(promptEvent) : ''),
+      mode: typeof delegation.run_mode === 'string' ? delegation.run_mode : undefined,
+      sessionID,
+      status,
+      items,
+    })
+  }
+
+  return [...topLevel, ...childRuns].sort(
+    (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
+  )
+}
+
+function isUserMessageItem(
+  item: ViewerTimelineItem,
+): item is Extract<CyberTimelineItem, { kind: 'message' }> {
+  return item.kind === 'message' && item.role === 'user'
+}
+
 function toViewerTimelineItem(
   item: TimelineItem,
   scanResults: Map<string, ScanResult>,
@@ -100,6 +208,7 @@ function toViewerTimelineItem(
     case 'message': {
       const message = item.message
       if (!message) return null
+      if (message.role === 'user' && message.agent_name && message.agent_name !== webUserAgent) return null
       const role = message.role === 'user' || message.role === 'assistant'
         ? message.role
         : 'system'
@@ -184,7 +293,10 @@ export default function ChatPanel({
   onClearError,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
-  const agentEvents = useMemo(() => aopEvents.filter((event) => !isPlatformMarkerEvent(event)), [aopEvents])
+  const agentEvents = useMemo(
+    () => aopEvents.filter((event) => !isPlatformMarkerEvent(event) && !isInternalUserEvent(event)),
+    [aopEvents],
+  )
   const liveThinkingItem = useMemo<TimelineItem | null>(() => {
     if (!isThinking) return null
     return { id: 'thinking-live', kind: 'thinking', timestamp: Date.now() }
@@ -197,22 +309,42 @@ export default function ChatPanel({
       .filter((item) => agentEvents.length === 0
         || item.kind === 'extension'
         || (item.kind === 'message' && item.role === 'user'))
-    const aopItems = reduceAOPToTimeline(agentEvents, { streaming: isBusy })
-      .filter((item) => item.kind !== 'message'
-        || item.role !== 'user'
-        || !platformItems.some(
-          (existing) => existing.kind === 'message'
-            && existing.role === 'user'
-            && existing.content === item.content,
-        ))
-    return [...platformItems, ...aopItems].sort(
+    const aopItems = reduceConversationAOP(agentEvents, aopEvents, isBusy)
+
+    // The optimistic user bubble is stamped with the browser clock (Date.now at
+    // send time); every agent event is stamped by the agent host. This merged
+    // transcript is ordered purely by timestamp, so a browser running even a few
+    // seconds ahead of the agent host would sort the user's own message *after*
+    // the reply it triggered. The hub re-emits each user message into the AOP
+    // stream stamped with the server clock — the same clock domain as the agent's
+    // turn — so pair each optimistic bubble with that echo, adopt its timestamp,
+    // and drop the echo as a duplicate. User and assistant then share one clock
+    // and stay in causal order regardless of browser/host skew.
+    const matchedEchoes = new Set<ViewerTimelineItem>()
+    for (const platform of platformItems) {
+      if (!isUserMessageItem(platform)) continue
+      const echo = aopItems.find(
+        (item) => isUserMessageItem(item) && item.content === platform.content && !matchedEchoes.has(item),
+      )
+      if (echo) {
+        platform.timestamp = echo.timestamp
+        matchedEchoes.add(echo)
+      }
+    }
+    const visibleAopItems = aopItems.filter((item) => !matchedEchoes.has(item))
+
+    return [...platformItems, ...visibleAopItems].sort(
       (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
     )
-  }, [agentEvents, isBusy, liveThinkingItem, scanResults, timeline])
+  }, [agentEvents, aopEvents, isBusy, liveThinkingItem, scanResults, timeline])
   // Keep the transcript geometry stable as IOA messages arrive. The right rail
   // is part of the desktop workspace even when the current session has no IOA
   // activity, so the conversation and composer never jump horizontally.
-  const inputFormClass = cn(contentOffsetClass, threadOffsetClass)
+  const hasIOARail = useMemo(
+    () => viewerTimeline.some((item) => describeIOAThreadItem(item, t) !== null),
+    [t, viewerTimeline],
+  )
+  const inputFormClass = cn(contentOffsetClass, hasIOARail && threadOffsetClass)
   const [persist, setPersist] = useState(false)
   // Goal mode: describe done-when criteria in natural language and let an
   // independent evaluator judge completion each round, re-driving the agent
@@ -397,27 +529,32 @@ export default function ChatPanel({
   )
 
   const emptyState = !hasActiveSession ? (
-    <div className={cn(workspaceClass, 'py-4')}>
+    <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-center py-4')}>
       <div className={inputFormClass}>
         <InstrumentIdle
           eyebrow={t('consoleReady')}
           title={t('startConversation')}
-          className="py-16"
         >
           {agents.length > 0 && (
             <div className="flex flex-wrap justify-center gap-2">
               {agents.map((agent) => (
-                <div key={agent.id} className="flex gap-1">
+                // Chat + Terminal read as one segmented control: a shared bordered
+                // surface with a hairline divider, so the pair no longer looks like
+                // a solid chip next to a stray bare link.
+                <div
+                  key={agent.id}
+                  className="inline-flex items-stretch divide-x divide-border overflow-hidden rounded-md border border-border bg-card shadow-soft"
+                >
                   {onCreateSession && (
-                    <Button size="sm" variant="outline" onClick={() => onCreateSession(agent.id)} className="gap-1.5">
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      {agent.name || 'Chat'}
+                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.id)} className="gap-1.5 rounded-none shadow-none">
+                      <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                      {agent.name || t('chat')}
                     </Button>
                   )}
                   {onOpenTerminal && (
-                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.id)} className="gap-1.5 text-muted-foreground">
+                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.id)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
                       <Terminal className="h-3.5 w-3.5" />
-                      Terminal
+                      {t('terminal')}
                     </Button>
                   )}
                 </div>
@@ -428,7 +565,9 @@ export default function ChatPanel({
       </div>
     </div>
   ) : !isThinking ? (
-    <div className={cn(workspaceClass, 'py-4')}>
+    // Desktop centers the "Ready" instrument in the empty thread; mobile keeps the
+    // greeting top-anchored (it's a full-height card grid, not a centered glyph).
+    <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-start py-4 md:justify-center')}>
       <div className={inputFormClass}>
         <div className="hidden md:block">
           <EmptyState
@@ -447,7 +586,10 @@ export default function ChatPanel({
   ) : null
 
   return (
-    <ViewerChatPanel timeline={viewerTimeline} className="min-w-0 bg-transparent">
+    <ViewerChatPanel
+      timeline={viewerTimeline as unknown as CyberTimelineItem[]}
+      className="min-w-0 bg-transparent"
+    >
       {error && (
         <ViewerChatPanel.ErrorBar>
           <div
@@ -466,7 +608,9 @@ export default function ChatPanel({
       <ViewerChatPanel.Timeline
         className="overscroll-contain !px-0 !py-0"
         contentClassName={cn(workspaceClass, 'py-4')}
-        railLayoutClassName="grid-cols-[0_minmax(0,1fr)_0] gap-x-0 lg:grid-cols-[0_minmax(0,1fr)_10rem] lg:gap-x-3 xl:grid-cols-[8rem_minmax(0,1fr)_11rem] 2xl:grid-cols-[10rem_minmax(0,1fr)_14rem]"
+        railLayoutClassName={hasIOARail
+          ? 'grid-cols-[0_minmax(0,1fr)_0] gap-x-0 lg:grid-cols-[0_minmax(0,1fr)_10rem] lg:gap-x-3 xl:grid-cols-[8rem_minmax(0,1fr)_11rem] 2xl:grid-cols-[10rem_minmax(0,1fr)_14rem]'
+          : 'grid-cols-[0_minmax(0,1fr)_0] gap-x-0 xl:grid-cols-[8rem_minmax(0,1fr)_0] xl:gap-x-3 2xl:grid-cols-[10rem_minmax(0,1fr)_0]'}
         emptyState={emptyState}
         renderItem={renderViewerItem}
         renderMark={renderViewerMark}
@@ -581,6 +725,8 @@ function timelineContent(
           role={item.role}
           actorName={item.actorName}
           timestamp={new Date(item.timestamp).toISOString()}
+          timeLabel={formatRailTime(item)}
+          headerClassName="xl:hidden"
         >
           {item.role === 'system' && systemCode(item.metadata) ? (
             <SystemMessageContent metadata={item.metadata!} fallback={item.content} />
@@ -602,6 +748,7 @@ function timelineContent(
           toolArgs={item.toolCall.toolArgs}
           result={item.toolCall.result}
           pending={item.toolCall.pending}
+          error={item.toolCall.error}
         />
       )
 
@@ -648,7 +795,12 @@ function timelineContent(
     }
 
     case 'divider':
-      return undefined
+      if (item.variant !== 'warning') return false
+      return (
+        <Callout tone="destructive" icon={<AlertTriangle className="h-3.5 w-3.5" />}>
+          {item.label}
+        </Callout>
+      )
 
     default:
       return null
@@ -702,7 +854,7 @@ function EvalNote({ pass, round, reason }: { pass: boolean; round?: number; reas
       className="rounded-lg"
     >
       <span className="font-medium">
-        {t('evalRound', { round: (round ?? 0) + 1 })} · {pass ? t('evalPass') : t('evalFail')}
+        {t('evalRound', { round: round ?? 1 })} · {pass ? t('evalPass') : t('evalFail')}
       </span>
       {reason ? <p className="mt-0.5 break-words text-muted-foreground">{reason}</p> : null}
     </Callout>
@@ -746,6 +898,17 @@ function AssistantResponseEntry({
   const message = response.response
   const hasThinking = !!response.thinking?.trim()
   const hasResponse = !!message?.content.trim()
+  // Fold the whole turn's tool calls under one disclosure so a long scan run
+  // doesn't sprawl the transcript. The header keeps a collapsed group legible:
+  // the tool count, plus a spinner while any call is still running.
+  const toolCount = response.tools.length
+  const toolsRunning = response.tools.some((tool) => tool.pending)
+  const toolsLabel = (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{toolCount} {toolCount === 1 ? t('tool') : t('tools')}</span>
+      {toolsRunning && <Loader2 className="h-3 w-3 animate-spin text-warning" />}
+    </span>
+  )
 
   return (
     <AssistantResponse
@@ -753,7 +916,7 @@ function AssistantResponseEntry({
       timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
       thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
-      tools={response.tools.length > 0 ? (
+      tools={toolCount > 0 ? (
         <div className="space-y-2">
           {response.tools.map((tool) => (
             <ScannerToolCall
@@ -763,12 +926,16 @@ function AssistantResponseEntry({
               toolArgs={tool.toolArgs}
               result={tool.result}
               pending={tool.pending}
+              error={tool.error}
             />
           ))}
         </div>
       ) : undefined}
       response={hasResponse ? <MarkdownContent content={trimDisplayContent(message?.content || '')} compact /> : undefined}
-      labels={{ tools: response.tools.length === 1 ? t('tool') : t('tools'), thinking: t('thinkingLabel'), response: t('responseLabel') }}
+      labels={{ tools: toolsLabel, thinking: t('thinkingLabel'), response: t('responseLabel') }}
+      headerClassName="xl:hidden"
+      timeLabel={formatRailTime(response)}
+      showResponseLabel={false}
     />
   )
 }
@@ -959,7 +1126,7 @@ function mergeIOAPayload(primary: IOAMessagePayload, fallback: IOAMessagePayload
 }
 
 function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: ReactNode }) {
-  return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} className="py-16" />
+  return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} />
 }
 
 // Phone-only greeting for a fresh, empty session: an AIScan hello + a 2×2 grid of

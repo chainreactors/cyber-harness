@@ -38,17 +38,19 @@ export default function SubagentRunCard({ run, children }: { run: SubagentRun; c
           </span>
         </>
       )}
-      collapsedPreview={(
+      collapsedPreview={run.prompt ? (
         <p className="truncate border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
           {run.prompt}
         </p>
-      )}
+      ) : undefined}
     >
       <div className="space-y-3 border-t border-border/60 px-3 py-3">
-        <div>
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Task</div>
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{run.prompt}</p>
-        </div>
+        {run.prompt && (
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Task</div>
+            <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{run.prompt}</p>
+          </div>
+        )}
         {run.sessionID && (
           <div className="font-mono text-[10px] text-muted-foreground">session {run.sessionID}</div>
         )}

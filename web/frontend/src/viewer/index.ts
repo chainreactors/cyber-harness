@@ -1,6 +1,23 @@
 // Re-export from the canonical @cyber/viewer package.
 // The local component forks are no longer maintained — use the upstream versions.
 
+import type { TimelineItem as CyberTimelineItem } from '../../cyber-ui/packages/viewer/src/types/timeline'
+
+export interface SubagentRunTimelineItem {
+  id: string
+  kind: 'subagent_run'
+  timestamp: number
+  actorName?: string
+  name: string
+  prompt: string
+  mode?: string
+  sessionID?: string
+  status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled'
+  items: ViewerTimelineItem[]
+}
+
+export type ViewerTimelineItem = CyberTimelineItem | SubagentRunTimelineItem
+
 export {
   stripAnsiControl,
   formatArgs,
@@ -25,8 +42,8 @@ export type {
   TimelineRendererConfig,
 } from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
 export type {
+  TimelineItem as CyberTimelineItem,
   ExtensionTimelineItem,
-  TimelineItem as ViewerTimelineItem,
 } from '../../cyber-ui/packages/viewer/src/types/timeline'
 export type { AOPEvent } from '@cyber/agent-protocol'
 

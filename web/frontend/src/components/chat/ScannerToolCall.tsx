@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Loader2, Wrench } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Check, CircleX, Loader2, Wrench } from 'lucide-react'
 import { EasmResultFromNodes, type SCONode } from '@cyber/cstx-easm'
 import { Badge, DisclosureCard } from '@cyber/ui'
 import { cn } from '@cyber/theme'
@@ -28,6 +29,7 @@ export interface ScannerToolCallProps {
   toolArgs?: string
   result?: string
   pending?: boolean
+  error?: boolean
 }
 
 export default function ScannerToolCall({
@@ -36,13 +38,15 @@ export default function ScannerToolCall({
   toolArgs = '',
   result,
   pending = false,
+  error = false,
 }: ScannerToolCallProps) {
+  const { t } = useTranslation('scan')
   const command = useMemo(() => scannerCommand(toolName, toolArgs), [toolName, toolArgs])
   const [nodes, setNodes] = useState<SCONode[] | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!command || !id || pending) return
+    if (!command || !id || pending || error) return
     let disposed = false
     setLoading(true)
     void listSCONodes({ scanId: id }).then((value) => {
@@ -53,7 +57,7 @@ export default function ScannerToolCall({
       if (!disposed) setLoading(false)
     })
     return () => { disposed = true }
-  }, [command, id, pending])
+  }, [command, error, id, pending])
 
   if (!command) {
     return (
@@ -62,6 +66,7 @@ export default function ScannerToolCall({
         toolArgs={toolArgs}
         result={result}
         pending={pending}
+        error={error}
       />
     )
   }
@@ -73,18 +78,32 @@ export default function ScannerToolCall({
   return (
     <DisclosureCard
       animated
-      defaultExpanded={!pending}
-      className={cn('transition-colors duration-200', pending ? 'border-warning/30' : 'border-border')}
+      // Collapsed by default (even once complete): a finished scan otherwise
+      // mounts a tall EASM table + raw-output block that buries the agent's
+      // written report — the operator can expand on demand. The result count in
+      // the header keeps a collapsed card informative.
+      defaultExpanded={false}
+      className={cn(
+        'transition-colors duration-200',
+        error ? 'border-destructive/35' : pending ? 'border-warning/30' : 'border-border',
+      )}
       header={
         <>
-          <Wrench className={cn('h-3.5 w-3.5 shrink-0', pending ? 'text-warning' : 'text-muted-foreground')} />
+          <Wrench className={cn('h-3.5 w-3.5 shrink-0', error ? 'text-destructive' : pending ? 'text-warning' : 'text-muted-foreground')} />
           <Badge variant="outline" size="sm" className="shrink-0 bg-muted/40 font-mono font-medium text-foreground">
             {command}
           </Badge>
           <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={summary || formattedArgs}>
-            {summary || (pending ? 'running' : 'completed')}
+            {summary || (error ? 'failed' : pending ? 'running' : 'completed')}
           </span>
-          {pending
+          {nodes && nodes.length > 0 && (
+            <Badge variant="muted" size="sm" className="shrink-0 rounded-full font-mono tabular-nums">
+              {nodes.length} {t('assets')}
+            </Badge>
+          )}
+          {error
+            ? <CircleX className="h-3 w-3 shrink-0 text-destructive" />
+            : pending
             ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-warning" />
             : <Check className="h-3 w-3 shrink-0 text-success" />}
         </>
