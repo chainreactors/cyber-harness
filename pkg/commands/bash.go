@@ -44,7 +44,6 @@ type BashTool struct {
 	tasks          *tmux.Manager
 	commandNames   func() []string
 	resolveCommand func(string) (Command, bool)
-	inbox          inbox.Inbox
 }
 
 func NewBashTool(workDir string, timeout int) *BashTool {
@@ -60,9 +59,8 @@ func (t *BashTool) SetCommandNames(fn func() []string) { t.commandNames = fn }
 func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
 	t.resolveCommand = fn
 }
-func (t *BashTool) SetInbox(ib inbox.Inbox) { t.inbox = ib }
-func (t *BashTool) Name() string            { return "bash" }
-func (t *BashTool) Close()                  { t.tasks.Shutdown() }
+func (t *BashTool) Name() string { return "bash" }
+func (t *BashTool) Close()       { t.tasks.Shutdown() }
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	t.scannerProxy = proxy
@@ -84,22 +82,22 @@ type BashArgs struct {
 	Timeout int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in seconds. The command is killed when it exceeds this. Omit to use the default (300s). Commands still running after 15s are moved to background and keep running until this timeout."`
 }
 
-func (t *BashTool) Definition() ToolDefinition {
-	return ToolDef("bash", t.Description(), BashArgs{})
+func (t *BashTool) Definition() coretool.Definition {
+	return coretool.Def("bash", t.Description(), BashArgs{})
 }
 
-func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
-	args, err := ParseArgs[BashArgs](arguments)
+func (t *BashTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+	args, err := coretool.ParseArgs[BashArgs](arguments)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 
 	command := strings.TrimSpace(args.Command)
 	if command == "" {
-		return ToolResult{}, fmt.Errorf("empty command")
+		return coretool.Result{}, fmt.Errorf("empty command")
 	}
 	if isOnlyCommentsOrBlank(command) {
-		return TextResult("ok"), nil
+		return coretool.TextResult("ok"), nil
 	}
 
 	options := BashExecOptions{}
@@ -109,10 +107,10 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	}
 	execution, err := t.Start(ctx, command, options)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 
-	return t.waitOrBackground(execution, ctx, inboxFromContext(ctx, t.inbox)), nil
+	return t.waitOrBackground(execution, ctx, inboxFromContext(ctx)), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
@@ -184,10 +182,10 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 // collected ToolResult (bounded text plus structured Details), streaming raw
 // output through options.OnOutput. Transports that must not auto-background
 // (AOP tool.call) use this instead of Execute.
-func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (ToolResult, error) {
+func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (coretool.Result, error) {
 	execution, err := t.RunForeground(ctx, command, options)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 	return t.collectResult(execution), nil
 }
@@ -408,7 +406,7 @@ func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 	}
 }
 
-func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) ToolResult {
+func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) coretool.Result {
 	done := t.tasks.Done(execution.ID)
 	select {
 	case <-done:
@@ -417,7 +415,7 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, t
 	case <-time.After(autoBackgroundThreshold):
 		info, _ := t.tasks.Get(execution.ID)
 		t.startMonitor(info, targetInbox)
-		return TextResult(fmt.Sprintf(
+		return coretool.TextResult(fmt.Sprintf(
 			"Command auto-backgrounded (exceeded %s).\nsession id=%s name=%s\nIncremental output will be delivered automatically. Use `tmux kill -t %s` to stop.",
 			autoBackgroundThreshold, info.ID, info.Name, info.ID))
 	case <-ctx.Done():
@@ -428,7 +426,7 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, t
 	}
 }
 
-func (t *BashTool) collectResult(execution *Execution) ToolResult {
+func (t *BashTool) collectResult(execution *Execution) coretool.Result {
 	raw := t.tasks.PeekOrEmpty(execution.ID, truncate.DefaultMaxLines)
 	r := truncate.Tail(raw, truncate.Options{})
 	text := r.Content
@@ -445,7 +443,7 @@ func (t *BashTool) collectResult(execution *Execution) ToolResult {
 	if info.ExitCode != 0 && info.State != tmux.StateRunning {
 		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
-	result := TextResult(text)
+	result := coretool.TextResult(text)
 	result.Details = execution.Details
 	return result
 }

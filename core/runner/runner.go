@@ -11,6 +11,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
@@ -182,17 +183,11 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	rt.sessionEvents = newSessionEmitter(publicBus)
 	rt.kernelBus.Subscribe(rt.sessionEvents.emit)
 
-	ib := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
-
 	var ioaCancel func()
 	var handoffCancel func()
 
-	sessMgr, bashTool := bashToolAndManager(rt.app.Commands)
+	sessMgr := bashManager(rt.app.Commands)
 	rt.ptyManager = sessMgr
-	if bashTool != nil {
-		bashTool.SetInbox(ib)
-	}
-	scheduler := agent.NewLoopScheduler(ib, logger)
 	rt.cleanup = func() {
 		if handoffCancel != nil {
 			handoffCancel()
@@ -200,7 +195,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		if ioaCancel != nil {
 			ioaCancel()
 		}
-		scheduler.Stop()
 		if sessMgr != nil {
 			sessMgr.Shutdown()
 		}
@@ -212,8 +206,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		Tools:          rt.app.Commands,
 		Model:          option.Model,
 		Logger:         logger,
-		Inbox:          ib,
-		LoopScheduler:  scheduler,
 		CacheRetention: agent.CacheShort,
 		Bus:            rt.kernelBus,
 	}
@@ -258,7 +250,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	}
 	handoffCancel = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
 	rt.app.Commands.RegisterTool(subAgentTool)
-	loop := agent.NewLoopCommand(scheduler)
+	loop := agent.NewLoopCommand()
 	rt.app.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
 
 	if option.Resume != "" {
@@ -340,9 +332,6 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 	}
 	rt.mu.Lock()
 	rt.config.Logger = logger
-	if rt.config.LoopScheduler != nil {
-		rt.config.LoopScheduler.SetLogger(logger)
-	}
 	if sl, ok := rt.config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
 		sl.SetLogger(logger)
 	}
@@ -692,19 +681,19 @@ func registerIOATools(ctx context.Context, application *App, option *cfg.Option)
 	return application.InitIOA(ctx, ioaCfg)
 }
 
-func bashToolAndManager(reg interface {
-	GetTool(string) (cmdpkg.AgentTool, bool)
-}) (*tmuxpkg.Manager, *cmdpkg.BashTool) {
+func bashManager(reg interface {
+	GetTool(string) (coretool.Tool, bool)
+}) *tmuxpkg.Manager {
 	if reg == nil {
-		return nil, nil
+		return nil
 	}
 	tool, ok := reg.GetTool("bash")
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	bt, ok := tool.(*cmdpkg.BashTool)
 	if !ok {
-		return nil, nil
+		return nil
 	}
-	return bt.Manager(), bt
+	return bt.Manager()
 }

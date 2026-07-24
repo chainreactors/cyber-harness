@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 type WebSearchTool struct {
@@ -29,18 +29,18 @@ func (t *WebSearchTool) Description() string {
 	return "Search the web for CVEs, exploits, vulnerability details, and product documentation."
 }
 
-func (t *WebSearchTool) Definition() commands.ToolDefinition {
-	return commands.ToolDef("web_search", t.Description(), webSearchArgs{})
+func (t *WebSearchTool) Definition() tool.Definition {
+	return tool.Def("web_search", t.Description(), webSearchArgs{})
 }
 
-func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (commands.ToolResult, error) {
-	args, err := commands.ParseArgs[webSearchArgs](arguments)
+func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (tool.Result, error) {
+	args, err := tool.ParseArgs[webSearchArgs](arguments)
 	if err != nil {
-		return commands.ToolResult{}, err
+		return tool.Result{}, err
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
-		return commands.ToolResult{}, fmt.Errorf("query is required")
+		return tool.Result{}, fmt.Errorf("query is required")
 	}
 
 	num := args.Num
@@ -54,16 +54,16 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (commands
 	if ws, ok := t.provider.(provider.WebSearchProvider); ok {
 		resp, err := ws.WebSearch(ctx, args.Query, num)
 		if err == nil {
-			return commands.TextResult(formatWebSearchResponse(resp, args.Query)), nil
+			return tool.TextResult(formatWebSearchResponse(resp, args.Query)), nil
 		}
 	}
 
 	if t.tavily != nil {
 		result, err := t.tavily.Execute(ctx, []string{args.Query, "--num", fmt.Sprint(num)})
 		if err == nil {
-			return commands.TextResult(result), nil
+			return tool.TextResult(result), nil
 		}
 	}
 
-	return commands.ToolResult{}, fmt.Errorf("web_search: no search backend available. Configure Tavily API key via --tavily-key flag, env (TAVILY_API_KEY), or config file (search.tavily_keys). Do not retry until configured")
+	return tool.Result{}, fmt.Errorf("web_search: no search backend available. Configure Tavily API key via --tavily-key flag, env (TAVILY_API_KEY), or config file (search.tavily_keys). Do not retry until configured")
 }

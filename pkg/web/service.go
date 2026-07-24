@@ -1051,7 +1051,7 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 	payloadJSON, _ := json.Marshal(payload)
 
 	taskID := generateID()
-	msg := WSMessage{
+	msg := webproto.Message{
 		Type:    "upload",
 		TaskID:  taskID,
 		DataB64: base64.StdEncoding.EncodeToString(data),
@@ -1601,7 +1601,7 @@ func (s *Service) closeRemoteSession(sessionID string) {
 		return
 	}
 	payload, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID, Reason: "completed"})
-	_ = s.agents.SendAgentMessage(session.AgentID, WSMessage{Type: webproto.TypeSessionClose, Payload: payload})
+	_ = s.agents.SendAgentMessage(session.AgentID, webproto.Message{Type: webproto.TypeSessionClose, Payload: payload})
 }
 
 // broadcastSystemMessage persists + broadcasts a system message. code names a

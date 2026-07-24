@@ -16,9 +16,7 @@ import (
 //	bash(command="loop 30s check status")
 //	bash(command="loop list")
 //	bash(command="loop stop loop-a1b2c3d4")
-type LoopCommand struct {
-	scheduler *LoopScheduler
-}
+type LoopCommand struct{}
 
 type loopSchedulerContextKey struct{}
 
@@ -39,9 +37,7 @@ func loopSchedulerFromContext(ctx context.Context) *LoopScheduler {
 	return scheduler
 }
 
-func NewLoopCommand(scheduler *LoopScheduler) *LoopCommand {
-	return &LoopCommand{scheduler: scheduler}
-}
+func NewLoopCommand() *LoopCommand { return &LoopCommand{} }
 
 func (c *LoopCommand) Name() string { return "loop" }
 
@@ -72,9 +68,6 @@ func (c *LoopCommand) Run(ctx context.Context, execution *commands.Execution) (a
 		if cfg, ok := toolAgentConfig(ctx); ok {
 			scheduler = cfg.LoopScheduler
 		}
-	}
-	if scheduler == nil {
-		scheduler = c.scheduler
 	}
 	if scheduler == nil {
 		return nil, fmt.Errorf("loop scheduler is not configured")

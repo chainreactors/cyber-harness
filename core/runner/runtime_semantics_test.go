@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ type runtimeSemanticProvider struct {
 	calls   int
 	started chan struct{}
 	release chan struct{}
+	usage   *agent.Usage
 }
 
 func (p *runtimeSemanticProvider) Name() string { return "runtime-semantic" }
@@ -36,7 +38,10 @@ func (p *runtimeSemanticProvider) ChatCompletion(ctx context.Context, _ *agent.C
 			return nil, ctx.Err()
 		}
 	}
-	return &agent.ChatCompletionResponse{Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}}}, nil
+	return &agent.ChatCompletionResponse{
+		Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}},
+		Usage:   p.usage,
+	}, nil
 }
 
 func (p *runtimeSemanticProvider) callCount() int {
@@ -97,6 +102,53 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	}
 }
 
+func TestConsoleRuntimeAdapterPreservesContextTokens(t *testing.T) {
+	provider := &runtimeSemanticProvider{usage: &agent.Usage{
+		PromptTokens: 8192,
+		TotalTokens:  8200,
+	}}
+	rt := newBareRuntime(t, nil, provider)
+	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := rt.consoleAppInfoForSession(session).Run(context.Background(), "hello", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ContextTokens != 8192 {
+		t.Fatalf("context tokens = %d, want 8192", result.ContextTokens)
+	}
+}
+
+func TestSessionContextCancellationStopsActiveRun(t *testing.T) {
+	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
+	rt := newBareRuntime(t, nil, provider)
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	session, err := rt.OpenSession(sessionCtx, SessionOptions{ID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := session.Run(context.Background(), RunInput{
+		TurnID: "turn-1",
+		Parts:  []aop.MessagePart{{Type: aop.PartText, Text: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("run did not start")
+	}
+
+	cancelSession()
+	if _, err := run.Wait(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v, want context canceled", err)
+	}
+}
+
 func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	registry := commands.NewRegistry()
 	commands.BuildGroup("core", &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger()}, registry)
@@ -105,14 +157,14 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := session.Snapshot().Messages
+	before := session.MessagesSnapshot()
 	var commandEvent aop.Event
 	rt.Subscribe(func(event aop.Event) {
 		if event.Type == aop.TypeMessage && event.TurnID == "" {
 			commandEvent = event
 		}
 	})
-	result, err := session.Command(context.Background(), CommandInput{Line: "!printf COMMAND_OK"})
+	result, err := session.Command(context.Background(), "!printf COMMAND_OK")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +174,7 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	if commandEvent.Type != aop.TypeMessage || commandEvent.TurnID != "" {
 		t.Fatalf("command AOP event = %+v", commandEvent)
 	}
-	after := session.Snapshot().Messages
+	after := session.MessagesSnapshot()
 	if len(after) != len(before) {
 		t.Fatalf("command changed transcript: before=%d after=%d", len(before), len(after))
 	}

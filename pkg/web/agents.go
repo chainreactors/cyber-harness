@@ -18,9 +18,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// WSMessage is the single message type for all agent↔web communication.
-type WSMessage = webproto.Message
-
 // AgentInfo is the public view of a connected agent.
 type AgentInfo struct {
 	ID           string                 `json:"id"`
@@ -48,8 +45,8 @@ type remoteAgent struct {
 	commands     []string
 	commandsMenu []webproto.CommandSpec
 	conn         *websocket.Conn
-	sendCh       chan WSMessage
-	controlCh    chan WSMessage
+	sendCh       chan webproto.Message
+	controlCh    chan webproto.Message
 	connectAt    time.Time
 	node         protocols.NodeRef
 	runtime      webproto.AgentRuntime
@@ -284,7 +281,7 @@ func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallDa
 		a.toolCalls[taskID] = struct{}{}
 		a.mu.Unlock()
 	}
-	ch, err := p.dispatchMessage(agentID, taskID, WSMessage{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
+	ch, err := p.dispatchMessage(agentID, taskID, webproto.Message{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
 	if err != nil {
 		if a := p.get(agentID); a != nil {
 			a.mu.Lock()
@@ -316,7 +313,7 @@ func (p *AgentPool) DispatchRun(agentID, turnID string, run webproto.RunPayload)
 		if !opened {
 			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: run.SessionID})
 			select {
-			case a.sendCh <- WSMessage{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			case a.sendCh <- webproto.Message{Type: webproto.TypeSessionOpen, Payload: openPayload}:
 			default:
 				a.mu.Lock()
 				delete(a.openSessions, run.SessionID)
@@ -329,7 +326,7 @@ func (p *AgentPool) DispatchRun(agentID, turnID string, run webproto.RunPayload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal run: %w", err)
 	}
-	return p.dispatchMessage(agentID, turnID, WSMessage{Type: webproto.TypeRun, TurnID: turnID, Payload: payload})
+	return p.dispatchMessage(agentID, turnID, webproto.Message{Type: webproto.TypeRun, TurnID: turnID, Payload: payload})
 }
 
 func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.CommandPayload) (<-chan taskResult, error) {
@@ -347,7 +344,7 @@ func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.Com
 		if !opened {
 			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: command.SessionID})
 			select {
-			case a.sendCh <- WSMessage{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			case a.sendCh <- webproto.Message{Type: webproto.TypeSessionOpen, Payload: openPayload}:
 			default:
 				a.mu.Lock()
 				delete(a.openSessions, command.SessionID)
@@ -360,10 +357,10 @@ func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.Com
 	if err != nil {
 		return nil, fmt.Errorf("marshal command: %w", err)
 	}
-	return p.dispatchMessage(agentID, taskID, WSMessage{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
+	return p.dispatchMessage(agentID, taskID, webproto.Message{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
 }
 
-func (p *AgentPool) dispatchMessage(agentID, taskID string, msg WSMessage) (<-chan taskResult, error) {
+func (p *AgentPool) dispatchMessage(agentID, taskID string, msg webproto.Message) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
@@ -402,7 +399,7 @@ func (p *AgentPool) BroadcastConfigReload() int {
 	n := 0
 	for _, a := range agents {
 		select {
-		case a.controlCh <- WSMessage{Type: "config"}:
+		case a.controlCh <- webproto.Message{Type: "config"}:
 			n++
 		default:
 			// A pending config control frame already causes the agent to fetch the
@@ -413,7 +410,7 @@ func (p *AgentPool) BroadcastConfigReload() int {
 	return n
 }
 
-func (p *AgentPool) SendAgentMessage(agentID string, msg WSMessage) error {
+func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error {
 	a := p.get(agentID)
 	if a == nil {
 		return fmt.Errorf("agent %s not connected", agentID)
@@ -442,11 +439,11 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 	}
 	a.mu.Unlock()
 	select {
-	case a.sendCh <- func() WSMessage {
+	case a.sendCh <- func() webproto.Message {
 		if isToolCall {
-			return WSMessage{Type: "cancel", TaskID: taskID}
+			return webproto.Message{Type: "cancel", TaskID: taskID}
 		}
-		return WSMessage{Type: webproto.TypeRunCancel, TurnID: taskID}
+		return webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
 	}():
 	default:
 	}
@@ -584,7 +581,7 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	}
 }
 
-func (p *AgentPool) forwardPTYMessage(msg WSMessage) bool {
+func (p *AgentPool) forwardPTYMessage(msg webproto.Message) bool {
 	if msg.Type != webproto.TypePTY {
 		return false
 	}
@@ -642,7 +639,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// First message must be register.
-	var reg WSMessage
+	var reg webproto.Message
 	if err := conn.ReadJSON(&reg); err != nil || reg.Type != "register" {
 		conn.Close()
 		return
@@ -669,8 +666,8 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		commands:      info.Commands,
 		commandsMenu:  info.CommandsMenu,
 		conn:          conn,
-		sendCh:        make(chan WSMessage, 32),
-		controlCh:     make(chan WSMessage, 1),
+		sendCh:        make(chan webproto.Message, 32),
+		controlCh:     make(chan webproto.Message, 1),
 		connectAt:     time.Now(),
 		node:          info.Node,
 		runtime:       info.Runtime,
@@ -691,7 +688,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Send connected ack.
 	ack, _ := json.Marshal(map[string]string{"agent_id": agent.id, "name": agent.name})
-	if err := conn.WriteJSON(WSMessage{Type: "connected", Payload: ack}); err != nil {
+	if err := conn.WriteJSON(webproto.Message{Type: "connected", Payload: ack}); err != nil {
 		return
 	}
 
@@ -744,7 +741,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Read loop: WebSocket → dispatch.
 	for {
-		var msg WSMessage
+		var msg webproto.Message
 		if err := conn.ReadJSON(&msg); err != nil {
 			return
 		}
@@ -752,7 +749,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg WSMessage) {
+func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg webproto.Message) {
 	if p.forwardPTYMessage(msg) {
 		return
 	}
@@ -986,7 +983,7 @@ func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEv
 	p.sessions.BroadcastChatEvent(sid, event)
 }
 
-func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg WSMessage) {
+func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {
 	var aopEv aop.Event
 	if len(msg.Payload) > 0 {
 		_ = json.Unmarshal(msg.Payload, &aopEv)

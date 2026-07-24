@@ -12,11 +12,8 @@ import (
 func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 	tool := NewBashTool(t.TempDir(), 5)
 	defer tool.Close()
-	fallback := inbox.NewBuffered(8)
 	scoped := inbox.NewBuffered(8)
-	defer fallback.Close()
 	defer scoped.Close()
-	tool.SetInbox(fallback)
 
 	release := make(chan struct{})
 	info, err := tool.tasks.CreateFunc(context.Background(), "scoped-inbox", 5*time.Second, func(context.Context, io.Writer) error {
@@ -40,8 +37,5 @@ func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 	}
 	if !received {
 		t.Fatal("scoped inbox did not receive background completion")
-	}
-	if got := fallback.Drain(); len(got) != 0 {
-		t.Fatalf("fallback inbox received %d messages, want 0", len(got))
 	}
 }

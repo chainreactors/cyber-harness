@@ -11,28 +11,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
-// Type aliases — re-export toolapi types so existing consumers compile unchanged.
-type ToolDefinition = tool.Definition
-
-type FunctionDefinition = tool.FuncDef
-
-type ToolResult = tool.Result
-
-type ContentBlock = tool.ContentBlock
-
-type AgentTool = tool.Tool
-
-// Forwarding helpers — existing callers use commands.TextResult(...) etc.
-var (
-	TextResult      = tool.TextResult
-	ErrorResult     = tool.ErrorResult
-	TerminateResult = tool.TerminateResult
-	TextBlock       = tool.TextBlock
-	ImageBlock      = tool.ImageBlock
-	SchemaOf        = tool.SchemaOf
-	ToolDef         = tool.Def
-)
-
 var _ tool.Executor = (*CommandRegistry)(nil)
 
 // Command describes one built-in command accepted by the Bash tool. Runtime
@@ -59,7 +37,7 @@ type CommandRegistry struct {
 	order  []string
 	groups map[string][]string
 
-	tools     map[string]AgentTool
+	tools     map[string]tool.Tool
 	toolOrder []string
 }
 
@@ -77,11 +55,11 @@ func NewRegistry() *CommandRegistry {
 	return &CommandRegistry{
 		items:  make(map[string]Command),
 		groups: make(map[string][]string),
-		tools:  make(map[string]AgentTool),
+		tools:  make(map[string]tool.Tool),
 	}
 }
 
-func (r *CommandRegistry) RegisterTool(t AgentTool) {
+func (r *CommandRegistry) RegisterTool(t tool.Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	name := t.Name()
@@ -91,43 +69,43 @@ func (r *CommandRegistry) RegisterTool(t AgentTool) {
 	r.tools[name] = t
 }
 
-func (r *CommandRegistry) Tools() []AgentTool {
+func (r *CommandRegistry) Tools() []tool.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]AgentTool, 0, len(r.toolOrder))
+	result := make([]tool.Tool, 0, len(r.toolOrder))
 	for _, name := range r.toolOrder {
 		result = append(result, r.tools[name])
 	}
 	return result
 }
 
-func (r *CommandRegistry) GetTool(name string) (AgentTool, bool) {
+func (r *CommandRegistry) GetTool(name string) (tool.Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
 }
 
-func (r *CommandRegistry) ToolDefinitions() []ToolDefinition {
+func (r *CommandRegistry) ToolDefinitions() []tool.Definition {
 	tools := r.Tools()
-	defs := make([]ToolDefinition, 0, len(tools))
+	defs := make([]tool.Definition, 0, len(tools))
 	for _, t := range tools {
 		defs = append(defs, t.Definition())
 	}
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result ToolResult, err error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result tool.Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result = ToolResult{}
+			result = tool.Result{}
 			err = fmt.Errorf("tool %s panic: %v\n%s", name, recovered, debug.Stack())
 		}
 	}()
 
 	t, ok := r.GetTool(name)
 	if !ok {
-		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
+		return tool.Result{}, fmt.Errorf("unknown tool: %s", name)
 	}
 	return t.Execute(ctx, arguments)
 }

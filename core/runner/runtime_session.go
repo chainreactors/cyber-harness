@@ -40,14 +40,6 @@ const (
 	SessionCloseRuntime   SessionCloseReason = "runtime_closed"
 )
 
-type SessionSnapshot struct {
-	ID           string
-	ActiveTurnID string
-	Pending      int
-	Closed       bool
-	Messages     []agent.ChatMessage
-}
-
 type RunInput struct {
 	TurnID        string
 	Parts         []aop.MessagePart
@@ -61,13 +53,10 @@ type RunInput struct {
 }
 
 type RunResult struct {
-	Output string
-	Stop   agent.StopReason
-	Usage  agent.Usage
-}
-
-type CommandInput struct {
-	Line string
+	Output        string
+	Stop          agent.StopReason
+	Usage         agent.Usage
+	ContextTokens int
 }
 
 type CommandResult struct {
@@ -126,11 +115,6 @@ type sessionOperation struct {
 	cancel  context.CancelFunc
 	execute func(context.Context)
 	reject  func(error)
-}
-
-type commandCall struct {
-	input CommandInput
-	done  chan commandOutcome
 }
 
 type commandOutcome struct {
@@ -259,8 +243,8 @@ func (e *turnEmitter) start() {
 	e.emitter.emit(aop.Event{Type: aop.TypeTurnStart, SessionID: e.sessionID, TurnID: e.turnID, Agent: e.agentName, Data: raw})
 }
 
-func (e *turnEmitter) end(result RunResult, contextTokens int, runErr error) {
-	data := aop.TurnEndData{Stop: string(result.Stop), Usage: runtimeUsageData(result.Usage), ContextTokens: contextTokens}
+func (e *turnEmitter) end(result RunResult, runErr error) {
+	data := aop.TurnEndData{Stop: string(result.Stop), Usage: runtimeUsageData(result.Usage), ContextTokens: result.ContextTokens}
 	if runErr != nil {
 		data.Error = runErr.Error()
 	}
@@ -269,13 +253,12 @@ func (e *turnEmitter) end(result RunResult, contextTokens int, runErr error) {
 }
 
 type commandSession struct {
-	runtime      *AgentRuntime
 	state        *sessionState
 	evalCriteria string
 }
 
-func (s *commandSession) execute(ctx context.Context, call commandCall) commandOutcome {
-	line := strings.TrimSpace(call.input.Line)
+func (s *commandSession) execute(ctx context.Context, input string) commandOutcome {
+	line := strings.TrimSpace(input)
 	if line == "" {
 		return commandOutcome{err: fmt.Errorf("command line is required")}
 	}
@@ -292,13 +275,13 @@ func (s *commandSession) execute(ctx context.Context, call commandCall) commandO
 	var stdout, stderr bytes.Buffer
 	ctx = commands.ContextWithInbox(ctx, s.state.inbox)
 	ctx = agent.ContextWithLoopScheduler(ctx, s.state.scheduler)
-	option := s.runtime.option
+	option := s.state.runtime.option
 	if option != nil {
 		copy := *option
 		copy.NoColor = true
 		option = &copy
 	}
-	console := tui.NewAgentConsoleWithWriters(ctx, option, s.runtime.consoleAppInfo(), s.state.agent, &stdout, &stderr)
+	console := tui.NewAgentConsoleWithWriters(ctx, option, s.state.runtime.consoleAppInfo(), s.state.agent, &stdout, &stderr)
 	console.SetEvalCriteria(s.evalCriteria)
 	_, err := console.ExecuteLineAndWait(line)
 	s.evalCriteria = console.EvalCriteria()
@@ -383,7 +366,6 @@ func (m *sessionMailbox) ActiveProducers() int { return m.base.ActiveProducers()
 
 type sessionState struct {
 	runtime   *AgentRuntime
-	public    *Session
 	id        string
 	agentName string
 	agent     *agent.Agent
@@ -395,10 +377,9 @@ type sessionState struct {
 	ops       chan *sessionOperation
 	done      chan struct{}
 
-	mu           sync.Mutex
-	activeTurnID string
-	pending      int
-	closed       bool
+	mu      sync.Mutex
+	pending int
+	closed  bool
 }
 
 func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
@@ -429,7 +410,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		rt.mu.Unlock()
 		return nil, fmt.Errorf("session %q already exists", id)
 	}
-	sessionCtx, cancel := context.WithCancel(rt.ctx)
+	sessionCtx, cancel := context.WithCancel(ctx)
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 	mailbox := &sessionMailbox{base: baseInbox}
 	scheduler := agent.NewLoopScheduler(mailbox, rt.config.Logger)
@@ -455,8 +436,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		ops: make(chan *sessionOperation, rt.pendingLimit()), done: make(chan struct{}),
 	}
 	public := &Session{state: state}
-	state.public = public
-	state.commands = &commandSession{runtime: rt, state: state}
+	state.commands = &commandSession{state: state}
 	mailbox.automatic = func() { state.startAutomaticRun() }
 	rt.sessions[id] = state
 	rt.wg.Add(1)
@@ -524,38 +504,41 @@ func (s *Session) Run(ctx context.Context, input RunInput) (*Run, error) {
 	return s.state.startRun(ctx, input)
 }
 
-func (s *Session) Command(ctx context.Context, input CommandInput) (CommandResult, error) {
+func (s *Session) Command(ctx context.Context, line string) (CommandResult, error) {
 	if s == nil || s.state == nil {
 		return CommandResult{}, fmt.Errorf("session is not configured")
 	}
-	call := commandCall{input: input, done: make(chan commandOutcome, 1)}
+	done := make(chan commandOutcome, 1)
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
-			outcome := s.state.commands.execute(runCtx, call)
+			outcome := s.state.commands.execute(runCtx, line)
 			if outcome.err == nil && len(outcome.result.Parts) > 0 {
 				s.state.emitCommandResult(outcome.result)
 			}
-			call.done <- outcome
+			done <- outcome
 		},
-		reject: func(err error) { call.done <- commandOutcome{err: err} },
+		reject: func(err error) { done <- commandOutcome{err: err} },
 	}
 	if err := s.state.admit(ctx, op); err != nil {
 		return CommandResult{}, err
 	}
-	outcome := <-call.done
+	outcome := <-done
 	return outcome.result, outcome.err
 }
 
-func (s *Session) Snapshot() SessionSnapshot {
+func (s *Session) ID() string {
 	if s == nil || s.state == nil {
-		return SessionSnapshot{}
+		return ""
 	}
-	state := s.state
-	state.mu.Lock()
-	snapshot := SessionSnapshot{ID: state.id, ActiveTurnID: state.activeTurnID, Pending: state.pending, Closed: state.closed}
-	state.mu.Unlock()
-	snapshot.Messages = state.agent.MessagesSnapshot()
-	return snapshot
+	return s.state.id
+
+}
+
+func (s *Session) MessagesSnapshot() []agent.ChatMessage {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	return s.state.agent.MessagesSnapshot()
 }
 
 func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, error) {
@@ -581,27 +564,24 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 		execute: func(runCtx context.Context) {
 			defer s.runtime.releaseTurnID(turnID)
 			defer unsubscribe()
-			s.mu.Lock()
-			s.activeTurnID = turnID
-			s.mu.Unlock()
 			s.inbox.setActive(true)
 			emitter.start()
 			result, runErr := s.executeRun(runCtx, turnID, input)
 			runResult := RunResult{}
-			contextTokens := 0
 			if result != nil {
-				runResult = RunResult{Output: result.Output, Stop: result.Stop, Usage: result.TotalUsage}
-				contextTokens = result.ContextTokens
+				runResult = RunResult{
+					Output:        result.Output,
+					Stop:          result.Stop,
+					Usage:         result.TotalUsage,
+					ContextTokens: result.ContextTokens,
+				}
 			} else if errors.Is(runErr, context.Canceled) {
 				runResult.Stop = agent.StopReasonCanceled
 			} else {
 				runResult.Stop = agent.StopReasonError
 			}
-			emitter.end(runResult, contextTokens, runErr)
+			emitter.end(runResult, runErr)
 			s.inbox.setActive(false)
-			s.mu.Lock()
-			s.activeTurnID = ""
-			s.mu.Unlock()
 			run.finish(runResult, runErr)
 		},
 		reject: func(err error) {
@@ -612,7 +592,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 				result.Stop = agent.StopReasonError
 			}
 			emitter.start()
-			emitter.end(result, 0, err)
+			emitter.end(result, err)
 			run.finish(result, err)
 		},
 	}
@@ -840,10 +820,15 @@ func (rt *AgentRuntime) consoleAppInfoForSession(session *Session) tui.AppInfo {
 			return nil, err
 		}
 		result, err := run.Wait()
-		return &agent.Result{Output: result.Output, Stop: result.Stop, TotalUsage: result.Usage}, err
+		return &agent.Result{
+			Output:        result.Output,
+			Stop:          result.Stop,
+			TotalUsage:    result.Usage,
+			ContextTokens: result.ContextTokens,
+		}, err
 	}
 	info.Command = func(ctx context.Context, line string) error {
-		_, err := session.Command(ctx, CommandInput{Line: line})
+		_, err := session.Command(ctx, line)
 		return err
 	}
 	return info

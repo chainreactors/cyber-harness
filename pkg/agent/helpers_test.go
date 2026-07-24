@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -48,14 +49,14 @@ func (t *recordingTool) Definition() ToolDefinition {
 	}
 }
 
-func (t *recordingTool) Execute(_ context.Context, arguments string) (commands.ToolResult, error) {
+func (t *recordingTool) Execute(_ context.Context, arguments string) (tool.Result, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, arguments)
 	if strings.Contains(arguments, "fail") {
-		return commands.ToolResult{}, fmt.Errorf("failed")
+		return tool.Result{}, fmt.Errorf("failed")
 	}
-	return commands.TextResult(t.output), nil
+	return tool.TextResult(t.output), nil
 }
 
 func (t *recordingTool) callsSnapshot() []string {

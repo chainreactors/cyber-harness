@@ -9,7 +9,6 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -36,17 +35,12 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 }
 
 func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
-	globalInbox := inbox.NewBuffered(agent.DefaultInboxCapacity)
-	globalScheduler := agent.NewLoopScheduler(globalInbox, telemetry.NopLogger())
-
 	reg := commands.NewRegistry()
 	commands.BuildGroup("core", &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger()}, reg)
-	loop := agent.NewLoopCommand(globalScheduler)
+	loop := agent.NewLoopCommand()
 	reg.Register(commands.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
 	rt := newBareRuntime(t, reg, nil)
 	t.Cleanup(func() {
-		globalScheduler.Stop()
-		globalInbox.Close()
 		for _, tool := range reg.Tools() {
 			if closer, ok := tool.(interface{ Close() }); ok {
 				closer.Close()
@@ -58,7 +52,7 @@ func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Command(context.Background(), CommandInput{Line: "!loop 10s check progress"}); err != nil {
+	if _, err := session.Command(context.Background(), "!loop 10s check progress"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,9 +62,6 @@ func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
 	}
 	if got := session.state.scheduler.Active(); got != 1 {
 		t.Fatalf("session scheduler active = %d, want 1", got)
-	}
-	if got := globalScheduler.Active(); got != 0 {
-		t.Fatalf("global scheduler active = %d, want 0", got)
 	}
 }
 

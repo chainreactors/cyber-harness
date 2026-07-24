@@ -62,19 +62,19 @@ type recordingBash struct {
 
 func (*recordingBash) Name() string        { return "bash" }
 func (*recordingBash) Description() string { return "test bash" }
-func (*recordingBash) Definition() commands.ToolDefinition {
-	return commands.ToolDef("bash", "test bash", struct {
+func (*recordingBash) Definition() tool.Definition {
+	return tool.Def("bash", "test bash", struct {
 		Command string `json:"command"`
 	}{})
 }
-func (*recordingBash) Execute(context.Context, string) (commands.ToolResult, error) {
-	return commands.ToolResult{}, nil
+func (*recordingBash) Execute(context.Context, string) (tool.Result, error) {
+	return tool.Result{}, nil
 }
-func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options commands.BashExecOptions) (commands.ToolResult, error) {
+func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options commands.BashExecOptions) (tool.Result, error) {
 	b.command = command
 	b.options = options
 	options.OnOutput([]byte("streamed\n"))
-	result := commands.TextResult("streamed")
+	result := tool.TextResult("streamed")
 	result.Details = &output.Result{Summary: output.Summary{Targets: 2}}
 	return result, nil
 }

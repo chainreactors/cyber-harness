@@ -24,14 +24,12 @@ func main() {
 		serverURL  string
 		token      string
 		runnerID   string
-		legacyName string
 		wsPath     string
 		configFile string
 	)
 	flag.StringVar(&serverURL, "server", "", "Cairn server URL, e.g. http://host:8080")
 	flag.StringVar(&token, "token", "", "runner token")
 	flag.StringVar(&runnerID, "id", "", "stable runner ID (default: hostname)")
-	flag.StringVar(&legacyName, "name", "", "deprecated alias for --id")
 	flag.StringVar(&wsPath, "ws-path", "/ws/runner", "runner WebSocket path")
 	flag.StringVar(&configFile, "config", "", "path to aiscan.yaml")
 	flag.Parse()
@@ -39,13 +37,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: aiscan-runner --server <url> --token <token> [--id <runner-id>]")
 		os.Exit(2)
 	}
-	if runnerID == "" {
-		runnerID = legacyName
-	} else if legacyName != "" && legacyName != runnerID {
-		fmt.Fprintln(os.Stderr, "--id and --name must match when both are provided")
-		os.Exit(2)
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: os.Stderr})

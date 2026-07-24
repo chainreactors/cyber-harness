@@ -42,14 +42,14 @@ type ListResult struct {
 	Truncated bool        `json:"truncated,omitempty"`
 }
 
-func (t *ListTool) Definition() ToolDefinition {
-	return ToolDef("ls", t.Description(), ListArgs{})
+func (t *ListTool) Definition() coretool.Definition {
+	return coretool.Def("ls", t.Description(), ListArgs{})
 }
 
-func (t *ListTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
-	args, err := ParseArgs[ListArgs](arguments)
+func (t *ListTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+	args, err := coretool.ParseArgs[ListArgs](arguments)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 	if args.Path == "" {
 		args.Path = "."
@@ -62,7 +62,7 @@ func (t *ListTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	}
 	entries, err := os.ReadDir(filepath.Clean(resolved))
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("list directory: %w", err)
+		return coretool.Result{}, fmt.Errorf("list directory: %w", err)
 	}
 
 	result := ListResult{Path: args.Path, Entries: make([]ListEntry, 0, min(len(entries), truncate.MaxGlobResults))}
@@ -73,7 +73,7 @@ func (t *ListTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
-			return ToolResult{}, fmt.Errorf("stat %s: %w", entry.Name(), err)
+			return coretool.Result{}, fmt.Errorf("stat %s: %w", entry.Name(), err)
 		}
 		result.Entries = append(result.Entries, ListEntry{
 			Name:        entry.Name(),
@@ -84,10 +84,10 @@ func (t *ListTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 
 	content, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
-	return ToolResult{
-		Content: []ContentBlock{TextBlock(string(content))},
+	return coretool.Result{
+		Content: []coretool.ContentBlock{coretool.TextBlock(string(content))},
 		Details: result,
 	}, nil
 }

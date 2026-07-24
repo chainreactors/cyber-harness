@@ -43,21 +43,21 @@ type WriteArgs struct {
 	Edits   []EditPatch `json:"edits,omitempty"   jsonschema:"description=One or more targeted replacements. Each edit is matched against the original file. Do not include overlapping edits."`
 }
 
-func (t *WriteTool) Definition() ToolDefinition {
-	return ToolDef("write", t.Description(), WriteArgs{})
+func (t *WriteTool) Definition() coretool.Definition {
+	return coretool.Def("write", t.Description(), WriteArgs{})
 }
 
-func (t *WriteTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
+func (t *WriteTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
 	effective := *t
 	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
 	t = &effective
-	args, err := ParseArgs[WriteArgs](arguments)
+	args, err := coretool.ParseArgs[WriteArgs](arguments)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 
 	if args.Path == "" {
-		return ToolResult{}, fmt.Errorf("path is required")
+		return coretool.Result{}, fmt.Errorf("path is required")
 	}
 
 	if len(args.Edits) > 0 {
@@ -67,20 +67,20 @@ func (t *WriteTool) Execute(ctx context.Context, arguments string) (ToolResult, 
 	return t.writeFile(args)
 }
 
-func (t *WriteTool) writeFile(args WriteArgs) (ToolResult, error) {
+func (t *WriteTool) writeFile(args WriteArgs) (coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return ToolResult{}, fmt.Errorf("create directory: %w", err)
+		return coretool.Result{}, fmt.Errorf("create directory: %w", err)
 	}
 
 	if err := os.WriteFile(path, []byte(args.Content), 0644); err != nil {
-		return ToolResult{}, fmt.Errorf("write file: %w", err)
+		return coretool.Result{}, fmt.Errorf("write file: %w", err)
 	}
 
 	lineCount := strings.Count(args.Content, "\n") + 1
-	return TextResult(fmt.Sprintf("wrote %d bytes (%d lines) to %s", len(args.Content), lineCount, args.Path)), nil
+	return coretool.TextResult(fmt.Sprintf("wrote %d bytes (%d lines) to %s", len(args.Content), lineCount, args.Path)), nil
 }
 
 type editMatch struct {
@@ -90,12 +90,12 @@ type editMatch struct {
 	newText    string
 }
 
-func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
+func (t *WriteTool) editFile(args WriteArgs) (coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("read file for edit: %w", err)
+		return coretool.Result{}, fmt.Errorf("read file for edit: %w", err)
 	}
 	original := string(data)
 
@@ -103,19 +103,19 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 	var matches []editMatch
 	for i, edit := range args.Edits {
 		if edit.OldText == "" {
-			return ErrorResult(fmt.Sprintf("edits[%d]: old_text must not be empty", i)), nil
+			return coretool.ErrorResult(fmt.Sprintf("edits[%d]: old_text must not be empty", i)), nil
 		}
 		if edit.OldText == edit.NewText {
-			return ErrorResult(fmt.Sprintf("edits[%d]: old_text and new_text are identical", i)), nil
+			return coretool.ErrorResult(fmt.Sprintf("edits[%d]: old_text and new_text are identical", i)), nil
 		}
 
 		count := strings.Count(original, edit.OldText)
 		if count == 0 {
 			hint := truncate.Clip(edit.OldText, 200)
-			return ErrorResult(fmt.Sprintf("edits[%d]: old_text not found in %s. Make sure it matches exactly (including whitespace and indentation).\nSearched for:\n%s", i, args.Path, hint)), nil
+			return coretool.ErrorResult(fmt.Sprintf("edits[%d]: old_text not found in %s. Make sure it matches exactly (including whitespace and indentation).\nSearched for:\n%s", i, args.Path, hint)), nil
 		}
 		if count > 1 && !edit.ReplaceAll {
-			return ErrorResult(fmt.Sprintf("edits[%d]: old_text matches %d locations in %s. Either set replace_all:true or include more surrounding context to disambiguate.", i, count, args.Path)), nil
+			return coretool.ErrorResult(fmt.Sprintf("edits[%d]: old_text matches %d locations in %s. Either set replace_all:true or include more surrounding context to disambiguate.", i, count, args.Path)), nil
 		}
 
 		if edit.ReplaceAll {
@@ -153,7 +153,7 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 			prev := nonReplaceAll[i-1]
 			curr := nonReplaceAll[i]
 			if prev.matchIndex+prev.matchLen > curr.matchIndex {
-				return ErrorResult(fmt.Sprintf("edits[%d] and edits[%d] overlap in %s. Merge them into a single edit that covers the combined range.",
+				return coretool.ErrorResult(fmt.Sprintf("edits[%d] and edits[%d] overlap in %s. Merge them into a single edit that covers the combined range.",
 					prev.editIndex, curr.editIndex, args.Path)), nil
 			}
 		}
@@ -180,7 +180,7 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 		idx := strings.Index(result, edit.OldText)
 		if idx < 0 {
 			// Could have been consumed by a replace_all edit
-			return ErrorResult(fmt.Sprintf("edits[%d]: old_text no longer found after applying replace_all edits. Check for conflicts between edits.", i)), nil
+			return coretool.ErrorResult(fmt.Sprintf("edits[%d]: old_text no longer found after applying replace_all edits. Check for conflicts between edits.", i)), nil
 		}
 		singleEdits = append(singleEdits, editMatch{
 			editIndex:  i,
@@ -199,11 +199,11 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 	}
 
 	if result == original {
-		return ErrorResult("edits produced no changes"), nil
+		return coretool.ErrorResult("edits produced no changes"), nil
 	}
 
 	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
-		return ToolResult{}, fmt.Errorf("write edited file: %w", err)
+		return coretool.Result{}, fmt.Errorf("write edited file: %w", err)
 	}
 
 	// Build summary
@@ -224,7 +224,7 @@ func (t *WriteTool) editFile(args WriteArgs) (ToolResult, error) {
 		}
 	}
 
-	return TextResult(summary.String()), nil
+	return coretool.TextResult(summary.String()), nil
 }
 
 func (t *WriteTool) resolvePath(path string) string {

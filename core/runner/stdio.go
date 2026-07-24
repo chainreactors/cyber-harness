@@ -137,9 +137,9 @@ func (h *stdioHost) accept(line string) {
 			return
 		}
 		h.mu.Lock()
-		h.sessions[session.Snapshot().ID] = session
+		h.sessions[session.ID()] = session
 		h.mu.Unlock()
-		opened, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: session.Snapshot().ID})
+		opened, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: session.ID()})
 		_ = h.emit(webproto.Message{Type: webproto.TypeSessionOpened, Payload: opened})
 
 	case webproto.TypeSessionClose:
@@ -222,7 +222,7 @@ func (h *stdioHost) accept(line string) {
 		h.wg.Add(1)
 		go func() {
 			defer h.wg.Done()
-			result, err := session.Command(h.ctx, CommandInput{Line: payload.Line})
+			result, err := session.Command(h.ctx, payload.Line)
 			if err != nil {
 				h.emitTaskError(message.TaskID, err)
 				return

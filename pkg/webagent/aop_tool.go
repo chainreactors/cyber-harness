@@ -23,7 +23,7 @@ type aopToolExecutor interface {
 // catalog, so the transport can assert execution capabilities on the resolved
 // tool instead of its name. *commands.CommandRegistry implements it.
 type toolResolver interface {
-	GetTool(name string) (commands.AgentTool, bool)
+	GetTool(name string) (tool.Tool, bool)
 }
 
 // foregroundTool is implemented by tools that run a command in the foreground
@@ -87,7 +87,7 @@ func executeCall(ctx context.Context, executor aopToolExecutor, call aop.ToolCal
 	if resolver, ok := executor.(toolResolver); ok {
 		if resolved, ok := resolver.GetTool(call.ToolName); ok {
 			if fg, ok := resolved.(foregroundTool); ok {
-				args, err := commands.ParseArgs[commands.BashArgs](string(arguments))
+				args, err := tool.ParseArgs[commands.BashArgs](string(arguments))
 				if err != nil {
 					return tool.Result{}, err
 				}

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/tool"
 	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -77,21 +78,21 @@ func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (a
 // panicTool is a test tool that always panics.
 type panicTool struct{ msg string }
 
-func (t *panicTool) Name() string                        { return "panic_tool" }
-func (t *panicTool) Description() string                 { return "always panics" }
-func (t *panicTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
-func (t *panicTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
+func (t *panicTool) Name() string                { return "panic_tool" }
+func (t *panicTool) Description() string         { return "always panics" }
+func (t *panicTool) Definition() tool.Definition { return tool.Definition{} }
+func (t *panicTool) Execute(_ context.Context, _ string) (tool.Result, error) {
 	panic(t.msg)
 }
 
 // normalTool returns a result without panicking.
 type normalTool struct{}
 
-func (t *normalTool) Name() string                        { return "normal_tool" }
-func (t *normalTool) Description() string                 { return "works fine" }
-func (t *normalTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
-func (t *normalTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
-	return commands.TextResult("hello"), nil
+func (t *normalTool) Name() string                { return "normal_tool" }
+func (t *normalTool) Description() string         { return "works fine" }
+func (t *normalTool) Definition() tool.Definition { return tool.Definition{} }
+func (t *normalTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+	return tool.TextResult("hello"), nil
 }
 
 type testLogger struct{}
@@ -107,11 +108,11 @@ type loggerAwareTool struct {
 	logger telemetry.Logger
 }
 
-func (t *loggerAwareTool) Name() string                        { return t.name }
-func (t *loggerAwareTool) Description() string                 { return t.name }
-func (t *loggerAwareTool) Definition() commands.ToolDefinition { return commands.ToolDefinition{} }
-func (t *loggerAwareTool) Execute(_ context.Context, _ string) (commands.ToolResult, error) {
-	return commands.TextResult("ok"), nil
+func (t *loggerAwareTool) Name() string                { return t.name }
+func (t *loggerAwareTool) Description() string         { return t.name }
+func (t *loggerAwareTool) Definition() tool.Definition { return tool.Definition{} }
+func (t *loggerAwareTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+	return tool.TextResult("ok"), nil
 }
 func (t *loggerAwareTool) InitLogger(logger telemetry.Logger) {
 	t.logger = logger

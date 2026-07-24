@@ -149,7 +149,7 @@ func (h *chatAgentHandler) HandleSessionOpen(ctx context.Context, msg webproto.M
 		sendProtocolError(send, "", "", err)
 		return
 	}
-	sessionID := session.Snapshot().ID
+	sessionID := session.ID()
 	h.mu.Lock()
 	h.sessions[sessionID] = session
 	h.mu.Unlock()
@@ -219,7 +219,7 @@ func (h *chatAgentHandler) HandleCommand(ctx context.Context, msg webproto.Messa
 		sendProtocolError(send, "", msg.TaskID, fmt.Errorf("session %q is not open", payload.SessionID))
 		return
 	}
-	result, err := session.Command(ctx, runner.CommandInput{Line: payload.Line})
+	result, err := session.Command(ctx, payload.Line)
 	if err != nil {
 		sendProtocolError(send, "", msg.TaskID, err)
 		return

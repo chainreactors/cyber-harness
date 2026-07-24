@@ -25,6 +25,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Keep wire fixtures concise without exposing a production alias.
+type WSMessage = webproto.Message
+
 type recordingSCOStore struct {
 	scanID string
 	nodes  []json.RawMessage

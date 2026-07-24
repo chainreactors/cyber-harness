@@ -22,10 +22,7 @@ type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string
 	// ID is the stable node identity used by Cairn as the runner primary key.
-	ID string
-	// Name is kept as a compatibility alias for callers created before ID was
-	// made explicit. New callers should set ID.
-	Name     string
+	ID       string
 	Token    string
 	Registry *commands.CommandRegistry
 	DataBus  *eventbus.Bus[output.ToolDataEvent]
@@ -44,9 +41,6 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		return fmt.Errorf("command registry is required")
 	}
 	runnerID := strings.TrimSpace(cfg.ID)
-	if runnerID == "" {
-		runnerID = strings.TrimSpace(cfg.Name)
-	}
 	if runnerID == "" {
 		runnerID, _ = os.Hostname()
 	}
