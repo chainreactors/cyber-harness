@@ -63,7 +63,9 @@ func InputFromAOPMessage(data aop.MessageData) Input {
 	return input
 }
 
-func (in Input) text() string {
+// Text returns the textual parts joined in their original order. Image parts
+// are intentionally omitted; callers use Parts when they need the full input.
+func (in Input) Text() string {
 	var sb strings.Builder
 	for _, p := range in.Parts {
 		if p.Text == "" {
@@ -87,7 +89,7 @@ func (in Input) chatMessage() (ChatMessage, error) {
 		}
 	}
 	if !hasImage {
-		return NewTextMessage("user", in.text()), nil
+		return NewTextMessage("user", in.Text()), nil
 	}
 	parts := make([]ContentPart, 0, len(in.Parts))
 	for _, p := range in.Parts {

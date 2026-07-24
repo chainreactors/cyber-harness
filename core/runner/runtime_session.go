@@ -631,7 +631,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	agentInput.NoEcho = input.NoEcho
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfig(provider, model, logger, inputText(agentInput), input.EvalCriteria, input.EvalMaxRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, agentInput, input.EvalCriteria, input.EvalMaxRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))

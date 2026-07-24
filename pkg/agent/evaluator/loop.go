@@ -3,6 +3,7 @@ package evaluator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
@@ -18,16 +19,29 @@ type EvalLoopConfig struct {
 	Goal          string
 	Criteria      string
 	TurnID        string
+	InitialInput  agent.Input
 }
 
 // NewLoopConfig builds an EvalLoopConfig around a fresh Evaluator. A
 // maxRounds of zero (or negative) defers to RunWithEval's default.
 func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal, criteria string, maxRounds int) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, goal, agent.TextInput(goal), criteria, maxRounds)
+}
+
+// NewLoopConfigWithInput preserves transport controls and multimodal parts on
+// the first evaluation round. Boundaries that already published the user input
+// use this constructor so NoEcho is not lost when entering Goal mode.
+func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, input agent.Input, criteria string, maxRounds int) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, strings.TrimSpace(input.Text()), input, criteria, maxRounds)
+}
+
+func newLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal string, input agent.Input, criteria string, maxRounds int) EvalLoopConfig {
 	return EvalLoopConfig{
 		Evaluator:     New(Config{Provider: p, Model: model, Logger: logger}),
 		MaxEvalRounds: maxRounds,
 		Goal:          goal,
 		Criteria:      criteria,
+		InitialInput:  input,
 	}
 }
 
@@ -47,7 +61,12 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 		return result
 	}
 
-	input := agent.TextInput(cfg.Goal)
+	input := cfg.InitialInput
+	// Keep direct EvalLoopConfig literals compatible with the pre-InitialInput
+	// API. Constructors always populate InitialInput.
+	if len(input.Parts) == 0 {
+		input = agent.TextInput(cfg.Goal)
+	}
 	var lastVerdict *Verdict
 	for round := 1; round <= cfg.MaxEvalRounds; round++ {
 		result, err := a.Run(ctx, input, opts...)
