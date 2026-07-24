@@ -112,7 +112,7 @@ libstdc++、libgcc 或 winpthread DLL。
 - 自然语言描述任务，agent 自主规划、扫描、分析、输出结论
 - Goal Evaluation — 独立评估器判定任务完成度，自动驱动重试
 - 交互式 REPL，支持直接执行命令
-- 多 provider 容错降级
+- 多 provider 配置，支持显式手动切换
 
 ### [IOA](https://github.com/chainreactors/ioa) — 多 Agent 协作
 
@@ -196,7 +196,11 @@ llm:
   provider: openai
   api_key: sk-...
   model: gpt-4o
+  context_window: 128000   # 模型上下文窗口；自定义模型建议显式填写
+  max_tokens: 16384        # 单次最大输出
 ```
+
+实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`。上下文接近配置窗口时会自动压缩。
 
 ---
 

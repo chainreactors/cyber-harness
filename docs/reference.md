@@ -56,15 +56,24 @@ llm:
   base_url: ""        # API base URL（留空使用 provider 默认值）
   api_key: ""         # API key（建议使用环境变量）
   model: ""           # 模型名称
+  context_window: 0    # 模型上下文窗口；0 表示按模型推断，未知模型默认 128000
+  max_tokens: 0        # 单次最大输出；0 使用默认值 16384
   proxy: ""           # 访问 LLM API 的 HTTP proxy
 
-  # 多 provider 降级链（可选）
+  # 多 provider 配置（可选；只手动切换，不自动 fallback）
+  active_profile: deepseek
   providers:
-    - provider: deepseek
+    - id: deepseek
+      name: DeepSeek
+      provider: deepseek
       base_url: https://api.deepseek.com
       api_key: "sk-..."
       model: deepseek-chat
-    - provider: openai
+      context_window: 128000
+      max_tokens: 16384
+    - id: openai
+      name: OpenAI
+      provider: openai
       api_key: "sk-..."
       model: gpt-4o
 
@@ -106,6 +115,8 @@ misc:
 | `--base-url` | LLM API base URL |
 | `--api-key` | LLM API key（也可用环境变量） |
 | `--model` | 模型名称（默认 `gpt-4o`） |
+| `--context-window` | 模型上下文窗口；自定义模型 ID 建议显式设置 |
+| `--max-tokens` | 单次 LLM 响应的最大输出 token 数 |
 | `--llm-proxy` | 访问 LLM API 的 HTTP 代理 |
 | `--ai` | 对 scanner 输出启用 LLM 分析 |
 
@@ -120,6 +131,8 @@ misc:
 | `--heartbeat <分钟>` | heartbeat 间隔（0 表示关闭，默认 0） |
 | `--timeout <秒>` | 整体超时（默认 3600） |
 | `-e, --eval` | 目标评估标准 — 独立 LLM 判断任务是否达成 |
+
+`max_tokens` 并非无条件发送：AIScan 会预估消息和工具 schema 的 token 数，并按 `context_window - 当前上下文 - 4096` 自动收紧。上下文接近窗口时会按 Pi 的默认策略自动压缩；服务端返回上下文溢出时会压缩并自动重试一次。
 
 ### Scanner 参数
 
@@ -169,9 +182,11 @@ misc:
 
 aiscan 可以从 `--base-url` 自动推断 provider（如 URL 包含 `deepseek.com` 自动识别为 `deepseek`）。
 
-### 多 Provider 降级链
+### 多 Provider 配置
 
-当主 provider 重试耗尽后，agent loop 自动切换到降级链中的下一个 provider 并重放当前 turn。配置文件中通过 `llm.providers` 数组定义，每个 entry 支持 `provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout` 字段。启动时并行初始化，失败的跳过。REPL 中可通过 `/provider` 查看链状态。
+配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。Web 设置页可以选择当前 profile，REPL 可通过 `/provider` 查看配置，并用 `/provider set` 显式应用新配置。
+
+Agent 只会重试当前 provider。重试耗尽后直接返回错误，不会自动切换到其他 profile，也不会把同一 turn 发给另一模型。
 
 ### Provider 配置示例
 

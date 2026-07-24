@@ -113,7 +113,7 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 - Natural language tasks — the agent plans, scans, analyzes, and reports autonomously
 - Goal evaluation — an independent evaluator judges task completion and drives automatic retry
 - Interactive REPL with direct command execution
-- Multi-provider fallback for resilience
+- Multiple provider profiles with explicit manual switching
 
 ### [IOA](https://github.com/chainreactors/ioa) — Multi-Agent Collaboration
 
@@ -197,7 +197,11 @@ llm:
   provider: openai
   api_key: sk-...
   model: gpt-4o
+  context_window: 128000   # Set explicitly for custom model IDs
+  max_tokens: 16384        # Maximum output per response
 ```
+
+The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. Automatic compaction starts as the context approaches the configured window.
 
 ---
 
