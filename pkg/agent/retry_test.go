@@ -45,6 +45,58 @@ func TestRetryOnTransientError(t *testing.T) {
 	}
 }
 
+func TestClampMaxTokens(t *testing.T) {
+	tests := []struct {
+		name                     string
+		configured, window, used int
+		want                     int
+	}{
+		{name: "configured limit fits", configured: 16384, window: 128000, used: 10000, want: 16384},
+		{name: "remaining context clamps", configured: 32768, window: 100000, used: 80000, want: 15904},
+		{name: "safety margin exhausted", configured: 4096, window: 4096, used: 1, want: 1},
+		{name: "default max tokens", configured: 0, window: 128000, used: 10000, want: DefaultMaxTokens},
+		{name: "unknown window leaves configured", configured: 12345, window: 0, used: 10000, want: 12345},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampMaxTokens(tt.configured, tt.window, tt.used); got != tt.want {
+				t.Fatalf("clampMaxTokens(%d, %d, %d) = %d, want %d", tt.configured, tt.window, tt.used, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigInitUsesPiModelLimitDefaults(t *testing.T) {
+	cfg := (Config{Model: "unknown-custom-model"}).init()
+	if cfg.MaxTokens != DefaultMaxTokens || cfg.ContextWindow != DefaultContextWindow {
+		t.Fatalf("default limits = max:%d context:%d", cfg.MaxTokens, cfg.ContextWindow)
+	}
+}
+
+func TestAgentRequestUsesConfiguredAndRemainingContextLimits(t *testing.T) {
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "done")),
+	}}
+	ag := NewAgent(Config{
+		Provider:      llm,
+		Model:         "custom",
+		MaxTokens:     20000,
+		ContextWindow: 10000,
+		MaxRetries:    -1,
+	})
+	if _, err := ag.Run(context.Background(), TextInput(strings.Repeat("x", 8000))); err != nil {
+		t.Fatal(err)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(requests))
+	}
+	// 8000 ASCII bytes estimate to 2000 tokens. No tools are registered.
+	if got, want := requests[0].MaxTokens, 10000-2000-ContextSafetyTokens; got != want {
+		t.Fatalf("request max_tokens = %d, want %d", got, want)
+	}
+}
+
 func TestNoRetryOnAuthError(t *testing.T) {
 	tools := commands.NewRegistry()
 	callCount := 0
@@ -100,6 +152,9 @@ func TestRetryableProviderTimeoutAndStallErrors(t *testing.T) {
 	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrStreamStalled)) {
 		t.Fatal("ErrStreamStalled should be retryable")
 	}
+	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrStreamIncomplete)) {
+		t.Fatal("ErrStreamIncomplete should be retryable")
+	}
 	if !isRetryableError(retryableTimeoutError{}) {
 		t.Fatal("network timeout should be retryable")
 	}
@@ -108,6 +163,15 @@ func TestRetryableProviderTimeoutAndStallErrors(t *testing.T) {
 	}
 	if isRetryableError(fmt.Errorf("wrapped: %w", context.DeadlineExceeded)) {
 		t.Fatal("context.DeadlineExceeded should not be retryable")
+	}
+}
+
+func TestContextOverflowBypassesTransportRetry(t *testing.T) {
+	if isRetryableError(&APIError{StatusCode: 500, Message: "maximum context length exceeded"}) {
+		t.Fatal("context overflow should go directly to compaction")
+	}
+	if !isRetryableError(&APIError{StatusCode: 503, Message: "Service unavailable: too many tokens"}) {
+		t.Fatal("service unavailable should remain a transport retry")
 	}
 }
 
@@ -128,7 +192,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	}
 }
 
-func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
+func TestProviderFailureDoesNotAutomaticallyFallback(t *testing.T) {
 	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "invalid api key"}}
 	fallback := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -144,33 +208,12 @@ func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	result, err := a.Run(context.Background(), TextInput("hello"))
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil (fallback should succeed)", err)
-	}
-	if result.Output != "from fallback" {
-		t.Fatalf("Output = %q, want 'from fallback'", result.Output)
-	}
-	if len(fallback.requestsSnapshot()) == 0 {
-		t.Fatal("fallback provider was never called")
-	}
-}
-
-func TestProviderFallbackAllExhausted(t *testing.T) {
-	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "bad key"}}
-	fallback := &scriptedProvider{err: &APIError{StatusCode: 403, Message: "forbidden"}}
-
-	a := NewAgent(Config{
-		Provider:   primary,
-		Model:      "primary-model",
-		Fallbacks:  []ProviderEntry{{Provider: fallback, Model: "fallback-model"}},
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
 	_, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil {
-		t.Fatal("Run() error = nil, want error when all providers exhausted")
+		t.Fatal("Run() error = nil, want the primary provider error")
+	}
+	if len(fallback.requestsSnapshot()) != 0 {
+		t.Fatal("fallback provider was called automatically")
 	}
 }
 

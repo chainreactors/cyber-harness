@@ -85,6 +85,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
+		true,
 		func(_ string, data []byte) (ChatCompletionStreamEvent, error) {
 			return parseOpenAIStreamChunk(data)
 		},

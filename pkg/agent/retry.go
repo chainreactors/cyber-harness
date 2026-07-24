@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -32,7 +33,11 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrCallTimeout) || errors.Is(err, ErrStreamStalled) || errors.Is(err, errEmptyResponse) {
+	if isContextOverflowError(err) {
+		return false
+	}
+	if errors.Is(err, ErrCallTimeout) || errors.Is(err, ErrStreamStalled) ||
+		errors.Is(err, ErrStreamIncomplete) || errors.Is(err, errEmptyResponse) {
 		return true
 	}
 	if errors.Is(err, context.Canceled) {
@@ -209,6 +214,7 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		CacheRetention: cfg.CacheRetention,
 		SessionID:      cfg.SessionID,
 	}
+	req.MaxTokens = clampMaxTokens(cfg.MaxTokens, cfg.ContextWindow, estimateRequestTokens(messages, tools))
 	em.status(aop.StatusLLMRequest, aop.NSAOP, aop.LLMRequest{Model: req.Model, Messages: len(req.Messages), MaxTokens: req.MaxTokens, Stream: cfg.Stream})
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(StreamingProvider); ok {
@@ -224,11 +230,40 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		return ChatMessage{}, nil, fmt.Errorf("%w at turn %d", errEmptyResponse, turn)
 	}
 	msg := resp.Choices[0].Message
+	msg.FinishReason = resp.Choices[0].FinishReason
 	if parts := messagePartsFromChat(msg); len(parts) > 0 {
 		em.messageWithID(messageID, "assistant", parts)
 	}
 	logUsage(cfg.Logger, resp.Usage)
 	return msg, resp.Usage, nil
+}
+
+func clampMaxTokens(configured, contextWindow, contextTokens int) int {
+	if configured <= 0 {
+		configured = DefaultMaxTokens
+	}
+	if contextWindow <= 0 {
+		return configured
+	}
+	available := contextWindow - contextTokens - ContextSafetyTokens
+	if available < 1 {
+		available = 1
+	}
+	if configured > available {
+		return available
+	}
+	return configured
+}
+
+func estimateRequestTokens(messages []ChatMessage, tools []ToolDefinition) int {
+	total := estimateAllTokens(messages)
+	if len(tools) == 0 {
+		return total
+	}
+	if encoded, err := json.Marshal(tools); err == nil {
+		total += (len(encoded) + 3) / 4
+	}
+	return total
 }
 
 func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, req *ChatCompletionRequest, em *aopEmitter, logger telemetry.Logger, turn int, messageID string) (ChatMessage, *Usage, error) {
@@ -239,6 +274,7 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 
 	builder := newMessageBuilder()
 	seenReasoning := false
+	finishReason := ""
 	var usage *Usage
 	for {
 		select {
@@ -253,6 +289,9 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 			}
 			if event.Usage != nil {
 				usage = event.Usage
+			}
+			if event.FinishReason != "" {
+				finishReason = event.FinishReason
 			}
 			if event.Done {
 				goto streamDone
@@ -274,6 +313,7 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 streamDone:
 
 	msg := builder.Message()
+	msg.FinishReason = finishReason
 	if parts := messagePartsFromChat(msg); len(parts) > 0 {
 		em.messageWithID(messageID, "assistant", parts)
 	}

@@ -304,6 +304,182 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 	}
 }
 
+func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	beforeCalled := false
+	afterCalled := false
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		{Choices: []Choice{{
+			Message: ChatMessage{
+				Role: "assistant",
+				ToolCalls: []ToolCall{{
+					ID: "call-truncated", Type: "function",
+					Function: FunctionCall{Name: "echo", Arguments: `{"value":"cut off`},
+				}},
+			},
+			FinishReason: "max_tokens",
+		}}},
+		chatResponse(NewTextMessage("assistant", "recovered")),
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
+			beforeCalled = true
+			return nil, nil
+		},
+		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
+			afterCalled = true
+			return nil, nil
+		},
+	}).Run(context.Background(), TextInput("use a tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("truncated tool was executed: %#v", calls)
+	}
+	if beforeCalled || afterCalled {
+		t.Fatalf("tool hooks ran for rejected call: before=%v after=%v", beforeCalled, afterCalled)
+	}
+
+	requests := llm.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(requests))
+	}
+	var truncated ChatMessage
+	var errorResult ChatMessage
+	for _, msg := range requests[1].Messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			truncated = msg
+		}
+		if msg.Role == "tool" && msg.ToolCallID == "call-truncated" {
+			errorResult = msg
+		}
+	}
+	if truncated.FinishReason != "max_tokens" {
+		t.Fatalf("finish reason = %q, want max_tokens", truncated.FinishReason)
+	}
+	if got := truncated.ToolCalls[0].Function.Arguments; got != "{}" {
+		t.Fatalf("sanitized arguments = %q, want {}", got)
+	}
+	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "Retry") {
+		t.Fatalf("error tool result = %#v", errorResult)
+	}
+}
+
+func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
+				Index: 0, ID: "stream-truncated", Type: "function",
+				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
+			}}}},
+			{FinishReason: "length"},
+			{Done: true},
+		},
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			{FinishReason: "stop"},
+			{Done: true},
+		},
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Stream:   true,
+	}).Run(context.Background(), TextInput("use a streaming tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("truncated tool was executed: %#v", calls)
+	}
+	var finishReason string
+	for _, msg := range result.Messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			finishReason = msg.FinishReason
+			break
+		}
+	}
+	if finishReason != "length" {
+		t.Fatalf("stream finish reason = %q, want length", finishReason)
+	}
+}
+
+func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
+				Index: 0, ID: "stream-malformed", Type: "function",
+				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
+			}}}},
+			{FinishReason: "tool_calls"},
+			{Done: true},
+		},
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			{FinishReason: "stop"},
+			{Done: true},
+		},
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm, Tools: tools, Model: "test", Stream: true,
+	}).Run(context.Background(), TextInput("use a streaming tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("malformed tool was executed: %#v", calls)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(requests))
+	}
+	var rejectedCall ChatMessage
+	var errorResult ChatMessage
+	for _, message := range requests[1].Messages {
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			rejectedCall = message
+		}
+		if message.Role == "tool" && message.ToolCallID == "stream-malformed" {
+			errorResult = message
+		}
+	}
+	if len(rejectedCall.ToolCalls) != 1 || rejectedCall.ToolCalls[0].Function.Arguments != "{}" {
+		t.Fatalf("rejected tool call = %#v", rejectedCall)
+	}
+	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "invalid") {
+		t.Fatalf("error tool result = %#v", errorResult)
+	}
+}
+
 func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "raw"}
@@ -460,6 +636,31 @@ func TestTokenBudgetExceeded(t *testing.T) {
 	}
 }
 
+func TestBudgetExhaustionDoesNotKeepUnpairedToolCall(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{{
+		Choices: []Choice{{Message: ChatMessage{
+			Role: "assistant",
+			ToolCalls: []ToolCall{{ID: "cut-off", Type: "function", Function: FunctionCall{
+				Name: "echo", Arguments: `{"value":"partial`},
+			}},
+		}, FinishReason: "max_tokens"}},
+		Usage: &Usage{TotalTokens: 1000},
+	}}}
+
+	result, err := NewAgent(Config{
+		Provider: llm, Tools: tools, Model: "test", TokenBudget: 1000,
+	}).Run(context.Background(), TextInput("use a tool"))
+	if err == nil || result == nil || result.Stop != StopReasonBudget {
+		t.Fatalf("Run() result=%#v error=%v, want budget stop", result, err)
+	}
+	if len(result.Messages) != 1 || len(echo.callsSnapshot()) != 0 {
+		t.Fatalf("budget stop kept or executed tool call: messages=%#v calls=%#v", result.Messages, echo.callsSnapshot())
+	}
+}
+
 func TestTruncateResultIncludesSize(t *testing.T) {
 	large := strings.Repeat("x\n", DefaultMaxResultSize)
 	tr := truncate.Head(large, truncate.Options{MaxBytes: DefaultMaxResultSize})
@@ -548,8 +749,8 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 	if result.TotalUsage.PromptTokens != 480 {
 		t.Errorf("TotalUsage.PromptTokens = %d, want 480", result.TotalUsage.PromptTokens)
 	}
-	if result.ContextTokens != 280 {
-		t.Errorf("ContextTokens = %d, want 280 (last turn prompt tokens)", result.ContextTokens)
+	if result.ContextTokens != 300 {
+		t.Errorf("ContextTokens = %d, want 300 (last turn input + output)", result.ContextTokens)
 	}
 }
 

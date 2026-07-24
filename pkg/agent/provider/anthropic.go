@@ -93,6 +93,7 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 	parser := &anthropicStreamParser{}
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
+		false,
 		parser.parse,
 	)
 	if err != nil {
@@ -229,13 +230,17 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 			} else {
 				resultContent = deref(m.Content)
 			}
+			resultBlock := map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": m.ToolCallID,
+				"content":     resultContent,
+			}
+			if m.ToolResultIsError {
+				resultBlock["is_error"] = true
+			}
 			messages = append(messages, aMsg{
-				Role: "user",
-				Content: []map[string]interface{}{{
-					"type":        "tool_result",
-					"tool_use_id": m.ToolCallID,
-					"content":     resultContent,
-				}},
+				Role:    "user",
+				Content: []map[string]interface{}{resultBlock},
 			})
 
 		default:

@@ -57,8 +57,9 @@ var (
 	InferProviderFromBaseURL = provider.InferFromBaseURL
 	NormalizeProvider        = provider.NormalizeProvider
 
-	ErrCallTimeout   = provider.ErrCallTimeout
-	ErrStreamStalled = provider.ErrStreamStalled
+	ErrCallTimeout      = provider.ErrCallTimeout
+	ErrStreamStalled    = provider.ErrStreamStalled
+	ErrStreamIncomplete = provider.ErrStreamIncomplete
 )
 
 // Agent-specific types.
@@ -119,15 +120,25 @@ type ProviderEntry struct {
 	Model    string
 }
 
+type CompactionSettings struct {
+	ReserveTokens    int
+	KeepRecentTokens int
+}
+
 type Config struct {
-	Provider         Provider
-	Tools            tool.Executor
-	Model            string
+	Provider Provider
+	Tools    tool.Executor
+	Model    string
+	// Fallbacks is retained for source compatibility. It is deliberately
+	// ignored: provider selection is explicit and a run never switches models.
+	// Deprecated: configure and select provider profiles explicitly.
 	Fallbacks        []ProviderEntry
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
 	Messages         []ChatMessage
 	MaxTokens        int
+	ContextWindow    int
+	Compaction       CompactionSettings
 	Temperature      *float64
 	Stream           bool
 	MaxRetries       int
@@ -173,6 +184,7 @@ func (c Config) WithInbox(ib inbox.Inbox) Config           { c.Inbox = ib; retur
 func (c Config) WithLogger(l telemetry.Logger) Config      { c.Logger = l; return c }
 func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
 func (c Config) WithMaxTokens(n int) Config                { c.MaxTokens = n; return c }
+func (c Config) WithContextWindow(n int) Config            { c.ContextWindow = n; return c }
 func (c Config) WithTemperature(t float64) Config          { c.Temperature = &t; return c }
 func (c Config) WithMaxRetries(n int) Config               { c.MaxRetries = n; return c }
 func (c Config) WithTokenBudget(n int) Config              { c.TokenBudget = n; return c }
@@ -197,6 +209,18 @@ func (c Config) init() Config {
 	}
 	if c.MaxRetries <= 0 {
 		c.MaxRetries = DefaultMaxRetries
+	}
+	if c.MaxTokens <= 0 {
+		c.MaxTokens = DefaultMaxTokens
+	}
+	if c.ContextWindow <= 0 {
+		c.ContextWindow = ModelContextWindow(c.Model)
+	}
+	if c.Compaction.ReserveTokens <= 0 {
+		c.Compaction.ReserveTokens = DefaultCompactionReserve
+	}
+	if c.Compaction.KeepRecentTokens <= 0 {
+		c.Compaction.KeepRecentTokens = DefaultKeepRecentTokens
 	}
 	if c.MaxResultSize <= 0 {
 		c.MaxResultSize = DefaultMaxResultSize

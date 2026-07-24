@@ -136,6 +136,18 @@ func (a *Agent) SetProvider(p Provider, model string) {
 	}
 }
 
+// SetProviderConfig hot-swaps the provider together with its model limits.
+func (a *Agent) SetProviderConfig(p Provider, providerConfig ProviderConfig) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Cfg.Provider = p
+	if providerConfig.Model != "" {
+		a.Cfg.Model = providerConfig.Model
+	}
+	a.Cfg.MaxTokens = providerConfig.MaxTokens
+	a.Cfg.ContextWindow = providerConfig.ContextWindow
+}
+
 // SetMaxTurns overrides the per-run turn cap (0 = unlimited). Applied to the
 // next Run; a run already in flight keeps the cap it snapshotted at its start.
 func (a *Agent) SetMaxTurns(n int) {
@@ -151,6 +163,18 @@ func (a *Agent) Model() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg.Model
+}
+
+func (a *Agent) ContextWindow() int {
+	if a == nil {
+		return 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.Cfg.ContextWindow > 0 {
+		return a.Cfg.ContextWindow
+	}
+	return ModelContextWindow(a.Cfg.Model)
 }
 
 func (a *Agent) SetLogger(logger telemetry.Logger) {
@@ -200,9 +224,10 @@ func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.De
 func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
 	return NewAgent(Config{
 		Provider:         cfg.Provider,
-		Fallbacks:        cfg.Fallbacks,
 		Tools:            cfg.Tools,
 		Model:            cfg.Model,
+		MaxTokens:        cfg.MaxTokens,
+		ContextWindow:    cfg.ContextWindow,
 		Logger:           cfg.Logger,
 		MaxRetries:       cfg.MaxRetries,
 		MaxParallelTools: cfg.MaxParallelTools,

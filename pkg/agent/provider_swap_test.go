@@ -46,6 +46,18 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 	}
 }
 
+func TestSetProviderConfigHotSwapsModelLimits(t *testing.T) {
+	provider := &scriptedProvider{}
+	ag := NewAgent(Config{MaxTokens: 1024, ContextWindow: 8192})
+	ag.SetProviderConfig(provider, ProviderConfig{
+		Model: "glm-5.2[1m]", MaxTokens: 32768, ContextWindow: 1000000,
+	})
+	cfg := ag.configSnapshot()
+	if cfg.Provider != provider || cfg.Model != "glm-5.2[1m]" || cfg.MaxTokens != 32768 || cfg.ContextWindow != 1000000 {
+		t.Fatalf("hot-swapped config = %+v", cfg)
+	}
+}
+
 // TestSetProviderRaceWithRun exercises a config push swapping the provider while
 // runs execute; run under -race it proves the Cfg read/write are serialized.
 func TestSetProviderRaceWithRun(t *testing.T) {

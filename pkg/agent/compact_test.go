@@ -1,7 +1,12 @@
 package agent
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 func msg(role, content string) ChatMessage {
@@ -22,6 +27,7 @@ func TestEstimateMessageTokens(t *testing.T) {
 		{"short text", msg("user", "hello"), 2},                                // 5 chars → ceil(5/4) = 2
 		{"exact boundary", msg("user", "abcd"), 1},                             // 4 chars → 1
 		{"longer text", msg("user", "hello world, this is a test message"), 9}, // 35 chars → ceil(35/4) = 9
+		{"image", NewMultimodalMessage("user", []ContentPart{ImagePart("image/png", "data", "high")}), 1200},
 		{"with tool calls", ChatMessage{
 			Role: "assistant",
 			ToolCalls: []ToolCall{{
@@ -72,7 +78,13 @@ func TestFindCutPoint(t *testing.T) {
 			0,
 		},
 		{
-			"cut at user message boundary",
+			"split a single oversized turn",
+			[]ChatMessage{msg("user", longStr), msg("assistant", "recent")},
+			20000,
+			1,
+		},
+		{
+			"split at assistant boundary to honor recent budget",
 			[]ChatMessage{
 				msg("user", longStr),      // ~25000 tokens — old
 				msg("assistant", longStr), // ~25000 tokens — old
@@ -80,10 +92,10 @@ func TestFindCutPoint(t *testing.T) {
 				msg("assistant", "reply"), // kept
 			},
 			20000,
-			2, // cut before the "recent" user message
+			1, // Pi-style split turn keeps from the nearest valid assistant boundary
 		},
 		{
-			"skip tool results",
+			"assistant boundary before old tool result",
 			[]ChatMessage{
 				msg("user", longStr),
 				msg("assistant", longStr),
@@ -92,7 +104,18 @@ func TestFindCutPoint(t *testing.T) {
 				msg("assistant", "reply"),
 			},
 			20000,
-			3, // cut at the "recent" user message, skipping tool result
+			1, // assistant is valid; a tool result itself is never a cut point
+		},
+		{
+			"split an oversized tool turn at an assistant boundary",
+			[]ChatMessage{
+				msg("user", longStr),
+				msg("assistant", "calling a tool"),
+				toolResult("tc1", longStr),
+				msg("assistant", "tool follow-up"),
+			},
+			20000,
+			3, // never retain from the tool result; summarize the turn prefix
 		},
 		{
 			"empty messages",
@@ -108,6 +131,43 @@ func TestFindCutPoint(t *testing.T) {
 				t.Errorf("findCutPoint() = %d, want %d", got, tt.wantIdx)
 			}
 		})
+	}
+}
+
+func TestCompactHistorySummarizesOversizedTurnPrefix(t *testing.T) {
+	long := strings.Repeat("x", 100000)
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "prefix checkpoint")),
+	}}
+	toolCall := ChatMessage{Role: "assistant", ToolCalls: []ToolCall{{
+		ID: "tc1", Type: "function", Function: FunctionCall{Name: "bash", Arguments: `{"command":"scan"}`},
+	}}}
+	messages := []ChatMessage{
+		msg("user", long),
+		toolCall,
+		toolResult("tc1", long),
+		msg("assistant", "recent suffix"),
+	}
+
+	compacted, result, err := compactHistory(context.Background(), CompactConfig{
+		Provider: llm, Model: "custom", KeepRecentTokens: 20000,
+		ReserveTokens: 16384, MaxTokens: 16384,
+	}, messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.requestsSnapshot()) != 1 {
+		t.Fatalf("summary requests = %d, want one turn-prefix request", len(llm.requestsSnapshot()))
+	}
+	if len(compacted) != 2 || compacted[1].Role != "assistant" || messageContent(compacted[1]) != "recent suffix" {
+		t.Fatalf("compacted messages = %#v", compacted)
+	}
+	if !strings.Contains(messageContent(compacted[0]), "Turn Context (split turn)") ||
+		!strings.Contains(messageContent(compacted[0]), "prefix checkpoint") {
+		t.Fatalf("split-turn summary = %q", messageContent(compacted[0]))
+	}
+	if result.KeptMessages != 1 {
+		t.Fatalf("compact result = %+v", result)
 	}
 }
 
@@ -138,6 +198,147 @@ func TestSerializeMessagesSkipsToolResultRoleUser(t *testing.T) {
 	}
 	if !contains(result, "[Tool Result]") {
 		t.Error("tool result should appear as Tool Result")
+	}
+}
+
+func TestShouldCompactContextUsesReserveThreshold(t *testing.T) {
+	settings := CompactionSettings{ReserveTokens: 16384}
+	if shouldCompactContext(983616, 1000000, settings) {
+		t.Fatal("equal-to threshold should not compact")
+	}
+	if !shouldCompactContext(983617, 1000000, settings) {
+		t.Fatal("usage above context_window-reserve_tokens should compact")
+	}
+}
+
+func TestEffectiveCompactionLimitsFitSmallContext(t *testing.T) {
+	reserve, keepRecent := effectiveCompactionLimits(8192, CompactionSettings{})
+	if reserve != 2048 || keepRecent != 4096 {
+		t.Fatalf("limits = %d/%d, want 2048/4096", reserve, keepRecent)
+	}
+}
+
+func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
+	long := strings.Repeat("x", 240)
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "history checkpoint")),
+		chatResponse(NewTextMessage("assistant", "turn-prefix checkpoint")),
+		chatResponse(NewTextMessage("assistant", "final answer")),
+	}}
+	agent := NewAgent(Config{
+		Provider:      llm,
+		Tools:         commands.NewRegistry(),
+		Model:         "custom",
+		MaxTokens:     64,
+		ContextWindow: 180,
+		Compaction: CompactionSettings{
+			ReserveTokens:    40,
+			KeepRecentTokens: 20,
+		},
+	})
+	agent.LoadMessages([]ChatMessage{
+		msg("user", long), msg("assistant", long),
+		msg("user", long), msg("assistant", long),
+	})
+
+	result, err := agent.Run(context.Background(), TextInput("continue"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "final answer" {
+		t.Fatalf("output = %q, want final answer", result.Output)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 3 {
+		t.Fatalf("provider requests = %d, want history summary + turn-prefix summary + normal request", len(requests))
+	}
+	if got, want := requests[0].MaxTokens, 32; got != want {
+		t.Fatalf("summary max_tokens = %d, want %d", got, want)
+	}
+	if got, want := requests[1].MaxTokens, 20; got != want {
+		t.Fatalf("turn-prefix max_tokens = %d, want %d", got, want)
+	}
+	if len(result.Messages) < 3 || result.Messages[0].Content == nil ||
+		!strings.Contains(*result.Messages[0].Content, "history checkpoint") ||
+		!strings.Contains(*result.Messages[0].Content, "turn-prefix checkpoint") {
+		t.Fatalf("compacted messages = %#v", result.Messages)
+	}
+	if len(result.NewMessages) != 2 {
+		t.Fatalf("new messages = %d, want run-scoped user/assistant pair: %#v", len(result.NewMessages), result.NewMessages)
+	}
+}
+
+func TestRunRecoversFromContextOverflowOnce(t *testing.T) {
+	long := strings.Repeat("x", 240)
+	calls := 0
+	llm := &callbackProvider{fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		calls++
+		switch calls {
+		case 1:
+			return nil, fmt.Errorf("prompt is too long: request exceeds maximum")
+		case 2, 3:
+			return chatResponse(NewTextMessage("assistant", "overflow checkpoint")), nil
+		default:
+			return chatResponse(NewTextMessage("assistant", "recovered")), nil
+		}
+	}}
+	agent := NewAgent(Config{
+		Provider:      llm,
+		Tools:         commands.NewRegistry(),
+		Model:         "custom",
+		MaxTokens:     64,
+		ContextWindow: 1000000,
+		MaxRetries:    -1,
+		Compaction: CompactionSettings{
+			ReserveTokens:    40,
+			KeepRecentTokens: 20,
+		},
+	})
+	agent.LoadMessages([]ChatMessage{
+		msg("user", long), msg("assistant", long),
+		msg("user", long), msg("assistant", long),
+	})
+
+	result, err := agent.Run(context.Background(), TextInput("continue"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" || calls != 4 {
+		t.Fatalf("output=%q calls=%d, want recovered/4", result.Output, calls)
+	}
+}
+
+func TestCompactHistoryRejectsTruncatedSummary(t *testing.T) {
+	long := strings.Repeat("x", 240)
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{{
+		Choices: []Choice{{
+			Message:      NewTextMessage("assistant", "incomplete checkpoint"),
+			FinishReason: "max_tokens",
+		}},
+	}}}
+	messages := []ChatMessage{
+		msg("user", long), msg("assistant", long),
+		msg("user", "recent"), msg("assistant", "reply"),
+	}
+
+	compacted, _, err := compactHistory(context.Background(), CompactConfig{
+		Provider: llm, Model: "test", KeepRecentTokens: 20,
+		ReserveTokens: 40, MaxTokens: 64,
+	}, messages)
+	if err == nil || !strings.Contains(err.Error(), "summary output truncated") {
+		t.Fatalf("compactHistory() error = %v, want truncated summary error", err)
+	}
+	if compacted != nil {
+		t.Fatalf("truncated summary replaced history: %#v", compacted)
+	}
+}
+
+func TestContextOverflowDetectionExcludesRateLimits(t *testing.T) {
+	if !isContextOverflowError(fmt.Errorf("input exceeds the context window")) {
+		t.Fatal("expected context overflow detection")
+	}
+	if isContextOverflowError(fmt.Errorf("rate limit: too many tokens, retry later")) {
+		t.Fatal("rate limit must not be treated as context overflow")
 	}
 }
 

@@ -47,6 +47,10 @@ type ChatMessage struct {
 	ReasoningContent *string       `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	// FinishReason is response metadata used by the agent loop. It must not be
+	// sent back as part of an OpenAI-compatible message.
+	FinishReason      string `json:"-"`
+	ToolResultIsError bool   `json:"-"`
 }
 
 func (m ChatMessage) MarshalJSON() ([]byte, error) {
@@ -123,9 +127,10 @@ type ChatMessageDelta struct {
 }
 
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID             string       `json:"id"`
+	Type           string       `json:"type"`
+	Function       FunctionCall `json:"function"`
+	RejectedReason string       `json:"-"`
 }
 
 type ToolCallDelta struct {
