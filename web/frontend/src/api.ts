@@ -271,6 +271,8 @@ export interface LLMProfileStatus {
   api_key_configured: boolean
   model: string
   proxy: string
+  context_window?: number
+  max_tokens?: number
 }
 
 export interface LLMProviderProfile {
@@ -281,6 +283,8 @@ export interface LLMProviderProfile {
   api_key: string
   model: string
   proxy: string
+  context_window?: number
+  max_tokens?: number
 }
 
 // ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
@@ -293,6 +297,8 @@ export interface ConfigStatus {
     api_key_configured: boolean
     model: string
     proxy: string
+    context_window?: number
+    max_tokens?: number
     active_profile?: string
     profiles?: LLMProfileStatus[]
   };

@@ -155,6 +155,9 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
+	if err := ValidateLLMConfig(cfg.LLM); err != nil {
+		return ConfigStatus{}, err
+	}
 	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
 		return ConfigStatus{}, err
 	}

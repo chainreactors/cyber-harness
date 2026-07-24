@@ -5,7 +5,23 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
+
+// ValidateLLMConfig accepts zero as "use the model default" and rejects
+// negative limits before an invalid configuration can be persisted.
+func ValidateLLMConfig(cfg webproto.LLMConfig) error {
+	for _, profile := range cfg.Providers {
+		if profile.MaxTokens < 0 {
+			return fmt.Errorf("LLM max_tokens must be zero or positive")
+		}
+		if profile.ContextWindow < 0 {
+			return fmt.Errorf("LLM context_window must be zero or positive")
+		}
+	}
+	return nil
+}
 
 func ValidateTarget(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)

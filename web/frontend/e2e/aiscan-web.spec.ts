@@ -188,6 +188,8 @@ test.describe('Config Panel', () => {
     await expect(dialog).toContainText('Model');
     await expect(dialog).toContainText('Provider');
     await expect(dialog).toContainText('Base URL');
+    await expect(dialog).toContainText('Context window');
+    await expect(dialog).toContainText('Maximum output');
     await expect(dialog).toContainText('API Key');
   });
 });

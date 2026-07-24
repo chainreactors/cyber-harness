@@ -41,7 +41,12 @@ function emptyForm(): DistributeConfig {
 
 function statusToForm(cs: ConfigStatus): DistributeConfig {
   const profiles: LLMProviderProfile[] = cs.llm.profiles?.length
-    ? cs.llm.profiles.map(profile => ({ ...profile, api_key: '' }))
+    ? cs.llm.profiles.map(profile => ({
+        ...profile,
+        api_key: '',
+        context_window: positiveInteger(profile.context_window),
+        max_tokens: positiveInteger(profile.max_tokens),
+      }))
     : [{
         id: cs.llm.active_profile || 'default',
         name: cs.llm.model || cs.llm.provider || 'Default',
@@ -50,6 +55,8 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
         api_key: '',
         model: cs.llm.model,
         proxy: cs.llm.proxy,
+        context_window: positiveInteger(cs.llm.context_window),
+        max_tokens: positiveInteger(cs.llm.max_tokens),
       }]
   return {
     llm: {
@@ -67,6 +74,15 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
 
 function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
   return { id, name: 'New LLM', provider: 'openai', base_url: '', api_key: '', model: '', proxy: '' }
+}
+
+function positiveInteger(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? value : undefined
+}
+
+function positiveIntegerFromInput(value: string): number | undefined {
+  if (value.trim() === '') return undefined
+  return positiveInteger(Number(value))
 }
 
 // sectionStatus returns the readiness badges for the active settings section.
@@ -244,7 +260,7 @@ function LLMTab({
   const profile = profiles.find(item => item.id === selectedProfileID) || profiles[0]
   const configuredProfile = cs?.llm.profiles?.find(item => item.id === profile?.id)
 
-  const updateProfile = (key: keyof LLMProviderProfile, value: string) => {
+  const updateProfile = <K extends keyof LLMProviderProfile,>(key: K, value: LLMProviderProfile[K]) => {
     if (!profile) return
     setForm(current => ({
       ...current,
@@ -376,6 +392,26 @@ function LLMTab({
         />
       </Field>
       <Field label={t('baseUrl')}><Input value={profile.base_url} onChange={(e) => updateProfile('base_url', e.target.value)} placeholder={t('providerDefault')} /></Field>
+      <Field label={t('contextWindow')}>
+        <Input
+          type="number"
+          min={1}
+          step={1}
+          value={profile.context_window ?? ''}
+          onChange={(e) => updateProfile('context_window', positiveIntegerFromInput(e.target.value))}
+          placeholder={t('modelDefault')}
+        />
+      </Field>
+      <Field label={t('maxTokens')}>
+        <Input
+          type="number"
+          min={1}
+          step={1}
+          value={profile.max_tokens ?? ''}
+          onChange={(e) => updateProfile('max_tokens', positiveIntegerFromInput(e.target.value))}
+          placeholder={t('modelDefault')}
+        />
+      </Field>
       <Field label={t('proxy')}><Input value={profile.proxy} onChange={(e) => updateProfile('proxy', e.target.value)} placeholder="http://127.0.0.1:7890" /></Field>
       <div className="sm:col-span-2">
         <Field label={t('apiKey')}>

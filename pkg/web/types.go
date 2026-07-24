@@ -65,6 +65,8 @@ type ConfigStatus struct {
 		APIKeyConfigured bool               `json:"api_key_configured"`
 		Model            string             `json:"model"`
 		Proxy            string             `json:"proxy"`
+		MaxTokens        int                `json:"max_tokens,omitempty"`
+		ContextWindow    int                `json:"context_window,omitempty"`
 		ActiveProfile    string             `json:"active_profile,omitempty"`
 		Profiles         []LLMProfileStatus `json:"profiles,omitempty"`
 	} `json:"llm"`
@@ -109,6 +111,8 @@ type LLMProfileStatus struct {
 	APIKeyConfigured bool   `json:"api_key_configured"`
 	Model            string `json:"model"`
 	Proxy            string `json:"proxy"`
+	MaxTokens        int    `json:"max_tokens,omitempty"`
+	ContextWindow    int    `json:"context_window,omitempty"`
 }
 
 // ConfigStatusFromDistribute builds a masked ConfigStatus from raw config.
@@ -122,12 +126,15 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.LLM.APIKeyConfigured = active.APIKey != ""
 	cs.LLM.Model = active.Model
 	cs.LLM.Proxy = active.Proxy
+	cs.LLM.MaxTokens = active.MaxTokens
+	cs.LLM.ContextWindow = active.ContextWindow
 	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
 	for _, profile := range d.LLM.Providers {
 		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
 			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
 			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
 			Model: profile.Model, Proxy: profile.Proxy,
+			MaxTokens: profile.MaxTokens, ContextWindow: profile.ContextWindow,
 		})
 	}
 	cs.Cyberhub.URL = d.Cyberhub.URL
