@@ -238,7 +238,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
       <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
         <SheetContent
           side="right"
-          className="flex w-full flex-col gap-0 border-l border-border/70 bg-card p-0 sm:max-w-5xl"
+          className="flex w-full flex-col gap-0 border-l border-border/70 bg-card p-0 sm:max-w-[min(96rem,94vw)]"
           onDragOver={(e: React.DragEvent) => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={(e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) }}
           onDrop={handleDrop}
@@ -326,7 +326,11 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     enableSearch: true,
                     enableFieldSearch: true,
                     enableSorting: true,
-                    enablePagination: true,
+                    // No pager: render every asset of the active type in one
+                    // scrollable list (the panel body caps height and scrolls) so a
+                    // small pool isn't hidden behind a "1-N of N" bar. Very large
+                    // imports scroll rather than page.
+                    enablePagination: false,
                     enableColumnResize: true,
                     enableRowSelection: true,
                     enableColoredTypes: true,
@@ -336,9 +340,20 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     typeFilterKey: 'cstx_type',
                     rowIdKey: 'cstx_id',
                     compact: true,
-                    pageSize: 50,
+                    // Classic table. The mixed "All" tab is a union of every asset
+                    // type's schema, so type-specific columns (Port, URL, Frameworks…)
+                    // are blank for most rows and push the table past the panel width.
+                    // sparseColumnThreshold hides columns filled for fewer than half of
+                    // the current tab's rows by default; sparseMinColumns then keeps the
+                    // ~8 most-populated columns visible so the "All" tab lands on a
+                    // useful overview (name, host, ip, url, port…) that fits without a
+                    // horizontal scroll — never collapsing to a near-empty table. Each
+                    // single-type tab, where its columns are fully populated, still
+                    // shows them all. Nothing is removed: hidden columns stay one click
+                    // away in the column selector.
+                    sparseColumnThreshold: 0.5,
+                    sparseMinColumns: 8,
                     columnsExclude: EXCLUDE_COLUMNS,
-                    paginationMode: 'client',
                     batchActions: BATCH_ACTIONS,
                   }}
                   onAction={handleAction}
