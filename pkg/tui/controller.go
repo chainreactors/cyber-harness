@@ -166,7 +166,10 @@ func (c *interactiveRunController) checkContextUsage(result *agent.Result) {
 	if result == nil || result.ContextTokens <= 0 {
 		return
 	}
-	contextWindow := agent.ModelContextWindow(c.session.Model())
+	contextWindow := c.session.ContextWindow()
+	if contextWindow <= 0 {
+		contextWindow = agent.ModelContextWindow(c.session.Model())
+	}
 	if result.ContextTokens*100/contextWindow >= 80 {
 		c.mu.Lock()
 		c.compactContextTokens = result.ContextTokens

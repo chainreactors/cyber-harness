@@ -45,11 +45,13 @@ func (p *fakeConsoleProvider) ChatCompletion(_ context.Context, req *agent.ChatC
 func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--cyberhub-url", "http://hub:8080",
+		"--max-tokens", "16384",
 		"scan",
 		"-i", "127.0.0.1",
 		"--verify=high",
 		"--api-key", "KEY",
 		"--model=deepseek-v4-pro",
+		"--context-window=1000000",
 		"--base-url", "https://api.deepseek.com",
 		"--cyberhub-key=HUBKEY",
 	})
@@ -66,6 +68,9 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	opt := parsed.Option
 	if opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
+	}
+	if opt.MaxTokens != 16384 || opt.ContextWindow != 1000000 {
+		t.Fatalf("llm limits = max:%d context:%d", opt.MaxTokens, opt.ContextWindow)
 	}
 	if opt.CyberhubURL != "http://hub:8080" || opt.CyberhubKey != "HUBKEY" {
 		t.Fatalf("scanner options = %#v", opt.ScannerOptions)

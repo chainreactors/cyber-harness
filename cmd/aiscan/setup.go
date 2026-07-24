@@ -40,7 +40,8 @@ func init() {
 func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
-	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, a.DataBus, logger)
+	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools,
+		a.Provider, a.ProviderConfig, a.Skills, a.DataBus, logger)
 }
 
 func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -66,15 +67,18 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
 	var scanOpts []any
 	if scanCfg.AIEnabled && llmProvider != nil {
-		scanOpts = append(scanOpts, scan.WithParent(agent.NewAgent(agent.Config{
-			Provider: llmProvider,
-			Tools:    cmdReg,
-			Model:    model,
-			Logger:   logger,
-		})))
+		scannerParent := agent.NewAgent(agent.Config{
+			Provider:      llmProvider,
+			Tools:         cmdReg,
+			Model:         providerConfig.Model,
+			MaxTokens:     providerConfig.MaxTokens,
+			ContextWindow: providerConfig.ContextWindow,
+			Logger:        logger,
+		})
+		scanOpts = append(scanOpts, scan.WithParent(scannerParent))
 		scanOpts = append(scanOpts, scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
 			return runner.CollectDeepBrowserArtifacts(ctx, cmdReg, targetURL, logger)
 		}))

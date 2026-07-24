@@ -84,13 +84,15 @@ func llmProviderEntries(profiles []webproto.LLMProviderConfig) []cfg.LLMProvider
 	entries := make([]cfg.LLMProviderEntry, 0, len(profiles))
 	for _, p := range profiles {
 		entries = append(entries, cfg.LLMProviderEntry{
-			ID:       p.ID,
-			Name:     p.Name,
-			Provider: p.Provider,
-			BaseURL:  p.BaseURL,
-			APIKey:   p.APIKey,
-			Model:    p.Model,
-			Proxy:    p.Proxy,
+			ID:            p.ID,
+			Name:          p.Name,
+			Provider:      p.Provider,
+			BaseURL:       p.BaseURL,
+			APIKey:        p.APIKey,
+			Model:         p.Model,
+			Proxy:         p.Proxy,
+			MaxTokens:     p.MaxTokens,
+			ContextWindow: p.ContextWindow,
 		})
 	}
 	return entries

@@ -134,6 +134,13 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 	}
 	if rt.app != nil {
+		if rt.option != nil {
+			if rt.app.ProviderConfig.Model != "" {
+				rt.option.Model = rt.app.ProviderConfig.Model
+			}
+			rt.option.MaxTokens = rt.app.ProviderConfig.MaxTokens
+			rt.option.ContextWindow = rt.app.ProviderConfig.ContextWindow
+		}
 		rt.app.SetLogger(logger)
 		logger = rt.app.Logger()
 	}
@@ -202,9 +209,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 
 	rt.config = agent.Config{
 		Provider:       rt.app.Provider,
-		Fallbacks:      rt.app.ProviderFallbacks,
 		Tools:          rt.app.Commands,
-		Model:          option.Model,
+		Model:          rt.app.ProviderConfig.Model,
+		MaxTokens:      rt.app.ProviderConfig.MaxTokens,
+		ContextWindow:  rt.app.ProviderConfig.ContextWindow,
 		Logger:         logger,
 		CacheRetention: agent.CacheShort,
 		Bus:            rt.kernelBus,
@@ -378,10 +386,21 @@ func (rt *AgentRuntime) SetProvider(provider agent.Provider, providerConfig agen
 	if providerConfig.Model != "" {
 		rt.config.Model = providerConfig.Model
 	}
+	rt.config.MaxTokens = providerConfig.MaxTokens
+	rt.config.ContextWindow = providerConfig.ContextWindow
 	for _, sess := range rt.sessions {
-		sess.agent.SetProvider(provider, providerConfig.Model)
+		sess.agent.SetProviderConfig(provider, providerConfig)
 	}
+	output := rt.output
+	model := rt.config.Model
 	rt.mu.Unlock()
+	if output != nil {
+		contextWindow := providerConfig.ContextWindow
+		if contextWindow <= 0 {
+			contextWindow = agent.ModelContextWindow(model)
+		}
+		output.SetContextWindow(contextWindow)
+	}
 }
 
 // ---------------------------------------------------------------------------

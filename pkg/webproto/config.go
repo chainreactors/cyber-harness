@@ -6,13 +6,15 @@ import "fmt"
 // ActiveProfile is the runtime primary provider; the remaining entries are
 // available for switching.
 type LLMProviderConfig struct {
-	ID       string `json:"id" yaml:"id,omitempty"`
-	Name     string `json:"name" yaml:"name,omitempty"`
-	Provider string `json:"provider" yaml:"provider"`
-	BaseURL  string `json:"base_url" yaml:"base_url"`
-	APIKey   string `json:"api_key,omitempty" yaml:"api_key"`
-	Model    string `json:"model" yaml:"model"`
-	Proxy    string `json:"proxy" yaml:"proxy"`
+	ID            string `json:"id" yaml:"id,omitempty"`
+	Name          string `json:"name" yaml:"name,omitempty"`
+	Provider      string `json:"provider" yaml:"provider"`
+	BaseURL       string `json:"base_url" yaml:"base_url"`
+	APIKey        string `json:"api_key,omitempty" yaml:"api_key"`
+	Model         string `json:"model" yaml:"model"`
+	Proxy         string `json:"proxy" yaml:"proxy"`
+	MaxTokens     int    `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
+	ContextWindow int    `json:"context_window,omitempty" yaml:"context_window,omitempty"`
 }
 
 // LLMConfig is the provider profile list — the single representation of LLM

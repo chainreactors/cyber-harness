@@ -102,7 +102,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	}
 }
 
-func TestConsoleRuntimeAdapterPreservesContextTokens(t *testing.T) {
+func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 	provider := &runtimeSemanticProvider{usage: &agent.Usage{
 		PromptTokens: 8192,
 		TotalTokens:  8200,
@@ -117,8 +117,8 @@ func TestConsoleRuntimeAdapterPreservesContextTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ContextTokens != 8192 {
-		t.Fatalf("context tokens = %d, want 8192", result.ContextTokens)
+	if result.ContextTokens != 8200 {
+		t.Fatalf("context tokens = %d, want 8200", result.ContextTokens)
 	}
 }
 

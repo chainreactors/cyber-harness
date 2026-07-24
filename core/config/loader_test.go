@@ -25,6 +25,7 @@ func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	src := Option{}
 	src.Provider = "config-provider"
 	src.Model = "config-model"
+	src.ActiveProfile = "config-profile"
 	src.CyberhubURL = "http://config-hub:9000"
 
 	mergeOption(&dst, &src)
@@ -37,6 +38,9 @@ func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	}
 	if dst.CyberhubURL != "http://config-hub:9000" {
 		t.Errorf("CyberhubURL: got %q, want %q", dst.CyberhubURL, "http://config-hub:9000")
+	}
+	if dst.ActiveProfile != "config-profile" {
+		t.Errorf("ActiveProfile: got %q, want %q", dst.ActiveProfile, "config-profile")
 	}
 }
 
@@ -75,6 +79,8 @@ llm:
   provider: deepseek
   model: deepseek-chat
   base_url: https://api.deepseek.com/v1
+  max_tokens: 32768
+  context_window: 1000000
 cyberhub:
   url: http://hub:9000
   key: testkey
@@ -107,6 +113,9 @@ ioa:
 		if c.got != c.want {
 			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
 		}
+	}
+	if opt.MaxTokens != 32768 || opt.ContextWindow != 1000000 {
+		t.Fatalf("model limits = max:%d context:%d", opt.MaxTokens, opt.ContextWindow)
 	}
 }
 
@@ -744,13 +753,20 @@ func TestProvidersListFromConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `
 llm:
+  active_profile: openai
   providers:
-    - provider: deepseek
+    - id: deepseek
+      provider: deepseek
       api_key: dk-111
       model: deepseek-chat
-    - provider: openai
+      max_tokens: 8192
+      context_window: 128000
+    - id: openai
+      provider: openai
       api_key: sk-222
       model: gpt-4o
+      max_tokens: 32768
+      context_window: 1000000
 `)
 
 	var opt Option
@@ -762,12 +778,14 @@ llm:
 	}
 
 	primary := ProviderConfig(&opt)
-	if primary.Provider != "deepseek" || primary.APIKey != "dk-111" {
+	if primary.Provider != "openai" || primary.APIKey != "sk-222" ||
+		primary.MaxTokens != 32768 || primary.ContextWindow != 1000000 {
 		t.Errorf("primary from list: %+v", primary)
 	}
 
 	fallbacks := FallbackProviderConfigs(&opt)
-	if len(fallbacks) != 1 || fallbacks[0].APIKey != "sk-222" {
+	if len(fallbacks) != 1 || fallbacks[0].APIKey != "dk-111" ||
+		fallbacks[0].MaxTokens != 8192 || fallbacks[0].ContextWindow != 128000 {
 		t.Errorf("fallbacks from list: %+v", fallbacks)
 	}
 }

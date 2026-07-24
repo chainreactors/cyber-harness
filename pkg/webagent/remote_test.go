@@ -20,7 +20,7 @@ func TestFetchRemoteConfigUsesBearerTokenFromURL(t *testing.T) {
 		var cfg webproto.DistributeConfig
 		cfg.LLM.ActiveProfile = "p1"
 		cfg.LLM.Providers = []webproto.LLMProviderConfig{
-			{ID: "p1", Provider: "deepseek", Model: "deepseek-chat"},
+			{ID: "p1", Provider: "deepseek", Model: "deepseek-chat", MaxTokens: 8192, ContextWindow: 128000},
 			{ID: "p2", Provider: "openai", Model: "gpt-5"},
 		}
 		_ = json.NewEncoder(w).Encode(cfg)
@@ -39,5 +39,8 @@ func TestFetchRemoteConfigUsesBearerTokenFromURL(t *testing.T) {
 	primary := option.Providers[0]
 	if primary.Provider != "deepseek" || primary.Model != "deepseek-chat" {
 		t.Fatalf("unexpected primary profile: %+v", primary)
+	}
+	if primary.MaxTokens != 8192 || primary.ContextWindow != 128000 {
+		t.Fatalf("remote model limits were not propagated: %+v", primary)
 	}
 }

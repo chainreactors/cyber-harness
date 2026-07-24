@@ -114,6 +114,7 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 	verbosity := 0
 	noColor := false
 	model := ""
+	contextWindow := 0
 	if option != nil {
 		debug = option.Debug
 		verbosity = len(option.Verbose)
@@ -122,6 +123,7 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 		}
 		noColor = option.NoColor
 		model = option.Model
+		contextWindow = option.ContextWindow
 	}
 	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
@@ -136,7 +138,10 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 		deltas:    make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(lv, o.dim, o.renderToolLine)
-	o.live.SetContextWindow(agent.ModelContextWindow(model))
+	if contextWindow <= 0 {
+		contextWindow = agent.ModelContextWindow(model)
+	}
+	o.live.SetContextWindow(contextWindow)
 	return o
 }
 
@@ -148,6 +153,15 @@ func (o *AgentOutput) Stdout() io.Writer { return o.stream.stdout }
 
 // Markdown returns whether markdown rendering is enabled.
 func (o *AgentOutput) Markdown() bool { return o.stream.markdown }
+
+func (o *AgentOutput) SetContextWindow(tokens int) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.live.SetContextWindow(tokens)
+}
 
 // SetReadlineMode commits finalized output above the current prompt and sends
 // transient status frames through readline's composer. The terminal still owns

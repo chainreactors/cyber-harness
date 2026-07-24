@@ -307,6 +307,12 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
 	option.Model = cfg.ResolveString(manual.Model, option.Model)
+	if manual.MaxTokens != 0 {
+		option.MaxTokens = manual.MaxTokens
+	}
+	if manual.ContextWindow != 0 {
+		option.ContextWindow = manual.ContextWindow
+	}
 	option.LLMProxy = cfg.ResolveString(manual.LLMProxy, option.LLMProxy)
 	if manual.AI {
 		option.AI = true
@@ -471,6 +477,16 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.APIKey = v }},
 	{names: []string{"--model"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Model = v }},
+	{names: []string{"--max-tokens"}, arity: 1, apply: func(o *cfg.Option, v string) {
+		if n, e := strconv.Atoi(v); e == nil {
+			o.MaxTokens = n
+		}
+	}},
+	{names: []string{"--context-window"}, arity: 1, apply: func(o *cfg.Option, v string) {
+		if n, e := strconv.Atoi(v); e == nil {
+			o.ContextWindow = n
+		}
+	}},
 	{names: []string{"--proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Proxy = v }},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.LLMProxy = v }},
 	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaEmail = v }},

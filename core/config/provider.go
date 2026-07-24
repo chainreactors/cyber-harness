@@ -39,13 +39,15 @@ func hasSingleProviderFields(option *Option) bool {
 
 func entryToProviderConfig(entry LLMProviderEntry) agent.ProviderConfig {
 	cfg := agent.ProviderConfig{
-		Provider: entry.Provider,
-		BaseURL:  entry.BaseURL,
-		APIKey:   entry.APIKey,
-		Model:    entry.Model,
-		Proxy:    entry.Proxy,
-		Timeout:  entry.Timeout,
-		Images:   entry.Images,
+		Provider:      entry.Provider,
+		BaseURL:       entry.BaseURL,
+		APIKey:        entry.APIKey,
+		Model:         entry.Model,
+		Proxy:         entry.Proxy,
+		Timeout:       entry.Timeout,
+		Images:        entry.Images,
+		MaxTokens:     entry.MaxTokens,
+		ContextWindow: entry.ContextWindow,
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 120
@@ -66,9 +68,20 @@ func activeProviderIndex(option *Option) int {
 	return 0
 }
 
+func applyProviderLimits(cfg *agent.ProviderConfig, option *Option) {
+	if option.MaxTokens != 0 {
+		cfg.MaxTokens = option.MaxTokens
+	}
+	if option.ContextWindow != 0 {
+		cfg.ContextWindow = option.ContextWindow
+	}
+}
+
 func ProviderConfig(option *Option) agent.ProviderConfig {
 	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
-		return entryToProviderConfig(option.Providers[activeProviderIndex(option)])
+		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
+		applyProviderLimits(&cfg, option)
+		return cfg
 	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
@@ -89,6 +102,7 @@ func ProviderConfig(option *Option) agent.ProviderConfig {
 	if option.LLMProxy != "" {
 		cfg.Proxy = option.LLMProxy
 	}
+	applyProviderLimits(&cfg, option)
 	cfg.Timeout = 120
 	return cfg
 }
@@ -117,4 +131,6 @@ func ApplyResolvedProviderOptions(option *Option, cfg agent.ProviderConfig) {
 	option.BaseURL = cfg.BaseURL
 	option.APIKey = cfg.APIKey
 	option.Model = cfg.Model
+	option.MaxTokens = cfg.MaxTokens
+	option.ContextWindow = cfg.ContextWindow
 }

@@ -764,7 +764,7 @@ func (r *AgentConsole) providerCommands() []Command {
 	return []Command{
 		{
 			Name:        "/provider",
-			Description: "查看/管理 LLM provider 链",
+			Description: "查看/管理 LLM provider 配置",
 			Args:        ArgsOptional,
 			Run: func(_ context.Context, _ *Session, args []string) error {
 				fields := splitArgs(args)
@@ -1064,7 +1064,7 @@ func (r *AgentConsole) renderProviders() string {
 	}
 	var rows []helpRow
 	for i, p := range info.Providers {
-		status := "○ standby"
+		status := "○ configured"
 		if p.Active {
 			status = "● active"
 		}
@@ -1423,6 +1423,7 @@ func (r *AgentConsole) pickerSize() (int, int) {
 func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.ProviderConfig, error) {
 	if pc.Model != r.appInfo.ProviderConfig.Model {
 		pc.Images = nil
+		pc.ContextWindow = 0
 	}
 	resolved, err := agent.ResolveProvider(&pc)
 	if err != nil {
@@ -1439,8 +1440,13 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 		r.appInfo.OnProviderChange(prov, *resolved)
 	}
 	if r.agent != nil {
-		r.agent.SetProvider(prov, resolved.Model)
+		r.agent.SetProviderConfig(prov, *resolved)
 	}
+	contextWindow := resolved.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = agent.ModelContextWindow(resolved.Model)
+	}
+	r.output.SetContextWindow(contextWindow)
 	if r.option != nil {
 		cfg.ApplyResolvedProviderOptions(r.option, *resolved)
 		r.option.LLMProxy = resolved.Proxy

@@ -30,22 +30,26 @@ type LLMOptions struct {
 	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
 	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
 	Model         string             `long:"model" config:"model" description:"LLM model name"`
+	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
+	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
 	LLMProxy      string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
 	ActiveProfile string             `no-flag:"true" config:"active_profile" description:"Active named LLM profile"`
-	Providers     []LLMProviderEntry `no-flag:"true" config:"providers" description:"Additional LLM providers for fallback or multi-model routing"`
+	Providers     []LLMProviderEntry `no-flag:"true" config:"providers" description:"Configured LLM provider profiles"`
 	AI            bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
 }
 
 type LLMProviderEntry struct {
-	ID       string `config:"id" yaml:"id,omitempty"`
-	Name     string `config:"name" yaml:"name,omitempty"`
-	Provider string `config:"provider" yaml:"provider"`
-	BaseURL  string `config:"base_url" yaml:"base_url"`
-	APIKey   string `config:"api_key" yaml:"api_key"`
-	Model    string `config:"model" yaml:"model"`
-	Proxy    string `config:"proxy" yaml:"proxy"`
-	Timeout  int    `config:"timeout" yaml:"timeout"`
-	Images   *bool  `config:"images" yaml:"images,omitempty"`
+	ID            string `config:"id" yaml:"id,omitempty"`
+	Name          string `config:"name" yaml:"name,omitempty"`
+	Provider      string `config:"provider" yaml:"provider"`
+	BaseURL       string `config:"base_url" yaml:"base_url"`
+	APIKey        string `config:"api_key" yaml:"api_key"`
+	Model         string `config:"model" yaml:"model"`
+	Proxy         string `config:"proxy" yaml:"proxy"`
+	Timeout       int    `config:"timeout" yaml:"timeout"`
+	Images        *bool  `config:"images" yaml:"images,omitempty"`
+	MaxTokens     int    `config:"max_tokens" yaml:"max_tokens,omitempty"`
+	ContextWindow int    `config:"context_window" yaml:"context_window,omitempty"`
 }
 
 type ScannerOptions struct {
