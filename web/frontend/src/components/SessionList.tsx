@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   PanelLeftClose, PanelLeft,
@@ -40,6 +40,22 @@ export default function SessionList({
   onSelectAgent, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: Props) {
   const { t } = useTranslation('sidebar')
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const toggleRef = useRef(onToggle)
+  useEffect(() => { toggleRef.current = onToggle }, [onToggle])
+  useEffect(() => {
+    if (!open || !window.matchMedia('(max-width: 767px)').matches) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') toggleRef.current()
+    }
+    closeButtonRef.current?.focus()
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      previouslyFocused?.focus()
+    }
+  }, [open])
   // Attach each session to a connected agent by id-or-name (see
   // agentMatchesSession — the hub re-mints agent ids on reconnect, so match the
   // stable name too). Whatever no live agent claims is "orphaned": its bound
@@ -105,7 +121,7 @@ export default function SessionList({
                 </span>
               </div>
               <LocalAgentControl />
-              <Button variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
+              <Button ref={closeButtonRef} variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
                 <PanelLeftClose className="w-4 h-4" />
               </Button>
             </>
