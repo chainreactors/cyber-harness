@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -51,6 +52,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	defer telemetry.RecoverAsError("zombie", &err)
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
+	args = ensureOutputDrain(args)
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
@@ -68,6 +70,16 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	}
 	fmt.Fprint(execution.Stdout, buf.String())
 	return nil, nil
+}
+
+// zombie core only starts its result consumer when a file output is present,
+// while workers always publish to the result channel. Supply the system sink
+// for normal stdout-only runs so successful and failed attempts cannot deadlock.
+func ensureOutputDrain(args []string) []string {
+	if toolargs.HasFlag(args, "-f") || toolargs.HasFlag(args, "--file") {
+		return args
+	}
+	return append(append([]string(nil), args...), "--file", os.DevNull)
 }
 
 var zombieFileFlags = map[string]bool{

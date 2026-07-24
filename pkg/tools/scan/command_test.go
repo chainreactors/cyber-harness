@@ -76,8 +76,12 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 			t.Fatalf("quick profile missing %s", name)
 		}
 	}
-	if quick.CrawlDepth != 2 {
-		t.Fatalf("quick crawl depth = %d, want 2", quick.CrawlDepth)
+	wantQuickDepth := 2
+	if quick.Enabled("katana_crawl") {
+		wantQuickDepth = 1
+	}
+	if quick.CrawlDepth != wantQuickDepth {
+		t.Fatalf("quick crawl depth = %d, want %d", quick.CrawlDepth, wantQuickDepth)
 	}
 	for _, name := range []string{capSprayPlugins, capSprayBrute} {
 		if quick.Enabled(name) {

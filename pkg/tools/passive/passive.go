@@ -24,13 +24,20 @@ const queryTimeout = 600 * time.Second
 
 // Command dispatches passive recon to uncover by -s <source>.
 type Command struct {
-	engine  *engine.UncoverEngine
+	engine  QueryEngine
 	logger  telemetry.Logger
 	sources map[string]bool
 }
 
+// QueryEngine is the passive command's minimal dependency, allowing callers
+// to supply deterministic or alternate recon backends.
+type QueryEngine interface {
+	Sources() []string
+	QueryRaw(context.Context, string, string) ([]sources.Result, error)
+}
+
 // New creates a passive command. Engine may be nil (not configured).
-func New(eng *engine.UncoverEngine) *Command {
+func New(eng QueryEngine) *Command {
 	c := &Command{
 		engine:  eng,
 		logger:  telemetry.NopLogger(),

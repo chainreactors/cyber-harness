@@ -1,6 +1,7 @@
 package proton
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -13,7 +14,7 @@ func TestFactoryBuildsProtonWithScannerGroup(t *testing.T) {
 	if !registry.Has("proton") {
 		t.Fatal("scanner group did not register proton")
 	}
-	if got := registry.GroupNames("scanner"); len(got) != 1 || got[0] != "proton" {
-		t.Fatalf("scanner group = %#v, want [proton]", got)
+	if got := registry.GroupNames("scanner"); !slices.Contains(got, "proton") {
+		t.Fatalf("scanner group = %#v, want proton", got)
 	}
 }

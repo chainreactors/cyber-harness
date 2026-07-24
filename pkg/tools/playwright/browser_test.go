@@ -198,16 +198,19 @@ func TestExecute_UnknownSubcommand(t *testing.T) {
 }
 
 func TestResolvePath_Absolute(t *testing.T) {
-	got := resolvePath("/work", "/abs/path.png")
-	if got != "/abs/path.png" {
-		t.Fatalf("expected /abs/path.png, got %q", got)
+	absolute := filepath.Join(t.TempDir(), "abs", "path.png")
+	got := resolvePath(t.TempDir(), absolute)
+	if got != absolute {
+		t.Fatalf("expected %q, got %q", absolute, got)
 	}
 }
 
 func TestResolvePath_Relative(t *testing.T) {
-	got := resolvePath("/work", "file.png")
-	if got != "/work/file.png" {
-		t.Fatalf("expected /work/file.png, got %q", got)
+	workDir := t.TempDir()
+	want := filepath.Join(workDir, "file.png")
+	got := resolvePath(workDir, "file.png")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 

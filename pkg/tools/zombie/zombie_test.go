@@ -3,6 +3,7 @@ package zombie
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -68,5 +69,22 @@ func TestResolveRelativePathsOnlyRewritesZombieFileFlags(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveRelativePaths() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnsureOutputDrain(t *testing.T) {
+	args := []string{"-i", "127.0.0.1:6379", "-s", "redis"}
+	got := ensureOutputDrain(args)
+	want := append(append([]string(nil), args...), "--file", os.DevNull)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ensureOutputDrain() = %#v, want %#v", got, want)
+	}
+	if len(args) != 4 {
+		t.Fatalf("ensureOutputDrain mutated input: %#v", args)
+	}
+
+	explicit := []string{"-i", "127.0.0.1:6379", "--file", "results.json"}
+	if got := ensureOutputDrain(explicit); !reflect.DeepEqual(got, explicit) {
+		t.Fatalf("explicit output changed: %#v", got)
 	}
 }
