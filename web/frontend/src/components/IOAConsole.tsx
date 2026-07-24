@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Clock3, GitBranch, Link2, MessageSquare, Network, RefreshCw, UserRound } from 'lucide-react'
 import {
@@ -36,21 +36,33 @@ const EMPTY_OVERVIEW: IOAOverview = { nodes: [], spaces: [], messages: [] }
 export default function IOAConsole({ open, onClose, initialSpaceID, initialMessageID }: IOAConsoleProps) {
   const { t } = useTranslation('ioa')
   const [overview, setOverview] = useState<IOAOverview>(EMPTY_OVERVIEW)
+  // `loaded` (first fetch settled successfully) gates the full-panel spinner;
+  // `loading` only animates the refresh icon, so background polls never blank
+  // out the console they are refreshing.
+  const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [activeSpaceID, setActiveSpaceID] = useState(initialSpaceID ?? '')
   const [selectedMessageID, setSelectedMessageID] = useState(initialMessageID ?? '')
 
+  // Skip a poll tick while the previous request is still in flight: a slow hub
+  // must not stack one extra pending request per tick until the browser's
+  // per-host connection pool is exhausted.
+  const inFlight = useRef(false)
   const refresh = useCallback(async () => {
-    if (!open) return
+    if (!open || inFlight.current) return
+    inFlight.current = true
     setLoading(true)
     try {
       const live = await getIOAOverview()
       setOverview(live)
       setError('')
+      setLoaded(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('loadFailed'))
+      const aborted = err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      setError(!aborted && err instanceof Error && err.message ? err.message : t('loadFailed'))
     } finally {
+      inFlight.current = false
       setLoading(false)
     }
   }, [open, t])
@@ -181,7 +193,7 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
 
         <main className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] xl:overflow-hidden">
           <div className="min-h-[clamp(420px,60vh,720px)] min-w-0 overflow-hidden xl:min-h-0">
-            {loading && !thread ? (
+            {!loaded && !error ? (
               <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Spinner className="h-4 w-4" />
                 {t('loading')}
@@ -196,7 +208,11 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
               />
             ) : (
               <div className="flex h-full items-center justify-center rounded-lg border border-border bg-card">
-                <EmptyState icon={MessageSquare} title={t('noMessages')} description={t('noMessagesHint')} />
+                {!loaded && error ? (
+                  <EmptyState icon={MessageSquare} title={t('loadFailed')} description={error} />
+                ) : (
+                  <EmptyState icon={MessageSquare} title={t('noMessages')} description={t('noMessagesHint')} />
+                )}
               </div>
             )}
           </div>
@@ -250,7 +266,7 @@ function MessageInspector({
   const title = messageTitle(message.content) || message.content_type || message.id
   const kind = detectContentType(message.content, message.content_type)
   const refs = message.refs?.messages ?? []
-  const handoff = kind === 'handoff' ? message.content as HandoffContent : null
+  const handoff = kind === 'handoff' ? message.content as unknown as HandoffContent : null
 
   return (
     <aside className="min-h-0 overflow-y-auto rounded-lg border border-border bg-card">

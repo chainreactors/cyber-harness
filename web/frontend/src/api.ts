@@ -447,7 +447,11 @@ export async function listLocalAgents(): Promise<LocalAgentView[]> {
 }
 
 export async function getIOAOverview(): Promise<IOAOverview> {
-  return apiJSON('/api/ioa/overview', 'Failed to load IOA console')
+  // Polled every 3s while the IOA console is open. A stalled hub must surface
+  // as an error the console can show, not a forever-pending request.
+  return apiJSON('/api/ioa/overview', 'Failed to load IOA console', {
+    signal: AbortSignal.timeout(10_000),
+  })
 }
 
 export async function stopLocalAgent(name: string): Promise<void> {
