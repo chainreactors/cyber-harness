@@ -155,6 +155,7 @@ jobs:
           TAGS="${{ matrix.tags }}"
           BINARY="${{ matrix.binary }}"
           MAIN="${{ matrix.main }}"
+          VERSION="${GORELEASER_CURRENT_TAG#v}"
           OUTDIR="dist/build"
           mkdir -p "${OUTDIR}"
 
@@ -164,9 +165,14 @@ jobs:
             out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -tags "$TAGS" -ldflags "-s -w" -buildvcs=false \
+              go build -trimpath -tags "$TAGS" \
+              -ldflags "-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}" \
+              -buildvcs=false \
               -o "$out" "$MAIN"
           done
+
+          version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
+          test "$version_output" = "aiscan v${VERSION}"
 
           echo "=== Binaries ==="
           ls -lh "${OUTDIR}/"
