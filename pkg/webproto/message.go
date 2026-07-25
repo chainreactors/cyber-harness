@@ -46,6 +46,7 @@ type SessionLifecyclePayload struct {
 type RunPayload struct {
 	SessionID     string            `json:"session_id"`
 	Parts         []aop.MessagePart `json:"parts"`
+	Continue      bool              `json:"continue,omitempty"`
 	NoEcho        bool              `json:"no_echo,omitempty"`
 	MaxTurns      int               `json:"max_turns,omitempty"`
 	EvalCriteria  string            `json:"eval_criteria,omitempty"`

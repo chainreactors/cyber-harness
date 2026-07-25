@@ -45,10 +45,11 @@ type AgentRuntime struct {
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
 	sessions       map[string]*sessionState
-	turnIDs        map[string]struct{}
+	runs           map[string]*Run
 	requestSeq     uint64
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
+	operations     sync.WaitGroup
 	ptyManager     *tmuxpkg.Manager
 	replMode       REPLMode
 	maxPending     int
@@ -88,7 +89,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		ctx:      runtimeCtx,
 		cancel:   runtimeCancel,
 		sessions: make(map[string]*sessionState),
-		turnIDs:  make(map[string]struct{}),
+		runs:     make(map[string]*Run),
 	}
 	if rc != nil {
 		rt.replMode = rc.REPLMode
@@ -317,6 +318,7 @@ func (rt *AgentRuntime) Close() {
 			_ = rt.CloseSession(context.Background(), id, SessionCloseRuntime)
 		}
 		rt.wg.Wait()
+		rt.operations.Wait()
 		if rt.cleanup != nil {
 			rt.cleanup()
 		}

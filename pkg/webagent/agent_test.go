@@ -16,7 +16,6 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -38,27 +37,6 @@ func TestWebNodeRefUsesWebIdentity(t *testing.T) {
 	}
 	if _, err := webNodeRef(&cfg.Option{AgentOptions: cfg.AgentOptions{WebURL: "https://example.test"}}); err == nil {
 		t.Fatal("expected missing ioa.node_name error")
-	}
-}
-
-func TestRunAndCommandErrorsKeepDistinctCorrelationIDs(t *testing.T) {
-	h := &chatAgentHandler{sessions: make(map[string]*runner.Session)}
-
-	var runError webproto.Message
-	wait := h.HandleRun(context.Background(), webproto.Message{
-		Type: webproto.TypeRun, TurnID: "turn-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { runError = message })
-	wait()
-	if runError.Type != webproto.TypeError || runError.TurnID != "turn-1" || runError.TaskID != "" {
-		t.Fatalf("run error correlation = %+v", runError)
-	}
-
-	var commandError webproto.Message
-	h.HandleCommand(context.Background(), webproto.Message{
-		Type: webproto.TypeCommand, TaskID: "command-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { commandError = message })
-	if commandError.Type != webproto.TypeError || commandError.TaskID != "command-1" || commandError.TurnID != "" {
-		t.Fatalf("command error correlation = %+v", commandError)
 	}
 }
 

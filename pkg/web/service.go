@@ -1330,8 +1330,17 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 		case "exit", "quit":
 			s.closeRemoteSession(sessionID)
 			return
-		case "continue", "followup":
-			// These are Runs: the adapter normalizes their prompt semantics.
+		case "continue":
+			s.handleAgentRun(sessionID, webproto.RunPayload{
+				SessionID: sessionID, Continue: true, NoEcho: true,
+				MaxTurns: opts.PersistMaxTurns, EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+			})
+			return
+		case "followup":
+			followup := *msg
+			followup.Content = strings.TrimSpace(args)
+			s.handleChatMessage(sessionID, &followup, opts)
+			return
 		default:
 			if !strings.HasPrefix(content, "/skill:") {
 				s.handleAgentCommand(sessionID, content)
@@ -1521,6 +1530,16 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 }
 
 func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
+	run := webproto.RunPayload{
+		SessionID: sessionID,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
+		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
+		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+	}
+	s.handleAgentRun(sessionID, run)
+}
+
+func (s *Service) handleAgentRun(sessionID string, run webproto.RunPayload) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -1537,12 +1556,6 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 		AgentName: agent.name,
 	})
 
-	run := webproto.RunPayload{
-		SessionID: sessionID,
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
-		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
-		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
-	}
 	resultCh, err := s.agents.DispatchRun(agent.id, taskID, run)
 	if err != nil {
 		s.finishSessionTask(taskID)
