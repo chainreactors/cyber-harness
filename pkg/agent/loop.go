@@ -535,14 +535,8 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 // eventContent returns the AOP tool.result payload: a plain string, or the
 // {content, images} variant when the tool returned images.
 func (e toolExecution) eventContent() any {
-	if e.fullResult != nil && e.fullResult.HasImages() {
-		trc := aop.ToolResultContent{Content: e.eventResultText()}
-		for _, block := range e.fullResult.Content {
-			if block.Type == "image" {
-				trc.Images = append(trc.Images, aop.ImageSource{Base64: block.Base64Data, MediaType: block.MimeType})
-			}
-		}
-		return trc
+	if e.fullResult != nil {
+		return aop.ToolResultContentFromResult(*e.fullResult, e.eventResultText())
 	}
 	return e.eventResultText()
 }

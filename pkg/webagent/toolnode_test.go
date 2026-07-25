@@ -29,7 +29,7 @@ type hubScript struct {
 	t *testing.T
 
 	registered chan webproto.RegisterPayload
-	toolResult chan webproto.CommandResultPayload
+	toolResult chan aop.ToolResultData
 	progress   chan string
 	fileData   chan []byte
 	toolData   chan webproto.Message
@@ -39,7 +39,7 @@ func newHubScript(t *testing.T) *hubScript {
 	return &hubScript{
 		t:          t,
 		registered: make(chan webproto.RegisterPayload, 1),
-		toolResult: make(chan webproto.CommandResultPayload, 1),
+		toolResult: make(chan aop.ToolResultData, 1),
 		progress:   make(chan string, 16),
 		fileData:   make(chan []byte, 1),
 		toolData:   make(chan webproto.Message, 4),
@@ -81,10 +81,15 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch msg.Type {
-		case webproto.TypeCommandResult:
-			var result webproto.CommandResultPayload
-			if err := json.Unmarshal(msg.Payload, &result); err != nil {
-				h.t.Errorf("command.result: %v", err)
+		case webproto.TypeAOP:
+			var event aop.Event
+			if err := json.Unmarshal(msg.Payload, &event); err != nil || event.Type != aop.TypeToolResult {
+				h.t.Errorf("tool.result: event=%+v err=%v", event, err)
+				return
+			}
+			result, err := aop.DecodeData[aop.ToolResultData](event)
+			if err != nil {
+				h.t.Errorf("tool.result data: %v", err)
 				return
 			}
 			h.toolResult <- result
@@ -113,12 +118,13 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 // drive issues the server→runner calls once the connection is live.
 func (h *hubScript) drive(conn *websocket.Conn) {
 	call := aop.ToolCallData{
-		ToolCallID: "call-1",
+		ToolCallID: "exec-1",
 		ToolName:   "bash",
 		Args:       map[string]any{"command": "echo hello"},
 	}
-	payload, _ := json.Marshal(webproto.CommandPayload{SessionID: "exec-1", ToolCall: &call})
-	if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeCommand, TaskID: "exec-1", Payload: payload}); err != nil {
+	event := toolEvent(h.t, call)
+	payload, _ := json.Marshal(event)
+	if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeAOP, TaskID: "exec-1", TurnID: "exec-1", Payload: payload}); err != nil {
 		return
 	}
 }
@@ -190,9 +196,9 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	if line != "streamed" {
 		t.Fatalf("progress line = %q", line)
 	}
-	result := wait(t, hub.toolResult, "command.result")
-	if isError, _ := result.Metadata["is_error"].(bool); isError || result.Metadata["tool_call_id"] != "call-1" || result.Metadata["tool_name"] != "bash" {
-		t.Fatalf("command.result = %+v", result)
+	result := wait(t, hub.toolResult, "tool.result")
+	if result.IsError || result.ToolCallID != "exec-1" || result.ToolName != "bash" {
+		t.Fatalf("tool.result = %+v", result)
 	}
 
 	// tool.data rides the same connection, correlated by call ID.

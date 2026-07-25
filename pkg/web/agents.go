@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -265,30 +264,50 @@ func (p *AgentPool) PickChat() *remoteAgent {
 	return fallback
 }
 
-// DispatchToolCall sends a structured Command to a tool-capable node and
-// returns a channel for the result. taskID correlates this non-Run RPC and its
-// progress telemetry.
+// DispatchToolCall sends a canonical AOP tool.call to a tool-capable node.
+// The task completes only on the matching AOP tool.result.
 func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallData) (<-chan taskResult, error) {
-	payload, err := json.Marshal(webproto.CommandPayload{SessionID: taskID, ToolCall: &call})
-	if err != nil {
-		return nil, fmt.Errorf("marshal command: %w", err)
+	a := p.get(agentID)
+	if a == nil {
+		return nil, fmt.Errorf("agent %s not connected", agentID)
 	}
-	if a := p.get(agentID); a != nil {
+	call.ToolCallID = taskID
+	sessionID := taskID
+	if p.sessions != nil {
+		if sid, ok := p.sessions.TaskSession(taskID); ok {
+			sessionID = sid
+		}
+	}
+	agentName := a.name
+	if agentName == "" {
+		agentName = a.id
+	}
+	data, err := json.Marshal(call)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool.call: %w", err)
+	}
+	event := aop.Event{
+		Type: aop.TypeToolCall, TS: time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID, TurnID: taskID, Agent: agentName, Data: data,
+	}
+	payload, _ := json.Marshal(event)
+	a.mu.Lock()
+	if a.toolCalls == nil {
+		a.toolCalls = map[string]struct{}{}
+	}
+	a.toolCalls[taskID] = struct{}{}
+	a.mu.Unlock()
+	ch, err := p.dispatchMessage(agentID, taskID, webproto.Message{
+		Type: webproto.TypeAOP, TaskID: taskID, TurnID: taskID, Payload: payload,
+	})
+	if err != nil {
 		a.mu.Lock()
-		if a.toolCalls == nil {
-			a.toolCalls = map[string]struct{}{}
-		}
-		a.toolCalls[taskID] = struct{}{}
+		delete(a.toolCalls, taskID)
 		a.mu.Unlock()
-	}
-	ch, err := p.dispatchMessage(agentID, taskID, webproto.Message{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
-	if err != nil {
-		if a := p.get(agentID); a != nil {
-			a.mu.Lock()
-			delete(a.toolCalls, taskID)
-			a.mu.Unlock()
-		}
 		return nil, err
+	}
+	if p.sessions != nil && sessionID != taskID {
+		p.sessions.BroadcastAOPEvent(sessionID, event)
 	}
 	return ch, nil
 }
@@ -878,25 +897,10 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg webproto.Message) {
 		if ok && ch != nil {
 			result := taskResult{Result: msg.Payload}
 			if isToolCall {
-				var command webproto.CommandResultPayload
-				if err := json.Unmarshal(msg.Payload, &command); err != nil {
-					result.Err = "decode command.result: " + err.Error()
-				} else {
-					result.Output = commandPartsText(command.Parts)
-					if isError, _ := command.Metadata["is_error"].(bool); isError {
-						result.Err, result.Output = result.Output, ""
-					}
-					if details := command.Metadata["details"]; details != nil {
-						result.Result, _ = json.Marshal(details)
-					}
-				}
+				result = taskResult{Err: "direct tool task returned command.result; expected AOP tool.result"}
 			}
 			ch <- result
 			close(ch)
-			if isToolCall {
-				p.recordScanResultStats(a, result.Result)
-				p.persistResultRecords(a, msg.TaskID, result.Result)
-			}
 		}
 
 	// complete/error are the terminal envelopes of the file RPCs only; agent
@@ -1000,7 +1004,11 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {
 	// Session-topic broadcast is optional (scans dispatched outside chat have
 	// no chat session); task convergence below is not.
 	if p.sessions != nil {
-		if sid, ok := p.sessions.TaskSession(msg.TurnID); ok {
+		correlationID := msg.TurnID
+		if msg.TaskID != "" {
+			correlationID = msg.TaskID
+		}
+		if sid, ok := p.sessions.TaskSession(correlationID); ok {
 			p.sessions.BroadcastAOPEvent(sid, aopEv)
 		} else if aopEv.SessionID != "" {
 			p.sessions.BroadcastAOPEvent(aopEv.SessionID, aopEv)
@@ -1045,7 +1053,7 @@ func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev a
 		close(ch)
 		return
 	}
-	res := taskResult{Output: toolResultText(d.Content), Turn: turn}
+	res := taskResult{Output: aop.ToolResultText(d.Content), Turn: turn}
 	if d.IsError {
 		res.Err = res.Output
 		res.Output = ""
@@ -1059,30 +1067,6 @@ func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev a
 	close(ch)
 	p.recordScanResultStats(a, details)
 	p.persistResultRecords(a, taskID, details)
-}
-
-// toolResultText flattens tool.result content: a plain string, or the text of
-// a structured ToolResultContent (text plus images).
-func toolResultText(content any) string {
-	switch c := content.(type) {
-	case string:
-		return c
-	case map[string]any:
-		if text, ok := c["content"].(string); ok {
-			return text
-		}
-	}
-	return ""
-}
-
-func commandPartsText(parts []aop.MessagePart) string {
-	var values []string
-	for _, part := range parts {
-		if part.Type == aop.PartText && part.Text != "" {
-			values = append(values, part.Text)
-		}
-	}
-	return strings.Join(values, "\n")
 }
 
 // convergeTaskOnSessionEnd closes a chat task when the ROOT agent session

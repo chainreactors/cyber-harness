@@ -107,12 +107,12 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 		registeredOnce.Do(func() { close(registered) })
 
 		call := aop.ToolCallData{
-			ToolCallID: "call-1",
+			ToolCallID: "task-1",
 			ToolName:   "bash",
 			Args:       map[string]any{"command": `echo "hello world"`},
 		}
-		payload, _ := json.Marshal(webproto.CommandPayload{SessionID: "task-1", ToolCall: &call})
-		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeCommand, TaskID: "task-1", Payload: payload}); err != nil {
+		payload, _ := json.Marshal(toolEvent(t, call))
+		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeAOP, TaskID: "task-1", TurnID: "task-1", Payload: payload}); err != nil {
 			t.Errorf("tool.call write: %v", err)
 			return
 		}
@@ -122,7 +122,7 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 				return
 			}
 			messages <- msg
-			if msg.Type == webproto.TypeCommandResult {
+			if msg.Type == webproto.TypeAOP {
 				return
 			}
 		}
@@ -165,8 +165,11 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 						seenOutput = true
 					}
 				}
-			case webproto.TypeCommandResult:
-				seenResult = true
+			case webproto.TypeAOP:
+				var event aop.Event
+				if json.Unmarshal(msg.Payload, &event) == nil && event.Type == aop.TypeToolResult {
+					seenResult = true
+				}
 			}
 		case <-deadline:
 			t.Fatal("timeout waiting for web agent messages")

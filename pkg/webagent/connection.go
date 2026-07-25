@@ -301,27 +301,30 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 			}
 
 		case webproto.TypeCommand:
-			var command webproto.CommandPayload
-			if json.Unmarshal(msg.Payload, &command) != nil {
-				continue
-			}
-			if command.ToolCall != nil {
-				taskCtx, cancel := context.WithCancel(connectionCtx)
-				mu.Lock()
-				execTasks[msg.TaskID] = cancel
-				mu.Unlock()
-				go func(m webproto.Message, call aop.ToolCallData) {
-					defer cancel()
-					defer func() {
-						mu.Lock()
-						delete(execTasks, m.TaskID)
-						mu.Unlock()
-					}()
-					HandleToolCommand(taskCtx, m, call, cc.Registry, cc.DataBus, send)
-				}(msg, *command.ToolCall)
-			} else if cc.Chat != nil {
+			if cc.Chat != nil {
 				cc.Chat.HandleProtocol(connectionCtx, msg, send)
 			}
+
+		case webproto.TypeAOP:
+			var event aop.Event
+			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				payload, _ := json.Marshal(webproto.ErrorPayload{Message: "decode AOP: " + err.Error()})
+				send(webproto.Message{Type: webproto.TypeError, TaskID: msg.TaskID, Payload: payload})
+				continue
+			}
+			taskCtx, cancel := context.WithCancel(connectionCtx)
+			mu.Lock()
+			execTasks[msg.TaskID] = cancel
+			mu.Unlock()
+			go func(m webproto.Message, event aop.Event) {
+				defer cancel()
+				defer func() {
+					mu.Lock()
+					delete(execTasks, m.TaskID)
+					mu.Unlock()
+				}()
+				HandleToolCallEvent(taskCtx, m, event, cc.Registry, cc.DataBus, send)
+			}(msg, event)
 
 		case "upload":
 			if cc.Chat != nil {

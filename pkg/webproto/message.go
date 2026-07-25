@@ -54,9 +54,8 @@ type RunPayload struct {
 }
 
 type CommandPayload struct {
-	SessionID string            `json:"session_id"`
-	Line      string            `json:"line"`
-	ToolCall  *aop.ToolCallData `json:"tool_call,omitempty"`
+	SessionID string `json:"session_id"`
+	Line      string `json:"line"`
 }
 
 type CommandResultPayload struct {
