@@ -91,6 +91,59 @@ func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
 	}
 }
 
+func TestParseCLIScannerExtractsRootTimeout(t *testing.T) {
+	for _, args := range [][]string{
+		{"--timeout", "45", "gogo", "-i", "127.0.0.1", "-p", "80"},
+		{"--timeout=45", "gogo", "-i", "127.0.0.1", "-p", "80"},
+	} {
+		t.Run(strings.Join(args[:1], "_"), func(t *testing.T) {
+			parsed, err := parseCLI(args)
+			if err != nil {
+				t.Fatalf("parseCLI() error = %v", err)
+			}
+			if parsed.Option.Timeout != 45 {
+				t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
+			}
+			wantArgs := []string{"gogo", "-i", "127.0.0.1", "-p", "80"}
+			if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+				t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+			}
+		})
+	}
+}
+
+func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{"gogo", "-i", "127.0.0.1", "--timeout", "5"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Timeout != 3600 {
+		t.Fatalf("overall timeout = %d, want default 3600", parsed.Option.Timeout)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "--timeout", "5"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
+	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Timeout != 45 {
+		t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
+	}
+
+	parsed, err = parseCLI([]string{"agent", "--timeout", "30", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() subcommand timeout error = %v", err)
+	}
+	if parsed.Option.Timeout != 30 {
+		t.Fatalf("subcommand timeout = %d, want 30", parsed.Option.Timeout)
+	}
+}
+
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 	if raceEnabled {
 		t.Skip("scanner pipeline has known races under -race; this test checks log output")

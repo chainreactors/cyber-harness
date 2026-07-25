@@ -40,6 +40,7 @@ type webCommand struct {
 
 type cliOptions struct {
 	cfg.MiscOptions `group:"Miscellaneous Options"`
+	Timeout         int          `long:"timeout" description:"Overall timeout in seconds"`
 	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
 	Serve           serveCommand `command:"serve" description:"Run the standalone agent server"`
 	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
@@ -224,6 +225,9 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	mode := selectedMode(parser)
 	option := buildOption(&cli, parser)
+	if cli.Timeout > 0 {
+		option.Timeout = cli.Timeout
+	}
 
 	if mode == cfg.RunModeNoCommand {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -283,7 +287,10 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
-	option.Timeout = 3600
+	option.Timeout = cli.Timeout
+	if option.Timeout <= 0 {
+		option.Timeout = 3600
+	}
 
 	scannerArgs := append([]string(nil), scannerRest...)
 	if scannerName == "scan" {
@@ -510,14 +517,15 @@ var scannerKnownFlags = []knownFlag{
 }
 
 var rootOnlyFlagValueArity = map[string]int{
-	"--input":  1,
-	"-i":       1,
-	"--view":   1,
-	"-F":       1,
-	"--output": 1,
-	"-o":       1,
-	"--file":   1,
-	"-f":       1,
+	"--input":   1,
+	"-i":        1,
+	"--view":    1,
+	"-F":        1,
+	"--output":  1,
+	"-o":        1,
+	"--file":    1,
+	"-f":        1,
+	"--timeout": 1,
 }
 
 var rootFlagValueArity = buildRootFlagValueArity()

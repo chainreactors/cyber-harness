@@ -50,9 +50,23 @@ func TestWithDefaultNoStatKeepsExplicitFlag(t *testing.T) {
 
 func TestWithDefaultScannerFlagsAppendsFlags(t *testing.T) {
 	got := withDefaultScannerFlags([]string{"-u", "http://127.0.0.1"})
-	want := []string{"-u", "http://127.0.0.1", "--no-bar", "--no-stat"}
+	want := []string{"-u", "http://127.0.0.1", "--no-bar", "--no-stat", "--client", "req"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withDefaultScannerFlags() = %#v, want %#v", got, want)
+	}
+}
+
+func TestWithDefaultClientKeepsExplicitClient(t *testing.T) {
+	for _, args := range [][]string{
+		{"-u", "https://example.test", "--client", "standard"},
+		{"-u", "https://example.test", "--client=fast"},
+		{"-u", "https://example.test", "-C", "standard"},
+		{"-u", "https://example.test", "-C=req"},
+	} {
+		got := withDefaultClient(args)
+		if !reflect.DeepEqual(got, args) {
+			t.Fatalf("withDefaultClient(%#v) = %#v", args, got)
+		}
 	}
 }
 

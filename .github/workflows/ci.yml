@@ -162,6 +162,28 @@ jobs:
             -run 'AgentTmux' \
             ./pkg/agent/
 
+  scanner-functional:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run scanner functional regressions
+        run: |
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m -v \
+            -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
+            ./pkg/tools
+
   # ── Generated templates tests (depends on tidy) ───────────────
 
   generated-test:

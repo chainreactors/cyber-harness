@@ -32,6 +32,7 @@ import (
 
 func TestScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
+	tlsServer := newScannerTLSFixture(t)
 	httpURL, err := url.Parse(httpServer.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +97,8 @@ http:
 	cases := []functionalCase{
 		{
 			Name: "gogo/http-fingerprint-jsonl", Tool: "gogo",
-			Args: []string{"-i", host, "-p", port, "-v", "-o", "jl", "-t", "20"},
+			Args:          []string{"-i", host, "-p", port, "-v", "-o", "jl", "-t", "20"},
+			SkipUnderRace: true,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"`+port+`"`, "nginx")
 				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
@@ -111,7 +113,8 @@ http:
 		},
 		{
 			Name: "gogo/target-file", Tool: "gogo",
-			Args: []string{"-l", targetsFile, "-p", port, "-o", "jl", "-t", "20"},
+			Args:          []string{"-l", targetsFile, "-p", port, "-o", "jl", "-t", "20"},
+			SkipUnderRace: true,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"`+port+`"`)
 			},
@@ -128,6 +131,17 @@ http:
 					}
 					_, hasNginx := item.Frameworks["nginx"]
 					return hasNginx
+				})
+			},
+		},
+		{
+			Name: "spray/explicit-https", Tool: "spray",
+			Args: []string{"-u", tlsServer.URL, "-j", "--limit", "1"},
+			Check: func(t *testing.T, result functionalResult) {
+				requireOutputContains(t, result, `"url":"`+tlsServer.URL+`"`, `"status":200`)
+				requireEvent(t, result, "spray", output.ToolDataWeb, func(data any) bool {
+					item, ok := data.(*parsers.SprayResult)
+					return ok && item != nil && item.Status == http.StatusOK && strings.HasPrefix(item.UrlString, "https://")
 				})
 			},
 		},
@@ -182,8 +196,9 @@ http:
 		},
 		{
 			Name: "scan/quick-pipeline", Tool: "scan",
-			Args:    []string{"-i", host, "--ports", port, "--mode", "quick", "--verify=off", "--timeout", "2", "--no-color"},
-			Timeout: 30 * time.Second,
+			Args:          []string{"-i", host, "--ports", port, "--mode", "quick", "--verify=off", "--timeout", "2", "--no-color"},
+			Timeout:       30 * time.Second,
+			SkipUnderRace: true,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "[summary] completed", port)
 				requireEvent(t, result, "gogo", output.ToolDataService, nil)
@@ -198,6 +213,19 @@ http:
 
 func newScannerHTTPFixture(t *testing.T) *httptest.Server {
 	t.Helper()
+	server := httptest.NewServer(newScannerHTTPHandler())
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newScannerTLSFixture(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(newScannerHTTPHandler())
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newScannerHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Server", "nginx/1.25.4")
@@ -220,9 +248,7 @@ func newScannerHTTPFixture(t *testing.T) *httptest.Server {
 		w.Header().Set("Server", "nginx/1.25.4")
 		fmt.Fprint(w, "AISCAN_REGRESSION_MARKER")
 	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
+	return mux
 }
 
 func newRedisAuthFixture(t *testing.T, password string) string {

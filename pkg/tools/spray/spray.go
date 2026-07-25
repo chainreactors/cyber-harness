@@ -163,7 +163,16 @@ func withDefaultNoStat(args []string) []string {
 }
 
 func withDefaultScannerFlags(args []string) []string {
-	return withDefaultNoStat(withDefaultNoBar(args))
+	return withDefaultClient(withDefaultNoStat(withDefaultNoBar(args)))
+}
+
+func withDefaultClient(args []string) []string {
+	for _, arg := range args {
+		if arg == "-C" || strings.HasPrefix(arg, "-C=") || arg == "--client" || strings.HasPrefix(arg, "--client=") {
+			return args
+		}
+	}
+	return append(args, "--client", "req")
 }
 
 func withDefaultBoolFlag(args []string, flag string) []string {
