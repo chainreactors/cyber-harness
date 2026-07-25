@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +10,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
@@ -60,9 +59,15 @@ type RunResult struct {
 }
 
 type CommandResult struct {
-	Parts    []aop.MessagePart
-	Metadata map[string]any
+	Command      string            `json:"command"`
+	Presentation string            `json:"presentation,omitempty"`
+	Parts        []aop.MessagePart `json:"parts,omitempty"`
 }
+
+const (
+	CommandPresentationPlain        = "plain"
+	CommandPresentationPreformatted = "preformatted"
+)
 
 type Session struct {
 	state *sessionState
@@ -179,36 +184,99 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 	if line == "/continue" || strings.HasPrefix(line, "/followup ") || strings.HasPrefix(line, "/skill:") {
 		return commandOutcome{err: fmt.Errorf("%s requires a Run", line)}
 	}
-
-	var stdout, stderr bytes.Buffer
 	ctx = commands.ContextWithInbox(ctx, s.state.inbox)
 	ctx = agent.ContextWithLoopScheduler(ctx, s.state.scheduler)
-	option := s.state.runtime.option
-	if option != nil {
-		copy := *option
-		copy.NoColor = true
-		option = &copy
+
+	if strings.HasPrefix(line, "!") {
+		return s.executeBash(ctx, line, strings.TrimSpace(strings.TrimPrefix(line, "!")))
 	}
-	console := tui.NewAgentConsoleWithWriters(ctx, option, s.state.runtime.consoleAppInfo(), s.state.agent, &stdout, &stderr)
-	console.SetEvalCriteria(s.evalCriteria)
-	_, err := console.ExecuteLineAndWait(line)
-	s.evalCriteria = console.EvalCriteria()
-	out := strings.TrimRight(outputpkg.StripANSI(stdout.String()), " \t\r\n")
-	errOut := strings.TrimRight(outputpkg.StripANSI(stderr.String()), " \t\r\n")
+	args, err := commands.SplitCommandLine(line)
 	if err != nil {
-		if errOut != "" {
-			err = fmt.Errorf("%s: %w", errOut, err)
-		}
 		return commandOutcome{err: err}
 	}
-	if out == "" {
-		out = errOut
-	} else if errOut != "" {
-		out = strings.TrimRight(out+"\n"+errOut, " \t\r\n")
+	if len(args) == 0 {
+		return commandOutcome{err: fmt.Errorf("command line is required")}
 	}
-	result := CommandResult{Metadata: map[string]any{"command": line}}
-	if out != "" {
-		result.Parts = []aop.MessagePart{{Type: aop.PartText, Text: out}}
+	name := args[0]
+	values := args[1:]
+	switch name {
+	case "/help":
+		return commandText(line, CommandPresentationPreformatted,
+			"Runtime commands:\n  /status\n  /clear\n  /compact [focus]\n  /eval [criteria|off]\n  /loop [interval prompt|list|stop name]\n  !<command>")
+	case "/status":
+		provider, model, _ := s.state.runtime.providerSnapshot()
+		providerName := "not configured"
+		if provider != nil {
+			providerName = provider.Name()
+		}
+		return commandText(line, CommandPresentationPreformatted, fmt.Sprintf(
+			"Session: %s\nAgent: %s\nProvider: %s\nModel: %s\nMessages: %d",
+			s.state.id, s.state.agentName, providerName, model, len(s.state.agent.MessagesSnapshot())))
+	case "/clear":
+		s.state.agent.Reset()
+		return commandText(line, CommandPresentationPlain, "Context cleared.")
+	case "/compact":
+		if len(s.state.agent.MessagesSnapshot()) < 4 {
+			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).")
+		}
+		result, err := s.state.agent.Compact(ctx, agent.CompactConfig{CustomInstructions: strings.TrimSpace(strings.Join(values, " "))})
+		if err != nil {
+			return commandOutcome{err: err}
+		}
+		return commandText(line, CommandPresentationPlain, fmt.Sprintf(
+			"Compacted: ~%d -> ~%d tokens (%d messages kept)", result.TokensBefore, result.TokensAfter, result.KeptMessages))
+	case "/eval", "/goal":
+		criteria := strings.TrimSpace(strings.Join(values, " "))
+		switch criteria {
+		case "":
+			if s.evalCriteria == "" {
+				return commandText(line, CommandPresentationPlain, "Goal evaluation: off")
+			}
+			return commandText(line, CommandPresentationPlain, "Goal evaluation: on\n  criteria: "+s.evalCriteria)
+		case "off":
+			s.evalCriteria = ""
+			return commandText(line, CommandPresentationPlain, "Goal evaluation disabled.")
+		default:
+			s.evalCriteria = criteria
+			return commandText(line, CommandPresentationPlain, "Goal evaluation enabled: "+criteria)
+		}
+	case "/loop":
+		command := "loop"
+		if len(values) == 0 {
+			command += " list"
+		} else {
+			command += " " + strings.Join(values, " ")
+		}
+		return s.executeBash(ctx, line, command)
+	default:
+		return commandOutcome{err: fmt.Errorf("command %q is not a Runtime command", name)}
+	}
+}
+
+func (s *commandSession) executeBash(ctx context.Context, line, command string) commandOutcome {
+	if command == "" {
+		return commandOutcome{err: fmt.Errorf("command is required after !")}
+	}
+	registry := s.state.runtime.app.Commands
+	if registry == nil {
+		return commandOutcome{err: fmt.Errorf("command registry is not available")}
+	}
+	bash, ok := registry.GetTool("bash")
+	if !ok {
+		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
+	}
+	payload, _ := json.Marshal(commands.BashArgs{Command: command})
+	result, err := bash.Execute(ctx, string(payload))
+	if err != nil {
+		return commandOutcome{err: err}
+	}
+	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(result.Text(), " \t\r\n"))
+}
+
+func commandText(line, presentation, text string) commandOutcome {
+	result := CommandResult{Command: line, Presentation: presentation}
+	if text != "" {
+		result.Parts = []aop.MessagePart{{Type: aop.PartText, Text: text}}
 	}
 	return commandOutcome{result: result}
 }
@@ -735,7 +803,9 @@ func (s *sessionState) emitCommandResult(result CommandResult) {
 	raw, _ := json.Marshal(aop.MessageData{
 		MessageID: s.runtime.nextRuntimeID("command"), Role: "assistant", Parts: result.Parts,
 	})
-	s.runtime.sessionEvents.emit(aop.Event{Type: aop.TypeMessage, SessionID: s.id, Agent: s.agentName, Data: raw})
+	event := aop.Event{Type: aop.TypeMessage, SessionID: s.id, Agent: s.agentName, Data: raw}
+	_ = xcommand.SetDetail(&event, xcommand.Detail{Line: result.Command, Presentation: result.Presentation})
+	s.runtime.sessionEvents.emit(event)
 }
 
 func (rt *AgentRuntime) pendingLimit() int {

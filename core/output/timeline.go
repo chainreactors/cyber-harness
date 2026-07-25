@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 	"github.com/chainreactors/utils/parsers"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
@@ -377,7 +378,12 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 		if data.Role == "user" {
 			sb.WriteString(fmt.Sprintf("> %s\n\n", TruncateStr(text, 200)))
 		} else {
-			sb.WriteString(text + "\n\n")
+			detail, ok, _ := xcommand.GetDetail(*event)
+			if ok && detail.Presentation == "preformatted" {
+				sb.WriteString(markdownCodeFence(text) + "\n\n")
+			} else {
+				sb.WriteString(text + "\n\n")
+			}
 		}
 
 	case aop.TypeToolCall:
@@ -444,4 +450,12 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 			sb.WriteString(fmt.Sprintf("\n> **session closed** (reason=%s)\n\n", data.Reason))
 		}
 	}
+}
+
+func markdownCodeFence(text string) string {
+	fence := "```"
+	for strings.Contains(text, fence) {
+		fence += "`"
+	}
+	return fence + "\n" + text + "\n" + fence
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -240,33 +239,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message)) {
 }
 
 // ---------------------------------------------------------------------------
-// REPL helpers
-// ---------------------------------------------------------------------------
-
-// fenceTerminalOutput wraps multi-line REPL/`!` command output in a Markdown
-// code fence. runChatREPLLine runs the same TUI console the interactive REPL
-// uses, whose panels (/status, /provider, /nodes ...) are drawn with box-drawing
-// characters and column padding that only line up in a fixed-width,
-// newline-preserving context. The web chat renders replies as Markdown prose,
-// which collapses single newlines to spaces and uses a proportional font -- so an
-// unfenced panel flattens into one mangled line. A fence makes the frontend
-// render it verbatim in a monospace <pre>. Single-line output (short status
-// confirmations like "Provider ready: ...") is left as prose.
-func fenceTerminalOutput(s string) string {
-	if !strings.Contains(s, "\n") {
-		return s
-	}
-	// Opening fence must be longer than any backtick run inside the payload
-	// (a `!cat` of a Markdown file could contain ```); grow it until it can't
-	// collide. Panel output never contains backticks, so this is just insurance.
-	fence := "```"
-	for strings.Contains(s, fence) {
-		fence += "`"
-	}
-	return fence + "\n" + s + "\n" + fence
-}
-
-// ---------------------------------------------------------------------------
 // Identity and command catalog (agent-specific, needs runner.AgentRuntime)
 // ---------------------------------------------------------------------------
 
@@ -275,9 +247,7 @@ func fenceTerminalOutput(s string) string {
 // non-internal) skill. The hub merges it with its hub-scope commands to build
 // the web "/" menu and /help, so the menu reflects what this agent can run.
 func agentCommandCatalog(app *runner.App) []webproto.CommandSpec {
-	// Build a zero-value console to extract command metadata without a live session.
-	r := &tui.AgentConsole{}
-	specs := tui.WebMenuSpecs(r.StaticCommands())
+	specs := runner.RuntimeCommandSpecs()
 	if app == nil || app.Skills == nil {
 		return specs
 	}
@@ -286,7 +256,7 @@ func agentCommandCatalog(app *runner.App) []webproto.CommandSpec {
 			continue
 		}
 		specs = append(specs, webproto.CommandSpec{
-			Name:        "/" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
+			Name:        "/skill:" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
 			Description: sk.Description,
 		})
 	}

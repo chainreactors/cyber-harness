@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 )
 
 func TestParseLineReadsNativeAOPEnvelope(t *testing.T) {
@@ -34,6 +35,20 @@ func TestTimelineRendersStructuredToolResult(t *testing.T) {
 	}
 	markdown := BuildTimelineMarkdown([]TimelineEntry{{Timestamp: mustTimelineTime(t, event.TS), Type: event.Type, Data: &event}})
 	if !strings.Contains(markdown, "three ports") {
+		t.Fatalf("timeline markdown = %q", markdown)
+	}
+}
+
+func TestTimelineFormatsPreformattedCommandAtPresentationBoundary(t *testing.T) {
+	data, _ := json.Marshal(aop.MessageData{
+		MessageID: "command-1", Role: "assistant", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "one\ntwo"}},
+	})
+	event := aop.Event{
+		Type: aop.TypeMessage, TS: "2026-07-20T00:00:00Z", SessionID: "session-1", Agent: "aiscan", Data: data,
+	}
+	_ = xcommand.SetDetail(&event, xcommand.Detail{Line: "/status", Presentation: "preformatted"})
+	markdown := BuildTimelineMarkdown([]TimelineEntry{{Timestamp: mustTimelineTime(t, event.TS), Type: event.Type, Data: &event}})
+	if !strings.Contains(markdown, "```\none\ntwo\n```") {
 		t.Fatalf("timeline markdown = %q", markdown)
 	}
 }

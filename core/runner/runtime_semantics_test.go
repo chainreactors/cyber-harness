@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -176,6 +177,10 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 	if commandEvent.Type != aop.TypeMessage || commandEvent.TurnID != "" {
 		t.Fatalf("command AOP event = %+v", commandEvent)
+	}
+	detail, ok, err := xcommand.GetDetail(commandEvent)
+	if err != nil || !ok || detail.Line != "!printf COMMAND_OK" || detail.Presentation != CommandPresentationPreformatted {
+		t.Fatalf("command extension = %+v ok=%v err=%v", detail, ok, err)
 	}
 	after := session.MessagesSnapshot()
 	if len(after) != len(before) {

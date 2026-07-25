@@ -9,6 +9,14 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
+func RuntimeCommandSpecs() []webproto.CommandSpec {
+	return []webproto.CommandSpec{
+		{Name: "/status", Description: "Show Runtime session and provider status"},
+		{Name: "/clear", Description: "Clear the current Agent context"},
+		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
+	}
+}
+
 // HandleProtocol handles the transport-neutral Agent Runtime control frames.
 // The caller owns framing and I/O; AgentRuntime owns all Session and Run state.
 func (rt *AgentRuntime) HandleProtocol(ctx context.Context, msg webproto.Message, send func(webproto.Message)) bool {
@@ -92,9 +100,7 @@ func (rt *AgentRuntime) HandleProtocol(ctx context.Context, msg webproto.Message
 				sendError("", msg.TaskID, err)
 				return
 			}
-			encoded, _ := json.Marshal(webproto.CommandResultPayload{
-				SessionID: payload.SessionID, Parts: result.Parts, Metadata: result.Metadata,
-			})
+			encoded, _ := json.Marshal(result)
 			send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: msg.TaskID, Payload: encoded})
 		}()
 		return true

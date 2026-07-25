@@ -510,28 +510,3 @@ func frameHasSessionActivity(frame pty.Frame, sessionID string) bool {
 	}
 	return false
 }
-
-func TestFenceTerminalOutput(t *testing.T) {
-	// Single-line status stays prose — no fence.
-	if got := fenceTerminalOutput("Provider ready: anthropic / glm-5.2"); strings.Contains(got, "```") {
-		t.Errorf("single-line output should not be fenced, got %q", got)
-	}
-	// Multi-line panel (box art) gets fenced so the web renders it monospace.
-	panel := "╭────╮\n│ providers │\n╰────╯"
-	got := fenceTerminalOutput(panel)
-	if !strings.HasPrefix(got, "```\n") || !strings.HasSuffix(got, "\n```") {
-		t.Errorf("multi-line panel should be wrapped in a code fence, got %q", got)
-	}
-	if !strings.Contains(got, panel) {
-		t.Errorf("fenced output should preserve the panel verbatim, got %q", got)
-	}
-	// A payload containing a triple-backtick run grows the fence so it can't collide.
-	got = fenceTerminalOutput("line1\n```\nline2")
-	if !strings.HasPrefix(got, "````\n") {
-		t.Errorf("fence must be longer than an inner backtick run, got %q", got)
-	}
-	// Empty stays empty.
-	if got := fenceTerminalOutput(""); got != "" {
-		t.Errorf("empty input should stay empty, got %q", got)
-	}
-}

@@ -77,7 +77,7 @@ func SkillCommands(s *Session) []Command {
 		}
 		sk := skill
 		cmds = append(cmds, Command{
-			Name:        "/" + sk.Name,
+			Name:        "/skill:" + sk.Name,
 			Description: sk.Description,
 			Args:        ArgsOptional,
 			Run: func(ctx context.Context, s *Session, args []string) error {

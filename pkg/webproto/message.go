@@ -58,12 +58,6 @@ type CommandPayload struct {
 	Line      string `json:"line"`
 }
 
-type CommandResultPayload struct {
-	SessionID string            `json:"session_id"`
-	Parts     []aop.MessagePart `json:"parts,omitempty"`
-	Metadata  map[string]any    `json:"metadata,omitempty"`
-}
-
 type ErrorPayload struct {
 	Message string `json:"message"`
 }

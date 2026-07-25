@@ -116,6 +116,28 @@ function eventText(event: AOPEvent): string {
     .join('\n')
 }
 
+function markdownCodeFence(text: string): string {
+  let fence = '```'
+  while (text.includes(fence)) fence += '`'
+  return `${fence}\n${text}\n${fence}`
+}
+
+function presentAOPEvent(event: AOPEvent): AOPEvent {
+  if (event.type !== 'message') return event
+  const command = event.ext?.command as { presentation?: string } | undefined
+  if (command?.presentation !== 'preformatted') return event
+  const data = event.data as { parts?: Array<{ type?: string; text?: string }> }
+  return {
+    ...event,
+    data: {
+      ...data,
+      parts: (data.parts ?? []).map((part) => (
+        part.type === 'text' && part.text ? { ...part, text: markdownCodeFence(part.text) } : part
+      )),
+    },
+  }
+}
+
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
   for (const value of Object.values(event.ext ?? {})) {
     if (value && typeof value === 'object') return value as Record<string, unknown>
@@ -145,7 +167,7 @@ function reduceConversationAOP(
 
   const childIDs = new Set(childStarts.keys())
   const topLevel = reduceAOPToTimeline(
-    events.filter((event) => !childIDs.has(event.session_id)),
+    events.filter((event) => !childIDs.has(event.session_id)).map(presentAOPEvent),
     { streaming, lifecycle: 'errors' },
   ) as ViewerTimelineItem[]
 
@@ -170,7 +192,7 @@ function reduceConversationAOP(
           ? 'canceled'
           : 'completed'
     const timestamp = Date.parse(start.ts)
-    const items = reduceAOPToTimeline(childEvents, {
+    const items = reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
       streaming: streaming && !end,
       lifecycle: 'errors',
     }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[]
