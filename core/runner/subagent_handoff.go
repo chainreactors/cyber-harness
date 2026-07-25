@@ -16,16 +16,6 @@ import (
 	"github.com/chainreactors/ioa/protocols"
 )
 
-// subscribeIOAHandoff records the two subagent lifecycle boundaries as native
-// IOA handoff messages by observing the agent AOP bus: a child session.start
-// carrying a delegation extension is the delegation, and the matching child
-// session.end is the return. The return references the delegation message so
-// other IOA implementations can reconstruct the thread without aiscan-specific
-// APIs.
-func subscribeIOAHandoff(bus *eventbus.Bus[aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) {
-	_ = subscribeIOAHandoffContext(context.Background(), bus, client, spaceName, logger)
-}
-
 func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
 	if bus == nil || client == nil || spaceName == "" {
 		return func() {}

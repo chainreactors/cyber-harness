@@ -70,7 +70,6 @@ type Session struct {
 
 type Run struct {
 	turnID string
-	log    *runEventLog
 	done   chan struct{}
 	mu     sync.Mutex
 	result RunResult
@@ -82,15 +81,6 @@ func (r *Run) TurnID() string {
 		return ""
 	}
 	return r.turnID
-}
-
-func (r *Run) Events(ctx context.Context) <-chan aop.Event {
-	if r == nil || r.log == nil {
-		ch := make(chan aop.Event)
-		close(ch)
-		return ch
-	}
-	return r.log.events(ctx)
 }
 
 func (r *Run) Wait() (RunResult, error) {
@@ -120,78 +110,6 @@ type sessionOperation struct {
 type commandOutcome struct {
 	result CommandResult
 	err    error
-}
-
-type runEventLog struct {
-	mu        sync.Mutex
-	eventsLog []aop.Event
-	notify    chan struct{}
-	closed    bool
-}
-
-func newRunEventLog() *runEventLog {
-	return &runEventLog{notify: make(chan struct{})}
-}
-
-func (l *runEventLog) append(event aop.Event) {
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
-		return
-	}
-	l.eventsLog = append(l.eventsLog, event)
-	close(l.notify)
-	l.notify = make(chan struct{})
-	l.mu.Unlock()
-}
-
-func (l *runEventLog) close() {
-	l.mu.Lock()
-	if !l.closed {
-		l.closed = true
-		close(l.notify)
-	}
-	l.mu.Unlock()
-}
-
-func (l *runEventLog) events(ctx context.Context) <-chan aop.Event {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	out := make(chan aop.Event)
-	go func() {
-		defer close(out)
-		index := 0
-		for {
-			l.mu.Lock()
-			var event aop.Event
-			hasEvent := index < len(l.eventsLog)
-			if hasEvent {
-				event = l.eventsLog[index]
-				index++
-			}
-			closed := l.closed
-			notify := l.notify
-			l.mu.Unlock()
-			if hasEvent {
-				select {
-				case out <- event:
-				case <-ctx.Done():
-					return
-				}
-				continue
-			}
-			if closed {
-				return
-			}
-			select {
-			case <-notify:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return out
 }
 
 type sessionEmitter struct {
@@ -225,17 +143,6 @@ type turnEmitter struct {
 	turnID    string
 	agentName string
 	emitter   *sessionEmitter
-	log       *runEventLog
-}
-
-func (e *turnEmitter) observe(event aop.Event) {
-	if event.SessionID != e.sessionID || event.TurnID != e.turnID {
-		return
-	}
-	e.log.append(event)
-	if event.Type == aop.TypeTurnEnd {
-		e.log.close()
-	}
 }
 
 func (e *turnEmitter) start() {
@@ -556,14 +463,11 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	}
 	s.runtime.turnIDs[turnID] = struct{}{}
 	s.runtime.mu.Unlock()
-	log := newRunEventLog()
-	run := &Run{turnID: turnID, log: log, done: make(chan struct{})}
-	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents, log: log}
-	unsubscribe := s.runtime.Subscribe(emitter.observe)
+	run := &Run{turnID: turnID, done: make(chan struct{})}
+	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents}
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
 			defer s.runtime.releaseTurnID(turnID)
-			defer unsubscribe()
 			s.inbox.setActive(true)
 			emitter.start()
 			result, runErr := s.executeRun(runCtx, turnID, input)
@@ -586,7 +490,6 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 		},
 		reject: func(err error) {
 			defer s.runtime.releaseTurnID(turnID)
-			defer unsubscribe()
 			result := RunResult{Stop: agent.StopReasonCanceled}
 			if !errors.Is(err, context.Canceled) {
 				result.Stop = agent.StopReasonError
@@ -597,7 +500,6 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 		},
 	}
 	if err := s.admit(ctx, op); err != nil {
-		unsubscribe()
 		s.runtime.releaseTurnID(turnID)
 		return nil, err
 	}
