@@ -219,7 +219,13 @@ func ResolvePrompt(value string) (string, error) {
 	}
 
 	info, err := os.Stat(prompt)
-	if err != nil || !info.Mode().IsRegular() {
+	if os.IsNotExist(err) {
+		return prompt, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stat prompt file %s: %w", prompt, err)
+	}
+	if !info.Mode().IsRegular() {
 		return prompt, nil
 	}
 

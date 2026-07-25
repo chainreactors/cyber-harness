@@ -74,6 +74,7 @@ func registerAuthRoutes(mux *http.ServeMux, key string) {
 			return
 		}
 
+		//nolint:gosec // Local HTTP deployments cannot use Secure cookies.
 		http.SetCookie(w, &http.Cookie{
 			Name:     authCookieName,
 			Value:    sessionValue(key),
@@ -87,6 +88,7 @@ func registerAuthRoutes(mux *http.ServeMux, key string) {
 	})
 
 	mux.HandleFunc("POST /api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		//nolint:gosec // Match the transport attributes used by the login cookie.
 		http.SetCookie(w, &http.Cookie{
 			Name:     authCookieName,
 			Value:    "",

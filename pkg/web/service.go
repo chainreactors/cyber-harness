@@ -1282,6 +1282,7 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		_ = s.store.UpdateSession(ctx, session)
 	}
 
+	//nolint:gosec // Agent dispatch must continue after the HTTP request returns.
 	go s.dispatchUserMessage(sessionID, msg, opts)
 
 	return msg, nil

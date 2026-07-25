@@ -13,7 +13,6 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/aop"
@@ -597,18 +596,6 @@ func scannerCommandSupportsDebug(name string) bool {
 	default:
 		return false
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Evaluation
-// ---------------------------------------------------------------------------
-
-func buildEvalConfig(option *cfg.Option, rt *AgentRuntime, logger telemetry.Logger, task string) evaluator.EvalLoopConfig {
-	model := option.Model
-	if option.EvalModel != "" {
-		model = option.EvalModel
-	}
-	return evaluator.NewLoopConfig(rt.app.Provider, model, logger, task, option.EvalCriteria, option.EvalMaxRetries)
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +28,6 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 type hubScript struct {
 	t *testing.T
 
-	mu         sync.Mutex
 	registered chan webproto.RegisterPayload
 	toolResult chan webproto.CommandResultPayload
 	progress   chan string

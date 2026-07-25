@@ -139,8 +139,6 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		c.Shell().OnReadlineDone = func() {
 			bridge.SetReady(false)
 		}
-		stdout = bridge
-		stderr = bridge
 		repl.stdout = bridge
 		repl.stderr = bridge
 	}

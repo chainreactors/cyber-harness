@@ -88,7 +88,7 @@ func HandleExec(ctx context.Context, msg webproto.Message, baseDir string, send 
 		case errors.Is(runCtx.Err(), context.Canceled):
 			result.ExitCode = -1
 			result.State = "killed"
-			result.KillCause = "cancelled"
+			result.KillCause = "canceled"
 		case errors.As(err, &exitErr):
 			result.ExitCode = exitErr.ExitCode()
 		default:

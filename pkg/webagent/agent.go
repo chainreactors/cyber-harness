@@ -356,10 +356,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message)) {
 // REPL helpers
 // ---------------------------------------------------------------------------
 
-func isREPLCommand(prompt string) bool {
-	return strings.HasPrefix(prompt, "/") || strings.HasPrefix(prompt, "!")
-}
-
 // fenceTerminalOutput wraps multi-line REPL/`!` command output in a Markdown
 // code fence. runChatREPLLine runs the same TUI console the interactive REPL
 // uses, whose panels (/status, /provider, /nodes ...) are drawn with box-drawing

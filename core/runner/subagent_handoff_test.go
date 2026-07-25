@@ -55,9 +55,9 @@ func waitHandoffBodies(t *testing.T, client *handoffClient, count int) (int, []p
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	spaceCalls, bodies := client.snapshot()
+	_, bodies := client.snapshot()
 	t.Fatalf("messages = %d, want %d", len(bodies), count)
-	return spaceCalls, bodies
+	return 0, bodies
 }
 
 func handoffEvent(t *testing.T, typ, sessionID, agentName string, data any) aop.Event {

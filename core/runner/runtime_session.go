@@ -784,16 +784,6 @@ func runtimeUsageData(usage agent.Usage) *aop.UsageData {
 	}
 }
 
-func inputText(input agent.Input) string {
-	var parts []string
-	for _, part := range input.Parts {
-		if part.Text != "" {
-			parts = append(parts, part.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
 func (rt *AgentRuntime) consoleAppInfo() tui.AppInfo {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()

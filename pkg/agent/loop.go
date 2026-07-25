@@ -662,10 +662,6 @@ func sanitizeMessages(msgs []ChatMessage) []ChatMessage {
 	return out
 }
 
-func isToolResultMessage(msg ChatMessage) bool {
-	return msg.ToolCallID != "" && (msg.Role == "tool" || msg.Role == "user")
-}
-
 func messageContent(msg ChatMessage) string {
 	if msg.Content == nil {
 		return ""

@@ -91,8 +91,8 @@ func (e *Execution) refresh() {
 	}
 }
 
-// Wait waits for the PTY session. Cancelling the wait also kills the session,
-// matching the previous foreground Bash execution behaviour.
+// Wait waits for the PTY session. Canceling the wait also kills the session,
+// matching the previous foreground Bash execution behavior.
 func (e *Execution) Wait(ctx context.Context) error {
 	e.mu.RLock()
 	id := e.ID

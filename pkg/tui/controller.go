@@ -231,7 +231,7 @@ func (c *interactiveRunController) Stop() bool {
 	}
 	cancel := c.cancel
 	c.stopping = true
-	// Cancelling the current run also drops queued input.
+	// Canceling the current run also drops queued input.
 	c.pending = nil
 	c.mu.Unlock()
 
