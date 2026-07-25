@@ -684,7 +684,7 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	agentConn := dialAgent(t, srv, "generation-agent", []string{"tmux"})
 
-	time.Sleep(50 * time.Millisecond)
+	waitAgents(t, pool, 1)
 	agentID := pool.List()[0].ID
 	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)

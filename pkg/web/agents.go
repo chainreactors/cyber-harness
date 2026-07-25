@@ -463,7 +463,7 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	defer conn.Close()
 
 	terminalID := generateID()
-	events, unsubscribe := p.subscribePTY(agentID, terminalID)
+	events, online, unsubscribe := p.subscribePTY(agentID, terminalID)
 	defer unsubscribe()
 	defer p.CloseTerminal(agentID, terminalID)
 
@@ -493,7 +493,7 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 			}
 		}
 	}()
-	if p.get(agentID) == nil {
+	if !online {
 		_ = write(pty.Frame{Type: pty.FrameDetached, StreamID: terminalID})
 	}
 
@@ -522,13 +522,19 @@ func (p *AgentPool) CloseTerminal(agentID, terminalID string) {
 	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
 }
 
-func (p *AgentPool) subscribePTY(agentID, terminalID string) (<-chan pty.Frame, func()) {
+func (p *AgentPool) subscribePTY(agentID, terminalID string) (<-chan pty.Frame, bool, func()) {
 	ch := make(chan pty.Frame, 256)
+	// Snapshot connectivity while registering the subscription under the pool
+	// lock. An unregister cannot otherwise be distinguished from an initially
+	// offline agent and can produce duplicate detached frames.
+	p.mu.RLock()
 	p.ptyMu.Lock()
 	p.ptySubs[terminalID] = ch
 	p.ptyAgents[terminalID] = agentID
+	online := p.agents[agentID] != nil
 	p.ptyMu.Unlock()
-	return ch, func() {
+	p.mu.RUnlock()
+	return ch, online, func() {
 		p.ptyMu.Lock()
 		if p.ptySubs[terminalID] == ch {
 			delete(p.ptySubs, terminalID)
