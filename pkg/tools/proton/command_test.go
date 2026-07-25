@@ -3,14 +3,12 @@ package proton_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protoncmd "github.com/chainreactors/aiscan/pkg/tools/proton"
@@ -30,17 +28,10 @@ func e2eBash(t *testing.T) (*commands.BashTool, string) {
 	rs := &resources.Set{}
 	cmd := protoncmd.New().WithResourceProvider(rs.ProtonConfig)
 	cmd.SetWorkDir(dir)
-	registry.Register(cmd, "proton")
+	registry.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "proton")
 
 	bash := commands.NewBashTool(dir, 30)
-	bash.Manager().SetCommands(func(name string) (tmux.Command, bool) {
-		return registry.Get(name)
-	})
-	bash.Manager().SetExecHooks(
-		func(w io.Writer) { commands.Output.Reset(w) },
-		func() { commands.Output.Reset(nil) },
-	)
-	bash.Manager().SetWorkDir(dir)
+	bash.SetCommandResolver(registry.Get)
 	return bash, dir
 }
 
@@ -53,7 +44,6 @@ func run(t *testing.T, bash *commands.BashTool, cmd string) string {
 	}
 	return res.Text()
 }
-
 
 func writeFile(t *testing.T, dir, name, content string) string {
 	t.Helper()

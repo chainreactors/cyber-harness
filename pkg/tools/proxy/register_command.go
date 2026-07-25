@@ -34,17 +34,17 @@ func init() {
 				// each command passes proxy to the SDK engine via
 				// Context.SetProxy / RunOptions.ProxyDial on next execution.
 				for _, pc := range reg.All() {
-					if updater, ok := pc.(interface{ SetProxy(string) }); ok {
-						updater.SetProxy(newProxy)
+					if pc.SetProxy != nil {
+						pc.SetProxy(newProxy)
 					}
 				}
 			})
-			cmd.SetCommandExecutor(reg.ExecuteArgs)
-			reg.Register(cmd, "proxy")
+			cmd.SetCommandExecutor(reg.Run)
+			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "proxy")
 
 			mitmCmd := NewMitmCommand(reg)
-			mitmCmd.SetCommandExecutor(reg.ExecuteArgs)
-			reg.Register(mitmCmd, "proxy")
+			mitmCmd.SetCommandExecutor(reg.Run)
+			reg.Register(commands.Command{Name: mitmCmd.Name(), Usage: mitmCmd.Usage(), Run: mitmCmd.Run}, "proxy")
 
 			// If --proxy / config proxy is a clash:// URL, auto-activate
 			if strings.HasPrefix(strings.ToUpper(deps.ScannerProxy), "CLASH://") {

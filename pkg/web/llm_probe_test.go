@@ -91,7 +91,7 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.APIKey = "sk-stored"
+	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
@@ -181,7 +181,7 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.APIKey = "sk-stored"
+	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.

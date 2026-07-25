@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -15,13 +16,28 @@ import (
 //	bash(command="loop 30s check status")
 //	bash(command="loop list")
 //	bash(command="loop stop loop-a1b2c3d4")
-type LoopCommand struct {
-	scheduler *LoopScheduler
+type LoopCommand struct{}
+
+type loopSchedulerContextKey struct{}
+
+// ContextWithLoopScheduler scopes direct REPL command execution to one runtime
+// session. Agent tool calls obtain the scheduler from their Config snapshot.
+func ContextWithLoopScheduler(ctx context.Context, scheduler *LoopScheduler) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, loopSchedulerContextKey{}, scheduler)
 }
 
-func NewLoopCommand(scheduler *LoopScheduler) *LoopCommand {
-	return &LoopCommand{scheduler: scheduler}
+func loopSchedulerFromContext(ctx context.Context) *LoopScheduler {
+	if ctx == nil {
+		return nil
+	}
+	scheduler, _ := ctx.Value(loopSchedulerContextKey{}).(*LoopScheduler)
+	return scheduler
 }
+
+func NewLoopCommand() *LoopCommand { return &LoopCommand{} }
 
 func (c *LoopCommand) Name() string { return "loop" }
 
@@ -46,30 +62,44 @@ Examples:
   loop 5m monitor targets                   every 5 minutes`
 }
 
-func (c *LoopCommand) Execute(ctx context.Context, args []string) error {
+func (c *LoopCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
+	scheduler := loopSchedulerFromContext(ctx)
+	if scheduler == nil {
+		if cfg, ok := toolAgentConfig(ctx); ok {
+			scheduler = cfg.LoopScheduler
+		}
+	}
+	if scheduler == nil {
+		return nil, fmt.Errorf("loop scheduler is not configured")
+	}
+	args := execution.Args
+	output := execution.Stdout
+	if output == nil {
+		output = io.Discard
+	}
 	if len(args) == 0 {
-		_, _ = fmt.Fprint(commands.Output, c.Usage()+"\n")
-		return nil
+		_, _ = fmt.Fprint(output, c.Usage()+"\n")
+		return nil, nil
 	}
 
 	switch strings.ToLower(args[0]) {
 	case "list", "ls":
-		return c.list()
+		return nil, c.list(scheduler, output)
 	case "stop", "rm", "remove":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: loop stop <name>")
+			return nil, fmt.Errorf("usage: loop stop <name>")
 		}
-		return c.stop(args[1])
+		return nil, c.stop(scheduler, output, args[1])
 	case "stop-all":
-		c.scheduler.Stop()
-		_, _ = fmt.Fprint(commands.Output, "All loops stopped.\n")
-		return nil
+		scheduler.Stop()
+		_, _ = fmt.Fprint(output, "All loops stopped.\n")
+		return nil, nil
 	default:
-		return c.create(ctx, args)
+		return nil, c.create(ctx, scheduler, output, args)
 	}
 }
 
-func (c *LoopCommand) create(ctx context.Context, args []string) error {
+func (c *LoopCommand) create(ctx context.Context, scheduler *LoopScheduler, output io.Writer, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
@@ -91,11 +121,11 @@ func (c *LoopCommand) create(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
 
-	name, err := c.scheduler.Add(ctx, entry)
+	name, err := scheduler.Add(ctx, entry)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(commands.Output, "Loop %q created: %s\n", name, entry.Schedule())
+	_, _ = fmt.Fprintf(output, "Loop %q created: %s\n", name, entry.Schedule())
 	return nil
 }
 
@@ -118,10 +148,10 @@ func tryCronPrefix(args []string) (*CronExpr, []string, bool) {
 	return cron, args[5:], true
 }
 
-func (c *LoopCommand) list() error {
-	loops := c.scheduler.List()
+func (c *LoopCommand) list(scheduler *LoopScheduler, output io.Writer) error {
+	loops := scheduler.List()
 	if len(loops) == 0 {
-		_, _ = fmt.Fprint(commands.Output, "No active loops.\n")
+		_, _ = fmt.Fprint(output, "No active loops.\n")
 		return nil
 	}
 	for _, l := range loops {
@@ -132,15 +162,15 @@ func (c *LoopCommand) list() error {
 		if l.Prompt != "" {
 			line += fmt.Sprintf("  prompt=%q", l.Prompt)
 		}
-		_, _ = fmt.Fprintln(commands.Output, line)
+		_, _ = fmt.Fprintln(output, line)
 	}
 	return nil
 }
 
-func (c *LoopCommand) stop(name string) error {
-	if err := c.scheduler.Remove(name); err != nil {
+func (c *LoopCommand) stop(scheduler *LoopScheduler, output io.Writer, name string) error {
+	if err := scheduler.Remove(name); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(commands.Output, "Loop %q stopped.\n", name)
+	_, _ = fmt.Fprintf(output, "Loop %q stopped.\n", name)
 	return nil
 }

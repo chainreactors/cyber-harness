@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -43,19 +44,21 @@ type ReadArgs struct {
 	Limit  int    `json:"limit,omitempty"  jsonschema:"description=Maximum number of lines to read (default: 2000)"`
 }
 
-func (t *ReadTool) Definition() ToolDefinition {
-	return ToolDef("read", t.Description(), ReadArgs{})
+func (t *ReadTool) Definition() coretool.Definition {
+	return coretool.Def("read", t.Description(), ReadArgs{})
 }
 
-
-func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
-	args, err := ParseArgs[ReadArgs](arguments)
+func (t *ReadTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+	effective := *t
+	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	t = &effective
+	args, err := coretool.ParseArgs[ReadArgs](arguments)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 
 	if args.Path == "" {
-		return ToolResult{}, fmt.Errorf("path is required")
+		return coretool.Result{}, fmt.Errorf("path is required")
 	}
 
 	// Virtual file reads (aiscan://..., embedded skills, etc.)
@@ -72,11 +75,11 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 		if result, ok := t.tryVirtualFallback(args.Path); ok {
 			return result, nil
 		}
-		return ToolResult{}, fmt.Errorf("file not found: %s", args.Path)
+		return coretool.Result{}, fmt.Errorf("file not found: %s", args.Path)
 	}
 
 	if info.IsDir() {
-		return ToolResult{}, fmt.Errorf("%s is a directory, not a file", args.Path)
+		return coretool.Result{}, fmt.Errorf("%s is a directory, not a file", args.Path)
 	}
 
 	if mime := detectImageMime(resolved); mime != "" {
@@ -84,16 +87,16 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	}
 
 	if isBinaryFile(resolved) {
-		return TextResult(fmt.Sprintf("[binary file: %s (%d bytes)]", args.Path, info.Size())), nil
+		return coretool.TextResult(fmt.Sprintf("[binary file: %s (%d bytes)]", args.Path, info.Size())), nil
 	}
 
 	return t.readFileLines(resolved, args.Path, args.Offset, args.Limit)
 }
 
-func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int) (ToolResult, error) {
+func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int) (coretool.Result, error) {
 	f, err := os.Open(resolved)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("open file: %w", err)
+		return coretool.Result{}, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -142,7 +145,7 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 	}
 
 	if err := scanner.Err(); err != nil {
-		return ToolResult{}, fmt.Errorf("read file: %w", err)
+		return coretool.Result{}, fmt.Errorf("read file: %w", err)
 	}
 
 	content := sb.String()
@@ -155,10 +158,10 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 			startLine, endLine, totalLines, nextOffset)
 	}
 
-	return TextResult(content), nil
+	return coretool.TextResult(content), nil
 }
 
-func (t *ReadTool) readVirtual(args ReadArgs) (ToolResult, error) {
+func (t *ReadTool) readVirtual(args ReadArgs) (coretool.Result, error) {
 	for _, reader := range t.readers {
 		if reader == nil {
 			continue
@@ -168,14 +171,14 @@ func (t *ReadTool) readVirtual(args ReadArgs) (ToolResult, error) {
 			continue
 		}
 		if err != nil {
-			return ToolResult{}, err
+			return coretool.Result{}, err
 		}
 		return t.paginateString(content, args.Path, args.Offset, args.Limit), nil
 	}
-	return ToolResult{}, fmt.Errorf("virtual file not found: %s", args.Path)
+	return coretool.Result{}, fmt.Errorf("virtual file not found: %s", args.Path)
 }
 
-func (t *ReadTool) tryVirtualFallback(path string) (ToolResult, bool) {
+func (t *ReadTool) tryVirtualFallback(path string) (coretool.Result, bool) {
 	for _, reader := range t.readers {
 		if reader == nil {
 			continue
@@ -189,10 +192,10 @@ func (t *ReadTool) tryVirtualFallback(path string) (ToolResult, bool) {
 		}
 		return t.paginateString(content, path, 0, 0), true
 	}
-	return ToolResult{}, false
+	return coretool.Result{}, false
 }
 
-func (t *ReadTool) paginateString(content, displayPath string, offset, limit int) ToolResult {
+func (t *ReadTool) paginateString(content, displayPath string, offset, limit int) coretool.Result {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
@@ -201,7 +204,7 @@ func (t *ReadTool) paginateString(content, displayPath string, offset, limit int
 		startLine = 1
 	}
 	if startLine > totalLines {
-		return TextResult(fmt.Sprintf("[offset %d exceeds file line count %d]", startLine, totalLines))
+		return coretool.TextResult(fmt.Sprintf("[offset %d exceeds file line count %d]", startLine, totalLines))
 	}
 
 	lineLimit := limit
@@ -234,7 +237,7 @@ func (t *ReadTool) paginateString(content, displayPath string, offset, limit int
 			startLine, actualEnd, totalLines, actualEnd+1)
 	}
 
-	return TextResult(result)
+	return coretool.TextResult(result)
 }
 
 func (t *ReadTool) resolvePath(path string) string {
@@ -276,19 +279,19 @@ func detectImageMime(path string) string {
 	return ""
 }
 
-func readImageFile(resolved, displayPath, mime string, size int64) (ToolResult, error) {
+func readImageFile(resolved, displayPath, mime string, size int64) (coretool.Result, error) {
 	if size > maxImageSize {
-		return TextResult(fmt.Sprintf("[image too large: %s (%d bytes, max %d)]", displayPath, size, maxImageSize)), nil
+		return coretool.TextResult(fmt.Sprintf("[image too large: %s (%d bytes, max %d)]", displayPath, size, maxImageSize)), nil
 	}
 	f, err := os.Open(resolved)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("open image: %w", err)
+		return coretool.Result{}, fmt.Errorf("open image: %w", err)
 	}
 	defer f.Close()
 
 	opt, err := optimizeImage(f, mime)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("optimize image: %w", err)
+		return coretool.Result{}, fmt.Errorf("optimize image: %w", err)
 	}
 
 	desc := fmt.Sprintf("Read image file [%s] (%d bytes)", opt.MimeType, len(opt.Base64Data)*3/4)
@@ -297,10 +300,10 @@ func readImageFile(resolved, displayPath, mime string, size int64) (ToolResult, 
 			opt.MimeType, opt.OrigW, opt.OrigH, opt.FinalW, opt.FinalH)
 	}
 
-	return ToolResult{
-		Content: []ContentBlock{
-			TextBlock(desc),
-			ImageBlock(opt.MimeType, opt.Base64Data),
+	return coretool.Result{
+		Content: []coretool.ContentBlock{
+			coretool.TextBlock(desc),
+			coretool.ImageBlock(opt.MimeType, opt.Base64Data),
 		},
 	}, nil
 }

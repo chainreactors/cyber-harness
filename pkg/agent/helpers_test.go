@@ -11,13 +11,15 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
 
-func testBus(handler func(Event)) *eventbus.Bus[Event] {
-	b := eventbus.New[Event]()
+func testBus(handler func(aop.Event)) *eventbus.Bus[aop.Event] {
+	b := eventbus.New[aop.Event]()
 	if handler != nil {
 		b.Subscribe(handler)
 	}
@@ -47,14 +49,14 @@ func (t *recordingTool) Definition() ToolDefinition {
 	}
 }
 
-func (t *recordingTool) Execute(_ context.Context, arguments string) (commands.ToolResult, error) {
+func (t *recordingTool) Execute(_ context.Context, arguments string) (tool.Result, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, arguments)
 	if strings.Contains(arguments, "fail") {
-		return commands.ToolResult{}, fmt.Errorf("failed")
+		return tool.Result{}, fmt.Errorf("failed")
 	}
-	return commands.TextResult(t.output), nil
+	return tool.TextResult(t.output), nil
 }
 
 func (t *recordingTool) callsSnapshot() []string {
@@ -217,9 +219,9 @@ type stubPseudoCommand struct {
 
 func (c *stubPseudoCommand) Name() string  { return c.name }
 func (c *stubPseudoCommand) Usage() string { return c.name }
-func (c *stubPseudoCommand) Execute(_ context.Context, _ []string) error {
-	fmt.Fprint(commands.Output, c.output)
-	return nil
+func (c *stubPseudoCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	fmt.Fprint(execution.Stdout, c.output)
+	return nil, nil
 }
 
 func chatResponse(msg ChatMessage) *ChatCompletionResponse {
@@ -247,7 +249,7 @@ func hasToolMessage(messages []ChatMessage, toolCallID, contains string) bool {
 	return false
 }
 
-func containsEvent(events []EventType, want EventType) bool {
+func containsEvent(events []string, want string) bool {
 	for _, event := range events {
 		if event == want {
 			return true
@@ -256,17 +258,17 @@ func containsEvent(events []EventType, want EventType) bool {
 	return false
 }
 
-func eventTypes(events []Event) []EventType {
-	out := make([]EventType, 0, len(events))
+func eventTypes(events []aop.Event) []string {
+	out := make([]string, 0, len(events))
 	for _, event := range events {
 		out = append(out, event.Type)
 	}
 	return out
 }
 
-func lastEvent(events []Event) Event {
+func lastEvent(events []aop.Event) aop.Event {
 	if len(events) == 0 {
-		return Event{}
+		return aop.Event{}
 	}
 	return events[len(events)-1]
 }

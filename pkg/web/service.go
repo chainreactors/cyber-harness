@@ -18,6 +18,10 @@ import (
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -123,13 +127,14 @@ func (s *Service) Status() ServiceStatus {
 		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
 			status.ConfigPath = path
 			status.ConfigLoaded = loaded
+			active := dc.LLM.Active()
 			if status.LLMProvider == "" {
-				status.LLMProvider = dc.LLM.Provider
+				status.LLMProvider = active.Provider
 			}
 			if status.LLMModel == "" {
-				status.LLMModel = dc.LLM.Model
+				status.LLMModel = active.Model
 			}
-			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || dc.LLM.APIKey != ""
+			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || active.APIKey != ""
 		}
 	}
 	return status
@@ -150,6 +155,9 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
+	if err := ValidateLLMConfig(cfg.LLM); err != nil {
+		return ConfigStatus{}, err
+	}
 	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
 		return ConfigStatus{}, err
 	}
@@ -167,6 +175,31 @@ func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig)
 		s.agents.BroadcastConfigReload()
 	}
 	return s.GetConfigStatus(ctx)
+}
+
+func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (ConfigStatus, error) {
+	if strings.TrimSpace(id) == "" {
+		return ConfigStatus{}, fmt.Errorf("LLM profile id is required")
+	}
+	if s.config == nil {
+		return ConfigStatus{}, fmt.Errorf("config store is not configured")
+	}
+	_, _, cfg, err := s.config.GetDistributeConfig(ctx)
+	if err != nil {
+		return ConfigStatus{}, err
+	}
+	found := false
+	for _, profile := range cfg.LLM.Providers {
+		if profile.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ConfigStatus{}, fmt.Errorf("LLM profile %q was not found", id)
+	}
+	cfg.LLM.ActiveProfile = id
+	return s.SaveConfig(ctx, cfg)
 }
 
 func (s *Service) GetDistributeConfig(ctx context.Context) (webproto.DistributeConfig, error) {
@@ -322,14 +355,19 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	}
 
 	cmd := "scan " + strings.Join(scanArgsForJob(job), " ")
-	resultCh, err := s.agents.DispatchCommand(agent.id, job.ID, cmd)
+	resultCh, err := s.agents.DispatchToolCall(agent.id, job.ID, aop.ToolCallData{
+		ToolCallID: job.ID,
+		ToolName:   "bash",
+		Args:       map[string]any{"command": cmd},
+	})
 	if err != nil {
 		s.failJob(job, err.Error())
 		return
 	}
 
-	// Wait for agent to complete. Output is forwarded to SSE hub by
-	// AgentPool.HandleOutput as the agent POSTs progress lines.
+	// Progress lines stream to the SSE hub as tool.data events while the scan
+	// runs; the terminal tool.result carries the full text and the structured
+	// scan result in its details.
 	res, ok := <-resultCh
 	if !ok {
 		s.failJob(job, "agent disconnected")
@@ -452,24 +490,36 @@ func scanArgsForJob(job *ScanJob) []string {
 	return args
 }
 
-type structuredScanCommand interface {
-	ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error)
-}
-
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
 	app := s.appSnapshot()
 	if app == nil || app.Commands == nil {
 		return "", nil, fmt.Errorf("aiscan runtime is not ready")
 	}
-	cmd, ok := app.Commands.Get("scan")
+	tool, ok := app.Commands.GetTool("bash")
 	if !ok {
-		return "", nil, fmt.Errorf("scan command is not registered")
+		return "", nil, fmt.Errorf("bash tool is not registered")
 	}
-	structured, ok := cmd.(structuredScanCommand)
+	bash, ok := tool.(*commands.BashTool)
 	if !ok {
-		return "", nil, fmt.Errorf("scan command does not support structured results")
+		return "", nil, fmt.Errorf("registered bash tool has unexpected type")
 	}
-	return structured.ExecuteStructured(ctx, args, stream)
+	var text strings.Builder
+	execution, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
+		OnOutput: func(data []byte) {
+			_, _ = text.Write(data)
+			if stream != nil {
+				_, _ = stream.Write(data)
+			}
+		},
+	})
+	if err != nil {
+		return text.String(), nil, err
+	}
+	result, ok := execution.Details.(*output.Result)
+	if !ok || result == nil {
+		return text.String(), nil, fmt.Errorf("scan execution returned no structured result")
+	}
+	return text.String(), result, nil
 }
 
 type sseStreamWriter struct {
@@ -1004,7 +1054,7 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 	payloadJSON, _ := json.Marshal(payload)
 
 	taskID := generateID()
-	msg := WSMessage{
+	msg := webproto.Message{
 		Type:    "upload",
 		TaskID:  taskID,
 		DataB64: base64.StdEncoding.EncodeToString(data),
@@ -1022,15 +1072,8 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			return nil, fmt.Errorf("agent disconnected during upload")
 		}
 		var result webproto.FileUploadResult
-		// The agent normally returns a JSON-encoded FileUploadResult. If it sent
-		// nothing structured (or non-JSON output), synthesize one from the raw
-		// output path — the upload still succeeded, just without an envelope.
 		if len(res.Result) == 0 || json.Unmarshal(res.Result, &result) != nil {
-			result = webproto.FileUploadResult{
-				Filename: filename,
-				Path:     res.Output,
-				Size:     int64(len(data)),
-			}
+			return nil, fmt.Errorf("agent upload returned no result envelope")
 		}
 		if result.Error != "" {
 			return nil, fmt.Errorf("agent upload error: %s", result.Error)
@@ -1076,11 +1119,16 @@ func (s *Service) ListSessions(ctx context.Context) ([]*ChatSession, error) {
 }
 
 func (s *Service) DeleteSession(ctx context.Context, id string) error {
+	s.closeRemoteSession(id)
 	return s.store.DeleteSession(ctx, id)
 }
 
 func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMessage, error) {
 	return s.store.ListMessages(ctx, sessionID, 500)
+}
+
+func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Event, error) {
+	return s.store.ListAOPEvents(ctx, sessionID, 10000)
 }
 
 func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
@@ -1089,28 +1137,72 @@ func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
 		s.persistRuntimeChatEvent(sessionID, event)
 	}
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
-		Type: event.Type,
-		Data: mustJSON(event),
-		// Terminal events must never be dropped (see isTerminalChatEvent). Eval
-		// verdicts are rare, non-terminal, but each one is a discrete round marker
-		// the client can't reconstruct if lost under backpressure — send reliably.
-		Reliable: isTerminalChatEvent(event.Type) || event.Type == ChatEventEval || event.Type == ChatEventCompact,
+		Type:     event.Type,
+		Data:     mustJSON(event),
+		Reliable: isTerminalChatEvent(event.Type),
 	})
 }
 
-// isTerminalChatEvent reports whether an event ends a run (or its scan) on the
-// client — the signals that release the composer and stop the streaming
-// indicators. These are broadcast reliably so the SSE hub never drops them under
-// backpressure: a lost token delta is invisible (a later delta and the final
-// message resend the full text), but a lost terminal event leaves the UI stuck
-// "streaming" forever — a busy composer and a blinking cursor that never clears.
-func isTerminalChatEvent(t string) bool {
-	switch t {
-	case ChatEventMessage, ChatEventMessageEnd, ChatEventError,
-		ChatEventScanComplete, ChatEventScanError:
+func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
+	if s == nil || s.hub == nil || sessionID == "" || !event.Valid() {
+		return
+	}
+	if s.store != nil {
+		_ = s.store.AddAOPEvent(context.Background(), sessionID, event)
+	}
+	s.broadcastAOPEvent(sessionID, event)
+}
+
+func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
+	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
+		Type:     "aop",
+		Data:     mustJSON(event),
+		Reliable: isReliableAOPEvent(event),
+	})
+}
+
+// broadcastHubError emits a hub-originated failure as an AOP error event: the
+// code names a translatable template (mirrored under `sys.*` in the frontend
+// locales), message is the English fallback, and params feed i18n
+// interpolation via the aiscan.web extension.
+func (s *Service) broadcastHubError(sessionID, code, message string, params map[string]any) {
+	data, _ := json.Marshal(aop.ErrorData{Code: code, Message: message})
+	event := aop.Event{
+		Type:      aop.TypeError,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID,
+		Agent:     "aiscan.web",
+		Data:      data,
+	}
+	if len(params) > 0 {
+		_ = webproto.SetWebExt(&event, webproto.WebMessageExt{Params: params})
+	}
+	s.BroadcastAOPEvent(sessionID, event)
+}
+
+func isReliableAOPEvent(event aop.Event) bool {
+	switch event.Type {
+	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd, aop.TypeMessage:
 		return true
+	case aop.TypeStatus:
+		// Status entries that drive durable UI state (eval/compact banners,
+		// budget warnings) must survive reconnect; the rest are evictable.
+		data, err := aop.DecodeData[aop.StatusData](event)
+		if err != nil {
+			return false
+		}
+		switch data.State {
+		case xeval.StateEnd, xcompact.StateEnd, aop.StatusTokenBudgetWarning:
+			return true
+		}
 	}
 	return false
+}
+
+// isTerminalChatEvent classifies terminal platform events. Agent run lifecycle
+// (including hub-originated failures) is carried exclusively by AOP.
+func isTerminalChatEvent(t string) bool {
+	return t == ChatEventScanComplete
 }
 
 func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
@@ -1134,64 +1226,6 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	}
 
 	switch event.Type {
-	case ChatEventMessageEnd:
-		// The finalized assistant text for one turn — the commentary the model
-		// emits before (or between) its tool calls. Only the run's LAST turn used
-		// to survive a reload, persisted as the aggregate reply by
-		// completeAssistantRun; every earlier turn's text streamed live but was
-		// dropped from the store, so it vanished from any timeline rebuilt from it:
-		// a page reload, an SSE reconnect, or a session switch that revalidates
-		// against the store. Persist each turn's text as an assistant message keyed
-		// by its turn so buildTimelineFromMessages reconstructs it. The final turn
-		// shares a turn key with the aggregate reply, so on rebuild the two merge
-		// into one bubble instead of doubling. (message_start / message_delta stay
-		// unpersisted — they are streaming partials of this same finalized text.)
-		msg.Role = "assistant"
-		msg.Content = strings.TrimSpace(event.Content)
-		if msg.Content == "" {
-			return
-		}
-
-	case ChatEventThinking:
-		msg.Role = "system"
-		msg.Content = strings.TrimSpace(event.Content)
-		if msg.Content == "" {
-			msg.Content = "thinking"
-		}
-
-	case ChatEventAgentJoined:
-		msg.Role = "system"
-		msg.Content = strings.TrimSpace(event.AgentName + " joined")
-
-	case ChatEventToolCall:
-		msg.Role = "tool_call"
-		msg.Content = event.ToolArgs
-		metadata["tool_call_id"] = event.ToolCallID
-		metadata["tool_name"] = event.ToolName
-		metadata["tool_args"] = event.ToolArgs
-
-	case ChatEventToolResult:
-		msg.Role = "tool_result"
-		msg.Content = event.Content
-		metadata["tool_call_id"] = event.ToolCallID
-
-	case ChatEventEval:
-		// Persist the round verdict so the eval badge survives a reload / session
-		// switch — buildTimelineFromMessages reconstructs it from content (reason)
-		// plus this metadata (round/pass).
-		msg.Role = "system"
-		msg.Content = event.EvalReason
-		metadata["eval_round"] = event.EvalRound
-		metadata["eval_pass"] = event.EvalPass
-		metadata["eval_reason"] = event.EvalReason
-
-	case ChatEventCompact:
-		msg.Role = "system"
-		msg.Content = fmt.Sprintf("context compacted: ~%d → ~%d tokens", event.CompactTokensBefore, event.CompactTokensAfter)
-		metadata["compact_tokens_before"] = event.CompactTokensBefore
-		metadata["compact_tokens_after"] = event.CompactTokensAfter
-		metadata["compact_kept_messages"] = event.CompactKeptMessages
-
 	case ChatEventScanComplete:
 		// Persist a lightweight marker so the inline scan card survives a reload /
 		// session switch. The heavy Result payload is NOT stored here — it stays
@@ -1217,7 +1251,7 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	_ = s.store.AddMessage(context.Background(), msg)
 }
 
-func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.ChatPayload) (*ChatMessage, error) {
+func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.GoalExt) (*ChatMessage, error) {
 	now := time.Now()
 	msg := &ChatMessage{
 		ID:        generateID(),
@@ -1225,9 +1259,13 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		Role:      "user",
 		Content:   content,
 		CreatedAt: now,
+		Queued:    s.sessionHasActiveTask(sessionID),
 	}
 	if err := s.store.AddMessage(ctx, msg); err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
+	}
+	if event, err := messageEventFromChatMessage(msg); err == nil {
+		s.broadcastAOPEvent(sessionID, event)
 	}
 
 	// Update session timestamp and auto-title from first message.
@@ -1244,13 +1282,32 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		_ = s.store.UpdateSession(ctx, session)
 	}
 
+	//nolint:gosec // Agent dispatch must continue after the HTTP request returns.
 	go s.dispatchUserMessage(sessionID, msg, opts)
 
 	return msg, nil
 }
 
-func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.ChatPayload) {
+// sessionHasActiveTask reports whether any task (chat turn or scan) is
+// currently running on the session — used to mark freshly sent messages as
+// queued rather than in-flight.
+func (s *Service) sessionHasActiveTask(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sid := range s.taskSessions {
+		if sid == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
 	content := strings.TrimSpace(msg.Content)
+	if strings.HasPrefix(content, "!") {
+		s.handleAgentCommand(sessionID, content)
+		return
+	}
 
 	// A typed "/verb" is routed by scope. Hub-scope commands (scan pipeline,
 	// agent roster, merged help) run here. Agent-scope commands (/status,
@@ -1269,9 +1326,24 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 			s.runHubCommand(sessionID, verb, args)
 			return
 		}
+		switch verb {
+		case "stop":
+			_ = s.CancelSession(context.Background(), sessionID)
+			return
+		case "exit", "quit":
+			s.closeRemoteSession(sessionID)
+			return
+		case "continue", "followup":
+			// These are Runs: the adapter normalizes their prompt semantics.
+		default:
+			if !strings.HasPrefix(content, "/skill:") {
+				s.handleAgentCommand(sessionID, content)
+				return
+			}
+		}
 	}
 
-	s.handleChatMessage(sessionID, content, opts)
+	s.handleChatMessage(sessionID, msg, opts)
 }
 
 // handleClearCommand implements web /clear as "clear conversation": it deletes the
@@ -1280,13 +1352,13 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 // in-memory model context resets too. The agent's "Context cleared." reply lands in
 // the now-empty transcript as the sole confirmation line; with no agent bound, the
 // emptied view is itself the confirmation.
-func (s *Service) handleClearCommand(sessionID string, opts webproto.ChatPayload) {
+func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
 	_ = s.store.ClearMessages(context.Background(), sessionID)
 	// Transient: a live-only signal to connected clients — the cleared state is
 	// already durable in the store, so a reconnecting client re-derives it on load.
 	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
 	if s.sessionAgent(sessionID) != nil {
-		s.handleChatMessage(sessionID, "/clear", opts)
+		s.handleAgentCommand(sessionID, "/clear")
 	}
 }
 
@@ -1368,10 +1440,7 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 	ctx := context.Background()
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]",
-		})
+		s.broadcastHubError(sessionID, "scan_usage", "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]", nil)
 		return
 	}
 
@@ -1400,10 +1469,7 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 	job, err := s.SubmitScan(ctx, target, mode, verify, sniper, deep)
 	if err != nil {
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: fmt.Sprintf("scan failed: %s", err),
-		})
+		s.broadcastHubError(sessionID, "scan_submit", fmt.Sprintf("scan failed: %s", err), map[string]any{"error": err.Error()})
 		return
 	}
 
@@ -1434,10 +1500,10 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 		}
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", a.Name, a.ID[:8], status))
 		entry := map[string]any{"name": a.Name, "id": a.ID[:8], "busy": a.Busy}
-		if a.Identity.Model != "" {
-			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Identity.Provider, a.Identity.Model))
-			entry["provider"] = a.Identity.Provider
-			entry["model"] = a.Identity.Model
+		if a.Status.Model != "" {
+			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Status.Provider, a.Status.Model))
+			entry["provider"] = a.Status.Provider
+			entry["model"] = a.Status.Model
 		}
 		sb.WriteString("\n")
 		list = append(list, entry)
@@ -1457,7 +1523,7 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	return s.agents.get(session.AgentID)
 }
 
-func (s *Service) handleChatMessage(sessionID, content string, opts webproto.ChatPayload) {
+func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -1474,13 +1540,16 @@ func (s *Service) handleChatMessage(sessionID, content string, opts webproto.Cha
 		AgentName: agent.name,
 	})
 
-	resultCh, err := s.agents.DispatchChatSession(agent.id, taskID, sessionID, content, opts)
+	run := webproto.RunPayload{
+		SessionID: sessionID,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
+		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
+		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+	}
+	resultCh, err := s.agents.DispatchRun(agent.id, taskID, run)
 	if err != nil {
 		s.finishSessionTask(taskID)
-		s.BroadcastChatEvent(sessionID, ChatEvent{
-			Type:  ChatEventError,
-			Error: err.Error(),
-		})
+		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
 		return
 	}
 
@@ -1491,21 +1560,52 @@ func (s *Service) handleChatMessage(sessionID, content string, opts webproto.Cha
 			// Agent dropped mid-run: signal completion so the composer releases
 			// instead of hanging on the streaming indicator (mirrors the command
 			// path above).
-			s.BroadcastChatEvent(sessionID, ChatEvent{
-				Type:  ChatEventError,
-				Error: "agent disconnected",
-			})
+			s.broadcastHubError(sessionID, "agent_disconnected", "agent disconnected", nil)
 			return
 		}
 		if canceled {
 			return
 		}
-		reply := res.Output
 		if res.Err != "" {
-			reply = "Error: " + res.Err
+			s.broadcastHubError(sessionID, "", res.Err, nil)
 		}
-		s.completeAssistantRun(sessionID, agent.id, agent.name, reply, res.Turn)
 	}()
+}
+
+func (s *Service) handleAgentCommand(sessionID, line string) {
+	agent := s.sessionAgent(sessionID)
+	if agent == nil {
+		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
+			"Agent is not connected. Reconnect the agent to continue chatting.", nil)
+		return
+	}
+	taskID := generateID()
+	s.registerSessionTask(taskID, sessionID, agent.id)
+	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, webproto.CommandPayload{SessionID: sessionID, Line: line})
+	if err != nil {
+		s.finishSessionTask(taskID)
+		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
+		return
+	}
+	go func() {
+		res, ok := <-resultCh
+		canceled := s.finishSessionTask(taskID)
+		if !ok || canceled {
+			return
+		}
+		if res.Err != "" {
+			s.broadcastHubError(sessionID, "", res.Err, nil)
+		}
+	}()
+}
+
+func (s *Service) closeRemoteSession(sessionID string) {
+	session, err := s.store.GetSession(context.Background(), sessionID)
+	if err != nil || s.agents == nil || session.AgentID == "" {
+		return
+	}
+	payload, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID, Reason: "completed"})
+	_ = s.agents.SendAgentMessage(session.AgentID, webproto.Message{Type: webproto.TypeSessionClose, Payload: payload})
 }
 
 // broadcastSystemMessage persists + broadcasts a system message. code names a
@@ -1528,14 +1628,9 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		CreatedAt: now,
 	}
 	_ = s.store.AddMessage(context.Background(), msg)
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:      ChatEventMessage,
-		MessageID: msg.ID,
-		Role:      "system",
-		Content:   fallback,
-		Code:      code,
-		Params:    params,
-	})
+	if event, err := messageEventFromChatMessage(msg); err == nil {
+		s.broadcastAOPEvent(sessionID, event)
+	}
 }
 
 func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
@@ -1553,42 +1648,4 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 		ScanID: scanID,
 		Result: result,
 	})
-}
-
-// completeAssistantRun is a run's terminal signal to the client. It always
-// broadcasts the aggregate assistant message so the UI finalizes the turn and
-// releases the composer — even when the run produced no final text (a tool-only
-// turn, or an eval run that hit its round cap). Skipping the broadcast on empty
-// content was what stranded the streaming indicator — the blinking cursor or the
-// "working" dots — forever. The reply is persisted only when it carries text, so
-// an empty completion never leaves a blank row in the transcript.
-func (s *Service) completeAssistantRun(sessionID, agentID, agentName, content string, turn int) {
-	content = strings.TrimRight(content, " \t\r\n")
-	event := ChatEvent{
-		Type:      ChatEventMessage,
-		Role:      "assistant",
-		AgentID:   agentID,
-		AgentName: agentName,
-		Turn:      turn,
-		Content:   content,
-	}
-	if content != "" {
-		msg := &ChatMessage{
-			ID:        generateID(),
-			SessionID: sessionID,
-			Role:      "assistant",
-			AgentID:   agentID,
-			AgentName: agentName,
-			Content:   content,
-			CreatedAt: time.Now(),
-		}
-		if turn > 0 {
-			if data, err := json.Marshal(map[string]any{"turn": turn}); err == nil {
-				msg.Metadata = data
-			}
-		}
-		_ = s.store.AddMessage(context.Background(), msg)
-		event.MessageID = msg.ID
-	}
-	s.BroadcastChatEvent(sessionID, event)
 }

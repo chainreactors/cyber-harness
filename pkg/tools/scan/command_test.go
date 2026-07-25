@@ -25,19 +25,19 @@ import (
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"
-	"github.com/chainreactors/utils/parsers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func newTestPipeline(t *testing.T, ctx context.Context, caps []pipeline.Capability, coll *collector, debug bool) *pipeline.Pipeline {
 	t.Helper()
 	bus := eventbus.New[pipeline.Observation]()
-	subscribePipeline(bus, coll, debug)
+	subscribePipeline(bus, coll, debug, nil)
 	p, err := pipeline.New(ctx, pipeline.Config{
 		Capabilities: caps,
 		Bus:          bus,
@@ -55,13 +55,13 @@ func testSeeds(events ...event) []pipeline.Event {
 func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"})
+	var stdout bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"}, Stdout: &stdout, Stderr: &stdout})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := commands.Output.Captured()
-	if !strings.Contains(out, "[summary] completed") {
+	out := stdout.String()
+	if !strings.Contains(output.StripANSI(out), "[summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
 }
@@ -76,8 +76,12 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 			t.Fatalf("quick profile missing %s", name)
 		}
 	}
-	if quick.CrawlDepth != 2 {
-		t.Fatalf("quick crawl depth = %d, want 2", quick.CrawlDepth)
+	wantQuickDepth := 2
+	if quick.Enabled("katana_crawl") {
+		wantQuickDepth = 1
+	}
+	if quick.CrawlDepth != wantQuickDepth {
+		t.Fatalf("quick crawl depth = %d, want %d", quick.CrawlDepth, wantQuickDepth)
 	}
 	for _, name := range []string{capSprayPlugins, capSprayBrute} {
 		if quick.Enabled(name) {
@@ -160,6 +164,14 @@ func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 
 func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
 	usage := Usage()
+	if !strings.Contains(usage, "Usage:") || !strings.Contains(usage, "scan [OPTIONS]") {
+		t.Fatalf("usage was not rendered by the scan go-flags parser:\n%s", usage)
+	}
+	for _, flag := range []string{"input", "verify", "broad-poc", "max-neutron-per-finger"} {
+		if !strings.Contains(usage, "--"+flag) && !strings.Contains(usage, "/"+flag) {
+			t.Fatalf("usage missing generated flag %q:\n%s", flag, usage)
+		}
+	}
 	if strings.Contains(usage, "--verify-timeout") {
 		t.Fatal("usage should not advertise deprecated --verify-timeout")
 	}
@@ -173,12 +185,12 @@ func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
 
 func TestScanRejectsRemovedAIFlag(t *testing.T) {
 	cmd := New(&engine.Set{})
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{
+	var stdout bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{
 		"-i", "http://127.0.0.1",
 		"--ai",
 		"--no-color",
-	})
+	}, Stdout: &stdout, Stderr: &stdout})
 	if err == nil {
 		t.Fatal("Execute() with removed --ai flag should fail")
 	}
@@ -1448,12 +1460,15 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
 	file := filepath.Join(t.TempDir(), "scan.txt")
-	var stream bytes.Buffer
-
-	out, _, err := cmd.ExecuteStructured(context.Background(), []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1", "-f", file}, &stream)
+	var stdout bytes.Buffer
+	details, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1", "-f", file}, Stdout: &stdout, Stderr: &stdout})
 	if err != nil {
-		t.Fatalf("ExecuteStructured() error = %v", err)
+		t.Fatalf("Run() error = %v", err)
 	}
+	if details == nil {
+		t.Fatal("Run() returned nil details")
+	}
+	out := stdout.String()
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("read output file: %v", err)
@@ -1471,11 +1486,11 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	if strings.Contains(out, "[scan.web] ") {
 		t.Fatalf("stdout output should not repeat streamed events: %q", out)
 	}
-	if !strings.Contains(output.StripANSI(stream.String()), "http://127.0.0.1:1") {
-		t.Fatalf("stream output missing event line: %q", stream.String())
+	if !strings.Contains(output.StripANSI(out), "http://127.0.0.1:1") {
+		t.Fatalf("stdout missing event line: %q", out)
 	}
-	if strings.Contains(output.StripANSI(stream.String()), "type=web") {
-		t.Fatalf("stream output contains key/value pollution: %q", stream.String())
+	if strings.Contains(output.StripANSI(out), "type=web") {
+		t.Fatalf("stdout contains key/value pollution: %q", out)
 	}
 }
 

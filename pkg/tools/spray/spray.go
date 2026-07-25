@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -11,9 +12,9 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
-	"github.com/chainreactors/utils/parsers"
 	"github.com/chainreactors/sdk/spray"
 	spraycore "github.com/chainreactors/spray/core"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type Command struct {
@@ -45,7 +46,8 @@ func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command 
 func (c *Command) Name() string { return "spray" }
 
 func (c *Command) Usage() string {
-	return spraycore.Help()
+	var options spraycore.Option
+	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
 func (c *Command) QuickReference() string {
@@ -63,11 +65,13 @@ func (c *Command) QuickReference() string {
     spray -l urls.txt --finger --crawl`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("spray", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
+	jsonOut := toolargs.BoolFlagEnabled(args, "-j") || toolargs.BoolFlagEnabled(args, "--json")
 	if debug {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
@@ -107,14 +111,32 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		},
 		OnResult: func(r *parsers.SprayResult) {
 			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, r.UrlString, r)
+			if debug {
+				// spray core prints results itself when not quiet
+				return
+			}
+			writeResult(execution.Stdout, r, jsonOut)
 		},
 	}
 	if err := spraycore.RunWithArgs(ctx, withDefaultScannerFlags(args), runOpts); err != nil {
-		fmt.Fprint(commands.Output, buf.String())
-		return fmt.Errorf("spray: %w", err)
+		fmt.Fprint(execution.Stdout, buf.String())
+		return nil, fmt.Errorf("spray: %w", err)
 	}
-	fmt.Fprint(commands.Output, buf.String())
-	return nil
+	fmt.Fprint(execution.Stdout, buf.String())
+	return nil, nil
+}
+
+func writeResult(w io.Writer, result *parsers.SprayResult, jsonOutput bool) {
+	if result == nil {
+		return
+	}
+	line := result.String()
+	if jsonOutput {
+		line = result.ToJson()
+	}
+	if line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // TestInjectProxy is exported for cross-package testing.
@@ -141,7 +163,16 @@ func withDefaultNoStat(args []string) []string {
 }
 
 func withDefaultScannerFlags(args []string) []string {
-	return withDefaultNoStat(withDefaultNoBar(args))
+	return withDefaultClient(withDefaultNoStat(withDefaultNoBar(args)))
+}
+
+func withDefaultClient(args []string) []string {
+	for _, arg := range args {
+		if arg == "-C" || strings.HasPrefix(arg, "-C=") || arg == "--client" || strings.HasPrefix(arg, "--client=") {
+			return args
+		}
+	}
+	return append(args, "--client", "req")
 }
 
 func withDefaultBoolFlag(args []string, flag string) []string {

@@ -16,8 +16,8 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	scanengine "github.com/chainreactors/aiscan/pkg/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/tools/toolargs"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -111,56 +111,37 @@ func (c *Command) SetProxy(proxy string) {
 func (c *Command) Name() string { return "neutron" }
 
 func (c *Command) Usage() string {
-	return `neutron - POC/vulnerability testing with nuclei-style options
-Usage: neutron -u <target> [options]
-
-Input:
-  -u, --target       Target URL, host, or ip:port. Can specify multiple.
-  -i, --input        Target URL, host, or ip:port (alias of --target).
-  -l, --list         File containing targets, one per line.
-
-Templates:
-  -t, --templates    Template file or directory to run. Can specify multiple.
-      --id           Run templates by id (comma-separated or repeated).
-      --exclude-id   Exclude templates by id.
-      --finger       Filter templates by fingerprint name.
-      --tags, --tag  Filter templates by tag.
-      --exclude-tags Exclude templates by tag.
-  -s, --severity     Filter severity: info, low, medium, high, critical.
-      --exclude-severity  Exclude severity.
-      --max-per-finger    Maximum templates selected per fingerprint.
-
-Rate and output:
-  -c, --concurrency  Template concurrency (default: 1).
-      --rate-limit, -rl  Maximum template executions per second.
-      --timeout      Overall timeout in seconds.
-  -o, --output       Write output to file.
-  -j, --json         Output JSON Lines.
-      --jsonl        Output JSON Lines.
-      --silent       Only output matched loots.
-      --all          Print matched and unmatched templates.
-      --template-list  List selected templates and exit.
-      --debug        Enable debug logging.
-
-Examples:
-  neutron -u http://target.com -s critical,high
-  neutron -l targets.txt -tags cve,rce -c 10 --rate-limit 20
-  neutron -u 10.0.0.1:8080 --finger nginx --max-per-finger 20
-  neutron -u http://target.com -t ./pocs --id shiro-detect -j -o loots.jsonl`
+	var options neutronFlags
+	return toolargs.GoFlagsHelp("neutron", &options)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) QuickReference() string {
+	return `### neutron — POC/vulnerability scanner (nuclei-style)
+  -i, -u <target>  Target URL/host (repeatable, -l for list file)
+  -t <path>        Extra template file or directory
+  --finger <name>  Only run templates matching these fingerprints
+  --tags <tags>    Filter templates by tag;  -s <sev>  Filter by severity
+  --id <ids>       Run specific template IDs;  --template-list  List and exit
+  -j               JSON Lines output
+  Examples:
+    neutron -i http://target.com
+    neutron -i http://target.com --finger nginx --tags cve
+    neutron -l targets.txt -s high,critical -j`
+}
+
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("neutron", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var flags neutronFlags
-	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
+	parser := toolargs.NewGoFlagsParser("neutron", &flags)
 	_, err = parser.ParseArgs(normalizeNucleiStyleArgs(args))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			fmt.Fprint(commands.Output, c.Usage()+"\n")
-			return nil
+			fmt.Fprint(execution.Stdout, c.Usage()+"\n")
+			return nil, nil
 		}
-		return fmt.Errorf("neutron: %w", err)
+		return nil, fmt.Errorf("neutron: %w", err)
 	}
 	if flags.Debug {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
@@ -175,24 +156,24 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 
 	targets, err := readNeutronTargets(flags.Inputs, flags.Input, flags.ListFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(targets) == 0 && !flags.TemplateList {
-		return fmt.Errorf("neutron: no input targets")
+		return nil, fmt.Errorf("neutron: no input targets")
 	}
 	if c.engine == nil {
-		return fmt.Errorf("neutron: engine is not available")
+		return nil, fmt.Errorf("neutron: engine is not available")
 	}
 	if flags.Concurrency <= 0 {
-		return fmt.Errorf("neutron: --concurrency must be greater than 0")
+		return nil, fmt.Errorf("neutron: --concurrency must be greater than 0")
 	}
 	if flags.RateLimit < 0 {
-		return fmt.Errorf("neutron: --rate-limit cannot be negative")
+		return nil, fmt.Errorf("neutron: --rate-limit cannot be negative")
 	}
 
 	loadedTemplates, err := loadNeutronTemplatePaths(flags.Templates)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	opts := neutronExecuteOptions{
@@ -212,18 +193,18 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		Debug:               flags.Debug,
 	}
 	if err := validateNeutronSeverities(opts.Severities, opts.ExcludeSeverities); err != nil {
-		return err
+		return nil, err
 	}
 
 	selected, filtered := selectNeutronTemplates(c.engine, c.index, opts)
 	if filtered && len(selected) == 0 {
-		return fmt.Errorf("neutron: no templates selected")
+		return nil, fmt.Errorf("neutron: no templates selected")
 	}
 	if len(selected) == 0 {
 		selected = nonNilSortedTemplates(c.engine.Get())
 	}
 	if len(selected) == 0 {
-		return fmt.Errorf("neutron: no templates available")
+		return nil, fmt.Errorf("neutron: no templates available")
 	}
 	opts.Templates = selected
 	opts.RestrictToTemplates = true
@@ -231,9 +212,9 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	if flags.TemplateList {
 		result, wErr := c.writeOrReturn(flags.OutputFile, renderTemplateList(selected, flags.JSON || flags.JSONL))
 		if result != "" {
-			fmt.Fprint(commands.Output, result)
+			fmt.Fprint(execution.Stdout, result)
 		}
-		return wErr
+		return nil, wErr
 	}
 
 	c.Logger.Infof("neutron action=testing targets=%d templates=%d concurrency=%d rate_limit=%d", len(targets), len(selected), flags.Concurrency, flags.RateLimit)
@@ -247,10 +228,10 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		targetOpts.Target = target
 		resultCh, err := neutronExecuteStream(ctx, c.engine, c.index, targetOpts)
 		if errors.Is(err, scanengine.ErrNoNeutronTemplates) {
-			return fmt.Errorf("neutron: no templates selected")
+			return nil, fmt.Errorf("neutron: no templates selected")
 		}
 		if err != nil {
-			return fmt.Errorf("neutron execute failed: %w", err)
+			return nil, fmt.Errorf("neutron execute failed: %w", err)
 		}
 		for result := range resultCh {
 			if result == nil {
@@ -266,24 +247,24 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
-				sb.WriteString(formatNeutronResult(record, jsonOutput))
+				line := formatNeutronResult(record, jsonOutput)
+				sb.WriteString(line)
+				fmt.Fprint(execution.Stdout, line)
 			}
 		}
 		if ctx.Err() != nil {
-			fmt.Fprint(commands.Output, sb.String())
-			return fmt.Errorf("neutron: %w", ctx.Err())
+			return nil, fmt.Errorf("neutron: %w", ctx.Err())
 		}
 	}
 
 	if statsEnabled && !flags.Silent && !jsonOutput {
-		sb.WriteString(fmt.Sprintf("[neutron] completed targets=%d templates=%d executed=%d matched=%d errors=%d\n",
-			summary.Targets, summary.Templates, summary.Executed, summary.Matched, summary.Errors))
+		line := fmt.Sprintf("[neutron] completed targets=%d templates=%d executed=%d matched=%d errors=%d\n",
+			summary.Targets, summary.Templates, summary.Executed, summary.Matched, summary.Errors)
+		sb.WriteString(line)
+		fmt.Fprint(execution.Stdout, line)
 	}
-	result, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
-	if result != "" {
-		fmt.Fprint(commands.Output, result)
-	}
-	return wErr
+	_, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
+	return nil, wErr
 }
 
 func normalizeNucleiStyleArgs(args []string) []string {

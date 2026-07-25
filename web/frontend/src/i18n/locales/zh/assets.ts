@@ -1,6 +1,8 @@
 export default {
   title: '资产',
   openAssets: '资产池',
+  description: '统一检索、筛选、导入和复用已发现的资产',
+  refresh: '刷新资产',
   noAssets: '尚未发现资产',
   noAssetsHint: '执行一次扫描以填充资产池。',
   sendToChat: '发送到聊天',
@@ -8,6 +10,18 @@ export default {
   assetCount: '{{count}} 项资产',
   refreshing: '刷新中…',
   import: '导入',
+  allTypes: '全部',
+  types: {
+    ip: 'IP',
+    cidr: '网段',
+    domain: '域名',
+    port: '端口',
+    app: '应用',
+    url: 'URL',
+    framework: '指纹',
+    endpoint: '端点',
+    vuln: '漏洞',
+  },
   importDialog: {
     title: '导入数据',
     description: '文件会先在前端完成结构校验和摘要预览，再由后端解析并归并到资产池。',

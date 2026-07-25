@@ -214,7 +214,9 @@
         no extra DOM. Use on the active target / scan / idle instrument frame. ── */
   .reticle {
     position: relative;
-    --reticle-color: hsl(var(--primary) / 0.55);
+    /* Light sits on white cards, so the primary-blue corner brackets need more
+       weight to register; dark keeps the softer 0.55 (see .dark override below). */
+    --reticle-color: hsl(var(--primary) / 0.85);
     --reticle-size: 14px;
     --reticle-weight: 1.5px;
     background-image:
@@ -237,14 +239,24 @@
       top left, top right, bottom left, bottom right,
       top left, top right, bottom left, bottom right;
   }
+  /* Dark keeps the softer bracket the frame was tuned for on black. */
+  .dark .reticle {
+    --reticle-color: hsl(var(--primary) / 0.55);
+  }
   /* ── Tactical grid — for idle instrument states (an instrument at rest shows its field) ── */
   .grid-tactical {
+    /* Light: a faint primary-blue tint reads on white where the old neutral border
+       line washed out; dark keeps its original neutral border line (override below). */
+    --grid-line: hsl(var(--primary) / 0.16);
     background-image:
-      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
     background-size: 34px 34px;
     -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
     mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 78%);
+  }
+  .dark .grid-tactical {
+    --grid-line: hsl(var(--border) / 0.6);
   }
 }
 

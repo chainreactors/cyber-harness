@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 	ioaclient "github.com/chainreactors/ioa/client"
-	"github.com/chainreactors/ioa/protocols"
 )
 
 type App struct {
@@ -29,7 +28,7 @@ type App struct {
 	Engines           any
 	Skills            *skills.Store
 	SkillDiagnostics  []skills.Diagnostic
-	IOAClient         protocols.ClientAPI
+	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
 	DataBus           *eventbus.Bus[output.ToolDataEvent]
 	SCOSidecar        *output.SCOSidecar
@@ -170,8 +169,8 @@ func (a *App) Close() {
 			}
 		}
 		for _, cmd := range a.Commands.All() {
-			if closer, ok := cmd.(interface{ Close() }); ok {
-				closer.Close()
+			if cmd.Close != nil {
+				cmd.Close()
 			}
 		}
 	}
@@ -265,28 +264,26 @@ func initCoreCommands(rc cfg.RuntimeConfig, llmProvider agent.Provider, skillSto
 }
 
 func executeRegistryCommand(ctx context.Context, reg *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {
-	if timeout <= 0 {
-		return reg.Execute(ctx, commandLine)
+	tool, ok := reg.GetTool("bash")
+	if !ok {
+		return "", fmt.Errorf("bash tool is not registered")
 	}
-	stepCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	type result struct {
-		out string
-		err error
+	bash, ok := tool.(*commands.BashTool)
+	if !ok {
+		return "", fmt.Errorf("registered bash tool has unexpected type")
 	}
-	done := make(chan result, 1)
-	go func() {
-		out, err := reg.Execute(stepCtx, commandLine)
-		done <- result{out: out, err: err}
-	}()
-
-	select {
-	case r := <-done:
-		return r.out, r.err
-	case <-stepCtx.Done():
-		return "", fmt.Errorf("command timed out after %s: %w", timeout, stepCtx.Err())
+	var output strings.Builder
+	execution, err := bash.RunForeground(ctx, commandLine, commands.BashExecOptions{
+		Timeout:  timeout,
+		OnOutput: func(data []byte) { _, _ = output.Write(data) },
+	})
+	if err != nil {
+		return output.String(), err
 	}
+	if execution.ExitCode != 0 {
+		return output.String(), fmt.Errorf("command exited with code %d", execution.ExitCode)
+	}
+	return output.String(), nil
 }
 
 func appendDeepBrowserStep(sb *strings.Builder, name, commandLine, output string, err error) {
@@ -329,10 +326,16 @@ func (a *App) InitIOA(ctx context.Context, ioa cfg.IOAConfig) error {
 	if err != nil {
 		return err
 	}
-	a.IOAClient = client
-	if streamClient, ok := client.(ioaclient.StreamAPI); ok {
-		a.IOAStreamClient = streamClient
+	if client == nil {
+		return nil
 	}
+	a.IOAClient = client
+	if ioa.Identity != nil {
+		if err := client.Bind(ioa.Identity); err != nil {
+			return fmt.Errorf("bind ioa identity: %w", err)
+		}
+	}
+	a.IOAStreamClient = client
 	if ioa.RegisterTools && a.Commands != nil {
 		deps := &commands.Deps{
 			IOAClient: client,
@@ -341,38 +344,51 @@ func (a *App) InitIOA(ctx context.Context, ioa cfg.IOAConfig) error {
 		}
 		commands.BuildGroup("ioa", deps, a.Commands)
 	}
-	if ioa.AutoRegister && client != nil && client.NodeID() == "" {
-		type autoRegisterer interface {
-			EnsureRegistered(ctx context.Context, name, description string, meta map[string]any) error
-		}
-		if ar, ok := client.(autoRegisterer); ok {
-			if err := ar.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
-				return err
-			}
-		} else {
-			if _, err := client.RegisterNode(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
-				return err
-			}
+	if ioa.AutoRegister {
+		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
+			a.Logger().Warnf("ioa registration pending: %s", err)
+			go a.retryIOARegistration(ctx, client, ioa)
+			return nil
 		}
 	}
-	if ioa.Space != "" && client != nil && client.NodeID() != "" {
+	a.configureIOASpace(ctx, client, ioa)
+	return nil
+}
+
+func (a *App) retryIOARegistration(ctx context.Context, client *ioaclient.Client, ioa cfg.IOAConfig) {
+	for attempt := 0; ; attempt++ {
+		delay := agent.RetryDelay(attempt)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta) == nil {
+			a.Logger().Infof("ioa node registered: %s", client.NodeID())
+			a.configureIOASpace(ctx, client, ioa)
+			return
+		}
+	}
+}
+
+func (a *App) configureIOASpace(ctx context.Context, client *ioaclient.Client, ioa cfg.IOAConfig) {
+	if ioa.Space != "" && client != nil && client.Bound() {
 		info, err := client.Space(ctx, ioa.Space, "aiscan agent")
 		if err == nil {
 			a.setIOASpace(info.ID)
 		}
 	}
-	return nil
 }
 
 func (a *App) setIOASpace(spaceID string) {
 	for _, cmd := range a.Commands.All() {
-		if setter, ok := cmd.(interface{ SetDefaultSpace(string) }); ok {
-			setter.SetDefaultSpace(spaceID)
+		if cmd.SetDefaultSpace != nil {
+			cmd.SetDefaultSpace(spaceID)
 		}
 	}
 }
 
-func newIOAClient(ioa cfg.IOAConfig) (protocols.ClientAPI, error) {
+func newIOAClient(ioa cfg.IOAConfig) (*ioaclient.Client, error) {
 	if ioa.URL == "" {
 		return nil, nil
 	}
@@ -396,7 +412,7 @@ func CollectDeepBrowserArtifacts(ctx context.Context, reg *commands.CommandRegis
 		}
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = reg.Execute(closeCtx, "playwright close "+session)
+		_, _ = executeRegistryCommand(closeCtx, reg, "playwright close "+session, 5*time.Second)
 	}()
 
 	script := `(()=>JSON.stringify({url:location.href,title:document.title,forms:[...document.forms].map((f,i)=>({i,action:f.action,method:f.method,inputs:[...f.elements].map(e=>({tag:e.tagName,type:e.type,name:e.name,id:e.id,placeholder:e.placeholder}))})),buttons:[...document.querySelectorAll("button,input[type=button],input[type=submit],a")].slice(0,80).map(e=>({tag:e.tagName,text:(e.innerText||e.value||e.getAttribute("aria-label")||"").trim(),href:e.href||"",type:e.type||"",id:e.id||"",name:e.name||""})),scripts:[...document.scripts].map(s=>s.src).filter(Boolean).slice(0,50),localStorage:Object.keys(localStorage),sessionStorage:Object.keys(sessionStorage)}))()`

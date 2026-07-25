@@ -21,7 +21,7 @@ import (
 
 type MitmCommand struct {
 	store       *FlowStore
-	execCommand func(ctx context.Context, tokens []string) (string, error)
+	execCommand CommandExecutor
 	registry    *commands.CommandRegistry
 }
 
@@ -32,7 +32,7 @@ func NewMitmCommand(reg *commands.CommandRegistry) *MitmCommand {
 	}
 }
 
-func (c *MitmCommand) SetCommandExecutor(fn func(ctx context.Context, tokens []string) (string, error)) {
+func (c *MitmCommand) SetCommandExecutor(fn CommandExecutor) {
 	c.execCommand = fn
 }
 
@@ -56,11 +56,12 @@ Examples:
   mitm analyze --host example.com`
 }
 
-func (c *MitmCommand) Execute(ctx context.Context, args []string) (err error) {
+func (c *MitmCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("mitm", &err)
+	args := execution.Args
 	if len(args) == 0 {
-		fmt.Fprint(commands.Output, c.Usage())
-		return nil
+		fmt.Fprint(execution.Stdout, c.Usage())
+		return nil, nil
 	}
 
 	var result string
@@ -76,47 +77,48 @@ func (c *MitmCommand) Execute(ctx context.Context, args []string) (err error) {
 		c.store.Clear()
 		result = "[mitm] flow store cleared"
 	default:
-		result, err = c.execWithCapture(ctx, args)
+		return c.execWithCapture(ctx, args, execution)
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result != "" {
-		fmt.Fprint(commands.Output, result)
+		fmt.Fprint(execution.Stdout, result)
 	}
-	return nil
+	return nil, nil
 }
 
-func (c *MitmCommand) execWithCapture(ctx context.Context, args []string) (string, error) {
+func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execution *commands.Execution) (any, error) {
 	if c.execCommand == nil {
-		return "", fmt.Errorf("mitm: command executor not available")
+		return nil, fmt.Errorf("mitm: command executor not available")
 	}
 
 	state := &mitmState{store: c.store}
 	if err := state.start(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Set MITM proxy on the target command only
 	targetName := args[0]
 	var prevProxy string
 	if cmd, ok := c.registry.Get(targetName); ok {
-		if updater, ok := cmd.(interface{ SetProxy(string) }); ok {
-			if getter, ok := cmd.(interface{ Proxy() string }); ok {
-				prevProxy = getter.Proxy()
+		if cmd.SetProxy != nil {
+			if cmd.GetProxy != nil {
+				prevProxy = cmd.GetProxy()
 			}
-			updater.SetProxy(state.proxyURL())
-			defer updater.SetProxy(prevProxy)
+			cmd.SetProxy(state.proxyURL())
+			defer cmd.SetProxy(prevProxy)
 		}
 	}
 	defer state.stop()
 
-	result, err := c.execCommand(ctx, args)
+	details, err := c.execCommand(ctx, args, execution)
 
 	flowCount := c.store.Count()
 	summary := fmt.Sprintf("\n[mitm] %d flows captured. Use 'mitm flows' or 'mitm analyze' to inspect.", flowCount)
-	return result + summary, err
+	fmt.Fprint(execution.Stdout, summary)
+	return details, err
 }
 
 type flowQueryFlags struct {

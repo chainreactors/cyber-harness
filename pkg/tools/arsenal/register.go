@@ -13,7 +13,7 @@ func init() {
 				logger.Warnf("arsenal init: %v", err)
 				return
 			}
-			reg.Register(cmd, "arsenal")
+			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "arsenal")
 		},
 	})
 }

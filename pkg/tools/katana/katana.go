@@ -114,8 +114,9 @@ Examples:
   katana -list urls.txt -d 2 -jc -timeout 60`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("katana", &err)
+	args := execution.Args
 	args = c.resolveRelativePaths(args)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {
@@ -126,7 +127,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 
 	options, err := readFlags(args)
 	if err != nil {
-		return fmt.Errorf("katana: %w", err)
+		return nil, fmt.Errorf("katana: %w", err)
 	}
 
 	// Force agent-friendly defaults.
@@ -140,7 +141,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 
 	if err := validateOptions(options); err != nil {
-		return fmt.Errorf("katana: %w", err)
+		return nil, fmt.Errorf("katana: %w", err)
 	}
 
 	// Context timeout.
@@ -170,7 +171,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	crawlerOptions, err := katanatypes.NewCrawlerOptions(options)
 	if err != nil {
 		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
-		return fmt.Errorf("katana: init: %w", err)
+		return nil, fmt.Errorf("katana: init: %w", err)
 	}
 	crawlerOptions.OutputWriter = collector
 	defer func() {
@@ -190,7 +191,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		crawler, err = standard.New(crawlerOptions)
 	}
 	if err != nil {
-		return fmt.Errorf("katana: create crawler: %w", err)
+		return nil, fmt.Errorf("katana: create crawler: %w", err)
 	}
 	defer crawler.Close()
 
@@ -202,7 +203,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		u = addSchemeIfNotExists(u)
 		if crawlErr := crawler.Crawl(u); crawlErr != nil {
 			if ctx.Err() != nil {
-				return fmt.Errorf("katana: timed out")
+				return nil, fmt.Errorf("katana: timed out")
 			}
 			c.Logger.Warnf("katana: crawl %s: %v", u, crawlErr)
 		}
@@ -210,9 +211,9 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 
 	// Write collected results.
 	for _, line := range collector.lines() {
-		fmt.Fprint(commands.Output, string(line)+"\n")
+		fmt.Fprint(execution.Stdout, string(line)+"\n")
 	}
-	return nil
+	return nil, nil
 }
 
 // readFlags replicates katana's cmd/katana/main.go readFlags() using goflags,
@@ -431,7 +432,6 @@ func addSchemeIfNotExists(inputURL string) string {
 	}
 	return "https://" + inputURL
 }
-
 
 // resultCollector implements katana's output.Writer interface.
 // It captures all results from both standard engine (via OnResult callback)

@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -35,15 +36,15 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 		},
 	}
 
-	var events []EventType
+	var events []string
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event Event) {
+		Bus: testBus(func(event aop.Event) {
 			events = append(events, event.Type)
 		}),
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -51,25 +52,13 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 		t.Fatalf("turns = %d, want 2", result.Turns)
 	}
 
-	want := []EventType{
-		EventAgentStart,
-		EventTurnStart,
-		EventMessageStart,
-		EventMessageEnd,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventToolExecutionStart,
-		EventToolExecutionEnd,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventTurnStart,
-		EventLLMRequest,
-		EventMessageStart,
-		EventMessageEnd,
-		EventTurnEnd,
-		EventAgentEnd,
+	want := []string{
+		aop.TypeMessage,
+		aop.TypeStatus,
+		aop.TypeToolCall,
+		aop.TypeToolResult,
+		aop.TypeStatus,
+		aop.TypeMessage,
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -95,10 +84,10 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 			return messages[len(messages)-1:]
 		},
 	})
-	if _, err := a.Run(context.Background(), "one"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("one")); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
-	if _, err := a.Run(context.Background(), "two"); err != nil {
+	if _, err := a.Run(context.Background(), TextInput("two")); err != nil {
 		t.Fatalf("second prompt error = %v", err)
 	}
 	requests := llm.requestsSnapshot()
@@ -135,7 +124,7 @@ func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		MaxTurns: 1,
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -158,17 +147,26 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		},
 	}
 	var updates int
+	var contentDeltas []string
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate {
-				updates++
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeMessageDelta {
+				return
+			}
+			data, err := aop.DecodeData[aop.MessageDeltaData](event)
+			if err != nil {
+				return
+			}
+			updates++
+			if data.PartType == aop.PartText {
+				contentDeltas = append(contentDeltas, data.Delta)
 			}
 		}),
-	})).Run(context.Background(), "stream")
+	})).Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -177,6 +175,9 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 	}
 	if updates == 0 {
 		t.Fatal("expected message_update events")
+	}
+	if got := strings.Join(contentDeltas, ""); got != "hello" {
+		t.Fatalf("content deltas = %q, want hello", got)
 	}
 }
 
@@ -195,12 +196,21 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && event.Usage != nil {
-				updateUsage = event.Usage
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeUsage {
+				return
+			}
+			data, err := aop.DecodeData[aop.UsageData](event)
+			if err != nil {
+				return
+			}
+			updateUsage = &Usage{
+				PromptTokens:     data.InputTokens,
+				CompletionTokens: data.OutputTokens,
+				TotalTokens:      data.TotalTokens,
 			}
 		}),
-	})).Run(context.Background(), "stream")
+	})).Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -208,7 +218,7 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		t.Fatalf("output = %q, want done", result.Output)
 	}
 	if updateUsage == nil || updateUsage.TotalTokens != 12 {
-		t.Fatalf("message_update usage = %#v, want total 12", updateUsage)
+		t.Fatalf("usage event = %#v, want total 12", updateUsage)
 	}
 }
 
@@ -228,14 +238,14 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventMessageUpdate && messageContent(event.Message) != "" {
+		Bus: testBus(func(event aop.Event) {
+			if event.Type == aop.TypeMessageDelta {
 				sawUpdate = true
 			}
 		}),
 	})
 
-	result, err := a.Run(context.Background(), "stream")
+	result, err := a.Run(context.Background(), TextInput("stream"))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -282,7 +292,7 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-	})).Run(context.Background(), "stream tool")
+	})).Run(context.Background(), TextInput("stream tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -291,6 +301,182 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 	}
 	if got := echo.callsSnapshot(); !reflect.DeepEqual(got, []string{`{"value":"x"}`}) {
 		t.Fatalf("tool calls = %#v", got)
+	}
+}
+
+func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	beforeCalled := false
+	afterCalled := false
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		{Choices: []Choice{{
+			Message: ChatMessage{
+				Role: "assistant",
+				ToolCalls: []ToolCall{{
+					ID: "call-truncated", Type: "function",
+					Function: FunctionCall{Name: "echo", Arguments: `{"value":"cut off`},
+				}},
+			},
+			FinishReason: "max_tokens",
+		}}},
+		chatResponse(NewTextMessage("assistant", "recovered")),
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
+			beforeCalled = true
+			return nil, nil
+		},
+		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
+			afterCalled = true
+			return nil, nil
+		},
+	}).Run(context.Background(), TextInput("use a tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("truncated tool was executed: %#v", calls)
+	}
+	if beforeCalled || afterCalled {
+		t.Fatalf("tool hooks ran for rejected call: before=%v after=%v", beforeCalled, afterCalled)
+	}
+
+	requests := llm.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(requests))
+	}
+	var truncated ChatMessage
+	var errorResult ChatMessage
+	for _, msg := range requests[1].Messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			truncated = msg
+		}
+		if msg.Role == "tool" && msg.ToolCallID == "call-truncated" {
+			errorResult = msg
+		}
+	}
+	if truncated.FinishReason != "max_tokens" {
+		t.Fatalf("finish reason = %q, want max_tokens", truncated.FinishReason)
+	}
+	if got := truncated.ToolCalls[0].Function.Arguments; got != "{}" {
+		t.Fatalf("sanitized arguments = %q, want {}", got)
+	}
+	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "Retry") {
+		t.Fatalf("error tool result = %#v", errorResult)
+	}
+}
+
+func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
+				Index: 0, ID: "stream-truncated", Type: "function",
+				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
+			}}}},
+			{FinishReason: "length"},
+			{Done: true},
+		},
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			{FinishReason: "stop"},
+			{Done: true},
+		},
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm,
+		Tools:    tools,
+		Model:    "test",
+		Stream:   true,
+	}).Run(context.Background(), TextInput("use a streaming tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("truncated tool was executed: %#v", calls)
+	}
+	var finishReason string
+	for _, msg := range result.Messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			finishReason = msg.FinishReason
+			break
+		}
+	}
+	if finishReason != "length" {
+		t.Fatalf("stream finish reason = %q, want length", finishReason)
+	}
+}
+
+func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
+				Index: 0, ID: "stream-malformed", Type: "function",
+				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
+			}}}},
+			{FinishReason: "tool_calls"},
+			{Done: true},
+		},
+		{
+			{Delta: ChatMessageDelta{Role: "assistant"}},
+			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			{FinishReason: "stop"},
+			{Done: true},
+		},
+	}}
+
+	result, err := NewAgent(Config{
+		Provider: llm, Tools: tools, Model: "test", Stream: true,
+	}).Run(context.Background(), TextInput("use a streaming tool"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("output = %q, want recovered", result.Output)
+	}
+	if calls := echo.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("malformed tool was executed: %#v", calls)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(requests))
+	}
+	var rejectedCall ChatMessage
+	var errorResult ChatMessage
+	for _, message := range requests[1].Messages {
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			rejectedCall = message
+		}
+		if message.Role == "tool" && message.ToolCallID == "stream-malformed" {
+			errorResult = message
+		}
+	}
+	if len(rejectedCall.ToolCalls) != 1 || rejectedCall.ToolCalls[0].Function.Arguments != "{}" {
+		t.Fatalf("rejected tool call = %#v", rejectedCall)
+	}
+	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "invalid") {
+		t.Fatalf("error tool result = %#v", errorResult)
 	}
 }
 
@@ -326,7 +512,7 @@ func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
 			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Flow: ToolFlowTerminate}, nil
 		},
-	})).Run(context.Background(), "use tool")
+	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -362,7 +548,7 @@ func TestFinishToolTerminatesLoop(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Bus:      testBus(nil),
-	}).Run(context.Background(), "do something")
+	}).Run(context.Background(), TextInput("do something"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -388,12 +574,16 @@ func TestTokenBudgetWarning(t *testing.T) {
 		Tools:       tools,
 		Model:       "test",
 		TokenBudget: 1000,
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTokenBudgetWarning {
+		Bus: testBus(func(event aop.Event) {
+			if event.Type != aop.TypeStatus {
+				return
+			}
+			data, err := aop.DecodeData[aop.StatusData](event)
+			if err == nil && data.State == aop.StatusTokenBudgetWarning {
 				sawWarning = true
 			}
 		}),
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -434,7 +624,7 @@ func TestTokenBudgetExceeded(t *testing.T) {
 		Tools:       tools,
 		Model:       "test",
 		TokenBudget: 1000,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want budget exceeded error")
 	}
@@ -443,6 +633,31 @@ func TestTokenBudgetExceeded(t *testing.T) {
 	}
 	if result == nil || result.TotalUsage.TotalTokens == 0 {
 		t.Fatal("result should contain accumulated usage")
+	}
+}
+
+func TestBudgetExhaustionDoesNotKeepUnpairedToolCall(t *testing.T) {
+	tools := commands.NewRegistry()
+	echo := &recordingTool{name: "echo", output: "must not run"}
+	tools.RegisterTool(echo)
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{{
+		Choices: []Choice{{Message: ChatMessage{
+			Role: "assistant",
+			ToolCalls: []ToolCall{{ID: "cut-off", Type: "function", Function: FunctionCall{
+				Name: "echo", Arguments: `{"value":"partial`},
+			}},
+		}, FinishReason: "max_tokens"}},
+		Usage: &Usage{TotalTokens: 1000},
+	}}}
+
+	result, err := NewAgent(Config{
+		Provider: llm, Tools: tools, Model: "test", TokenBudget: 1000,
+	}).Run(context.Background(), TextInput("use a tool"))
+	if err == nil || result == nil || result.Stop != StopReasonBudget {
+		t.Fatalf("Run() result=%#v error=%v, want budget stop", result, err)
+	}
+	if len(result.Messages) != 1 || len(echo.callsSnapshot()) != 0 {
+		t.Fatalf("budget stop kept or executed tool call: messages=%#v calls=%#v", result.Messages, echo.callsSnapshot())
 	}
 }
 
@@ -474,7 +689,7 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -514,7 +729,7 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -534,8 +749,8 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 	if result.TotalUsage.PromptTokens != 480 {
 		t.Errorf("TotalUsage.PromptTokens = %d, want 480", result.TotalUsage.PromptTokens)
 	}
-	if result.ContextTokens != 280 {
-		t.Errorf("ContextTokens = %d, want 280 (last turn prompt tokens)", result.ContextTokens)
+	if result.ContextTokens != 300 {
+		t.Errorf("ContextTokens = %d, want 300 (last turn input + output)", result.ContextTokens)
 	}
 }
 
@@ -550,30 +765,29 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 		},
 	}
 
-	var turnEndUsage *Usage
-	var turnEndContext int
+	var turnEndUsage *aop.UsageData
 	_, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event Event) {
-			if event.Type == EventTurnEnd {
-				turnEndUsage = event.Usage
-				turnEndContext = event.ContextTokens
+		Bus: testBus(func(event aop.Event) {
+			switch event.Type {
+			case aop.TypeUsage:
+				if data, err := aop.DecodeData[aop.UsageData](event); err == nil {
+					u := data
+					turnEndUsage = &u
+				}
 			}
 		}),
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if turnEndUsage == nil {
-		t.Fatal("EventTurnEnd.Usage is nil")
+		t.Fatal("usage event missing")
 	}
 	if turnEndUsage.TotalTokens != 540 {
-		t.Errorf("EventTurnEnd Usage.TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
-	}
-	if turnEndContext != 500 {
-		t.Errorf("EventTurnEnd ContextTokens = %d, want 500", turnEndContext)
+		t.Errorf("usage TotalTokens = %d, want 540", turnEndUsage.TotalTokens)
 	}
 }
 
@@ -600,7 +814,7 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 		NewTextMessage("assistant", ""),
 	})
 
-	result, err := a.Run(context.Background(), "continue")
+	result, err := a.Run(context.Background(), TextInput("continue"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -636,7 +850,7 @@ func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "main task")
+	}).Run(context.Background(), TextInput("main task"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -679,7 +893,7 @@ func TestInboxClosedDoesNotBlock(t *testing.T) {
 		Tools:        tools,
 		Model:        "test",
 		SystemPrompt: "system",
-	}).Run(context.Background(), "task")
+	}).Run(context.Background(), TextInput("task"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -719,7 +933,7 @@ func TestInboxDrainedBetweenTurns(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "scan things")
+	}).Run(context.Background(), TextInput("scan things"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -775,7 +989,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "start background scan")
+	}).Run(context.Background(), TextInput("start background scan"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -842,7 +1056,7 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 		Model:        "test",
 		SystemPrompt: "system",
 		Inbox:        ib,
-	}).Run(context.Background(), "run a scan")
+	}).Run(context.Background(), TextInput("run a scan"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -963,7 +1177,7 @@ func TestTurnUsageCacheAccumulation(t *testing.T) {
 		SystemPrompt:   "sys",
 		CacheRetention: CacheShort,
 		Logger:         telemetry.NopLogger(),
-	})).Run(context.Background(), "read something")
+	})).Run(context.Background(), TextInput("read something"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1006,10 +1220,14 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		},
 	}
 
-	var captured *Usage
-	handler := func(e Event) {
-		if e.Type == EventTurnEnd && e.Usage != nil {
-			captured = e.Usage
+	var captured *aop.UsageData
+	handler := func(e aop.Event) {
+		if e.Type != aop.TypeUsage {
+			return
+		}
+		if data, err := aop.DecodeData[aop.UsageData](e); err == nil {
+			u := data
+			captured = &u
 		}
 	}
 
@@ -1018,21 +1236,21 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		Tools:        commands.NewRegistry(),
 		Model:        "test",
 		SystemPrompt: "sys",
-		Bus:          testBus(func(e Event) { handler(e) }),
+		Bus:          testBus(func(e aop.Event) { handler(e) }),
 		Logger:       telemetry.NopLogger(),
-	})).Run(context.Background(), "test")
+	})).Run(context.Background(), TextInput("test"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if captured == nil {
-		t.Fatal("EventTurnEnd did not carry usage")
+		t.Fatal("usage event missing")
 	}
 	if captured.CacheReadTokens != 60 {
-		t.Errorf("EventTurnEnd CacheReadTokens = %d, want 60", captured.CacheReadTokens)
+		t.Errorf("usage CacheReadTokens = %d, want 60", captured.CacheReadTokens)
 	}
 	if captured.CacheWriteTokens != 20 {
-		t.Errorf("EventTurnEnd CacheWriteTokens = %d, want 20", captured.CacheWriteTokens)
+		t.Errorf("usage CacheWriteTokens = %d, want 20", captured.CacheWriteTokens)
 	}
 	fmt.Printf("Event carries cache usage: read=%d write=%d\n", captured.CacheReadTokens, captured.CacheWriteTokens)
 }

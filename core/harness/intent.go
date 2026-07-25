@@ -73,18 +73,12 @@ func (intent Intent) Run(t *testing.T, h *Harness) *RunResult {
 
 	var r *RunResult
 	if intent.Timeout > 0 {
-		r = h.RunWithTimeout(intent.Timeout, intent.buildArgs()...)
+		r = h.AgentWithTimeout(intent.Timeout, intent.Prompt, intent.ExtraArgs...)
 	} else {
 		r = h.Agent(intent.Prompt, intent.ExtraArgs...)
 	}
 	intent.verify(t, h, r)
 	return r
-}
-
-func (intent Intent) buildArgs() []string {
-	args := []string{"agent", "-p", intent.Prompt}
-	args = append(args, intent.ExtraArgs...)
-	return args
 }
 
 func (intent Intent) verify(t *testing.T, h *Harness, r *RunResult) {

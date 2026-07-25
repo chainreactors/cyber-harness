@@ -26,23 +26,30 @@ type ScanConfigOptions struct {
 }
 
 type LLMOptions struct {
-	Provider  string             `long:"provider" config:"provider" description:"LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot"`
-	BaseURL   string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
-	APIKey    string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
-	Model     string             `long:"model" config:"model" description:"LLM model name"`
-	LLMProxy  string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
-	Providers []LLMProviderEntry `no-flag:"true" config:"providers" description:"Additional LLM providers for fallback or multi-model routing"`
-	AI        bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
+	Provider      string             `long:"provider" config:"provider" description:"LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot"`
+	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
+	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
+	Model         string             `long:"model" config:"model" description:"LLM model name"`
+	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
+	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
+	LLMProxy      string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
+	ActiveProfile string             `no-flag:"true" config:"active_profile" description:"Active named LLM profile"`
+	Providers     []LLMProviderEntry `no-flag:"true" config:"providers" description:"Configured LLM provider profiles"`
+	AI            bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
 }
 
 type LLMProviderEntry struct {
-	Provider string `config:"provider" yaml:"provider"`
-	BaseURL  string `config:"base_url" yaml:"base_url"`
-	APIKey   string `config:"api_key" yaml:"api_key"`
-	Model    string `config:"model" yaml:"model"`
-	Proxy    string `config:"proxy" yaml:"proxy"`
-	Timeout  int    `config:"timeout" yaml:"timeout"`
-	Images   *bool  `config:"images" yaml:"images,omitempty"`
+	ID            string `config:"id" yaml:"id,omitempty"`
+	Name          string `config:"name" yaml:"name,omitempty"`
+	Provider      string `config:"provider" yaml:"provider"`
+	BaseURL       string `config:"base_url" yaml:"base_url"`
+	APIKey        string `config:"api_key" yaml:"api_key"`
+	Model         string `config:"model" yaml:"model"`
+	Proxy         string `config:"proxy" yaml:"proxy"`
+	Timeout       int    `config:"timeout" yaml:"timeout"`
+	Images        *bool  `config:"images" yaml:"images,omitempty"`
+	MaxTokens     int    `config:"max_tokens" yaml:"max_tokens,omitempty"`
+	ContextWindow int    `config:"context_window" yaml:"context_window,omitempty"`
 }
 
 type ScannerOptions struct {
@@ -53,7 +60,7 @@ type ScannerOptions struct {
 }
 
 type AgentOptions struct {
-	Prompt         string   `short:"p" long:"prompt" description:"Natural language task for the agent"`
+	Prompt         string   `short:"p" long:"prompt" description:"Natural language task or existing file path for the agent"`
 	Inputs         []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
 	Skills         []string `short:"s" long:"skill" description:"Skill to apply (name or file path). Can specify multiple"`
 	Tools          []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable (search, browser). Arsenal is always loaded"`
@@ -64,8 +71,41 @@ type AgentOptions struct {
 	EvalModel      string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	WebURL         string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
+	Transport      string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume         string   `long:"resume" description:"Resume session from a saved session file path"`
 	SaveSession    bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
+}
+
+type AgentTransport string
+
+const (
+	AgentTransportAuto  AgentTransport = "auto"
+	AgentTransportLocal AgentTransport = "local"
+	AgentTransportWeb   AgentTransport = "web"
+	AgentTransportStdio AgentTransport = "stdio"
+)
+
+func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
+	value := AgentTransport(strings.ToLower(strings.TrimSpace(opt.Transport)))
+	if value == "" {
+		value = AgentTransportAuto
+	}
+	switch value {
+	case AgentTransportAuto:
+		if strings.TrimSpace(opt.WebURL) != "" {
+			return AgentTransportWeb, nil
+		}
+		return AgentTransportLocal, nil
+	case AgentTransportLocal, AgentTransportStdio:
+		return value, nil
+	case AgentTransportWeb:
+		if strings.TrimSpace(opt.WebURL) == "" {
+			return "", fmt.Errorf("--transport web requires --web-url")
+		}
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported agent transport %q: use auto, local, web, or stdio", opt.Transport)
+	}
 }
 
 type IOAOptions struct {
@@ -125,7 +165,10 @@ func StdinIsTerminal() bool {
 }
 
 func ResolveTask(opt *Option) (string, error) {
-	prompt := strings.TrimSpace(opt.Prompt)
+	prompt, err := ResolvePrompt(opt.Prompt)
+	if err != nil {
+		return "", err
+	}
 	if prompt != "" {
 		if len(opt.Inputs) > 0 {
 			return fmt.Sprintf("%s\n\nTargets:\n%s", prompt, FormatInputs(opt.Inputs)), nil
@@ -164,6 +207,33 @@ func ResolveTask(opt *Option) (string, error) {
 	}
 
 	return "", fmt.Errorf("no prompt specified: use -p, --prompt, --task-file, or pipe via stdin")
+}
+
+// ResolvePrompt treats a non-empty prompt as a file path when it names an
+// existing regular file. Values that do not name a file remain natural
+// language prompts.
+func ResolvePrompt(value string) (string, error) {
+	prompt := strings.TrimSpace(value)
+	if prompt == "" {
+		return "", nil
+	}
+
+	info, err := os.Stat(prompt)
+	if os.IsNotExist(err) {
+		return prompt, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stat prompt file %s: %w", prompt, err)
+	}
+	if !info.Mode().IsRegular() {
+		return prompt, nil
+	}
+
+	data, err := os.ReadFile(prompt)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %s: %w", prompt, err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func FormatInputs(inputs []string) string {

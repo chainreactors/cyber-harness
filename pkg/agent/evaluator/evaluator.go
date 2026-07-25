@@ -66,10 +66,10 @@ func (e *Evaluator) Evaluate(ctx context.Context, goal, criteria string, message
 		e.cfg.Logger.Warnf("evaluate attempt %d failed: %s", attempt+1, err)
 		if attempt < e.cfg.MaxRetries-1 {
 			select {
-		case <-time.After(time.Duration(attempt+1) * time.Second):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 	return nil, fmt.Errorf("evaluate failed after %d attempts: %w", e.cfg.MaxRetries, lastErr)

@@ -1,6 +1,7 @@
 package neutron
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -36,6 +37,18 @@ func TestNormalizeNucleiStyleArgs(t *testing.T) {
 	}
 }
 
+func TestUsageIsGeneratedFromNeutronFlags(t *testing.T) {
+	usage := New(nil, nil).Usage()
+	if !strings.Contains(usage, "Usage:") || !strings.Contains(usage, "neutron [OPTIONS]") {
+		t.Fatalf("usage was not rendered by the neutron go-flags parser:\n%s", usage)
+	}
+	for _, flag := range []string{"target", "templates", "rate-limit", "restrict-templates"} {
+		if !strings.Contains(usage, "--"+flag) && !strings.Contains(usage, "/"+flag) {
+			t.Fatalf("usage missing generated flag %q:\n%s", flag, usage)
+		}
+	}
+}
+
 func TestSelectNeutronTemplatesFiltersByCommonMetadata(t *testing.T) {
 	engine := newTestNeutronEngine(t,
 		testTemplate("critical-cve", "critical", "cve,rce", "nginx"),
@@ -65,12 +78,12 @@ func TestCommandTemplateListSupportsNucleiStyleFlagsAndJSON(t *testing.T) {
 		testTemplate("low-info", "low", "info", "php"),
 	), nil)
 
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"})
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := commands.Output.Captured()
+	out := output.String()
 	var result neutronResult
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
 		t.Fatalf("json output = %q, error = %v", out, err)
@@ -102,12 +115,12 @@ http:
 	}
 
 	cmd := New(newTestNeutronEngine(t, testTemplate("embedded", "low", "embedded", "")), nil)
-	commands.Output.Reset(nil)
-	err = cmd.Execute(context.Background(), []string{"--template-list", "-t", templatePath})
+	var output bytes.Buffer
+	_, err = cmd.Run(context.Background(), &commands.Execution{Args: []string{"--template-list", "-t", templatePath}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	out := commands.Output.Captured()
+	out := output.String()
 	if !strings.Contains(out, "custom-poc") || strings.Contains(out, "embedded") {
 		t.Fatalf("output = %q", out)
 	}

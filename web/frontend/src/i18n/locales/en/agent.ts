@@ -8,6 +8,7 @@ export default {
   failedToLoadAgents: 'Failed to load agents',
   filterAgents: 'Filter agents…',
   noMatchingAgents: 'No matching agents.',
+  openingTerminal: 'Opening terminal…',
   busy: 'busy',
   idle: 'idle',
   justNow: 'just now',

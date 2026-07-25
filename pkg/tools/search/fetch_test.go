@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +14,11 @@ import (
 
 func execFetch(t *testing.T, cmd *FetchCommand, args []string) string {
 	t.Helper()
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(context.Background(), args); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	return commands.Output.Captured()
+	return output.String()
 }
 
 func TestFetchExecutePreservesExplicitHTTPURL(t *testing.T) {

@@ -23,6 +23,8 @@ type AppInfo struct {
 	Skills            *skills.Store
 	OnProviderChange  func(agent.Provider, agent.ProviderConfig)
 	OnLoggerChange    func(telemetry.Logger)
+	Run               func(context.Context, string, bool) (*agent.Result, error)
+	Command           func(context.Context, string) error
 }
 
 // Session holds the dependencies commands need to operate on.

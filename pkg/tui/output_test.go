@@ -2,15 +2,19 @@ package tui
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 type syncedBuffer struct {
@@ -42,6 +46,75 @@ func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
+// ---------------------------------------------------------------------------
+// AOP event builders
+// ---------------------------------------------------------------------------
+
+func aopTestEvent(typ string, data any) aop.Event {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
+	return aop.Event{Type: typ, TurnID: "run-test", Data: raw}
+}
+
+func turnStartEvent(turn int) aop.Event {
+	return aopTestEvent(aop.TypeTurnStart, aop.TurnStartData{})
+}
+
+func turnEndEvent(turn, contextTokens int) aop.Event {
+	return aopTestEvent(aop.TypeTurnEnd, aop.TurnEndData{Stop: string(agent.StopReasonCompleted), ContextTokens: contextTokens})
+}
+
+func textDeltaEvent(messageID, delta string) aop.Event {
+	return aopTestEvent(aop.TypeMessageDelta, aop.MessageDeltaData{
+		MessageID: messageID,
+		PartType:  aop.PartText,
+		Delta:     delta,
+	})
+}
+
+func reasoningDeltaEvent(messageID, delta string) aop.Event {
+	return aopTestEvent(aop.TypeMessageDelta, aop.MessageDeltaData{
+		MessageID: messageID,
+		PartType:  aop.PartReasoning,
+		Delta:     delta,
+	})
+}
+
+func messageEvent(messageID, role string, parts ...aop.MessagePart) aop.Event {
+	return aopTestEvent(aop.TypeMessage, aop.MessageData{
+		MessageID: messageID,
+		Role:      role,
+		Parts:     parts,
+	})
+}
+
+func toolCallEvent(id, name, args string) aop.Event {
+	return aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
+		ToolCallID: id,
+		ToolName:   name,
+		Args:       args,
+	})
+}
+
+func toolResultEvent(id, name, result string, isError bool) aop.Event {
+	return aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
+		ToolCallID: id,
+		ToolName:   name,
+		Content:    result,
+		IsError:    isError,
+	})
+}
+
+func usageEvent(input, outputTok, total int) aop.Event {
+	return aopTestEvent(aop.TypeUsage, aop.UsageData{
+		InputTokens:  input,
+		OutputTokens: outputTok,
+		TotalTokens:  total,
+	})
+}
+
 func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
 	stdout := &bytes.Buffer{}
 	color := output.NewColor(false)
@@ -50,6 +123,7 @@ func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
 		debug:     debug,
 		verbosity: verbosity,
 		stream:    NewStreamWriter(stdout, stderr, true, false, color, verbosity),
+		deltas:    make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(NewLiveView(stderr, ""), o.dim, o.renderToolLine)
 	return o
@@ -67,12 +141,24 @@ func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 	}
 }
 
+func TestFormatTokenUsageUsesCompactMarkers(t *testing.T) {
+	got := formatTokenUsage(&agent.Usage{
+		PromptTokens:     1832,
+		CompletionTokens: 63,
+		CacheReadTokens:  1026,
+	})
+	if got != "↑1,832 ↓63 ↻56%" {
+		t.Fatalf("formatTokenUsage() = %q", got)
+	}
+}
+
 func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 	var stdout bytes.Buffer
 	color := output.NewColor(false)
 	o := &AgentOutput{
 		color:  color,
 		stream: NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, 0),
+		deltas: make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(NewLiveView(&bytes.Buffer{}, ""), o.dim, o.renderToolLine)
 
@@ -90,47 +176,67 @@ func TestThinkingSpinnerSurvivesInvisibleStreamUpdates(t *testing.T) {
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(turnStartEvent(1))
 	if !liveRunning(o.live) {
 		t.Fatal("thinking spinner did not start")
 	}
 
-	o.HandleEvent(agent.Event{Type: agent.EventMessageUpdate, Turn: 1, Message: agent.ChatMessage{Role: "assistant"}})
+	o.HandleEvent(textDeltaEvent("m-1", ""))
 	if !liveRunning(o.live) {
-		t.Fatal("role-only stream update stopped thinking spinner")
+		t.Fatal("empty stream update stopped thinking spinner")
 	}
 
-	reasoning := "internal reasoning that is hidden at default verbosity"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
-	})
+	o.HandleEvent(reasoningDeltaEvent("m-1", "internal reasoning that is hidden at default verbosity"))
 	if !liveRunning(o.live) {
 		t.Fatal("hidden reasoning stream update stopped thinking spinner")
 	}
 
-	content := "partial paragraph without markdown flush"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", Content: &content},
-	})
+	o.HandleEvent(textDeltaEvent("m-1", "partial paragraph without markdown flush"))
 	if !liveRunning(o.live) {
 		t.Fatal("buffered markdown stream update stopped thinking spinner before visible output")
 	}
 
-	content += "\n\n"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", Content: &content},
-	})
+	o.HandleEvent(textDeltaEvent("m-1", "\n\n"))
 	if !liveRunning(o.live) {
 		t.Fatal("visible stream update stopped thinking spinner")
 	}
 	if !strings.Contains(stdout.String(), "partial paragraph") {
 		t.Fatalf("visible content was not written: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestInboxPreviewKeepsThinkingLiveAndTruncates(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.SetInbox([]string{
+		strings.Repeat("very long pending prompt ", 10),
+		"second pending prompt",
+	})
+
+	if !liveRunning(o.live) {
+		t.Fatal("inbox update stopped the thinking status")
+	}
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "inbox[2]") || !strings.Contains(got, "second pending prompt") {
+		t.Fatalf("live inbox preview missing status or content: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Fatalf("long inbox entry was not truncated: %q", got)
+	}
+	if strings.Contains(got, "queued:") {
+		t.Fatalf("legacy queued line leaked into inbox rendering: %q", got)
+	}
+
+	// Starting the next run resets turn state but must retain inputs that are
+	// still waiting behind it.
+	o.Start("prompt", "")
+	o.HandleEvent(turnStartEvent(1))
+	if got := stripANSI(stderr.String()); !strings.Contains(got, "inbox[2]") {
+		t.Fatalf("inbox preview did not survive run reset: %q", got)
 	}
 }
 
@@ -140,21 +246,14 @@ func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, false)
 
 	content := "buffered answer"
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", Content: &content},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", content))
 	if stdout.Len() != 0 {
 		t.Fatalf("non-TTY update streamed stdout before turn end: %q", stdout.String())
 	}
 
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventTurnEnd,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", Content: &content},
-	})
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: content}))
+	o.HandleEvent(turnEndEvent(1, 0))
 	if !strings.Contains(stdout.String(), content) {
 		t.Fatalf("non-TTY turn end did not render content: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
@@ -166,17 +265,12 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 	o := NewStaticAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(turnStartEvent(1))
 	if liveRunning(o.live) {
 		t.Fatal("static output started thinking live view")
 	}
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionStart,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Arguments:  `{"command":"echo hi"}`,
-	})
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo hi"}`))
 	if liveRunning(o.live) {
 		t.Fatal("static output started tool live view")
 	}
@@ -190,28 +284,142 @@ func TestStaticOutputDisablesDynamicTUIOnTTY(t *testing.T) {
 	}
 }
 
-func TestThinkingLineShowsTokenUsage(t *testing.T) {
+func TestThinkingLineShowsTurnUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type:  agent.EventMessageUpdate,
-		Turn:  1,
-		Usage: &agent.Usage{PromptTokens: 1000, CompletionTokens: 234, TotalTokens: 1234},
-		Message: agent.ChatMessage{
-			Role: "assistant",
-		},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(usageEvent(1000, 234, 1234))
+	o.HandleEvent(textDeltaEvent("m-1", ""))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "thinking") || !strings.Contains(got, "tokens=1,234") {
-		t.Fatalf("thinking line missing token usage: %q", got)
+	if !strings.Contains(got, "thinking") ||
+		!strings.Contains(got, "[turn 1 | ↑1,000 ↓234") {
+		t.Fatalf("thinking line missing turn usage: %q", got)
 	}
 	if !liveRunning(o.live) {
 		t.Fatal("usage update stopped thinking spinner")
+	}
+}
+
+func TestThinkingLineShowsChangingStreamTokenEstimate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	first := stripANSI(stderr.String())
+	if !strings.Contains(first, "↓≈2") {
+		t.Fatalf("initial stream token estimate missing: %q", first)
+	}
+
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+	second := stripANSI(stderr.String())
+	if !strings.Contains(second, "↓≈4") {
+		t.Fatalf("updated stream token estimate missing: %q", second)
+	}
+
+	o.HandleEvent(usageEvent(100, 7, 107))
+	exact := stripANSI(stderr.String())
+	if strings.LastIndex(exact, "↓7") <= strings.LastIndex(exact, "↓≈4") {
+		t.Fatalf("formal usage did not replace the estimate: %q", exact)
+	}
+}
+
+func TestThinkingLineRefreshesElapsedTimeWithoutHistoryStats(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	time.Sleep(150 * time.Millisecond)
+
+	got := stripANSI(stderr.String())
+	if !regexp.MustCompile(`\[turn 1 \| (?:[1-9][0-9]*ms|[1-9][0-9]*\.[0-9]s)\]`).MatchString(got) {
+		t.Fatalf("thinking line did not refresh elapsed time: %q", got)
+	}
+}
+
+func TestReadlineFooterRefreshesAtConfiguredRate(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	var statuses []string
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		statuses = append(statuses, status)
+		mu.Unlock()
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	mu.Lock()
+	initial := len(statuses)
+	mu.Unlock()
+	if initial != 1 {
+		t.Fatalf("readline footer rendered %d times at turn start, want exactly 1", initial)
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	mu.Lock()
+	after := len(statuses)
+	mu.Unlock()
+	if after <= initial {
+		t.Fatalf("readline footer did not refresh: before=%d after=%d", initial, after)
+	}
+}
+
+func TestReadlineFooterCoalescesStreamTokenUpdates(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	var statuses []string
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		statuses = append(statuses, stripANSI(status))
+		mu.Unlock()
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	mu.Lock()
+	afterFirst := len(statuses)
+	mu.Unlock()
+
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+	mu.Lock()
+	afterSmallUpdate := len(statuses)
+	mu.Unlock()
+	if afterSmallUpdate != afterFirst {
+		t.Fatalf("small token delta forced a footer refresh: before=%d after=%d", afterFirst, afterSmallUpdate)
+	}
+
+	o.HandleEvent(textDeltaEvent("m-1", strings.Repeat("x", 512)))
+	mu.Lock()
+	afterMilestone := len(statuses)
+	mu.Unlock()
+	if afterMilestone != afterSmallUpdate {
+		t.Fatalf("token delta bypassed footer ticker: before=%d after=%d", afterSmallUpdate, afterMilestone)
+	}
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+	mu.Lock()
+	afterTick := len(statuses)
+	latest := statuses[len(statuses)-1]
+	mu.Unlock()
+	if afterTick <= afterMilestone {
+		t.Fatalf("footer ticker did not publish token update: before=%d after=%d", afterMilestone, afterTick)
+	}
+	if !strings.Contains(latest, "↓≈") {
+		t.Fatalf("token milestone footer missing estimate: %q", latest)
 	}
 }
 
@@ -222,18 +430,12 @@ func TestInteractiveInputSuppressesLiveStatus(t *testing.T) {
 	defer o.live.Stop()
 
 	o.SetInteractiveInputActive(true)
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type:  agent.EventMessageUpdate,
-		Turn:  1,
-		Usage: &agent.Usage{PromptTokens: 1000, CompletionTokens: 234, TotalTokens: 1234},
-		Message: agent.ChatMessage{
-			Role: "assistant",
-		},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(usageEvent(1000, 234, 1234))
+	o.HandleEvent(textDeltaEvent("m-1", "hello"))
 
 	got := stripANSI(stderr.String())
-	if strings.Contains(got, "thinking") || strings.Contains(got, "tokens=1,234") {
+	if strings.Contains(got, "thinking") || strings.Contains(got, "↑1,000 ↓234") {
 		t.Fatalf("live status leaked while input active: %q", got)
 	}
 	if liveRunning(o.live) {
@@ -241,7 +443,7 @@ func TestInteractiveInputSuppressesLiveStatus(t *testing.T) {
 	}
 }
 
-func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
+func TestLiveStatusShowsCurrentTurnContextAndOutputTokens(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
@@ -249,68 +451,37 @@ func TestLiveStatusShowsCumulativeContextAndCurrentOutputTokens(t *testing.T) {
 	}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type:  agent.EventMessageUpdate,
-		Turn:  1,
-		Usage: &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
-		Message: agent.ChatMessage{
-			Role: "assistant",
-		},
-	})
-	o.HandleEvent(agent.Event{
-		Type:          agent.EventTurnEnd,
-		Turn:          1,
-		Usage:         &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
-		TotalUsage:    &agent.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 1000},
-		ContextTokens: 400,
-		Message:       agent.ChatMessage{Role: "assistant"},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(usageEvent(400, 100, 1000))
+	o.HandleEvent(turnEndEvent(1, 400))
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 2})
-	o.HandleEvent(agent.Event{
-		Type:  agent.EventMessageUpdate,
-		Turn:  2,
-		Usage: &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 2000},
-		Message: agent.ChatMessage{
-			Role: "assistant",
-		},
-	})
+	o.HandleEvent(turnStartEvent(2))
+	o.HandleEvent(usageEvent(4096, 50, 2000))
+	o.HandleEvent(textDeltaEvent("m-2", ""))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "tokens=3,000") {
-		t.Fatalf("live line missing cumulative tokens: %q", got)
+	if !strings.Contains(got, "turn 2") || !strings.Contains(got, "↑4,096 ↓50") {
+		t.Fatalf("live line missing current turn usage: %q", got)
 	}
-	if !strings.Contains(got, "ctx=4,096/8,192 (50%)") {
+	if !strings.Contains(got, "◐4,096/8,192 (50%)") {
 		t.Fatalf("live line missing context percentage: %q", got)
-	}
-	if !strings.Contains(got, "out=50") {
-		t.Fatalf("live line missing current output tokens: %q", got)
 	}
 }
 
-func TestTurnStatsShowsContextWindowUse(t *testing.T) {
+func TestTurnStatsStayTransientInStaticMode(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
-	o := NewAgentOutputWithWriters(&cfg.Option{
+	o := NewStaticAgentOutputWithWriters(&cfg.Option{
 		LLMOptions: cfg.LLMOptions{Model: "gpt-4"},
 	}, &stdout, &stderr, true)
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type:          agent.EventTurnEnd,
-		Turn:          1,
-		Usage:         &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 4146},
-		TotalUsage:    &agent.Usage{PromptTokens: 4096, CompletionTokens: 50, TotalTokens: 4146},
-		ContextTokens: 4096,
-		Message:       agent.ChatMessage{Role: "assistant"},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(usageEvent(4096, 50, 4146))
+	o.HandleEvent(turnEndEvent(1, 4096))
 
 	got := stripANSI(stderr.String())
-	if !strings.Contains(got, "turn 1") ||
-		!strings.Contains(got, "input=4,096 output=50") ||
-		!strings.Contains(got, "ctx=4,096/8,192 (50%)") {
-		t.Fatalf("turn stats missing context window use: %q", got)
+	if strings.Contains(got, "turn 1") || strings.Contains(got, "↑4,096 ↓50") {
+		t.Fatalf("turn stats were committed to static output: %q", got)
 	}
 }
 
@@ -320,28 +491,20 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(turnStartEvent(1))
 	if o.live.Status() != liveStatusThinking {
 		t.Fatalf("live status = %q, want thinking", o.live.Status())
 	}
 
-	content := "partial assistant answer"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", Content: &content},
-	})
+	o.HandleEvent(textDeltaEvent("m-1", "partial assistant answer"))
 	if o.live.Status() != liveStatusTalking {
 		t.Fatalf("live status = %q, want talking", o.live.Status())
 	}
+	if !liveRunning(o.live) {
+		t.Fatal("talking should keep using the shared live status row")
+	}
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionStart,
-		Turn:       1,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Arguments:  `{"command":"echo hi"}`,
-	})
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo hi"}`))
 	if o.live.Status() != liveStatusTooling {
 		t.Fatalf("live status = %q, want tooling", o.live.Status())
 	}
@@ -352,30 +515,62 @@ func TestLiveStatusSwitchesTalkingAndTooling(t *testing.T) {
 	}
 }
 
-func TestAssistantToolCallMessageEndStopsLiveStatus(t *testing.T) {
+func TestReadlineFooterRendersLiveToolLines(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
+	var mu sync.Mutex
+	latest := ""
 	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		mu.Lock()
+		latest = stripANSI(status)
+		mu.Unlock()
+	})
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	o.HandleEvent(agent.Event{
-		Type: agent.EventMessageEnd,
-		Turn: 1,
-		Message: agent.ChatMessage{
-			Role: "assistant",
-			ToolCalls: []agent.ToolCall{{
-				ID: "call-1",
-				Function: agent.FunctionCall{
-					Name:      "bash",
-					Arguments: `{"command":"echo hi"}`,
-				},
-			}},
-		},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"spray -u https://example.com -j"}`))
 
-	if liveRunning(o.live) {
-		t.Fatal("assistant tool-call message end should stop live status before logger output")
+	mu.Lock()
+	got := latest
+	mu.Unlock()
+	if !strings.Contains(got, "tooling") || !strings.Contains(got, "bash") ||
+		!strings.Contains(got, "spray -u https://example.com -j") {
+		t.Fatalf("live tool footer missing progress: %q", got)
+	}
+	if !strings.Contains(got, "\n") {
+		t.Fatalf("tool progress was not rendered on its own composer row: %q", got)
+	}
+}
+
+func TestReadlineToolSpinnerRefreshesWithoutToolEvents(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var mu sync.Mutex
+	frames := make(map[string]struct{})
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(io.Discard, func(status string) {
+		plain := stripANSI(status)
+		if strings.Contains(plain, "bash") {
+			mu.Lock()
+			frames[plain] = struct{}{}
+			mu.Unlock()
+		}
+	})
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"sleep 1"}`))
+	// The first configured interval must advance the frame. Previously the
+	// ticker repainted frame zero once, so the first visible change took two
+	// intervals and made tool progress look event-driven or sluggish.
+	time.Sleep(readlineFooterInterval + 75*time.Millisecond)
+
+	mu.Lock()
+	count := len(frames)
+	mu.Unlock()
+	if count < 2 {
+		t.Fatalf("tool spinner produced %d distinct frames, want at least 2", count)
 	}
 }
 
@@ -387,13 +582,9 @@ func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 	}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(turnStartEvent(1))
 	reasoning := "checking target scope\nprobing admin route"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
-	})
+	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "checking target scope") || !strings.Contains(got, "probing admin route") {
@@ -418,19 +609,9 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
-	reasoning := "The user wants"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
-	})
-	reasoning = "The user wants me to test redhaze.top"
-	o.HandleEvent(agent.Event{
-		Type:    agent.EventMessageUpdate,
-		Turn:    1,
-		Message: agent.ChatMessage{Role: "assistant", ReasoningContent: &reasoning},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", "The user wants"))
+	o.HandleEvent(reasoningDeltaEvent("m-1", " me to test redhaze.top"))
 
 	got := stripANSI(stderr.String())
 	if strings.Count(got, "The user wants") != 1 {
@@ -441,19 +622,141 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	}
 }
 
+func TestReadlineThinkingAppendsWithoutSyntheticNewlines(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+	}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", "The user wants"))
+	o.HandleEvent(reasoningDeltaEvent("m-1", " me to inspect the image"))
+
+	if len(committed) != 0 {
+		t.Fatalf("partial reasoning was committed as separate lines: %#v", committed)
+	}
+
+	o.HandleEvent(reasoningDeltaEvent("m-1", "\nthen report"))
+	if len(committed) != 1 || committed[0] != "The user wants me to inspect the image" {
+		t.Fatalf("reasoning line commits = %#v", committed)
+	}
+
+	reasoning := "The user wants me to inspect the image\nthen report"
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(turnEndEvent(1, 0))
+	if len(committed) != 2 || committed[1] != "then report" {
+		t.Fatalf("final reasoning commits = %#v", committed)
+	}
+}
+
+func TestReadlineDefaultDoesNotCommitThinking(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	reasoning := "private chain of thought\nsecond line"
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(turnEndEvent(1, 0))
+
+	if joined := strings.Join(committed, "\n"); strings.Contains(joined, "private chain of thought") {
+		t.Fatalf("default verbosity committed thinking: %#v", committed)
+	}
+}
+
+func TestReadlineShowsAndCommitsIntermediateAssistantTextBeforeTool(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	text := "I will inspect the image before running the scanner."
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", text))
+
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: text}))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"scan image.png"}`))
+	if len(committed) != 1 || !strings.Contains(committed[0], text) {
+		t.Fatalf("intermediate assistant text was not committed before tool: %#v", committed)
+	}
+}
+
+func TestReadlineCommitsFinalTextForImageResponse(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	var committed []string
+	bridge := &readlineConsoleBridge{
+		active: func() bool { return true },
+		ready:  true,
+		commit: func(text string) error {
+			committed = append(committed, stripANSI(text))
+			return nil
+		},
+		redraw: func() {},
+	}
+	o := NewAgentOutputWithWriters(&cfg.Option{}, &stdout, &stderr, true)
+	o.SetReadlineMode(bridge, bridge.UpdateStatus)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(messageEvent("m-1", "assistant",
+		aop.MessagePart{Type: aop.PartText, Text: "The screenshot shows an exposed admin login."},
+		aop.MessagePart{Type: aop.PartText, Text: "No credentials are visible."},
+	))
+	o.HandleEvent(turnEndEvent(1, 0))
+
+	joined := strings.Join(committed, "\n")
+	if !strings.Contains(joined, "The screenshot shows an exposed admin login.") ||
+		!strings.Contains(joined, "No credentials are visible.") {
+		t.Fatalf("image response text missing from readline output: %#v", committed)
+	}
+}
+
 func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 2, false)
 	reasoning := "checking target scope\nprobing admin route"
 
-	o.HandleEvent(agent.Event{
-		Type: agent.EventTurnEnd,
-		Turn: 1,
-		Message: agent.ChatMessage{
-			Role:             "assistant",
-			ReasoningContent: &reasoning,
-		},
-	})
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(turnEndEvent(1, 0))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "checking target scope") || !strings.Contains(got, "probing admin route") {
@@ -468,18 +771,8 @@ func TestAgentOutputToolSummary(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionStart,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Arguments:  `{"command":"scan -i 127.0.0.1 --mode quick"}`,
-	})
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionEnd,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Result:     "ok",
-	})
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"scan -i 127.0.0.1 --mode quick"}`))
+	o.HandleEvent(toolResultEvent("call-1", "bash", "ok", false))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "bash") || !strings.Contains(got, "scan -i 127.0.0.1 --mode quick") {
@@ -500,18 +793,8 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, true)
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionStart,
-		ToolCallID: "call-1",
-		ToolName:   "read",
-		Arguments:  `{"path":"docs/usage.md","limit":20}`,
-	})
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionEnd,
-		ToolCallID: "call-1",
-		ToolName:   "read",
-		Result:     "file content",
-	})
+	o.HandleEvent(toolCallEvent("call-1", "read", `{"path":"docs/usage.md","limit":20}`))
+	o.HandleEvent(toolResultEvent("call-1", "read", "file content", false))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "read") || !strings.Contains(got, "docs/usage.md") {
@@ -529,13 +812,7 @@ func TestAgentOutputToolError(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionEnd,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Result:     "permission denied",
-		IsError:    true,
-	})
+	o.HandleEvent(toolResultEvent("call-1", "bash", "permission denied", true))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✗") {
@@ -550,12 +827,7 @@ func TestAgentOutputWriteEditSummary(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionStart,
-		ToolCallID: "call-1",
-		ToolName:   "write",
-		Arguments:  `{"path":"src/main.go","edits":[{"old_text":"foo","new_text":"bar"},{"old_text":"baz","new_text":"qux"}]}`,
-	})
+	o.HandleEvent(toolCallEvent("call-1", "write", `{"path":"src/main.go","edits":[{"old_text":"foo","new_text":"bar"},{"old_text":"baz","new_text":"qux"}]}`))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "▸") {
@@ -574,12 +846,7 @@ func TestAgentOutputMultiLineResult(t *testing.T) {
 	o := testOutput(&stderr, 1, false)
 
 	result := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"
-	o.HandleEvent(agent.Event{
-		Type:       agent.EventToolExecutionEnd,
-		ToolCallID: "call-1",
-		ToolName:   "bash",
-		Result:     result,
-	})
+	o.HandleEvent(toolResultEvent("call-1", "bash", result, false))
 
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") {
@@ -658,9 +925,9 @@ func TestToolCallCounting(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 0, false)
 
-	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c1", ToolName: "bash", Result: "ok"})
-	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c2", ToolName: "read", Result: "data"})
-	o.HandleEvent(agent.Event{Type: agent.EventToolExecutionEnd, ToolCallID: "c3", ToolName: "bash", IsError: true, Result: "fail"})
+	o.HandleEvent(toolResultEvent("c1", "bash", "ok", false))
+	o.HandleEvent(toolResultEvent("c2", "read", "data", false))
+	o.HandleEvent(toolResultEvent("c3", "bash", "fail", true))
 
 	if o.toolCallCount != 3 {
 		t.Errorf("toolCallCount = %d, want 3", o.toolCallCount)
@@ -670,14 +937,14 @@ func TestToolCallCounting(t *testing.T) {
 	}
 }
 
-func TestTurnStartMarker(t *testing.T) {
+func TestTurnStartDoesNotWritePermanentMarker(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 1})
+	o.HandleEvent(turnStartEvent(1))
 	turn1Output := stderr.String()
 
-	o.HandleEvent(agent.Event{Type: agent.EventTurnStart, Turn: 2})
+	o.HandleEvent(turnStartEvent(2))
 	turn2Output := stderr.String()[len(turn1Output):]
 
 	got1 := stripANSI(turn1Output)
@@ -686,8 +953,8 @@ func TestTurnStartMarker(t *testing.T) {
 	}
 
 	got2 := stripANSI(turn2Output)
-	if !strings.Contains(got2, "turn 2") {
-		t.Fatalf("turn 2 should show turn marker, got: %q", got2)
+	if strings.Contains(got2, "turn 2") {
+		t.Fatalf("turn 2 marker should stay transient, got: %q", got2)
 	}
 }
 
@@ -695,19 +962,52 @@ func TestEvalEndRendering(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	o.HandleEvent(agent.Event{Type: agent.EventEvalEnd, EvalPass: true, EvalRound: 0, EvalReason: "all checks passed"})
+	passed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
+	_ = xeval.SetDetail(&passed, xeval.Detail{Round: 1, Pass: true, Reason: "all checks passed"})
+	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
 		t.Fatalf("eval pass missing expected markers: %q", got)
+	}
+	if !strings.Contains(got, "round 1") {
+		t.Fatalf("eval pass used wrong round: %q", got)
 	}
 	if !strings.Contains(got, "all checks passed") {
 		t.Fatalf("eval pass missing reason: %q", got)
 	}
 
 	stderr.Reset()
-	o.HandleEvent(agent.Event{Type: agent.EventEvalEnd, EvalPass: false, EvalRound: 1, EvalReason: "port 443 not scanned"})
+	failed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
+	_ = xeval.SetDetail(&failed, xeval.Detail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
+	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {
 		t.Fatalf("eval fail missing expected markers: %q", got)
+	}
+	if !strings.Contains(got, "round 2") {
+		t.Fatalf("eval fail used wrong round: %q", got)
+	}
+}
+
+func TestLiveStatusEvalRoundUsesProtocolValue(t *testing.T) {
+	live := &LiveStatus{}
+	live.ShowEvalRound(1)
+	if live.note != "eval · round 1" {
+		t.Fatalf("eval live status used wrong round: %q", live.note)
+	}
+}
+
+func TestCompleteMessageClearsDeltaAccumulator(t *testing.T) {
+	var stderr syncedBuffer
+	o := testOutput(&stderr, 0, false)
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(textDeltaEvent("m-1", "hello"))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: "hello"}))
+	if len(o.deltas) != 0 {
+		t.Fatalf("delta accumulator not cleared on complete message: %d entries", len(o.deltas))
+	}
+	if !o.hasAssistant {
+		t.Fatal("complete assistant message not recorded")
 	}
 }

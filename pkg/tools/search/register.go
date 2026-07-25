@@ -23,7 +23,8 @@ func init() {
 			}
 
 			reg.RegisterTool(NewWebSearchTool(p, tavily))
-			reg.Register(NewFetchCommand(), "search")
+			fetch := NewFetchCommand()
+			reg.Register(commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run}, "search")
 
 			var idx *association.Index
 			if es, ok := deps.EngineSet.(*engine.Set); ok && es != nil {
@@ -36,7 +37,8 @@ func init() {
 					idx.BuildWithFingers(full.Fingers(), full.Aliases(), nil)
 				}
 			}
-			reg.Register(NewCyberhubSearch(idx), "search")
+			cyberhub := NewCyberhubSearch(idx)
+			reg.Register(commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run}, "search")
 		},
 	})
 }

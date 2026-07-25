@@ -14,6 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan"
@@ -39,7 +40,8 @@ func init() {
 func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
-	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools, a.Provider, a.ProviderConfig.Model, a.Skills, a.DataBus, logger)
+	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools,
+		a.Provider, a.ProviderConfig, a.Skills, a.DataBus, logger)
 }
 
 func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -65,15 +67,18 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, model string, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
 	var scanOpts []any
 	if scanCfg.AIEnabled && llmProvider != nil {
-		scanOpts = append(scanOpts, scan.WithParent(agent.NewAgent(agent.Config{
-			Provider: llmProvider,
-			Tools:    cmdReg,
-			Model:    model,
-			Logger:   logger,
-		})))
+		scannerParent := agent.NewAgent(agent.Config{
+			Provider:      llmProvider,
+			Tools:         cmdReg,
+			Model:         providerConfig.Model,
+			MaxTokens:     providerConfig.MaxTokens,
+			ContextWindow: providerConfig.ContextWindow,
+			Logger:        logger,
+		})
+		scanOpts = append(scanOpts, scan.WithParent(scannerParent))
 		scanOpts = append(scanOpts, scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
 			return runner.CollectDeepBrowserArtifacts(ctx, cmdReg, targetURL, logger)
 		}))
@@ -147,19 +152,24 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 	defer rt.Close()
 
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	rt.Output.Start("scanner", strings.Join(scannerArgs, " "))
-
-	result, err := agent.NewAgent(rt.Config.
-		WithSystemPrompt(rt.SystemPrompt).
-		WithStream(false)).
-		Run(ctx, prompt)
+	agentOutput := tui.NewStaticAgentOutput(option)
+	unsubscribe := rt.Subscribe(agentOutput.HandleEvent)
+	defer unsubscribe()
+	agentOutput.Start("scanner", strings.Join(scannerArgs, " "))
+	session, err := rt.OpenSession(ctx, runner.SessionOptions{ID: "scanner"})
 	if err != nil {
 		return err
 	}
-	if result != nil && strings.TrimSpace(result.Output) != "" {
-		rt.Output.Final(result.Output)
+	run, err := session.Run(ctx, runner.RunInput{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
+	if err != nil {
+		return err
 	}
-	return nil
+	result, err := run.Wait()
+	if strings.TrimSpace(result.Output) != "" {
+		agentOutput.Final(result.Output)
+	}
+	_ = rt.CloseSession(context.Background(), "scanner", runner.SessionCloseCompleted)
+	return err
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {
@@ -171,7 +181,10 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 		}
 	}
 
-	intent := strings.TrimSpace(option.Prompt)
+	intent, err := cfg.ResolvePrompt(option.Prompt)
+	if err != nil {
+		return "", err
+	}
 	if intent == "" && option.TaskFile != "" {
 		data, err := os.ReadFile(option.TaskFile)
 		if err != nil {
@@ -182,7 +195,7 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 	if intent == "" {
 		intent = "Process the scanner output according to the user's intent. If no specific intent is provided, briefly explain the important evidence in the output."
 	}
-	intent, err := cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
+	intent, err = cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
 	if err != nil {
 		return "", err
 	}

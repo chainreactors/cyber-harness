@@ -44,13 +44,12 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 | --- | --- |
 | **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | 完整版 — 额外包含 playwright 浏览器、passive recon、katana 爬虫 |
-| **aiscan-agent** | 轻量 agent 版 — 仅 agent 运行时，适合部署为远程 worker |
 
-| 系统 | 架构 | 标准版 | 完整版 | Agent 版 |
-| --- | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` | `aiscan-agent_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` | `aiscan-agent_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` | `aiscan-agent_windows_amd64.exe` |
+| 系统 | 架构 | 标准版 | 完整版 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
+| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
 
 ```bash
 # Linux
@@ -72,14 +71,16 @@ git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
 go build -o aiscan ./cmd/aiscan                          # 标准版
 go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 playwright/katana/passive）
+go build -o aiscan-agent ./cmd/agent                      # 仅供开发者使用的轻量 agent 运行时
 ```
 
-Makefile 对应 Release 的三种功能层级。`make full` 会先构建前端，再将最新的
-`web/static` 嵌入 full 二进制：
+GitHub Releases 只发布标准版和完整版。轻量 agent 运行时仍保留给开发者从
+源码自行编译。`make full` 会先构建前端，再将最新的 `web/static` 嵌入 full
+二进制：
 
 ```bash
 make                                                      # Standard 默认版
-make agent                                                # Agent 轻量版
+make agent                                                # 仅供开发者使用的轻量 agent 运行时
 make full                                                 # 前端 + Full 完整版
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
 ```
@@ -111,7 +112,7 @@ libstdc++、libgcc 或 winpthread DLL。
 - 自然语言描述任务，agent 自主规划、扫描、分析、输出结论
 - Goal Evaluation — 独立评估器判定任务完成度，自动驱动重试
 - 交互式 REPL，支持直接执行命令
-- 多 provider 容错降级
+- 多 provider 配置，支持显式手动切换
 
 ### [IOA](https://github.com/chainreactors/ioa) — 多 Agent 协作
 
@@ -195,7 +196,11 @@ llm:
   provider: openai
   api_key: sk-...
   model: gpt-4o
+  context_window: 128000   # 模型上下文窗口；自定义模型建议显式填写
+  max_tokens: 16384        # 单次最大输出
 ```
+
+实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`。上下文接近配置窗口时会自动压缩。
 
 ---
 

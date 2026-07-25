@@ -1,0 +1,12 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/runner/
+!cmd/runner/**
+!core/
+!core/**
+!pkg/
+!pkg/**
+!skills/
+!skills/**

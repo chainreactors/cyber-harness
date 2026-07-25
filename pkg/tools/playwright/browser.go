@@ -238,10 +238,11 @@ Examples:
 }
 
 // Execute dispatches to the appropriate sub-command.
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("playwright", &err)
+	args := execution.Args
 	if len(args) == 0 {
-		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
+		return nil, fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
 
 	// Extract global -s flag (playwright-cli alignment) and PLAYWRIGHT_CLI_SESSION env var.
@@ -260,7 +261,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	args = cleanArgs
 
 	if len(args) == 0 {
-		return fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
+		return nil, fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
 
 	sub := args[0]
@@ -516,7 +517,7 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		result, err = c.execTemplate(ctx, subArgs)
 
 	default:
-		return fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())
+		return nil, fmt.Errorf("playwright: unknown subcommand %q\n\n%s", sub, c.Usage())
 	}
 
 	if err == nil && len(subArgs) > 0 {
@@ -526,12 +527,12 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result != "" {
-		fmt.Fprint(commands.Output, result)
+		fmt.Fprint(execution.Stdout, result)
 	}
-	return nil
+	return nil, nil
 }
 
 // Close shuts down the browser process if running.

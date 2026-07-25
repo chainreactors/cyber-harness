@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/chainreactors/aiscan/pkg/aop"
+	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
-// A saturated subscriber buffer must never swallow a terminal event: the hub
-// evicts the oldest queued (droppable) delta to make room. This is the fix that
-// keeps a finished run from stranding the composer as "busy" with a blinking
-// cursor when the closing message_end / message is lost to backpressure.
+// A saturated subscriber buffer must never swallow a reliable terminal event.
 func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 	h := NewHub()
 	ch, unsub := h.Subscribe("s1")
@@ -19,15 +20,15 @@ func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 	// Saturate the 64-slot buffer with droppable deltas while nobody reads.
 	const bufCap = 64
 	for i := 0; i < bufCap; i++ {
-		h.Broadcast("s1", HubEvent{Type: ChatEventMessageDelta, Data: mustJSON(i)})
+		h.Broadcast("s1", HubEvent{Type: "delta", Data: mustJSON(i)})
 	}
 
 	// One more droppable event has nowhere to go: it is silently dropped, never
 	// blocking and never displacing a queued event.
-	h.Broadcast("s1", HubEvent{Type: ChatEventMessageDelta, Data: mustJSON("overflow")})
+	h.Broadcast("s1", HubEvent{Type: "delta", Data: mustJSON("overflow")})
 
 	// A terminal event onto the same full buffer must land, evicting the oldest.
-	h.Broadcast("s1", HubEvent{Type: ChatEventMessageEnd, Data: mustJSON("done"), Reliable: true})
+	h.Broadcast("s1", HubEvent{Type: "terminal", Data: mustJSON("done"), Reliable: true})
 
 	drained := make([]HubEvent, 0, bufCap)
 	for len(ch) > 0 {
@@ -40,7 +41,7 @@ func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 
 	var sawTerminal, sawOverflow bool
 	for _, e := range drained {
-		if e.Type == ChatEventMessageEnd {
+		if e.Type == "terminal" {
 			sawTerminal = true
 		}
 		if string(e.Data) == string(mustJSON("overflow")) {
@@ -56,25 +57,20 @@ func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 }
 
 // isTerminalChatEvent is the only test of the reliability classification: the
-// run-ending signals must all qualify, or the stuck-cursor bug returns. Whether
-// mid-stream types stay droppable is low-stakes (a mis-marked delta only adds
-// eviction churn), so it isn't asserted.
+// run-ending platform signal must qualify, or the stuck-cursor bug returns.
+// Agent lifecycle terminals are AOP events and covered by isReliableAOPEvent.
 func TestIsTerminalChatEvent(t *testing.T) {
-	for _, ty := range []string{
-		ChatEventMessage, ChatEventMessageEnd, ChatEventError,
-		ChatEventScanComplete, ChatEventScanError,
-	} {
-		if !isTerminalChatEvent(ty) {
-			t.Errorf("%q should be terminal (reliable)", ty)
+	if !isTerminalChatEvent(ChatEventScanComplete) {
+		t.Errorf("%q should be terminal (reliable)", ChatEventScanComplete)
+	}
+	for _, ty := range []string{ChatEventScanStarted, ChatEventScanProgress, ChatEventAgentJoined} {
+		if isTerminalChatEvent(ty) {
+			t.Errorf("%q should not be terminal", ty)
 		}
 	}
 }
 
-// A run that ends with no final text (a tool-only turn, or an eval run that hit
-// its round cap) must still broadcast the terminal message so the client
-// finalizes the turn and releases the composer — but it must not leave a blank
-// assistant row in the transcript. A run with real text does both.
-func TestCompleteAssistantRunAlwaysSignalsButPersistsOnlyText(t *testing.T) {
+func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -82,38 +78,31 @@ func TestCompleteAssistantRunAlwaysSignalsButPersistsOnlyText(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
-	const sid = "sess-terminal"
-	ch, unsub := svc.Hub().Subscribe(sessionTopic(sid))
-	defer unsub()
+	const sid = "sess-aop"
+	event := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        "2026-07-19T00:00:00Z",
+		SessionID: "agent-session",
+		Agent:     "aiscan",
+		Seq:       7,
+		Data:      json.RawMessage(`{"message_id":"m-1","role":"assistant","parts":[{"type":"text","text":"hello"}]}`),
+	}
+	svc.BroadcastAOPEvent(sid, event)
 
-	// Empty completion: broadcasts the terminal signal, persists nothing.
-	svc.completeAssistantRun(sid, "agent-1", "Agent One", "   ", 1)
-	if got := drainEventTypes(ch); len(got) != 1 || got[0] != ChatEventMessage {
-		t.Fatalf("empty completion broadcast = %v, want one %q", got, ChatEventMessage)
+	events, err := store.ListAOPEvents(context.Background(), sid, 100)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if msgs, _ := store.ListMessages(context.Background(), sid, 100); len(msgs) != 0 {
-		t.Fatalf("empty completion persisted %d messages, want 0", len(msgs))
+	if len(events) != 1 {
+		t.Fatalf("persisted AOP events = %d, want 1", len(events))
 	}
-
-	// Text completion: same terminal signal, plus the reply is persisted.
-	svc.completeAssistantRun(sid, "agent-1", "Agent One", "done", 2)
-	if got := drainEventTypes(ch); len(got) != 1 || got[0] != ChatEventMessage {
-		t.Fatalf("text completion broadcast = %v, want one %q", got, ChatEventMessage)
-	}
-	msgs, _ := store.ListMessages(context.Background(), sid, 100)
-	if len(msgs) != 1 || msgs[0].Content != "done" {
-		t.Fatalf("text completion persisted %+v, want one message %q", msgs, "done")
+	got := events[0]
+	if got.Type != event.Type || got.SessionID != event.SessionID || got.Seq != event.Seq || string(got.Data) != string(event.Data) {
+		t.Fatalf("persisted AOP event = %+v, want %+v", got, event)
 	}
 }
 
-// A run's intermediate assistant text — the commentary the model streams before
-// its tool calls — must be persisted, not just streamed. Before this, only the
-// final aggregate reply (completeAssistantRun) survived, so every earlier turn's
-// text vanished from any timeline rebuilt from the store: a page reload, an SSE
-// reconnect, or a session switch that revalidates against it. It is persisted as
-// an assistant message carrying its turn, so buildTimelineFromMessages keys it to
-// the right bubble. Streaming partials (message_start / message_delta) stay out.
-func TestMessageEndPersistsIntermediateAssistantText(t *testing.T) {
+func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -121,69 +110,25 @@ func TestMessageEndPersistsIntermediateAssistantText(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
-	const sid = "sess-msgend"
-
-	// Streaming partials of the same text: live-only, never persisted.
-	svc.BroadcastChatEvent(sid, ChatEvent{Type: ChatEventMessageStart, Role: "assistant", Content: "有意", Turn: 1})
-	svc.BroadcastChatEvent(sid, ChatEvent{Type: ChatEventMessageDelta, Role: "assistant", Content: "有意思", Turn: 1})
-	// Finalized turn-1 commentary: persisted so a rebuild can show it.
-	svc.BroadcastChatEvent(sid, ChatEvent{Type: ChatEventMessageEnd, Role: "assistant", Content: "有意思！charge.js 暴露了内部 API", Turn: 1})
-	// Whitespace-only end (a tool-only turn): nothing to persist.
-	svc.BroadcastChatEvent(sid, ChatEvent{Type: ChatEventMessageEnd, Role: "assistant", Content: "  \n ", Turn: 2})
-
-	msgs, err := store.ListMessages(context.Background(), sid, 100)
+	event := aop.Event{
+		Type: "turn.end", TS: time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "sess-eval", Agent: "aiscan", Data: json.RawMessage(`{"turn":1}`),
+	}
+	_ = xeval.SetDetail(&event, xeval.Detail{Round: 2, Pass: false, Reason: "needs one more verified finding"})
+	svc.BroadcastAOPEvent("sess-eval", event)
+	events, err := store.ListAOPEvents(context.Background(), "sess-eval", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("persisted messages = %d, want 1 (only the non-empty message_end)", len(msgs))
+	if len(events) != 1 {
+		t.Fatalf("persisted AOP events = %d, want 1", len(events))
 	}
-	got := msgs[0]
-	if got.Role != "assistant" || got.Content != "有意思！charge.js 暴露了内部 API" {
-		t.Fatalf("persisted message = {role:%q content:%q}, want assistant commentary", got.Role, got.Content)
+	detail, ok, err := xeval.GetDetail(events[0])
+	if err != nil || !ok {
+		t.Fatalf("persisted extension = %#v, %v, %v", events[0].Ext, ok, err)
 	}
-	var metadata map[string]any
-	if err := json.Unmarshal(got.Metadata, &metadata); err != nil {
-		t.Fatalf("metadata json: %v", err)
-	}
-	// The turn is what keys this text to its bubble on rebuild; without it a
-	// multi-turn run collapses its intermediate texts into one slot.
-	if metadata["turn"] != float64(1) {
-		t.Fatalf("turn metadata = %#v, want 1", metadata["turn"])
-	}
-}
-
-func TestEvalEventPersistsVerdictMetadata(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	svc := NewService(ServiceConfig{Store: store})
-
-	svc.BroadcastChatEvent("sess-eval", ChatEvent{
-		Type:       ChatEventEval,
-		EvalRound:  2,
-		EvalPass:   false,
-		EvalReason: "needs one more verified finding",
-	})
-
-	msgs, err := store.ListMessages(context.Background(), "sess-eval", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("persisted messages = %d, want 1", len(msgs))
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal(msgs[0].Metadata, &metadata); err != nil {
-		t.Fatalf("metadata json: %v", err)
-	}
-	if metadata["event_type"] != ChatEventEval || metadata["eval_reason"] != "needs one more verified finding" {
-		t.Fatalf("eval metadata = %#v", metadata)
-	}
-	if metadata["eval_round"] != float64(2) || metadata["eval_pass"] != false {
-		t.Fatalf("eval verdict metadata = %#v", metadata)
+	if detail.Round != 2 || detail.Pass || detail.Reason != "needs one more verified finding" {
+		t.Fatalf("persisted detail = %#v", detail)
 	}
 }
 
@@ -224,12 +169,4 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	if len(empty) != 0 {
 		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))
 	}
-}
-
-func drainEventTypes(ch <-chan HubEvent) []string {
-	var out []string
-	for len(ch) > 0 {
-		out = append(out, (<-ch).Type)
-	}
-	return out
 }

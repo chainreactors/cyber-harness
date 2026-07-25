@@ -4,12 +4,13 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
-	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/aop/x/delegation"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
@@ -31,8 +32,6 @@ type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
 type Choice = provider.Choice
 type Usage = provider.Usage
 type APIError = provider.APIError
-type ResponseFormat = provider.ResponseFormat
-type JSONSchemaSpec = provider.JSONSchemaSpec
 type CacheRetention = provider.CacheRetention
 type Provider = provider.Provider
 type StreamingProvider = provider.StreamingProvider
@@ -58,33 +57,12 @@ var (
 	InferProviderFromBaseURL = provider.InferFromBaseURL
 	NormalizeProvider        = provider.NormalizeProvider
 
-	ErrCallTimeout   = provider.ErrCallTimeout
-	ErrStreamStalled = provider.ErrStreamStalled
+	ErrCallTimeout      = provider.ErrCallTimeout
+	ErrStreamStalled    = provider.ErrStreamStalled
+	ErrStreamIncomplete = provider.ErrStreamIncomplete
 )
 
 // Agent-specific types.
-
-type EventType string
-
-const (
-	EventAgentStart         EventType = "agent_start"
-	EventAgentEnd           EventType = "agent_end"
-	EventTurnStart          EventType = "turn_start"
-	EventTurnEnd            EventType = "turn_end"
-	EventLLMRequest         EventType = "llm_request"
-	EventMessageStart       EventType = "message_start"
-	EventMessageUpdate      EventType = "message_update"
-	EventMessageEnd         EventType = "message_end"
-	EventToolExecutionStart EventType = "tool_execution_start"
-	EventToolExecutionEnd   EventType = "tool_execution_end"
-	EventTokenBudgetWarning EventType = "token_budget_warning"
-	EventEvalStart          EventType = "eval_start"
-	EventEvalEnd            EventType = "eval_end"
-	EventEvalError          EventType = "eval_error"
-	EventCompactStart       EventType = "compact_start"
-	EventCompactEnd         EventType = "compact_end"
-	EventCompactError       EventType = "compact_error"
-)
 
 type StopReason string
 
@@ -96,38 +74,6 @@ const (
 	StopReasonError      StopReason = "error"
 	StopReasonCanceled   StopReason = "canceled"
 )
-
-type Event struct {
-	Type            EventType
-	SessionID       string
-	ParentSessionID string
-	Turn            int
-	EmittedAt       time.Time
-	Request         *ChatCompletionRequest
-	Message         ChatMessage
-	Messages        []ChatMessage
-	NewMessages     []ChatMessage
-	ToolResults     []ChatMessage
-	ToolCallID      string
-	ToolName        string
-	Arguments       string
-	Result          string
-	IsError         bool
-	Err             error
-	StartedAt       time.Time // tool execution start time (set on ToolExecutionEnd)
-	Stop            StopReason
-	Usage           *Usage
-	TotalUsage      *Usage // cumulative usage across all turns (set on TurnEnd/AgentEnd)
-	ContextTokens   int
-	EvalRound       int
-	EvalPass        bool
-	EvalReason      string
-	EvalError       string
-
-	CompactTokensBefore int
-	CompactTokensAfter  int
-	CompactKeptMessages int
-}
 
 type TransformContextFunc func([]ChatMessage) []ChatMessage
 
@@ -174,23 +120,35 @@ type ProviderEntry struct {
 	Model    string
 }
 
+type CompactionSettings struct {
+	ReserveTokens    int
+	KeepRecentTokens int
+}
+
 type Config struct {
-	Provider         Provider
-	Tools            *commands.CommandRegistry
-	Model            string
+	Provider Provider
+	Tools    tool.Executor
+	Model    string
+	// Fallbacks is retained for source compatibility. It is deliberately
+	// ignored: provider selection is explicit and a run never switches models.
+	// Deprecated: configure and select provider profiles explicitly.
 	Fallbacks        []ProviderEntry
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
 	Messages         []ChatMessage
 	MaxTokens        int
+	ContextWindow    int
+	Compaction       CompactionSettings
 	Temperature      *float64
 	Stream           bool
 	MaxRetries       int
 	TokenBudget      int
-	ResponseFormat   *ResponseFormat
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              *eventbus.Bus[Event]
+	Bus              *eventbus.Bus[aop.Event]
+	// OnRunEnd fires once per run with the final result — replaces the old
+	// EventAgentEnd Messages subscription for session persistence.
+	OnRunEnd         func(*Result)
 	BeforeToolCall   func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall    func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	MaxTurns         int
@@ -201,35 +159,45 @@ type Config struct {
 	MaxParallelTools int
 	CacheRetention   CacheRetention
 	SessionID        string
+	TurnID           string
 	ParentSessionID  string
+	ParentToolCallID string
+	Delegation       *delegation.DelegationDetail
+	// AgentName tags emitted AOP events; defaults to "aiscan".
+	AgentName string
+	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
+	// restored; Result.MessageCounter carries the final value for saving.
+	MessageCounter int64
+
+	emitter *aopEmitter
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config               { c.Provider = p; return c }
-func (c Config) WithTools(t *commands.CommandRegistry) Config { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config                    { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config             { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config       { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config                     { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config              { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config         { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[Event]) Config        { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config                   { c.MaxTokens = n; return c }
-func (c Config) WithTemperature(t float64) Config             { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config                  { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config                 { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config        { c.Expander = e; return c }
+func (c Config) WithProvider(p Provider) Config            { c.Provider = p; return c }
+func (c Config) WithTools(t tool.Executor) Config          { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config                 { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config          { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []ChatMessage) Config    { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                  { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config           { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config      { c.Logger = l; return c }
+func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
+func (c Config) WithMaxTokens(n int) Config                { c.MaxTokens = n; return c }
+func (c Config) WithContextWindow(n int) Config            { c.ContextWindow = n; return c }
+func (c Config) WithTemperature(t float64) Config          { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config               { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config              { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config     { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
 }
 func (c Config) WithCacheRetention(r CacheRetention) Config { c.CacheRetention = r; return c }
 func (c Config) WithSessionID(id string) Config             { c.SessionID = id; return c }
-func (c Config) WithResponseFormat(rf *ResponseFormat) Config {
-	c.ResponseFormat = rf
-	return c
-}
+func (c Config) WithTurnID(id string) Config                { c.TurnID = id; return c }
+func (c Config) WithAgentName(name string) Config           { c.AgentName = name; return c }
+func (c Config) WithOnRunEnd(fn func(*Result)) Config       { c.OnRunEnd = fn; return c }
 func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
 	c.LoopScheduler = s
 	return c
@@ -242,6 +210,18 @@ func (c Config) init() Config {
 	if c.MaxRetries <= 0 {
 		c.MaxRetries = DefaultMaxRetries
 	}
+	if c.MaxTokens <= 0 {
+		c.MaxTokens = DefaultMaxTokens
+	}
+	if c.ContextWindow <= 0 {
+		c.ContextWindow = ModelContextWindow(c.Model)
+	}
+	if c.Compaction.ReserveTokens <= 0 {
+		c.Compaction.ReserveTokens = DefaultCompactionReserve
+	}
+	if c.Compaction.KeepRecentTokens <= 0 {
+		c.Compaction.KeepRecentTokens = DefaultKeepRecentTokens
+	}
 	if c.MaxResultSize <= 0 {
 		c.MaxResultSize = DefaultMaxResultSize
 	}
@@ -249,37 +229,30 @@ func (c Config) init() Config {
 		c.MaxParallelTools = DefaultMaxParallelTools
 	}
 	if c.SessionID == "" {
-		b := make([]byte, 8)
-		_, _ = crand.Read(b)
-		c.SessionID = hex.EncodeToString(b)
+		c.SessionID = randomID()
+	}
+	if c.AgentName == "" {
+		c.AgentName = "aiscan"
 	}
 	if c.Tools == nil {
-		c.Tools = commands.NewRegistry()
+		c.Tools = tool.EmptyExecutor()
 	}
 	if c.Inbox == nil {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	if c.Bus == nil {
-		c.Bus = eventbus.New[Event]()
+		c.Bus = eventbus.New[aop.Event]()
+	}
+	if c.emitter == nil {
+		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)
 	}
 	return c
 }
 
-type emitter struct {
-	bus             *eventbus.Bus[Event]
-	sessionID       string
-	parentSessionID string
-}
-
-func newEmitter(bus *eventbus.Bus[Event], sessionID, parentSessionID string) emitter {
-	return emitter{bus: bus, sessionID: sessionID, parentSessionID: parentSessionID}
-}
-
-func (e emitter) Emit(ev Event) {
-	ev.SessionID = e.sessionID
-	ev.ParentSessionID = e.parentSessionID
-	ev.EmittedAt = time.Now()
-	e.bus.Emit(ev)
+func randomID() string {
+	b := make([]byte, 8)
+	_, _ = crand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // NewAgent creates an Agent from a Config.
@@ -304,21 +277,22 @@ type TurnUsage struct {
 }
 
 type Result struct {
-	Output        string
-	NewMessages   []ChatMessage
-	Messages      []ChatMessage
-	Turns         int
-	TotalUsage    Usage
-	TurnUsages    []TurnUsage
-	ContextTokens int
-	Stop          StopReason
-	Err           error
+	Output         string
+	NewMessages    []ChatMessage
+	Messages       []ChatMessage
+	Turns          int
+	TotalUsage     Usage
+	TurnUsages     []TurnUsage
+	ContextTokens  int
+	Stop           StopReason
+	Err            error
+	MessageCounter int64
 }
 
 type State struct {
 	SystemPrompt string
 	Messages     []ChatMessage
-	Tools        *commands.CommandRegistry
+	Tools        tool.Executor
 	ErrorMessage string
 	LastError    error
 }

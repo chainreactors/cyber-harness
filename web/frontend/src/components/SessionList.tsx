@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   PanelLeftClose, PanelLeft,
@@ -8,9 +8,10 @@ import {
 } from 'lucide-react'
 import {
   Button, Callout, Tooltip, TooltipTrigger, TooltipContent,
-  Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot,
+  Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot, ThemeToggle,
 } from '@cyber/ui'
-import { cn } from '@cyber/theme'
+import { cn, useTheme } from '@cyber/theme'
+import LanguageToggle from './LanguageToggle'
 import { launchLocalAgent, listLocalAgents, stopLocalAgent } from '../api'
 import type { AgentInfo, ChatSession, LocalAgentView } from '../api'
 import { agentActivity } from '../lib/agentActivity'
@@ -39,6 +40,22 @@ export default function SessionList({
   onSelectAgent, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: Props) {
   const { t } = useTranslation('sidebar')
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const toggleRef = useRef(onToggle)
+  useEffect(() => { toggleRef.current = onToggle }, [onToggle])
+  useEffect(() => {
+    if (!open || !window.matchMedia('(max-width: 767px)').matches) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') toggleRef.current()
+    }
+    closeButtonRef.current?.focus()
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      previouslyFocused?.focus()
+    }
+  }, [open])
   // Attach each session to a connected agent by id-or-name (see
   // agentMatchesSession — the hub re-mints agent ids on reconnect, so match the
   // stable name too). Whatever no live agent claims is "orphaned": its bound
@@ -104,7 +121,7 @@ export default function SessionList({
                 </span>
               </div>
               <LocalAgentControl />
-              <Button variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
+              <Button ref={closeButtonRef} variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
                 <PanelLeftClose className="w-4 h-4" />
               </Button>
             </>
@@ -197,8 +214,28 @@ export default function SessionList({
             ))}
           </div>
         )}
+
+        <SidebarPreferences expanded={open} />
       </aside>
     </>
+  )
+}
+
+function SidebarPreferences({ expanded }: { expanded: boolean }) {
+  const { isDark, toggle } = useTheme()
+
+  return (
+    <div className={cn(
+      'mt-auto shrink-0 border-t border-border/60',
+      expanded
+        ? 'flex items-center justify-end gap-1 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+        : 'flex flex-col items-center gap-1 p-2',
+    )}>
+      <LanguageToggle />
+      <div data-sidebar-theme-toggle>
+        <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
+      </div>
+    </div>
   )
 }
 
@@ -219,8 +256,8 @@ function AgentGroup({
 }) {
   const { t } = useTranslation('sidebar')
   const [expanded, setExpanded] = useState(isSelected || sessions.some((s) => s.id === activeSessionID))
-  const identity = agent.identity || {}
-  const llm = [identity.provider, identity.model].filter(Boolean).join('/')
+  const status = agent.status || { bound: false }
+  const llm = [status.provider, status.model].filter(Boolean).join('/')
   const act = agentActivity(agent)
 
   function handleToggle() {

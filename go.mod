@@ -8,7 +8,7 @@ require (
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260704073236-3e22b6a528b9
 	github.com/chainreactors/gogo/v2 v2.14.2-0.20260710171447-b1776cb06226
-	github.com/chainreactors/ioa v0.1.2-0.20260621175506-35d6a4a11645
+	github.com/chainreactors/ioa v0.1.2-0.20260720012101-ee17a402fc18
 	github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260710171341-456d36779ab2
@@ -21,11 +21,11 @@ require (
 	github.com/chainreactors/sdk/zombie v0.0.0-20260708104745-dcad8620f5e9
 	github.com/chainreactors/spray v1.3.3-0.20260704194611-7ce7b850d447
 	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
-	github.com/chainreactors/tui/readline v0.0.0-20260712082522-2ba36ad7841f
+	github.com/chainreactors/tui/readline v0.0.0-20260723062039-ed89e758c21b
 	github.com/chainreactors/utils v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
 	github.com/chainreactors/utils/parsers v0.0.3-0.20260707181750-8aa6ca296863
-	github.com/chainreactors/utils/pty v0.0.0-20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721
 	github.com/chainreactors/zombie v1.3.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0
@@ -49,6 +49,10 @@ require (
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
+)
+
+require (
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -232,7 +236,7 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -286,7 +290,6 @@ require (
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect

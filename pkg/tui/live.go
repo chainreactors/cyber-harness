@@ -3,8 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 	"github.com/chainreactors/aiscan/pkg/util"
 )
 
@@ -13,7 +15,21 @@ const (
 	liveStatusThinking = "thinking"
 	liveStatusTooling  = "tooling"
 	liveStatusTalking  = "talking"
+	inboxPreviewItems  = 3
+	inboxPreviewRunes  = 64
 )
+
+// toolEvent is the TUI's merged view of one AOP tool.call/tool.result pair.
+type toolEvent struct {
+	id        string
+	name      string
+	args      string
+	result    string
+	isError   bool
+	done      bool
+	startedAt time.Time
+	elapsed   time.Duration
+}
 
 type LiveStatus struct {
 	view *LiveView
@@ -21,29 +37,32 @@ type LiveStatus struct {
 	status string
 	note   string
 
+	turn           int
+	turnToolCalls  int
 	turnUsage      *agent.Usage
-	completedUsage agent.Usage
+	outputEstimate int
 	contextTokens  int
 	contextWindow  int
 
-	tools map[string]agent.Event
+	tools map[string]*toolEvent
 	order []string
+	inbox []string
 
 	dim            func(string) string
-	renderToolLine func(agent.Event) string
+	renderToolLine func(*toolEvent) string
 }
 
-func NewLiveStatus(view *LiveView, dim func(string) string, renderToolLine func(agent.Event) string) *LiveStatus {
+func NewLiveStatus(view *LiveView, dim func(string) string, renderToolLine func(*toolEvent) string) *LiveStatus {
 	if dim == nil {
 		dim = func(s string) string { return s }
 	}
 	if renderToolLine == nil {
-		renderToolLine = func(agent.Event) string { return "" }
+		renderToolLine = func(*toolEvent) string { return "" }
 	}
 	return &LiveStatus{
 		view:           view,
 		status:         liveStatusThinking,
-		tools:          make(map[string]agent.Event),
+		tools:          make(map[string]*toolEvent),
 		dim:            dim,
 		renderToolLine: renderToolLine,
 	}
@@ -63,34 +82,84 @@ func (l *LiveStatus) Reset() {
 	l.Stop()
 	l.status = liveStatusThinking
 	l.note = ""
+	l.turn = 0
+	l.turnToolCalls = 0
 	l.turnUsage = nil
-	l.completedUsage = agent.Usage{}
+	l.outputEstimate = 0
 	l.contextTokens = 0
-	l.tools = make(map[string]agent.Event)
+	l.tools = make(map[string]*toolEvent)
 	l.order = nil
 }
 
-func (l *LiveStatus) BeginTurn() {
+func (l *LiveStatus) BeginTurn(turn int) {
 	if l == nil {
 		return
 	}
 	l.status = liveStatusThinking
 	l.note = ""
+	l.turn = turn
+	l.turnToolCalls = 0
 	l.turnUsage = nil
+	l.outputEstimate = 0
 	l.clearTools()
+	l.view.SetElapsedStart(time.Now())
 	l.Render()
 }
 
-func (l *LiveStatus) MessageUpdate(event agent.Event, contentDelta bool) {
+// NoteDelta switches the shared status row from thinking to talking once
+// assistant response text begins. It remains the same transient composer row;
+// response text itself is committed separately to terminal scrollback.
+func (l *LiveStatus) NoteDelta(textDelta bool) {
 	if l == nil {
 		return
 	}
-	l.setTurnUsage(event.Usage)
-	if contentDelta && !l.HasTools() {
+	if textDelta && !l.HasTools() && l.status != liveStatusTalking {
 		l.status = liveStatusTalking
 		l.note = ""
+		l.Render()
 	}
-	l.Render()
+}
+
+func (l *LiveStatus) SetTurnUsage(usage agent.Usage) {
+	if l == nil {
+		return
+	}
+	l.turnUsage = &usage
+}
+
+func (l *LiveStatus) SetOutputEstimate(tokens int) {
+	if l == nil {
+		return
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	l.outputEstimate = tokens
+	if l.view != nil {
+		// The animation timer performs the actual redraw. Keeping its pending
+		// lines current makes token changes visible at the configured cadence
+		// without repainting once per provider delta.
+		l.view.UpdateDeferred(l.lines())
+	}
+}
+
+func (l *LiveStatus) SetTurnToolCalls(count int) {
+	if l == nil {
+		return
+	}
+	l.turnToolCalls = count
+}
+
+// SetInbox updates the pending user input preview. The inbox intentionally
+// survives Reset so a queued run remains visible while the next run starts.
+func (l *LiveStatus) SetInbox(items []string, render bool) {
+	if l == nil {
+		return
+	}
+	l.inbox = append(l.inbox[:0], items...)
+	if render {
+		l.Render()
+	}
 }
 
 func (l *LiveStatus) ShowEvalRound(round int) {
@@ -98,35 +167,48 @@ func (l *LiveStatus) ShowEvalRound(round int) {
 		return
 	}
 	l.status = liveStatusTooling
-	l.note = fmt.Sprintf("eval · round %d", round+1)
+	l.note = fmt.Sprintf("eval · round %d", round)
 	l.clearTools()
 	l.Render()
 }
 
-func (l *LiveStatus) StartTool(event agent.Event) {
-	if l == nil {
+func (l *LiveStatus) StartTool(ev *toolEvent) {
+	if l == nil || ev == nil {
 		return
 	}
 	l.status = liveStatusTooling
 	l.note = ""
-	if event.ToolCallID != "" {
+	if ev.id != "" {
 		l.ensureTools()
-		if !l.hasTool(event.ToolCallID) {
-			l.order = append(l.order, event.ToolCallID)
+		if !l.hasTool(ev.id) {
+			l.order = append(l.order, ev.id)
 		}
-		l.tools[event.ToolCallID] = event
+		l.tools[ev.id] = ev
 	}
 	l.Render()
 }
 
-func (l *LiveStatus) UpdateTool(event agent.Event) (tracked bool, done bool) {
-	if l == nil || event.ToolCallID == "" || !l.hasTool(event.ToolCallID) {
+func (l *LiveStatus) UpdateTool(ev *toolEvent) (tracked bool, done bool) {
+	if l == nil || ev == nil || ev.id == "" || !l.hasTool(ev.id) {
 		return false, false
 	}
 	l.status = liveStatusTooling
 	l.note = ""
 	l.ensureTools()
-	l.tools[event.ToolCallID] = event
+	// A tool.result event carries only id/name/result — inherit the call-side
+	// metadata (args, start time) so the rendered line keeps its context.
+	if prev := l.tools[ev.id]; prev != nil {
+		if ev.name == "" {
+			ev.name = prev.name
+		}
+		if ev.args == "" {
+			ev.args = prev.args
+		}
+		if ev.startedAt.IsZero() {
+			ev.startedAt = prev.startedAt
+		}
+	}
+	l.tools[ev.id] = ev
 	if l.allToolsDone() {
 		return true, true
 	}
@@ -134,29 +216,18 @@ func (l *LiveStatus) UpdateTool(event agent.Event) (tracked bool, done bool) {
 	return true, false
 }
 
-func (l *LiveStatus) FinishTurn(event agent.Event) {
+// FinishTurn records the latest context size. Per-turn statistics remain in
+// the transient status line and are intentionally not committed to history.
+func (l *LiveStatus) FinishTurn(contextTokens int) {
 	if l == nil {
 		return
 	}
-	switch {
-	case event.TotalUsage != nil:
-		l.completedUsage = *event.TotalUsage
-	case event.Usage != nil:
-		l.addCompleted(event.Usage)
-	}
-	if event.ContextTokens > 0 {
-		l.contextTokens = event.ContextTokens
-	} else if event.Usage != nil && event.Usage.PromptTokens > 0 {
-		l.contextTokens = event.Usage.PromptTokens
+	if contextTokens > 0 {
+		l.contextTokens = contextTokens
+	} else if l.turnUsage != nil && l.turnUsage.PromptTokens > 0 {
+		l.contextTokens = l.turnUsage.PromptTokens
 	}
 	l.turnUsage = nil
-}
-
-func (l *LiveStatus) FinishAgent(event agent.Event) {
-	if l == nil || event.TotalUsage == nil {
-		return
-	}
-	l.completedUsage = *event.TotalUsage
 }
 
 func (l *LiveStatus) HasTools() bool {
@@ -196,7 +267,7 @@ func (l *LiveStatus) Stop() {
 	l.view.Stop()
 }
 
-func (l *LiveStatus) StopAndDrainTools() []agent.Event {
+func (l *LiveStatus) StopAndDrainTools() []*toolEvent {
 	if l == nil {
 		return nil
 	}
@@ -204,11 +275,11 @@ func (l *LiveStatus) StopAndDrainTools() []agent.Event {
 	return l.DrainTools()
 }
 
-func (l *LiveStatus) DrainTools() []agent.Event {
+func (l *LiveStatus) DrainTools() []*toolEvent {
 	if l == nil || len(l.order) == 0 {
 		return nil
 	}
-	events := make([]agent.Event, 0, len(l.order))
+	events := make([]*toolEvent, 0, len(l.order))
 	for _, id := range l.order {
 		if event, ok := l.tools[id]; ok {
 			events = append(events, event)
@@ -238,16 +309,42 @@ func (l *LiveStatus) lines() []string {
 func (l *LiveStatus) statusLine() string {
 	line := spinnerSentinel + " " + fmt.Sprintf("%-*s", liveStatusWidth, l.Status())
 	var details []string
-	if usage := l.formatTokenDetails(); usage != "" {
-		details = append(details, l.dim(usage))
+	if turn := l.formatTurnDetails(); turn != "" {
+		details = append(details, l.dim(turn))
 	}
 	if l.note != "" {
 		details = append(details, l.dim(l.note))
+	}
+	if inbox := l.formatInbox(); inbox != "" {
+		details = append(details, l.dim(inbox))
 	}
 	if len(details) > 0 {
 		line += " · " + strings.Join(details, " · ")
 	}
 	return line
+}
+
+func (l *LiveStatus) formatInbox() string {
+	if l == nil || len(l.inbox) == 0 {
+		return ""
+	}
+	count := len(l.inbox)
+	limit := count
+	if limit > inboxPreviewItems {
+		limit = inboxPreviewItems
+	}
+	previews := make([]string, 0, limit+1)
+	for _, item := range l.inbox[:limit] {
+		item = strings.Join(strings.Fields(item), " ")
+		if item == "" {
+			item = "continue"
+		}
+		previews = append(previews, truncate.ClipRunes(item, inboxPreviewRunes))
+	}
+	if hidden := count - limit; hidden > 0 {
+		previews = append(previews, fmt.Sprintf("+%d", hidden))
+	}
+	return fmt.Sprintf("inbox[%d] %s", count, strings.Join(previews, " | "))
 }
 
 func (l *LiveStatus) toolLines() []string {
@@ -262,51 +359,28 @@ func (l *LiveStatus) toolLines() []string {
 	return lines
 }
 
-func (l *LiveStatus) setTurnUsage(usage *agent.Usage) {
-	if usage == nil {
-		return
+func (l *LiveStatus) formatTurnDetails() string {
+	if l == nil || l.turn <= 0 {
+		return ""
 	}
-	copied := *usage
-	l.turnUsage = &copied
-}
-
-func (l *LiveStatus) addCompleted(usage *agent.Usage) {
-	if usage == nil {
-		return
+	parts := []string{fmt.Sprintf("turn %d", l.turn)}
+	if l.turnToolCalls > 0 {
+		parts = append(parts, fmt.Sprintf("tools=%d", l.turnToolCalls))
 	}
-	l.completedUsage.PromptTokens += usage.PromptTokens
-	l.completedUsage.CompletionTokens += usage.CompletionTokens
-	l.completedUsage.TotalTokens += usageTotal(usage)
-	l.completedUsage.CacheReadTokens += usage.CacheReadTokens
-	l.completedUsage.CacheWriteTokens += usage.CacheWriteTokens
-}
-
-func (l *LiveStatus) formatTokenDetails() string {
-	total := usageTotal(&l.completedUsage)
-	output := 0
 	contextTokens := l.contextTokens
 	if l.turnUsage != nil {
-		total += usageTotal(l.turnUsage)
-		output = l.turnUsage.CompletionTokens
+		parts = append(parts, formatTokenUsage(l.turnUsage))
 		if l.turnUsage.PromptTokens > 0 {
 			contextTokens = l.turnUsage.PromptTokens
 		}
-	}
-	if total == 0 && output == 0 && contextTokens == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, 3)
-	if total > 0 {
-		parts = append(parts, "tokens="+util.FormatNumber(total))
+	} else if l.outputEstimate > 0 {
+		parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
 	}
 	if context := l.ContextUsage(contextTokens); context != "" {
 		parts = append(parts, context)
 	}
-	if output > 0 {
-		parts = append(parts, "out="+util.FormatNumber(output))
-	}
-	return strings.Join(parts, " ")
+	parts = append(parts, elapsedSentinel)
+	return "[" + strings.Join(parts, " | ") + "]"
 }
 
 func (l *LiveStatus) ContextUsage(tokens int) string {
@@ -319,7 +393,8 @@ func (l *LiveStatus) ContextUsage(tokens int) string {
 	if tokens <= 0 || l.contextWindow <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("ctx=%s/%s (%s)",
+	return fmt.Sprintf("%s%s/%s (%s)",
+		contextMarker,
 		util.FormatNumber(tokens),
 		util.FormatNumber(l.contextWindow),
 		formatUsagePercent(tokens, l.contextWindow))
@@ -347,13 +422,13 @@ func formatUsagePercent(used, total int) string {
 }
 
 func (l *LiveStatus) clearTools() {
-	l.tools = make(map[string]agent.Event)
+	l.tools = make(map[string]*toolEvent)
 	l.order = nil
 }
 
 func (l *LiveStatus) ensureTools() {
 	if l.tools == nil {
-		l.tools = make(map[string]agent.Event)
+		l.tools = make(map[string]*toolEvent)
 	}
 }
 
@@ -368,7 +443,7 @@ func (l *LiveStatus) allToolsDone() bool {
 	}
 	for _, id := range l.order {
 		event, ok := l.tools[id]
-		if !ok || event.Type != agent.EventToolExecutionEnd {
+		if !ok || !event.done {
 			return false
 		}
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"slices"
@@ -15,8 +16,8 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/runner"
+	transportpkg "github.com/chainreactors/aiscan/core/transport"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webagent"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -39,6 +40,7 @@ type webCommand struct {
 
 type cliOptions struct {
 	cfg.MiscOptions `group:"Miscellaneous Options"`
+	Timeout         int          `long:"timeout" description:"Overall timeout in seconds"`
 	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
 	Serve           serveCommand `command:"serve" description:"Run the standalone agent server"`
 	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
@@ -53,6 +55,8 @@ type agentCommand struct {
 	cfg.IOAOptions     `group:"Server Options"`
 	cfg.ReconOptions   `group:"Recon Options"`
 }
+
+func (agentCommand) Usage() string { return "[OPTIONS]" }
 
 type serveCommand struct {
 	Token string `long:"token" description:"Access key for the server (auto-generated if empty)"`
@@ -161,12 +165,7 @@ func aiscan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		var err error
-		if option.WebURL != "" {
-			err = webagent.Run(ctx, &option, logger)
-		} else {
-			err = runner.RunAgentMode(ctx, &option, logger, sigHandler.SetStopFunc)
-		}
+		err := transportpkg.Run(ctx, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
@@ -226,6 +225,9 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	mode := selectedMode(parser)
 	option := buildOption(&cli, parser)
+	if cli.Timeout > 0 {
+		option.Timeout = cli.Timeout
+	}
 
 	if mode == cfg.RunModeNoCommand {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -285,7 +287,10 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
-	option.Timeout = 3600
+	option.Timeout = cli.Timeout
+	if option.Timeout <= 0 {
+		option.Timeout = 3600
+	}
 
 	scannerArgs := append([]string(nil), scannerRest...)
 	if scannerName == "scan" {
@@ -309,6 +314,12 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
 	option.Model = cfg.ResolveString(manual.Model, option.Model)
+	if manual.MaxTokens != 0 {
+		option.MaxTokens = manual.MaxTokens
+	}
+	if manual.ContextWindow != 0 {
+		option.ContextWindow = manual.ContextWindow
+	}
 	option.LLMProxy = cfg.ResolveString(manual.LLMProxy, option.LLMProxy)
 	if manual.AI {
 		option.AI = true
@@ -473,6 +484,16 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.APIKey = v }},
 	{names: []string{"--model"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Model = v }},
+	{names: []string{"--max-tokens"}, arity: 1, apply: func(o *cfg.Option, v string) {
+		if n, e := strconv.Atoi(v); e == nil {
+			o.MaxTokens = n
+		}
+	}},
+	{names: []string{"--context-window"}, arity: 1, apply: func(o *cfg.Option, v string) {
+		if n, e := strconv.Atoi(v); e == nil {
+			o.ContextWindow = n
+		}
+	}},
 	{names: []string{"--proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Proxy = v }},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.LLMProxy = v }},
 	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaEmail = v }},
@@ -496,14 +517,15 @@ var scannerKnownFlags = []knownFlag{
 }
 
 var rootOnlyFlagValueArity = map[string]int{
-	"--input":  1,
-	"-i":       1,
-	"--view":   1,
-	"-F":       1,
-	"--output": 1,
-	"-o":       1,
-	"--file":   1,
-	"-f":       1,
+	"--input":   1,
+	"-i":        1,
+	"--view":    1,
+	"-F":        1,
+	"--output":  1,
+	"-o":        1,
+	"--file":    1,
+	"-f":        1,
+	"--timeout": 1,
 }
 
 var rootFlagValueArity = buildRootFlagValueArity()
@@ -728,5 +750,21 @@ func setupSignalHandler(cancel context.CancelFunc, logger telemetry.Logger) *sig
 }
 
 func printHelp(parser *goflags.Parser) {
-	parser.WriteHelp(os.Stdout)
+	writeHelp(parser, os.Stdout)
+}
+
+func writeHelp(parser *goflags.Parser, writer io.Writer) {
+	if parser.Active == nil {
+		parser.WriteHelp(writer)
+		return
+	}
+
+	// Parser.Usage contains the long root command catalog. go-flags reuses it
+	// verbatim when rendering subcommand help, which pushes the active command's
+	// flags below the fold. Keep the detailed catalog for `aiscan -h`, but use a
+	// compact root prefix for `aiscan <command> -h`.
+	rootUsage := parser.Usage
+	parser.Usage = "[GLOBAL OPTIONS]"
+	defer func() { parser.Usage = rootUsage }()
+	parser.WriteHelp(writer)
 }

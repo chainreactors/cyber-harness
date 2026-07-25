@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -32,7 +33,7 @@ func TestRetryOnTransientError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v, want success after retry", err)
 	}
@@ -41,6 +42,58 @@ func TestRetryOnTransientError(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Fatalf("call count = %d, want 2", callCount)
+	}
+}
+
+func TestClampMaxTokens(t *testing.T) {
+	tests := []struct {
+		name                     string
+		configured, window, used int
+		want                     int
+	}{
+		{name: "configured limit fits", configured: 16384, window: 128000, used: 10000, want: 16384},
+		{name: "remaining context clamps", configured: 32768, window: 100000, used: 80000, want: 15904},
+		{name: "safety margin exhausted", configured: 4096, window: 4096, used: 1, want: 1},
+		{name: "default max tokens", configured: 0, window: 128000, used: 10000, want: DefaultMaxTokens},
+		{name: "unknown window leaves configured", configured: 12345, window: 0, used: 10000, want: 12345},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampMaxTokens(tt.configured, tt.window, tt.used); got != tt.want {
+				t.Fatalf("clampMaxTokens(%d, %d, %d) = %d, want %d", tt.configured, tt.window, tt.used, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigInitUsesPiModelLimitDefaults(t *testing.T) {
+	cfg := (Config{Model: "unknown-custom-model"}).init()
+	if cfg.MaxTokens != DefaultMaxTokens || cfg.ContextWindow != DefaultContextWindow {
+		t.Fatalf("default limits = max:%d context:%d", cfg.MaxTokens, cfg.ContextWindow)
+	}
+}
+
+func TestAgentRequestUsesConfiguredAndRemainingContextLimits(t *testing.T) {
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "done")),
+	}}
+	ag := NewAgent(Config{
+		Provider:      llm,
+		Model:         "custom",
+		MaxTokens:     20000,
+		ContextWindow: 10000,
+		MaxRetries:    -1,
+	})
+	if _, err := ag.Run(context.Background(), TextInput(strings.Repeat("x", 8000))); err != nil {
+		t.Fatal(err)
+	}
+	requests := llm.requestsSnapshot()
+	if len(requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(requests))
+	}
+	// 8000 ASCII bytes estimate to 2000 tokens. No tools are registered.
+	if got, want := requests[0].MaxTokens, 10000-2000-ContextSafetyTokens; got != want {
+		t.Fatalf("request max_tokens = %d, want %d", got, want)
 	}
 }
 
@@ -59,7 +112,7 @@ func TestNoRetryOnAuthError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 3,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want auth error")
 	}
@@ -83,7 +136,7 @@ func TestRetryExhaustedReturnsLastError(t *testing.T) {
 		Tools:      tools,
 		Model:      "test",
 		MaxRetries: 2,
-	})).Run(context.Background(), "hello")
+	})).Run(context.Background(), TextInput("hello"))
 	if err == nil {
 		t.Fatal("Run() error = nil, want error after retries exhausted")
 	}
@@ -99,6 +152,9 @@ func TestRetryableProviderTimeoutAndStallErrors(t *testing.T) {
 	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrStreamStalled)) {
 		t.Fatal("ErrStreamStalled should be retryable")
 	}
+	if !isRetryableError(fmt.Errorf("wrapped: %w", ErrStreamIncomplete)) {
+		t.Fatal("ErrStreamIncomplete should be retryable")
+	}
 	if !isRetryableError(retryableTimeoutError{}) {
 		t.Fatal("network timeout should be retryable")
 	}
@@ -110,6 +166,15 @@ func TestRetryableProviderTimeoutAndStallErrors(t *testing.T) {
 	}
 }
 
+func TestContextOverflowBypassesTransportRetry(t *testing.T) {
+	if isRetryableError(&APIError{StatusCode: 500, Message: "maximum context length exceeded"}) {
+		t.Fatal("context overflow should go directly to compaction")
+	}
+	if !isRetryableError(&APIError{StatusCode: 503, Message: "Service unavailable: too many tokens"}) {
+		t.Fatal("service unavailable should remain a transport retry")
+	}
+}
+
 func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -117,16 +182,17 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	_, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
-		newEmitter(eventbus.New[Event](), "test", ""),
+		newAOPEmitter(eventbus.New[aop.Event](), "aiscan", "test-session", "", "", nil, 0),
 		telemetry.NopLogger(),
 		1,
+		"m-1",
 	)
 	if err != context.Canceled {
 		t.Fatalf("streamAssistantMessageWithUsage() error = %v, want context.Canceled", err)
 	}
 }
 
-func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
+func TestProviderFailureDoesNotAutomaticallyFallback(t *testing.T) {
 	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "invalid api key"}}
 	fallback := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -142,33 +208,12 @@ func TestProviderFallbackOnRetryExhaustion(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	result, err := a.Run(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil (fallback should succeed)", err)
-	}
-	if result.Output != "from fallback" {
-		t.Fatalf("Output = %q, want 'from fallback'", result.Output)
-	}
-	if len(fallback.requestsSnapshot()) == 0 {
-		t.Fatal("fallback provider was never called")
-	}
-}
-
-func TestProviderFallbackAllExhausted(t *testing.T) {
-	primary := &scriptedProvider{err: &APIError{StatusCode: 401, Message: "bad key"}}
-	fallback := &scriptedProvider{err: &APIError{StatusCode: 403, Message: "forbidden"}}
-
-	a := NewAgent(Config{
-		Provider:   primary,
-		Model:      "primary-model",
-		Fallbacks:  []ProviderEntry{{Provider: fallback, Model: "fallback-model"}},
-		MaxRetries: 0,
-		Logger:     telemetry.NopLogger(),
-	})
-
-	_, err := a.Run(context.Background(), "hello")
+	_, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil {
-		t.Fatal("Run() error = nil, want error when all providers exhausted")
+		t.Fatal("Run() error = nil, want the primary provider error")
+	}
+	if len(fallback.requestsSnapshot()) != 0 {
+		t.Fatal("fallback provider was called automatically")
 	}
 }
 
@@ -191,7 +236,7 @@ func TestNoFallbackWhenPrimarySucceeds(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	result, err := a.Run(context.Background(), "hello")
+	result, err := a.Run(context.Background(), TextInput("hello"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -234,7 +279,7 @@ func TestImageErrorAutoRecovery(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze this")
+	result, err := a.Run(context.Background(), TextInput("analyze this"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -275,7 +320,7 @@ func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze the screenshot")
+	result, err := a.Run(context.Background(), TextInput("analyze the screenshot"))
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil (image error should auto-recover)", err)
 	}
@@ -312,7 +357,7 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 		},
 	})
 
-	result, err := a.Run(context.Background(), "analyze")
+	result, err := a.Run(context.Background(), TextInput("analyze"))
 	if err != nil {
 		t.Fatalf("first Run() error = %v", err)
 	}
@@ -321,7 +366,7 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 	}
 
 	imgProvider.callCount.Store(0)
-	_, err = a.Run(context.Background(), "follow up")
+	_, err = a.Run(context.Background(), TextInput("follow up"))
 	if err != nil {
 		t.Fatalf("second Run() error = %v", err)
 	}

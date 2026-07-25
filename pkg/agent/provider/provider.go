@@ -31,13 +31,15 @@ type WebSearchResponse struct {
 }
 
 type ProviderConfig struct {
-	Provider string `yaml:"provider" config:"provider"`
-	BaseURL  string `yaml:"base_url" config:"base_url"`
-	APIKey   string `yaml:"api_key"  config:"api_key"`
-	Model    string `yaml:"model"    config:"model"`
-	Proxy    string `yaml:"proxy"    config:"proxy"`
-	Timeout  int    `yaml:"timeout"  config:"timeout"`
-	Images   *bool  `yaml:"images,omitempty" config:"images"`
+	Provider      string `yaml:"provider" config:"provider"`
+	BaseURL       string `yaml:"base_url" config:"base_url"`
+	APIKey        string `yaml:"api_key"  config:"api_key"`
+	Model         string `yaml:"model"    config:"model"`
+	Proxy         string `yaml:"proxy"    config:"proxy"`
+	Timeout       int    `yaml:"timeout"  config:"timeout"`
+	Images        *bool  `yaml:"images,omitempty" config:"images"`
+	MaxTokens     int    `yaml:"max_tokens,omitempty" config:"max_tokens"`
+	ContextWindow int    `yaml:"context_window,omitempty" config:"context_window"`
 }
 
 func NormalizeProvider(name string) string {
@@ -49,6 +51,12 @@ func NormalizeProvider(name string) string {
 
 func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	resolved := *cfg
+	if resolved.MaxTokens < 0 {
+		return nil, fmt.Errorf("max_tokens must be zero or positive")
+	}
+	if resolved.ContextWindow < 0 {
+		return nil, fmt.Errorf("context_window must be zero or positive")
+	}
 
 	if resolved.Provider == "" {
 		if resolved.BaseURL != "" {

@@ -3,8 +3,10 @@
 package playwright
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -175,8 +177,7 @@ func TestParseOpenOpts_NoSpeedUp(t *testing.T) {
 
 func TestExecute_NoSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), nil)
+	_, err := cmd.Run(context.Background(), &commands.Execution{Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil {
 		t.Fatal("expected error for no subcommand")
 	}
@@ -187,8 +188,7 @@ func TestExecute_NoSubcommand(t *testing.T) {
 
 func TestExecute_UnknownSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), []string{"bogus"})
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"bogus"}, Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand")
 	}
@@ -198,16 +198,19 @@ func TestExecute_UnknownSubcommand(t *testing.T) {
 }
 
 func TestResolvePath_Absolute(t *testing.T) {
-	got := resolvePath("/work", "/abs/path.png")
-	if got != "/abs/path.png" {
-		t.Fatalf("expected /abs/path.png, got %q", got)
+	absolute := filepath.Join(t.TempDir(), "abs", "path.png")
+	got := resolvePath(t.TempDir(), absolute)
+	if got != absolute {
+		t.Fatalf("expected %q, got %q", absolute, got)
 	}
 }
 
 func TestResolvePath_Relative(t *testing.T) {
-	got := resolvePath("/work", "file.png")
-	if got != "/work/file.png" {
-		t.Fatalf("expected /work/file.png, got %q", got)
+	workDir := t.TempDir()
+	want := filepath.Join(workDir, "file.png")
+	got := resolvePath(workDir, "file.png")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
@@ -260,18 +263,18 @@ func newTestServer(handler http.HandlerFunc) *httptest.Server {
 // execString is a test helper that runs cmd.Execute and returns the output as a string.
 func execString(t *testing.T, cmd *Command, ctx context.Context, args []string) string {
 	t.Helper()
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(ctx, args); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
-	return commands.Output.Captured()
+	return output.String()
 }
 
 // execStringErr is a test helper that runs cmd.Execute and returns (output, error).
 func execStringErr(cmd *Command, ctx context.Context, args []string) (string, error) {
-	commands.Output.Reset(nil)
-	err := cmd.Execute(ctx, args)
-	return commands.Output.Captured(), err
+	var output bytes.Buffer
+	_, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	return output.String(), err
 }
 
 func TestIntegration_Navigate(t *testing.T) {

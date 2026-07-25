@@ -84,6 +84,14 @@ func (h *Hub) Broadcast(id string, event HubEvent) {
 }
 
 func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, terminalEvents ...string) {
+	serveSSE(w, r, hub, id, nil, terminalEvents...)
+}
+
+func ServeSSEWithInitial(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initial []HubEvent, terminalEvents ...string) {
+	serveSSE(w, r, hub, id, initial, terminalEvents...)
+}
+
+func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initial []HubEvent, terminalEvents ...string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -99,6 +107,10 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, termi
 
 	ch, unsubscribe := hub.Subscribe(id)
 	defer unsubscribe()
+	for _, event := range initial {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
+	}
+	flusher.Flush()
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()

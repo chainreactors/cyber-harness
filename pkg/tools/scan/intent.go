@@ -31,7 +31,7 @@ func FilterAutoSkill(selected []string, command string) []string {
 
 func ScannerSkillName(command string) string {
 	switch command {
-	case "gogo", "spray", "katana", "zombie", "neutron", "passive", "scan":
+	case "gogo", "spray", "katana", "zombie", "neutron", "proton", "passive", "scan":
 		return command
 	default:
 		return ""

@@ -1,6 +1,7 @@
 package arsenal
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -16,21 +17,21 @@ import (
 // run executes arsenal as a Command and returns stdout.
 func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), args)
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("arsenal %s: %v", strings.Join(args, " "), err)
 	}
-	return commands.Output.Captured()
+	return output.String()
 }
 
 // runErr executes and expects an error.
 func runErr(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
-	commands.Output.Reset(nil)
-	err := cmd.Execute(context.Background(), args)
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
 	if err == nil {
-		t.Fatalf("arsenal %s: expected error, got output: %s", strings.Join(args, " "), commands.Output.Captured())
+		t.Fatalf("arsenal %s: expected error, got output: %s", strings.Join(args, " "), output.String())
 	}
 	return err.Error()
 }

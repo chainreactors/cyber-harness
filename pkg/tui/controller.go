@@ -9,17 +9,21 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 type agentRunFunc func(context.Context) (*agent.Result, error)
 
+type pendingRun struct {
+	label       string
+	displayText string
+	run         agentRunFunc
+}
+
 type EvalSettings struct {
 	Criteria string
 	Model    string
 	Provider agent.Provider
-	Bus      *eventbus.Bus[agent.Event]
 	Logger   telemetry.Logger
 }
 
@@ -34,6 +38,7 @@ type interactiveRunController struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	onFinish func()
+	pending  []pendingRun
 
 	Eval *EvalSettings
 
@@ -55,15 +60,22 @@ func (c *interactiveRunController) SubmitPrompt(label, displayText, prompt strin
 	if strings.TrimSpace(prompt) == "" {
 		return nil
 	}
+	return c.submit(label, displayText, c.buildRunFunc(prompt))
+}
+
+func (c *interactiveRunController) submit(label, displayText string, run agentRunFunc) error {
 	c.mu.Lock()
 	if c.running {
+		// Busy input joins the run-boundary FIFO: each queued prompt becomes a
+		// full Input→Run cycle, matching the stdio/web entry semantics.
+		c.pending = append(c.pending, pendingRun{label: label, displayText: displayText, run: run})
+		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
-		c.session.SteerUserMessage(prompt)
-		c.output.Queued(displayText)
+		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
-	return c.start(label, displayText, c.buildRunFunc(prompt))
+	return c.start(label, displayText, run)
 }
 
 func (c *interactiveRunController) Continue() error {
@@ -72,39 +84,30 @@ func (c *interactiveRunController) Continue() error {
 	}
 	c.mu.Lock()
 	if c.running {
+		c.pending = append(c.pending, pendingRun{label: "continue", run: func(ctx context.Context) (*agent.Result, error) {
+			return c.session.Continue(ctx)
+		}})
+		inbox := pendingDisplayTexts(c.pending)
 		c.mu.Unlock()
-		c.session.SteerUserMessage("Continue.")
-		c.output.Queued("Continue.")
+		c.output.SetInbox(inbox)
 		return nil
 	}
 	c.mu.Unlock()
-	return c.start("continue", "", c.session.Continue)
+	return c.start("continue", "", func(ctx context.Context) (*agent.Result, error) {
+		return c.session.Continue(ctx)
+	})
 }
 
 func (c *interactiveRunController) buildRunFunc(prompt string) agentRunFunc {
 	if c.Eval == nil || c.Eval.Criteria == "" {
 		return func(ctx context.Context) (*agent.Result, error) {
-			return c.session.Run(ctx, prompt)
+			return c.session.Run(ctx, agent.TextInput(prompt))
 		}
 	}
 	eval := c.Eval
 	return func(ctx context.Context) (*agent.Result, error) {
-		logger := eval.Logger
-		if logger == nil {
-			logger = telemetry.NopLogger()
-		}
-		cfg := evaluator.EvalLoopConfig{
-			Evaluator: evaluator.New(evaluator.Config{
-				Provider: eval.Provider,
-				Model:    eval.Model,
-				Logger:   logger,
-			}),
-			MaxEvalRounds: 3,
-			Goal:          prompt,
-			Criteria:      eval.Criteria,
-			Bus:           eval.Bus,
-		}
-		result, _, err := evaluator.RunWithEval(ctx, c.session, cfg)
+		result, _, err := evaluator.RunWithEval(ctx, c.session,
+			evaluator.NewLoopConfig(eval.Provider, eval.Model, eval.Logger, prompt, eval.Criteria, 0))
 		return result, err
 	}
 }
@@ -133,7 +136,7 @@ func (c *interactiveRunController) start(label, displayText string, run agentRun
 func (c *interactiveRunController) run(ctx context.Context, cancel context.CancelFunc, done chan struct{}, run agentRunFunc) {
 	defer close(done)
 	defer cancel()
-	defer func() { c.finish(); c.notifyFinish() }()
+	defer func() { c.finish(); c.notifyFinish(); c.drainPending() }()
 
 	result, err := run(ctx)
 	if ctx.Err() != nil {
@@ -163,7 +166,10 @@ func (c *interactiveRunController) checkContextUsage(result *agent.Result) {
 	if result == nil || result.ContextTokens <= 0 {
 		return
 	}
-	contextWindow := agent.ModelContextWindow(c.session.Cfg.Model)
+	contextWindow := c.session.ContextWindow()
+	if contextWindow <= 0 {
+		contextWindow = agent.ModelContextWindow(c.session.Model())
+	}
 	if result.ContextTokens*100/contextWindow >= 80 {
 		c.mu.Lock()
 		c.compactContextTokens = result.ContextTokens
@@ -178,6 +184,25 @@ func (c *interactiveRunController) finish() {
 	c.running = false
 	c.stopping = false
 	c.cancel = nil
+}
+
+// drainPending starts the oldest queued run, if any. Queued runs chain: each
+// run's defer drains the next, preserving FIFO order.
+func (c *interactiveRunController) drainPending() {
+	c.mu.Lock()
+	if len(c.pending) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	next := c.pending[0]
+	c.pending = c.pending[1:]
+	inbox := pendingDisplayTexts(c.pending)
+	c.mu.Unlock()
+	c.output.SetInbox(inbox)
+	if err := c.start(next.label, next.displayText, next.run); err != nil {
+		c.output.Error(err)
+		c.drainPending()
+	}
 }
 
 func (c *interactiveRunController) SetOnFinish(fn func()) {
@@ -206,13 +231,30 @@ func (c *interactiveRunController) Stop() bool {
 	}
 	cancel := c.cancel
 	c.stopping = true
+	// Canceling the current run also drops queued input.
+	c.pending = nil
 	c.mu.Unlock()
 
 	if c.output != nil {
+		c.output.SetInbox(nil)
 		c.output.AbortCurrentRun()
 	}
 	cancel()
 	return true
+}
+
+// pendingDisplayTexts extracts stable, user-facing inbox previews without
+// exposing expanded prompts or internal run closures in the status row.
+func pendingDisplayTexts(pending []pendingRun) []string {
+	items := make([]string, 0, len(pending))
+	for _, run := range pending {
+		text := strings.TrimSpace(run.displayText)
+		if text == "" {
+			text = strings.TrimSpace(run.label)
+		}
+		items = append(items, text)
+	}
+	return items
 }
 
 func (c *interactiveRunController) Running() bool {

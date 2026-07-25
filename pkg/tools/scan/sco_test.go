@@ -14,7 +14,7 @@ import (
 func TestStructuredResultContainsSCONodes(t *testing.T) {
 	bus := eventbus.New[pipeline.Observation]()
 	coll := newCollector([]string{"192.168.1.0/24"}, nil, false, false)
-	subscribePipeline(bus, coll, false)
+	subscribePipeline(bus, coll, false, nil)
 
 	// Simulate gogo finding a service
 	gogoResult := &parsers.GOGOResult{

@@ -15,7 +15,7 @@ import (
 
 type OnProxyChange func(newProxyURL string)
 
-type CommandExecutor func(ctx context.Context, tokens []string) (string, error)
+type CommandExecutor func(ctx context.Context, tokens []string, execution *commands.Execution) (any, error)
 
 type Command struct {
 	state         *State
@@ -27,9 +27,9 @@ func New(state *State) *Command {
 	return &Command{state: state}
 }
 
-func (c *Command) SetOnProxyChange(fn OnProxyChange) { c.onProxyChange = fn }
+func (c *Command) SetOnProxyChange(fn OnProxyChange)     { c.onProxyChange = fn }
 func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
-func (c *Command) Name() string                         { return "proxy" }
+func (c *Command) Name() string                          { return "proxy" }
 
 func (c *Command) Usage() string {
 	return `proxy - Manage proxy nodes and proxy-chain execution
@@ -57,19 +57,21 @@ Auto mode options:
   --strategy,-s adaptive      Load balance strategy (adaptive, url-test, round-robin, random)`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("proxy", &err)
+	args := execution.Args
 	if len(args) == 0 {
-		fmt.Fprint(commands.Output, c.Usage())
-		return nil
+		fmt.Fprint(execution.Stdout, c.Usage())
+		return nil, nil
 	}
 	subcmd := strings.ToLower(args[0])
 	rest := args[1:]
 
 	var result string
+	var details any
 
 	if strings.Contains(args[0], "://") {
-		result, err = c.execPassthrough(ctx, args[0], rest)
+		details, err = c.execPassthrough(ctx, args[0], rest, execution)
 	} else {
 		switch subcmd {
 		case "auto":
@@ -89,23 +91,23 @@ func (c *Command) Execute(ctx context.Context, args []string) (err error) {
 		default:
 			if len(rest) > 0 {
 				if node, _, findErr := c.findNode(args[0]); findErr == nil {
-					result, err = c.execPassthrough(ctx, node.URL.String(), rest)
+					details, err = c.execPassthrough(ctx, node.URL.String(), rest, execution)
 				} else {
-					return fmt.Errorf("unknown proxy subcommand: %s\n%s", subcmd, c.Usage())
+					return nil, fmt.Errorf("unknown proxy subcommand: %s\n%s", subcmd, c.Usage())
 				}
 			} else {
-				return fmt.Errorf("unknown proxy subcommand: %s\n%s", subcmd, c.Usage())
+				return nil, fmt.Errorf("unknown proxy subcommand: %s\n%s", subcmd, c.Usage())
 			}
 		}
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result != "" {
-		fmt.Fprint(commands.Output, result)
+		fmt.Fprint(execution.Stdout, result)
 	}
-	return nil
+	return details, nil
 }
 
 // parseFlags is a helper that wraps goflags.ParseArgs and returns remaining positional args.
@@ -122,15 +124,15 @@ func parseFlags(f interface{}, args []string) ([]string, error) {
 // passthrough
 // ---------------------------------------------------------------------------
 
-func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string) (string, error) {
+func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string, execution *commands.Execution) (any, error) {
 	if len(cmdArgs) == 0 {
-		return "", fmt.Errorf("usage: proxy <proxy-url> <command> [args...]\nexample: proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2")
+		return nil, fmt.Errorf("usage: proxy <proxy-url> <command> [args...]\nexample: proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2")
 	}
 	if c.execCommand == nil {
-		return "", fmt.Errorf("proxy passthrough not available (no command executor)")
+		return nil, fmt.Errorf("proxy passthrough not available (no command executor)")
 	}
 	if _, err := url.Parse(proxyURL); err != nil {
-		return "", fmt.Errorf("invalid proxy URL: %w", err)
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
 	prev := c.state.ActiveProxy()
@@ -143,7 +145,7 @@ func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs 
 		}
 	}()
 
-	return c.execCommand(ctx, cmdArgs)
+	return c.execCommand(ctx, cmdArgs, execution)
 }
 
 // ---------------------------------------------------------------------------

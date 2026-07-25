@@ -36,4 +36,18 @@ export default {
   llmHealthSettings: '点击打开设置',
   // 手机端会话抽屉（顶栏汉堡打开）
   openSessions: '对话历史',
+  authChecking: '正在验证登录状态…',
+  loginTitle: '访问 AIScan',
+  loginDescription: '请输入服务启动时生成或通过命令行配置的访问 Token。',
+  loginTokenLabel: '访问 Token',
+  loginTokenPlaceholder: '输入 Token',
+  loginTokenRequired: '请输入访问 Token',
+  loginShowToken: '显示 Token',
+  loginHideToken: '隐藏 Token',
+  loginSecurityHint: 'Token 仅用于本次登录，并由服务器保存在 HttpOnly 会话中。',
+  loginSubmit: '登录',
+  loginSubmitting: '正在验证…',
+  loginInvalid: 'Token 无效，请检查后重试。',
+  loginUnavailable: '暂时无法连接服务器，请稍后重试。',
+  logout: '退出登录',
 }

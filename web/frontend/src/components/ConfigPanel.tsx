@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle, Settings, Zap } from 'lucide-react'
+import { Check, CheckCircle, Plus, Settings, Trash2, Zap } from 'lucide-react'
 import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
-import type { ConfigStatus, ConnCheck, DistributeConfig, LLMTestResult, ServerStatus } from '../api'
+import type { ConfigStatus, ConnCheck, DistributeConfig, LLMProviderProfile, LLMTestResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, ResultLine } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ModelCombobox } from './ModelCombobox'
@@ -27,8 +27,9 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 function emptyForm(): DistributeConfig {
+  const profile = blankLLMProfile('default')
   return {
-    llm: { provider: '', base_url: '', api_key: '', model: '', proxy: '' },
+    llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
     recon: { fofa_email: '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: '' },
     scan: { verify: '', verify_timeout: 0 },
@@ -39,8 +40,29 @@ function emptyForm(): DistributeConfig {
 }
 
 function statusToForm(cs: ConfigStatus): DistributeConfig {
+  const profiles: LLMProviderProfile[] = cs.llm.profiles?.length
+    ? cs.llm.profiles.map(profile => ({
+        ...profile,
+        api_key: '',
+        context_window: positiveInteger(profile.context_window),
+        max_tokens: positiveInteger(profile.max_tokens),
+      }))
+    : [{
+        id: cs.llm.active_profile || 'default',
+        name: cs.llm.model || cs.llm.provider || 'Default',
+        provider: cs.llm.provider,
+        base_url: cs.llm.base_url,
+        api_key: '',
+        model: cs.llm.model,
+        proxy: cs.llm.proxy,
+        context_window: positiveInteger(cs.llm.context_window),
+        max_tokens: positiveInteger(cs.llm.max_tokens),
+      }]
   return {
-    llm: { provider: cs.llm.provider, base_url: cs.llm.base_url, api_key: '', model: cs.llm.model, proxy: cs.llm.proxy },
+    llm: {
+      active_profile: cs.llm.active_profile || profiles[0].id,
+      providers: profiles,
+    },
     cyberhub: { url: cs.cyberhub.url, key: '', mode: cs.cyberhub.mode, proxy: cs.cyberhub.proxy },
     recon: { fofa_email: cs.recon.fofa_email, fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: cs.recon.proxy, limit: cs.recon.limit },
     scan: { ...cs.scan },
@@ -48,6 +70,19 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
     ioa: { url: cs.ioa.url, token: '', node_name: cs.ioa.node_name, space: cs.ioa.space },
     agent: { ...cs.agent },
   }
+}
+
+function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
+  return { id, name: 'New LLM', provider: 'openai', base_url: '', api_key: '', model: '', proxy: '' }
+}
+
+function positiveInteger(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? value : undefined
+}
+
+function positiveIntegerFromInput(value: string): number | undefined {
+  if (value.trim() === '') return undefined
+  return positiveInteger(Number(value))
 }
 
 // sectionStatus returns the readiness badges for the active settings section.
@@ -93,6 +128,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('llm')
+  const [selectedLLMProfileID, setSelectedLLMProfileID] = useState('default')
 
   useEffect(() => {
     if (!open) return
@@ -100,7 +136,12 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
     setError('')
     setSaved(false)
     getConfigStatus()
-      .then((s) => { setCs(s); setForm(statusToForm(s)) })
+      .then((s) => {
+        const next = statusToForm(s)
+        setCs(s)
+        setForm(next)
+        setSelectedLLMProfileID(next.llm.active_profile)
+      })
       .catch((err: Error) => setError(err.message || t('failedLoad')))
       .finally(() => setLoading(false))
   }, [open])
@@ -166,7 +207,15 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
                 <Badge variant={cs?.config_loaded ? 'success' : 'warning'} className="text-xs">{cs?.config_loaded ? t('configLoaded') : t('configMissing')}</Badge>
               </div>
               <div className="min-h-[12rem]">
-                {activeTab === 'llm' && <LLMTab form={form} setForm={setForm} cs={cs} />}
+                {activeTab === 'llm' && (
+                  <LLMTab
+                    form={form}
+                    setForm={setForm}
+                    cs={cs}
+                    selectedProfileID={selectedLLMProfileID}
+                    onSelectProfile={setSelectedLLMProfileID}
+                  />
+                )}
                 {activeTab === 'cyberhub' && <CyberhubTab form={form} setForm={setForm} cs={cs} />}
                 {activeTab === 'recon' && <ReconTab form={form} setForm={setForm} cs={cs} />}
                 {activeTab === 'scan' && <ScanTab form={form} setForm={setForm} />}
@@ -193,24 +242,71 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
 
 type TabProps = { form: DistributeConfig; setForm: React.Dispatch<React.SetStateAction<DistributeConfig>>; cs?: ConfigStatus | null }
 
-function LLMTab({ form, setForm, cs }: TabProps) {
+function LLMTab({
+  form,
+  setForm,
+  cs,
+  selectedProfileID,
+  onSelectProfile,
+}: TabProps & { selectedProfileID: string; onSelectProfile: (id: string) => void }) {
   const { t } = useTranslation('config')
-  const u = (k: string, v: string) => setForm((f) => ({ ...f, llm: { ...f.llm, [k]: v } }))
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<LLMTestResult | null>(null)
   const [models, setModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
 
+  const profiles = form.llm.providers
+  const profile = profiles.find(item => item.id === selectedProfileID) || profiles[0]
+  const configuredProfile = cs?.llm.profiles?.find(item => item.id === profile?.id)
+
+  const updateProfile = <K extends keyof LLMProviderProfile,>(key: K, value: LLMProviderProfile[K]) => {
+    if (!profile) return
+    setForm(current => ({
+      ...current,
+      llm: {
+        ...current.llm,
+        providers: current.llm.providers.map(item => item.id === profile.id ? { ...item, [key]: value } : item),
+      },
+    }))
+  }
+
+  const addProfile = () => {
+    const next = blankLLMProfile()
+    setForm(current => ({ ...current, llm: { ...current.llm, providers: [...current.llm.providers, next] } }))
+    onSelectProfile(next.id)
+    setModels([])
+    setResult(null)
+  }
+
+  const removeProfile = () => {
+    if (!profile || profiles.length <= 1) return
+    const remaining = profiles.filter(item => item.id !== profile.id)
+    const nextActive = form.llm.active_profile === profile.id ? remaining[0].id : form.llm.active_profile
+    setForm(current => ({
+      ...current,
+      llm: { ...current.llm, active_profile: nextActive, providers: remaining },
+    }))
+    onSelectProfile(remaining[0].id)
+    setModels([])
+    setResult(null)
+  }
+
+  const setActiveProfile = () => {
+    if (!profile) return
+    setForm(current => ({ ...current, llm: { ...current.llm, active_profile: profile.id } }))
+  }
+
   const handleFetchModels = async () => {
+    if (!profile) return
     setFetchingModels(true)
     setModelsError(null)
     try {
       const res = await listLLMModels({
-        provider: form.llm.provider,
-        base_url: form.llm.base_url,
-        api_key: form.llm.api_key,
-        proxy: form.llm.proxy,
+        provider: profile.provider,
+        base_url: profile.base_url,
+        api_key: profile.api_key,
+        proxy: profile.proxy,
       })
       if (res.ok) {
         setModels(res.models ?? [])
@@ -227,29 +323,57 @@ function LLMTab({ form, setForm, cs }: TabProps) {
   }
 
   const handleTest = async () => {
+    if (!profile) return
     setTesting(true)
     setResult(null)
     try {
       const res = await testLLM({
-        provider: form.llm.provider,
-        base_url: form.llm.base_url,
-        api_key: form.llm.api_key,
-        model: form.llm.model,
-        proxy: form.llm.proxy,
+        provider: profile.provider,
+        base_url: profile.base_url,
+        api_key: profile.api_key,
+        model: profile.model,
+        proxy: profile.proxy,
       })
       setResult(res)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      setResult({ ok: false, provider: form.llm.provider, model: form.llm.model, latency_ms: 0, error: message || t('testFailed') })
+      setResult({ ok: false, provider: profile.provider, model: profile.model, latency_ms: 0, error: message || t('testFailed') })
     } finally {
       setTesting(false)
     }
   }
 
+  if (!profile) return null
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/15 p-2">
+        {profiles.map(item => {
+          const active = item.id === form.llm.active_profile
+          const selected = item.id === profile.id
+          return (
+            <button key={item.id} type="button" onClick={() => { onSelectProfile(item.id); setModels([]); setResult(null) }}>
+              <Badge
+                variant={active ? 'success' : selected ? 'secondary' : 'outline'}
+                className={cn('gap-1.5 py-1 text-xs transition-colors', selected && 'ring-2 ring-primary/15')}
+              >
+                {active && <Check className="h-3 w-3" />}
+                {item.name || item.model || item.provider || t('unnamedProfile')}
+              </Badge>
+            </button>
+          )
+        })}
+        <Button type="button" variant="ghost" size="xs" onClick={addProfile} className="gap-1 text-muted-foreground">
+          <Plus className="h-3.5 w-3.5" />
+          {t('addLLMProfile')}
+        </Button>
+      </div>
+
+      <Field label={t('profileName')}>
+        <Input value={profile.name} onChange={(e) => updateProfile('name', e.target.value)} placeholder={t('profileNameHint')} />
+      </Field>
       <Field label={t('provider')}>
-        <Select value={form.llm.provider} onValueChange={(v) => u('provider', v)}>
+        <Select value={profile.provider} onValueChange={(v) => updateProfile('provider', v)}>
           <SelectTrigger className="h-9 w-full"><SelectValue placeholder={t('selectProvider')} /></SelectTrigger>
           <SelectContent>
             {['deepseek','openai','openrouter','ollama','groq','moonshot','anthropic'].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -258,8 +382,8 @@ function LLMTab({ form, setForm, cs }: TabProps) {
       </Field>
       <Field label={t('model')} error={modelsError}>
         <ModelCombobox
-          value={form.llm.model}
-          onChange={(v) => u('model', v)}
+          value={profile.model}
+          onChange={(v) => updateProfile('model', v)}
           models={models}
           loading={fetchingModels}
           error={modelsError}
@@ -267,19 +391,51 @@ function LLMTab({ form, setForm, cs }: TabProps) {
           placeholder="deepseek-v4-pro / gpt-4.1"
         />
       </Field>
-      <Field label={t('baseUrl')}><Input value={form.llm.base_url} onChange={(e) => u('base_url', e.target.value)} placeholder={t('providerDefault')} /></Field>
-      <Field label={t('proxy')}><Input value={form.llm.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="http://127.0.0.1:7890" /></Field>
+      <Field label={t('baseUrl')}><Input value={profile.base_url} onChange={(e) => updateProfile('base_url', e.target.value)} placeholder={t('providerDefault')} /></Field>
+      <Field label={t('contextWindow')}>
+        <Input
+          type="number"
+          min={1}
+          step={1}
+          value={profile.context_window ?? ''}
+          onChange={(e) => updateProfile('context_window', positiveIntegerFromInput(e.target.value))}
+          placeholder={t('modelDefault')}
+        />
+      </Field>
+      <Field label={t('maxTokens')}>
+        <Input
+          type="number"
+          min={1}
+          step={1}
+          value={profile.max_tokens ?? ''}
+          onChange={(e) => updateProfile('max_tokens', positiveIntegerFromInput(e.target.value))}
+          placeholder={t('modelDefault')}
+        />
+      </Field>
+      <Field label={t('proxy')}><Input value={profile.proxy} onChange={(e) => updateProfile('proxy', e.target.value)} placeholder="http://127.0.0.1:7890" /></Field>
       <div className="sm:col-span-2">
         <Field label={t('apiKey')}>
-          <Input type="password" value={form.llm.api_key} onChange={(e) => u('api_key', e.target.value)}
-            placeholder={cs?.llm.api_key_configured ? t('configuredKeep') : t('requiredUnlessOllama')} />
+          <Input type="password" value={profile.api_key} onChange={(e) => updateProfile('api_key', e.target.value)}
+            placeholder={configuredProfile?.api_key_configured ? t('configuredKeep') : t('requiredUnlessOllama')} />
         </Field>
       </div>
-      <div className="sm:col-span-2 flex items-center gap-3">
-        <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing || !form.llm.model}>
+      <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing || !profile.model}>
           {testing ? <ProbePulse /> : <Zap className="h-4 w-4" />}
           {testing ? t('testing') : t('testConnection')}
         </Button>
+        {profile.id !== form.llm.active_profile && (
+          <Button type="button" variant="outline" size="sm" onClick={setActiveProfile}>
+            <Check className="h-4 w-4" />
+            {t('setActiveProfile')}
+          </Button>
+        )}
+        {profiles.length > 1 && (
+          <Button type="button" variant="ghost" size="sm" onClick={removeProfile} className="text-destructive hover:text-destructive">
+            <Trash2 className="h-4 w-4" />
+            {t('removeProfile')}
+          </Button>
+        )}
         {result && (
           <ResultLine ok={result.ok} title={result.ok ? undefined : result.error}>
             {result.ok
@@ -470,4 +626,3 @@ function ConnCheckRow({ check }: { check: ConnCheck }) {
     </ResultLine>
   )
 }
-

@@ -71,36 +71,6 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: aiscan-agent
-    main: ./cmd/agent
-    binary: "{{ .ProjectName }}-agent"
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
-    flags:
-      - -trimpath
-    tags:
-      - forceposix
-      - emptytemplates
-      - noembed
-      - osusergo
-      - netgo
-    ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
-
 upx:
   - enabled: true
     goos: [linux, windows]
@@ -109,7 +79,7 @@ upx:
 
 archives:
   - id: aiscan
-    builds: [aiscan]
+    ids: [aiscan]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
@@ -118,21 +88,13 @@ archives:
       - src: docs/*
 
   - id: aiscan-full
-    builds: [aiscan-full]
+    ids: [aiscan-full]
     name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
     files:
       - src: README.md
       - src: docs/*
-
-  - id: aiscan-agent
-    builds: [aiscan-agent]
-    name_template: "{{ .ProjectName }}-agent_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
 
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"

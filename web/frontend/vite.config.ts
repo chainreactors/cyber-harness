@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const backendURL = process.env.AISCAN_BACKEND_URL || 'http://127.0.0.1:8080'
+
 // Design-system primitives + the terminal view are consumed from the cyber-ui
 // submodule (single source of truth for what aiscan contributes upstream). The
 // remaining composite views (markdown/viewer) stay vendored under @/ because
@@ -15,15 +17,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@cyber/ui': path.resolve(cyberUI, 'ui/src'),
       '@cyber/theme': path.resolve(cyberUI, 'theme/src'),
+      '@cyber/markdown': path.resolve(cyberUI, 'markdown/src'),
       '@cyber/terminal': path.resolve(cyberUI, 'terminal/src'),
       '@cyber/cstx': path.resolve(cyberUI, 'cstx/src'),
       '@cyber/cstx-easm': path.resolve(cyberUI, 'cstx-easm/src'),
+      '@cyber/agent-protocol': path.resolve(__dirname, './src/compat/agent-protocol.ts'),
+      '@cyber/viewer': path.resolve(cyberUI, 'viewer/src'),
+      '@cyber/ioa': path.resolve(__dirname, './src/compat/ioa.tsx'),
     },
   },
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: backendURL,
         ws: true,
       },
     },

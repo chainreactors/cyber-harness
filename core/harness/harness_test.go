@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	ioaclient "github.com/chainreactors/ioa/client"
+	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
 
@@ -41,6 +44,107 @@ func TestAgentSimplePrompt(t *testing.T) {
 		MaxTurns:       2,
 		JudgeCriteria:  "The agent must reply with the number 4. No tool calls needed. The answer must be mathematically correct.",
 	}.Run(t, h)
+}
+
+// TestAgentDualSessionInterleaved drives the stdio host with two concurrent
+// sessions: messages for sess-a and sess-b are written interleaved and both
+// sessions must run to completion independently.
+func TestAgentDualSessionInterleaved(t *testing.T) {
+	h := New(t)
+
+	fullArgs := h.agentCLIArgs()
+	fullArgs = append(fullArgs, "--transport", "stdio")
+
+	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, h.exe, fullArgs...)
+	cmd.Dir = h.workDir
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start agent: %v", err)
+	}
+
+	encoder := json.NewEncoder(stdin)
+	writeFrame := func(message webproto.Message) {
+		t.Helper()
+		if err := encoder.Encode(message); err != nil {
+			t.Fatalf("write %s: %v", message.Type, err)
+		}
+	}
+	writeRun := func(sessionID, turnID, text string) {
+		writeFrame(webproto.Message{
+			Type: webproto.TypeRun, TurnID: turnID,
+			Payload: webproto.MustJSON(webproto.RunPayload{
+				SessionID: sessionID,
+				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: text}},
+			}),
+		})
+	}
+	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-a"})})
+	writeFrame(webproto.Message{Type: webproto.TypeSessionOpen, Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "sess-b"})})
+	writeRun("sess-a", "turn-a1", "Reply with exactly: ALPHA")
+	writeRun("sess-b", "turn-b1", "Reply with exactly: BRAVO")
+	writeRun("sess-a", "turn-a2", "Reply with exactly: ALPHA2")
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+
+	type sessionState struct {
+		ended   int
+		wantEnd int
+		outputs []string
+	}
+	sessions := map[string]*sessionState{"sess-a": {wantEnd: 2}, "sess-b": {wantEnd: 1}}
+	decoder := json.NewDecoder(stdout)
+	for {
+		var message webproto.Message
+		if err := decoder.Decode(&message); err != nil {
+			break
+		}
+		if message.Type != webproto.TypeAOP {
+			continue
+		}
+		var event aop.Event
+		if err := json.Unmarshal(message.Payload, &event); err != nil {
+			t.Fatalf("decode AOP payload: %v", err)
+		}
+		state, ok := sessions[event.SessionID]
+		if !ok {
+			continue
+		}
+		switch event.Type {
+		case aop.TypeMessage:
+			data, err := aop.DecodeData[aop.MessageData](event)
+			if err == nil && data.Role == "assistant" {
+				state.outputs = append(state.outputs, messageText(data))
+			}
+		case aop.TypeTurnEnd:
+			state.ended++
+		}
+	}
+	_ = cmd.Wait()
+
+	for id, state := range sessions {
+		if state.ended != state.wantEnd {
+			t.Errorf("%s completed %d/%d runs (stderr: %s)", id, state.ended, state.wantEnd, clip(stderr.String(), 500))
+		}
+	}
+	if got := strings.Join(sessions["sess-a"].outputs, "\n"); !strings.Contains(got, "ALPHA") {
+		t.Errorf("sess-a outputs = %q, want ALPHA", got)
+	}
+	if got := strings.Join(sessions["sess-b"].outputs, "\n"); !strings.Contains(got, "BRAVO") {
+		t.Errorf("sess-b outputs = %q, want BRAVO", got)
+	}
 }
 
 func TestAgentEmptyReply(t *testing.T) {
@@ -140,8 +244,8 @@ func TestAgentMultiStepTask(t *testing.T) {
 func TestAgentMultiTurn(t *testing.T) {
 	h := New(t)
 	Intent{
-		Name:   "multi-turn-file-ops",
-		Prompt: "Step 1: Create file /tmp/aiscan_multi.txt with content 'step1'. Step 2: Append ' step2' to it. Step 3: Read it and confirm it says 'step1 step2'.",
+		Name:     "multi-turn-file-ops",
+		Prompt:   "Step 1: Create file /tmp/aiscan_multi.txt with content 'step1'. Step 2: Append ' step2' to it. Step 3: Read it and confirm it says 'step1 step2'.",
 		NoErrors: true,
 		MaxTurns: 8,
 		JudgeCriteria: "The agent must perform three sequential file operations: " +

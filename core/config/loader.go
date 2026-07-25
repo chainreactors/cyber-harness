@@ -111,6 +111,12 @@ func mergeOption(dst, src *Option) {
 	dst.BaseURL = ResolveString(dst.BaseURL, src.BaseURL)
 	dst.APIKey = ResolveString(dst.APIKey, src.APIKey)
 	dst.Model = ResolveString(dst.Model, src.Model)
+	if dst.MaxTokens == 0 {
+		dst.MaxTokens = src.MaxTokens
+	}
+	if dst.ContextWindow == 0 {
+		dst.ContextWindow = src.ContextWindow
+	}
 	dst.LLMProxy = ResolveString(dst.LLMProxy, src.LLMProxy)
 	dst.CyberhubURL = ResolveString(dst.CyberhubURL, src.CyberhubURL)
 	dst.CyberhubKey = ResolveString(dst.CyberhubKey, src.CyberhubKey)
@@ -125,6 +131,7 @@ func mergeOption(dst, src *Option) {
 	}
 	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
 	dst.WebURL = ResolveString(dst.WebURL, src.WebURL)
+	dst.Transport = ResolveString(dst.Transport, src.Transport)
 	dst.IOAURL = ResolveString(dst.IOAURL, src.IOAURL)
 	dst.IOAToken = ResolveString(dst.IOAToken, src.IOAToken)
 	dst.IOANodeName = ResolveString(dst.IOANodeName, src.IOANodeName)
@@ -134,6 +141,7 @@ func mergeOption(dst, src *Option) {
 	if len(dst.Providers) == 0 && len(src.Providers) > 0 {
 		dst.Providers = src.Providers
 	}
+	dst.ActiveProfile = ResolveString(dst.ActiveProfile, src.ActiveProfile)
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
 	}

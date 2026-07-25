@@ -24,13 +24,20 @@ const queryTimeout = 600 * time.Second
 
 // Command dispatches passive recon to uncover by -s <source>.
 type Command struct {
-	engine  *engine.UncoverEngine
+	engine  QueryEngine
 	logger  telemetry.Logger
 	sources map[string]bool
 }
 
+// QueryEngine is the passive command's minimal dependency, allowing callers
+// to supply deterministic or alternate recon backends.
+type QueryEngine interface {
+	Sources() []string
+	QueryRaw(context.Context, string, string) ([]sources.Result, error)
+}
+
 // New creates a passive command. Engine may be nil (not configured).
-func New(eng *engine.UncoverEngine) *Command {
+func New(eng QueryEngine) *Command {
 	c := &Command{
 		engine:  eng,
 		logger:  telemetry.NopLogger(),
@@ -77,27 +84,28 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("passive", &err)
+	args := execution.Args
 	src, rest, help, err := splitSource(args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if help {
-		fmt.Fprint(commands.Output, c.Usage())
-		return nil
+		fmt.Fprint(execution.Stdout, c.Usage())
+		return nil, nil
 	}
 	if c.sources[src] {
 		result, err := c.runQuery(ctx, src, rest)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if result != "" {
-			fmt.Fprint(commands.Output, result)
+			fmt.Fprint(execution.Stdout, result)
 		}
-		return nil
+		return nil, nil
 	}
-	return fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
+	return nil, fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
 }
 
 // --------------- query dispatch ----------------------------------------------

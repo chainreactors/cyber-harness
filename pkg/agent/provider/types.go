@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/chainreactors/aiscan/core/tool"
 )
 
 // CacheRetention controls prompt caching behavior across providers.
@@ -45,6 +47,10 @@ type ChatMessage struct {
 	ReasoningContent *string       `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	// FinishReason is response metadata used by the agent loop. It must not be
+	// sent back as part of an OpenAI-compatible message.
+	FinishReason      string `json:"-"`
+	ToolResultIsError bool   `json:"-"`
 }
 
 func (m ChatMessage) MarshalJSON() ([]byte, error) {
@@ -121,9 +127,10 @@ type ChatMessageDelta struct {
 }
 
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID             string       `json:"id"`
+	Type           string       `json:"type"`
+	Function       FunctionCall `json:"function"`
+	RejectedReason string       `json:"-"`
 }
 
 type ToolCallDelta struct {
@@ -143,27 +150,9 @@ type FunctionCallDelta struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-type ToolDefinition struct {
-	Type     string             `json:"type"`
-	Function FunctionDefinition `json:"function"`
-}
+type ToolDefinition = tool.Definition
 
-type FunctionDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-}
-
-type ResponseFormat struct {
-	Type       string          `json:"type"`
-	JSONSchema *JSONSchemaSpec  `json:"json_schema,omitempty"`
-}
-
-type JSONSchemaSpec struct {
-	Name   string      `json:"name"`
-	Schema interface{} `json:"schema"`
-	Strict bool        `json:"strict,omitempty"`
-}
+type FunctionDefinition = tool.FuncDef
 
 type ChatCompletionRequest struct {
 	Model          string           `json:"model"`
@@ -172,7 +161,6 @@ type ChatCompletionRequest struct {
 	MaxTokens      int              `json:"max_tokens,omitempty"`
 	Temperature    *float64         `json:"temperature,omitempty"`
 	Stream         bool             `json:"stream,omitempty"`
-	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
 	CacheRetention CacheRetention   `json:"-"`
 	SessionID      string           `json:"-"`
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
 )
 
@@ -37,19 +38,21 @@ type GlobArgs struct {
 	Path    string `json:"path,omitempty" jsonschema:"description=Base directory for the search (default: working directory)"`
 }
 
-func (t *GlobTool) Definition() ToolDefinition {
-	return ToolDef("glob", t.Description(), GlobArgs{})
+func (t *GlobTool) Definition() coretool.Definition {
+	return coretool.Def("glob", t.Description(), GlobArgs{})
 }
 
-
-func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, error) {
-	args, err := ParseArgs[GlobArgs](arguments)
+func (t *GlobTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+	effective := *t
+	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	t = &effective
+	args, err := coretool.ParseArgs[GlobArgs](arguments)
 	if err != nil {
-		return ToolResult{}, err
+		return coretool.Result{}, err
 	}
 
 	if args.Pattern == "" {
-		return ToolResult{}, fmt.Errorf("pattern is required")
+		return coretool.Result{}, fmt.Errorf("pattern is required")
 	}
 
 	baseDir := t.workDir
@@ -70,7 +73,7 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 		matches, err = filepath.Glob(pattern)
 	}
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("glob error: %w", err)
+		return coretool.Result{}, fmt.Errorf("glob error: %w", err)
 	}
 
 	// Also search virtual/embedded files
@@ -88,7 +91,7 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	}
 
 	if len(matches) == 0 {
-		return TextResult("no files matched"), nil
+		return coretool.TextResult("no files matched"), nil
 	}
 
 	truncated := false
@@ -112,7 +115,7 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (ToolResult, e
 	}
 	sb.WriteString(summary)
 
-	return TextResult(sb.String()), nil
+	return coretool.TextResult(sb.String()), nil
 }
 
 // globRecursive handles patterns containing ** by walking the directory tree.

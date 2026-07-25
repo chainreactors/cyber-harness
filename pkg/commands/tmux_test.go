@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"runtime"
 	"strings"
 	"testing"
@@ -10,14 +12,28 @@ import (
 	tmuxpkg "github.com/chainreactors/aiscan/pkg/agent/tmux"
 )
 
-func tmuxTool(t *testing.T) *TmuxCommand {
+type testOutputWriter struct{ bytes.Buffer }
+
+func (w *testOutputWriter) Reset(_ io.Writer) { w.Buffer.Reset() }
+func (w *testOutputWriter) Captured() string  { return w.String() }
+
+var Output = &testOutputWriter{}
+
+type testTmuxCommand struct {
+	command Command
+	manager *tmuxpkg.Manager
+}
+
+func (c *testTmuxCommand) Execute(ctx context.Context, args []string) error {
+	_, err := c.command.Run(ctx, &Execution{Args: args, Stdout: Output, Stderr: Output})
+	return err
+}
+
+func tmuxTool(t *testing.T) *testTmuxCommand {
 	t.Helper()
-	mgr := tmuxpkg.NewManager()
-	t.Cleanup(mgr.Shutdown)
-	mgr.SetWorkDir(t.TempDir())
-	return &TmuxCommand{
-		manager: mgr,
-	}
+	bash := NewBashTool(t.TempDir(), 10)
+	t.Cleanup(bash.Close)
+	return &testTmuxCommand{command: NewTmuxCommand(bash), manager: bash.Manager()}
 }
 
 func TestTmuxNewSessionForeground(t *testing.T) {

@@ -8,6 +8,7 @@ export default {
   failedToLoadAgents: '加载 Agent 失败',
   filterAgents: '筛选 Agent…',
   noMatchingAgents: '无匹配 Agent。',
+  openingTerminal: '正在打开终端…',
   busy: '忙碌',
   idle: '空闲',
   justNow: '刚刚',

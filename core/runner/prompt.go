@@ -179,7 +179,9 @@ func BuildSystemPrompt(cfg *PromptConfig, agentCfg *agent.Config) string {
 	}
 	tools := cfg.Tools
 	if tools == nil && agentCfg != nil {
-		tools = agentCfg.Tools
+		if reg, ok := agentCfg.Tools.(*commands.CommandRegistry); ok {
+			tools = reg
+		}
 	}
 	if tools == nil {
 		tools = commands.NewRegistry()

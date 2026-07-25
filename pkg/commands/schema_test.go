@@ -2,6 +2,8 @@ package commands
 
 import (
 	"testing"
+
+	"github.com/chainreactors/aiscan/core/tool"
 )
 
 type testReadArgs struct {
@@ -15,7 +17,7 @@ type testEnumArgs struct {
 }
 
 func TestSchemaOf(t *testing.T) {
-	m := SchemaOf(testReadArgs{})
+	m := tool.SchemaOf(testReadArgs{})
 
 	if m["type"] != "object" {
 		t.Fatalf("expected type=object, got %v", m["type"])
@@ -48,7 +50,7 @@ func TestSchemaOf(t *testing.T) {
 }
 
 func TestSchemaOfEnum(t *testing.T) {
-	m := SchemaOf(testEnumArgs{})
+	m := tool.SchemaOf(testEnumArgs{})
 
 	props, ok := m["properties"].(map[string]any)
 	if !ok {
@@ -79,7 +81,7 @@ func TestSchemaOfEnum(t *testing.T) {
 }
 
 func TestToolDef(t *testing.T) {
-	def := ToolDef("read", "Read a file", testReadArgs{})
+	def := tool.Def("read", "Read a file", testReadArgs{})
 
 	if def.Type != "function" {
 		t.Fatalf("expected type=function, got %s", def.Type)
@@ -99,7 +101,7 @@ func TestToolDef(t *testing.T) {
 }
 
 func TestParseArgs(t *testing.T) {
-	args, err := ParseArgs[testReadArgs](`{"path": "/tmp/test.txt", "offset": 10}`)
+	args, err := tool.ParseArgs[testReadArgs](`{"path": "/tmp/test.txt", "offset": 10}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,14 +117,14 @@ func TestParseArgs(t *testing.T) {
 }
 
 func TestParseArgsInvalid(t *testing.T) {
-	_, err := ParseArgs[testReadArgs](`{invalid json}`)
+	_, err := tool.ParseArgs[testReadArgs](`{invalid json}`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
 
 func TestToolResult(t *testing.T) {
-	r := TextResult("hello world")
+	r := tool.TextResult("hello world")
 	if r.Text() != "hello world" {
 		t.Fatalf("expected 'hello world', got %q", r.Text())
 	}
@@ -130,7 +132,7 @@ func TestToolResult(t *testing.T) {
 		t.Fatal("expected IsError=false")
 	}
 
-	e := ErrorResult("something broke")
+	e := tool.ErrorResult("something broke")
 	if !e.IsError {
 		t.Fatal("expected IsError=true")
 	}
@@ -138,7 +140,7 @@ func TestToolResult(t *testing.T) {
 		t.Fatalf("expected 'something broke', got %q", e.Text())
 	}
 
-	tr := TerminateResult("done")
+	tr := tool.TerminateResult("done")
 	if !tr.Terminate {
 		t.Fatal("expected Terminate=true")
 	}

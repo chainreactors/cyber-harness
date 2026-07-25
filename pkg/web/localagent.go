@@ -36,6 +36,7 @@ type LocalAgents struct {
 	webURL     string     // hub loopback address children dial (derived from web --addr)
 	webAuthURL string     // same base with the access token as userinfo, for /api/agent/ws auth
 	ioaURL     string     // hub IOA endpoint carrying the embedded access token
+	configFile string     // explicit hub config inherited by hub-launched children
 	pool       *AgentPool // live pool, for registration/busy cross-reference
 
 	mu    sync.Mutex
@@ -46,11 +47,12 @@ type LocalAgents struct {
 // NewLocalAgents builds a launcher. hubURL is the loopback base the children
 // dial (e.g. http://127.0.0.1:8080); ioaToken is embedded into the child's IOA
 // URL. Children are launched from the current aiscan executable.
-func NewLocalAgents(hubURL, ioaToken string, pool *AgentPool) *LocalAgents {
+func NewLocalAgents(hubURL, ioaToken, configFile string, pool *AgentPool) *LocalAgents {
 	return &LocalAgents{
 		webURL:     hubURL,
 		webAuthURL: webURLWithToken(hubURL, ioaToken),
 		ioaURL:     nodeIOAURL(hubURL, ioaToken),
+		configFile: strings.TrimSpace(configFile),
 		pool:       pool,
 	}
 }
@@ -108,12 +110,17 @@ func (l *LocalAgents) Launch(ctx context.Context) (*LocalAgentView, error) {
 	name := fmt.Sprintf("local-%d", l.seq)
 	l.mu.Unlock()
 
-	cmd := exec.Command(bin, "agent",
+	args := []string{
+		"agent",
 		"--web-url", l.webAuthURL,
 		"--server-url", l.ioaURL,
 		"--space", "default",
 		"--node-name", name,
-	)
+	}
+	if l.configFile != "" {
+		args = append([]string{"--config", l.configFile}, args...)
+	}
+	cmd := exec.Command(bin, args...)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start local agent: %w", err)
 	}
@@ -192,19 +199,14 @@ func (l *LocalAgents) remove(p *localProc) {
 	}
 }
 
-// view cross-references a child against the live pool (matched by IOA node name,
-// falling back to the agent name) to report whether it has connected yet.
+// view cross-references a child against the live pool by its display name.
 func (l *LocalAgents) view(p *localProc) LocalAgentView {
 	v := LocalAgentView{Name: p.name, PID: p.pid}
 	if l.pool == nil {
 		return v
 	}
 	for _, a := range l.pool.List() {
-		name := a.Identity.NodeName
-		if name == "" {
-			name = a.Name
-		}
-		if name == p.name {
+		if a.Name == p.name {
 			v.Registered, v.Busy = true, a.Busy
 			break
 		}

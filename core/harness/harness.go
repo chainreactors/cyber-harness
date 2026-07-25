@@ -5,15 +5,21 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 var (
@@ -87,7 +93,11 @@ func buildOnce(t *testing.T) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	exe := filepath.Join(dir, "aiscan-e2e")
+	exeName := "aiscan-e2e"
+	if runtime.GOOS == "windows" {
+		exeName += ".exe"
+	}
+	exe := filepath.Join(dir, exeName)
 	args := []string{"build", "-tags", buildTags(), "-o", exe, "./cmd/aiscan"}
 	cmd := exec.Command("go", args...)
 	cmd.Dir = repoRoot(t)
@@ -114,65 +124,38 @@ func (h *Harness) Run(args ...string) *RunResult {
 func (h *Harness) RunWithTimeout(timeout time.Duration, args ...string) *RunResult {
 	h.t.Helper()
 
-	eventsFile := filepath.Join(h.workDir, fmt.Sprintf("events-%d.jsonl", time.Now().UnixNano()))
-
-	fullArgs := append(h.llmArgs(), "--no-color", "--quiet")
-
-	needsEvents := false
-	for _, a := range args {
-		if a == "agent" {
-			needsEvents = true
-			break
-		}
+	var fullArgs []string
+	switch {
+	case len(args) > 0 && args[0] == "agent":
+		fullArgs = h.agentCLIArgs(args[1:]...)
+	case len(args) == 1 && args[0] == "--version":
+		fullArgs = []string{"--no-color", "--quiet", "--version"}
+	default:
+		fullArgs = append(h.llmArgs(), "--no-color", "--quiet")
+		fullArgs = append(fullArgs, args...)
 	}
-	fullArgs = append(fullArgs, args...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, h.exe, fullArgs...)
 	cmd.Dir = h.workDir
-	if needsEvents {
-		cmd.Env = append(os.Environ(), "AISCAN_EVENTS_FILE="+eventsFile)
-	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	var monitorDone chan struct{}
-	if h.monitor != nil && needsEvents {
-		monitorDone = make(chan struct{})
-		go h.monitor.run(eventsFile, monitorDone)
-	}
-
 	start := time.Now()
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	if monitorDone != nil {
-		close(monitorDone)
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() != nil {
-			exitCode = -1
-		}
-	}
+	exitCode := processExitCode(err)
 
 	result := &RunResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 		Duration: duration,
-	}
-
-	if needsEvents {
-		result.Events = loadEvents(eventsFile)
 	}
 
 	h.t.Logf("ran: aiscan %s (exit=%d, duration=%s, turns=%d, tools=%d)",
@@ -193,19 +176,108 @@ func (h *Harness) WorkFile(name string) string {
 
 func (h *Harness) Agent(prompt string, extraArgs ...string) *RunResult {
 	h.t.Helper()
-	args := []string{"agent", "-p", prompt}
-	args = append(args, extraArgs...)
-	return h.Run(args...)
+	return h.AgentWithTimeout(h.timeout, prompt, extraArgs...)
+}
+
+func (h *Harness) AgentWithTimeout(timeout time.Duration, prompt string, extraArgs ...string) *RunResult {
+	h.t.Helper()
+
+	fullArgs := h.agentCLIArgs(extraArgs...)
+	fullArgs = append(fullArgs, "--transport", "stdio")
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, h.exe, fullArgs...)
+	cmd.Dir = h.workDir
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		h.t.Fatalf("agent stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		h.t.Fatalf("agent stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		h.t.Fatalf("start aiscan agent: %v", err)
+	}
+
+	encoder := json.NewEncoder(stdin)
+	openErr := encoder.Encode(webproto.Message{
+		Type:    webproto.TypeSessionOpen,
+		Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "harness"}),
+	})
+	writeErr := openErr
+	if writeErr == nil {
+		writeErr = encoder.Encode(webproto.Message{
+			Type: webproto.TypeRun, TurnID: "turn-1",
+			Payload: webproto.MustJSON(webproto.RunPayload{
+				SessionID: "harness",
+				Parts:     []aop.MessagePart{{Type: aop.PartText, Text: prompt}},
+			}),
+		})
+	}
+	closeErr := stdin.Close()
+	if writeErr != nil || closeErr != nil {
+		cancel()
+	}
+
+	output, events, streamErr := consumeAgentStream(stdout, h.monitor)
+	if streamErr != nil {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	duration := time.Since(start)
+
+	exitCode := processExitCode(waitErr)
+	if writeErr != nil {
+		exitCode = -1
+		fmt.Fprintf(&stderr, "write stdio request: %v\n", writeErr)
+	} else if closeErr != nil {
+		exitCode = -1
+		fmt.Fprintf(&stderr, "close stdio request: %v\n", closeErr)
+	}
+	if streamErr != nil {
+		exitCode = -1
+		fmt.Fprintf(&stderr, "read AOP stdout: %v\n", streamErr)
+	}
+
+	result := &RunResult{
+		Stdout:   output,
+		Stderr:   stderr.String(),
+		ExitCode: exitCode,
+		Duration: duration,
+		Events:   events,
+	}
+
+	h.t.Logf("ran: aiscan agent (exit=%d, duration=%s, turns=%d, tools=%d)",
+		exitCode, duration.Round(time.Millisecond), result.Turns(), len(result.ToolCalls()))
+	if exitCode != 0 {
+		h.t.Logf("stderr: %s", clip(stderr.String(), 2000))
+	}
+
+	return result
 }
 
 func (h *Harness) AgentWithInput(prompt string, inputs []string, extraArgs ...string) *RunResult {
 	h.t.Helper()
-	args := []string{"agent", "-p", prompt}
+	args := make([]string, 0, len(inputs)*2+len(extraArgs))
 	for _, input := range inputs {
 		args = append(args, "-i", input)
 	}
 	args = append(args, extraArgs...)
-	return h.Run(args...)
+	task := fmt.Sprintf("%s\n\nTargets:\n%s", prompt, config.FormatInputs(inputs))
+	return h.Agent(task, args...)
+}
+
+func (h *Harness) agentCLIArgs(extraArgs ...string) []string {
+	args := []string{"--no-color", "--quiet", "agent"}
+	args = append(args, h.llmArgs()...)
+	return append(args, extraArgs...)
 }
 
 func (h *Harness) Scanner(name string, scannerArgs ...string) *RunResult {
@@ -238,6 +310,16 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func processExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func clip(s string, maxLen int) string {

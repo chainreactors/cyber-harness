@@ -39,13 +39,15 @@ func hasSingleProviderFields(option *Option) bool {
 
 func entryToProviderConfig(entry LLMProviderEntry) agent.ProviderConfig {
 	cfg := agent.ProviderConfig{
-		Provider: entry.Provider,
-		BaseURL:  entry.BaseURL,
-		APIKey:   entry.APIKey,
-		Model:    entry.Model,
-		Proxy:    entry.Proxy,
-		Timeout:  entry.Timeout,
-		Images:   entry.Images,
+		Provider:      entry.Provider,
+		BaseURL:       entry.BaseURL,
+		APIKey:        entry.APIKey,
+		Model:         entry.Model,
+		Proxy:         entry.Proxy,
+		Timeout:       entry.Timeout,
+		Images:        entry.Images,
+		MaxTokens:     entry.MaxTokens,
+		ContextWindow: entry.ContextWindow,
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 120
@@ -53,9 +55,33 @@ func entryToProviderConfig(entry LLMProviderEntry) agent.ProviderConfig {
 	return cfg
 }
 
+// activeProviderIndex resolves the primary provider profile by ActiveProfile
+// id; list position is meaningless, so an unset or unknown id selects index 0.
+func activeProviderIndex(option *Option) int {
+	if option.ActiveProfile != "" {
+		for i, entry := range option.Providers {
+			if entry.ID == option.ActiveProfile {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+func applyProviderLimits(cfg *agent.ProviderConfig, option *Option) {
+	if option.MaxTokens != 0 {
+		cfg.MaxTokens = option.MaxTokens
+	}
+	if option.ContextWindow != 0 {
+		cfg.ContextWindow = option.ContextWindow
+	}
+}
+
 func ProviderConfig(option *Option) agent.ProviderConfig {
 	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
-		return entryToProviderConfig(option.Providers[0])
+		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
+		applyProviderLimits(&cfg, option)
+		return cfg
 	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
@@ -76,14 +102,19 @@ func ProviderConfig(option *Option) agent.ProviderConfig {
 	if option.LLMProxy != "" {
 		cfg.Proxy = option.LLMProxy
 	}
+	applyProviderLimits(&cfg, option)
 	cfg.Timeout = 120
 	return cfg
 }
 
 func FallbackProviderConfigs(option *Option) []agent.ProviderConfig {
-	if !hasSingleProviderFields(option) && len(option.Providers) > 1 {
+	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
+		active := activeProviderIndex(option)
 		var configs []agent.ProviderConfig
-		for _, entry := range option.Providers[1:] {
+		for i, entry := range option.Providers {
+			if i == active {
+				continue
+			}
 			configs = append(configs, entryToProviderConfig(entry))
 		}
 		return configs
@@ -100,4 +131,6 @@ func ApplyResolvedProviderOptions(option *Option, cfg agent.ProviderConfig) {
 	option.BaseURL = cfg.BaseURL
 	option.APIKey = cfg.APIKey
 	option.Model = cfg.Model
+	option.MaxTokens = cfg.MaxTokens
+	option.ContextWindow = cfg.ContextWindow
 }

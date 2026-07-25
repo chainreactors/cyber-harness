@@ -19,7 +19,9 @@ export interface ScanJob {
 }
 
 import type { SCONode } from '@cyber/cstx-easm';
+import type { AOPEvent } from '@cyber/agent-protocol';
 export type { SCONode };
+export type { AOPEvent };
 
 export interface ScanResult {
   summary: ScanResultSummary;
@@ -130,31 +132,74 @@ export interface ServerStatus {
   ioa_url?: string;
 }
 
+export const AUTH_REQUIRED_EVENT = 'aiscan:auth-required'
+
+export class APIError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message)
+    this.name = 'APIError'
+  }
+}
+
+export async function getAuthSession(): Promise<boolean> {
+  const res = await fetch('/api/auth/session', { cache: 'no-store' })
+  if (!res.ok) return false
+  const body = await res.json() as { authenticated?: boolean }
+  return body.authenticated === true
+}
+
+export async function login(token: string): Promise<void> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    throw new APIError(await errorMessage(res, 'Login failed'), res.status)
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' })
+  } finally {
+    notifyAuthRequired()
+  }
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
   commands?: string[];
   busy: boolean;
   connected_at: string;
-  identity?: AgentIdentity;
+  node: NodeRef;
+  runtime?: AgentRuntime;
+  status?: AgentStatus;
   stats?: AgentStats;
 }
 
-export interface AgentIdentity {
-  node_id?: string;
-  node_name?: string;
-  space?: string;
-  ioa_url?: string;
+export interface NodeRef {
+  id: string;
+  authority: string;
+}
+
+export interface AgentRuntime {
   hostname?: string;
   username?: string;
   working_dir?: string;
   os?: string;
   arch?: string;
   pid?: number;
-  provider?: string;
-  model?: string;
   capabilities?: string[];
   meta?: Record<string, unknown>;
+}
+
+export interface AgentStatus {
+  provider?: string;
+  model?: string;
+  space?: string;
+  bound: boolean;
 }
 
 export interface AgentStats {
@@ -173,11 +218,90 @@ export interface AgentStats {
   current_detail?: string;
 }
 
+export interface IOAIdentityBinding {
+  namespace: string
+  subject: string
+  claims?: Record<string, unknown>
+}
+
+export interface IOANode {
+  id: string
+  name: string
+  description?: string
+  meta?: Record<string, unknown>
+  identities?: IOAIdentityBinding[]
+}
+
+export interface IOASpace {
+  id: string
+  name: string
+  tags?: string[]
+  nodes?: IOANode[]
+  message_count: number
+}
+
+export interface IOARef {
+  messages?: string[]
+  nodes?: string[]
+}
+
+export interface IOAMessage {
+  id: string
+  space_id: string
+  sender: string
+  created_at: string
+  content_type?: string
+  content: Record<string, unknown>
+  refs?: IOARef
+  meta?: Record<string, unknown>
+  content_schema?: Record<string, unknown>
+}
+
+export interface IOAOverview {
+  nodes: IOANode[]
+  spaces: IOASpace[]
+  messages: IOAMessage[]
+}
+
+export interface LLMProfileStatus {
+  id: string
+  name: string
+  provider: string
+  base_url: string
+  api_key_configured: boolean
+  model: string
+  proxy: string
+  context_window?: number
+  max_tokens?: number
+}
+
+export interface LLMProviderProfile {
+  id: string
+  name: string
+  provider: string
+  base_url: string
+  api_key: string
+  model: string
+  proxy: string
+  context_window?: number
+  max_tokens?: number
+}
+
 // ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
 export interface ConfigStatus {
   config_path?: string;
   config_loaded: boolean;
-  llm: { provider: string; base_url: string; api_key_configured: boolean; model: string; proxy: string };
+  llm: {
+    provider: string
+    base_url: string
+    api_key_configured: boolean
+    model: string
+    proxy: string
+    context_window?: number
+    max_tokens?: number
+    active_profile?: string
+    profiles?: LLMProfileStatus[]
+  };
   cyberhub: { url: string; key_configured: boolean; mode: string; proxy: string };
   recon: { fofa_email: string; fofa_key_configured: boolean; hunter_token_configured: boolean; hunter_api_key_configured: boolean; proxy: string; limit?: number };
   scan: { verify: string; verify_timeout: number };
@@ -188,22 +312,16 @@ export interface ConfigStatus {
 
 // DistributeConfig — PUT /api/config request body (with secret values)
 export interface DistributeConfig {
-  llm: { provider: string; base_url: string; api_key: string; model: string; proxy: string };
+  llm: {
+    active_profile: string
+    providers: LLMProviderProfile[]
+  };
   cyberhub: { url: string; key: string; mode: string; proxy: string };
   recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number };
   scan: { verify: string; verify_timeout: number };
   search: { tavily_keys: string };
   ioa: { url: string; token: string; node_name: string; space: string };
   agent: { tools: string[]; timeout: number; save_session: boolean };
-}
-
-export interface TerminalMessage {
-  type: string;
-  task_id?: string;
-  stream_id?: string;
-  data?: string;
-  data_b64?: string;
-  payload?: Record<string, unknown>;
 }
 
 export async function getStatus(): Promise<ServerStatus> {
@@ -224,6 +342,14 @@ export async function saveConfig(config: DistributeConfig): Promise<ConfigStatus
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
+}
+
+export async function activateLLMProfile(id: string): Promise<ConfigStatus> {
+  return apiJSON('/api/config/llm/active', 'Failed to switch LLM profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
 }
 
 // LLMTestRequest — POST /api/config/llm/test body. Leave api_key blank to
@@ -326,6 +452,14 @@ export async function listLocalAgents(): Promise<LocalAgentView[]> {
   return apiJSON('/api/deploy/local', 'Failed to list local agents')
 }
 
+export async function getIOAOverview(): Promise<IOAOverview> {
+  // Polled every 3s while the IOA console is open. A stalled hub must surface
+  // as an error the console can show, not a forever-pending request.
+  return apiJSON('/api/ioa/overview', 'Failed to load IOA console', {
+    signal: AbortSignal.timeout(10_000),
+  })
+}
+
 export async function stopLocalAgent(name: string): Promise<void> {
   await apiJSON(`/api/deploy/local/${encodeURIComponent(name)}`, 'Failed to delete local agent', {
     method: 'DELETE',
@@ -424,27 +558,48 @@ export async function deleteScan(id: string): Promise<void> {
   await apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Failed to delete scan', { method: 'DELETE' });
 }
 
+// subscribeSSE is the module-private EventSource primitive: one place that
+// wires named handlers, extracts the data string, and manages lifecycle.
+// Handlers receive the raw data string (possibly empty) and decide on parsing.
+function subscribeSSE(
+  url: string,
+  handlers: Record<string, (data: string, raw: Event) => void>,
+  opts?: { onOpen?: () => void; onError?: () => void },
+): EventSource {
+  const es = new EventSource(url)
+  if (opts?.onOpen) es.addEventListener('open', () => opts.onOpen!())
+  if (opts?.onError) es.addEventListener('error', () => opts.onError!())
+  for (const [type, handler] of Object.entries(handlers)) {
+    es.addEventListener(type, (e: Event) => {
+      const data = 'data' in e ? (e as MessageEvent).data : undefined
+      if (typeof data !== 'string') return
+      handler(data, e)
+    })
+  }
+  return es
+}
+
 export function subscribeScanEvents(
   id: string,
   onEvent: (event: ScanEvent) => void,
 ): () => void {
-  const es = new EventSource(authURL(`/api/scans/${encodeURIComponent(id)}/events`));
-  const handler = (type: RawScanEventType) => (e: Event) => {
-    const data = 'data' in e ? (e as MessageEvent).data : undefined;
-    if (typeof data !== 'string' || data === '') {
+  let es: EventSource | null = null
+  const close = () => es?.close()
+  const handler = (type: RawScanEventType) => (data: string) => {
+    if (data === '') {
       if (type === 'error') {
         void getScan(id)
           .then((job) => {
             if (job.status === 'completed') {
               onEvent({ type: 'complete', scan_id: id, status: job.status });
-              es.close();
+              close();
             } else if (job.status === 'failed' || job.status === 'canceled') {
               onEvent({
                 type: 'error',
                 scan_id: id,
                 error: job.error || `Scan ${job.status}`,
               });
-              es.close();
+              close();
             }
           })
           .catch(() => {});
@@ -468,17 +623,19 @@ export function subscribeScanEvents(
 
     onEvent(event);
     if (event.type === 'complete' || event.type === 'error') {
-      es.close();
+      close();
     }
   };
-  es.addEventListener('progress', handler('progress'));
-  es.addEventListener('status', handler('status'));
-  es.addEventListener('stats', handler('stats'));
-  es.addEventListener('complete', handler('complete'));
-  es.addEventListener('error', handler('error'));
-  es.addEventListener('output', handler('output'));
+  es = subscribeSSE(`/api/scans/${encodeURIComponent(id)}/events`, {
+    progress: handler('progress'),
+    status: handler('status'),
+    stats: handler('stats'),
+    complete: handler('complete'),
+    error: handler('error'),
+    output: handler('output'),
+  });
 
-  return () => es.close();
+  return () => es?.close();
 }
 
 // --- Chat session types ---
@@ -497,7 +654,7 @@ export interface ChatSession {
 export interface ChatMessage {
   id: string
   session_id: string
-  role: 'user' | 'assistant' | 'system' | 'tool_call' | 'tool_result'
+  role: 'user' | 'assistant' | 'system'
   agent_id?: string
   agent_name?: string
   content: string
@@ -506,10 +663,8 @@ export interface ChatMessage {
 }
 
 export type ChatEventType =
-  | 'message' | 'message_start' | 'message_delta' | 'message_end'
-  | 'tool_call' | 'tool_result' | 'thinking'
-  | 'scan_started' | 'scan_progress' | 'scan_complete' | 'scan_error'
-  | 'agent_joined' | 'eval' | 'session_cleared' | 'error'
+  | 'scan_started' | 'scan_progress' | 'scan_complete'
+  | 'agent_joined' | 'session_cleared'
 
 export interface ChatEvent {
   type: ChatEventType
@@ -520,21 +675,9 @@ export interface ChatEvent {
   agent_name?: string
   turn?: number
   content?: string
-  delta?: string
-  tool_name?: string
-  tool_args?: string
-  tool_call_id?: string
   scan_id?: string
   result?: ScanResult
   data?: string
-  error?: string
-  // System/error messages carry a stable code (+ params) so the client can
-  // localize them via i18n; `content`/`error` stay as English fallbacks.
-  code?: string
-  params?: Record<string, unknown>
-  eval_round?: number
-  eval_pass?: boolean
-  eval_reason?: string
 }
 
 // --- Chat session API ---
@@ -617,12 +760,8 @@ export interface FileUploadResult {
 export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
   const form = new FormData()
   form.append('file', file)
-  const headers: Record<string, string> = {}
-  const key = getAccessKey()
-  if (key) headers['Authorization'] = `Bearer ${key}`
-  const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
+  const resp = await authenticatedFetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
     method: 'POST',
-    headers,
     body: form,
   })
   if (!resp.ok) {
@@ -640,10 +779,7 @@ export async function listChatMessages(sessionID: string): Promise<ChatMessage[]
 // ('en' | 'zh'). Returns '' when the report isn't ready yet (404) so callers can
 // just show a placeholder.
 export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
-  const headers: Record<string, string> = {}
-  const key = getAccessKey()
-  if (key) headers['Authorization'] = `Bearer ${key}`
-  const res = await fetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`, { headers })
+  const res = await authenticatedFetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`)
   if (!res.ok) return ''
   return res.text()
 }
@@ -652,46 +788,50 @@ export function subscribeChatEvents(
   sessionID: string,
   onEvent: (event: ChatEvent) => void,
   onReconnect?: () => void,
+  onAOP?: (event: AOPEvent) => void,
+  onOpen?: () => void,
 ): () => void {
-  const url = authURL(`/api/chat/sessions/${encodeURIComponent(sessionID)}/events`)
-  const es = new EventSource(url)
-
   const eventTypes: ChatEventType[] = [
-    'message', 'message_start', 'message_delta', 'message_end',
-    'tool_call', 'tool_result', 'thinking',
-    'scan_started', 'scan_progress', 'scan_complete', 'scan_error',
-    'agent_joined', 'eval', 'session_cleared', 'error',
+    'scan_started', 'scan_progress', 'scan_complete',
+    'agent_joined', 'session_cleared',
   ]
 
+  const handlers: Record<string, (data: string) => void> = {}
   for (const type of eventTypes) {
-    es.addEventListener(type, (e: Event) => {
-      const data = 'data' in e ? (e as MessageEvent).data : undefined
-      if (typeof data !== 'string' || data === '') return
+    handlers[type] = (data: string) => {
+      if (data === '') return
       try {
         const parsed = JSON.parse(data)
         onEvent({ ...parsed, type })
       } catch {
         onEvent({ type, session_id: sessionID, data } as ChatEvent)
       }
-    })
+    }
+  }
+  handlers['aop'] = (data: string) => {
+    if (data === '') return
+    try {
+      const parsed = JSON.parse(data) as AOPEvent
+      if (parsed.session_id && parsed.agent && parsed.type && parsed.ts && parsed.data) onAOP?.(parsed)
+    } catch {
+      // Ignore malformed protocol frames; platform events continue normally.
+    }
   }
 
-  es.addEventListener('error', () => {
-    // EventSource auto-reconnects, but the chat SSE topic keeps no backlog, so a
-    // terminal event (message_end / tool_result / the aggregate 'message')
-    // broadcast during the drop is lost — which strands the composer in a
-    // permanent "thinking" state. Reconcile from REST truth on each connection
-    // error (idempotent), mirroring the scan path's getScan-on-error recovery.
-    onReconnect?.()
-  })
+  // EventSource reconnects automatically. Reconcile platform-domain state
+  // from REST; AOP itself is replayed from durable storage by the SSE endpoint.
+  const es = subscribeSSE(
+    `/api/chat/sessions/${encodeURIComponent(sessionID)}/events`,
+    handlers,
+    { onOpen, onError: onReconnect },
+  )
 
   return () => es.close()
 }
 
 export function agentTerminalWebSocketURL(agentID: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const base = `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
-  return authURL(base);
+  return `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
 }
 
 // ── SCO Nodes ──
@@ -726,7 +866,7 @@ export async function importSCOData(
   form.append('file', file);
   form.append('artifact', artifact);
   form.append('scan_id', scanId);
-  const resp = await fetch('/api/sco/import', { method: 'POST', body: form });
+  const resp = await authenticatedFetch('/api/sco/import', { method: 'POST', body: form });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
     throw new Error(err.error || `Import failed: ${resp.status}`);
@@ -734,29 +874,22 @@ export async function importSCOData(
   return resp.json();
 }
 
-function getAccessKey(): string {
-  return (window as any).__AISCAN_ACCESS_KEY__ || ''
-}
-
-// For SSE/WebSocket, append access_key as query param since EventSource/WebSocket can't set headers.
-function authURL(path: string): string {
-  const key = getAccessKey()
-  if (!key) return path
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}access_key=${encodeURIComponent(key)}`
-}
-
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {
-  const key = getAccessKey()
-  const headers = new Headers(init?.headers)
-  if (key) {
-    headers.set('Authorization', `Bearer ${key}`)
-  }
-  const res = await fetch(path, { ...init, headers });
+  const res = await authenticatedFetch(path, init)
   if (!res.ok) {
-    throw new Error(await errorMessage(res, fallbackMessage));
+    throw new APIError(await errorMessage(res, fallbackMessage), res.status)
   }
   return res.json();
+}
+
+async function authenticatedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init)
+  if (res.status === 401) notifyAuthRequired()
+  return res
+}
+
+function notifyAuthRequired() {
+  window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
 }
 
 async function errorMessage(res: Response, fallback: string) {

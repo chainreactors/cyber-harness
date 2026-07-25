@@ -9,17 +9,18 @@ import (
 
 func newFakeAgent(id string, buf int) *remoteAgent {
 	return &remoteAgent{
-		id:     id,
-		name:   id,
-		sendCh: make(chan WSMessage, buf),
-		tasks:  make(map[string]chan taskResult),
-		turns:  make(map[string]int),
-		done:   make(chan struct{}),
+		id:        id,
+		name:      id,
+		sendCh:    make(chan WSMessage, buf),
+		controlCh: make(chan WSMessage, 1),
+		tasks:     make(map[string]chan taskResult),
+		turns:     make(map[string]int),
+		done:      make(chan struct{}),
 	}
 }
 
-// TestBroadcastConfigReload covers both branches: an open agent gets a "config"
-// notification; an agent with a full send buffer is skipped, not blocked on.
+// TestBroadcastConfigReload verifies config updates use the control channel and
+// are not blocked by a saturated task/output channel.
 func TestBroadcastConfigReload(t *testing.T) {
 	pool := NewAgentPool(nil)
 	open := newFakeAgent("open", 1)
@@ -28,40 +29,67 @@ func TestBroadcastConfigReload(t *testing.T) {
 	pool.register(open)
 	pool.register(full)
 
-	if n := pool.BroadcastConfigReload(); n != 1 {
-		t.Fatalf("notified = %d, want 1 (full channel skipped)", n)
+	if n := pool.BroadcastConfigReload(); n != 2 {
+		t.Fatalf("notified = %d, want 2", n)
 	}
 	select {
-	case msg := <-open.sendCh:
+	case msg := <-open.controlCh:
 		if msg.Type != "config" {
 			t.Fatalf("open agent got %q, want config", msg.Type)
 		}
 	default:
 		t.Fatal("open agent got no config message")
 	}
+	select {
+	case msg := <-full.controlCh:
+		if msg.Type != "config" {
+			t.Fatalf("full agent got %q, want config", msg.Type)
+		}
+	default:
+		t.Fatal("full agent got no config control message")
+	}
 }
 
-// TestHandleAgentIdentityUpdate covers the post-hot-reload identity re-announce:
-// the agent's swapped provider/model reach the pool (so the UI badge tracks the
-// live model), while the register-time identity fields (NodeName/PID/host) are
-// preserved rather than clobbered by the partial update.
-func TestHandleAgentIdentityUpdate(t *testing.T) {
+func TestHandleAgentStatusUpdate(t *testing.T) {
 	pool := NewAgentPool(nil)
 	a := newFakeAgent("n1", 1)
-	a.identity = webproto.AgentIdentity{NodeName: "local-1", PID: 4242, Provider: "anthropic", Model: "old-model"}
+	a.runtime = webproto.AgentRuntime{PID: 4242, Hostname: "local-1"}
+	a.status = webproto.AgentStatus{Provider: "anthropic", Model: "old-model"}
 	pool.register(a)
 
-	payload, _ := json.Marshal(webproto.AgentIdentity{Provider: "anthropic", Model: "glm-5.2"})
-	pool.handleAgentMessage(a, WSMessage{Type: "agent.identity", Payload: payload})
+	payload, _ := json.Marshal(webproto.AgentStatus{Provider: "anthropic", Model: "glm-5.2", Bound: true})
+	pool.handleAgentMessage(a, WSMessage{Type: "agent.status", Payload: payload})
 
-	got := a.info().Identity
+	got := a.info().Status
 	if got.Model != "glm-5.2" {
-		t.Errorf("Model = %q, want glm-5.2 (identity should track the hot-reload)", got.Model)
+		t.Errorf("Model = %q, want glm-5.2", got.Model)
 	}
 	if got.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want anthropic", got.Provider)
 	}
-	if got.NodeName != "local-1" || got.PID != 4242 {
-		t.Errorf("register-time identity clobbered: NodeName=%q PID=%d", got.NodeName, got.PID)
+	if runtime := a.info().Runtime; runtime.Hostname != "local-1" || runtime.PID != 4242 {
+		t.Errorf("runtime clobbered: Hostname=%q PID=%d", runtime.Hostname, runtime.PID)
+	}
+}
+
+func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
+	pool := NewAgentPool(nil)
+	a := newFakeAgent("n1", 1)
+	a.status = webproto.AgentStatus{Provider: "openai", Model: "old-model"}
+	pool.register(a)
+
+	payload, _ := json.Marshal(webproto.ConfigReloadResult{
+		OK: true, Provider: "deepseek", Model: "deepseek-v4-pro",
+	})
+	pool.handleAgentMessage(a, WSMessage{Type: "config.result", Payload: payload})
+	got := a.info().Status
+	if got.Provider != "deepseek" || got.Model != "deepseek-v4-pro" || got.ConfigError != "" {
+		t.Fatalf("unexpected config result status: %+v", got)
+	}
+
+	payload, _ = json.Marshal(webproto.ConfigReloadResult{OK: false, Error: "invalid API key"})
+	pool.handleAgentMessage(a, WSMessage{Type: "config.result", Payload: payload})
+	if got := a.info().Status; got.ConfigError != "invalid API key" {
+		t.Fatalf("config error = %q", got.ConfigError)
 	}
 }

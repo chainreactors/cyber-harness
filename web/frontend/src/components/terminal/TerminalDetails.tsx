@@ -27,7 +27,8 @@ export function TerminalDetails({
   taskSessions: PTYSession[]
 }) {
   const { t } = useTranslation('agent')
-  const identity = agent.identity || {}
+  const runtime = agent.runtime || {}
+  const agentStatus = agent.status || { bound: false }
   const stats = agent.stats || {}
   const running = taskSessions.filter((s) => s.state === 'running').length
   const closed = taskSessions.length - running
@@ -39,13 +40,13 @@ export function TerminalDetails({
         <DetailRow label="ID" value={agent.id} mono />
         <DetailRow label={t('tdState')} value={agent.busy ? t('busy') : t('idle')} />
         <DetailRow label={t('tdConnected')} value={formatDateTime(agent.connected_at)} />
-        <DetailRow label={t('tdHost')} value={identity.hostname} />
-        <DetailRow label={t('tdUser')} value={identity.username} />
-        <DetailRow label={t('tdRuntime')} value={[identity.os, identity.arch].filter(Boolean).join('/')} />
-        <DetailRow label="PID" value={identity.pid} />
-        <DetailRow label="CWD" value={identity.working_dir} mono />
-        <DetailRow label="LLM" value={[identity.provider, identity.model].filter(Boolean).join(' / ') || t('offline')} />
-        <DetailRow label={t('tdSpace')} value={identity.space} />
+        <DetailRow label={t('tdHost')} value={runtime.hostname} />
+        <DetailRow label={t('tdUser')} value={runtime.username} />
+        <DetailRow label={t('tdRuntime')} value={[runtime.os, runtime.arch].filter(Boolean).join('/')} />
+        <DetailRow label="PID" value={runtime.pid} />
+        <DetailRow label="CWD" value={runtime.working_dir} mono />
+        <DetailRow label="LLM" value={[agentStatus.provider, agentStatus.model].filter(Boolean).join(' / ') || t('offline')} />
+        <DetailRow label={t('tdSpace')} value={agentStatus.space} />
       </DetailGroup>
 
       <DetailGroup title={t('tdActiveSession')}>
@@ -75,7 +76,7 @@ export function TerminalDetails({
         <DetailRow label={t('tdRunning')} value={running} />
         <DetailRow label={t('tdClosed')} value={closed} />
         <DetailRow label={t('tdCommands')} value={agent.commands?.join(', ')} />
-        <DetailRow label={t('tdCapabilities')} value={identity.capabilities?.join(', ')} />
+        <DetailRow label={t('tdCapabilities')} value={runtime.capabilities?.join(', ')} />
       </DetailGroup>
 
       <DetailGroup title={t('tdStats')}>

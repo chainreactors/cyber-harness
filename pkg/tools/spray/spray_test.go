@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	spraypkg "github.com/chainreactors/spray/pkg"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func TestWithDefaultNoBarAppendsFlag(t *testing.T) {
@@ -49,9 +50,43 @@ func TestWithDefaultNoStatKeepsExplicitFlag(t *testing.T) {
 
 func TestWithDefaultScannerFlagsAppendsFlags(t *testing.T) {
 	got := withDefaultScannerFlags([]string{"-u", "http://127.0.0.1"})
-	want := []string{"-u", "http://127.0.0.1", "--no-bar", "--no-stat"}
+	want := []string{"-u", "http://127.0.0.1", "--no-bar", "--no-stat", "--client", "req"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withDefaultScannerFlags() = %#v, want %#v", got, want)
+	}
+}
+
+func TestWithDefaultClientKeepsExplicitClient(t *testing.T) {
+	for _, args := range [][]string{
+		{"-u", "https://example.test", "--client", "standard"},
+		{"-u", "https://example.test", "--client=fast"},
+		{"-u", "https://example.test", "-C", "standard"},
+		{"-u", "https://example.test", "-C=req"},
+	} {
+		got := withDefaultClient(args)
+		if !reflect.DeepEqual(got, args) {
+			t.Fatalf("withDefaultClient(%#v) = %#v", args, got)
+		}
+	}
+}
+
+func TestWriteResultSupportsTextAndJSON(t *testing.T) {
+	result := &parsers.SprayResult{
+		UrlString: "http://example.test",
+		Status:    200,
+		Source:    parsers.CheckSource,
+	}
+
+	var textOutput bytes.Buffer
+	writeResult(&textOutput, result, false)
+	if got := textOutput.String(); !strings.Contains(got, "http://example.test") || !strings.Contains(got, "200") {
+		t.Fatalf("text output = %q", got)
+	}
+
+	var jsonOutput bytes.Buffer
+	writeResult(&jsonOutput, result, true)
+	if got := jsonOutput.String(); !strings.Contains(got, `"url":"http://example.test"`) || !strings.Contains(got, `"status":200`) {
+		t.Fatalf("JSON output = %q", got)
 	}
 }
 
@@ -115,8 +150,8 @@ func TestExecuteInstallsResourceProviderBeforePrint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commands.Output.Reset(nil)
-	err = New(engine).Execute(context.Background(), []string{"--print"})
+	var output bytes.Buffer
+	_, err = New(engine).Run(context.Background(), &commands.Execution{Args: []string{"--print"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -129,8 +164,8 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	var logs bytes.Buffer
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "● spray debug enabled") {

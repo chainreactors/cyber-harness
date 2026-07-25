@@ -1,5 +1,6 @@
 export default {
   chat: '对话',
+  terminal: '终端',
   llmConfig: 'LLM 配置',
   agentsConnected: '已连接 {{count}} 个 agent',
   noAgents: '未连接 agent',
@@ -32,6 +33,10 @@ export default {
   thinking: '思考中',
   agent: 'Agent',
   ioaMessage: '服务消息',
+  ioaOpenConsole: '打开 IOA 控制台',
+  ioaOpenReference: '打开引用消息 {{id}}',
+  ioaExpandMarkdown: '展开 Markdown',
+  ioaCollapseMarkdown: '收起 Markdown',
   typeMessageWithCommands: '输入消息...(输入 / 查看命令)',
   cmdScan: '在本会话运行扫描',
   cmdAgents: '列出已连接的 agent',
@@ -60,6 +65,10 @@ export default {
   evalPass: '已达标',
   evalFail: '未达标',
   evalLabel: '评估',
+  compactLabel: '上下文已压缩',
+  compactDetail: '{{before}} → {{after}} tokens · 保留 {{kept}} 条消息',
+  tokenBudgetLabel: 'Token 预算告警',
+  tokenBudgetDetail: '上下文 {{contextTokens}} / 预算 {{budget}} tokens',
   agentOfflineBannerNamed: 'Agent「{{name}}」已离线，重连后可继续对话（/help、/agents 命令仍可用）。',
   agentOfflineBanner: '绑定的 agent 已离线，重连后可继续对话（/help、/agents 命令仍可用）。',
   deleteSessionConfirm: '确定删除该会话？其对话记录将被移除、实时连接会断开，此操作不可撤销。',
@@ -67,6 +76,18 @@ export default {
   a11yThinking: 'AIScan 正在处理',
   a11yResponding: 'AIScan 正在回复',
   a11yTurnDone: '回复完成',
+  // “@” 提及选择器(分类:CSTX 资产 / IOA 节点+消息 / 文件)。
+  mention: {
+    cstx: '资产',
+    ioa: 'IOA',
+    file: '文件',
+    nodes: '节点',
+    messages: '消息',
+    insert: '插入所选',
+    chooseFile: '选择文件…',
+    fileHint: '为本条消息附加文件 —— 作为上下文内联,或上传给 agent。',
+    empty: '无匹配',
+  },
   // 后端系统消息(按 code 本地化;英文原文仅作兜底)。与 pkg/web 的 Sys* 常量一一对应。
   sys: {
     no_running_task: '当前没有正在运行的任务。',
@@ -77,5 +98,9 @@ export default {
     agents_connected: '已连接 {{n}} 个 agent：',
     agent_status_idle: '空闲',
     agent_status_busy: '忙碌',
+    scan_usage: '用法：/scan <target> [--mode full] [--verify] [--sniper] [--deep]',
+    scan_submit: '扫描失败：{{error}}',
+    dispatch_failed: '任务下发到 agent 失败。',
+    agent_disconnected: 'Agent 已断开连接。',
   },
 }

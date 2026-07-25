@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@radix-ui/react-context-menu": "^2.3.3",
@@ -28,6 +30,8 @@
     "chroma-js": "^3.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
+    "graphology": "^0.26.0",
     "i18next": "^26.3.3",
     "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.468.0",
@@ -38,11 +42,14 @@
     "react-syntax-highlighter": "^15.6.1",
     "recharts": "^2.15.4",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/typography": "^0.5.15",
     "@types/chroma-js": "^2.4.5",
+    "@types/dagre": "^0.7.54",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/react-syntax-highlighter": "^15.5.13",

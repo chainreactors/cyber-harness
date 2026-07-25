@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
 type RunResult struct {
@@ -16,98 +15,106 @@ type RunResult struct {
 	Stderr   string
 	ExitCode int
 	Duration time.Duration
-	Events   []AgentEvent
+	Events   []aop.Event
 }
 
-type AgentEvent struct {
-	Type            string              `json:"type"`
-	Turn            int                 `json:"turn,omitempty"`
-	ToolName        string              `json:"tool_name,omitempty"`
-	ToolCallID      string              `json:"tool_call_id,omitempty"`
-	Args            string              `json:"arguments,omitempty"`
-	Result          string              `json:"result,omitempty"`
-	IsError         bool                `json:"is_error,omitempty"`
-	Error           string              `json:"error,omitempty"`
-	Stop            string              `json:"stop,omitempty"`
-	Message         *agent.ChatMessage  `json:"message,omitempty"`
-	ToolResults     []agent.ChatMessage `json:"tool_results,omitempty"`
-	Usage           *agent.Usage        `json:"usage,omitempty"`
-	ContextTokens   int                 `json:"context_tokens,omitempty"`
-	NewMessages     int                 `json:"new_messages,omitempty"`
-	RequestModel    string              `json:"request_model,omitempty"`
-	RequestMessages int                 `json:"request_messages,omitempty"`
-	RequestTools    int                 `json:"request_tools,omitempty"`
+// ToolExecution is an on-demand typed view that retains both original AOP
+// envelopes. It is never stored in place of the protocol events.
+type ToolExecution struct {
+	CallEvent   aop.Event
+	ResultEvent aop.Event
+	Call        aop.ToolCallData
+	Result      aop.ToolResultData
 }
 
-func (r *RunResult) OK() bool       { return r.ExitCode == 0 }
-func (r *RunResult) Output() string { return strings.TrimSpace(r.Stdout) }
+func (e ToolExecution) Name() string {
+	if e.Result.ToolName != "" {
+		return e.Result.ToolName
+	}
+	return e.Call.ToolName
+}
+
+func (e ToolExecution) Args() any          { return e.Call.Args }
+func (e ToolExecution) ResultText() string { return valueText(e.Result.Content) }
+func (e ToolExecution) IsError() bool      { return e.Result.IsError }
+
+func (r *RunResult) OK() bool         { return r.ExitCode == 0 }
+func (r *RunResult) Output() string   { return strings.TrimSpace(r.Stdout) }
 func (r *RunResult) Combined() string { return r.Stdout + r.Stderr }
 
 func (r *RunResult) ContainsOutput(substr string) bool {
 	return strings.Contains(r.Stdout, substr) || strings.Contains(r.Stderr, substr)
 }
 
-// ToolCalls returns merged tool call events: arguments come from
-// tool_execution_start, results from tool_execution_end, joined by tool_call_id.
-func (r *RunResult) ToolCalls() []AgentEvent {
-	argsByID := make(map[string]string)
-	for _, e := range r.Events {
-		if e.Type == "tool_execution_start" && e.ToolCallID != "" {
-			argsByID[e.ToolCallID] = e.Args
+func (r *RunResult) ToolCalls() []ToolExecution {
+	calls := make(map[string]struct {
+		event aop.Event
+		data  aop.ToolCallData
+	})
+	for _, event := range r.Events {
+		if event.Type != aop.TypeToolCall {
+			continue
+		}
+		data, err := aop.DecodeData[aop.ToolCallData](event)
+		if err == nil && data.ToolCallID != "" {
+			calls[data.ToolCallID] = struct {
+				event aop.Event
+				data  aop.ToolCallData
+			}{event: event, data: data}
 		}
 	}
-	var calls []AgentEvent
-	for _, e := range r.Events {
-		if e.Type == "tool_execution_end" {
-			if e.Args == "" && e.ToolCallID != "" {
-				e.Args = argsByID[e.ToolCallID]
-			}
-			calls = append(calls, e)
+	var out []ToolExecution
+	for _, event := range r.Events {
+		if event.Type != aop.TypeToolResult {
+			continue
 		}
+		data, err := aop.DecodeData[aop.ToolResultData](event)
+		if err != nil {
+			continue
+		}
+		call := calls[data.ToolCallID]
+		out = append(out, ToolExecution{
+			CallEvent: call.event, ResultEvent: event, Call: call.data, Result: data,
+		})
 	}
-	return calls
+	return out
 }
 
 func (r *RunResult) HasToolCall(name string) bool {
-	for _, e := range r.ToolCalls() {
-		if e.ToolName == name {
-			return true
-		}
-	}
-	return false
+	return len(r.ToolCallsNamed(name)) > 0
 }
 
-func (r *RunResult) ToolCallsNamed(name string) []AgentEvent {
-	var out []AgentEvent
-	for _, e := range r.ToolCalls() {
-		if e.ToolName == name {
-			out = append(out, e)
+func (r *RunResult) ToolCallsNamed(name string) []ToolExecution {
+	var out []ToolExecution
+	for _, execution := range r.ToolCalls() {
+		if execution.Name() == name {
+			out = append(out, execution)
 		}
 	}
 	return out
 }
 
 func (r *RunResult) Turns() int {
-	max := 0
-	for _, e := range r.Events {
-		if e.Turn > max {
-			max = e.Turn
+	seen := make(map[string]struct{})
+	for _, event := range r.Events {
+		if event.Type == aop.TypeTurnStart && event.TurnID != "" {
+			seen[event.TurnID] = struct{}{}
 		}
 	}
-	return max
+	return len(seen)
 }
 
 func (r *RunResult) ToolCallSequence() []string {
 	var names []string
-	for _, e := range r.ToolCalls() {
-		names = append(names, e.ToolName)
+	for _, execution := range r.ToolCalls() {
+		names = append(names, execution.Name())
 	}
 	return names
 }
 
 func (r *RunResult) ToolResultContains(toolName, substr string) bool {
-	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.Result, substr) {
+	for _, execution := range r.ToolCallsNamed(toolName) {
+		if strings.Contains(execution.ResultText(), substr) {
 			return true
 		}
 	}
@@ -115,8 +122,8 @@ func (r *RunResult) ToolResultContains(toolName, substr string) bool {
 }
 
 func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
-	for _, e := range r.ToolCallsNamed(toolName) {
-		if strings.Contains(e.Args, substr) {
+	for _, execution := range r.ToolCallsNamed(toolName) {
+		if strings.Contains(argsText(execution.Args()), substr) {
 			return true
 		}
 	}
@@ -125,18 +132,18 @@ func (r *RunResult) ToolArgsContains(toolName, substr string) bool {
 
 func (r *RunResult) AllToolResults() string {
 	var sb strings.Builder
-	for _, e := range r.ToolCalls() {
-		sb.WriteString(e.Result)
+	for _, execution := range r.ToolCalls() {
+		sb.WriteString(execution.ResultText())
 		sb.WriteByte('\n')
 	}
 	return sb.String()
 }
 
-func (r *RunResult) ErroredToolCalls() []AgentEvent {
-	var out []AgentEvent
-	for _, e := range r.ToolCalls() {
-		if e.IsError {
-			out = append(out, e)
+func (r *RunResult) ErroredToolCalls() []ToolExecution {
+	var out []ToolExecution
+	for _, execution := range r.ToolCalls() {
+		if execution.IsError() {
+			out = append(out, execution)
 		}
 	}
 	return out
@@ -144,8 +151,12 @@ func (r *RunResult) ErroredToolCalls() []AgentEvent {
 
 func (r *RunResult) StopReason() string {
 	for i := len(r.Events) - 1; i >= 0; i-- {
-		if r.Events[i].Type == "agent_end" {
-			return r.Events[i].Stop
+		if r.Events[i].Type != aop.TypeTurnEnd {
+			continue
+		}
+		data, err := aop.DecodeData[aop.TurnEndData](r.Events[i])
+		if err == nil {
+			return data.Stop
 		}
 	}
 	return ""
@@ -153,21 +164,23 @@ func (r *RunResult) StopReason() string {
 
 func (r *RunResult) TotalTokens() int {
 	for i := len(r.Events) - 1; i >= 0; i-- {
-		if r.Events[i].Type == "turn_end" && r.Events[i].Usage != nil {
-			return r.Events[i].Usage.TotalTokens
+		if r.Events[i].Type != aop.TypeUsage {
+			continue
+		}
+		data, err := aop.DecodeData[aop.UsageData](r.Events[i])
+		if err == nil && data.TotalTokens > 0 {
+			return data.TotalTokens
 		}
 	}
 	return 0
 }
 
-// tool-specific accessors
-
-func (r *RunResult) SubagentCalls() []AgentEvent { return r.ToolCallsNamed("subagent") }
+func (r *RunResult) SubagentCalls() []ToolExecution { return r.ToolCallsNamed("subagent") }
 
 func (r *RunResult) SubagentCreateCount() int {
 	n := 0
-	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
+	for _, execution := range r.SubagentCalls() {
+		if isSubagentCreate(execution) {
 			n++
 		}
 	}
@@ -176,9 +189,9 @@ func (r *RunResult) SubagentCreateCount() int {
 
 func (r *RunResult) SubagentCreateArgs() []string {
 	var args []string
-	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
-			args = append(args, e.Args)
+	for _, execution := range r.SubagentCalls() {
+		if isSubagentCreate(execution) {
+			args = append(args, argsText(execution.Args()))
 		}
 	}
 	return args
@@ -186,28 +199,35 @@ func (r *RunResult) SubagentCreateArgs() []string {
 
 func (r *RunResult) SubagentResults() []string {
 	var results []string
-	for _, e := range r.SubagentCalls() {
-		if !strings.Contains(e.Args, `"list"`) && !strings.Contains(e.Args, `"kill"`) && !strings.Contains(e.Args, `"message"`) {
-			results = append(results, e.Result)
+	for _, execution := range r.SubagentCalls() {
+		if isSubagentCreate(execution) {
+			results = append(results, execution.ResultText())
 		}
 	}
 	return results
 }
 
-func loadEvents(path string) []AgentEvent {
-	records, err := output.ParseRecordFile(path)
+func isSubagentCreate(execution ToolExecution) bool {
+	args, ok := execution.Args().(map[string]any)
+	if !ok {
+		return true
+	}
+	action, _ := args["action"].(string)
+	return action != "list" && action != "kill" && action != "message"
+}
+
+func argsText(args any) string { return valueText(args) }
+
+func valueText(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil
+		return ""
 	}
-	var events []AgentEvent
-	for _, rec := range records {
-		if rec.Type != output.TypeAgent {
-			continue
-		}
-		var e AgentEvent
-		if json.Unmarshal(rec.Data, &e) == nil {
-			events = append(events, e)
-		}
-	}
-	return events
+	return string(encoded)
 }

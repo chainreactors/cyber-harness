@@ -32,6 +32,16 @@ func (w *TimelineWriter) Close() error {
 	return err
 }
 
+func (w *TimelineWriter) WriteRaw(data []byte) {
+	line := append(data, '\n')
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return
+	}
+	_, _ = w.file.Write(line)
+}
+
 func (w *TimelineWriter) WriteRecord(rec Record) {
 	line, err := json.Marshal(rec)
 	if err != nil {

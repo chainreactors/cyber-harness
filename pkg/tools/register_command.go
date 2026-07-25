@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	cfg.ScanUsageFunc = scan.Usage
+	cfg.ExtraScannerUsage["scan"] = scan.Usage
 	commands.RegisterFactory(commands.Factory{
 		Group: "scanner",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
@@ -26,9 +26,13 @@ func init() {
 			if deps.ScannerProxy != "" {
 				scanOpts = append(scanOpts, scan.WithProxy(deps.ScannerProxy))
 			}
+			if deps.DataBus != nil {
+				scanOpts = append(scanOpts, scan.WithDataBus(deps.DataBus))
+			}
 
 			if es.Gogo != nil && es.Spray != nil {
-				reg.Register(scan.New(es, scanOpts...), "scanner")
+				impl := scan.New(es, scanOpts...)
+				reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
 			}
 		},
 	})

@@ -1,5 +1,6 @@
 export default {
   chat: 'Chat',
+  terminal: 'Terminal',
   llmConfig: 'LLM Config',
   agentsConnected: '{{count}} agent(s) connected',
   noAgents: 'No agents connected',
@@ -32,6 +33,10 @@ export default {
   thinking: 'Thinking',
   agent: 'Agent',
   ioaMessage: 'Server message',
+  ioaOpenConsole: 'Open IOA Console',
+  ioaOpenReference: 'Open referenced message {{id}}',
+  ioaExpandMarkdown: 'Expand Markdown',
+  ioaCollapseMarkdown: 'Collapse Markdown',
   typeMessageWithCommands: 'Type a message... (/ for commands)',
   cmdScan: 'Run a scan in this session',
   cmdAgents: 'List connected agents',
@@ -60,6 +65,10 @@ export default {
   evalPass: 'Goal met',
   evalFail: 'Not met yet',
   evalLabel: 'Eval',
+  compactLabel: 'Context compacted',
+  compactDetail: '{{before}} → {{after}} tokens · kept {{kept}} messages',
+  tokenBudgetLabel: 'Token budget warning',
+  tokenBudgetDetail: 'context {{contextTokens}} / budget {{budget}} tokens',
   agentOfflineBannerNamed: 'Agent "{{name}}" is offline — reconnect it to continue chatting (/help and /agents still work).',
   agentOfflineBanner: 'The bound agent is offline — reconnect it to continue chatting (/help and /agents still work).',
   deleteSessionConfirm: 'Delete this session? Its transcript is removed and the live connection is closed. This cannot be undone.',
@@ -67,6 +76,18 @@ export default {
   a11yThinking: 'AIScan is working',
   a11yResponding: 'AIScan is responding',
   a11yTurnDone: 'Response complete',
+  // "@" mention picker (categorized: CSTX assets / IOA nodes + messages / File).
+  mention: {
+    cstx: 'Assets',
+    ioa: 'IOA',
+    file: 'File',
+    nodes: 'Nodes',
+    messages: 'Messages',
+    insert: 'Insert selected',
+    chooseFile: 'Choose file…',
+    fileHint: 'Attach a file to this message — inlined as context or uploaded to the agent.',
+    empty: 'No matches',
+  },
   // Backend system messages (localized by code; English here is also the fallback).
   // Mirrors the Sys* codes in pkg/web.
   sys: {
@@ -78,5 +99,9 @@ export default {
     agents_connected: '{{n}} agent(s) connected:',
     agent_status_idle: 'idle',
     agent_status_busy: 'busy',
+    scan_usage: 'usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]',
+    scan_submit: 'Scan failed: {{error}}',
+    dispatch_failed: 'Failed to dispatch the task to the agent.',
+    agent_disconnected: 'Agent disconnected.',
   },
 }

@@ -37,7 +37,6 @@ type LLMTestResult struct {
 // unreachable endpoint fails fast instead of hanging the settings dialog.
 const llmProbeTimeout = 30 * time.Second
 
-
 // LLMModelsResult reports the model IDs discovered at the endpoint. ok=false
 // carries the reason (unsupported provider, auth failure, unreachable, …).
 type LLMModelsResult struct {

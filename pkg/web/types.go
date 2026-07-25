@@ -60,11 +60,15 @@ type ConfigStatus struct {
 	ConfigPath   string `json:"config_path,omitempty"`
 	ConfigLoaded bool   `json:"config_loaded"`
 	LLM          struct {
-		Provider         string `json:"provider"`
-		BaseURL          string `json:"base_url"`
-		APIKeyConfigured bool   `json:"api_key_configured"`
-		Model            string `json:"model"`
-		Proxy            string `json:"proxy"`
+		Provider         string             `json:"provider"`
+		BaseURL          string             `json:"base_url"`
+		APIKeyConfigured bool               `json:"api_key_configured"`
+		Model            string             `json:"model"`
+		Proxy            string             `json:"proxy"`
+		MaxTokens        int                `json:"max_tokens,omitempty"`
+		ContextWindow    int                `json:"context_window,omitempty"`
+		ActiveProfile    string             `json:"active_profile,omitempty"`
+		Profiles         []LLMProfileStatus `json:"profiles,omitempty"`
 	} `json:"llm"`
 	Cyberhub struct {
 		URL           string `json:"url"`
@@ -99,16 +103,40 @@ type ConfigStatus struct {
 	} `json:"agent"`
 }
 
+type LLMProfileStatus struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Provider         string `json:"provider"`
+	BaseURL          string `json:"base_url"`
+	APIKeyConfigured bool   `json:"api_key_configured"`
+	Model            string `json:"model"`
+	Proxy            string `json:"proxy"`
+	MaxTokens        int    `json:"max_tokens,omitempty"`
+	ContextWindow    int    `json:"context_window,omitempty"`
+}
+
 // ConfigStatusFromDistribute builds a masked ConfigStatus from raw config.
 func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loaded bool) ConfigStatus {
 	var cs ConfigStatus
 	cs.ConfigPath = path
 	cs.ConfigLoaded = loaded
-	cs.LLM.Provider = d.LLM.Provider
-	cs.LLM.BaseURL = d.LLM.BaseURL
-	cs.LLM.APIKeyConfigured = d.LLM.APIKey != ""
-	cs.LLM.Model = d.LLM.Model
-	cs.LLM.Proxy = d.LLM.Proxy
+	active := d.LLM.Active()
+	cs.LLM.Provider = active.Provider
+	cs.LLM.BaseURL = active.BaseURL
+	cs.LLM.APIKeyConfigured = active.APIKey != ""
+	cs.LLM.Model = active.Model
+	cs.LLM.Proxy = active.Proxy
+	cs.LLM.MaxTokens = active.MaxTokens
+	cs.LLM.ContextWindow = active.ContextWindow
+	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
+	for _, profile := range d.LLM.Providers {
+		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
+			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
+			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
+			Model: profile.Model, Proxy: profile.Proxy,
+			MaxTokens: profile.MaxTokens, ContextWindow: profile.ContextWindow,
+		})
+	}
 	cs.Cyberhub.URL = d.Cyberhub.URL
 	cs.Cyberhub.KeyConfigured = d.Cyberhub.Key != ""
 	cs.Cyberhub.Mode = d.Cyberhub.Mode
@@ -159,25 +187,18 @@ type ChatMessage struct {
 	Content   string          `json:"content"`
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
+	// Queued is a transient send-time hint: true when the message was accepted
+	// while another chat task is still running on the session, so the client
+	// can render it as pending-in-queue rather than in-flight.
+	Queued bool `json:"queued,omitempty"`
 }
 
 const (
-	ChatEventMessage        = "message"
-	ChatEventMessageStart   = "message_start"
-	ChatEventMessageDelta   = "message_delta"
-	ChatEventMessageEnd     = "message_end"
-	ChatEventToolCall       = "tool_call"
-	ChatEventToolResult     = "tool_result"
-	ChatEventThinking       = "thinking"
 	ChatEventScanStarted    = "scan_started"
 	ChatEventScanProgress   = "scan_progress"
 	ChatEventScanComplete   = "scan_complete"
-	ChatEventScanError      = "scan_error"
 	ChatEventAgentJoined    = "agent_joined"
 	ChatEventSessionCleared = "session_cleared"
-	ChatEventEval           = "eval"
-	ChatEventCompact        = "compact"
-	ChatEventError          = "error"
 )
 
 // System message codes. A backend-generated system message carries a stable
@@ -194,42 +215,27 @@ const (
 )
 
 type ChatEvent struct {
-	Type       string         `json:"type"`
-	SessionID  string         `json:"session_id"`
-	MessageID  string         `json:"message_id,omitempty"`
-	Role       string         `json:"role,omitempty"`
-	AgentID    string         `json:"agent_id,omitempty"`
-	AgentName  string         `json:"agent_name,omitempty"`
-	Turn       int            `json:"turn,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	Delta      string         `json:"delta,omitempty"`
-	ToolName   string         `json:"tool_name,omitempty"`
-	ToolArgs   string         `json:"tool_args,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ScanID     string         `json:"scan_id,omitempty"`
-	Result     *output.Result `json:"result,omitempty"`
-	Data       string         `json:"data,omitempty"`
-	Error      string         `json:"error,omitempty"`
-	Code       string         `json:"code,omitempty"`
-	Params     map[string]any `json:"params,omitempty"`
-	// Goal-mode evaluator verdict, carried on ChatEventEval. EvalRound is
-	// 0-indexed (the client renders round+1).
-	EvalRound  int    `json:"eval_round,omitempty"`
-	EvalPass   bool   `json:"eval_pass,omitempty"`
-	EvalReason string `json:"eval_reason,omitempty"`
-
-	CompactTokensBefore int `json:"compact_tokens_before,omitempty"`
-	CompactTokensAfter  int `json:"compact_tokens_after,omitempty"`
-	CompactKeptMessages int `json:"compact_kept_messages,omitempty"`
-
-	Transient bool `json:"-"`
+	Type      string         `json:"type"`
+	SessionID string         `json:"session_id"`
+	MessageID string         `json:"message_id,omitempty"`
+	Role      string         `json:"role,omitempty"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	AgentName string         `json:"agent_name,omitempty"`
+	Turn      int            `json:"turn,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	ScanID    string         `json:"scan_id,omitempty"`
+	Result    *output.Result `json:"result,omitempty"`
+	Data      string         `json:"data,omitempty"`
+	Transient bool           `json:"-"`
 }
 
 type SendMessageRequest struct {
 	Content string `json:"content"`
 	// Goal-mode run controls (optional). The frontend sends these when the user
 	// enables the Goal panel; a plain chat send leaves them zero.
-	webproto.ChatPayload
+	EvalCriteria    string `json:"eval_criteria,omitempty"`
+	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
+	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
 }
 
 type CreateSessionRequest struct {

@@ -118,6 +118,7 @@ func streamSSE(
 	endpoint string,
 	body []byte,
 	setHeaders func(*http.Request),
+	acceptDoneMarker bool,
 	parse func(eventType string, data []byte) (ChatCompletionStreamEvent, error),
 ) (<-chan ChatCompletionStreamEvent, error) {
 	reqCtx, reqCancel := context.WithCancel(ctx)
@@ -183,6 +184,10 @@ func streamSSE(
 			}
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
+				if !acceptDoneMarker {
+					sseSend(ctx, events, ChatCompletionStreamEvent{Err: ErrStreamIncomplete})
+					return
+				}
 				sseSend(ctx, events, ChatCompletionStreamEvent{Done: true})
 				return
 			}
@@ -217,7 +222,11 @@ func streamSSE(
 			return
 		}
 
-		sseSend(ctx, events, ChatCompletionStreamEvent{Done: true})
+		if acceptDoneMarker {
+			sseSend(ctx, events, ChatCompletionStreamEvent{Done: true})
+		} else {
+			sseSend(ctx, events, ChatCompletionStreamEvent{Err: ErrStreamIncomplete})
+		}
 	}()
 
 	return events, nil

@@ -15,7 +15,17 @@ import (
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
+	goflags "github.com/jessevdk/go-flags"
 )
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
 
 type fakeConsoleProvider struct {
 	requests int
@@ -35,11 +45,13 @@ func (p *fakeConsoleProvider) ChatCompletion(_ context.Context, req *agent.ChatC
 func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"--cyberhub-url", "http://hub:8080",
+		"--max-tokens", "16384",
 		"scan",
 		"-i", "127.0.0.1",
 		"--verify=high",
 		"--api-key", "KEY",
 		"--model=deepseek-v4-pro",
+		"--context-window=1000000",
 		"--base-url", "https://api.deepseek.com",
 		"--cyberhub-key=HUBKEY",
 	})
@@ -57,6 +69,9 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	if opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
+	if opt.MaxTokens != 16384 || opt.ContextWindow != 1000000 {
+		t.Fatalf("llm limits = max:%d context:%d", opt.MaxTokens, opt.ContextWindow)
+	}
 	if opt.CyberhubURL != "http://hub:8080" || opt.CyberhubKey != "HUBKEY" {
 		t.Fatalf("scanner options = %#v", opt.ScannerOptions)
 	}
@@ -73,6 +88,59 @@ func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
 	wantArgs := []string{"scan", "-i", "127.0.0.1", "--debug"}
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIScannerExtractsRootTimeout(t *testing.T) {
+	for _, args := range [][]string{
+		{"--timeout", "45", "gogo", "-i", "127.0.0.1", "-p", "80"},
+		{"--timeout=45", "gogo", "-i", "127.0.0.1", "-p", "80"},
+	} {
+		t.Run(strings.Join(args[:1], "_"), func(t *testing.T) {
+			parsed, err := parseCLI(args)
+			if err != nil {
+				t.Fatalf("parseCLI() error = %v", err)
+			}
+			if parsed.Option.Timeout != 45 {
+				t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
+			}
+			wantArgs := []string{"gogo", "-i", "127.0.0.1", "-p", "80"}
+			if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+				t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+			}
+		})
+	}
+}
+
+func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{"gogo", "-i", "127.0.0.1", "--timeout", "5"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Timeout != 3600 {
+		t.Fatalf("overall timeout = %d, want default 3600", parsed.Option.Timeout)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "--timeout", "5"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
+	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Timeout != 45 {
+		t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
+	}
+
+	parsed, err = parseCLI([]string{"agent", "--timeout", "30", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() subcommand timeout error = %v", err)
+	}
+	if parsed.Option.Timeout != 30 {
+		t.Fatalf("subcommand timeout = %d, want 30", parsed.Option.Timeout)
 	}
 }
 
@@ -141,6 +209,79 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 	}
 	if resolved.Provider != "openai" {
 		t.Fatalf("resolved provider = %q, want openai (DeepSeek uses OpenAI-compatible protocol)", resolved.Provider)
+	}
+}
+
+func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
+	var cli cliOptions
+	parser := newCLIParser(&cli, parserOptionsForArgs([]string{"agent", "-h"}))
+	_, err := parser.ParseArgs([]string{"agent", "-h"})
+	flagsErr, ok := err.(*goflags.Error)
+	if !ok || flagsErr.Type != goflags.ErrHelp {
+		t.Fatalf("ParseArgs() error = %v, want ErrHelp", err)
+	}
+
+	var buf bytes.Buffer
+	writeHelp(parser, &buf)
+	help := buf.String()
+	for _, wants := range [][]string{
+		{"agent [OPTIONS]"},
+		{"Agent Options:"},
+		{"--prompt", "/prompt"},
+		{"--transport", "/transport"},
+		{"--server-url", "/server-url"},
+	} {
+		if !containsAny(help, wants...) {
+			want := strings.Join(wants, " or ")
+			t.Fatalf("agent help missing %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "Advanced scanners:") || strings.Contains(help, "Server management:") {
+		t.Fatalf("agent help leaked the root command catalog:\n%s", help)
+	}
+}
+
+func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
+	for _, name := range []string{"scan", "gogo", "spray", "zombie", "neutron"} {
+		t.Run(name, func(t *testing.T) {
+			help, ok := cfg.StaticScannerUsage(name)
+			if !ok {
+				t.Fatalf("StaticScannerUsage(%q) was not registered", name)
+			}
+			if !strings.Contains(help, "Usage:") || !strings.Contains(help, name+" [OPTIONS]") {
+				t.Fatalf("%s help was not rendered by its go-flags parser:\n%s", name, help)
+			}
+			if !strings.Contains(help, "Help Options:") {
+				t.Fatalf("%s help is missing go-flags help options:\n%s", name, help)
+			}
+			if strings.Count(help, "\n") < 10 {
+				t.Fatalf("%s help looks like a static placeholder:\n%s", name, help)
+			}
+		})
+	}
+}
+
+func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
+	help, ok := cfg.StaticScannerUsage("proton")
+	if !ok {
+		t.Fatal("proton scanner help was not registered")
+	}
+	for _, want := range []string{"Usage: proton", "--template-list", "--severity"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("proton help missing %q:\n%s", want, help)
+		}
+	}
+
+	parsed, err := parseCLI([]string{"proton", "-i", "config.yaml", "-j"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Mode != cfg.RunModeScanner {
+		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeScanner)
+	}
+	wantArgs := []string{"proton", "-i", "config.yaml", "-j"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
 }
 

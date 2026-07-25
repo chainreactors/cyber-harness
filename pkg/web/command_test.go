@@ -93,7 +93,7 @@ func TestClearCommandWipesTranscript(t *testing.T) {
 		t.Fatalf("setup: got %d messages, want 3", len(msgs))
 	}
 
-	svc.handleClearCommand(sid, webproto.ChatPayload{})
+	svc.handleClearCommand(sid, webproto.GoalExt{})
 
 	msgs, err := svc.GetMessages(ctx, sid)
 	if err != nil {

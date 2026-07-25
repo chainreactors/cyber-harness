@@ -5,6 +5,7 @@ import (
 	"github.com/chainreactors/ioa/protocols"
 
 	_ "github.com/chainreactors/ioa/protocols/checkpoint"
+	_ "github.com/chainreactors/ioa/protocols/handoff"
 	_ "github.com/chainreactors/ioa/protocols/swarm"
 )
 

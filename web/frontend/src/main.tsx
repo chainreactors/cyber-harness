@@ -6,6 +6,7 @@ import './i18n'
 import { useTranslation } from 'react-i18next'
 import { registerChatExtensions } from './lib/chat-extensions'
 import ErrorBoundary from './components/ErrorBoundary'
+import AuthGate from './components/AuthGate'
 import { ConfirmProvider } from '@cyber/ui'
 import './index.css'
 
@@ -26,11 +27,23 @@ function LocalizedConfirmProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+declare global {
+  interface Window {
+    __AISCAN_REACT_ROOT__?: ReturnType<typeof ReactDOM.createRoot>
+  }
+}
+
+const rootElement = document.getElementById('root')!
+const root = window.__AISCAN_REACT_ROOT__ ?? ReactDOM.createRoot(rootElement)
+window.__AISCAN_REACT_ROOT__ = root
+
+root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <LocalizedConfirmProvider>
-        <App />
+        <AuthGate>
+          <App />
+        </AuthGate>
       </LocalizedConfirmProvider>
     </ErrorBoundary>
   </React.StrictMode>,

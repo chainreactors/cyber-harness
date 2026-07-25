@@ -13,6 +13,7 @@ import (
 
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/util"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
@@ -150,8 +151,8 @@ func truncateToolResultLine(value string, limit int) string {
 // Event helpers
 // ---------------------------------------------------------------------------
 
-func toolNameOrDefault(ev agent.Event) string {
-	if name := strings.TrimSpace(ev.ToolName); name != "" {
+func toolNameOrDefault(ev *toolEvent) string {
+	if name := strings.TrimSpace(ev.name); name != "" {
 		return name
 	}
 	return "tool"
@@ -170,7 +171,7 @@ func isToolMetaLine(line string) bool {
 
 var knownScanners = map[string]bool{
 	"scan": true, "gogo": true, "spray": true, "zombie": true,
-	"neutron": true, "katana": true, "passive": true,
+	"neutron": true, "proton": true, "katana": true, "passive": true,
 }
 
 func extractPseudoCommand(cmdLine string) (tool, target string) {
@@ -205,40 +206,45 @@ func shouldRenderUserIntent(body string) bool {
 // Formatting helpers for stats
 // ---------------------------------------------------------------------------
 
-// formatTokenUsage formats token usage like: "input=2,378 output=27 cache 95%"
+const (
+	inputTokenMarker  = "↑"
+	outputTokenMarker = "↓"
+	cacheHitMarker    = "↻"
+	contextMarker     = "◐"
+)
+
+// formatTokenUsage formats token usage like: "↑2,378 ↓27 ↻95%".
 func formatTokenUsage(u *agent.Usage) string {
 	if u == nil {
 		return ""
 	}
-	s := fmt.Sprintf("input=%s output=%s", util.FormatNumber(u.PromptTokens), util.FormatNumber(u.CompletionTokens))
+	s := fmt.Sprintf("%s%s %s%s",
+		inputTokenMarker, util.FormatNumber(u.PromptTokens),
+		outputTokenMarker, util.FormatNumber(u.CompletionTokens))
 	if ratio := u.CacheHitRatio(); ratio > 0 {
-		s += fmt.Sprintf(" cache %.0f%%", ratio*100)
+		s += fmt.Sprintf(" %s%.0f%%", cacheHitMarker, ratio*100)
 	}
 	return s
 }
 
 // ---------------------------------------------------------------------------
-// Chat message summarisation helpers
+// Message summarisation helpers
 // ---------------------------------------------------------------------------
 
-func lastMessageSummary(messages []agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
-	if len(messages) == 0 {
-		return "", 0, 0, 0, ""
-	}
-	return summarizeChatMessage(messages[len(messages)-1])
-}
-
-func summarizeChatMessage(msg agent.ChatMessage) (role string, contentLen int, toolCalls int, reasoningLen int, preview string) {
+func summarizeMessageData(msg aop.MessageData) (role string, contentLen int, reasoningLen int, preview string) {
 	role = msg.Role
-	if msg.Content != nil {
-		contentLen = len(*msg.Content)
-		preview = truncate.Clip(*msg.Content, agentDebugPreviewLimit)
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case aop.PartText:
+			contentLen += len(p.Text)
+			if preview == "" {
+				preview = truncate.Clip(p.Text, agentDebugPreviewLimit)
+			}
+		case aop.PartReasoning:
+			reasoningLen += len(p.Text)
+		}
 	}
-	if msg.ReasoningContent != nil {
-		reasoningLen = len(*msg.ReasoningContent)
-	}
-	toolCalls = len(msg.ToolCalls)
-	return role, contentLen, toolCalls, reasoningLen, preview
+	return role, contentLen, reasoningLen, preview
 }
 
 // ---------------------------------------------------------------------------

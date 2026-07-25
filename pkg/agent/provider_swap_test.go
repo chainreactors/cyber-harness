@@ -18,7 +18,7 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 
 	ag := NewAgent(Config{Provider: provA, Model: "model-a"})
 
-	res, err := ag.Run(context.Background(), "hi")
+	res, err := ag.Run(context.Background(), TextInput("hi"))
 	if err != nil {
 		t.Fatalf("run A: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 
 	ag.SetProvider(provB, "model-b")
 
-	res, err = ag.Run(context.Background(), "hi again")
+	res, err = ag.Run(context.Background(), TextInput("hi again"))
 	if err != nil {
 		t.Fatalf("run B: %v", err)
 	}
@@ -43,6 +43,18 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 	ag.SetProvider(provA, "")
 	if ag.Cfg.Model != "model-b" {
 		t.Fatalf("empty-model swap changed model to %q, want model-b", ag.Cfg.Model)
+	}
+}
+
+func TestSetProviderConfigHotSwapsModelLimits(t *testing.T) {
+	provider := &scriptedProvider{}
+	ag := NewAgent(Config{MaxTokens: 1024, ContextWindow: 8192})
+	ag.SetProviderConfig(provider, ProviderConfig{
+		Model: "glm-5.2[1m]", MaxTokens: 32768, ContextWindow: 1000000,
+	})
+	cfg := ag.configSnapshot()
+	if cfg.Provider != provider || cfg.Model != "glm-5.2[1m]" || cfg.MaxTokens != 32768 || cfg.ContextWindow != 1000000 {
+		t.Fatalf("hot-swapped config = %+v", cfg)
 	}
 }
 
@@ -62,7 +74,7 @@ func TestSetProviderRaceWithRun(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 50; i++ {
-		if _, err := ag.Run(context.Background(), "hi"); err != nil {
+		if _, err := ag.Run(context.Background(), TextInput("hi")); err != nil {
 			t.Errorf("run %d: %v", i, err)
 		}
 	}

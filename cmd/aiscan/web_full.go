@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,6 +76,7 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		pool = web.NewAgentPool(service.Hub())
 	}
 	pool.SetRecordStore(store)
+	pool.SetSCOStore(store)
 	service.SetAgentPool(pool)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
@@ -91,18 +91,25 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
 	ioaHandler := ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc))
 
+	listener, err := net.Listen("tcp", opts.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", opts.Addr, err)
+	}
+	defer listener.Close()
+	listenAddr := listener.Addr().String()
+
 	// Local agents: the hub can spawn `aiscan agent` children on its own host
 	// (one-click launch/stop from the UI). Each child dials the hub's loopback
 	// web + IOA endpoints — the IOA access key is embedded into the IOA URL — and
 	// registers in the pool like any node. The hub holds the only handle to them,
 	// so they are all killed on shutdown.
-	localAgents := web.NewLocalAgents(hubLocalURL(opts.Addr), accessKey, pool)
+	localAgents := web.NewLocalAgents(hubLocalURL(listenAddr), accessKey, configFile, pool)
 	go func() {
 		<-ctx.Done()
 		localAgents.StopAll()
 	}()
 
-	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub, accessKey), accessKey)
+	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -116,21 +123,22 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 		_ = srv.Shutdown(shutCtx)
 	}()
 
-	logger.Infof("aiscan server listening on http://%s?access_key=%s", opts.Addr, accessKey)
-	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, opts.Addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	logger.Infof("aiscan server listening on http://%s", listenAddr)
+	logger.Infof("  web access token: %s", accessKey)
+	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, listenAddr)
+	if localAgent, err := localAgents.Launch(ctx); err != nil {
+		logger.Warnf("auto-start local agent: %s", err)
+	} else {
+		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.PID)
+	}
+	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil
 }
 
-func newSPAFileServer(fsys fs.FS, accessKey string) http.HandlerFunc {
-	// Read index.html and inject the access key so the frontend can authenticate API calls.
+func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	indexBytes, _ := fs.ReadFile(fsys, "index.html")
-	if accessKey != "" && len(indexBytes) > 0 {
-		injection := []byte(`<script>window.__AISCAN_ACCESS_KEY__="` + accessKey + `";</script>`)
-		indexBytes = bytes.Replace(indexBytes, []byte("</head>"), append(injection, []byte("</head>")...), 1)
-	}
 	fileServer := http.FileServer(http.FS(fsys))
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -147,10 +155,8 @@ func newSPAFileServer(fsys fs.FS, accessKey string) http.HandlerFunc {
 				return
 			}
 		}
-		// Serve injected index.html for SPA routes. Never cache it: it's the one
-		// unfingerprinted document, it carries the per-start access key, and it
-		// points at the current asset hashes — a cached shell would keep loading a
-		// stale bundle (or a dead access key after a restart) until a hard refresh.
+		// Serve index.html for SPA routes. Never cache it: it is the one
+		// unfingerprinted document and points at the current asset hashes.
 		if len(indexBytes) > 0 {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-cache")
@@ -218,9 +224,22 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	if err != nil {
 		return p, false, webproto.DistributeConfig{}, err
 	}
+	dc := parseDistributeConfig(data)
+	return p, true, dc, nil
+}
+
+// parseDistributeConfig decodes the YAML settings file and migrates a legacy
+// flat llm section into the provider profile list — the only place the flat
+// representation is still accepted.
+func parseDistributeConfig(data []byte) webproto.DistributeConfig {
 	var dc webproto.DistributeConfig
 	_ = yaml.Unmarshal(data, &dc)
-	return p, true, dc, nil
+	var legacy struct {
+		LLM webproto.LLMProviderConfig `yaml:"llm"`
+	}
+	_ = yaml.Unmarshal(data, &legacy)
+	webproto.MigrateLLMConfig(&dc.LLM, legacy.LLM)
+	return dc
 }
 
 func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) error {
@@ -234,12 +253,12 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 	var current webproto.DistributeConfig
 	if loaded {
 		if data, err := os.ReadFile(p); err == nil {
-			_ = yaml.Unmarshal(data, &current)
+			current = parseDistributeConfig(data)
 		}
 	}
 
 	// Preserve existing secrets when incoming value is empty.
-	preserveSecret(&incoming.LLM.APIKey, current.LLM.APIKey)
+	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
 	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
 	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
 	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)
@@ -259,6 +278,27 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 func preserveSecret(incoming *string, existing string) {
 	if strings.TrimSpace(*incoming) == "" {
 		*incoming = existing
+	}
+}
+
+func preserveLLMProfileSecrets(incoming *webproto.LLMConfig, existing webproto.LLMConfig) {
+	byID := make(map[string]webproto.LLMProviderConfig, len(existing.Providers))
+	for _, profile := range existing.Providers {
+		if profile.ID != "" {
+			byID[profile.ID] = profile
+		}
+	}
+	for i := range incoming.Providers {
+		if strings.TrimSpace(incoming.Providers[i].APIKey) != "" {
+			continue
+		}
+		if current, ok := byID[incoming.Providers[i].ID]; ok {
+			incoming.Providers[i].APIKey = current.APIKey
+			continue
+		}
+		if i < len(existing.Providers) {
+			incoming.Providers[i].APIKey = existing.Providers[i].APIKey
+		}
 	}
 }
 

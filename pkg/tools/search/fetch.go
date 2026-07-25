@@ -159,38 +159,39 @@ func NewFetchCommand() *FetchCommand {
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
 
-func (c *FetchCommand) Execute(ctx context.Context, args []string) (err error) {
+func (c *FetchCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("fetch", &err)
+	args := execution.Args
 	rawURL, extract, err := parseFetchArgs(args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	normalizedURL, err := normalizeURL(rawURL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := validateURL(normalizedURL); err != nil {
-		return err
+		return nil, err
 	}
 
 	if cached, ok := c.cache.Get(normalizedURL); ok {
 		if cached.binary {
-			fmt.Fprint(commands.Output, formatBinaryCacheOutput(normalizedURL, cached))
-			return nil
+			fmt.Fprint(execution.Stdout, formatBinaryCacheOutput(normalizedURL, cached))
+			return nil, nil
 		}
-		fmt.Fprint(commands.Output, formatFetchOutput(normalizedURL, cached, extract))
-		return nil
+		fmt.Fprint(execution.Stdout, formatFetchOutput(normalizedURL, cached, extract))
+		return nil, nil
 	}
 
 	result, redir, err := c.fetchWithRedirects(ctx, normalizedURL, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if redir != nil {
-		fmt.Fprint(commands.Output, formatRedirectMessage(redir))
-		return nil
+		fmt.Fprint(execution.Stdout, formatRedirectMessage(redir))
+		return nil, nil
 	}
 
 	if isBinaryContentType(result.contentType) {
@@ -204,8 +205,8 @@ func (c *FetchCommand) Execute(ctx context.Context, args []string) (err error) {
 			fetchedAt:   time.Now(),
 		}
 		c.cache.Set(normalizedURL, entry)
-		fmt.Fprint(commands.Output, formatBinaryCacheOutput(normalizedURL, entry))
-		return nil
+		fmt.Fprint(execution.Stdout, formatBinaryCacheOutput(normalizedURL, entry))
+		return nil, nil
 	}
 
 	content := result.body
@@ -224,8 +225,8 @@ func (c *FetchCommand) Execute(ctx context.Context, args []string) (err error) {
 	}
 	c.cache.Set(normalizedURL, entry)
 
-	fmt.Fprint(commands.Output, formatFetchOutput(normalizedURL, entry, extract))
-	return nil
+	fmt.Fprint(execution.Stdout, formatFetchOutput(normalizedURL, entry, extract))
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -552,9 +553,9 @@ var (
 
 	allTagRe = regexp.MustCompile(`<[^>]+>`)
 
-	multiNewlineRe    = regexp.MustCompile(`\n{4,}`)
-	multiSpaceRe      = regexp.MustCompile(`[ \t]{2,}`)
-	blankLineSplitRe  = regexp.MustCompile(`\n\s*\n`)
+	multiNewlineRe   = regexp.MustCompile(`\n{4,}`)
+	multiSpaceRe     = regexp.MustCompile(`[ \t]{2,}`)
+	blankLineSplitRe = regexp.MustCompile(`\n\s*\n`)
 
 	commentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
 )

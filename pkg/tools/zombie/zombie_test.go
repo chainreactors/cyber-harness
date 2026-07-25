@@ -3,6 +3,7 @@ package zombie
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,8 +17,8 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	var logs bytes.Buffer
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(context.Background(), []string{"--debug", "--help"}); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "● zombie debug enabled") {
@@ -68,5 +69,22 @@ func TestResolveRelativePathsOnlyRewritesZombieFileFlags(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveRelativePaths() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnsureOutputDrain(t *testing.T) {
+	args := []string{"-i", "127.0.0.1:6379", "-s", "redis"}
+	got := ensureOutputDrain(args)
+	want := append(append([]string(nil), args...), "--file", os.DevNull)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ensureOutputDrain() = %#v, want %#v", got, want)
+	}
+	if len(args) != 4 {
+		t.Fatalf("ensureOutputDrain mutated input: %#v", args)
+	}
+
+	explicit := []string{"-i", "127.0.0.1:6379", "--file", "results.json"}
+	if got := ensureOutputDrain(explicit); !reflect.DeepEqual(got, explicit) {
+		t.Fatalf("explicit output changed: %#v", got)
 	}
 }

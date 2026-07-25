@@ -12,9 +12,6 @@ var ExtraSummaryEntries []string
 
 var ExtraScannerUsage = map[string]func() string{}
 
-// ScanUsageFunc is set by the scan package init in non-mini builds.
-var ScanUsageFunc func() string
-
 // ScannerEnabled reports whether built-in scanner commands are available.
 // Defaults to true; cmd/agent sets it to false.
 var ScannerEnabled = true
@@ -26,6 +23,7 @@ type ScannerCommands struct {
 	Katana  struct{} `command:"katana" description:"Run katana web crawler"`
 	Zombie  struct{} `command:"zombie" description:"Run zombie weakpass scanner"`
 	Neutron struct{} `command:"neutron" description:"Run neutron POC scanner"`
+	Proton  struct{} `command:"proton" description:"Run proton sensitive info scanner"`
 	Passive struct{} `command:"passive" description:"Run passive cyberspace recon"`
 }
 
@@ -86,39 +84,12 @@ func IsScannerHelpRequest(args []string) bool {
 }
 
 func StaticScannerUsage(name string) (string, bool) {
-	switch name {
-	case "scan":
-		if ScanUsageFunc != nil {
-			return ScanUsageFunc(), true
-		}
-		if !ScannerEnabled {
-			return "", false
-		}
-		return "scan - AI-assisted security scan pipeline\nUsage: scan [options]\n", true
-	case "gogo":
-		if !ScannerEnabled {
-			return "", false
-		}
-		return "gogo - host, port, service, and banner discovery\nUsage: gogo [options]\n", true
-	case "spray":
-		if !ScannerEnabled {
-			return "", false
-		}
-		return "spray - web probing, fingerprints, common files, and crawl checks\nUsage: spray [options]\n", true
-	case "zombie":
-		if !ScannerEnabled {
-			return "", false
-		}
-		return "zombie - weak credential checks for supported services\nUsage: zombie [options]\n", true
-	case "neutron":
-		if !ScannerEnabled {
-			return "", false
-		}
-		return "neutron - POC/vulnerability testing with nuclei-style options\nUsage: neutron -u <target> [options]\n", true
-	default:
-		if fn, ok := ExtraScannerUsage[name]; ok {
-			return fn(), true
-		}
+	if !ScannerCommandAvailable(name) {
 		return "", false
 	}
+	fn, ok := ExtraScannerUsage[name]
+	if !ok || fn == nil {
+		return "", false
+	}
+	return fn(), true
 }

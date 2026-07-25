@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	_ "modernc.org/sqlite"
 )
 
@@ -59,14 +61,10 @@ func migrate(db *sql.DB) error {
 			updated_at TEXT NOT NULL
 		);
 
-		CREATE TABLE IF NOT EXISTS chat_messages (
+		CREATE TABLE IF NOT EXISTS chat_aop_events (
 			id         TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			role       TEXT NOT NULL,
-			agent_id   TEXT NOT NULL DEFAULT '',
-			agent_name TEXT NOT NULL DEFAULT '',
-			content    TEXT NOT NULL DEFAULT '',
-			metadata   TEXT NOT NULL DEFAULT '',
+			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
 
@@ -137,15 +135,17 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
-		CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
+		CREATE INDEX IF NOT EXISTS idx_aop_events_session ON chat_aop_events(session_id, created_at, id);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+	return wipeLegacyAOPEvents(db)
 }
 
 type sqliteColumnMigration struct {
@@ -155,6 +155,10 @@ type sqliteColumnMigration struct {
 }
 
 func ensureSQLiteColumn(db *sql.DB, column sqliteColumnMigration) error {
+	tableExists, err := sqliteTableExists(db, column.table)
+	if err != nil || !tableExists {
+		return err
+	}
 	exists, err := sqliteColumnExists(db, column.table, column.name)
 	if err != nil {
 		return err
@@ -169,6 +173,81 @@ func ensureSQLiteColumn(db *sql.DB, column sqliteColumnMigration) error {
 		column.definition,
 	))
 	return err
+}
+
+func sqliteTableExists(db *sql.DB, table string) (bool, error) {
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count)
+	return count > 0, err
+}
+
+// wipeLegacyAOPEvents performs the one-time breaking AOP lifecycle cutover.
+// Sessions/messages/assets/records stay intact; only protocol event history is
+// cleared because old session/turn boundaries cannot be reinterpreted safely.
+func wipeLegacyAOPEvents(db *sql.DB) error {
+	exists, err := sqliteTableExists(db, "chat_aop_events")
+	if err != nil || !exists {
+		return err
+	}
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version >= 2 {
+		return nil
+	}
+	if _, err := db.Exec(`DELETE FROM chat_aop_events`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`PRAGMA user_version = 2`)
+	return err
+}
+
+// messageEventFromChatMessage converts a hub-authored chat message (user input,
+// system notices) into an AOP message event for persistence and broadcast.
+func messageEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
+	if msg == nil || msg.SessionID == "" {
+		return aop.Event{}, fmt.Errorf("chat message requires session_id")
+	}
+	createdAt := msg.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	agentName := strings.TrimSpace(msg.AgentName)
+	if agentName == "" {
+		agentName = "aiscan.web"
+	}
+	role := msg.Role
+	if role == "" {
+		role = "user"
+	}
+	data, err := json.Marshal(aop.MessageData{
+		MessageID: msg.ID,
+		Role:      role,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: msg.Content}},
+	})
+	if err != nil {
+		return aop.Event{}, err
+	}
+	ext := webproto.WebMessageExt{AgentID: msg.AgentID}
+	if len(msg.Metadata) > 0 {
+		if json.Valid(msg.Metadata) {
+			ext.Metadata = msg.Metadata
+		} else if raw, err := json.Marshal(string(msg.Metadata)); err == nil {
+			ext.Metadata = raw
+		}
+	}
+	event := aop.Event{
+		Type:      aop.TypeMessage,
+		TS:        createdAt.UTC().Format(time.RFC3339Nano),
+		SessionID: msg.SessionID,
+		Agent:     agentName,
+		Data:      data,
+	}
+	if ext.AgentID != "" || len(ext.Metadata) > 0 {
+		_ = webproto.SetWebExt(&event, ext)
+	}
+	return event, nil
 }
 
 func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
@@ -381,51 +460,123 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 // --- Chat message CRUD ---
 
 func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
-	metadata := ""
-	if msg.Metadata != nil {
-		metadata = string(msg.Metadata)
+	event, err := messageEventFromChatMessage(msg)
+	if err != nil {
+		return err
 	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO chat_messages (id, session_id, role, agent_id, agent_name, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.SessionID, msg.Role, msg.AgentID, msg.AgentName, msg.Content, metadata,
-		msg.CreatedAt.Format(time.RFC3339Nano),
-	)
-	return err
+	return s.AddAOPEvent(ctx, msg.SessionID, event)
 }
 
 // ClearMessages deletes every message in a session without removing the session
 // itself — the store half of web /clear ("clear conversation"). Messages are leaf
 // rows (nothing references them), so a single delete suffices.
 func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE session_id = ?`, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_aop_events WHERE session_id = ?`, sessionID)
 	return err
+}
+
+func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event aop.Event) error {
+	// Deltas are streaming fragments; only complete messages are persisted so a
+	// replayed history holds the authoritative state.
+	if event.Type == aop.TypeMessageDelta {
+		return nil
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	createdAt := event.TS
+	if createdAt == "" {
+		createdAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO chat_aop_events (id, session_id, event_json, created_at) VALUES (?, ?, ?, ?)`,
+		generateID(), sessionID, string(raw), createdAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]aop.Event, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT event_json FROM chat_aop_events WHERE session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := make([]aop.Event, 0)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var event aop.Event
+		if json.Unmarshal([]byte(raw), &event) == nil && event.Valid() {
+			events = append(events, event)
+		}
+	}
+	return events, rows.Err()
 }
 
 func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, role, agent_id, agent_name, content, metadata, created_at
-		 FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?`, sessionID, limit)
+	events, err := s.ListAOPEvents(ctx, sessionID, 10000)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var msgs []*ChatMessage
-	for rows.Next() {
-		var m ChatMessage
-		var metadata, createdAt string
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.AgentID, &m.AgentName, &m.Content, &metadata, &createdAt); err != nil {
-			return nil, err
-		}
-		if metadata != "" {
-			m.Metadata = json.RawMessage(metadata)
-		}
-		m.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		msgs = append(msgs, &m)
+	capacity := len(events)
+	if capacity > limit {
+		capacity = limit
 	}
-	return msgs, rows.Err()
+	msgs := make([]*ChatMessage, 0, capacity)
+	for _, event := range events {
+		if event.Type != aop.TypeMessage {
+			continue
+		}
+		var data aop.MessageData
+		if json.Unmarshal(event.Data, &data) != nil {
+			continue
+		}
+		var sb strings.Builder
+		for _, part := range data.Parts {
+			if part.Type != aop.PartText || part.Text == "" {
+				continue
+			}
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(part.Text)
+		}
+		msg := &ChatMessage{
+			ID:        data.MessageID,
+			SessionID: sessionID,
+			Role:      data.Role,
+			AgentName: event.Agent,
+			Content:   sb.String(),
+		}
+		if msg.ID == "" {
+			msg.ID = generateID()
+		}
+		if msg.Role == "" {
+			msg.Role = "assistant"
+		}
+		msg.CreatedAt, _ = time.Parse(time.RFC3339Nano, event.TS)
+		if ext, ok, err := webproto.GetWebExt(event); err == nil && ok {
+			msg.AgentID = ext.AgentID
+			msg.Metadata = ext.Metadata
+		}
+		msgs = append(msgs, msg)
+		if len(msgs) >= limit {
+			break
+		}
+	}
+	return msgs, nil
 }
 
 // --- Session-scan association ---

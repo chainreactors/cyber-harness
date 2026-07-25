@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,21 +15,100 @@ import (
 
 	webstatic "github.com/chainreactors/aiscan/web"
 
+	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/utils/pty"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
 )
 
-func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
-	return dialAgentWithIdentity(t, srv, name, commands, webproto.AgentIdentity{
-		NodeID:   "node-" + name,
-		NodeName: name,
-		Space:    "case-test",
-	})
+// Keep wire fixtures concise without exposing a production alias.
+type WSMessage = webproto.Message
+
+type recordingSCOStore struct {
+	scanID string
+	nodes  []json.RawMessage
 }
 
-func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, identity webproto.AgentIdentity) *websocket.Conn {
+func (s *recordingSCOStore) UpsertSCONodes(_ context.Context, scanID string, nodes []json.RawMessage) error {
+	s.scanID = scanID
+	s.nodes = append([]json.RawMessage(nil), nodes...)
+	return nil
+}
+
+func TestAgentPoolPersistsToolSCO(t *testing.T) {
+	store := &recordingSCOStore{}
+	pool := NewAgentPool(NewHub())
+	pool.SetSCOStore(store)
+	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","value":"127.0.0.1"}`)
+	payload, err := json.Marshal(map[string]any{
+		"call_id": "call-gogo-1",
+		"nodes":   []json.RawMessage{node},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pool.handleAgentMessage(&remoteAgent{}, WSMessage{Type: "tool.sco", Payload: payload})
+
+	if store.scanID != "call-gogo-1" {
+		t.Fatalf("scan id = %q, want tool call id", store.scanID)
+	}
+	if len(store.nodes) != 1 || string(store.nodes[0]) != string(node) {
+		t.Fatalf("stored nodes = %s", store.nodes)
+	}
+}
+
+func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
+	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, webproto.AgentStatus{Space: "case-test"})
+}
+
+func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+	t.Helper()
+	if err := conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
+		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
+	}
+}
+
+func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+	t.Helper()
+	var msg WSMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("agent read PTY %s: %v", want, err)
+	}
+	frame, err := webproto.DecodePTYMessage(msg)
+	if err != nil {
+		t.Fatalf("decode agent PTY %s: %v", want, err)
+	}
+	if frame.Type != want {
+		t.Fatalf("agent expected PTY %s, got %s", want, frame.Type)
+	}
+	return frame
+}
+
+func writeBrowserPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+	t.Helper()
+	if err := conn.WriteJSON(frame); err != nil {
+		t.Fatalf("browser write PTY %s: %v", frame.Type, err)
+	}
+}
+
+func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+	t.Helper()
+	var frame pty.Frame
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("browser read PTY %s: %v", want, err)
+	}
+	if frame.Type != want {
+		t.Fatalf("browser expected PTY %s, got %s", want, frame.Type)
+	}
+	return frame
+}
+
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status webproto.AgentStatus) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -41,7 +121,8 @@ func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, comm
 	reg, _ := json.Marshal(webproto.RegisterPayload{
 		Name:     name,
 		Commands: commands,
-		Identity: identity,
+		Node:     protocols.NodeRef{ID: nodeID, Authority: srv.URL},
+		Status:   status,
 		Stats:    webproto.AgentStats{TotalTokens: 42},
 	})
 	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
@@ -59,13 +140,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	pool := NewAgentPool(hub)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/agent/ws", pool.HandleWS)
-	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
-		segments := pathSegments(r.URL.Path)
-		if len(segments) == 5 && segments[0] == "api" && segments[1] == "agents" && segments[3] == "terminal" && segments[4] == "ws" {
-			pool.HandleTerminalWS(segments[2], w, r)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		pool.HandleTerminalWS(r.PathValue("id"), w, r)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -82,8 +158,8 @@ func TestWSRegisterAndList(t *testing.T) {
 	if len(agents) != 1 || agents[0].Name != "test-agent" {
 		t.Fatalf("expected 1 agent named test-agent, got %+v", agents)
 	}
-	if agents[0].Identity.NodeID != "node-test-agent" || agents[0].Identity.Space != "case-test" {
-		t.Fatalf("agent identity not retained: %+v", agents[0].Identity)
+	if agents[0].Node.ID != "node-test-agent" || agents[0].Status.Space != "case-test" {
+		t.Fatalf("agent descriptor not retained: %+v", agents[0])
 	}
 	if agents[0].Stats.TotalTokens != 42 {
 		t.Fatalf("agent stats not retained: %+v", agents[0].Stats)
@@ -148,18 +224,35 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	progressCh, unsub := pool.hub.Subscribe("task-1")
 	defer unsub()
 
-	resultCh, err := pool.DispatchCommand(agentID, "task-1", "scan -i 1.2.3.4")
+	resultCh, err := pool.DispatchToolCall(agentID, "task-1", aop.ToolCallData{
+		ToolCallID: "task-1",
+		ToolName:   "bash",
+		Args:       map[string]any{"command": "scan -i 1.2.3.4"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "exec" || cmd.Data != "scan -i 1.2.3.4" {
+	if cmd.Type != webproto.TypeCommand {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
+	var command webproto.CommandPayload
+	if err := json.Unmarshal(cmd.Payload, &command); err != nil {
+		t.Fatal(err)
+	}
+	if command.ToolCall == nil || command.SessionID != "task-1" {
+		t.Fatalf("unexpected command: %+v", command)
+	}
+	call := *command.ToolCall
+	args, _ := call.Args.(map[string]any)
+	if call.ToolName != "bash" || args["command"] != "scan -i 1.2.3.4" {
+		t.Fatalf("unexpected tool.call data: %+v", call)
+	}
 
-	conn.WriteJSON(WSMessage{Type: "output", TaskID: "task-1", Data: "port 80 open"})
+	progress, _ := json.Marshal(output.ToolDataEvent{Tool: "bash", Kind: output.ToolDataProgress, Data: "port 80 open", CallID: "task-1"})
+	conn.WriteJSON(WSMessage{Type: "tool.data", TaskID: "task-1", Payload: progress})
 	select {
 	case evt := <-progressCh:
 		if !strings.Contains(string(evt.Data), "port 80 open") {
@@ -169,12 +262,18 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	result, _ := json.Marshal(map[string]int{"ports": 3})
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-1", Data: "done", Payload: result})
+	resultPayload, _ := json.Marshal(webproto.CommandResultPayload{
+		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: "done"}},
+		Metadata: map[string]any{"tool_call_id": "task-1", "tool_name": "bash", "details": map[string]int{"ports": 3}},
+	})
+	conn.WriteJSON(WSMessage{Type: webproto.TypeCommandResult, TaskID: "task-1", Payload: resultPayload})
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {
 			t.Fatalf("unexpected result: %+v", res)
+		}
+		if !strings.Contains(string(res.Result), `"ports":3`) {
+			t.Fatalf("result details not propagated: %s", res.Result)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
@@ -183,13 +282,8 @@ func TestWSDispatchAndComplete(t *testing.T) {
 
 func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
-	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-chat-worker",
-		NodeName: "chat-worker",
-		Space:    "case-test",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",
+		webproto.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -205,14 +299,21 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != "chat" || cmd.Data != "hello" {
+	if cmd.Type != webproto.TypeRun || cmd.TurnID != "task-chat" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
+	var run webproto.RunPayload
+	if err := json.Unmarshal(cmd.Payload, &run); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Parts) != 1 || run.Parts[0].Text != "hello" {
+		t.Fatalf("unexpected run input: %+v", run)
+	}
 
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-chat", Data: "hi"})
+	conn.WriteJSON(turnEndMessage("task-chat", "sess-chat", "completed"))
 	select {
 	case res := <-resultCh:
-		if res.Err != "" || res.Output != "hi" {
+		if res.Err != "" {
 			t.Fatalf("unexpected result: %+v", res)
 		}
 	case <-time.After(time.Second):
@@ -220,19 +321,30 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 	}
 }
 
-// TestDispatchChatSessionCarriesGoalOptions guards the Goal-mode wiring: the
-// eval criteria and round budget must survive into the WS chat payload so the
-// agent can run the evaluator loop. This whole channel was silently dropped
+// turnEndMessage builds the agent→hub AOP turn.end frame that converges
+// a chat task.
+func turnEndMessage(turnID, sessionID, stop string) WSMessage {
+	data, _ := json.Marshal(aop.TurnEndData{Stop: stop})
+	payload, _ := json.Marshal(aop.Event{
+		Type:      aop.TypeTurnEnd,
+		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: sessionID,
+		TurnID:    turnID,
+		Agent:     "agent",
+		Data:      data,
+	})
+	return WSMessage{Type: "aop", TurnID: turnID, Payload: payload}
+}
+
+// TestDispatchRunCarriesGoalOptions guards the Goal-mode wiring: the
+// eval criteria and round budget must survive into the AOP user message ext so
+// the agent can run the evaluator loop. This whole channel was silently dropped
 // once (SendMessageRequest{Content} only), leaving the Goal panel a dead
 // control — this test fails loudly if that regresses.
-func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
+func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
-	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-goal-worker",
-		NodeName: "goal-worker",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
+		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -241,33 +353,39 @@ func TestDispatchChatSessionCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	opts := webproto.ChatPayload{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5}
-	resultCh, err := pool.DispatchChatSession(agent.id, "task-goal", "sess-1", "audit target", opts)
+	resultCh, err := pool.DispatchRun(agent.id, "task-goal", webproto.RunPayload{
+		SessionID: "sess-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
+		NoEcho: true, EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	var opened WSMessage
+	if err := conn.ReadJSON(&opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.Type != webproto.TypeSessionOpen {
+		t.Fatalf("first frame = %+v, want session.open", opened)
+	}
 	var cmd WSMessage
 	if err := conn.ReadJSON(&cmd); err != nil {
 		t.Fatal(err)
 	}
-	if cmd.Type != "chat" || cmd.Data != "audit target" {
-		t.Fatalf("unexpected message: %+v", cmd)
+	var inbound webproto.RunPayload
+	if cmd.Type != webproto.TypeRun || json.Unmarshal(cmd.Payload, &inbound) != nil {
+		t.Fatalf("dispatch did not carry a Run: %+v", cmd)
 	}
-	var payload webproto.ChatPayload
-	if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
-		t.Fatalf("decode chat payload: %v (raw=%s)", err, cmd.Payload)
+	if inbound.SessionID != "sess-1" || len(inbound.Parts) != 1 || inbound.Parts[0].Text != "audit target" {
+		t.Errorf("run = %+v", inbound)
 	}
-	if payload.SessionID != "sess-1" {
-		t.Errorf("session_id = %q, want sess-1", payload.SessionID)
+	if inbound.EvalCriteria != "find at least one SQLi" || inbound.EvalMaxRounds != 5 {
+		t.Errorf("goal options = %+v", inbound)
 	}
-	if payload.EvalCriteria != "find at least one SQLi" {
-		t.Errorf("eval_criteria = %q, want it to reach the agent", payload.EvalCriteria)
+	if !inbound.NoEcho {
+		t.Error("hub-sent user message must set no_echo")
 	}
-	if payload.EvalMaxRounds != 5 {
-		t.Errorf("eval_max_rounds = %d, want 5", payload.EvalMaxRounds)
-	}
-	conn.WriteJSON(WSMessage{Type: "complete", TaskID: "task-goal", Data: "ok"})
+	conn.WriteJSON(turnEndMessage("task-goal", "sess-1", "completed"))
 	select {
 	case <-resultCh:
 	case <-time.After(time.Second):
@@ -289,12 +407,8 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil, nil, ""))
 	defer srv.Close()
 
-	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, webproto.AgentIdentity{
-		NodeID:   "node-upload-agent",
-		NodeName: "upload-agent",
-		Provider: "openai",
-		Model:    "test-model",
-	})
+	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
+		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -397,7 +511,7 @@ func TestWSPick(t *testing.T) {
 	}
 }
 
-func TestWSTelemetryForwarding(t *testing.T) {
+func TestWSLegacyTelemetryIsNotProjected(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgent(t, srv, "tele-agent", []string{"scan"})
 	defer conn.Close()
@@ -411,11 +525,8 @@ func TestWSTelemetryForwarding(t *testing.T) {
 
 	select {
 	case evt := <-progressCh:
-		if !strings.Contains(string(evt.Data), "turn 1") {
-			t.Fatalf("unexpected: %s", evt.Data)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
+		t.Fatalf("legacy telemetry was projected into progress: %+v", evt)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -426,7 +537,7 @@ func TestWSTerminalRelay(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -436,53 +547,31 @@ func TestWSTerminalRelay(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	if err := browserConn.WriteJSON(WSMessage{Type: "pty.open"}); err != nil {
-		t.Fatalf("browser pty.open: %v", err)
-	}
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
 
-	var open WSMessage
-	if err := agentConn.ReadJSON(&open); err != nil {
-		t.Fatalf("agent read pty.open: %v", err)
-	}
-	if open.Type != "pty.open" || open.StreamID == "" || open.TaskID != "" {
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
+	if open.StreamID == "" {
 		t.Fatalf("unexpected pty.open: %+v", open)
 	}
 
-	openedPayload, _ := json.Marshal(map[string]string{"session_id": "session-1"})
-	if err := agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: open.StreamID, Payload: openedPayload}); err != nil {
-		t.Fatalf("agent pty.opened: %v", err)
-	}
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "session-1"})
 
-	var opened WSMessage
-	if err := browserConn.ReadJSON(&opened); err != nil {
-		t.Fatalf("browser read pty.opened: %v", err)
-	}
-	if opened.Type != "pty.opened" || opened.StreamID != open.StreamID || opened.TaskID != "" || !strings.Contains(string(opened.Payload), "session-1") {
+	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
+	if opened.StreamID != open.StreamID || opened.SessionID != "session-1" {
 		t.Fatalf("unexpected pty.opened: %+v", opened)
 	}
 
-	inputPayload, _ := json.Marshal(map[string]string{"session_id": "session-1", "data": "echo pty-ok\n"})
-	if err := browserConn.WriteJSON(WSMessage{Type: "pty.input", Payload: inputPayload}); err != nil {
-		t.Fatalf("browser pty.input: %v", err)
-	}
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, SessionID: "session-1", Data: []byte("echo pty-ok\n")})
 
-	var input WSMessage
-	if err := agentConn.ReadJSON(&input); err != nil {
-		t.Fatalf("agent read pty.input: %v", err)
-	}
-	if input.Type != "pty.input" || input.StreamID != open.StreamID || input.TaskID != "" || !strings.Contains(string(input.Payload), "pty-ok") {
+	input := readAgentPTY(t, agentConn, pty.FrameInput)
+	if input.StreamID != open.StreamID || input.SessionID != "session-1" || string(input.Data) != "echo pty-ok\n" {
 		t.Fatalf("unexpected pty.input: %+v", input)
 	}
 
-	if err := agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: open.StreamID, Data: "pty-ok\n"}); err != nil {
-		t.Fatalf("agent pty.output: %v", err)
-	}
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: open.StreamID, Data: []byte("pty-ok\n")})
 
-	var output WSMessage
-	if err := browserConn.ReadJSON(&output); err != nil {
-		t.Fatalf("browser read pty.output: %v", err)
-	}
-	if output.Type != "pty.output" || output.TaskID != "" || output.StreamID != open.StreamID || output.Data != "pty-ok\n" {
+	output := readBrowserPTY(t, browserConn, pty.FrameOutput)
+	if output.StreamID != open.StreamID || string(output.Data) != "pty-ok\n" {
 		t.Fatalf("unexpected pty.output: %+v", output)
 	}
 }
@@ -494,7 +583,7 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -504,106 +593,64 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	readAgent := func(typ string) WSMessage {
-		t.Helper()
-		var m WSMessage
-		if err := agentConn.ReadJSON(&m); err != nil {
-			t.Fatalf("agent read %s: %v", typ, err)
-		}
-		if m.Type != typ {
-			t.Fatalf("agent expected %s, got %s", typ, m.Type)
-		}
-		return m
-	}
-	readBrowser := func(typ string) WSMessage {
-		t.Helper()
-		var m WSMessage
-		if err := browserConn.ReadJSON(&m); err != nil {
-			t.Fatalf("browser read %s: %v", typ, err)
-		}
-		if m.Type != typ {
-			t.Fatalf("browser expected %s, got %s", typ, m.Type)
-		}
-		return m
-	}
-	agentReply := func(m WSMessage) {
-		t.Helper()
-		if err := agentConn.WriteJSON(m); err != nil {
-			t.Fatalf("agent write %s: %v", m.Type, err)
-		}
-	}
-	browserSend := func(m WSMessage) {
-		t.Helper()
-		if err := browserConn.WriteJSON(m); err != nil {
-			t.Fatalf("browser write %s: %v", m.Type, err)
-		}
-	}
-
 	// open
-	browserSend(WSMessage{Type: "pty.open", Payload: mustJSON(map[string]any{
-		"kind": "shell", "name": "test-shell", "cols": 80, "rows": 24,
-	})})
-	open := readAgent("pty.open")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 
-	agentReply(WSMessage{Type: "pty.opened", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1", "kind": "shell"})})
-	opened := readBrowser("pty.opened")
-	if !strings.Contains(string(opened.Payload), "sess-1") {
-		t.Fatalf("opened missing session_id: %s", opened.Payload)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1", Kind: "shell"})
+	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
+	if opened.SessionID != "sess-1" {
+		t.Fatalf("opened missing session_id: %+v", opened)
 	}
 
 	// input → output
-	browserSend(WSMessage{Type: "pty.input", Payload: mustJSON(map[string]any{"data": "ls\n"})})
-	inp := readAgent("pty.input")
-	if !strings.Contains(string(inp.Payload), "ls") {
-		t.Fatalf("input data lost: %s", inp.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, Data: []byte("ls\n")})
+	inp := readAgentPTY(t, agentConn, pty.FrameInput)
+	if string(inp.Data) != "ls\n" {
+		t.Fatalf("input data lost: %q", inp.Data)
 	}
-	agentReply(WSMessage{Type: "pty.output", StreamID: streamID, Data: "file1 file2\n"})
-	out := readBrowser("pty.output")
-	if out.Data != "file1 file2\n" {
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte("file1 file2\n")})
+	out := readBrowserPTY(t, browserConn, pty.FrameOutput)
+	if string(out.Data) != "file1 file2\n" {
 		t.Fatalf("output: %q", out.Data)
 	}
 
 	// resize
-	browserSend(WSMessage{Type: "pty.resize", Payload: mustJSON(map[string]any{"cols": 120, "rows": 40})})
-	resize := readAgent("pty.resize")
-	if !strings.Contains(string(resize.Payload), "120") {
-		t.Fatalf("resize cols lost: %s", resize.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameResize, Cols: 120, Rows: 40})
+	resize := readAgentPTY(t, agentConn, pty.FrameResize)
+	if resize.Cols != 120 || resize.Rows != 40 {
+		t.Fatalf("resize lost: %+v", resize)
 	}
 
 	// list
-	browserSend(WSMessage{Type: "pty.list"})
-	list := readAgent("pty.list")
-	agentReply(WSMessage{Type: "pty.sessions", StreamID: list.StreamID,
-		Payload: mustJSON(map[string]any{"sessions": []map[string]any{
-			{"id": "sess-1", "kind": "shell", "state": "running"},
-		}})})
-	sessions := readBrowser("pty.sessions")
-	if !strings.Contains(string(sessions.Payload), "sess-1") {
-		t.Fatalf("sessions missing: %s", sessions.Payload)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameList})
+	list := readAgentPTY(t, agentConn, pty.FrameList)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "sess-1", Kind: "shell", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "sess-1" {
+		t.Fatalf("sessions missing: %+v", sessions)
 	}
 
 	// detach
-	browserSend(WSMessage{Type: "pty.detach"})
-	det := readAgent("pty.detach")
-	agentReply(WSMessage{Type: "pty.detached", StreamID: det.StreamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	readBrowser("pty.detached")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameDetach})
+	det := readAgentPTY(t, agentConn, pty.FrameDetach)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameDetached, StreamID: det.StreamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameDetached)
 
 	// attach
-	browserSend(WSMessage{Type: "pty.attach", Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	att := readAgent("pty.attach")
-	agentReply(WSMessage{Type: "pty.attached", StreamID: att.StreamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	readBrowser("pty.attached")
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, SessionID: "sess-1"})
+	att := readAgentPTY(t, agentConn, pty.FrameAttach)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: att.StreamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameAttached)
 
 	// closed
-	agentReply(WSMessage{Type: "pty.closed", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1", "state": "completed", "exit_code": 0})})
-	closed := readBrowser("pty.closed")
-	if !strings.Contains(string(closed.Payload), "completed") {
-		t.Fatalf("closed state lost: %s", closed.Payload)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: streamID,
+		SessionID: "sess-1", State: pty.StateCompleted})
+	closed := readBrowserPTY(t, browserConn, pty.FrameClosed)
+	if closed.State != pty.StateCompleted {
+		t.Fatalf("closed state lost: %+v", closed)
 	}
 }
 
@@ -614,7 +661,7 @@ func TestWSTerminalSingleton(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -624,19 +671,75 @@ func TestWSTerminalSingleton(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	browserConn.WriteJSON(WSMessage{Type: "pty.open", Payload: mustJSON(map[string]any{
-		"kind": "repl", "name": "main-repl", "singleton": true, "cols": 80, "rows": 24,
-	})})
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen,
+		Kind: "shell", Name: "singleton-shell", Singleton: true, Cols: 80, Rows: 24})
 
-	var open WSMessage
-	agentConn.ReadJSON(&open)
-	if open.Type != "pty.open" {
-		t.Fatalf("expected pty.open, got %s", open.Type)
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
+	if !open.Singleton || open.Kind != "shell" || open.Name != "singleton-shell" {
+		t.Fatalf("singleton not preserved: %+v", open)
 	}
-	var payload webproto.PTYPayload
-	json.Unmarshal(open.Payload, &payload)
-	if !payload.Singleton || payload.Kind != "repl" || payload.Name != "main-repl" {
-		t.Fatalf("singleton not preserved: %+v", payload)
+}
+
+func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	agentConn := dialAgent(t, srv, "generation-agent", []string{"tmux"})
+
+	time.Sleep(50 * time.Millisecond)
+	agentID := pool.List()[0].ID
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
+	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial terminal: %v", err)
+	}
+	defer browserConn.Close()
+
+	if err := agentConn.Close(); err != nil {
+		t.Fatalf("close agent: %v", err)
+	}
+	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
+	if detached.StreamID == "" {
+		t.Fatalf("disconnect notification missing stream id: %+v", detached)
+	}
+
+	reconnected := dialAgent(t, srv, "generation-agent", []string{"tmux"})
+	defer reconnected.Close()
+	list := readAgentPTY(t, reconnected, pty.FrameList)
+	if list.StreamID != detached.StreamID {
+		t.Fatalf("rebound stream = %s, want %s", list.StreamID, detached.StreamID)
+	}
+	writeAgentPTY(t, reconnected, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
+		t.Fatalf("reconnected sessions not forwarded: %+v", sessions)
+	}
+}
+
+func TestWSTerminalCanWaitForOfflineAgent(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	agentID := protocols.NodeRef{ID: "node-offline-agent", Authority: srv.URL}.URI()
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
+	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial offline terminal: %v", err)
+	}
+	defer browserConn.Close()
+	readBrowserPTY(t, browserConn, pty.FrameDetached)
+
+	agentConn := dialAgent(t, srv, "offline-agent", []string{"tmux"})
+	defer agentConn.Close()
+	list := readAgentPTY(t, agentConn, pty.FrameList)
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
+		t.Fatalf("offline subscription did not rebind: %+v", sessions)
 	}
 }
 
@@ -647,7 +750,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + agentID + "/terminal/ws"
+	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
 	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -657,17 +760,15 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	}
 	defer browserConn.Close()
 
-	browserConn.WriteJSON(WSMessage{Type: "pty.open"})
-	var open WSMessage
-	agentConn.ReadJSON(&open)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
-	agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: streamID,
-		Payload: mustJSON(map[string]any{"session_id": "sess-1"})})
-	browserConn.ReadJSON(&open) // consume opened
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1"})
+	readBrowserPTY(t, browserConn, pty.FrameOpened)
 
 	// Flood: agent sends 100 output messages without browser reading
 	for i := 0; i < 100; i++ {
-		agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: streamID, Data: strings.Repeat("x", 100)})
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte(strings.Repeat("x", 100))})
 	}
 	time.Sleep(100 * time.Millisecond)
 
@@ -675,11 +776,11 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	browserConn.SetReadDeadline(time.Now().Add(time.Second))
 	received := 0
 	for {
-		var m WSMessage
+		var m pty.Frame
 		if err := browserConn.ReadJSON(&m); err != nil {
 			break
 		}
-		if m.Type == "pty.output" {
+		if m.Type == pty.FrameOutput {
 			received++
 		}
 	}
@@ -700,13 +801,8 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(pool.List())
 	})
-	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
-		segments := pathSegments(r.URL.Path)
-		if len(segments) == 5 && segments[1] == "agents" && segments[3] == "terminal" && segments[4] == "ws" {
-			pool.HandleTerminalWS(segments[2], w, r)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		pool.HandleTerminalWS(r.PathValue("id"), w, r)
 	})
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -748,7 +844,10 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *websocket.C
 	if err != nil {
 		t.Fatalf("dial agent: %v", err)
 	}
-	reg, _ := json.Marshal(map[string]any{"name": name, "commands": []string{"tmux"}})
+	reg, _ := json.Marshal(webproto.RegisterPayload{
+		Name: name, Commands: []string{"tmux"},
+		Node: protocols.NodeRef{ID: "node-" + name, Authority: srv.URL},
+	})
 	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
 	var ack WSMessage
 	conn.ReadJSON(&ack)
@@ -786,13 +885,17 @@ func drainAgentMessages(conn *websocket.Conn, timeout time.Duration) []WSMessage
 	return msgs
 }
 
-func findMessage(msgs []WSMessage, typ string) (WSMessage, bool) {
+func findPTYFrame(msgs []WSMessage, typ pty.FrameType) (pty.Frame, bool) {
 	for _, m := range msgs {
-		if m.Type == typ {
-			return m, true
+		if m.Type != webproto.TypePTY {
+			continue
+		}
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == typ {
+			return frame, true
 		}
 	}
-	return WSMessage{}, false
+	return pty.Frame{}, false
 }
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
@@ -827,25 +930,20 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 
 	openFirstAgentTerminal(t, page)
 
-	// Two WebSocket terminals connect (ReplTerminal + TaskPTYPanel).
-	// Drain all initial messages from the agent: pty.open (repl), pty.list (tasks)
+	// The terminal discovers the Runtime-owned REPL through pty.list; the browser
+	// never creates it.
 	initial := drainAgentMessages(agentConn, time.Second)
 
-	replOpen, ok := findMessage(initial, "pty.open")
+	listMsg, ok := findPTYFrame(initial, pty.FrameList)
 	if !ok {
-		t.Fatalf("no pty.open received, got: %v", initial)
+		t.Fatalf("no pty.list received, got: %v", initial)
 	}
-	replStreamID := replOpen.StreamID
-
-	// Reply to the pty.open for the REPL terminal
-	agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: replStreamID,
-		Payload: mustJSON(map[string]any{"session_id": "e2e-sess-1", "kind": "repl"})})
-
-	// Reply to pty.list for the task panel (if received)
-	if listMsg, ok := findMessage(initial, "pty.list"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.sessions", StreamID: listMsg.StreamID,
-			Payload: mustJSON(map[string]any{"sessions": []any{}})})
-	}
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID,
+		Sessions: []pty.Info{{ID: "e2e-sess-1", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
+	attach := readAgentPTY(t, agentConn, pty.FrameAttach)
+	replStreamID := attach.StreamID
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
+		SessionID: "e2e-sess-1", Kind: "repl"})
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -865,7 +963,8 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	inputs := drainAgentMessages(agentConn, time.Second)
 	gotInput := false
 	for _, m := range inputs {
-		if m.Type == "pty.input" && m.StreamID == replStreamID {
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
 			gotInput = true
 			break
 		}
@@ -876,12 +975,12 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	}
 
 	// Agent sends output back — verify the output path works
-	agentConn.WriteJSON(WSMessage{Type: "pty.output", StreamID: replStreamID, Data: "hello\r\n"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: replStreamID, Data: []byte("hello\r\n")})
 	time.Sleep(300 * time.Millisecond)
 
 	// Agent sends pty.closed
-	agentConn.WriteJSON(WSMessage{Type: "pty.closed", StreamID: replStreamID,
-		Payload: mustJSON(map[string]any{"session_id": "e2e-sess-1", "state": "completed", "exit_code": 0})})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
+		SessionID: "e2e-sess-1", State: pty.StateCompleted})
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify xterm rendered "[session closed]"
@@ -918,13 +1017,11 @@ func TestE2ETerminalResize(t *testing.T) {
 
 	// Drain initial messages and reply
 	initial := drainAgentMessages(agentConn, time.Second)
-	if open, ok := findMessage(initial, "pty.open"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.opened", StreamID: open.StreamID,
-			Payload: mustJSON(map[string]any{"session_id": "resize-sess"})})
+	if open, ok := findPTYFrame(initial, pty.FrameOpen); ok {
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "resize-sess"})
 	}
-	if list, ok := findMessage(initial, "pty.list"); ok {
-		agentConn.WriteJSON(WSMessage{Type: "pty.sessions", StreamID: list.StreamID,
-			Payload: mustJSON(map[string]any{"sessions": []any{}})})
+	if list, ok := findPTYFrame(initial, pty.FrameList); ok {
+		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID})
 	}
 
 	// Trigger resize by changing viewport
@@ -934,11 +1031,51 @@ func TestE2ETerminalResize(t *testing.T) {
 	msgs := drainAgentMessages(agentConn, time.Second)
 	resizeReceived := false
 	for _, m := range msgs {
-		if m.Type == "pty.resize" {
+		frame, err := webproto.DecodePTYMessage(m)
+		if err == nil && frame.Type == pty.FrameResize {
 			resizeReceived = true
-			t.Logf("resize received: %s", m.Payload)
+			t.Logf("resize received: %+v", frame)
 			break
 		}
 	}
 	t.Logf("resize message received: %v", resizeReceived)
+}
+
+func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
+	pool := NewAgentPool(nil)
+	resultCh := make(chan taskResult, 1)
+	remote := &remoteAgent{
+		id:            "agent-1",
+		sendCh:        make(chan WSMessage, 1),
+		tasks:         map[string]chan taskResult{"task-1": resultCh},
+		turns:         map[string]int{"task-1": 1},
+		toolCalls:     make(map[string]struct{}),
+		childSessions: make(map[string]map[string]struct{}),
+	}
+	pool.agents[remote.id] = remote
+
+	pool.CancelTask(remote.id, "task-1")
+
+	select {
+	case frame := <-remote.sendCh:
+		if frame.Type != webproto.TypeRunCancel || frame.TurnID != "task-1" {
+			t.Fatalf("cancel frame = %+v", frame)
+		}
+	default:
+		t.Fatal("cancel frame was not sent")
+	}
+	select {
+	case _, ok := <-resultCh:
+		if ok {
+			t.Fatal("canceled task result channel remained open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled task did not converge")
+	}
+	remote.mu.Lock()
+	_, exists := remote.tasks["task-1"]
+	remote.mu.Unlock()
+	if exists {
+		t.Fatal("canceled task remained registered")
+	}
 }

@@ -16,7 +16,7 @@
 - [--ai 模式](#--ai-模式)
 - [Skills](#skills)
 - [信号处理](#信号处理)
-- [多 Provider 降级](#多-provider-降级)
+- [多 Provider 配置](#多-provider-配置)
 - [适用场景](#适用场景)
 
 ---
@@ -43,7 +43,7 @@ One-shot 模式接收一次性任务，agent 执行完成后自动退出。
 
 | 方式 | 参数 | 说明 |
 | --- | --- | --- |
-| 自然语言 prompt | `-p, --prompt` | 任务描述 |
+| Prompt | `-p, --prompt` | 任务描述；若值是已存在的文件路径，则读取文件内容 |
 | 目标 | `-i, --input` | IP、URL、IP:port、CIDR，可重复 |
 | 任务文件 | `--task-file` | 从文件读取任务描述（支持 Markdown） |
 | 指定 skill | `-s, --skill` | 加载指定 skill，可重复 |
@@ -62,6 +62,9 @@ aiscan agent -p "枚举服务并输出风险摘要" -i 10.0.0.10 -i http://10.0.
 
 # 从文件读取任务
 aiscan agent --task-file task.md -i 192.168.1.0/24
+
+# -p 也会自动读取已存在的 prompt 文件
+aiscan agent -p task.md -i 192.168.1.0/24
 
 # 仅提供目标（自动生成扫描任务）
 aiscan agent -i http://target.example
@@ -180,8 +183,9 @@ aiscan agent --model gpt-4o
 
 | 命令 | 说明 |
 | --- | --- |
-| `/provider` | 查看 LLM Provider 链状态（active/standby） |
-| `/provider list` | 列出所有配置的 provider 及其状态 |
+| `/provider` | 查看 LLM Provider 配置（active/configured） |
+| `/provider list` | 列出当前和其他可用 provider 配置 |
+| `/provider set ...` | 显式设置当前 provider 和模型 |
 
 #### IOA 命令（需 `--ioa-url`）
 
@@ -501,51 +505,55 @@ REPL 中 `!` 前缀的直接命令拥有独立的 cancel context，支持 Ctrl+C
 
 ---
 
-## 多 Provider 降级
+## 多 Provider 配置
 
-★ v0.2.2 新增。当主 provider 重试次数耗尽后，agent 循环自动切换到降级链中的下一个 provider。
+可以保存多个 provider profile，但模型切换始终由用户显式触发。Agent 不会在请求失败后自动换 provider。
 
 ### 机制
 
-1. 主 provider 的每次 LLM 请求最多重试 10 次（指数退避：1s → 2s → 4s → 8s → 10s 封顶）
+1. 当前 provider 的 LLM 请求按配置执行重试和退避
 2. 可重试的错误：HTTP 429（限流）、500/502/503/529（服务端错误）、超时、连接错误
 3. 不可重试的错误：HTTP 401/403/404（认证/权限/不存在）立即失败
-4. 所有重试耗尽后，如果配置了降级链，自动切换到下一个 provider 继续当前 turn
-5. 所有 provider 均耗尽时，agent 以 `StopReasonError` 停止
+4. 当前 provider 重试耗尽后，agent 以 `StopReasonError` 停止
+5. 其他 profile 不会收到当前 turn，避免跨模型隐式重放
 
 ### 配置
 
-在配置文件中定义 provider 降级链：
+在配置文件中定义 provider profile，并明确指定当前项：
 
 ```yaml
 llm:
-  provider: openai
-  model: gpt-4o
-  api_key: "sk-..."
+  active_profile: openai
   providers:
-    - provider: deepseek
+    - id: openai
+      provider: openai
+      model: gpt-4o
+      api_key: "sk-..."
+    - id: deepseek
+      provider: deepseek
       model: deepseek-chat
       api_key: "..."
-    - provider: ollama
+    - id: ollama
+      provider: ollama
       model: llama3
       base_url: "http://localhost:11434/v1"
 ```
 
-主 provider 通过顶层 `llm` 配置指定，`providers` 数组定义降级顺序。完整配置格式参见 [参考手册](reference.md)。
+`active_profile` 按 `id` 选择当前项；未设置时使用列表第一项。完整格式参见 [参考手册](reference.md)。
 
 ### 查看状态
 
-REPL 中使用 `/provider` 命令查看当前 provider 链状态：
+REPL 中使用 `/provider` 命令查看当前和其他可用配置：
 
 ```text
 aiscan> /provider
-Provider chain:
+Provider profiles:
   1. openai / gpt-4o          # active
-  2. deepseek / deepseek-chat  # standby
-  3. ollama / llama3           # standby
+  2. deepseek / deepseek-chat  # configured
+  3. ollama / llama3           # configured
 ```
 
-当发生降级切换时，日志中会输出切换信息。
+切换通过 Web 设置页，或 REPL 的 `/provider set --provider ... --model ...` 显式完成。
 
 ---
 

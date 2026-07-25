@@ -19,12 +19,14 @@ void i18n.changeLanguage(lang)
 const agents: AgentInfo[] = [
   {
     id: 'a1', name: 'recon-01', busy: true, connected_at: '',
-    identity: { provider: 'anthropic', model: 'claude-opus-4-8' },
+    node: { id: 'recon-01', authority: 'https://ioa.example' },
+    status: { provider: 'anthropic', model: 'claude-opus-4-8', bound: true },
     stats: { current_tool: 'gogo', current_detail: '10.0.0.0/24' } as never,
   },
   {
     id: 'a2', name: 'osint-tokyo', busy: false, connected_at: '',
-    identity: { provider: 'openai', model: 'gpt-5' },
+    node: { id: 'osint-tokyo', authority: 'https://ioa.example' },
+    status: { provider: 'openai', model: 'gpt-5', bound: true },
   },
 ]
 const sessions: ChatSession[] = [

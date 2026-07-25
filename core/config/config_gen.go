@@ -21,17 +21,20 @@ const configFileHeader = `# aiscan 配置文件
 #       api_key: sk-...
 #       model: deepseek-chat
 #
-#   格式二 — providers 列表（第一个为主 provider，其余为 fallback）:
+#   格式二 — providers 配置列表（通过 active_profile 显式选择）:
 #     llm:
+#       active_profile: deepseek
 #       providers:
-#         - provider: deepseek
+#         - id: deepseek
+#           provider: deepseek
 #           api_key: sk-...
 #           model: deepseek-chat
-#         - provider: openai
+#         - id: openai
+#           provider: openai
 #           api_key: sk-...
 #           model: gpt-4o
 #
-#   两种可混用：单字段设为主 provider，providers 列表设为 fallback
+#   不设置 active_profile 时使用列表第一项。运行失败不会自动切换 provider。
 
 `
 

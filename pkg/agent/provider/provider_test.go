@@ -25,6 +25,17 @@ func TestResolveUsesBaseURL(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsNegativeModelLimits(t *testing.T) {
+	for _, cfg := range []ProviderConfig{
+		{MaxTokens: -1},
+		{ContextWindow: -1},
+	} {
+		if _, err := Resolve(&cfg); err == nil {
+			t.Fatalf("Resolve(%+v) accepted a negative model limit", cfg)
+		}
+	}
+}
+
 func TestResolvePreservesExplicitBaseURL(t *testing.T) {
 	cfg, err := Resolve(&ProviderConfig{
 		Provider: "ollama",
@@ -388,6 +399,82 @@ func TestAnthropicProviderChatCompletionStream(t *testing.T) {
 		t.Fatal("missing done event")
 	}
 }
+
+func TestAnthropicProviderStreamRejectsPrematureEOF(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n")
+		fmt.Fprint(w, "event: message_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n")
+		// Anthropic requires message_stop; closing here must be an error.
+	}))
+	defer server.Close()
+
+	p, err := NewAnthropicProvider(&ProviderConfig{Provider: "anthropic", BaseURL: server.URL + "/v1", Timeout: 5})
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider() error = %v", err)
+	}
+	events, err := p.ChatCompletionStream(context.Background(), &ChatCompletionRequest{Model: "test"})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream() error = %v", err)
+	}
+
+	var streamErr error
+	var done bool
+	for event := range events {
+		if event.Err != nil {
+			streamErr = event.Err
+		}
+		done = done || event.Done
+	}
+	if !errors.Is(streamErr, ErrStreamIncomplete) {
+		t.Fatalf("stream error = %v, want ErrStreamIncomplete", streamErr)
+	}
+	if done {
+		t.Fatal("premature EOF was reported as a completed stream")
+	}
+}
+
+func TestAnthropicErrorToolResultIsMarkedOnWire(t *testing.T) {
+	p := &AnthropicProvider{config: &ProviderConfig{BaseURL: "https://api.anthropic.com/v1"}}
+	result := NewToolResultMessage("call-truncated", truncatedToolResultForTest)
+	result.ToolResultIsError = true
+	body, err := p.marshalRequest(&ChatCompletionRequest{
+		Model: "test",
+		Messages: []ChatMessage{
+			{Role: "assistant", ToolCalls: []ToolCall{{
+				ID: "call-truncated", Type: "function",
+				Function: FunctionCall{Name: "write", Arguments: "{}"},
+			}}},
+			result,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshalRequest() error = %v", err)
+	}
+
+	var payload struct {
+		Messages []struct {
+			Content []struct {
+				Type    string `json:"type"`
+				IsError bool   `json:"is_error"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	if len(payload.Messages) != 2 || len(payload.Messages[1].Content) != 1 {
+		t.Fatalf("messages = %#v", payload.Messages)
+	}
+	block := payload.Messages[1].Content[0]
+	if block.Type != "tool_result" || !block.IsError {
+		t.Fatalf("tool result block = %#v, want is_error=true", block)
+	}
+}
+
+const truncatedToolResultForTest = "model output was truncated"
 
 func TestOpenAIProviderChatCompletionBodyTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

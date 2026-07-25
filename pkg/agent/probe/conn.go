@@ -20,7 +20,6 @@ import (
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 
 	"github.com/chainreactors/aiscan/pkg/tools/search"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 // ConnCheck is the outcome of probing one external dependency. A single
@@ -51,7 +50,7 @@ var (
 // convention where a configured secret is left empty to keep it unchanged. Like
 // TestLLM, probe failures are reported inside ConnCheck rather than as a
 // returned error; a non-nil error only signals an unknown/untestable section.
-func TestConn(ctx context.Context, section string, in, stored webproto.DistributeConfig) ([]ConnCheck, error) {
+func TestConn(ctx context.Context, section string, in, stored ProbeConfig) ([]ConnCheck, error) {
 	switch strings.ToLower(strings.TrimSpace(section)) {
 	case "cyberhub":
 		return testCyberhub(ctx, in, stored), nil
@@ -68,7 +67,7 @@ func TestConn(ctx context.Context, section string, in, stored webproto.Distribut
 
 // --- section probes ---
 
-func testCyberhub(ctx context.Context, in, stored webproto.DistributeConfig) []ConnCheck {
+func testCyberhub(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	hubURL := fallbackStr(in.Cyberhub.URL, stored.Cyberhub.URL)
 	key := fallbackStr(in.Cyberhub.Key, stored.Cyberhub.Key)
 	return []ConnCheck{runCheck("cyberhub", func() (string, error) {
@@ -88,7 +87,7 @@ func testCyberhub(ctx context.Context, in, stored webproto.DistributeConfig) []C
 	})}
 }
 
-func testRecon(ctx context.Context, in, stored webproto.DistributeConfig) []ConnCheck {
+func testRecon(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	proxy := fallbackStr(in.Recon.Proxy, stored.Recon.Proxy)
 	var checks []ConnCheck
 
@@ -116,7 +115,7 @@ func testRecon(ctx context.Context, in, stored webproto.DistributeConfig) []Conn
 	return checks
 }
 
-func testSearch(ctx context.Context, in, stored webproto.DistributeConfig) []ConnCheck {
+func testSearch(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	keys := fallbackStr(in.Search.TavilyKeys, stored.Search.TavilyKeys)
 	return []ConnCheck{runCheck("tavily", func() (string, error) {
 		first := firstCSV(keys)
@@ -129,7 +128,7 @@ func testSearch(ctx context.Context, in, stored webproto.DistributeConfig) []Con
 	})}
 }
 
-func testIOA(ctx context.Context, in, stored webproto.DistributeConfig) []ConnCheck {
+func testIOA(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	ioaURL := fallbackStr(in.IOA.URL, stored.IOA.URL)
 	token := fallbackStr(in.IOA.Token, stored.IOA.Token)
 	return []ConnCheck{runCheck("ioa", func() (string, error) {
@@ -322,4 +321,3 @@ func firstCSV(s string) string {
 	}
 	return ""
 }
-

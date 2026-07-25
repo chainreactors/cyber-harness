@@ -10,6 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
@@ -83,80 +84,25 @@ func (c *Command) Usage() string {
 }
 
 func Usage() string {
-	return `scan - automatic security scan
-Usage: scan -i <target> [options]
-Inputs:
-  -i, --input       URL, IP, IP:port, or CIDR. Can specify multiple.
-  -l, --list        File containing inputs, one per line. CIDR is allowed.
-Options:
-      --mode        Scan profile: quick or full (default: quick)
-      --verify      Use AI to verify loots at threshold: auto, off, low, medium, high, critical
-      --sniper      Use AI to search public vulnerabilities for discovered fingerprints
-      --deep        Run deep AI testing for discovered websites and fingerprinted assets
-      --report      Output a concise final markdown report
-  -f, --file        Write output to file without ANSI colors
-  -F, --format      Write aggregated asset report to file
-      --trace       Show internal scanner source and pipeline trace
-      --debug       Enable trace and underlying scanner debug logs
-
-Advanced:
-      --thread      Total concurrency budget (default: 1000); auto-distributed across engines
-  -j, --json        Output raw gogo and spray results as JSON Lines
-      --ports       Ports for gogo scanning (default: all in quick, - in full)
-      --timeout     Timeout in seconds (default: 5)
-      --dict        Dictionary file for spray word-based discovery. Can specify multiple.
-      --rule        Rule file for spray word mutation. Can specify multiple.
-      --word        Spray word-generation DSL
-      --default-dict  Use spray default dictionary for word-based discovery
-      --advance     Enable spray advance plugin behavior for enabled web capabilities
-      --zombie-top        Use top N default weakpass words
-      --user        Weakpass username. Can specify multiple.
-      --pwd         Weakpass password. Can specify multiple.
-      --max-neutron-per-finger  Maximum neutron templates per fingerprint (default: 20)
-Profiles:
-  quick: fast exposure discovery, web probes, HTTP Basic weakpass, and fingerprint-based POC checks
-  full: deeper ports, crawl depth=2, common backup/active web checks, and default web dictionary
-AI Skills:
-  --verify=<level>: validate loots with LLM-guided active checks
-  --sniper: search public CVEs/exploits for each fingerprint via AI agent
-  --deep: run dynamic testing for discovered websites and fingerprinted assets
-Output:
-  default: [web], [service], [fingerprint], [risk], [vuln], [sniper], [ai], [summary]
-  --trace: also prints internal gogo/spray/zombie/neutron source and pipeline events
-Examples:
-  scan -i 192.168.1.0/24 --mode quick
-  scan -i http://target.com --verify=high
-  scan -i http://target.com --sniper
-  scan -i http://target.com --mode full --deep
-  scan -i http://target.com --mode full --verify=high --sniper --report
-  scan -i 192.168.1.0/24 --ports top100
-  scan -i 127.0.0.1 --mode quick -j
-  scan -i 127.0.0.1 --mode quick -f 1.txt
-  scan -i 127.0.0.1 --mode quick --report
-  scan -i 127.0.0.1 --user admin --pwd admin123
-  scan -i http://target.com --dict paths.txt --rule rules.txt
-  scan -l targets.txt --mode full --zombie-top 5`
+	var options flags
+	return toolargs.GoFlagsHelp("scan", &options)
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) (err error) {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("scan", &err)
-	out, _, err := c.execute(ctx, c.resolveRelativePaths(args), nil)
+	out, result, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if out != "" {
-		fmt.Fprint(commands.Output, out)
+		fmt.Fprint(execution.Stdout, out)
 	}
-	return nil
-}
-
-func (c *Command) ExecuteStructured(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
-	return c.execute(ctx, c.resolveRelativePaths(args), stream)
+	return result, nil
 }
 
 func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
 	var flags flags
-	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
+	parser := toolargs.NewGoFlagsParser("scan", &flags)
 	if _, err := parser.ParseArgs(args); err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			return c.Usage() + "\n", nil, nil
@@ -201,11 +147,11 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	trace := flags.Trace || flags.Debug
 	pipelineBus := eventbus.New[pipeline.Observation]()
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
-	subscribePipeline(pipelineBus, coll, trace)
+	subscribePipeline(pipelineBus, coll, trace, stream)
 
 	var scanWriter *scanJSONLWriter
 	if flags.OutputFile != "" {
-		var agentBus *eventbus.Bus[agent.Event]
+		var agentBus *eventbus.Bus[aop.Event]
 		if c.parent != nil {
 			agentBus = c.parent.Cfg.Bus
 		}
@@ -289,7 +235,25 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			c.Logger.Errorf("%s", err.Error())
 		}
 	}
-	return out, coll.StructuredResult(), nil
+	result := coll.StructuredResult()
+	c.emitStructuredData(ctx, result)
+	return out, result, nil
+}
+
+func (c *Command) emitStructuredData(ctx context.Context, result *output.Result) {
+	if result == nil || c.DataBus == nil {
+		return
+	}
+	for _, service := range result.Services {
+		if service != nil {
+			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, service.GetTarget(), service)
+		}
+	}
+	for _, probe := range result.WebProbes {
+		if probe != nil {
+			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, probe.UrlString, probe)
+		}
+	}
 }
 
 var scanFileFlags = map[string]bool{

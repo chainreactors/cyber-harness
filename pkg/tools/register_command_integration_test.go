@@ -5,6 +5,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -20,11 +21,11 @@ import (
 
 func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
 	t.Helper()
-	commands.Output.Reset(nil)
-	if err := cmd.Execute(ctx, args); err != nil {
+	var output bytes.Buffer
+	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
-	return commands.Output.Captured()
+	return output.String()
 }
 
 func TestIntegrationPassiveFofa(t *testing.T) {

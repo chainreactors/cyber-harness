@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
+	transportpkg "github.com/chainreactors/aiscan/core/transport"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webagent"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -62,28 +62,29 @@ Examples:
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
 	defer cancel()
 
+	var interruptMu sync.RWMutex
 	var interruptFn func() bool
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 	go func() {
-		for {
-			<-sigChan
-			if interruptFn != nil && interruptFn() {
+		for sig := range sigChan {
+			interruptMu.RLock()
+			fn := interruptFn
+			interruptMu.RUnlock()
+			if sig == os.Interrupt && fn != nil && fn() {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "\nPress Ctrl+C again to exit\n")
-			<-sigChan
-			os.Exit(1)
+			cancel()
+			return
 		}
 	}()
 
-	if option.WebURL != "" {
-		err = webagent.Run(ctx, &option, logger)
-	} else {
-		err = runner.RunAgentMode(ctx, &option, logger, func(fn func() bool) {
-			interruptFn = fn
-		})
-	}
+	err = transportpkg.Run(ctx, &option, logger, os.Stdin, os.Stdout, func(fn func() bool) {
+		interruptMu.Lock()
+		interruptFn = fn
+		interruptMu.Unlock()
+	})
 	if err != nil {
 		logger.Errorf("agent failed: %s", err)
 		os.Exit(1)

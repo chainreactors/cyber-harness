@@ -61,10 +61,11 @@ Usage:
 Installed tools become immediately available via bash.`
 }
 
-func (c *ArsenalCommand) Execute(_ context.Context, args []string) error {
+func (c *ArsenalCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	args := execution.Args
 	if len(args) == 0 {
-		_, _ = fmt.Fprint(commands.Output, c.Usage()+"\n")
-		return nil
+		_, _ = fmt.Fprint(execution.Stdout, c.Usage()+"\n")
+		return nil, nil
 	}
 
 	action := strings.ToLower(args[0])
@@ -91,16 +92,16 @@ func (c *ArsenalCommand) Execute(_ context.Context, args []string) error {
 	case "add":
 		result, err = c.add(rest)
 	default:
-		return fmt.Errorf("unknown command %q. Run 'arsenal' for usage", action)
+		return nil, fmt.Errorf("unknown command %q. Run 'arsenal' for usage", action)
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result != "" {
-		_, _ = fmt.Fprint(commands.Output, result+"\n")
+		_, _ = fmt.Fprint(execution.Stdout, result+"\n")
 	}
-	return nil
+	return nil, nil
 }
 
 // --- subcommands ---

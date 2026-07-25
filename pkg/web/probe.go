@@ -13,32 +13,44 @@ import (
 // live inside the response; a returned error only signals an untestable section.
 func (s *Service) TestConn(ctx context.Context, section string, in webproto.DistributeConfig) ([]probe.ConnCheck, error) {
 	stored, _ := s.storedConfig(ctx)
-	return probe.TestConn(ctx, section, in, stored)
+	return probe.TestConn(ctx, section, toProbeConfig(in), toProbeConfig(stored))
+}
+
+func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
+	return probe.ProbeConfig{
+		Cyberhub: probe.CyberhubProbe{URL: dc.Cyberhub.URL, Key: dc.Cyberhub.Key},
+		Recon: probe.ReconProbe{
+			FofaKey: dc.Recon.FofaKey, HunterToken: dc.Recon.HunterToken,
+			HunterAPIKey: dc.Recon.HunterAPIKey, Proxy: dc.Recon.Proxy,
+		},
+		Search: probe.SearchProbe{TavilyKeys: dc.Search.TavilyKeys},
+		IOA:    probe.IOAProbe{URL: dc.IOA.URL, Token: dc.IOA.Token},
+	}
 }
 
 // TestLLM probes the supplied LLM settings, falling back to the stored API key
 // when the request leaves it blank, then delegates to pkg/probe.
 func (s *Service) TestLLM(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMTestResult, error) {
-	var storedKey string
-	if s.config != nil {
-		if dc, err := s.GetDistributeConfig(ctx); err == nil {
-			storedKey = strings.TrimSpace(dc.LLM.APIKey)
-		}
-	}
-	return probe.TestLLM(ctx, req, storedKey)
+	return probe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx))
 }
 
 // ListLLMModels enumerates the models the supplied LLM endpoint advertises,
 // falling back to the stored API key when the request leaves it blank, then
 // delegates to pkg/probe.
 func (s *Service) ListLLMModels(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMModelsResult, error) {
-	var storedKey string
-	if s.config != nil {
-		if dc, err := s.GetDistributeConfig(ctx); err == nil {
-			storedKey = strings.TrimSpace(dc.LLM.APIKey)
-		}
+	return probe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx))
+}
+
+// storedLLMAPIKey returns the active profile's API key from the persisted
+// config, or "" when unavailable.
+func (s *Service) storedLLMAPIKey(ctx context.Context) string {
+	if s.config == nil {
+		return ""
 	}
-	return probe.ListLLMModels(ctx, req, storedKey)
+	if dc, err := s.GetDistributeConfig(ctx); err == nil {
+		return strings.TrimSpace(dc.LLM.Active().APIKey)
+	}
+	return ""
 }
 
 // storedConfig returns the config persisted on the server, or ok=false when no

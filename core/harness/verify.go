@@ -135,6 +135,40 @@ func (v *Verifier) ToolCount(name string, min, max int) *Verifier {
 	return v
 }
 
+func (v *Verifier) ToolUsed(name string) *Verifier {
+	if !v.r.HasToolCall(name) {
+		v.fail(fmt.Sprintf("tool %q was not used", name))
+	}
+	return v
+}
+
+func (v *Verifier) ToolArgMatch(name string, match func(string) bool) *Verifier {
+	for _, call := range v.r.ToolCallsNamed(name) {
+		if match(argsText(call.Args())) {
+			return v
+		}
+	}
+	v.fail(fmt.Sprintf("no %q tool arguments matched", name))
+	return v
+}
+
+func (v *Verifier) ToolResultMatch(name string, match func(string) bool) *Verifier {
+	for _, call := range v.r.ToolCallsNamed(name) {
+		if match(call.ResultText()) {
+			return v
+		}
+	}
+	v.fail(fmt.Sprintf("no %q tool result matched", name))
+	return v
+}
+
+func (v *Verifier) AnyResultContains(substr string) *Verifier {
+	if !strings.Contains(v.r.AllToolResults(), substr) {
+		v.fail(fmt.Sprintf("no tool result contains %q", substr))
+	}
+	return v
+}
+
 // =====================================================================
 // Expect — pattern-based tool call verification
 // =====================================================================
@@ -185,7 +219,7 @@ func (v *Verifier) NoToolErrors() *Verifier {
 	if len(errs) > 0 {
 		names := make([]string, len(errs))
 		for i, e := range errs {
-			names[i] = fmt.Sprintf("%s(%s)", e.ToolName, clip(e.Result, 80))
+			names[i] = fmt.Sprintf("%s(%s)", e.Name(), clip(e.ResultText(), 80))
 		}
 		v.fail(fmt.Sprintf("%d tool call(s) errored: %s", len(errs), strings.Join(names, ", ")))
 	}
