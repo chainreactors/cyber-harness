@@ -98,7 +98,7 @@ func (a *remoteAgent) commandSpecs() []webproto.CommandSpec {
 // SessionLookup resolves a task ID to its owning chat session.
 type SessionLookup interface {
 	TaskSession(taskID string) (sessionID string, ok bool)
-	BroadcastChatEvent(sessionID string, event ChatEvent)
+	BroadcastDomainEvent(sessionID string, event DomainEvent)
 	BroadcastAOPEvent(sessionID string, event aop.Event)
 }
 
@@ -809,8 +809,8 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg webproto.Message) {
 			Type: "progress",
 			Data: mustJSON(map[string]string{"scan_id": msg.TaskID, "data": data}),
 		})
-		p.forwardToSession(a, msg.TaskID, ChatEvent{
-			Type:   ChatEventScanProgress,
+		p.forwardToSession(a, msg.TaskID, DomainEvent{
+			Type:   DomainEventScanProgress,
 			ScanID: msg.TaskID,
 			Data:   data,
 		})
@@ -972,7 +972,7 @@ func (p *AgentPool) recordScanResultStats(a *remoteAgent, payload json.RawMessag
 	a.mu.Unlock()
 }
 
-func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEvent) {
+func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event DomainEvent) {
 	if p.sessions == nil || taskID == "" {
 		return
 	}
@@ -986,7 +986,7 @@ func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event ChatEv
 	if event.AgentName == "" {
 		event.AgentName = a.name
 	}
-	p.sessions.BroadcastChatEvent(sid, event)
+	p.sessions.BroadcastDomainEvent(sid, event)
 }
 
 func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {

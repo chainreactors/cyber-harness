@@ -10,10 +10,10 @@ import {
   listChatMessages,
   listChatSessions,
   sendChatMessage,
-  subscribeChatEvents,
+  subscribeDomainEvents,
   getScan,
 } from '../api'
-import type { AgentInfo, AOPEvent, ChatEvent, ChatMessage, ChatSession, ScanResult } from '../api'
+import type { AgentInfo, AOPEvent, DomainEvent, ChatMessage, ChatSession, ScanResult } from '../api'
 import {
   isRootPath,
   parseRoute,
@@ -242,7 +242,7 @@ export function useChatSession() {
     setPendingResponse(false)
   }
 
-  function handleChatEvent(event: ChatEvent) {
+  function handleDomainEvent(event: DomainEvent) {
     const now = Date.now()
 
     switch (event.type) {
@@ -460,9 +460,9 @@ export function useChatSession() {
     } catch {}
 
     if (activation !== activationRef.current) return
-    unsubRef.current = subscribeChatEvents(
+    unsubRef.current = subscribeDomainEvents(
       id,
-      handleChatEvent,
+      handleDomainEvent,
       () => reconcileAfterReconnect(id),
       handleAOPEvent,
       () => {

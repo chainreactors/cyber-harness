@@ -194,11 +194,11 @@ type ChatMessage struct {
 }
 
 const (
-	ChatEventScanStarted    = "scan_started"
-	ChatEventScanProgress   = "scan_progress"
-	ChatEventScanComplete   = "scan_complete"
-	ChatEventAgentJoined    = "agent_joined"
-	ChatEventSessionCleared = "session_cleared"
+	DomainEventScanStarted    = "scan_started"
+	DomainEventScanProgress   = "scan_progress"
+	DomainEventScanComplete   = "scan_complete"
+	DomainEventAgentJoined    = "agent_joined"
+	DomainEventSessionCleared = "session_cleared"
 )
 
 // System message codes. A backend-generated system message carries a stable
@@ -214,15 +214,11 @@ const (
 	SysAgentNotConnected = "agent_not_connected"
 )
 
-type ChatEvent struct {
+type DomainEvent struct {
 	Type      string         `json:"type"`
 	SessionID string         `json:"session_id"`
-	MessageID string         `json:"message_id,omitempty"`
-	Role      string         `json:"role,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty"`
 	AgentName string         `json:"agent_name,omitempty"`
-	Turn      int            `json:"turn,omitempty"`
-	Content   string         `json:"content,omitempty"`
 	ScanID    string         `json:"scan_id,omitempty"`
 	Result    *output.Result `json:"result,omitempty"`
 	Data      string         `json:"data,omitempty"`

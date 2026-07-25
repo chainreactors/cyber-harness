@@ -1131,15 +1131,15 @@ func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Eve
 	return s.store.ListAOPEvents(ctx, sessionID, 10000)
 }
 
-func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
+func (s *Service) BroadcastDomainEvent(sessionID string, event DomainEvent) {
 	event.SessionID = sessionID
 	if !event.Transient {
-		s.persistRuntimeChatEvent(sessionID, event)
+		s.persistRuntimeDomainEvent(sessionID, event)
 	}
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
 		Type:     event.Type,
 		Data:     mustJSON(event),
-		Reliable: isTerminalChatEvent(event.Type),
+		Reliable: isTerminalDomainEvent(event.Type),
 	})
 }
 
@@ -1199,13 +1199,13 @@ func isReliableAOPEvent(event aop.Event) bool {
 	return false
 }
 
-// isTerminalChatEvent classifies terminal platform events. Agent run lifecycle
+// isTerminalDomainEvent classifies terminal platform events. Agent run lifecycle
 // (including hub-originated failures) is carried exclusively by AOP.
-func isTerminalChatEvent(t string) bool {
-	return t == ChatEventScanComplete
+func isTerminalDomainEvent(t string) bool {
+	return t == DomainEventScanComplete
 }
 
-func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
+func (s *Service) persistRuntimeDomainEvent(sessionID string, event DomainEvent) {
 	if s == nil || s.store == nil || sessionID == "" {
 		return
 	}
@@ -1221,12 +1221,9 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	metadata := map[string]any{
 		"event_type": event.Type,
 	}
-	if event.Turn > 0 {
-		metadata["turn"] = event.Turn
-	}
 
 	switch event.Type {
-	case ChatEventScanComplete:
+	case DomainEventScanComplete:
 		// Persist a lightweight marker so the inline scan card survives a reload /
 		// session switch. The heavy Result payload is NOT stored here — it stays
 		// reloadable via the session_scans link (getScan), and the client fills the
@@ -1356,7 +1353,7 @@ func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
 	_ = s.store.ClearMessages(context.Background(), sessionID)
 	// Transient: a live-only signal to connected clients — the cleared state is
 	// already durable in the store, so a reconnecting client re-derives it on load.
-	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
+	s.BroadcastDomainEvent(sessionID, DomainEvent{Type: DomainEventSessionCleared, Transient: true})
 	if s.sessionAgent(sessionID) != nil {
 		s.handleAgentCommand(sessionID, "/clear")
 	}
@@ -1477,8 +1474,8 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 	s.registerSessionTask(job.ID, sessionID, "")
 
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:   ChatEventScanStarted,
+	s.BroadcastDomainEvent(sessionID, DomainEvent{
+		Type:   DomainEventScanStarted,
 		ScanID: job.ID,
 		Data:   fmt.Sprintf("Scan started: %s (%s)", target, mode),
 	})
@@ -1534,8 +1531,8 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 	taskID := generateID()
 	s.registerSessionTask(taskID, sessionID, agent.id)
 
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:      ChatEventAgentJoined,
+	s.BroadcastDomainEvent(sessionID, DomainEvent{
+		Type:      DomainEventAgentJoined,
 		AgentID:   agent.id,
 		AgentName: agent.name,
 	})
@@ -1643,8 +1640,8 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	if s.finishSessionTask(scanID) {
 		return
 	}
-	s.BroadcastChatEvent(sid, ChatEvent{
-		Type:   ChatEventScanComplete,
+	s.BroadcastDomainEvent(sid, DomainEvent{
+		Type:   DomainEventScanComplete,
 		ScanID: scanID,
 		Result: result,
 	})

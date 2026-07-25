@@ -11,12 +11,12 @@ import (
 
 type evalSink struct {
 	sid        string
-	chatEvents []ChatEvent
+	chatEvents []DomainEvent
 	aopEvents  []aop.Event
 }
 
 func (s *evalSink) TaskSession(string) (string, bool) { return s.sid, true }
-func (s *evalSink) BroadcastChatEvent(_ string, event ChatEvent) {
+func (s *evalSink) BroadcastDomainEvent(_ string, event DomainEvent) {
 	s.chatEvents = append(s.chatEvents, event)
 }
 func (s *evalSink) BroadcastAOPEvent(_ string, event aop.Event) {
