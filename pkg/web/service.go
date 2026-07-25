@@ -22,9 +22,9 @@ import (
 	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	scantool "github.com/chainreactors/aiscan/tools/scan"
 )
 
 // hubCommands are the 3 commands that run on the web hub, not the agent.

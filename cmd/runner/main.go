@@ -15,8 +15,8 @@ import (
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tools/scan/engine"
 	"github.com/chainreactors/aiscan/pkg/webagent"
+	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
 func main() {
