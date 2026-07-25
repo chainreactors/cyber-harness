@@ -18,7 +18,6 @@ const (
 	TypeSpray     RecordType = "spray"
 	TypeZombie    RecordType = "zombie"
 	TypeNeutron   RecordType = "neutron"
-	TypeAgent     RecordType = "agent"
 	TypeScanEnd   RecordType = "scan_end"
 
 	TypeError RecordType = "error"
@@ -60,7 +59,6 @@ func (r Record) Marshal() []byte {
 	b, _ := json.Marshal(r)
 	return b
 }
-
 
 func ParseRecord(line []byte) (Record, error) {
 	var r Record
