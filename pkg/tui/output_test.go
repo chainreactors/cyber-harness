@@ -118,14 +118,17 @@ func usageEvent(input, outputTok, total int) aop.Event {
 func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
 	stdout := &bytes.Buffer{}
 	color := output.NewColor(false)
+	policy := cfg.OutputPolicyForLevel(verbosity)
 	o := &AgentOutput{
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
-		stream:    NewStreamWriter(stdout, stderr, true, false, color, verbosity),
+		policy:    policy,
+		stream:    NewStreamWriter(stdout, stderr, true, false, color, policy.ShowReasoning()),
 		deltas:    make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(NewLiveView(stderr, ""), o.dim, o.renderToolLine)
+	o.live.SetUsageVisible(policy.Usage)
 	return o
 }
 
@@ -157,7 +160,8 @@ func TestAgentOutputFinalWritesPlainMarkdownWithoutWrapper(t *testing.T) {
 	color := output.NewColor(false)
 	o := &AgentOutput{
 		color:  color,
-		stream: NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, 0),
+		policy: cfg.OutputPolicyForPreset(cfg.OutputPresetDefault),
+		stream: NewStreamWriter(&stdout, &bytes.Buffer{}, true, false, color, false),
 		deltas: make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(NewLiveView(&bytes.Buffer{}, ""), o.dim, o.renderToolLine)
@@ -301,6 +305,31 @@ func TestThinkingLineShowsTurnUsage(t *testing.T) {
 	}
 	if !liveRunning(o.live) {
 		t.Fatal("usage update stopped thinking spinner")
+	}
+}
+
+func TestLiveStatusCanHideUsageDetails(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	showUsage := false
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		LLMOptions:    cfg.LLMOptions{Model: "gpt-4"},
+		OutputOptions: cfg.OutputOptions{Usage: &showUsage},
+	}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(usageEvent(4096, 50, 4146))
+	o.HandleEvent(textDeltaEvent("m-1", "12345678"))
+
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "turn 1") {
+		t.Fatalf("live status itself was hidden: %q", got)
+	}
+	for _, hidden := range []string{"↑", "↓", "◐", "4,096/8,192"} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("usage detail %q leaked into live status: %q", hidden, got)
+		}
 	}
 }
 
@@ -578,7 +607,7 @@ func TestThinkingVerboseStreamsReasoningWithoutTags(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
-		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true}},
 	}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -605,7 +634,7 @@ func TestThinkingVerboseStreamsOnlyReasoningDelta(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr syncedBuffer
 	o := NewAgentOutputWithWriters(&cfg.Option{
-		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true}},
 	}, &stdout, &stderr, true)
 	defer o.live.Stop()
 
@@ -636,7 +665,7 @@ func TestReadlineThinkingAppendsWithoutSyntheticNewlines(t *testing.T) {
 		redraw: func() {},
 	}
 	o := NewAgentOutputWithWriters(&cfg.Option{
-		MiscOptions: cfg.MiscOptions{Verbose: []bool{true, true}},
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true}},
 	}, &stdout, &stderr, true)
 	o.SetReadlineMode(bridge, bridge.UpdateStatus)
 	defer o.live.Stop()
@@ -751,7 +780,7 @@ func TestReadlineCommitsFinalTextForImageResponse(t *testing.T) {
 
 func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
 	var stderr syncedBuffer
-	o := testOutput(&stderr, 2, false)
+	o := testOutput(&stderr, 1, false)
 	reasoning := "checking target scope\nprobing admin route"
 
 	o.HandleEvent(turnStartEvent(1))
@@ -857,6 +886,151 @@ func TestAgentOutputMultiLineResult(t *testing.T) {
 	}
 	if !strings.Contains(got, "+") && !strings.Contains(got, "lines") {
 		t.Fatalf("stderr missing truncation hint for multi-line result: %q", got)
+	}
+}
+
+func TestAgentOutputFullResultIsNotTruncated(t *testing.T) {
+	var stderr syncedBuffer
+	o := testOutput(&stderr, 2, false)
+	result := strings.Join([]string{
+		"line1", "line2", "line3", "line4", "line5", "line6", "line7", "line8", "line9", "line10",
+		"line11", "line12", "line13", "line14", "line15", "line16", "line17", "line18", "line19", "line20",
+	}, "\n")
+
+	o.HandleEvent(toolResultEvent("call-1", "bash", result, false))
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "line20") || strings.Contains(got, "lines hidden") {
+		t.Fatalf("full result was truncated: %q", got)
+	}
+}
+
+func TestAgentOutputDefaultKeepsToolOutputCompact(t *testing.T) {
+	var stderr syncedBuffer
+	o := testOutput(&stderr, 0, false)
+
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo compact"}`))
+	o.HandleEvent(toolResultEvent("call-1", "bash", "sensitive result body", false))
+	got := stripANSI(stderr.String())
+	if !strings.Contains(got, "bash") || !strings.Contains(got, "echo compact") {
+		t.Fatalf("compact summary missing: %q", got)
+	}
+	if strings.Contains(got, "command  ") || strings.Contains(got, "sensitive result body") {
+		t.Fatalf("default output leaked tool detail: %q", got)
+	}
+}
+
+func TestAgentOutputWithoutLiveStatusKeepsStaticToolSummaries(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	showLive := false
+	o := NewAgentOutputWithWriters(&cfg.Option{OutputOptions: cfg.OutputOptions{
+		LiveStatus: &showLive,
+	}}, &stdout, &stderr, true)
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo compact"}`))
+	o.HandleEvent(toolResultEvent("call-1", "bash", "hidden result body", false))
+
+	got := stripANSI(stderr.String())
+	if o.canAnimate() || liveRunning(o.live) {
+		t.Fatal("live status remained active after output.live_status=false")
+	}
+	if !strings.Contains(got, "bash") || !strings.Contains(got, "echo compact") || !strings.Contains(got, "✓") {
+		t.Fatalf("static compact tool summary missing: %q", got)
+	}
+	if strings.Contains(got, "thinking") || strings.Contains(got, "hidden result body") {
+		t.Fatalf("disabled live status rendered transient or detailed output: %q", got)
+	}
+}
+
+func TestAgentOutputSeparatesReasoningAndFinalAnswerStreams(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{
+		MiscOptions: cfg.MiscOptions{Verbose: []bool{true}},
+	}, &stdout, &stderr, true)
+	defer o.live.Stop()
+
+	reasoning := "reasoning-stream-only"
+	answer := "final-answer-stream-only"
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
+	o.HandleEvent(textDeltaEvent("m-1", answer+"\n\n"))
+	o.HandleEvent(messageEvent("m-1", "assistant",
+		aop.MessagePart{Type: aop.PartReasoning, Text: reasoning},
+		aop.MessagePart{Type: aop.PartText, Text: answer},
+	))
+	o.HandleEvent(turnEndEvent(1, 0))
+
+	stdoutText := stripANSI(stdout.String())
+	stderrText := stripANSI(stderr.String())
+	if !strings.Contains(stdoutText, answer) || strings.Contains(stdoutText, reasoning) {
+		t.Fatalf("stdout mixed agent streams: %q", stdoutText)
+	}
+	if !strings.Contains(stderrText, reasoning) || strings.Contains(stderrText, answer) {
+		t.Fatalf("stderr mixed agent streams: %q", stderrText)
+	}
+}
+
+func TestAgentOutputCustomPolicyControlsEachToolSection(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	show := false
+	o := NewAgentOutputWithWriters(&cfg.Option{OutputOptions: cfg.OutputOptions{
+		Reasoning:     "full",
+		ToolCalls:     "compact",
+		ToolArguments: "full",
+		ToolResults:   "hidden",
+		LiveStatus:    &show,
+		Usage:         &show,
+	}}, &stdout, &stderr, true)
+
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", "custom reasoning"))
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo a very long custom command"}`))
+	o.HandleEvent(toolResultEvent("call-1", "bash", "hidden result", false))
+
+	got := stripANSI(stderr.String())
+	for _, want := range []string{"custom reasoning", "echo a very long custom command"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("custom output missing %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "hidden result") {
+		t.Fatalf("custom output included hidden result: %q", got)
+	}
+	if o.VerbosityLabel() != "custom" || o.canAnimate() {
+		t.Fatalf("custom state label=%q animate=%v", o.VerbosityLabel(), o.canAnimate())
+	}
+}
+
+func TestAgentOutputHiddenToolsSuppressesArgumentsAndResults(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr syncedBuffer
+	o := NewAgentOutputWithWriters(&cfg.Option{OutputOptions: cfg.OutputOptions{
+		ToolCalls: "hidden", ToolArguments: "full", ToolResults: "full",
+	}}, &stdout, &stderr, false)
+
+	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"echo hidden"}`))
+	o.HandleEvent(toolResultEvent("call-1", "bash", "hidden result", false))
+	if got := stripANSI(stderr.String()); strings.Contains(got, "echo hidden") || strings.Contains(got, "hidden result") {
+		t.Fatalf("hidden tool output was rendered: %q", got)
+	}
+}
+
+func TestAgentOutputCustomPresetCycleStartsAtDefault(t *testing.T) {
+	show := false
+	o := NewAgentOutputWithWriters(&cfg.Option{OutputOptions: cfg.OutputOptions{
+		Reasoning: "full", LiveStatus: &show,
+	}}, &bytes.Buffer{}, &bytes.Buffer{}, false)
+
+	if got := o.VerbosityLabel(); got != "custom" {
+		t.Fatalf("initial label = %q, want custom", got)
+	}
+	for _, want := range []string{"default", "thinking", "full", "default"} {
+		if got := o.CycleOutputPreset(); got != want {
+			t.Fatalf("cycle label = %q, want %q", got, want)
+		}
 	}
 }
 

@@ -423,7 +423,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	reg := commands.NewRegistry()

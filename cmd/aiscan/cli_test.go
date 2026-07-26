@@ -227,6 +227,9 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 	for _, wants := range [][]string{
 		{"agent [OPTIONS]"},
 		{"Agent Options:"},
+		{"-v", "--verbose"},
+		{"thinking and tool previews"},
+		{"full tool results"},
 		{"--prompt", "/prompt"},
 		{"--transport", "/transport"},
 		{"--server-url", "/server-url"},

@@ -128,10 +128,7 @@ func (r *AgentConsole) handleToggleVerbosity() {
 	if out == nil {
 		return
 	}
-	current := out.VerbosityLevel()
-	next := (current + 1) % 3
-	out.SetVerbosity(next)
-	label := out.VerbosityLabel()
+	label := out.CycleOutputPreset()
 	if out.color.Enabled {
 		fmt.Fprintf(r.stderr, "\n%s %s\n",
 			out.dim("verbosity:"),

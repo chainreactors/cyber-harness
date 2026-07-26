@@ -17,6 +17,7 @@ type Option struct {
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	IOAOptions     `group:"Server Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
+	OutputOptions  `group:"Agent Output Options" config:"output"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 	ScanConfig     ScanConfigOptions `no-flag:"true" config:"scan"`
 }
@@ -125,7 +126,7 @@ type MiscOptions struct {
 	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
 	ViewOutput string `short:"f" long:"file" description:"Write -F output to file instead of stdout"`
 	Debug      bool   `long:"debug" config:"debug" description:"Enable debug logging"`
-	Verbose    []bool `short:"v" long:"verbose" description:"Increase verbosity (-v tools, -vv thinking)"`
+	Verbose    []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
 	Quiet      bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
 	NoColor    bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
 	Version    bool   `long:"version" description:"Print version and exit"`

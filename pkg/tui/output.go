@@ -48,6 +48,7 @@ type AgentOutput struct {
 	color     output.Color
 	debug     bool
 	verbosity int
+	policy    cfg.OutputPolicy
 
 	stream  *StreamWriter
 	aborted bool
@@ -111,20 +112,20 @@ func newAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, ter
 
 func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, stderrTTY bool, mode RenderMode) *AgentOutput {
 	debug := false
-	verbosity := 0
 	noColor := false
 	model := ""
 	contextWindow := 0
 	if option != nil {
 		debug = option.Debug
-		verbosity = len(option.Verbose)
-		if option.Quiet {
-			verbosity = -1
-		}
 		noColor = option.NoColor
 		model = option.Model
 		contextWindow = option.ContextWindow
 	}
+	policy, err := cfg.ResolveOutputPolicy(option)
+	if err != nil {
+		policy = cfg.OutputPolicyForPreset(cfg.OutputPresetDefault)
+	}
+	verbosity := outputPolicyLevel(policy)
 	useColor := !noColor && stderrTTY
 	color := output.NewColor(useColor)
 	lv := NewLiveView(stderr, color.Code(output.ANSICyan))
@@ -132,12 +133,14 @@ func newAgentOutput(option *cfg.Option, stdout, stderr io.Writer, stdoutTTY, std
 		color:     color,
 		debug:     debug,
 		verbosity: verbosity,
-		stream:    NewStreamWriter(stdout, stderr, stdoutTTY, !noColor && stdoutTTY, color, verbosity),
+		policy:    policy,
+		stream:    NewStreamWriter(stdout, stderr, stdoutTTY, !noColor && stdoutTTY, color, policy.ShowReasoning()),
 		mode:      mode,
 		tty:       stderrTTY,
 		deltas:    make(map[string]*deltaAccumulator),
 	}
 	o.live = NewLiveStatus(lv, o.dim, o.renderToolLine)
+	o.live.SetUsageVisible(policy.Usage)
 	if contextWindow <= 0 {
 		contextWindow = agent.ModelContextWindow(model)
 	}
@@ -188,8 +191,21 @@ func (o *AgentOutput) SetVerbosity(level int) {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.verbosity = level
-	o.stream.verbosity = level
+	o.applyOutputPolicyLocked(cfg.OutputPolicyForLevel(level))
+}
+
+func (o *AgentOutput) CycleOutputPreset() string {
+	if o == nil {
+		return "default"
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	next := 0
+	if !o.policy.Custom {
+		next = (o.verbosity + 1) % 3
+	}
+	o.applyOutputPolicyLocked(cfg.OutputPolicyForLevel(next))
+	return o.outputLabelLocked()
 }
 
 func (o *AgentOutput) VerbosityLevel() int {
@@ -202,16 +218,52 @@ func (o *AgentOutput) VerbosityLevel() int {
 }
 
 func (o *AgentOutput) VerbosityLabel() string {
-	switch o.VerbosityLevel() {
+	if o == nil {
+		return "default"
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.outputLabelLocked()
+}
+
+func (o *AgentOutput) outputLabelLocked() string {
+	if o.policy.Custom {
+		return "custom"
+	}
+	switch o.verbosity {
 	case -1:
 		return "quiet"
 	case 0:
 		return "default"
 	case 1:
-		return "tools"
-	default:
 		return "thinking"
+	default:
+		return "full"
 	}
+}
+
+func (o *AgentOutput) applyOutputPolicyLocked(policy cfg.OutputPolicy) {
+	o.policy = policy
+	o.verbosity = outputPolicyLevel(policy)
+	o.stream.SetReasoning(policy.ShowReasoning())
+	o.live.SetUsageVisible(policy.Usage)
+}
+
+func outputPolicyLevel(policy cfg.OutputPolicy) int {
+	switch policy.Preset {
+	case cfg.OutputPresetQuiet:
+		return -1
+	case cfg.OutputPresetVerbose:
+		return 1
+	case cfg.OutputPresetFull:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func (o *AgentOutput) quiet() bool {
+	return o == nil || o.policy.Quiet()
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +279,7 @@ func (o *AgentOutput) Start(label, text string) {
 	o.stopLive()
 	o.stream.Flush()
 	o.beginRun()
-	if o.verbosity < 0 {
+	if o.quiet() {
 		return
 	}
 	label = strings.TrimSpace(label)
@@ -250,7 +302,7 @@ func (o *AgentOutput) Start(label, text string) {
 }
 
 func (o *AgentOutput) Empty() {
-	if o == nil || o.verbosity < 0 {
+	if o == nil || o.quiet() {
 		return
 	}
 	o.mu.Lock()
@@ -296,7 +348,7 @@ func (o *AgentOutput) SetInbox(items []string) {
 }
 
 func (o *AgentOutput) Stopping() {
-	if o == nil || o.verbosity < 0 {
+	if o == nil || o.quiet() {
 		return
 	}
 	o.mu.Lock()
@@ -306,7 +358,7 @@ func (o *AgentOutput) Stopping() {
 }
 
 func (o *AgentOutput) Stopped() {
-	if o == nil || o.verbosity < 0 {
+	if o == nil || o.quiet() {
 		return
 	}
 	o.mu.Lock()
@@ -410,7 +462,7 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.live.SetOutputEstimate(estimateStreamTokens(acc.text, acc.reasoning))
 		contentDelta := o.stream.WouldPrintContentDelta(&acc.text)
 		visible := o.stream.WouldPrintDelta(&acc.text, &acc.reasoning)
-		if o.verbosity >= 0 {
+		if !o.quiet() {
 			writeDelta := func() {
 				o.stream.Delta(&acc.text, &acc.reasoning)
 			}
@@ -457,6 +509,9 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		}
 		o.turnToolCalls++
 		o.live.SetTurnToolCalls(o.turnToolCalls)
+		if o.policy.ToolCalls == cfg.OutputCallsHidden || o.quiet() {
+			return
+		}
 		ev := &toolEvent{
 			id:        data.ToolCallID,
 			name:      data.ToolName,
@@ -472,14 +527,14 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		} else {
 			o.live.Stop()
 			o.stream.Flush()
-			if o.verbosity >= 0 {
+			if !o.quiet() {
 				name := toolNameOrDefault(ev)
 				w := o.Stderr()
 				fmt.Fprintln(w)
 				fmt.Fprintf(w, "%s%s\n", toolBlockIndent,
 					o.color.Wrap("▸", output.ANSICyan)+" "+o.bold(name)+"  "+
 						o.dim(truncate.Clip(summarizeToolArguments(name, ev.args), 80)))
-				if o.verbosity >= 1 {
+				if o.policy.ToolArguments != cfg.OutputDetailHidden {
 					o.printToolArgBlock(w, name, ev.args)
 				}
 				if o.debug {
@@ -499,6 +554,9 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		if data.IsError {
 			o.toolErrorCount++
 		}
+		if o.policy.ToolCalls == cfg.OutputCallsHidden || o.quiet() {
+			return
+		}
 		ev := &toolEvent{
 			id:      data.ToolCallID,
 			name:    data.ToolName,
@@ -513,11 +571,11 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			}
 		} else {
 			o.stopLive()
-			if o.verbosity >= 0 {
+			if !o.quiet() {
 				w := o.Stderr()
 				fmt.Fprintln(w)
 				fmt.Fprintln(w, o.renderToolLine(ev))
-				if o.verbosity >= 1 {
+				if o.policy.ToolResults != cfg.OutputDetailHidden {
 					o.printToolDetail(w, ev)
 				}
 			}
@@ -541,7 +599,9 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 		o.totalUsage.TotalTokens += usage.TotalTokens
 		o.totalUsage.CacheReadTokens += usage.CacheReadTokens
 		o.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
-		o.live.SetTurnUsage(usage)
+		if o.policy.Usage {
+			o.live.SetTurnUsage(usage)
+		}
 		if o.canAnimate() {
 			o.live.Render()
 		}
@@ -606,7 +666,7 @@ func estimateStreamTokens(parts ...string) int {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) canAnimate() bool {
-	if o == nil || o.mode != ModeInteractive || !o.tty || o.verbosity < 0 {
+	if o == nil || o.mode != ModeInteractive || !o.tty || o.quiet() || !o.policy.LiveStatus {
 		return false
 	}
 	if o.readline {
@@ -649,8 +709,11 @@ func (o *AgentOutput) printToolDetail(w io.Writer, ev *toolEvent) {
 	name := toolNameOrDefault(ev)
 	if ev.isError {
 		if errText := strings.TrimSpace(ev.result); errText != "" {
+			if o.policy.ToolResults != cfg.OutputDetailFull {
+				errText = truncate.Clip(errText, agentStatusPreviewLimit)
+			}
 			fmt.Fprintf(w, "%s%s\n", toolResultIndent,
-				o.color.Wrap(truncate.Clip(errText, agentStatusPreviewLimit), output.ANSIRed))
+				o.color.Wrap(errText, output.ANSIRed))
 		}
 		return
 	}
@@ -659,7 +722,7 @@ func (o *AgentOutput) printToolDetail(w io.Writer, ev *toolEvent) {
 		return
 	}
 	var preview toolResultPreview
-	if o.verbosity >= 2 {
+	if o.policy.ToolResults == cfg.OutputDetailFull {
 		preview = toolResultPreview{lines: normalizeToolResultLines(result)}
 	} else {
 		preview = buildToolResultPreview(name, result, o.debug)
@@ -687,6 +750,10 @@ func (o *AgentOutput) printToolDetail(w io.Writer, ev *toolEvent) {
 }
 
 func (o *AgentOutput) printToolArgBlock(w io.Writer, name, arguments string) {
+	if o.policy.ToolArguments == cfg.OutputDetailFull {
+		o.printFullToolArguments(w, arguments)
+		return
+	}
 	lines := formatToolArguments(name, arguments)
 	if len(lines) == 0 {
 		return
@@ -703,6 +770,22 @@ func (o *AgentOutput) printToolArgBlock(w io.Writer, name, arguments string) {
 	}
 }
 
+func (o *AgentOutput) printFullToolArguments(w io.Writer, arguments string) {
+	var decoded any
+	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+		fmt.Fprintf(w, "%s%s\n", toolArgIndent, arguments)
+		return
+	}
+	pretty, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		fmt.Fprintf(w, "%s%s\n", toolArgIndent, arguments)
+		return
+	}
+	for _, line := range strings.Split(string(pretty), "\n") {
+		fmt.Fprintf(w, "%s%s\n", toolArgIndent, line)
+	}
+}
+
 func (o *AgentOutput) printPermanentTools(events []*toolEvent) {
 	if len(events) == 0 {
 		return
@@ -711,7 +794,10 @@ func (o *AgentOutput) printPermanentTools(events []*toolEvent) {
 	fmt.Fprintln(w)
 	for _, event := range events {
 		fmt.Fprintln(w, o.renderToolLine(event))
-		if o.verbosity >= 1 {
+		if o.policy.ToolArguments != cfg.OutputDetailHidden {
+			o.printToolArgBlock(w, toolNameOrDefault(event), event.args)
+		}
+		if o.policy.ToolResults != cfg.OutputDetailHidden {
 			o.printToolDetail(w, event)
 		}
 	}
@@ -764,13 +850,13 @@ func (o *AgentOutput) coloredElapsed(started time.Time) string {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) turnEnd(turn int) {
-	if o.verbosity < 0 {
+	if o.quiet() {
 		return
 	}
 	o.stream.Flush()
 	w := o.Stderr()
 
-	if o.verbosity >= 2 && o.stream.ReasoningPrinted() == 0 {
+	if o.policy.ShowReasoning() && o.stream.ReasoningPrinted() == 0 {
 		if reasoning := strings.TrimSpace(messagePartText(o.lastAssistant, aop.PartReasoning)); reasoning != "" {
 			o.renderThinkingBlock(w, reasoning)
 		}

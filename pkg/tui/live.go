@@ -43,6 +43,7 @@ type LiveStatus struct {
 	outputEstimate int
 	contextTokens  int
 	contextWindow  int
+	showUsage      bool
 
 	tools map[string]*toolEvent
 	order []string
@@ -50,6 +51,12 @@ type LiveStatus struct {
 
 	dim            func(string) string
 	renderToolLine func(*toolEvent) string
+}
+
+func (l *LiveStatus) SetUsageVisible(visible bool) {
+	if l != nil {
+		l.showUsage = visible
+	}
 }
 
 func NewLiveStatus(view *LiveView, dim func(string) string, renderToolLine func(*toolEvent) string) *LiveStatus {
@@ -62,6 +69,7 @@ func NewLiveStatus(view *LiveView, dim func(string) string, renderToolLine func(
 	return &LiveStatus{
 		view:           view,
 		status:         liveStatusThinking,
+		showUsage:      true,
 		tools:          make(map[string]*toolEvent),
 		dim:            dim,
 		renderToolLine: renderToolLine,
@@ -367,17 +375,19 @@ func (l *LiveStatus) formatTurnDetails() string {
 	if l.turnToolCalls > 0 {
 		parts = append(parts, fmt.Sprintf("tools=%d", l.turnToolCalls))
 	}
-	contextTokens := l.contextTokens
-	if l.turnUsage != nil {
-		parts = append(parts, formatTokenUsage(l.turnUsage))
-		if l.turnUsage.PromptTokens > 0 {
-			contextTokens = l.turnUsage.PromptTokens
+	if l.showUsage {
+		contextTokens := l.contextTokens
+		if l.turnUsage != nil {
+			parts = append(parts, formatTokenUsage(l.turnUsage))
+			if l.turnUsage.PromptTokens > 0 {
+				contextTokens = l.turnUsage.PromptTokens
+			}
+		} else if l.outputEstimate > 0 {
+			parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
 		}
-	} else if l.outputEstimate > 0 {
-		parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
-	}
-	if context := l.ContextUsage(contextTokens); context != "" {
-		parts = append(parts, context)
+		if context := l.ContextUsage(contextTokens); context != "" {
+			parts = append(parts, context)
+		}
 	}
 	parts = append(parts, elapsedSentinel)
 	return "[" + strings.Join(parts, " | ") + "]"

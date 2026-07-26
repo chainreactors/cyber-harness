@@ -89,6 +89,16 @@ ioa:
   node_name: ""
   space: ""
 
+# Agent 交互输出
+output:
+  preset: "default"       # default、verbose 或 full
+  # reasoning: "hidden"   # hidden 或 full
+  # tool_calls: "compact" # hidden 或 compact
+  # tool_arguments: "hidden" # hidden、preview 或 full
+  # tool_results: "hidden"   # hidden、preview 或 full
+  # live_status: true      # thinking/tooling/talking 瞬时状态
+  # usage: true            # 瞬时状态中的 token/上下文用量
+
 # 扫描默认值
 scan:
   verify: ""          # auto, off, low, medium, high, critical
@@ -100,6 +110,25 @@ misc:
   quiet: false
   no_color: false
 ```
+
+### Agent 输出
+
+`output.preset` 提供三组基线；未注释的细粒度字段会覆盖所选 preset：
+
+| 输出项 | `default` | `verbose` / `-v` | `full` / `-vv` |
+| --- | --- | --- | --- |
+| reasoning | hidden | full | full |
+| tool_calls | compact | compact | compact |
+| tool_arguments | hidden | preview | preview |
+| tool_results | hidden | preview | full |
+| live_status | true | true | true |
+| usage | true | true | true |
+
+默认输出只保留紧凑的工具调用摘要，不显示 reasoning、结构化参数或工具结果。`tool_calls: hidden` 是总开关，同时隐藏工具参数和结果。`live_status: false` 只关闭动态状态，仍按策略输出静态工具摘要；`usage: false` 只隐藏动态状态中的 token 和上下文用量，不产生或删除永久统计行。
+
+输出优先级为 `-q > -vv > -v > output 配置 > default`。`-q` 只显示最终回答；`-v` 和 `-vv` 会完整覆盖 `output` 中的 preset 和细粒度字段。此配置只影响 Agent 交互输出，不改变 scanner 输出或 `--debug` 日志，也不改变最终回答的 stdout 输出。
+
+交互模式下 `Ctrl+O` 按 `default → thinking → full → default` 循环固定 preset。当前为自定义细粒度配置时，第一次按键先切换到 `default`，之后再继续循环。
 
 ---
 
@@ -158,7 +187,8 @@ misc:
 | 参数 | 说明 |
 | --- | --- |
 | `--debug` | 输出调试日志 |
-| `-q, --quiet` | 减少日志输出 |
+| `-v, --verbose` | 显示完整 reasoning 和预览后的工具参数/结果；重复为 `-vv`，显示完整工具结果 |
+| `-q, --quiet` | 只显示最终回答（优先于 `-v/-vv`） |
 | `--no-color` | 禁用 ANSI 颜色 |
 | `--version` | 输出版本号并退出 |
 
