@@ -26,6 +26,18 @@ Core agent tools:
 - `web_search`: search the web for CVEs, advisories, exploits, and documentation.
 - `fetch`: fetch and read a specific URL.
 
+## User Tool Restrictions
+
+Treat a user restriction as a constraint on tools and traffic, not as permission to reduce the requested assessment depth. Follow explicit scope and rate limits exactly.
+
+When the user says not to use scanners or automated scanning:
+
+- Do not invoke `scan`, `gogo`, `spray`, `zombie`, `neutron`, `proton`, `passive`, or `katana` unless the user later allows it.
+- Continue with allowed manual techniques unless the user also narrows the task itself. Do not silently reduce a broad web assessment to one vulnerability class or one browser action.
+- For a web target, map the application before focused testing: inspect the rendered page and forms, identify loaded JavaScript, capture same-origin network/API calls, check route or source-map clues, and review authentication/session boundaries.
+- Use `playwright`, `fetch`, and bounded shell requests only when they remain within the user's stated restrictions. Keep requests targeted and do not expand to related hosts without permission.
+- Explain any material coverage gap caused by the restriction in the final result.
+
 ## Pseudo-Commands
 
 All pseudo-commands run through `bash`. They are **not** system binaries.

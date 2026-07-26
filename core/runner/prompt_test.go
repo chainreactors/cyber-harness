@@ -1,10 +1,13 @@
 package runner
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -79,5 +82,41 @@ func TestBuildSystemPromptLoadsSkillBody(t *testing.T) {
 	principlesIdx := strings.Index(prompt, "## Key Principles")
 	if skillIdx > principlesIdx {
 		t.Fatal("loaded skills should appear before principles")
+	}
+}
+
+func TestAgentRuntimePreloadsBaseSkillOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		skills []string
+	}{
+		{name: "default"},
+		{name: "explicit duplicate", skills: []string{"aiscan"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			option := &cfg.Option{}
+			option.Skills = tc.skills
+			rt, err := NewAgentRuntime(context.Background(), option, telemetry.NopLogger(), &RuntimeConfig{
+				ProviderOptional: true,
+				NoOutput:         true,
+			})
+			if err != nil {
+				t.Fatalf("NewAgentRuntime() error = %v", err)
+			}
+			defer rt.Close()
+
+			if count := strings.Count(rt.systemPrompt, "## Skill: aiscan"); count != 1 {
+				t.Fatalf("base skill count = %d, want 1", count)
+			}
+			for _, want := range []string{
+				"## User Tool Restrictions",
+				"map the application before focused testing",
+				"capture same-origin network/API calls",
+			} {
+				if !strings.Contains(rt.systemPrompt, want) {
+					t.Fatalf("system prompt missing base skill rule %q", want)
+				}
+			}
+		})
 	}
 }

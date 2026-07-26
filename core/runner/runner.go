@@ -76,6 +76,8 @@ type RuntimeConfig struct {
 	MaxPending        int
 }
 
+const baseAgentSkillName = "aiscan"
+
 func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -155,7 +157,19 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		NodeName:    nodeName,
 		Space:       option.Space,
 	}
-	for _, name := range option.Skills {
+	if rc != nil && rc.PromptConfig != nil {
+		promptConfig := *rc.PromptConfig
+		promptConfig.LoadedSkills = append([]LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
+		pc = &promptConfig
+	}
+	skillNames := option.Skills
+	if !pc.ScannerAgentMode {
+		skillNames = append([]string{baseAgentSkillName}, skillNames...)
+	}
+	for _, name := range skillNames {
+		if promptHasLoadedSkill(pc, name) {
+			continue
+		}
 		body := rt.app.Skills.ReadBody(name)
 		if body == "" {
 			body = skills.ReadFile("skills/" + name + ".md")
@@ -166,9 +180,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		if body != "" {
 			pc.LoadedSkills = append(pc.LoadedSkills, LoadedSkill{Name: name, Body: body})
 		}
-	}
-	if rc != nil && rc.PromptConfig != nil {
-		pc = rc.PromptConfig
 	}
 	rt.systemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
@@ -298,6 +309,15 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	}
 
 	return rt, nil
+}
+
+func promptHasLoadedSkill(pc *PromptConfig, name string) bool {
+	for _, loaded := range pc.LoadedSkills {
+		if loaded.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (rt *AgentRuntime) Close() {
