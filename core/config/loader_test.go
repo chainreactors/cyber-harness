@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/pkg/telemetry"
@@ -438,6 +439,17 @@ func TestInitDefaultConfig(t *testing.T) {
 	os.WriteFile(path, []byte(content), 0o644)
 	if err := LoadConfig(path, &opt); err != nil {
 		t.Errorf("generated config should be parseable: %v", err)
+	}
+	for _, want := range []string{
+		"output:",
+		"preset: \"default\"",
+		"# reasoning: \"hidden\"",
+		"# tool_results: \"hidden\"",
+		"# live_status: true",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("generated config missing %q", want)
+		}
 	}
 }
 

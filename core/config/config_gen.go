@@ -74,6 +74,7 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 		groupTag := field.Tag.Get("group")
 		descTag := field.Tag.Get("description")
 		defaultTag := field.Tag.Get("default")
+		optionalTag := field.Tag.Get("config_optional") == "true"
 
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Pointer {
@@ -108,7 +109,11 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 				b.WriteString(fmt.Sprintf("%s# %s\n", prefix, descTag))
 			}
 			val := formatValue(fieldType.Kind(), defaultTag)
-			b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, configTag, val))
+			if optionalTag {
+				b.WriteString(fmt.Sprintf("%s# %s: %s\n", prefix, configTag, val))
+			} else {
+				b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, configTag, val))
+			}
 		}
 	}
 	return b.String()

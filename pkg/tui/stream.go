@@ -17,7 +17,7 @@ type StreamWriter struct {
 	enabled   bool
 	markdown  bool
 	color     output.Color
-	verbosity int
+	reasoning bool
 
 	printed    int    // content bytes flushed
 	buf        string // paragraph buffer
@@ -29,14 +29,20 @@ type StreamWriter struct {
 	streamed   bool   // any content was streamed this turn
 }
 
-func NewStreamWriter(stdout, stderr io.Writer, enabled, markdown bool, color output.Color, verbosity int) *StreamWriter {
+func NewStreamWriter(stdout, stderr io.Writer, enabled, markdown bool, color output.Color, reasoning bool) *StreamWriter {
 	return &StreamWriter{
 		stdout:    stdout,
 		stderr:    stderr,
 		enabled:   enabled,
 		markdown:  markdown,
 		color:     color,
-		verbosity: verbosity,
+		reasoning: reasoning,
+	}
+}
+
+func (w *StreamWriter) SetReasoning(enabled bool) {
+	if w != nil {
+		w.reasoning = enabled
 	}
 }
 
@@ -49,7 +55,7 @@ func (w *StreamWriter) Delta(content, reasoning *string) {
 	// Reasoning: stream incrementally to stderr in dim. This avoids repainting
 	// long wrapped lines in the live view, which terminals cannot erase reliably
 	// without width-aware row accounting.
-	if w.verbosity >= 2 && reasoning != nil {
+	if w.reasoning && reasoning != nil {
 		w.reasonFull = *reasoning
 		if len(w.reasonFull) > w.reasonPrt {
 			if !w.reasonOpen {
@@ -96,7 +102,7 @@ func (w *StreamWriter) WouldPrintDelta(content, reasoning *string) bool {
 	if w == nil || !w.enabled || w.stdout == nil {
 		return false
 	}
-	if w.verbosity >= 2 && reasoning != nil {
+	if w.reasoning && reasoning != nil {
 		if len(*reasoning) > w.reasonPrt {
 			return true
 		}
