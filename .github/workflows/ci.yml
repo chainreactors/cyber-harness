@@ -142,7 +142,7 @@ jobs:
       - name: Run proxy tool tests
         run: |
           go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
-            ./pkg/tools/proxy/
+            ./tools/proxy/
 
       - name: Run tmux command tests
         run: |
@@ -182,7 +182,7 @@ jobs:
         run: |
           go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m -v \
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
-            ./pkg/tools
+            ./tools
 
   # ── Generated templates tests (depends on tidy) ───────────────
 

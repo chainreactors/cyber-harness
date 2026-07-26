@@ -72,7 +72,8 @@ func handoffEvent(t *testing.T, typ, sessionID, agentName string, data any) aop.
 func TestIOAHandoffFromAOPBus(t *testing.T) {
 	client := &handoffClient{}
 	bus := eventbus.New[aop.Event]()
-	subscribeIOAHandoff(bus, client, "test", nil)
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
+	defer cancel()
 
 	start := handoffEvent(t, aop.TypeSessionStart, "child-session", "worker", aop.SessionStartData{
 		Model:            "test-model",
@@ -136,7 +137,8 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 func TestIOAHandoffFailedRun(t *testing.T) {
 	client := &handoffClient{}
 	bus := eventbus.New[aop.Event]()
-	subscribeIOAHandoff(bus, client, "test", nil)
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
+	defer cancel()
 
 	start := handoffEvent(t, aop.TypeSessionStart, "child-session", "worker", aop.SessionStartData{
 		ParentSessionID:  "parent-session",
@@ -165,7 +167,8 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
 	client := &handoffClient{}
 	bus := eventbus.New[aop.Event]()
-	subscribeIOAHandoff(bus, client, "test", nil)
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
+	defer cancel()
 
 	bus.Emit(handoffEvent(t, aop.TypeSessionStart, "root-session", "aiscan", aop.SessionStartData{Model: "test-model"}))
 	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "root-session", "aiscan", aop.TurnEndData{Stop: "completed"}))

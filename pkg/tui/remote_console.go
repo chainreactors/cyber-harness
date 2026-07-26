@@ -13,13 +13,13 @@ import (
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
-// AgentEventSubscriber connects a console-local renderer to the runtime AOP
+// AOPEventSubscriber connects a console-local renderer to the runtime AOP
 // bus and returns an unsubscribe function owned by that console attachment.
-type AgentEventSubscriber func(func(aop.Event)) func()
+type AOPEventSubscriber func(func(aop.Event)) func()
 
 // RunRemoteAgentConsoleWithControl adapts a byte-stream terminal while keeping
 // event rendering scoped to the attached agent session.
-func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, control *rlterm.StreamControl, subscribers ...AgentEventSubscriber) error {
+func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, input io.Reader, output io.Writer, control *rlterm.StreamControl, subscribers ...AOPEventSubscriber) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
 	}
@@ -30,7 +30,7 @@ func RunRemoteAgentConsoleWithControl(ctx context.Context, option *cfg.Option, a
 // RunAgentConsoleWithTerminal creates the renderer and readline console for an
 // explicit terminal. Local callers pass the process terminal directly so
 // control sequences are never buffered and replayed through a PTY.
-func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, terminal *rlterm.Terminal, subscribers ...AgentEventSubscriber) error {
+func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, terminal *rlterm.Terminal, subscribers ...AOPEventSubscriber) error {
 	if terminal == nil {
 		return fmt.Errorf("terminal is nil")
 	}
@@ -43,7 +43,7 @@ func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 
 // subscribeAgentOutput filters the shared runtime bus by session ID so a
 // remote or local REPL cannot render sibling/subagent events accidentally.
-func subscribeAgentOutput(output *AgentOutput, session *agent.Agent, subscribers ...AgentEventSubscriber) func() {
+func subscribeAgentOutput(output *AgentOutput, session *agent.Agent, subscribers ...AOPEventSubscriber) func() {
 	if output == nil || session == nil || len(subscribers) == 0 || subscribers[0] == nil {
 		return func() {}
 	}

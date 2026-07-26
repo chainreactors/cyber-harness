@@ -662,19 +662,15 @@ export interface ChatMessage {
   created_at: string
 }
 
-export type ChatEventType =
+export type DomainEventType =
   | 'scan_started' | 'scan_progress' | 'scan_complete'
   | 'agent_joined' | 'session_cleared'
 
-export interface ChatEvent {
-  type: ChatEventType
+export interface DomainEvent {
+  type: DomainEventType
   session_id: string
-  message_id?: string
-  role?: ChatMessage['role']
   agent_id?: string
   agent_name?: string
-  turn?: number
-  content?: string
   scan_id?: string
   result?: ScanResult
   data?: string
@@ -784,14 +780,14 @@ export async function fetchScanReport(scanID: string, lang: string): Promise<str
   return res.text()
 }
 
-export function subscribeChatEvents(
+export function subscribeDomainEvents(
   sessionID: string,
-  onEvent: (event: ChatEvent) => void,
+  onEvent: (event: DomainEvent) => void,
   onReconnect?: () => void,
   onAOP?: (event: AOPEvent) => void,
   onOpen?: () => void,
 ): () => void {
-  const eventTypes: ChatEventType[] = [
+  const eventTypes: DomainEventType[] = [
     'scan_started', 'scan_progress', 'scan_complete',
     'agent_joined', 'session_cleared',
   ]
@@ -804,7 +800,7 @@ export function subscribeChatEvents(
         const parsed = JSON.parse(data)
         onEvent({ ...parsed, type })
       } catch {
-        onEvent({ type, session_id: sessionID, data } as ChatEvent)
+        onEvent({ type, session_id: sessionID, data } as DomainEvent)
       }
     }
   }

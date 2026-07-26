@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
@@ -72,18 +73,21 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var replay []aop.Event
-	for event := range run.Events(context.Background()) {
-		replay = append(replay, event)
+	var turnEvents []aop.Event
+	for _, event := range all {
+		if event.TurnID != "turn-1" {
+			continue
+		}
+		turnEvents = append(turnEvents, event)
 		if event.SessionID != "session-1" || event.TurnID != "turn-1" {
 			t.Fatalf("run event identity = %+v", event)
 		}
 	}
-	if len(replay) < 2 || replay[0].Type != aop.TypeTurnStart || replay[len(replay)-1].Type != aop.TypeTurnEnd {
-		t.Fatalf("run replay = %+v", replay)
+	if len(turnEvents) < 2 || turnEvents[0].Type != aop.TypeTurnStart || turnEvents[len(turnEvents)-1].Type != aop.TypeTurnEnd {
+		t.Fatalf("turn events = %+v", turnEvents)
 	}
 	starts, ends := 0, 0
-	for _, event := range replay {
+	for _, event := range turnEvents {
 		if event.Type == aop.TypeTurnStart {
 			starts++
 		}
@@ -174,6 +178,10 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	if commandEvent.Type != aop.TypeMessage || commandEvent.TurnID != "" {
 		t.Fatalf("command AOP event = %+v", commandEvent)
 	}
+	detail, ok, err := xcommand.GetDetail(commandEvent)
+	if err != nil || !ok || detail.Line != "!printf COMMAND_OK" || detail.Presentation != CommandPresentationPreformatted {
+		t.Fatalf("command extension = %+v ok=%v err=%v", detail, ok, err)
+	}
 	after := session.MessagesSnapshot()
 	if len(after) != len(before) {
 		t.Fatalf("command changed transcript: before=%d after=%d", len(before), len(after))
@@ -183,6 +191,8 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newBareRuntime(t, nil, provider)
+	var events []aop.Event
+	rt.Subscribe(func(event aop.Event) { events = append(events, event) })
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +217,10 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 2 inside one Run", provider.callCount())
 	}
 	starts, ends := 0, 0
-	for event := range run.Events(context.Background()) {
+	for _, event := range events {
+		if event.TurnID != "turn-1" {
+			continue
+		}
 		if event.Type == aop.TypeTurnStart {
 			starts++
 		}

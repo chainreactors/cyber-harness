@@ -68,8 +68,6 @@ func newStdioTestSession(t *testing.T, h *stdioHost, output *bytes.Buffer, id st
 	if h.rt == nil || h.rt.ctx == nil {
 		initialized := newRuntimeStdioHost(t, output, prov)
 		h.rt = initialized.rt
-		h.sessions = initialized.sessions
-		h.runs = initialized.runs
 	}
 	h.accept(openSessionLine(t, id))
 }

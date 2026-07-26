@@ -57,10 +57,7 @@ type connectionConfig struct {
 // Implementations live in webagent or other packages that have access to the
 // agent runtime and provider.
 type chatHandler interface {
-	HandleSessionOpen(ctx context.Context, msg webproto.Message, send func(webproto.Message))
-	HandleSessionClose(ctx context.Context, msg webproto.Message, send func(webproto.Message))
-	HandleRun(ctx context.Context, msg webproto.Message, send func(webproto.Message)) func()
-	HandleCommand(ctx context.Context, msg webproto.Message, send func(webproto.Message))
+	HandleProtocol(ctx context.Context, msg webproto.Message, send func(webproto.Message)) bool
 
 	// HandleUpload processes a file upload message.
 	HandleUpload(msg webproto.Message, send func(webproto.Message))
@@ -224,7 +221,6 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 
 	var mu sync.Mutex
 	execTasks := make(map[string]context.CancelFunc) // active tool.call tasks
-	turnCancels := make(map[string]context.CancelFunc)
 
 	// Tool telemetry: scanner tool.data and normalized tool.sco events ride the
 	// same connection, correlated to the calling task by call ID.
@@ -299,57 +295,36 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		}
 
 		switch msg.Type {
-		case webproto.TypeSessionOpen:
+		case webproto.TypeSessionOpen, webproto.TypeSessionClose, webproto.TypeRun, webproto.TypeRunCancel:
 			if cc.Chat != nil {
-				cc.Chat.HandleSessionOpen(connectionCtx, msg, send)
+				cc.Chat.HandleProtocol(connectionCtx, msg, send)
 			}
-
-		case webproto.TypeSessionClose:
-			if cc.Chat != nil {
-				cc.Chat.HandleSessionClose(connectionCtx, msg, send)
-			}
-
-		case webproto.TypeRun:
-			if cc.Chat == nil || msg.TurnID == "" {
-				continue
-			}
-			runCtx, runCancel := context.WithCancel(connectionCtx)
-			mu.Lock()
-			turnCancels[msg.TurnID] = runCancel
-			mu.Unlock()
-			wait := cc.Chat.HandleRun(runCtx, msg, send)
-			go func(turnID string) {
-				defer runCancel()
-				defer func() {
-					mu.Lock()
-					delete(turnCancels, turnID)
-					mu.Unlock()
-				}()
-				wait()
-			}(msg.TurnID)
 
 		case webproto.TypeCommand:
-			var command webproto.CommandPayload
-			if json.Unmarshal(msg.Payload, &command) != nil {
+			if cc.Chat != nil {
+				cc.Chat.HandleProtocol(connectionCtx, msg, send)
+			}
+
+		case webproto.TypeAOP:
+			var event aop.Event
+			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				payload, _ := json.Marshal(webproto.ErrorPayload{Message: "decode AOP: " + err.Error()})
+				send(webproto.Message{Type: webproto.TypeError, TaskID: msg.TaskID, Payload: payload})
 				continue
 			}
-			if command.ToolCall != nil {
-				taskCtx, cancel := context.WithCancel(connectionCtx)
-				mu.Lock()
-				execTasks[msg.TaskID] = cancel
-				mu.Unlock()
-				go func(m webproto.Message, call aop.ToolCallData) {
-					defer cancel()
-					defer func() {
-						mu.Lock()
-						delete(execTasks, m.TaskID)
-						mu.Unlock()
-					}()
-					HandleToolCommand(taskCtx, m, call, cc.Registry, cc.DataBus, send)
-				}(msg, *command.ToolCall)
-			} else if cc.Chat != nil {
-				go cc.Chat.HandleCommand(connectionCtx, msg, send)
-			}
+			taskCtx, cancel := context.WithCancel(connectionCtx)
+			mu.Lock()
+			execTasks[msg.TaskID] = cancel
+			mu.Unlock()
+			go func(m webproto.Message, event aop.Event) {
+				defer cancel()
+				defer func() {
+					mu.Lock()
+					delete(execTasks, m.TaskID)
+					mu.Unlock()
+				}()
+				HandleToolCallEvent(taskCtx, m, event, cc.Registry, cc.DataBus, send)
+			}(msg, event)
 
 		case "upload":
 			if cc.Chat != nil {
@@ -390,14 +365,6 @@ func connectOnce(ctx context.Context, cc connectionConfig, logger telemetry.Logg
 		case "config":
 			if cc.Chat != nil {
 				go cc.Chat.HandleConfigReload(cc.ServerURL, send)
-			}
-
-		case webproto.TypeRunCancel:
-			mu.Lock()
-			cancel := turnCancels[msg.TurnID]
-			mu.Unlock()
-			if cancel != nil {
-				cancel()
 			}
 
 		case "cancel":

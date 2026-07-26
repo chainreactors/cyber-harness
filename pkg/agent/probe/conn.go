@@ -19,7 +19,7 @@ import (
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 
-	"github.com/chainreactors/aiscan/pkg/tools/search"
+	"github.com/chainreactors/aiscan/tools/search"
 )
 
 // ConnCheck is the outcome of probing one external dependency. A single

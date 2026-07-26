@@ -16,7 +16,6 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -38,27 +37,6 @@ func TestWebNodeRefUsesWebIdentity(t *testing.T) {
 	}
 	if _, err := webNodeRef(&cfg.Option{AgentOptions: cfg.AgentOptions{WebURL: "https://example.test"}}); err == nil {
 		t.Fatal("expected missing ioa.node_name error")
-	}
-}
-
-func TestRunAndCommandErrorsKeepDistinctCorrelationIDs(t *testing.T) {
-	h := &chatAgentHandler{sessions: make(map[string]*runner.Session)}
-
-	var runError webproto.Message
-	wait := h.HandleRun(context.Background(), webproto.Message{
-		Type: webproto.TypeRun, TurnID: "turn-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { runError = message })
-	wait()
-	if runError.Type != webproto.TypeError || runError.TurnID != "turn-1" || runError.TaskID != "" {
-		t.Fatalf("run error correlation = %+v", runError)
-	}
-
-	var commandError webproto.Message
-	h.HandleCommand(context.Background(), webproto.Message{
-		Type: webproto.TypeCommand, TaskID: "command-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { commandError = message })
-	if commandError.Type != webproto.TypeError || commandError.TaskID != "command-1" || commandError.TurnID != "" {
-		t.Fatalf("command error correlation = %+v", commandError)
 	}
 }
 
@@ -129,12 +107,12 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 		registeredOnce.Do(func() { close(registered) })
 
 		call := aop.ToolCallData{
-			ToolCallID: "call-1",
+			ToolCallID: "task-1",
 			ToolName:   "bash",
 			Args:       map[string]any{"command": `echo "hello world"`},
 		}
-		payload, _ := json.Marshal(webproto.CommandPayload{SessionID: "task-1", ToolCall: &call})
-		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeCommand, TaskID: "task-1", Payload: payload}); err != nil {
+		payload, _ := json.Marshal(toolEvent(t, call))
+		if err := conn.WriteJSON(webproto.Message{Type: webproto.TypeAOP, TaskID: "task-1", TurnID: "task-1", Payload: payload}); err != nil {
 			t.Errorf("tool.call write: %v", err)
 			return
 		}
@@ -144,7 +122,7 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 				return
 			}
 			messages <- msg
-			if msg.Type == webproto.TypeCommandResult {
+			if msg.Type == webproto.TypeAOP {
 				return
 			}
 		}
@@ -187,8 +165,11 @@ func TestRunConnectionScopesTelemetryToActiveTask(t *testing.T) {
 						seenOutput = true
 					}
 				}
-			case webproto.TypeCommandResult:
-				seenResult = true
+			case webproto.TypeAOP:
+				var event aop.Event
+				if json.Unmarshal(msg.Payload, &event) == nil && event.Type == aop.TypeToolResult {
+					seenResult = true
+				}
 			}
 		case <-deadline:
 			t.Fatal("timeout waiting for web agent messages")
@@ -528,29 +509,4 @@ func frameHasSessionActivity(frame pty.Frame, sessionID string) bool {
 		}
 	}
 	return false
-}
-
-func TestFenceTerminalOutput(t *testing.T) {
-	// Single-line status stays prose — no fence.
-	if got := fenceTerminalOutput("Provider ready: anthropic / glm-5.2"); strings.Contains(got, "```") {
-		t.Errorf("single-line output should not be fenced, got %q", got)
-	}
-	// Multi-line panel (box art) gets fenced so the web renders it monospace.
-	panel := "╭────╮\n│ providers │\n╰────╯"
-	got := fenceTerminalOutput(panel)
-	if !strings.HasPrefix(got, "```\n") || !strings.HasSuffix(got, "\n```") {
-		t.Errorf("multi-line panel should be wrapped in a code fence, got %q", got)
-	}
-	if !strings.Contains(got, panel) {
-		t.Errorf("fenced output should preserve the panel verbatim, got %q", got)
-	}
-	// A payload containing a triple-backtick run grows the fence so it can't collide.
-	got = fenceTerminalOutput("line1\n```\nline2")
-	if !strings.HasPrefix(got, "````\n") {
-		t.Errorf("fence must be longer than an inner backtick run, got %q", got)
-	}
-	// Empty stays empty.
-	if got := fenceTerminalOutput(""); got != "" {
-		t.Errorf("empty input should stay empty, got %q", got)
-	}
 }

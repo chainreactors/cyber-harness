@@ -1,3 +1,3 @@
 package main
 
-import _ "github.com/chainreactors/aiscan/pkg/tools/arsenal"
+import _ "github.com/chainreactors/aiscan/tools/arsenal"

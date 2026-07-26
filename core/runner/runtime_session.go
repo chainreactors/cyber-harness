@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +10,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/pkg/agent/inbox"
 	"github.com/chainreactors/aiscan/pkg/aop"
+	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
@@ -60,9 +59,15 @@ type RunResult struct {
 }
 
 type CommandResult struct {
-	Parts    []aop.MessagePart
-	Metadata map[string]any
+	Command      string            `json:"command"`
+	Presentation string            `json:"presentation,omitempty"`
+	Parts        []aop.MessagePart `json:"parts,omitempty"`
 }
+
+const (
+	CommandPresentationPlain        = "plain"
+	CommandPresentationPreformatted = "preformatted"
+)
 
 type Session struct {
 	state *sessionState
@@ -70,8 +75,8 @@ type Session struct {
 
 type Run struct {
 	turnID string
-	log    *runEventLog
 	done   chan struct{}
+	cancel context.CancelFunc
 	mu     sync.Mutex
 	result RunResult
 	err    error
@@ -82,15 +87,6 @@ func (r *Run) TurnID() string {
 		return ""
 	}
 	return r.turnID
-}
-
-func (r *Run) Events(ctx context.Context) <-chan aop.Event {
-	if r == nil || r.log == nil {
-		ch := make(chan aop.Event)
-		close(ch)
-		return ch
-	}
-	return r.log.events(ctx)
 }
 
 func (r *Run) Wait() (RunResult, error) {
@@ -120,78 +116,6 @@ type sessionOperation struct {
 type commandOutcome struct {
 	result CommandResult
 	err    error
-}
-
-type runEventLog struct {
-	mu        sync.Mutex
-	eventsLog []aop.Event
-	notify    chan struct{}
-	closed    bool
-}
-
-func newRunEventLog() *runEventLog {
-	return &runEventLog{notify: make(chan struct{})}
-}
-
-func (l *runEventLog) append(event aop.Event) {
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
-		return
-	}
-	l.eventsLog = append(l.eventsLog, event)
-	close(l.notify)
-	l.notify = make(chan struct{})
-	l.mu.Unlock()
-}
-
-func (l *runEventLog) close() {
-	l.mu.Lock()
-	if !l.closed {
-		l.closed = true
-		close(l.notify)
-	}
-	l.mu.Unlock()
-}
-
-func (l *runEventLog) events(ctx context.Context) <-chan aop.Event {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	out := make(chan aop.Event)
-	go func() {
-		defer close(out)
-		index := 0
-		for {
-			l.mu.Lock()
-			var event aop.Event
-			hasEvent := index < len(l.eventsLog)
-			if hasEvent {
-				event = l.eventsLog[index]
-				index++
-			}
-			closed := l.closed
-			notify := l.notify
-			l.mu.Unlock()
-			if hasEvent {
-				select {
-				case out <- event:
-				case <-ctx.Done():
-					return
-				}
-				continue
-			}
-			if closed {
-				return
-			}
-			select {
-			case <-notify:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return out
 }
 
 type sessionEmitter struct {
@@ -225,17 +149,6 @@ type turnEmitter struct {
 	turnID    string
 	agentName string
 	emitter   *sessionEmitter
-	log       *runEventLog
-}
-
-func (e *turnEmitter) observe(event aop.Event) {
-	if event.SessionID != e.sessionID || event.TurnID != e.turnID {
-		return
-	}
-	e.log.append(event)
-	if event.Type == aop.TypeTurnEnd {
-		e.log.close()
-	}
 }
 
 func (e *turnEmitter) start() {
@@ -271,36 +184,99 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 	if line == "/continue" || strings.HasPrefix(line, "/followup ") || strings.HasPrefix(line, "/skill:") {
 		return commandOutcome{err: fmt.Errorf("%s requires a Run", line)}
 	}
-
-	var stdout, stderr bytes.Buffer
 	ctx = commands.ContextWithInbox(ctx, s.state.inbox)
 	ctx = agent.ContextWithLoopScheduler(ctx, s.state.scheduler)
-	option := s.state.runtime.option
-	if option != nil {
-		copy := *option
-		copy.NoColor = true
-		option = &copy
+
+	if strings.HasPrefix(line, "!") {
+		return s.executeBash(ctx, line, strings.TrimSpace(strings.TrimPrefix(line, "!")))
 	}
-	console := tui.NewAgentConsoleWithWriters(ctx, option, s.state.runtime.consoleAppInfo(), s.state.agent, &stdout, &stderr)
-	console.SetEvalCriteria(s.evalCriteria)
-	_, err := console.ExecuteLineAndWait(line)
-	s.evalCriteria = console.EvalCriteria()
-	out := strings.TrimRight(outputpkg.StripANSI(stdout.String()), " \t\r\n")
-	errOut := strings.TrimRight(outputpkg.StripANSI(stderr.String()), " \t\r\n")
+	args, err := commands.SplitCommandLine(line)
 	if err != nil {
-		if errOut != "" {
-			err = fmt.Errorf("%s: %w", errOut, err)
-		}
 		return commandOutcome{err: err}
 	}
-	if out == "" {
-		out = errOut
-	} else if errOut != "" {
-		out = strings.TrimRight(out+"\n"+errOut, " \t\r\n")
+	if len(args) == 0 {
+		return commandOutcome{err: fmt.Errorf("command line is required")}
 	}
-	result := CommandResult{Metadata: map[string]any{"command": line}}
-	if out != "" {
-		result.Parts = []aop.MessagePart{{Type: aop.PartText, Text: out}}
+	name := args[0]
+	values := args[1:]
+	switch name {
+	case "/help":
+		return commandText(line, CommandPresentationPreformatted,
+			"Runtime commands:\n  /status\n  /clear\n  /compact [focus]\n  /eval [criteria|off]\n  /loop [interval prompt|list|stop name]\n  !<command>")
+	case "/status":
+		provider, model, _ := s.state.runtime.providerSnapshot()
+		providerName := "not configured"
+		if provider != nil {
+			providerName = provider.Name()
+		}
+		return commandText(line, CommandPresentationPreformatted, fmt.Sprintf(
+			"Session: %s\nAgent: %s\nProvider: %s\nModel: %s\nMessages: %d",
+			s.state.id, s.state.agentName, providerName, model, len(s.state.agent.MessagesSnapshot())))
+	case "/clear":
+		s.state.agent.Reset()
+		return commandText(line, CommandPresentationPlain, "Context cleared.")
+	case "/compact":
+		if len(s.state.agent.MessagesSnapshot()) < 4 {
+			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).")
+		}
+		result, err := s.state.agent.Compact(ctx, agent.CompactConfig{CustomInstructions: strings.TrimSpace(strings.Join(values, " "))})
+		if err != nil {
+			return commandOutcome{err: err}
+		}
+		return commandText(line, CommandPresentationPlain, fmt.Sprintf(
+			"Compacted: ~%d -> ~%d tokens (%d messages kept)", result.TokensBefore, result.TokensAfter, result.KeptMessages))
+	case "/eval", "/goal":
+		criteria := strings.TrimSpace(strings.Join(values, " "))
+		switch criteria {
+		case "":
+			if s.evalCriteria == "" {
+				return commandText(line, CommandPresentationPlain, "Goal evaluation: off")
+			}
+			return commandText(line, CommandPresentationPlain, "Goal evaluation: on\n  criteria: "+s.evalCriteria)
+		case "off":
+			s.evalCriteria = ""
+			return commandText(line, CommandPresentationPlain, "Goal evaluation disabled.")
+		default:
+			s.evalCriteria = criteria
+			return commandText(line, CommandPresentationPlain, "Goal evaluation enabled: "+criteria)
+		}
+	case "/loop":
+		command := "loop"
+		if len(values) == 0 {
+			command += " list"
+		} else {
+			command += " " + strings.Join(values, " ")
+		}
+		return s.executeBash(ctx, line, command)
+	default:
+		return commandOutcome{err: fmt.Errorf("command %q is not a Runtime command", name)}
+	}
+}
+
+func (s *commandSession) executeBash(ctx context.Context, line, command string) commandOutcome {
+	if command == "" {
+		return commandOutcome{err: fmt.Errorf("command is required after !")}
+	}
+	registry := s.state.runtime.app.Commands
+	if registry == nil {
+		return commandOutcome{err: fmt.Errorf("command registry is not available")}
+	}
+	bash, ok := registry.GetTool("bash")
+	if !ok {
+		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
+	}
+	payload, _ := json.Marshal(commands.BashArgs{Command: command})
+	result, err := bash.Execute(ctx, string(payload))
+	if err != nil {
+		return commandOutcome{err: err}
+	}
+	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(result.Text(), " \t\r\n"))
+}
+
+func commandText(line, presentation, text string) commandOutcome {
+	result := CommandResult{Command: line, Presentation: presentation}
+	if text != "" {
+		result.Parts = []aop.MessagePart{{Type: aop.PartText, Text: text}}
 	}
 	return commandOutcome{result: result}
 }
@@ -365,17 +341,19 @@ func (m *sessionMailbox) RegisterProducer(name string) *inboxpkg.ProducerHandle 
 func (m *sessionMailbox) ActiveProducers() int { return m.base.ActiveProducers() }
 
 type sessionState struct {
-	runtime   *AgentRuntime
-	id        string
-	agentName string
-	agent     *agent.Agent
-	inbox     *sessionMailbox
-	scheduler *agent.LoopScheduler
-	commands  *commandSession
-	ctx       context.Context
-	cancel    context.CancelFunc
-	ops       chan *sessionOperation
-	done      chan struct{}
+	runtime          *AgentRuntime
+	id               string
+	agentName        string
+	parentSessionID  string
+	parentToolCallID string
+	agent            *agent.Agent
+	inbox            *sessionMailbox
+	scheduler        *agent.LoopScheduler
+	commands         *commandSession
+	ctx              context.Context
+	cancel           context.CancelFunc
+	ops              chan *sessionOperation
+	done             chan struct{}
 
 	mu      sync.Mutex
 	pending int
@@ -431,7 +409,9 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		ag.LoadMessages(rt.resumeMessages)
 	}
 	state := &sessionState{
-		runtime: rt, id: id, agentName: agentName, agent: ag, inbox: mailbox,
+		runtime: rt, id: id, agentName: agentName,
+		parentSessionID: options.ParentSessionID, parentToolCallID: options.ParentToolCallID,
+		agent: ag, inbox: mailbox,
 		scheduler: scheduler, ctx: sessionCtx, cancel: cancel,
 		ops: make(chan *sessionOperation, rt.pendingLimit()), done: make(chan struct{}),
 	}
@@ -454,6 +434,50 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		Model: rt.config.Model, ParentSessionID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID,
 	})
 	return public, nil
+}
+
+// EnsureSession returns an existing Runtime-owned Session or opens it with the
+// Runtime lifetime. It is idempotent so a transport reconnect can safely
+// announce the same logical Session again.
+func (rt *AgentRuntime) EnsureSession(options SessionOptions) (*Session, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("agent runtime is not configured")
+	}
+	id := strings.TrimSpace(options.ID)
+	if id != "" {
+		rt.mu.RLock()
+		state := rt.sessions[id]
+		rt.mu.RUnlock()
+		if state != nil {
+			return ensuredSession(state, options)
+		}
+	}
+	session, err := rt.OpenSession(rt.ctx, options)
+	if err == nil || id == "" {
+		return session, err
+	}
+	// Concurrent reconnects may both observe the Session as absent. The strict
+	// OpenSession call admits one; the loser re-reads and validates that Session.
+	rt.mu.RLock()
+	state := rt.sessions[id]
+	rt.mu.RUnlock()
+	if state == nil {
+		return nil, err
+	}
+	return ensuredSession(state, options)
+}
+
+func ensuredSession(state *sessionState, options SessionOptions) (*Session, error) {
+	if options.ParentSessionID != "" && options.ParentSessionID != state.parentSessionID {
+		return nil, fmt.Errorf("session %q parent_session_id conflicts with open session", state.id)
+	}
+	if options.ParentToolCallID != "" && options.ParentToolCallID != state.parentToolCallID {
+		return nil, fmt.Errorf("session %q parent_tool_call_id conflicts with open session", state.id)
+	}
+	if options.AgentName != "" && options.AgentName != state.agentName {
+		return nil, fmt.Errorf("session %q agent name conflicts with open session", state.id)
+	}
+	return &Session{state: state}, nil
 }
 
 func (rt *AgentRuntime) CloseSession(ctx context.Context, sessionID string, reason SessionCloseReason) error {
@@ -495,6 +519,58 @@ func (rt *AgentRuntime) Subscribe(fn func(aop.Event)) func() {
 		return func() {}
 	}
 	return rt.bus.Subscribe(fn)
+}
+
+func (rt *AgentRuntime) session(sessionID string) (*Session, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("agent runtime is not configured")
+	}
+	rt.mu.RLock()
+	state := rt.sessions[strings.TrimSpace(sessionID)]
+	rt.mu.RUnlock()
+	if state == nil {
+		return nil, fmt.Errorf("session %q is not open", sessionID)
+	}
+	return &Session{state: state}, nil
+}
+
+func (rt *AgentRuntime) RunSession(ctx context.Context, sessionID string, input RunInput) (*Run, error) {
+	session, err := rt.session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return session.Run(ctx, input)
+}
+
+func (rt *AgentRuntime) CommandSession(ctx context.Context, sessionID, line string) (CommandResult, error) {
+	session, err := rt.session(sessionID)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return session.Command(ctx, line)
+}
+
+func (rt *AgentRuntime) CancelRun(turnID string) error {
+	if rt == nil {
+		return fmt.Errorf("agent runtime is not configured")
+	}
+	turnID = strings.TrimSpace(turnID)
+	rt.mu.RLock()
+	run := rt.runs[turnID]
+	rt.mu.RUnlock()
+	if run == nil {
+		return fmt.Errorf("turn %q is not active", turnID)
+	}
+	run.cancel()
+	return nil
+}
+
+// WaitOperations waits for all Runs and asynchronous control operations that
+// were admitted before the call. Transports use it to drain before shutdown.
+func (rt *AgentRuntime) WaitOperations() {
+	if rt != nil {
+		rt.operations.Wait()
+	}
 }
 
 func (s *Session) Run(ctx context.Context, input RunInput) (*Run, error) {
@@ -549,21 +625,24 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	if turnID == "" {
 		turnID = s.runtime.nextRuntimeID("turn")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, runCancel := context.WithCancel(ctx)
+	run := &Run{turnID: turnID, done: make(chan struct{}), cancel: runCancel}
 	s.runtime.mu.Lock()
-	if _, exists := s.runtime.turnIDs[turnID]; exists {
+	if _, exists := s.runtime.runs[turnID]; exists {
 		s.runtime.mu.Unlock()
+		runCancel()
 		return nil, fmt.Errorf("turn %q already exists", turnID)
 	}
-	s.runtime.turnIDs[turnID] = struct{}{}
+	s.runtime.runs[turnID] = run
+	s.runtime.operations.Add(1)
 	s.runtime.mu.Unlock()
-	log := newRunEventLog()
-	run := &Run{turnID: turnID, log: log, done: make(chan struct{})}
-	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents, log: log}
-	unsubscribe := s.runtime.Subscribe(emitter.observe)
+	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents}
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
-			defer s.runtime.releaseTurnID(turnID)
-			defer unsubscribe()
+			defer s.runtime.releaseRun(run)
 			s.inbox.setActive(true)
 			emitter.start()
 			result, runErr := s.executeRun(runCtx, turnID, input)
@@ -585,8 +664,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			run.finish(runResult, runErr)
 		},
 		reject: func(err error) {
-			defer s.runtime.releaseTurnID(turnID)
-			defer unsubscribe()
+			defer s.runtime.releaseRun(run)
 			result := RunResult{Stop: agent.StopReasonCanceled}
 			if !errors.Is(err, context.Canceled) {
 				result.Stop = agent.StopReasonError
@@ -596,9 +674,8 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			run.finish(result, err)
 		},
 	}
-	if err := s.admit(ctx, op); err != nil {
-		unsubscribe()
-		s.runtime.releaseTurnID(turnID)
+	if err := s.admit(runCtx, op); err != nil {
+		s.runtime.releaseRun(run)
 		return nil, err
 	}
 	return run, nil
@@ -726,7 +803,9 @@ func (s *sessionState) emitCommandResult(result CommandResult) {
 	raw, _ := json.Marshal(aop.MessageData{
 		MessageID: s.runtime.nextRuntimeID("command"), Role: "assistant", Parts: result.Parts,
 	})
-	s.runtime.sessionEvents.emit(aop.Event{Type: aop.TypeMessage, SessionID: s.id, Agent: s.agentName, Data: raw})
+	event := aop.Event{Type: aop.TypeMessage, SessionID: s.id, Agent: s.agentName, Data: raw}
+	_ = xcommand.SetDetail(&event, xcommand.Detail{Line: result.Command, Presentation: result.Presentation})
+	s.runtime.sessionEvents.emit(event)
 }
 
 func (rt *AgentRuntime) pendingLimit() int {
@@ -762,10 +841,17 @@ func (rt *AgentRuntime) nextRuntimeID(prefix string) string {
 	return id
 }
 
-func (rt *AgentRuntime) releaseTurnID(turnID string) {
+func (rt *AgentRuntime) releaseRun(run *Run) {
+	if run == nil {
+		return
+	}
+	run.cancel()
 	rt.mu.Lock()
-	delete(rt.turnIDs, turnID)
+	if rt.runs[run.turnID] == run {
+		delete(rt.runs, run.turnID)
+	}
 	rt.mu.Unlock()
+	rt.operations.Done()
 }
 
 func (rt *AgentRuntime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {

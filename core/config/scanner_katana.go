@@ -2,7 +2,7 @@
 
 package config
 
-import katanacmd "github.com/chainreactors/aiscan/pkg/tools/katana"
+import katanacmd "github.com/chainreactors/aiscan/tools/katana"
 
 func init() {
 	ExtraCommands["katana"] = true

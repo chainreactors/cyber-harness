@@ -18,7 +18,7 @@ type HubEvent struct {
 	Data json.RawMessage
 	// Reliable marks a terminal event that Broadcast must not drop under
 	// backpressure: on a full buffer it evicts the oldest queued event to seat
-	// one, rather than shedding it like a token delta. See isTerminalChatEvent
+	// one, rather than shedding it like a token delta. See isTerminalDomainEvent
 	// for which events qualify and why a lost one strands the UI.
 	Reliable bool
 }

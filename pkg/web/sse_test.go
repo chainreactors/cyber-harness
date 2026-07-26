@@ -56,15 +56,15 @@ func TestHubBroadcastReliableSurvivesBackpressure(t *testing.T) {
 	}
 }
 
-// isTerminalChatEvent is the only test of the reliability classification: the
+// isTerminalDomainEvent is the only test of the reliability classification: the
 // run-ending platform signal must qualify, or the stuck-cursor bug returns.
 // Agent lifecycle terminals are AOP events and covered by isReliableAOPEvent.
-func TestIsTerminalChatEvent(t *testing.T) {
-	if !isTerminalChatEvent(ChatEventScanComplete) {
-		t.Errorf("%q should be terminal (reliable)", ChatEventScanComplete)
+func TestIsTerminalDomainEvent(t *testing.T) {
+	if !isTerminalDomainEvent(DomainEventScanComplete) {
+		t.Errorf("%q should be terminal (reliable)", DomainEventScanComplete)
 	}
-	for _, ty := range []string{ChatEventScanStarted, ChatEventScanProgress, ChatEventAgentJoined} {
-		if isTerminalChatEvent(ty) {
+	for _, ty := range []string{DomainEventScanStarted, DomainEventScanProgress, DomainEventAgentJoined} {
+		if isTerminalDomainEvent(ty) {
 			t.Errorf("%q should not be terminal", ty)
 		}
 	}
@@ -143,8 +143,8 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	// A completed scan must leave a durable marker so its inline card survives a
 	// timeline rebuild (reload / session switch). The heavy Result is intentionally
 	// not stored — only the scan_id, which the client re-hydrates via scan_ids.
-	svc.BroadcastChatEvent("sess-scan", ChatEvent{
-		Type:   ChatEventScanComplete,
+	svc.BroadcastDomainEvent("sess-scan", DomainEvent{
+		Type:   DomainEventScanComplete,
 		ScanID: "scan-123",
 	})
 
@@ -159,12 +159,12 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	if err := json.Unmarshal(msgs[0].Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json: %v", err)
 	}
-	if metadata["event_type"] != ChatEventScanComplete || metadata["scan_id"] != "scan-123" {
+	if metadata["event_type"] != DomainEventScanComplete || metadata["scan_id"] != "scan-123" {
 		t.Fatalf("scan marker metadata = %#v", metadata)
 	}
 
 	// A marker with no scan id is meaningless — it must not create a phantom row.
-	svc.BroadcastChatEvent("sess-scan-empty", ChatEvent{Type: ChatEventScanComplete})
+	svc.BroadcastDomainEvent("sess-scan-empty", DomainEvent{Type: DomainEventScanComplete})
 	empty, _ := store.ListMessages(context.Background(), "sess-scan-empty", 100)
 	if len(empty) != 0 {
 		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))

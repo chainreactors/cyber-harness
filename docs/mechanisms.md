@@ -217,27 +217,19 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 
 ---
 
-## 12. completeAssistantRun 始终广播
+## 12. Agent 生命周期统一由 AOP 驱动
 
-**问题**: 旧 `persistAssistantMessage` 在 content 为空时跳过广播和持久化。tool-only turn 或 eval 命中轮次上限时 UI 卡在 streaming indicator。
+**问题**: 旧 Web 路径通过 `completeAssistantRun` 合成终止消息，并另外持久化中间轮次。它与 Runtime 已产生的 AOP message/turn 生命周期重复，tool-only turn 还需要额外的空消息规则才能释放 UI 状态。
 
-**机制**: 新 `completeAssistantRun` **始终广播** terminal message event，但只在有文本时持久化。空回复不留空行，UI 正常释放 composer。
+**机制**: Runtime 产生的 typed AOP event 是 Agent 消息、工具调用和 turn 状态的唯一语义来源。Web 层直接转发和持久化这些事件，不再合成第二套 assistant 完成事件，也不再为中间轮次维护独立的聊天事件协议。
 
-**文件**: `pkg/web/service.go`
+scan、agent joined、session cleared 等产品事件保留独立的 `DomainEvent`，不携带 Agent 的 role/content/message ID 字段。
 
----
-
-## 13. message_end 中间轮持久化
-
-**问题**: 多轮对话中只有最终聚合回复被持久化（`completeAssistantRun`），中间每轮的 assistant 文本只在 SSE 流中出现，页面刷新后消失。
-
-**机制**: `persistRuntimeChatEvent` 新增 `ChatEventMessageEnd` case。每轮非空的 finalized text 存为 assistant message，带 turn 元数据。`buildTimelineFromMessages` 按 turn 归到正确的气泡。streaming partials (message_start/message_delta) 不持久化。
-
-**文件**: `pkg/web/service.go`
+**文件**: `core/runner/`, `pkg/aop/`, `pkg/web/service.go`
 
 ---
 
-## 14. TUI 渲染改进
+## 13. TUI 渲染改进
 
 ### CJK 感知宽度
 
@@ -255,15 +247,15 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 
 `redactIOAURL` 剥离 `http://<token>@host/ioa` 中的 userinfo，防止 token 泄露到终端/截图。
 
-### fenceTerminalOutput
+### 命令展示边界
 
-REPL 多行输出（box-drawing panel）在 web chat 中包裹 code fence，让前端以 monospace `<pre>` 渲染。单行输出保持 prose。fence 长度自适应避免与内容中的 backtick 冲突。
+跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web timeline 在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不再处理 Markdown 或终端格式。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/tui/ioa.go`, `pkg/webagent/agent.go`
+**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/tui/ioa.go`, `pkg/aop/x/command/command.go`, `core/output/timeline.go`
 
 ---
 
-## 15. 环境变量优先级修正
+## 14. 环境变量优先级修正
 
 旧逻辑中 provider-scoped env（如 `ANTHROPIC_MODEL`）和 aiscan 自有 env（`AISCAN_MODEL`）在 `else if` 链中平级。hub 启动的 agent 继承 hub 环境后，Settings UI 配置的 model 被环境变量覆盖。
 

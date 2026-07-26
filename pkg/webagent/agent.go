@@ -8,14 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/runner"
 	"github.com/chainreactors/aiscan/pkg/agent"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -60,7 +58,6 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 	chatHandler := &chatAgentHandler{
 		rt:        rt,
 		serverURL: option.WebURL,
-		sessions:  make(map[string]*runner.Session),
 		app:       application,
 		option:    option,
 		logger:    logger,
@@ -107,12 +104,11 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return nil
 	}
 
-	startup, err := rt.OpenSession(ctx, runner.SessionOptions{ID: "startup"})
+	_, err = rt.EnsureSession(runner.SessionOptions{ID: "startup"})
 	if err != nil {
 		return err
 	}
-	chatHandler.sessions["startup"] = startup
-	run, err := startup.Run(ctx, runner.RunInput{TurnID: "startup", Parts: []aop.MessagePart{{Type: aop.PartText, Text: task}}})
+	run, err := rt.RunSession(ctx, "startup", runner.RunInput{TurnID: "startup", Parts: []aop.MessagePart{{Type: aop.PartText, Text: task}}})
 	if err == nil {
 		_, err = run.Wait()
 	}
@@ -129,123 +125,13 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 type chatAgentHandler struct {
 	rt        *runner.AgentRuntime
 	serverURL string
-	mu        sync.Mutex
-	sessions  map[string]*runner.Session
 	app       *runner.App
 	option    *cfg.Option
 	logger    telemetry.Logger
 }
 
-func (h *chatAgentHandler) HandleSessionOpen(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
-	var payload webproto.SessionOpenPayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		sendProtocolError(send, "", "", err)
-		return
-	}
-	session, err := h.rt.OpenSession(ctx, runner.SessionOptions{
-		ID: payload.SessionID, ParentSessionID: payload.ParentSessionID, ParentToolCallID: payload.ParentToolCallID,
-	})
-	if err != nil {
-		sendProtocolError(send, "", "", err)
-		return
-	}
-	sessionID := session.ID()
-	h.mu.Lock()
-	h.sessions[sessionID] = session
-	h.mu.Unlock()
-	encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID})
-	send(webproto.Message{Type: webproto.TypeSessionOpened, Payload: encoded})
-}
-
-func (h *chatAgentHandler) HandleSessionClose(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
-	var payload webproto.SessionLifecyclePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		sendProtocolError(send, "", "", err)
-		return
-	}
-	reason := runner.SessionCloseReason(payload.Reason)
-	if err := h.rt.CloseSession(ctx, payload.SessionID, reason); err != nil {
-		sendProtocolError(send, "", "", err)
-		return
-	}
-	h.mu.Lock()
-	delete(h.sessions, payload.SessionID)
-	h.mu.Unlock()
-	encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: payload.SessionID, Reason: payload.Reason})
-	send(webproto.Message{Type: webproto.TypeSessionClosed, Payload: encoded})
-}
-
-func (h *chatAgentHandler) HandleRun(ctx context.Context, msg webproto.Message, send func(webproto.Message)) func() {
-	var payload webproto.RunPayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		return func() { sendProtocolError(send, msg.TurnID, "", err) }
-	}
-	h.mu.Lock()
-	session := h.sessions[payload.SessionID]
-	h.mu.Unlock()
-	if session == nil {
-		return func() {
-			sendProtocolError(send, msg.TurnID, "", fmt.Errorf("session %q is not open", payload.SessionID))
-		}
-	}
-	input := runner.RunInput{
-		TurnID: msg.TurnID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
-		EvalCriteria: payload.EvalCriteria, EvalMaxRounds: payload.EvalMaxRounds,
-	}
-	prompt := strings.TrimSpace(partsText(payload.Parts))
-	if prompt == "/continue" {
-		input.Continue = true
-		input.Parts = nil
-	} else if strings.HasPrefix(prompt, "/followup ") {
-		input.Parts = []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(strings.TrimPrefix(prompt, "/followup "))}}
-	}
-	run, err := session.Run(ctx, input)
-	if err != nil {
-		return func() { sendProtocolError(send, msg.TurnID, "", err) }
-	}
-	return func() { _, _ = run.Wait() }
-}
-
-func (h *chatAgentHandler) HandleCommand(ctx context.Context, msg webproto.Message, send func(webproto.Message)) {
-	var payload webproto.CommandPayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		sendProtocolError(send, "", msg.TaskID, err)
-		return
-	}
-	h.mu.Lock()
-	session := h.sessions[payload.SessionID]
-	h.mu.Unlock()
-	if session == nil {
-		sendProtocolError(send, "", msg.TaskID, fmt.Errorf("session %q is not open", payload.SessionID))
-		return
-	}
-	result, err := session.Command(ctx, payload.Line)
-	if err != nil {
-		sendProtocolError(send, "", msg.TaskID, err)
-		return
-	}
-	for i := range result.Parts {
-		if result.Parts[i].Type == aop.PartText {
-			result.Parts[i].Text = fenceTerminalOutput(result.Parts[i].Text)
-		}
-	}
-	encoded, _ := json.Marshal(webproto.CommandResultPayload{SessionID: payload.SessionID, Parts: result.Parts, Metadata: result.Metadata})
-	send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: msg.TaskID, Payload: encoded})
-}
-
-func sendProtocolError(send func(webproto.Message), turnID, taskID string, err error) {
-	payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
-	send(webproto.Message{Type: webproto.TypeError, TurnID: turnID, TaskID: taskID, Payload: payload})
-}
-
-func partsText(parts []aop.MessagePart) string {
-	var values []string
-	for _, part := range parts {
-		if part.Type == aop.PartText && part.Text != "" {
-			values = append(values, part.Text)
-		}
-	}
-	return strings.Join(values, "\n")
+func (h *chatAgentHandler) HandleProtocol(ctx context.Context, msg webproto.Message, send func(webproto.Message)) bool {
+	return h.rt != nil && h.rt.HandleProtocol(ctx, msg, send)
 }
 
 func (h *chatAgentHandler) HandleUpload(msg webproto.Message, send func(webproto.Message)) {
@@ -353,33 +239,6 @@ func handleFileUpload(msg webproto.Message, send func(webproto.Message)) {
 }
 
 // ---------------------------------------------------------------------------
-// REPL helpers
-// ---------------------------------------------------------------------------
-
-// fenceTerminalOutput wraps multi-line REPL/`!` command output in a Markdown
-// code fence. runChatREPLLine runs the same TUI console the interactive REPL
-// uses, whose panels (/status, /provider, /nodes ...) are drawn with box-drawing
-// characters and column padding that only line up in a fixed-width,
-// newline-preserving context. The web chat renders replies as Markdown prose,
-// which collapses single newlines to spaces and uses a proportional font -- so an
-// unfenced panel flattens into one mangled line. A fence makes the frontend
-// render it verbatim in a monospace <pre>. Single-line output (short status
-// confirmations like "Provider ready: ...") is left as prose.
-func fenceTerminalOutput(s string) string {
-	if !strings.Contains(s, "\n") {
-		return s
-	}
-	// Opening fence must be longer than any backtick run inside the payload
-	// (a `!cat` of a Markdown file could contain ```); grow it until it can't
-	// collide. Panel output never contains backticks, so this is just insurance.
-	fence := "```"
-	for strings.Contains(s, fence) {
-		fence += "`"
-	}
-	return fence + "\n" + s + "\n" + fence
-}
-
-// ---------------------------------------------------------------------------
 // Identity and command catalog (agent-specific, needs runner.AgentRuntime)
 // ---------------------------------------------------------------------------
 
@@ -388,9 +247,7 @@ func fenceTerminalOutput(s string) string {
 // non-internal) skill. The hub merges it with its hub-scope commands to build
 // the web "/" menu and /help, so the menu reflects what this agent can run.
 func agentCommandCatalog(app *runner.App) []webproto.CommandSpec {
-	// Build a zero-value console to extract command metadata without a live session.
-	r := &tui.AgentConsole{}
-	specs := tui.WebMenuSpecs(r.StaticCommands())
+	specs := runner.RuntimeCommandSpecs()
 	if app == nil || app.Skills == nil {
 		return specs
 	}
@@ -399,7 +256,7 @@ func agentCommandCatalog(app *runner.App) []webproto.CommandSpec {
 			continue
 		}
 		specs = append(specs, webproto.CommandSpec{
-			Name:        "/" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
+			Name:        "/skill:" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
 			Description: sk.Description,
 		})
 	}

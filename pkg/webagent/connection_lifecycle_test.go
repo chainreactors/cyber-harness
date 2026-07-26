@@ -22,19 +22,16 @@ type disconnectChatHandler struct {
 	once     sync.Once
 }
 
-func (h *disconnectChatHandler) HandleRun(ctx context.Context, _ webproto.Message, _ func(webproto.Message)) func() {
+func (h *disconnectChatHandler) HandleProtocol(ctx context.Context, msg webproto.Message, _ func(webproto.Message)) bool {
+	if msg.Type != webproto.TypeRun {
+		return false
+	}
 	h.once.Do(func() { close(h.started) })
-	return func() {
+	go func() {
 		<-ctx.Done()
 		close(h.canceled)
-	}
-}
-
-func (*disconnectChatHandler) HandleSessionOpen(context.Context, webproto.Message, func(webproto.Message)) {
-}
-func (*disconnectChatHandler) HandleSessionClose(context.Context, webproto.Message, func(webproto.Message)) {
-}
-func (*disconnectChatHandler) HandleCommand(context.Context, webproto.Message, func(webproto.Message)) {
+	}()
+	return true
 }
 func (*disconnectChatHandler) HandleUpload(webproto.Message, func(webproto.Message)) {}
 func (*disconnectChatHandler) HandleConfigReload(string, func(webproto.Message))     {}

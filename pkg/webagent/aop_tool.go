@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -32,48 +33,49 @@ type foregroundTool interface {
 	RunForegroundTool(context.Context, string, commands.BashExecOptions) (tool.Result, error)
 }
 
-// HandleToolCommand executes one structured direct Command and returns a
-// command.result frame. It does not create a Session or Turn.
-func HandleToolCommand(ctx context.Context, msg webproto.Message, call aop.ToolCallData, executor aopToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent], send func(webproto.Message)) {
+// HandleToolCallEvent executes one direct AOP tool.call and returns its
+// terminal tool.result through the same AOP envelope.
+func HandleToolCallEvent(ctx context.Context, msg webproto.Message, event aop.Event, executor aopToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent], send func(webproto.Message)) {
+	sendError := func(err error) {
+		payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
+		send(webproto.Message{Type: webproto.TypeError, TaskID: msg.TaskID, Payload: payload})
+	}
+	if !event.Valid() {
+		sendError(fmt.Errorf("invalid inbound AOP event"))
+		return
+	}
+	if event.Type != aop.TypeToolCall {
+		sendError(fmt.Errorf("unsupported inbound AOP event %q", event.Type))
+		return
+	}
+	call, err := aop.DecodeData[aop.ToolCallData](event)
+	if err != nil {
+		sendError(fmt.Errorf("decode tool.call: %w", err))
+		return
+	}
+	if msg.TaskID == "" || call.ToolCallID != msg.TaskID {
+		sendError(fmt.Errorf("tool.call correlation requires task_id == tool_call_id"))
+		return
+	}
+	if strings.TrimSpace(call.ToolName) == "" {
+		sendError(fmt.Errorf("tool.call tool_name is required"))
+		return
+	}
 	if call.WorkDir != "" {
 		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkDir})
 	}
 	callID := msg.TaskID
-	if callID == "" {
-		callID = call.ToolCallID
-	}
 	ctx = output.ContextWithCallID(ctx, callID)
 
 	started := time.Now()
 	result, execErr := executeCall(ctx, executor, call, dataBus, callID)
-	metadata := map[string]any{
-		"tool_call_id": call.ToolCallID,
-		"tool_name":    call.ToolName,
-		"duration_ms":  int(time.Since(started).Milliseconds()),
-	}
-	var parts []aop.MessagePart
-	if execErr != nil {
-		parts = []aop.MessagePart{{Type: aop.PartText, Text: execErr.Error()}}
-		metadata["is_error"] = true
-	} else {
-		if result.Text() != "" {
-			parts = append(parts, aop.MessagePart{Type: aop.PartText, Text: result.Text()})
-		}
-		if result.HasImages() {
-			for _, block := range result.Content {
-				if block.Type == "image" {
-					parts = append(parts, aop.MessagePart{Type: aop.PartImage, Image: &aop.ImageSource{Base64: block.Base64Data, MediaType: block.MimeType}})
-				}
-			}
-		}
-		if result.Details != nil {
-			metadata["details"] = result.Details
-		}
-		metadata["terminate"] = result.Terminate
-		metadata["is_error"] = result.IsError
-	}
-	payload, _ := json.Marshal(webproto.CommandResultPayload{Parts: parts, Metadata: metadata})
-	send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: callID, Payload: payload})
+	data := aop.ToolResultDataFromResult(call, result, execErr, time.Since(started))
+	raw, _ := json.Marshal(data)
+	event.Type = aop.TypeToolResult
+	event.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	event.Data = raw
+	payload, _ := json.Marshal(event)
+	send(webproto.Message{Type: webproto.TypeAOP, TaskID: callID, TurnID: event.TurnID, Payload: payload})
 }
 
 // executeCall runs the tool call. Tools with foreground capability stream

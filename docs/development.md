@@ -1,5 +1,7 @@
 # Aiscan 扩展开发手册
 
+> 新增结构化原生工具时，优先阅读 [`tools/README.md`](../tools/README.md)。最小实现只需要 `core/tool.Tool` 的四个方法和一次 `RegisterTool`；本页主要说明需要 Bash、扫描引擎或其他 Runtime 依赖的 Pseudo-Command/Factory 路径。
+
 Aiscan 提供两种对 AI 零侵入的扩展机制，开发者无需修改 agent 核心代码即可为 AI 增加新能力：
 
 | 扩展方式 | 实现方式 | 侵入程度 | 适用场景 |
@@ -155,11 +157,11 @@ type Deps struct {
 ```go
 // cmd/aiscan/imports.go
 import (
-    _ "github.com/chainreactors/aiscan/pkg/tools"           // scanner 组
-    _ "github.com/chainreactors/aiscan/pkg/tools/arsenal"    // arsenal 组
-    _ "github.com/chainreactors/aiscan/pkg/tools/ioa"        // ioa 组
-    _ "github.com/chainreactors/aiscan/pkg/tools/proxy"      // proxy 组
-    _ "github.com/chainreactors/aiscan/pkg/tools/search"     // search 组
+    _ "github.com/chainreactors/aiscan/tools"           // scanner 组
+    _ "github.com/chainreactors/aiscan/tools/arsenal"    // arsenal 组
+    _ "github.com/chainreactors/aiscan/tools/ioa"        // ioa 组
+    _ "github.com/chainreactors/aiscan/tools/proxy"      // proxy 组
+    _ "github.com/chainreactors/aiscan/tools/search"     // search 组
 )
 ```
 
@@ -170,12 +172,12 @@ import (
 **步骤 1：创建包目录**
 
 ```
-pkg/tools/whatweb/
+tools/whatweb/
 ├── whatweb.go       # 命令实现
 └── register.go      # 工厂注册
 ```
 
-**步骤 2：实现 Command 接口** — `pkg/tools/whatweb/whatweb.go`
+**步骤 2：实现 Command 接口** — `tools/whatweb/whatweb.go`
 
 ```go
 package whatweb
@@ -259,7 +261,7 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 }
 ```
 
-**步骤 3：注册工厂** — `pkg/tools/whatweb/register.go`
+**步骤 3：注册工厂** — `tools/whatweb/register.go`
 
 ```go
 package whatweb
@@ -289,7 +291,7 @@ func init() {
 ```go
 import (
     // ...existing imports...
-    _ "github.com/chainreactors/aiscan/pkg/tools/whatweb"
+    _ "github.com/chainreactors/aiscan/tools/whatweb"
 )
 ```
 

@@ -46,6 +46,7 @@ type SessionLifecyclePayload struct {
 type RunPayload struct {
 	SessionID     string            `json:"session_id"`
 	Parts         []aop.MessagePart `json:"parts"`
+	Continue      bool              `json:"continue,omitempty"`
 	NoEcho        bool              `json:"no_echo,omitempty"`
 	MaxTurns      int               `json:"max_turns,omitempty"`
 	EvalCriteria  string            `json:"eval_criteria,omitempty"`
@@ -53,15 +54,8 @@ type RunPayload struct {
 }
 
 type CommandPayload struct {
-	SessionID string            `json:"session_id"`
-	Line      string            `json:"line"`
-	ToolCall  *aop.ToolCallData `json:"tool_call,omitempty"`
-}
-
-type CommandResultPayload struct {
-	SessionID string            `json:"session_id"`
-	Parts     []aop.MessagePart `json:"parts,omitempty"`
-	Metadata  map[string]any    `json:"metadata,omitempty"`
+	SessionID string `json:"session_id"`
+	Line      string `json:"line"`
 }
 
 type ErrorPayload struct {

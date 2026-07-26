@@ -443,6 +443,13 @@ func (r *AgentConsole) handleRuntimeInputLine(line string) (bool, error) {
 			return r.appInfo.Run(ctx, prompt, false)
 		})
 	}
+	if runtimeTUICommand(text) {
+		args, err := AgentConsoleArgsForLine(text)
+		if err != nil {
+			return false, err
+		}
+		return false, r.executeArgs(r.ctx, args)
+	}
 	if strings.HasPrefix(text, "!") {
 		return false, r.appInfo.Command(r.ctx, text)
 	}
@@ -453,6 +460,19 @@ func (r *AgentConsole) handleRuntimeInputLine(line string) (bool, error) {
 		})
 	}
 	return false, r.appInfo.Command(r.ctx, text)
+}
+
+func runtimeTUICommand(line string) bool {
+	name := strings.Fields(strings.TrimSpace(line))
+	if len(name) == 0 {
+		return false
+	}
+	switch name[0] {
+	case "/help", "/resume", "/provider", "/model", "/spaces", "/messages", "/context", "/nodes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *AgentConsole) promptString() string {

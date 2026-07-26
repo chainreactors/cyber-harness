@@ -3,6 +3,7 @@ package webagent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,30 +29,59 @@ func toolCommand(toolCallID, toolName string, args map[string]any) aop.ToolCallD
 	}
 }
 
-func decodeCommandResult(t *testing.T, msg webproto.Message) webproto.CommandResultPayload {
+func toolEvent(t *testing.T, call aop.ToolCallData) aop.Event {
 	t.Helper()
-	if msg.Type != webproto.TypeCommandResult {
+	data, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return aop.Event{
+		Type: aop.TypeToolCall, TS: time.Now().UTC().Format(time.RFC3339Nano),
+		SessionID: "session-1", TurnID: call.ToolCallID, Agent: "worker", Data: data,
+	}
+}
+
+func decodeToolResult(t *testing.T, msg webproto.Message) aop.ToolResultData {
+	t.Helper()
+	if msg.Type != webproto.TypeAOP {
 		t.Fatalf("result envelope = %+v", msg)
 	}
-	var result webproto.CommandResultPayload
-	if err := json.Unmarshal(msg.Payload, &result); err != nil {
+	var event aop.Event
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != aop.TypeToolResult {
+		t.Fatalf("result event = %+v", event)
+	}
+	result, err := aop.DecodeData[aop.ToolResultData](event)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return result
 }
 
-func TestHandleToolCommand(t *testing.T) {
+func TestHandleToolCallEvent(t *testing.T) {
 	var got webproto.Message
-	HandleToolCommand(context.Background(), webproto.Message{Type: webproto.TypeCommand, TaskID: "call-1"},
-		toolCommand("call-1", "echo", map[string]any{"value": "hello"}),
+	call := toolCommand("call-1", "echo", map[string]any{"value": "hello"})
+	HandleToolCallEvent(context.Background(), webproto.Message{Type: webproto.TypeAOP, TaskID: "call-1"}, toolEvent(t, call),
 		aopTestExecutor{}, nil, func(msg webproto.Message) { got = msg })
 
 	if got.TaskID != "call-1" {
 		t.Fatalf("result envelope = %+v", got)
 	}
-	result := decodeCommandResult(t, got)
-	if result.Metadata["tool_call_id"] != "call-1" || result.Metadata["tool_name"] != "echo" || len(result.Parts) != 1 {
+	result := decodeToolResult(t, got)
+	if result.ToolCallID != "call-1" || result.ToolName != "echo" || !strings.Contains(aop.ToolResultText(result.Content), "echo") {
 		t.Fatalf("result data = %+v", result)
+	}
+}
+
+func TestHandleToolCallEventRejectsMismatchedCorrelation(t *testing.T) {
+	var got webproto.Message
+	call := toolCommand("call-1", "echo", map[string]any{"value": "hello"})
+	HandleToolCallEvent(context.Background(), webproto.Message{Type: webproto.TypeAOP, TaskID: "other"}, toolEvent(t, call),
+		aopTestExecutor{}, nil, func(msg webproto.Message) { got = msg })
+	if got.Type != webproto.TypeError || got.TaskID != "other" {
+		t.Fatalf("error envelope = %+v", got)
 	}
 }
 
@@ -79,11 +109,11 @@ func (b *recordingBash) RunForegroundTool(_ context.Context, command string, opt
 	return result, nil
 }
 
-// TestHandleToolCommandForeground verifies that a foreground-capable tool is
+// TestHandleToolCallEventForeground verifies that a foreground-capable tool is
 // run via RunForegroundTool, that output lines stream as tool.data progress
 // events correlated by the call session id, and that the tool.result carries
 // the text content plus structured Details.
-func TestHandleToolCommandForeground(t *testing.T) {
+func TestHandleToolCallEventForeground(t *testing.T) {
 	reg := commands.NewRegistry()
 	bash := &recordingBash{}
 	reg.RegisterTool(bash)
@@ -97,8 +127,8 @@ func TestHandleToolCommandForeground(t *testing.T) {
 	})
 
 	var got webproto.Message
-	HandleToolCommand(context.Background(), webproto.Message{Type: webproto.TypeCommand, TaskID: "task-1"},
-		toolCommand("call-1", "bash", map[string]any{"command": "echo test", "timeout": 7}),
+	call := toolCommand("task-1", "bash", map[string]any{"command": "echo test", "timeout": 7})
+	HandleToolCallEvent(context.Background(), webproto.Message{Type: webproto.TypeAOP, TaskID: "task-1"}, toolEvent(t, call),
 		reg, dataBus, func(msg webproto.Message) { got = msg })
 
 	if bash.command != "echo test" || bash.options.Timeout != 7*time.Second {
@@ -108,11 +138,11 @@ func TestHandleToolCommandForeground(t *testing.T) {
 		t.Fatalf("progress events = %+v", progress)
 	}
 
-	result := decodeCommandResult(t, got)
-	if isError, _ := result.Metadata["is_error"].(bool); isError || len(result.Parts) == 0 || result.Parts[0].Text != "streamed" {
+	result := decodeToolResult(t, got)
+	if result.IsError || aop.ToolResultText(result.Content) != "streamed" {
 		t.Fatalf("result data = %+v", result)
 	}
-	details, _ := json.Marshal(result.Metadata["details"])
+	details, _ := json.Marshal(result.Details)
 	var structured output.Result
 	if err := json.Unmarshal(details, &structured); err != nil {
 		t.Fatalf("decode structured details: %v", err)

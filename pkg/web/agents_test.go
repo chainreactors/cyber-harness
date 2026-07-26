@@ -235,17 +235,20 @@ func TestWSDispatchAndComplete(t *testing.T) {
 
 	var cmd WSMessage
 	conn.ReadJSON(&cmd)
-	if cmd.Type != webproto.TypeCommand {
+	if cmd.Type != webproto.TypeAOP || cmd.TaskID != "task-1" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	var command webproto.CommandPayload
-	if err := json.Unmarshal(cmd.Payload, &command); err != nil {
+	var callEvent aop.Event
+	if err := json.Unmarshal(cmd.Payload, &callEvent); err != nil {
 		t.Fatal(err)
 	}
-	if command.ToolCall == nil || command.SessionID != "task-1" {
-		t.Fatalf("unexpected command: %+v", command)
+	if callEvent.Type != aop.TypeToolCall || callEvent.TurnID != "task-1" {
+		t.Fatalf("unexpected tool.call event: %+v", callEvent)
 	}
-	call := *command.ToolCall
+	call, err := aop.DecodeData[aop.ToolCallData](callEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
 	args, _ := call.Args.(map[string]any)
 	if call.ToolName != "bash" || args["command"] != "scan -i 1.2.3.4" {
 		t.Fatalf("unexpected tool.call data: %+v", call)
@@ -262,11 +265,14 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	resultPayload, _ := json.Marshal(webproto.CommandResultPayload{
-		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: "done"}},
-		Metadata: map[string]any{"tool_call_id": "task-1", "tool_name": "bash", "details": map[string]int{"ports": 3}},
+	resultData, _ := json.Marshal(aop.ToolResultData{
+		ToolCallID: "task-1", ToolName: "bash", Content: "done", Details: map[string]int{"ports": 3},
 	})
-	conn.WriteJSON(WSMessage{Type: webproto.TypeCommandResult, TaskID: "task-1", Payload: resultPayload})
+	resultEvent := callEvent
+	resultEvent.Type = aop.TypeToolResult
+	resultEvent.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	resultEvent.Data = resultData
+	conn.WriteJSON(WSMessage{Type: webproto.TypeAOP, TaskID: "task-1", TurnID: "task-1", Payload: webproto.MustJSON(resultEvent)})
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {

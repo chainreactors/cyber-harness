@@ -22,9 +22,9 @@ import (
 	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	scantool "github.com/chainreactors/aiscan/pkg/tools/scan"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+	scantool "github.com/chainreactors/aiscan/tools/scan"
 )
 
 // hubCommands are the 3 commands that run on the web hub, not the agent.
@@ -1131,15 +1131,15 @@ func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Eve
 	return s.store.ListAOPEvents(ctx, sessionID, 10000)
 }
 
-func (s *Service) BroadcastChatEvent(sessionID string, event ChatEvent) {
+func (s *Service) BroadcastDomainEvent(sessionID string, event DomainEvent) {
 	event.SessionID = sessionID
 	if !event.Transient {
-		s.persistRuntimeChatEvent(sessionID, event)
+		s.persistRuntimeDomainEvent(sessionID, event)
 	}
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
 		Type:     event.Type,
 		Data:     mustJSON(event),
-		Reliable: isTerminalChatEvent(event.Type),
+		Reliable: isTerminalDomainEvent(event.Type),
 	})
 }
 
@@ -1199,13 +1199,13 @@ func isReliableAOPEvent(event aop.Event) bool {
 	return false
 }
 
-// isTerminalChatEvent classifies terminal platform events. Agent run lifecycle
+// isTerminalDomainEvent classifies terminal platform events. Agent run lifecycle
 // (including hub-originated failures) is carried exclusively by AOP.
-func isTerminalChatEvent(t string) bool {
-	return t == ChatEventScanComplete
+func isTerminalDomainEvent(t string) bool {
+	return t == DomainEventScanComplete
 }
 
-func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
+func (s *Service) persistRuntimeDomainEvent(sessionID string, event DomainEvent) {
 	if s == nil || s.store == nil || sessionID == "" {
 		return
 	}
@@ -1221,12 +1221,9 @@ func (s *Service) persistRuntimeChatEvent(sessionID string, event ChatEvent) {
 	metadata := map[string]any{
 		"event_type": event.Type,
 	}
-	if event.Turn > 0 {
-		metadata["turn"] = event.Turn
-	}
 
 	switch event.Type {
-	case ChatEventScanComplete:
+	case DomainEventScanComplete:
 		// Persist a lightweight marker so the inline scan card survives a reload /
 		// session switch. The heavy Result payload is NOT stored here — it stays
 		// reloadable via the session_scans link (getScan), and the client fills the
@@ -1333,8 +1330,17 @@ func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts w
 		case "exit", "quit":
 			s.closeRemoteSession(sessionID)
 			return
-		case "continue", "followup":
-			// These are Runs: the adapter normalizes their prompt semantics.
+		case "continue":
+			s.handleAgentRun(sessionID, webproto.RunPayload{
+				SessionID: sessionID, Continue: true, NoEcho: true,
+				MaxTurns: opts.PersistMaxTurns, EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+			})
+			return
+		case "followup":
+			followup := *msg
+			followup.Content = strings.TrimSpace(args)
+			s.handleChatMessage(sessionID, &followup, opts)
+			return
 		default:
 			if !strings.HasPrefix(content, "/skill:") {
 				s.handleAgentCommand(sessionID, content)
@@ -1356,7 +1362,7 @@ func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
 	_ = s.store.ClearMessages(context.Background(), sessionID)
 	// Transient: a live-only signal to connected clients — the cleared state is
 	// already durable in the store, so a reconnecting client re-derives it on load.
-	s.BroadcastChatEvent(sessionID, ChatEvent{Type: ChatEventSessionCleared, Transient: true})
+	s.BroadcastDomainEvent(sessionID, DomainEvent{Type: DomainEventSessionCleared, Transient: true})
 	if s.sessionAgent(sessionID) != nil {
 		s.handleAgentCommand(sessionID, "/clear")
 	}
@@ -1477,8 +1483,8 @@ func (s *Service) handleScanCommand(sessionID, args string) {
 
 	s.registerSessionTask(job.ID, sessionID, "")
 
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:   ChatEventScanStarted,
+	s.BroadcastDomainEvent(sessionID, DomainEvent{
+		Type:   DomainEventScanStarted,
 		ScanID: job.ID,
 		Data:   fmt.Sprintf("Scan started: %s (%s)", target, mode),
 	})
@@ -1524,6 +1530,16 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 }
 
 func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
+	run := webproto.RunPayload{
+		SessionID: sessionID,
+		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
+		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
+		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
+	}
+	s.handleAgentRun(sessionID, run)
+}
+
+func (s *Service) handleAgentRun(sessionID string, run webproto.RunPayload) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -1534,18 +1550,12 @@ func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts web
 	taskID := generateID()
 	s.registerSessionTask(taskID, sessionID, agent.id)
 
-	s.BroadcastChatEvent(sessionID, ChatEvent{
-		Type:      ChatEventAgentJoined,
+	s.BroadcastDomainEvent(sessionID, DomainEvent{
+		Type:      DomainEventAgentJoined,
 		AgentID:   agent.id,
 		AgentName: agent.name,
 	})
 
-	run := webproto.RunPayload{
-		SessionID: sessionID,
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
-		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
-		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
-	}
 	resultCh, err := s.agents.DispatchRun(agent.id, taskID, run)
 	if err != nil {
 		s.finishSessionTask(taskID)
@@ -1643,8 +1653,8 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	if s.finishSessionTask(scanID) {
 		return
 	}
-	s.BroadcastChatEvent(sid, ChatEvent{
-		Type:   ChatEventScanComplete,
+	s.BroadcastDomainEvent(sid, DomainEvent{
+		Type:   DomainEventScanComplete,
 		ScanID: scanID,
 		Result: result,
 	})
