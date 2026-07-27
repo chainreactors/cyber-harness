@@ -24,7 +24,7 @@ import (
 const runModeWeb cfg.RunMode = "web"
 
 // webServeFunc is set via init() in web_full.go (full build only).
-var webServeFunc func(ctx context.Context, option *cfg.Option, web webCommand, logger telemetry.Logger) error
+var webServeFunc func(ctx context.Context, option, explicitOption *cfg.Option, web webCommand, logger telemetry.Logger) error
 
 type webCommand struct {
 	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
@@ -109,6 +109,7 @@ func aiscan() {
 	}
 
 	option := parsed.Option
+	explicitOption := option
 	if option.Version {
 		fmt.Printf("aiscan v%s\n", cfg.Version)
 		return
@@ -175,7 +176,7 @@ func aiscan() {
 			fmt.Fprintln(os.Stderr, "error: web server not available (requires full build)")
 			os.Exit(1)
 		}
-		if err := webServeFunc(ctx, &option, parsed.WebOpts, logger); err != nil {
+		if err := webServeFunc(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
 			logger.Errorf("web server failed: %s", err)
 			os.Exit(1)
 		}

@@ -4,10 +4,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/web"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"gopkg.in/yaml.v3"
 )
@@ -45,7 +50,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0600 {
 		t.Fatalf("candidate permissions = %o, want 600", perm)
 	}
 	if got := prepared.Config.LLM.Active().APIKey; got != "secret-key" {
@@ -61,6 +66,30 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	}
 	if !loaded || committed.LLM.Active().Model != "new-model" || committed.LLM.Active().APIKey != "secret-key" {
 		t.Fatalf("committed config = %+v", committed.LLM)
+	}
+}
+
+func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
+	store, err := web.NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	application := &runner.App{SCOSidecar: &output.SCOSidecar{}}
+
+	wireWebApp(application, store)
+	if application.SCOSidecar.OnNodes == nil {
+		t.Fatal("reloaded app SCO sidecar callback was not bound")
+	}
+	application.SCOSidecar.OnNodes("scan-1", []json.RawMessage{
+		json.RawMessage(`{"cstx_id":"node-1","cstx_type":"asset","data":{}}`),
+	})
+	nodes, err := store.ListSCONodesByScanID(context.Background(), "scan-1", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("persisted SCO nodes = %d, want 1", len(nodes))
 	}
 }
 

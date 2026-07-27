@@ -10,6 +10,17 @@ import (
 type envLookup func(string) (string, bool)
 
 func ResolveRuntimeConfig(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, true)
+}
+
+// ResolveRuntimeConfigCandidate resolves a staged configuration without
+// mutating process-wide state. It is used to validate a Web reload candidate
+// before the staged file is committed.
+func ResolveRuntimeConfigCandidate(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, false)
+}
+
+func resolveRuntimeConfig(option *Option, applyProcessState bool) (string, error) {
 	explicit := *option
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
@@ -20,7 +31,7 @@ func ResolveRuntimeConfig(option *Option) (string, error) {
 	if _, err := ResolveOutputPolicy(option); err != nil {
 		return configPath, err
 	}
-	if strings.TrimSpace(option.DataDir) != "" {
+	if applyProcessState && strings.TrimSpace(option.DataDir) != "" {
 		SetDataDir(option.DataDir)
 	}
 	return configPath, nil

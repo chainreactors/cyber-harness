@@ -75,7 +75,7 @@ func distributeToOption(d *webproto.DistributeConfig) *cfg.Option {
 	opt.ReconProxy = d.Recon.Proxy
 	opt.ReconLimit = d.Recon.Limit
 	if d.Search.TavilyKeys != "" {
-		cfg.DefaultTavilyKeys = cfg.ResolveString(cfg.DefaultTavilyKeys, d.Search.TavilyKeys)
+		opt.SearchConfig.TavilyKeys = cfg.ResolveString(opt.SearchConfig.TavilyKeys, d.Search.TavilyKeys)
 	}
 	return opt
 }

@@ -19,11 +19,16 @@ type Option struct {
 	ReconOptions   `group:"Recon Options" config:"recon"`
 	OutputOptions  `group:"Agent Output Options" config:"output"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
-	ScanConfig     ScanConfigOptions `no-flag:"true" config:"scan"`
+	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
+	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
 }
 
 type ScanConfigOptions struct {
 	Verify string `config:"verify"`
+}
+
+type SearchConfigOptions struct {
+	TavilyKeys string `config:"tavily_keys" description:"Tavily API keys (comma-separated; empty falls back to DuckDuckGo)"`
 }
 
 type LLMOptions struct {

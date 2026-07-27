@@ -31,7 +31,7 @@ func init() {
 	webServeFunc = runWeb
 }
 
-func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger telemetry.Logger) error {
+func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) error {
 	store, err := web.NewSQLiteStore(opts.DB)
 	if err != nil {
 		return fmt.Errorf("open database: %s", err)
@@ -48,30 +48,32 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	}
 
 	configFile := option.ConfigFile
-	appOption := *option
 	service := web.NewService(web.ServiceConfig{
 		Store:       store,
 		App:         application,
 		ConfigStore: &webConfigStore{explicit: configFile},
 		AppFactory: func(ctx context.Context, prepared *web.PreparedConfig) (*runner.App, error) {
-			candidateOption := appOption
+			candidateOption := cfg.Option{}
+			if explicitOption != nil {
+				candidateOption = *explicitOption
+			}
 			candidateOption.ConfigFile = prepared.RuntimePath
-			return initWebApp(ctx, &candidateOption, logger)
+			if _, err := cfg.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
+				return nil, err
+			}
+			candidate, err := initWebApp(ctx, &candidateOption, logger)
+			if err != nil {
+				return nil, err
+			}
+			wireWebApp(candidate, store)
+			return candidate, nil
 		},
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
 	defer service.Close()
 
-	if application.SCOSidecar != nil {
-		application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
-			scanID := callID
-			if scanID == "" {
-				scanID = "standalone"
-			}
-			_ = store.UpsertSCONodes(context.Background(), scanID, nodes)
-		}
-	}
+	wireWebApp(application, store)
 
 	var pool *web.AgentPool
 	if option.Debug {
@@ -141,6 +143,19 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	return nil
 }
 
+func wireWebApp(application *runner.App, store *web.SQLiteStore) {
+	if application == nil || store == nil || application.SCOSidecar == nil {
+		return
+	}
+	application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
+		scanID := callID
+		if scanID == "" {
+			scanID = "standalone"
+		}
+		_ = store.UpsertSCONodes(context.Background(), scanID, nodes)
+	}
+}
+
 func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	indexBytes, _ := fs.ReadFile(fsys, "index.html")
 	fileServer := http.FileServer(http.FS(fsys))
@@ -179,14 +194,6 @@ func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Lo
 	if baseOption != nil {
 		option = *baseOption
 	}
-	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
-	if err != nil {
-		return nil, err
-	}
-	if cfgPath != "" {
-		logger.Infof("loaded config: %s", cfgPath)
-	}
-
 	appCfg := cfg.AppConfig(&option, cfg.RuntimeFeatures{
 		ProviderEnabled:  true,
 		ProviderOptional: true,

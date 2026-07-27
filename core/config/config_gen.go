@@ -38,12 +38,7 @@ const configFileHeader = `# aiscan 配置文件
 
 `
 
-const configFileTail = `# 搜索
-search:
-  # Tavily API keys (逗号分隔，留空则 fallback 到 DuckDuckGo)
-  tavily_keys: ""
-
-# 以下仅 build.sh 使用
+const configFileTail = `# 以下仅 build.sh 使用
 build:
   osarch: ""
   tags: ""
