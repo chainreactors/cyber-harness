@@ -383,9 +383,7 @@ func (s *Service) CancelScan(id string) error {
 		Reliable: true,
 	})
 	if agentID != "" && s.agents != nil {
-		if err := s.agents.CancelTask(agentID, id); err != nil {
-			return err
-		}
+		_ = s.agents.CancelTask(agentID, id)
 	}
 	return nil
 }
@@ -1361,8 +1359,22 @@ func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMes
 	return s.store.ListMessages(ctx, sessionID, 500)
 }
 
+func (s *Service) GetMessagePage(ctx context.Context, sessionID string, before int64, limit int) (ChatMessagePage, error) {
+	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ChatMessagePage{}, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return ChatMessagePage{}, err
+	}
+	return s.store.ListMessagePage(ctx, sessionID, before, limit)
+}
+
 func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Event, error) {
 	return s.store.ListAOPEvents(ctx, sessionID, 10000)
+}
+
+func (s *Service) GetAOPEventsAfter(ctx context.Context, sessionID string, after int64) ([]persistedAOPEvent, error) {
+	return s.store.ListAOPEventsAfter(ctx, sessionID, after, 0)
 }
 
 func (s *Service) BroadcastDomainEvent(sessionID string, event DomainEvent) {
@@ -1381,14 +1393,20 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
 	if s == nil || s.hub == nil || sessionID == "" || !event.Valid() {
 		return
 	}
+	var cursor int64
 	if s.store != nil {
-		_ = s.store.AddAOPEvent(context.Background(), sessionID, event)
+		storedCursor, _, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
+		if err != nil {
+			return
+		}
+		cursor = storedCursor
 	}
-	s.broadcastAOPEvent(sessionID, event)
+	s.broadcastAOPEvent(sessionID, event, cursor)
 }
 
-func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
+func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event, cursor int64) {
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
+		ID:       cursor,
 		Type:     "aop",
 		Data:     mustJSON(event),
 		Reliable: isReliableAOPEvent(event),
@@ -1499,11 +1517,12 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		CreatedAt: now,
 		Queued:    s.sessionHasActiveTask(sessionID),
 	}
-	if err := s.store.AddMessage(ctx, msg); err != nil {
+	cursor, err := s.store.AppendMessage(ctx, msg)
+	if err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
 	}
 	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event)
+		s.broadcastAOPEvent(sessionID, event, cursor)
 	}
 
 	// Update session timestamp and auto-title from first message.
@@ -1875,9 +1894,12 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		Metadata:  meta,
 		CreatedAt: now,
 	}
-	_ = s.store.AddMessage(context.Background(), msg)
+	cursor, err := s.store.AppendMessage(context.Background(), msg)
+	if err != nil {
+		return
+	}
 	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event)
+		s.broadcastAOPEvent(sessionID, event, cursor)
 	}
 }
 

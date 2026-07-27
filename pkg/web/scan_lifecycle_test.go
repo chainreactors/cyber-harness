@@ -204,6 +204,38 @@ func TestCancelTaskUsesControlChannelWhenTaskQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestCancelTaskWaitsForSaturatedControlChannel(t *testing.T) {
+	pool := NewAgentPool(NewHub())
+	remote := newFakeAgent("agent-1", 1)
+	remote.toolCalls = map[string]struct{}{"scan-1": {}}
+	resultCh := make(chan taskResult, 1)
+	remote.tasks["scan-1"] = resultCh
+	remote.controlCh <- webproto.Message{Type: "config"}
+	pool.agents[remote.id] = remote
+
+	if err := pool.CancelTask(remote.id, "scan-1"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-resultCh:
+		if ok {
+			t.Fatal("canceled result channel remained open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not converge the pending task")
+	}
+
+	<-remote.controlCh
+	select {
+	case msg := <-remote.controlCh:
+		if msg.Type != "cancel" || msg.TaskID != "scan-1" {
+			t.Fatalf("queued cancellation = %+v", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation was dropped under control-channel backpressure")
+	}
+}
+
 func TestDecodeScanResultRejectsInvalidEnvelopes(t *testing.T) {
 	for _, tc := range []struct {
 		name string

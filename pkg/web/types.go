@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
@@ -194,10 +195,21 @@ type ChatMessage struct {
 	Content   string          `json:"content"`
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
+	Cursor    int64           `json:"cursor,omitempty"`
 	// Queued is a transient send-time hint: true when the message was accepted
 	// while another chat task is still running on the session, so the client
 	// can render it as pending-in-queue rather than in-flight.
 	Queued bool `json:"queued,omitempty"`
+}
+
+type ChatMessagePage struct {
+	Items      []*ChatMessage `json:"items"`
+	NextCursor int64          `json:"next_cursor,omitempty"`
+}
+
+type persistedAOPEvent struct {
+	Cursor int64
+	Event  aop.Event
 }
 
 const (

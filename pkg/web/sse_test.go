@@ -245,3 +245,28 @@ func TestServeSSEWithSnapshotSubscribesBeforeReadingSnapshot(t *testing.T) {
 		t.Fatalf("SSE body = %q; event broadcast during snapshot was lost", body)
 	}
 }
+
+func TestServeSSEWithSnapshotDropsQueuedSnapshotDuplicates(t *testing.T) {
+	hub := NewHub()
+	req := httptest.NewRequest("GET", "/events", nil)
+	recorder := newLockedResponseRecorder()
+
+	err := ServeSSEWithSnapshot(recorder, req, hub, "session-topic", func() ([]HubEvent, error) {
+		hub.Broadcast("session-topic", HubEvent{ID: 2, Type: "aop", Data: mustJSON("duplicate")})
+		hub.Broadcast("session-topic", HubEvent{ID: 3, Type: "done", Data: mustJSON("new"), Reliable: true})
+		return []HubEvent{
+			{ID: 1, Type: "aop", Data: mustJSON("one")},
+			{ID: 2, Type: "aop", Data: mustJSON("duplicate")},
+		}, nil
+	}, "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := recorder.BodyString()
+	if strings.Count(body, "id: 2\n") != 1 {
+		t.Fatalf("snapshot cursor 2 was emitted more than once: %q", body)
+	}
+	if !strings.Contains(body, "id: 3\n") {
+		t.Fatalf("new queued event was not emitted: %q", body)
+	}
+}

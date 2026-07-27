@@ -478,15 +478,33 @@ func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {
-	msgs, err := h.service.GetMessages(r.Context(), r.PathValue("id"))
+	before, err := parsePositiveInt64(r.URL.Query().Get("before"))
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid before cursor")
+		return
+	}
+	limit := 500
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil || parsed < 1 || parsed > 500 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+			return
+		}
+		limit = parsed
+	}
+	page, err := h.service.GetMessagePage(r.Context(), r.PathValue("id"), before, limit)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if msgs == nil {
-		msgs = []*ChatMessage{}
+	if page.Items == nil {
+		page.Items = []*ChatMessage{}
 	}
-	writeJSON(w, http.StatusOK, msgs)
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -495,20 +513,32 @@ func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
+	after, _ := parsePositiveInt64(r.Header.Get("Last-Event-ID"))
 	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), sessionTopic(id), func() ([]HubEvent, error) {
-		events, err := h.service.GetAOPEvents(r.Context(), id)
+		events, err := h.service.GetAOPEventsAfter(r.Context(), id, after)
 		if err != nil {
 			return nil, err
 		}
 		initial := make([]HubEvent, 0, len(events))
 		for _, event := range events {
-			initial = append(initial, HubEvent{Type: "aop", Data: mustJSON(event)})
+			initial = append(initial, HubEvent{ID: event.Cursor, Type: "aop", Data: mustJSON(event.Event)})
 		}
 		return initial, nil
 	}, "_never")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+func parsePositiveInt64(value string) (int64, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("invalid positive integer %q", value)
+	}
+	return parsed, nil
 }
 
 // ── SCO Nodes ──

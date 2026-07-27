@@ -54,6 +54,60 @@ func TestSQLiteStoreWipesLegacyTextEvents(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreBackfillsDurableEventSequence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-sequence.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE chat_sessions (id TEXT PRIMARY KEY, agent_id TEXT, agent_name TEXT, title TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+		CREATE TABLE chat_aop_events (id TEXT PRIMARY KEY, session_id TEXT, event_json TEXT, created_at TEXT);
+		INSERT INTO chat_sessions VALUES ('s1','','','','active','2026-07-19T00:00:00Z','2026-07-19T00:00:00Z');
+		INSERT INTO chat_aop_events VALUES
+			('e2','s1','{"type":"status","ts":"2026-07-19T00:00:02Z","session_id":"s1","agent":"aiscan","data":{}}','2026-07-19T00:00:02Z'),
+			('e1','s1','{"type":"status","ts":"2026-07-19T00:00:01Z","session_id":"s1","agent":"aiscan","data":{}}','2026-07-19T00:00:01Z');
+		PRAGMA user_version = 2;
+	`)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.db.Query(`SELECT hub_seq, id FROM chat_aop_events WHERE session_id = 's1' ORDER BY hub_seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var seq int
+		var id string
+		if err := rows.Scan(&seq, &id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, id)
+		if seq != len(got) {
+			t.Fatalf("hub_seq for %s = %d, want %d", id, seq, len(got))
+		}
+	}
+	if len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
+		t.Fatalf("backfilled order = %v, want [e1 e2]", got)
+	}
+	cursor, persisted, err := store.AppendAOPEvent(context.Background(), "s1", aop.Event{
+		Type: aop.TypeStatus, TS: "2026-07-19T00:00:03Z", SessionID: "s1", Agent: "aiscan", Data: json.RawMessage(`{}`),
+	})
+	if err != nil || !persisted || cursor != 3 {
+		t.Fatalf("AppendAOPEvent cursor = %d, persisted = %v, err = %v; want 3, true, nil", cursor, persisted, err)
+	}
+}
+
 func TestSQLiteStoreMessageRoundTrip(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
@@ -123,6 +177,46 @@ func TestSQLiteStoreMessageRoundTrip(t *testing.T) {
 		if e.Type == aop.TypeMessageDelta {
 			t.Fatalf("delta was persisted: %+v", e)
 		}
+	}
+}
+
+func TestSQLiteStoreMessagePaginationIgnoresNonMessageDensity(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "message-pages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	createStoredSession(t, store, "s1")
+
+	for message := 1; message <= 4; message++ {
+		for event := 0; event < 25; event++ {
+			if err := store.AddAOPEvent(ctx, "s1", aop.Event{
+				Type: aop.TypeStatus, TS: time.Now().UTC().Format(time.RFC3339Nano), SessionID: "s1", Agent: "aiscan", Data: json.RawMessage(`{}`),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := store.AddMessage(ctx, &ChatMessage{
+			ID: string(rune('0' + message)), SessionID: "s1", Role: "user", Content: "message", CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	latest, err := store.ListMessagePage(ctx, "s1", 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(latest.Items) != 2 || latest.Items[0].ID != "3" || latest.Items[1].ID != "4" || latest.NextCursor == 0 {
+		t.Fatalf("latest page = %+v", latest)
+	}
+	older, err := store.ListMessagePage(ctx, "s1", latest.NextCursor, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Items) != 2 || older.Items[0].ID != "1" || older.Items[1].ID != "2" || older.NextCursor != 0 {
+		t.Fatalf("older page = %+v", older)
 	}
 }
 

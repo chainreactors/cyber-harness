@@ -165,3 +165,49 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 		t.Fatalf("event count changed by replay: before=%d after=%d", len(before), len(after))
 	}
 }
+
+func TestSessionEventsResumesAfterLastEventID(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	session, err := svc.CreateSession(context.Background(), "", "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for seq := 1; seq <= 3; seq++ {
+		if err := store.AddAOPEvent(context.Background(), session.ID, aop.Event{
+			Type: aop.TypeStatus, TS: time.Now().UTC().Format(time.RFC3339Nano), SessionID: session.ID, Agent: "aiscan",
+			Data: mustJSON(map[string]int{"seq": seq}),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest("GET", "/api/chat/sessions/"+session.ID+"/events", nil).WithContext(reqCtx)
+	req.Header.Set("Last-Event-ID", "2")
+	req.SetPathValue("id", session.ID)
+	recorder := newLockedResponseRecorder()
+	done := make(chan struct{})
+	go func() {
+		(&handlerImpl{service: svc}).sessionEvents(recorder, req)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(recorder.BodyString(), "id: 3\n") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sessionEvents did not return after request cancel")
+	}
+	body := recorder.BodyString()
+	if strings.Contains(body, "id: 1\n") || strings.Contains(body, "id: 2\n") || !strings.Contains(body, "id: 3\n") {
+		t.Fatalf("resume body = %q, want only events after cursor 2", body)
+	}
+}

@@ -14,6 +14,7 @@ import (
 // HubEvent is the unit broadcast through the SSE hub. Type is the SSE
 // event name, Data is pre-serialized JSON written directly to the stream.
 type HubEvent struct {
+	ID   int64
 	Type string
 	Data json.RawMessage
 	// Reliable marks a terminal event that Broadcast must not drop under
@@ -129,7 +130,12 @@ func serveSSEChannel(w http.ResponseWriter, r *http.Request, ch <-chan HubEvent,
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	var lastSentID int64
 	for _, event := range initial {
+		if event.ID > 0 {
+			fmt.Fprintf(w, "id: %d\n", event.ID)
+			lastSentID = event.ID
+		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
 		if isTerminalEvent(event.Type, terminalEvents) {
 			flusher.Flush()
@@ -151,6 +157,13 @@ func serveSSEChannel(w http.ResponseWriter, r *http.Request, ch <-chan HubEvent,
 		case event, ok := <-ch:
 			if !ok {
 				return
+			}
+			if event.ID > 0 && event.ID <= lastSentID {
+				continue
+			}
+			if event.ID > 0 {
+				fmt.Fprintf(w, "id: %d\n", event.ID)
+				lastSentID = event.ID
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
 			flusher.Flush()

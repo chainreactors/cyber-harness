@@ -482,7 +482,7 @@ func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error
 func (p *AgentPool) CancelTask(agentID, taskID string) error {
 	a := p.get(agentID)
 	if a == nil {
-		return fmt.Errorf("agent %s not connected", agentID)
+		return nil
 	}
 	a.mu.Lock()
 	resultCh, pending := a.tasks[taskID]
@@ -501,18 +501,35 @@ func (p *AgentPool) CancelTask(agentID, taskID string) error {
 	if isToolCall {
 		cancelMessage = webproto.Message{Type: "cancel", TaskID: taskID}
 	}
-	var sendErr error
-	select {
-	case a.controlCh <- cancelMessage:
-	case <-a.done:
-		sendErr = fmt.Errorf("agent %s disconnected before cancellation", agentID)
-	case <-time.After(time.Second):
-		sendErr = fmt.Errorf("agent %s control channel full", agentID)
-	}
 	if resultCh != nil {
 		close(resultCh)
 	}
-	return sendErr
+	a.enqueueControl(cancelMessage)
+	return nil
+}
+
+// enqueueControl never drops a control frame because task traffic temporarily
+// fills the channel. The pending send is bounded by the agent connection's
+// lifetime and the writer always drains controlCh before sendCh.
+func (a *remoteAgent) enqueueControl(msg webproto.Message) {
+	if a == nil || a.controlCh == nil {
+		return
+	}
+	select {
+	case a.controlCh <- msg:
+		return
+	default:
+	}
+	go func() {
+		if a.done == nil {
+			a.controlCh <- msg
+			return
+		}
+		select {
+		case a.controlCh <- msg:
+		case <-a.done:
+		}
+	}()
 }
 
 // HandleTerminalWS bridges one browser terminal WebSocket to one remote agent.

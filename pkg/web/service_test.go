@@ -84,6 +84,20 @@ func TestSendMessageReturnsNotFoundForMissingSession(t *testing.T) {
 	}
 }
 
+func TestListMessagesReturnsNotFoundForMissingSession(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/sessions/missing/messages", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestGetScanRebuildsLegacyMergedAssets(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "scans.db"))
 	if err != nil {
