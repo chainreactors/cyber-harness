@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -416,29 +417,55 @@ func (h *handlerImpl) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 const maxUploadSize = 50 << 20 // 50 MB
 
-func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
-	// Bound the total request body before parsing so an oversized multipart
-	// upload can't exhaust memory/disk (gosec G120). Allow modest headroom over
-	// maxUploadSize for the multipart envelope (boundaries and part headers).
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+(1<<20))
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil { //nolint:gosec // G120: body bounded by http.MaxBytesReader above
-		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
-		return
+var ErrUploadTooLarge = errors.New("uploaded file exceeds the size limit")
+
+func readMultipartUpload(w http.ResponseWriter, r *http.Request, maxSize int64) (string, []byte, error) {
+	if maxSize <= 0 {
+		return "", nil, fmt.Errorf("upload size limit must be positive")
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize+(1<<20))
+	if err := r.ParseMultipartForm(maxSize); err != nil { //nolint:gosec // G120: body is bounded above
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return "", nil, ErrUploadTooLarge
+		}
+		return "", nil, fmt.Errorf("parse multipart form: %w", err)
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file field")
-		return
+		return "", nil, fmt.Errorf("missing file field: %w", err)
 	}
 	defer file.Close()
+	if header.Size > maxSize {
+		return "", nil, ErrUploadTooLarge
+	}
 
-	data, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
+	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read file")
+		return "", nil, fmt.Errorf("read uploaded file: %w", err)
+	}
+	if int64(len(data)) > maxSize {
+		return "", nil, ErrUploadTooLarge
+	}
+	return header.Filename, data, nil
+}
+
+func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
+	filename, data, err := readMultipartUpload(w, r, maxUploadSize)
+	if err != nil {
+		if errors.Is(err, ErrUploadTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrUploadTooLarge.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), header.Filename, data)
+	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), filename, data)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())

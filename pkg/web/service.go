@@ -1220,6 +1220,7 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			map[string]any{"filename": filename, "path": result.Path})
 		return &result, nil
 	case <-ctx.Done():
+		_ = s.agents.CancelTask(agentID, taskID)
 		return nil, ctx.Err()
 	}
 }
