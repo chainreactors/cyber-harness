@@ -91,7 +91,31 @@ func ServeSSEWithInitial(w http.ResponseWriter, r *http.Request, hub *Hub, id st
 	serveSSE(w, r, hub, id, initial, terminalEvents...)
 }
 
+func ServeSSEWithSnapshot(
+	w http.ResponseWriter,
+	r *http.Request,
+	hub *Hub,
+	id string,
+	snapshot func() ([]HubEvent, error),
+	terminalEvents ...string,
+) error {
+	ch, unsubscribe := hub.Subscribe(id)
+	defer unsubscribe()
+	initial, err := snapshot()
+	if err != nil {
+		return err
+	}
+	serveSSEChannel(w, r, ch, initial, terminalEvents...)
+	return nil
+}
+
 func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initial []HubEvent, terminalEvents ...string) {
+	ch, unsubscribe := hub.Subscribe(id)
+	defer unsubscribe()
+	serveSSEChannel(w, r, ch, initial, terminalEvents...)
+}
+
+func serveSSEChannel(w http.ResponseWriter, r *http.Request, ch <-chan HubEvent, initial []HubEvent, terminalEvents ...string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -105,10 +129,12 @@ func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initi
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ch, unsubscribe := hub.Subscribe(id)
-	defer unsubscribe()
 	for _, event := range initial {
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
+		if isTerminalEvent(event.Type, terminalEvents) {
+			flusher.Flush()
+			return
+		}
 	}
 	flusher.Flush()
 

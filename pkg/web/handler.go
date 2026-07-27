@@ -272,11 +272,40 @@ func (h *handlerImpl) cancelScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlerImpl) scanEvents(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := h.service.GetScan(r.Context(), id); err != nil {
+	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), id, func() ([]HubEvent, error) {
+		job, err := h.service.GetScan(r.Context(), id)
+		if err != nil {
+			return nil, err
+		}
+		return []HubEvent{scanSnapshotEvent(job)}, nil
+	}, "complete", "error")
+	if err != nil {
 		writeError(w, http.StatusNotFound, "scan not found")
-		return
 	}
-	ServeSSE(w, r, h.service.Hub(), id, "complete", "error")
+}
+
+func scanSnapshotEvent(job *ScanJob) HubEvent {
+	switch job.Status {
+	case StatusCompleted:
+		return HubEvent{
+			Type: "complete",
+			Data: mustJSON(map[string]any{"scan_id": job.ID, "status": string(job.Status), "result": job.Result}),
+		}
+	case StatusFailed, StatusCanceled:
+		errMsg := job.Error
+		if errMsg == "" && job.Status == StatusCanceled {
+			errMsg = "scan canceled"
+		}
+		return HubEvent{
+			Type: "error",
+			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "error": errMsg}),
+		}
+	default:
+		return HubEvent{
+			Type: "status",
+			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "progress": job.Progress}),
+		}
+	}
 }
 
 func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
@@ -439,16 +468,20 @@ func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	events, err := h.service.GetAOPEvents(r.Context(), id)
+	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), sessionTopic(id), func() ([]HubEvent, error) {
+		events, err := h.service.GetAOPEvents(r.Context(), id)
+		if err != nil {
+			return nil, err
+		}
+		initial := make([]HubEvent, 0, len(events))
+		for _, event := range events {
+			initial = append(initial, HubEvent{Type: "aop", Data: mustJSON(event)})
+		}
+		return initial, nil
+	}, "_never")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return
 	}
-	initial := make([]HubEvent, 0, len(events))
-	for _, event := range events {
-		initial = append(initial, HubEvent{Type: "aop", Data: mustJSON(event)})
-	}
-	ServeSSEWithInitial(w, r, h.service.Hub(), sessionTopic(id), initial, "_never")
 }
 
 // ── SCO Nodes ──

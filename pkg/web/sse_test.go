@@ -3,10 +3,13 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
@@ -171,5 +174,74 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	empty, _ := store.ListMessages(context.Background(), "sess-scan-empty", 100)
 	if len(empty) != 0 {
 		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))
+	}
+}
+
+func TestScanEventsImmediatelyReplaysStoredTerminalState(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status ScanStatus
+		want   string
+	}{
+		{name: "completed", status: StatusCompleted, want: "event: complete"},
+		{name: "failed", status: StatusFailed, want: "event: error"},
+		{name: "canceled", status: StatusCanceled, want: "\"status\":\"canceled\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			now := time.Now()
+			job := &ScanJob{
+				ID: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: tc.status,
+				Error: "scan failed", CreatedAt: now, UpdatedAt: now,
+			}
+			if tc.status == StatusCompleted {
+				job.Result = &output.Result{}
+			}
+			if err := store.Create(context.Background(), job); err != nil {
+				t.Fatal(err)
+			}
+
+			svc := NewService(ServiceConfig{Store: store})
+			h := &handlerImpl{service: svc}
+			req := httptest.NewRequest("GET", "/api/scans/terminal-scan/events", nil)
+			req.SetPathValue("id", job.ID)
+			recorder := newLockedResponseRecorder()
+			done := make(chan struct{})
+			go func() {
+				h.scanEvents(recorder, req)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("terminal scan SSE did not return immediately")
+			}
+			if body := recorder.BodyString(); !strings.Contains(body, tc.want) {
+				t.Fatalf("SSE body = %q, want %q", body, tc.want)
+			}
+		})
+	}
+}
+
+func TestServeSSEWithSnapshotSubscribesBeforeReadingSnapshot(t *testing.T) {
+	hub := NewHub()
+	req := httptest.NewRequest("GET", "/events", nil)
+	recorder := newLockedResponseRecorder()
+
+	err := ServeSSEWithSnapshot(recorder, req, hub, "session-topic", func() ([]HubEvent, error) {
+		hub.Broadcast("session-topic", HubEvent{
+			Type: "turn.end", Data: mustJSON(map[string]string{"stop": "completed"}), Reliable: true,
+		})
+		return nil, nil
+	}, "turn.end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := recorder.BodyString(); !strings.Contains(body, "event: turn.end") {
+		t.Fatalf("SSE body = %q; event broadcast during snapshot was lost", body)
 	}
 }
