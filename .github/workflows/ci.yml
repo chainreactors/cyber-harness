@@ -227,17 +227,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build embedded frontend
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run build
+          test -s web/static/index.html
 
       - name: Run e2e tests
         run: |
-          if [ -d pkg/e2e ]; then
-            go test -race -count=1 -timeout 10m \
-              -tags "e2e re2_cgo re2_static" \
-              -v \
-              ./pkg/e2e/
-          else
-            echo "pkg/e2e not found, skipping"
-          fi
+          go test -race -count=1 -timeout 10m \
+            -tags "e2e re2_cgo re2_static" \
+            -v \
+            ./pkg/web
 
   # ── Build (depends on test, 3 parallel profiles) ──────────────
 
