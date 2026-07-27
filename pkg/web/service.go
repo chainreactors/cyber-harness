@@ -34,14 +34,22 @@ var hubCommands = map[string]bool{"scan": true, "agents": true, "help": true}
 
 type ConfigStore interface {
 	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg webproto.DistributeConfig, err error)
-	SaveDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) error
+	PrepareDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error)
+	CommitDistributeConfig(ctx context.Context, prepared *PreparedConfig) error
+	DiscardDistributeConfig(prepared *PreparedConfig)
+}
+
+type PreparedConfig struct {
+	Config      webproto.DistributeConfig
+	RuntimePath string
+	TargetPath  string
 }
 
 type ServiceConfig struct {
 	Store         *SQLiteStore
 	App           *runner.App
 	ConfigStore   ConfigStore
-	AppFactory    func(ctx context.Context) (*runner.App, error)
+	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
 	AgentPool     *AgentPool
 	MaxConcurrent int
 	ScanTimeout   time.Duration
@@ -49,10 +57,11 @@ type ServiceConfig struct {
 
 type Service struct {
 	store   *SQLiteStore
-	appMu   sync.RWMutex
-	app     *runner.App
+	appMu   sync.Mutex
+	app     *managedApp
+	saveMu  sync.Mutex
 	config  ConfigStore
-	reload  func(ctx context.Context) (*runner.App, error)
+	reload  func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
 	agents  *AgentPool
 	hub     *Hub
 	sem     chan struct{}
@@ -66,6 +75,13 @@ type Service struct {
 	taskCanceled map[string]bool
 }
 
+type managedApp struct {
+	app     *runner.App
+	refs    int
+	retired bool
+	closed  bool
+}
+
 func NewService(cfg ServiceConfig) *Service {
 	maxConcurrent := cfg.MaxConcurrent
 	if maxConcurrent <= 0 {
@@ -77,7 +93,7 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 	svc := &Service{
 		store:        cfg.Store,
-		app:          cfg.App,
+		app:          wrapManagedApp(cfg.App),
 		config:       cfg.ConfigStore,
 		reload:       cfg.AppFactory,
 		agents:       cfg.AgentPool,
@@ -117,8 +133,9 @@ func (s *Service) Close() {
 		cancel()
 	}
 	s.appMu.Lock()
-	app := s.app
+	current := s.app
 	s.app = nil
+	app := retireManagedApp(current)
 	s.appMu.Unlock()
 	if app != nil {
 		app.Close()
@@ -126,7 +143,7 @@ func (s *Service) Close() {
 }
 
 func (s *Service) Status() ServiceStatus {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
 	status := ServiceStatus{
 		Version:      config.Version,
 		LLMAvailable: app != nil && app.Provider != nil,
@@ -136,6 +153,7 @@ func (s *Service) Status() ServiceStatus {
 		status.LLMModel = app.ProviderConfig.Model
 		status.LLMAPIKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
 	}
+	release()
 	if s.config != nil {
 		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
 			status.ConfigPath = path
@@ -165,22 +183,51 @@ func (s *Service) GetConfigStatus(ctx context.Context) (ConfigStatus, error) {
 }
 
 func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig) (ConfigStatus, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
 	if err := ValidateLLMConfig(cfg.LLM); err != nil {
 		return ConfigStatus{}, err
 	}
-	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
+	prepared, err := s.config.PrepareDistributeConfig(ctx, cfg)
+	if err != nil {
 		return ConfigStatus{}, err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.config.DiscardDistributeConfig(prepared)
+		}
+	}()
+	if prepared == nil {
+		return ConfigStatus{}, fmt.Errorf("config store returned no prepared config")
+	}
+	if err := ValidateLLMConfig(prepared.Config.LLM); err != nil {
+		return ConfigStatus{}, err
+	}
+
+	var nextApp *runner.App
 	if s.reload != nil {
-		app, err := s.reload(ctx)
+		nextApp, err = s.reload(ctx, prepared)
 		if err != nil {
 			cs, _ := s.GetConfigStatus(ctx)
 			return cs, fmt.Errorf("reload aiscan runtime: %w", err)
 		}
-		s.swapApp(app)
+		if nextApp == nil {
+			return ConfigStatus{}, fmt.Errorf("reload aiscan runtime returned no app")
+		}
+	}
+	if err := s.config.CommitDistributeConfig(ctx, prepared); err != nil {
+		if nextApp != nil {
+			nextApp.Close()
+		}
+		return ConfigStatus{}, err
+	}
+	committed = true
+	if nextApp != nil {
+		s.swapApp(nextApp)
 	}
 	// Tell connected agents to hot-swap their own provider too — the hub reload
 	// above only refreshes the hub's in-process runtime, not the agent subprocesses.
@@ -580,17 +627,60 @@ func (s *Service) failJob(job *ScanJob, errMsg string) (bool, error) {
 }
 
 func (s *Service) aiAvailable() bool {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
+	defer release()
 	return app != nil && app.Provider != nil
 }
 
-func (s *Service) appSnapshot() *runner.App {
-	if s == nil {
+func wrapManagedApp(app *runner.App) *managedApp {
+	if app == nil {
 		return nil
 	}
-	s.appMu.RLock()
-	defer s.appMu.RUnlock()
-	return s.app
+	return &managedApp{app: app}
+}
+
+func retireManagedApp(ref *managedApp) *runner.App {
+	if ref == nil || ref.closed {
+		return nil
+	}
+	ref.retired = true
+	if ref.refs != 0 {
+		return nil
+	}
+	ref.closed = true
+	return ref.app
+}
+
+func (s *Service) acquireApp() (*runner.App, func()) {
+	if s == nil {
+		return nil, func() {}
+	}
+	s.appMu.Lock()
+	ref := s.app
+	if ref != nil && !ref.closed {
+		ref.refs++
+	}
+	s.appMu.Unlock()
+	if ref == nil || ref.closed {
+		return nil, func() {}
+	}
+
+	var once sync.Once
+	return ref.app, func() {
+		once.Do(func() {
+			var closeApp *runner.App
+			s.appMu.Lock()
+			ref.refs--
+			if ref.refs == 0 && ref.retired && !ref.closed {
+				ref.closed = true
+				closeApp = ref.app
+			}
+			s.appMu.Unlock()
+			if closeApp != nil {
+				closeApp.Close()
+			}
+		})
+	}
 }
 
 func (s *Service) swapApp(next *runner.App) {
@@ -599,10 +689,15 @@ func (s *Service) swapApp(next *runner.App) {
 	}
 	s.appMu.Lock()
 	prev := s.app
-	s.app = next
+	if prev != nil && prev.app == next {
+		s.appMu.Unlock()
+		return
+	}
+	s.app = wrapManagedApp(next)
+	closeApp := retireManagedApp(prev)
 	s.appMu.Unlock()
-	if prev != nil && prev != next {
-		prev.Close()
+	if closeApp != nil {
+		closeApp.Close()
 	}
 }
 
@@ -621,7 +716,8 @@ func scanArgsForJob(job *ScanJob) []string {
 }
 
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
+	defer release()
 	if app == nil || app.Commands == nil {
 		return "", nil, fmt.Errorf("aiscan runtime is not ready")
 	}

@@ -50,10 +50,14 @@ func runWeb(ctx context.Context, option *cfg.Option, opts webCommand, logger tel
 	configFile := option.ConfigFile
 	appOption := *option
 	service := web.NewService(web.ServiceConfig{
-		Store:         store,
-		App:           application,
-		ConfigStore:   &webConfigStore{explicit: configFile},
-		AppFactory:    func(ctx context.Context) (*runner.App, error) { return initWebApp(ctx, &appOption, logger) },
+		Store:       store,
+		App:         application,
+		ConfigStore: &webConfigStore{explicit: configFile},
+		AppFactory: func(ctx context.Context, prepared *web.PreparedConfig) (*runner.App, error) {
+			candidateOption := appOption
+			candidateOption.ConfigFile = prepared.RuntimePath
+			return initWebApp(ctx, &candidateOption, logger)
+		},
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
@@ -242,9 +246,9 @@ func parseDistributeConfig(data []byte) webproto.DistributeConfig {
 	return dc
 }
 
-func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) error {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) (*web.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -252,9 +256,11 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 	p, loaded := s.resolveConfigPath()
 	var current webproto.DistributeConfig
 	if loaded {
-		if data, err := os.ReadFile(p); err == nil {
-			current = parseDistributeConfig(data)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
 		}
+		current = parseDistributeConfig(data)
 	}
 
 	// Preserve existing secrets when incoming value is empty.
@@ -266,13 +272,75 @@ func (s *webConfigStore) SaveDistributeConfig(ctx context.Context, incoming webp
 	preserveSecret(&incoming.Search.TavilyKeys, current.Search.TavilyKeys)
 	preserveSecret(&incoming.IOA.Token, current.IOA.Token)
 
-	next, _ := yaml.Marshal(&incoming)
+	next, err := yaml.Marshal(&incoming)
+	if err != nil {
+		return nil, err
+	}
 	if dir := filepath.Dir(p); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return os.WriteFile(p, next, 0600)
+	dir := filepath.Dir(p)
+	if dir == "" {
+		dir = "."
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(p)+".tmp-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if err := tmp.Chmod(0600); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if _, err := tmp.Write(next); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	return &web.PreparedConfig{
+		Config: incoming, RuntimePath: tmpPath, TargetPath: p,
+	}, nil
+}
+
+func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *web.PreparedConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if prepared == nil || prepared.RuntimePath == "" || prepared.TargetPath == "" {
+		return fmt.Errorf("prepared config is incomplete")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := replaceConfigFile(prepared.RuntimePath, prepared.TargetPath); err != nil {
+		return err
+	}
+	prepared.RuntimePath = ""
+	if dir, err := os.Open(filepath.Dir(prepared.TargetPath)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
+func (s *webConfigStore) DiscardDistributeConfig(prepared *web.PreparedConfig) {
+	if prepared == nil || prepared.RuntimePath == "" {
+		return
+	}
+	_ = os.Remove(prepared.RuntimePath)
+	prepared.RuntimePath = ""
 }
 
 func preserveSecret(incoming *string, existing string) {

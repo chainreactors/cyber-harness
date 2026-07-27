@@ -21,10 +21,16 @@ func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool
 	return "config.yaml", true, f.cfg, nil
 }
 
-func (f *fakeConfigStore) SaveDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) error {
-	f.cfg = cfg
+func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error) {
+	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
+}
+
+func (f *fakeConfigStore) CommitDistributeConfig(_ context.Context, prepared *PreparedConfig) error {
+	f.cfg = prepared.Config
 	return nil
 }
+
+func (f *fakeConfigStore) DiscardDistributeConfig(*PreparedConfig) {}
 
 // stubLLMServer emulates an OpenAI-compatible /chat/completions endpoint and
 // records the Authorization header it received.

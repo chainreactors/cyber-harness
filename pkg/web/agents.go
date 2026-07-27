@@ -64,6 +64,7 @@ type remoteAgent struct {
 	// session.start's parent_session_id. Only a ROOT session.end converges the
 	// task; child ends are lifecycle noise.
 	childSessions map[string]map[string]struct{}
+	reloadPending bool
 	done          chan struct{}
 }
 
@@ -405,9 +406,9 @@ func (p *AgentPool) dispatchMessage(agentID, taskID string, msg webproto.Message
 
 // BroadcastConfigReload notifies every connected agent that the hub config
 // changed so each re-fetches and hot-swaps its LLM provider without a restart.
-// Config notifications use a dedicated control channel so task output cannot
-// starve or silently drop a provider change. A full channel already contains a
-// pending reload, so the latest persisted config will still be fetched.
+// Config notifications use the control channel so task output cannot starve a
+// provider change. Repeated reloads are coalesced while one is queued or waiting
+// for control-channel capacity; the agent always fetches the latest config.
 func (p *AgentPool) BroadcastConfigReload() int {
 	p.mu.RLock()
 	agents := make([]*remoteAgent, 0, len(p.agents))
@@ -417,16 +418,52 @@ func (p *AgentPool) BroadcastConfigReload() int {
 	p.mu.RUnlock()
 	n := 0
 	for _, a := range agents {
-		select {
-		case a.controlCh <- webproto.Message{Type: "config"}:
-			n++
-		default:
-			// A pending config control frame already causes the agent to fetch the
-			// newest persisted config, so this update is effectively coalesced.
+		if a.queueConfigReload() {
 			n++
 		}
 	}
 	return n
+}
+
+func (a *remoteAgent) queueConfigReload() bool {
+	if a == nil || a.controlCh == nil {
+		return false
+	}
+	a.mu.Lock()
+	if a.reloadPending {
+		a.mu.Unlock()
+		return true
+	}
+	a.reloadPending = true
+	a.mu.Unlock()
+
+	msg := webproto.Message{Type: "config"}
+	select {
+	case a.controlCh <- msg:
+		return true
+	default:
+	}
+
+	go func() {
+		if a.done == nil {
+			a.controlCh <- msg
+			return
+		}
+		select {
+		case a.controlCh <- msg:
+		case <-a.done:
+			a.mu.Lock()
+			a.reloadPending = false
+			a.mu.Unlock()
+		}
+	}()
+	return true
+}
+
+func (a *remoteAgent) finishConfigReload() {
+	a.mu.Lock()
+	a.reloadPending = false
+	a.mu.Unlock()
 }
 
 func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error {
@@ -739,6 +776,9 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 			// Give control frames priority over task/output traffic.
 			select {
 			case msg := <-agent.controlCh:
+				if msg.Type == "config" {
+					agent.finishConfigReload()
+				}
 				if err := conn.WriteJSON(msg); err != nil {
 					closeBrokenConnection()
 					return
@@ -748,6 +788,9 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			select {
 			case msg := <-agent.controlCh:
+				if msg.Type == "config" {
+					agent.finishConfigReload()
+				}
 				if err := conn.WriteJSON(msg); err != nil {
 					closeBrokenConnection()
 					return
