@@ -365,6 +365,13 @@ func (s *Service) runScan(runCtx context.Context, jobID string) {
 		delete(s.scanAgents, jobID)
 		s.mu.Unlock()
 	}()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if job, err := s.store.Get(context.Background(), jobID); err == nil {
+				_, _ = s.failJob(job, fmt.Sprintf("scan runtime panic: %v", recovered))
+			}
+		}
+	}()
 
 	select {
 	case s.sem <- struct{}{}:
@@ -453,10 +460,10 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		job.Progress = progress
 	}
 
-	var result *output.Result
-	if len(res.Result) > 0 {
-		result = &output.Result{}
-		_ = json.Unmarshal(res.Result, result)
+	result, err := decodeScanResult(res.Result)
+	if err != nil {
+		_, _ = s.failJob(job, err.Error())
+		return
 	}
 
 	_, _ = s.completeJob(context.Background(), job, agent.id, result)
@@ -483,8 +490,26 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 	if streamWriter.job != nil {
 		job = streamWriter.job
 	}
+	if ctx.Err() != nil {
+		s.finishScanContext(job, ctx.Err())
+		return
+	}
 
 	_, _ = s.completeJob(context.Background(), job, "", result)
+}
+
+func decodeScanResult(raw json.RawMessage) (*output.Result, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, fmt.Errorf("agent scan returned an empty result envelope")
+	}
+	var result *output.Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode agent scan result: %w", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("agent scan returned a null result envelope")
+	}
+	return result, nil
 }
 
 func (s *Service) finishScanContext(job *ScanJob, err error) {

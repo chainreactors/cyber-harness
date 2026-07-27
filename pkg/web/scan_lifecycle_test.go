@@ -204,6 +204,28 @@ func TestCancelTaskUsesControlChannelWhenTaskQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestDecodeScanResultRejectsInvalidEnvelopes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "empty"},
+		{name: "null", raw: json.RawMessage("null")},
+		{name: "malformed", raw: json.RawMessage("{")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := decodeScanResult(tc.raw); err == nil {
+				t.Fatal("decodeScanResult() accepted an invalid result")
+			}
+		})
+	}
+
+	result, err := decodeScanResult(json.RawMessage("{}"))
+	if err != nil || result == nil {
+		t.Fatalf("decodeScanResult({}) = %+v, %v", result, err)
+	}
+}
+
 func TestCompleteJobCannotOverwriteCanceledScan(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
