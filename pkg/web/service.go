@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +60,7 @@ type Service struct {
 
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
+	scanAgents   map[string]string
 	taskSessions map[string]string // taskID → sessionID
 	taskAgents   map[string]string // taskID → agentID
 	taskCanceled map[string]bool
@@ -82,6 +85,7 @@ func NewService(cfg ServiceConfig) *Service {
 		sem:          make(chan struct{}, maxConcurrent),
 		timeout:      timeout,
 		cancels:      make(map[string]context.CancelFunc),
+		scanAgents:   make(map[string]string),
 		taskSessions: make(map[string]string),
 		taskAgents:   make(map[string]string),
 		taskCanceled: make(map[string]bool),
@@ -102,6 +106,15 @@ func (s *Service) SetAgentPool(pool *AgentPool) {
 func (s *Service) Close() {
 	if s == nil {
 		return
+	}
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.cancels))
+	for _, cancel := range s.cancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
 	}
 	s.appMu.Lock()
 	app := s.app
@@ -240,7 +253,11 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		return nil, fmt.Errorf("store create: %w", err)
 	}
 
-	go s.runScan(job.ID) //nolint:gosec // G118: background scan outlives the request
+	runCtx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.cancels[job.ID] = cancel
+	s.mu.Unlock()
+	go s.runScan(runCtx, job.ID) //nolint:gosec // G118: background scan outlives the request
 
 	return job, nil
 }
@@ -272,21 +289,56 @@ func refreshStructuredAssets(job *ScanJob) {
 }
 
 func (s *Service) CancelScan(id string) error {
-	s.mu.Lock()
-	cancel, ok := s.cancels[id]
-	s.mu.Unlock()
-	if ok {
-		cancel()
-	}
 	ctx := context.Background()
 	job, err := s.store.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrScanNotFound, id)
+		}
 		return err
 	}
-	if job.Status == StatusRunning || job.Status == StatusQueued {
-		job.Status = StatusCanceled
-		job.UpdatedAt = time.Now()
-		return s.store.Update(ctx, job)
+	if job.Status == StatusCanceled {
+		return nil
+	}
+	if job.Status != StatusRunning && job.Status != StatusQueued {
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, job.Status)
+	}
+	job.Status = StatusCanceled
+	job.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(ctx, job, StatusRunning, StatusQueued)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		current, err := s.store.Get(ctx, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrScanNotFound, id)
+			}
+			return err
+		}
+		if current.Status == StatusCanceled {
+			return nil
+		}
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, current.Status)
+	}
+
+	s.mu.Lock()
+	cancel := s.cancels[id]
+	agentID := s.scanAgents[id]
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.hub.Broadcast(id, HubEvent{
+		Type:     "error",
+		Data:     mustJSON(map[string]string{"scan_id": id, "status": string(StatusCanceled), "error": "scan canceled"}),
+		Reliable: true,
+	})
+	if agentID != "" && s.agents != nil {
+		if err := s.agents.CancelTask(agentID, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -306,33 +358,34 @@ func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error
 	return job.Report, nil
 }
 
-func (s *Service) runScan(jobID string) {
-	s.sem <- struct{}{}
-	defer func() { <-s.sem }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-
-	s.mu.Lock()
-	s.cancels[jobID] = cancel
-	s.mu.Unlock()
+func (s *Service) runScan(runCtx context.Context, jobID string) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.cancels, jobID)
+		delete(s.scanAgents, jobID)
 		s.mu.Unlock()
 	}()
+
+	select {
+	case s.sem <- struct{}{}:
+	case <-runCtx.Done():
+		return
+	}
+	defer func() { <-s.sem }()
+
+	ctx, cancel := context.WithTimeout(runCtx, s.timeout)
+	defer cancel()
 
 	job, err := s.store.Get(ctx, jobID)
 	if err != nil {
 		return
 	}
-	if job.Status == StatusCanceled {
-		return
-	}
-
 	job.Status = StatusRunning
 	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
+	changed, err := s.store.TransitionScan(context.Background(), job, StatusQueued)
+	if err != nil || !changed {
+		return
+	}
 
 	s.hub.Broadcast(jobID, HubEvent{
 		Type: "status",
@@ -350,7 +403,13 @@ func (s *Service) runScan(jobID string) {
 func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	agent := s.agents.Pick()
 	if agent == nil {
-		s.failJob(job, "no agents available")
+		_, _ = s.failJob(job, "no agents available")
+		return
+	}
+	s.mu.Lock()
+	s.scanAgents[job.ID] = agent.id
+	s.mu.Unlock()
+	if ctx.Err() != nil {
 		return
 	}
 
@@ -361,20 +420,33 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		Args:       map[string]any{"command": cmd},
 	})
 	if err != nil {
-		s.failJob(job, err.Error())
+		_, _ = s.failJob(job, err.Error())
 		return
 	}
 
 	// Progress lines stream to the SSE hub as tool.data events while the scan
 	// runs; the terminal tool.result carries the full text and the structured
 	// scan result in its details.
-	res, ok := <-resultCh
+	var res taskResult
+	var ok bool
+	select {
+	case <-ctx.Done():
+		_ = s.agents.CancelTask(agent.id, job.ID)
+		s.finishScanContext(job, ctx.Err())
+		return
+	case res, ok = <-resultCh:
+	}
+	if ctx.Err() != nil {
+		_ = s.agents.CancelTask(agent.id, job.ID)
+		s.finishScanContext(job, ctx.Err())
+		return
+	}
 	if !ok {
-		s.failJob(job, "agent disconnected")
+		_, _ = s.failJob(job, "agent disconnected")
 		return
 	}
 	if res.Err != "" {
-		s.failJob(job, res.Err)
+		_, _ = s.failJob(job, res.Err)
 		return
 	}
 	if progress := lastOutputLine(res.Output); progress != "" {
@@ -387,7 +459,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		_ = json.Unmarshal(res.Result, result)
 	}
 
-	s.completeJob(ctx, job, agent.id, result)
+	_, _ = s.completeJob(context.Background(), job, agent.id, result)
 }
 
 func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
@@ -402,14 +474,31 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 	args := scanArgsForJob(job)
 	_, result, err := s.executeScan(ctx, args, streamWriter)
 	if err != nil {
-		s.failJob(job, err.Error())
+		s.finishScanContext(job, ctx.Err())
+		if ctx.Err() == nil {
+			_, _ = s.failJob(job, err.Error())
+		}
 		return
 	}
 	if streamWriter.job != nil {
 		job = streamWriter.job
 	}
 
-	s.completeJob(ctx, job, "", result)
+	_, _ = s.completeJob(context.Background(), job, "", result)
+}
+
+func (s *Service) finishScanContext(job *ScanJob, err error) {
+	if err == nil {
+		return
+	}
+	if err == context.DeadlineExceeded {
+		_, _ = s.failJob(job, "scan timed out")
+		return
+	}
+	next := *job
+	next.Status = StatusCanceled
+	next.UpdatedAt = time.Now()
+	_, _ = s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
 }
 
 func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
@@ -419,12 +508,21 @@ func (s *Service) persistResultRecords(scanID, agentID string, result *output.Re
 	}
 }
 
-func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) {
-	job.Status = StatusCompleted
-	job.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
-	job.Result = result
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
+func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) (bool, error) {
+	if result == nil {
+		return false, fmt.Errorf("scan result is required")
+	}
+	next := *job
+	next.Status = StatusCompleted
+	next.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
+	next.Result = result
+	next.Error = ""
+	next.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(ctx, &next, StatusRunning)
+	if err != nil || !changed {
+		return changed, err
+	}
+	*job = next
 	s.persistResultRecords(job.ID, agentID, result)
 	if len(result.Nodes) > 0 {
 		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
@@ -435,18 +533,25 @@ func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string,
 		Reliable: true,
 	})
 	s.broadcastScanComplete(job.ID, result)
+	return true, nil
 }
 
-func (s *Service) failJob(job *ScanJob, errMsg string) {
-	job.Status = StatusFailed
-	job.Error = errMsg
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(context.Background(), job)
+func (s *Service) failJob(job *ScanJob, errMsg string) (bool, error) {
+	next := *job
+	next.Status = StatusFailed
+	next.Error = errMsg
+	next.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
+	if err != nil || !changed {
+		return changed, err
+	}
+	*job = next
 	s.hub.Broadcast(job.ID, HubEvent{
 		Type:     "error",
 		Data:     mustJSON(map[string]string{"scan_id": job.ID, "error": errMsg}),
 		Reliable: true,
 	})
+	return true, nil
 }
 
 func (s *Service) aiAvailable() bool {
@@ -564,8 +669,12 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 		}
 		current.Progress = line
 		current.UpdatedAt = time.Now()
-		if err := w.store.Update(context.Background(), current); err != nil {
+		changed, err := w.store.TransitionScan(context.Background(), current, StatusRunning)
+		if err != nil {
 			return 0, err
+		}
+		if !changed {
+			return 0, context.Canceled
 		}
 		w.job = current
 

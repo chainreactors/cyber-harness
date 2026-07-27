@@ -2,10 +2,16 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/webproto"
+)
+
+var (
+	ErrScanNotFound      = errors.New("scan not found")
+	ErrScanNotCancelable = errors.New("scan cannot be canceled")
 )
 
 type ScanStatus string

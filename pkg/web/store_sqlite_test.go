@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
@@ -142,5 +143,43 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 	}
 	if !got.Verify || got.Sniper || !got.Deep {
 		t.Fatalf("stored options = verify:%v sniper:%v deep:%v", got.Verify, got.Sniper, got.Deep)
+	}
+}
+
+func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "transitions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+	job := &ScanJob{
+		ID: "scan-transition", Target: "127.0.0.1", Mode: "quick",
+		Status: StatusQueued, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+
+	job.Status = StatusCanceled
+	job.UpdatedAt = time.Now()
+	changed, err := store.TransitionScan(context.Background(), job, StatusQueued, StatusRunning)
+	if err != nil || !changed {
+		t.Fatalf("queued -> canceled = %v, %v; want true, nil", changed, err)
+	}
+
+	job.Status = StatusCompleted
+	job.Result = &output.Result{}
+	changed, err = store.TransitionScan(context.Background(), job, StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("terminal canceled status was overwritten")
+	}
+	stored, err := store.Get(context.Background(), job.ID)
+	if err != nil || stored.Status != StatusCanceled {
+		t.Fatalf("stored scan = %+v, %v", stored, err)
 	}
 }

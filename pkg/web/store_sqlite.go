@@ -337,6 +337,40 @@ func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
 	return err
 }
 
+// TransitionScan updates a scan only while it is in one of the expected
+// states. Callers use the affected-row result to make terminal states
+// immutable when cancellation and completion race.
+func (s *SQLiteStore) TransitionScan(ctx context.Context, job *ScanJob, expected ...ScanStatus) (bool, error) {
+	if job == nil {
+		return false, fmt.Errorf("scan job is required")
+	}
+	if len(expected) == 0 {
+		return false, fmt.Errorf("at least one expected scan status is required")
+	}
+
+	placeholders := make([]string, len(expected))
+	args := []any{
+		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		string(job.Status), job.Progress, job.Report, marshalResult(job), job.Error,
+		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
+	}
+	for i, status := range expected {
+		placeholders[i] = "?"
+		args = append(args, string(status))
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=?
+		 WHERE id=? AND status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM scans WHERE id=?`, id)
 	return err

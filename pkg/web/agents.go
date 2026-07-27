@@ -442,10 +442,10 @@ func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error
 	}
 }
 
-func (p *AgentPool) CancelTask(agentID, taskID string) {
+func (p *AgentPool) CancelTask(agentID, taskID string) error {
 	a := p.get(agentID)
 	if a == nil {
-		return
+		return fmt.Errorf("agent %s not connected", agentID)
 	}
 	a.mu.Lock()
 	resultCh, pending := a.tasks[taskID]
@@ -457,18 +457,25 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 		delete(a.childSessions, taskID)
 	}
 	a.mu.Unlock()
-	select {
-	case a.sendCh <- func() webproto.Message {
-		if isToolCall {
-			return webproto.Message{Type: "cancel", TaskID: taskID}
-		}
-		return webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
-	}():
-	default:
+	if !pending {
+		return nil
 	}
-	if pending && resultCh != nil {
+	cancelMessage := webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
+	if isToolCall {
+		cancelMessage = webproto.Message{Type: "cancel", TaskID: taskID}
+	}
+	var sendErr error
+	select {
+	case a.controlCh <- cancelMessage:
+	case <-a.done:
+		sendErr = fmt.Errorf("agent %s disconnected before cancellation", agentID)
+	case <-time.After(time.Second):
+		sendErr = fmt.Errorf("agent %s control channel full", agentID)
+	}
+	if resultCh != nil {
 		close(resultCh)
 	}
+	return sendErr
 }
 
 // HandleTerminalWS bridges one browser terminal WebSocket to one remote agent.
@@ -692,7 +699,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		commandsMenu:  info.CommandsMenu,
 		conn:          conn,
 		sendCh:        make(chan webproto.Message, 32),
-		controlCh:     make(chan webproto.Message, 1),
+		controlCh:     make(chan webproto.Message, 32),
 		connectAt:     time.Now(),
 		node:          info.Node,
 		runtime:       info.Runtime,

@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -256,7 +257,14 @@ func (h *handlerImpl) getScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlerImpl) cancelScan(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.CancelScan(r.PathValue("id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, ErrScanNotFound):
+			writeError(w, http.StatusNotFound, ErrScanNotFound.Error())
+		case errors.Is(err, ErrScanNotCancelable):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "canceled"})

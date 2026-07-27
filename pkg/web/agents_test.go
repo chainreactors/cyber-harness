@@ -1053,6 +1053,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	remote := &remoteAgent{
 		id:            "agent-1",
 		sendCh:        make(chan WSMessage, 1),
+		controlCh:     make(chan WSMessage, 1),
 		tasks:         map[string]chan taskResult{"task-1": resultCh},
 		turns:         map[string]int{"task-1": 1},
 		toolCalls:     make(map[string]struct{}),
@@ -1063,7 +1064,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	pool.CancelTask(remote.id, "task-1")
 
 	select {
-	case frame := <-remote.sendCh:
+	case frame := <-remote.controlCh:
 		if frame.Type != webproto.TypeRunCancel || frame.TurnID != "task-1" {
 			t.Fatalf("cancel frame = %+v", frame)
 		}
