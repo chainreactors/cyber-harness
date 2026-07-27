@@ -12,6 +12,7 @@ import (
 var (
 	ErrScanNotFound      = errors.New("scan not found")
 	ErrScanNotCancelable = errors.New("scan cannot be canceled")
+	ErrSessionNotFound   = errors.New("session not found")
 )
 
 type ScanStatus string

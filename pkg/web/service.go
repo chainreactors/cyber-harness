@@ -1169,7 +1169,10 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*webproto.FileUploadResult, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("session not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return nil, fmt.Errorf("get upload session: %w", err)
 	}
 	if s.agents == nil {
 		return nil, fmt.Errorf("no agent pool available")
@@ -1384,6 +1387,13 @@ func (s *Service) persistRuntimeDomainEvent(sessionID string, event DomainEvent)
 
 func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.GoalExt) (*ChatMessage, error) {
 	now := time.Now()
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return nil, fmt.Errorf("get message session: %w", err)
+	}
 	msg := &ChatMessage{
 		ID:        generateID(),
 		SessionID: sessionID,
@@ -1400,18 +1410,15 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 	}
 
 	// Update session timestamp and auto-title from first message.
-	session, err := s.store.GetSession(ctx, sessionID)
-	if err == nil {
-		session.UpdatedAt = now
-		if session.Title == "" {
-			title := content
-			if len(title) > 60 {
-				title = title[:60] + "..."
-			}
-			session.Title = title
+	session.UpdatedAt = now
+	if session.Title == "" {
+		title := content
+		if len(title) > 60 {
+			title = title[:60] + "..."
 		}
-		_ = s.store.UpdateSession(ctx, session)
+		session.Title = title
 	}
+	_ = s.store.UpdateSession(ctx, session)
 
 	//nolint:gosec // Agent dispatch must continue after the HTTP request returns.
 	go s.dispatchUserMessage(sessionID, msg, opts)

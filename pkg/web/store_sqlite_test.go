@@ -12,6 +12,16 @@ import (
 	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
+func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
+	t.Helper()
+	now := time.Now()
+	if err := store.CreateSession(context.Background(), &ChatSession{
+		ID: id, Status: SessionActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession(%q): %v", id, err)
+	}
+}
+
 func TestSQLiteStoreWipesLegacyTextEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)
@@ -51,6 +61,7 @@ func TestSQLiteStoreMessageRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
+	createStoredSession(t, store, "s1")
 
 	created := time.Date(2026, 7, 19, 1, 2, 3, 0, time.UTC)
 	if err := store.AddMessage(ctx, &ChatMessage{
@@ -181,5 +192,148 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 	stored, err := store.Get(context.Background(), job.ID)
 	if err != nil || stored.Status != StatusCanceled {
 		t.Fatalf("stored scan = %+v, %v", stored, err)
+	}
+}
+
+func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	var enabled int
+	if err := store.db.QueryRow(`PRAGMA foreign_keys`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 {
+		t.Fatalf("PRAGMA foreign_keys = %d, want 1", enabled)
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+	session := &ChatSession{
+		ID: "session-cascade", Status: SessionActive,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddMessage(ctx, &ChatMessage{
+		ID: "message-cascade", SessionID: session.ID, Role: "user", Content: "hello", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkScanToSession(ctx, session.ID, "scan-cascade"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSession(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range []string{"chat_aop_events", "session_scans"} {
+		var count int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE session_id = ?`, session.ID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s retained %d rows after session deletion", table, count)
+		}
+	}
+}
+
+func TestSQLiteStoreRejectsMessageForMissingSession(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	err = store.AddMessage(context.Background(), &ChatMessage{
+		ID: "orphan-message", SessionID: "missing", Role: "user", Content: "hello", CreatedAt: time.Now(),
+	})
+	if err == nil {
+		t.Fatal("AddMessage() created an orphan event")
+	}
+}
+
+func TestSQLiteStoreMigratesLegacySessionForeignKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-foreign-keys.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE chat_sessions (
+			id TEXT PRIMARY KEY, agent_id TEXT, agent_name TEXT, title TEXT,
+			status TEXT, created_at TEXT, updated_at TEXT
+		);
+		CREATE TABLE chat_aop_events (
+			id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+			event_json TEXT NOT NULL, created_at TEXT NOT NULL
+		);
+		CREATE TABLE session_scans (
+			session_id TEXT NOT NULL, scan_id TEXT NOT NULL,
+			PRIMARY KEY (session_id, scan_id)
+		);
+		INSERT INTO chat_sessions VALUES (
+			'kept-session','','','','active','2026-07-27T00:00:00Z','2026-07-27T00:00:00Z'
+		);
+		INSERT INTO chat_aop_events VALUES
+			('kept-event','kept-session','{}','2026-07-27T00:00:01Z'),
+			('orphan-event','missing-session','{}','2026-07-27T00:00:02Z');
+		INSERT INTO session_scans VALUES
+			('kept-session','kept-scan'),
+			('missing-session','orphan-scan');
+		PRAGMA user_version = 2;
+	`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	for _, table := range []string{"chat_aop_events", "session_scans"} {
+		var keptCount int
+		if err := store.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE session_id = 'kept-session'`,
+		).Scan(&keptCount); err != nil {
+			t.Fatal(err)
+		}
+		if keptCount != 1 {
+			t.Fatalf("%s retained %d valid legacy rows, want 1", table, keptCount)
+		}
+		var orphanCount int
+		if err := store.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE session_id = 'missing-session'`,
+		).Scan(&orphanCount); err != nil {
+			t.Fatal(err)
+		}
+		if orphanCount != 0 {
+			t.Fatalf("%s retained %d legacy orphan rows", table, orphanCount)
+		}
+	}
+
+	if err := store.DeleteSession(context.Background(), "kept-session"); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"chat_aop_events", "session_scans"} {
+		var count int
+		if err := store.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE session_id = 'kept-session'`,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s did not cascade after legacy migration", table)
+		}
 	}
 }

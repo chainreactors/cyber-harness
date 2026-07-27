@@ -81,6 +81,7 @@ func TestClearCommandWipesTranscript(t *testing.T) {
 	svc := newMenuTestService(t)
 	ctx := context.Background()
 	sid := "sess-clear"
+	createStoredSession(t, svc.store, sid)
 	for _, role := range []string{"user", "assistant", "user"} {
 		err := svc.store.AddMessage(ctx, &ChatMessage{
 			ID: generateID(), SessionID: sid, Role: role, Content: "x", CreatedAt: time.Now(),

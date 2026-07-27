@@ -79,6 +79,7 @@ func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	svc := NewService(ServiceConfig{Store: store})
 
 	const sid = "sess-aop"
+	createStoredSession(t, store, sid)
 	event := aop.Event{
 		Type:      aop.TypeMessage,
 		TS:        "2026-07-19T00:00:00Z",
@@ -109,6 +110,7 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "sess-eval")
 
 	event := aop.Event{
 		Type: "turn.end", TS: time.Now().UTC().Format(time.RFC3339Nano),
@@ -139,6 +141,7 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "sess-scan")
 
 	// A completed scan must leave a durable marker so its inline card survives a
 	// timeline rebuild (reload / session switch). The heavy Result is intentionally

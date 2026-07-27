@@ -1017,8 +1017,6 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {
 		}
 		if sid, ok := p.sessions.TaskSession(correlationID); ok {
 			p.sessions.BroadcastAOPEvent(sid, aopEv)
-		} else if aopEv.SessionID != "" {
-			p.sessions.BroadcastAOPEvent(aopEv.SessionID, aopEv)
 		}
 	}
 

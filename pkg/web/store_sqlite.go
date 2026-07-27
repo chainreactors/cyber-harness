@@ -19,7 +19,7 @@ type SQLiteStore struct {
 }
 
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -28,6 +28,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate sqlite: %w", err)
+	}
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
+		db.Close()
+		if err != nil {
+			return nil, fmt.Errorf("verify sqlite foreign keys: %w", err)
+		}
+		return nil, fmt.Errorf("verify sqlite foreign keys: disabled")
 	}
 	return &SQLiteStore{db: db}, nil
 }
@@ -134,6 +142,9 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
+	if err := ensureSessionForeignKeys(db); err != nil {
+		return err
+	}
 
 	if _, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
@@ -146,6 +157,129 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	return wipeLegacyAOPEvents(db)
+}
+
+func ensureSessionForeignKeys(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	aopConstrained, err := hasCascadeForeignKey(tx, "chat_aop_events", "session_id", "chat_sessions", "id")
+	if err != nil {
+		return err
+	}
+	if aopConstrained {
+		if _, err := tx.Exec(`
+			DELETE FROM chat_aop_events
+			WHERE NOT EXISTS (
+				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_aop_events.session_id
+			)
+		`); err != nil {
+			return err
+		}
+	} else if err := rebuildAOPEventsWithForeignKey(tx); err != nil {
+		return err
+	}
+
+	scansConstrained, err := hasCascadeForeignKey(tx, "session_scans", "session_id", "chat_sessions", "id")
+	if err != nil {
+		return err
+	}
+	if scansConstrained {
+		if _, err := tx.Exec(`
+			DELETE FROM session_scans
+			WHERE NOT EXISTS (
+				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = session_scans.session_id
+			)
+		`); err != nil {
+			return err
+		}
+	} else if err := rebuildSessionScansWithForeignKey(tx); err != nil {
+		return err
+	}
+
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	violated := rows.Next()
+	rowsErr := rows.Err()
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if rowsErr != nil {
+		return rowsErr
+	}
+	if violated {
+		return fmt.Errorf("sqlite foreign key check failed after migration")
+	}
+	return tx.Commit()
+}
+
+func hasCascadeForeignKey(tx *sql.Tx, table, from, parent, to string) (bool, error) {
+	rows, err := tx.Query(`PRAGMA foreign_key_list(` + quoteSQLiteIdent(table) + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id, seq                           int
+			parentTable, fromColumn, toColumn string
+			onUpdate, onDelete, match         string
+		)
+		if err := rows.Scan(&id, &seq, &parentTable, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
+			return false, err
+		}
+		if parentTable == parent && fromColumn == from && toColumn == to && strings.EqualFold(onDelete, "CASCADE") {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func rebuildAOPEventsWithForeignKey(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		DROP TABLE IF EXISTS chat_aop_events_fk_migration;
+		CREATE TABLE chat_aop_events_fk_migration (
+			id         TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			event_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		INSERT INTO chat_aop_events_fk_migration (rowid, id, session_id, event_json, created_at)
+		SELECT events.rowid, events.id, events.session_id, events.event_json, events.created_at
+		FROM chat_aop_events AS events
+		WHERE EXISTS (
+			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = events.session_id
+		)
+		ORDER BY events.rowid;
+		DROP TABLE chat_aop_events;
+		ALTER TABLE chat_aop_events_fk_migration RENAME TO chat_aop_events;
+	`)
+	return err
+}
+
+func rebuildSessionScansWithForeignKey(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		DROP TABLE IF EXISTS session_scans_fk_migration;
+		CREATE TABLE session_scans_fk_migration (
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			scan_id    TEXT NOT NULL,
+			PRIMARY KEY (session_id, scan_id)
+		);
+		INSERT INTO session_scans_fk_migration (session_id, scan_id)
+		SELECT links.session_id, links.scan_id
+		FROM session_scans AS links
+		WHERE EXISTS (
+			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = links.session_id
+		);
+		DROP TABLE session_scans;
+		ALTER TABLE session_scans_fk_migration RENAME TO session_scans;
+	`)
+	return err
 }
 
 type sqliteColumnMigration struct {

@@ -359,6 +359,10 @@ func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.service.HandleUserMessage(r.Context(), r.PathValue("id"), req.Content, opts)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -407,6 +411,10 @@ func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), header.Filename, data)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
