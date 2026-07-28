@@ -51,7 +51,10 @@ require (
 	modernc.org/sqlite v1.40.1
 )
 
-require sigs.k8s.io/yaml v1.6.0 // indirect
+require (
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	sigs.k8s.io/yaml v1.6.0
+)
 
 require (
 	aead.dev/minisign v0.2.0 // indirect
