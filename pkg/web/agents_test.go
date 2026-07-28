@@ -796,7 +796,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	t.Logf("received %d/%d messages under buffer pressure", received, 100)
 }
 
-func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
+func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"))
 	if err != nil {
@@ -841,13 +841,13 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	return srv, pool
 }
 
-type mockBrowserAgent struct {
+type mockBrowserAgent struct { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	conn     *websocket.Conn
 	messages chan WSMessage
 	errors   chan error
 }
 
-func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowserAgent {
+func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowserAgent { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -884,11 +884,11 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowser
 	return agent
 }
 
-func (a *mockBrowserAgent) Close() error {
+func (a *mockBrowserAgent) Close() error { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	return a.conn.Close()
 }
 
-func launchBrowser(t *testing.T) *rod.Browser {
+func launchBrowser(t *testing.T) *rod.Browser { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	path, ok := launcher.LookPath()
 	if !ok {
@@ -905,7 +905,7 @@ func launchBrowser(t *testing.T) *rod.Browser {
 	return browser
 }
 
-func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []WSMessage {
+func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []WSMessage { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	var msgs []WSMessage
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -922,7 +922,7 @@ func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []WSMess
 	}
 }
 
-func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType) pty.Frame {
+func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType) pty.Frame { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -944,14 +944,14 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 	}
 }
 
-func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) {
+func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	if err := agent.conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
 		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
 	}
 }
 
-func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
+func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	terminal, err := page.Timeout(5*time.Second).ElementR("button", "Terminal")
 	if err != nil {
@@ -968,7 +968,7 @@ func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
 	page.Timeout(5 * time.Second).MustWaitStable()
 }
 
-func runE2ETerminalOpenAndType(t *testing.T) {
+func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "e2e-agent")
 	defer agentConn.Close()
@@ -1039,7 +1039,7 @@ func runE2ETerminalOpenAndType(t *testing.T) {
 	t.Log("e2e terminal test: open → attach → input/output → close verified")
 }
 
-func runE2ETerminalResize(t *testing.T) {
+func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "resize-agent")
 	defer agentConn.Close()

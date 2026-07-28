@@ -432,7 +432,7 @@ func readMultipartUpload(w http.ResponseWriter, r *http.Request, maxSize int64) 
 		return "", nil, fmt.Errorf("parse multipart form: %w", err)
 	}
 	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
 
 	file, header, err := r.FormFile("file")

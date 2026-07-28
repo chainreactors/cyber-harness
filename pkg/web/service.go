@@ -304,7 +304,10 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 	s.mu.Lock()
 	s.cancels[job.ID] = cancel
 	s.mu.Unlock()
-	go s.runScan(runCtx, job.ID) //nolint:gosec // G118: background scan outlives the request
+	go func() { //nolint:gosec // G118: background scan intentionally outlives the request
+		defer cancel()
+		s.runScan(runCtx, job.ID)
+	}()
 
 	return job, nil
 }
@@ -1252,7 +1255,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	if s.agents != nil {
 		for _, task := range tasks {
 			if task.agentID != "" {
-				s.agents.CancelTask(task.agentID, task.taskID)
+				_ = s.agents.CancelTask(task.agentID, task.taskID)
 			}
 		}
 	}

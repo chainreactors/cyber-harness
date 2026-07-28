@@ -188,7 +188,7 @@ func ensureSessionForeignKeys(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	aopConstrained, err := hasCascadeForeignKey(tx, "chat_aop_events", "session_id", "chat_sessions", "id")
 	if err != nil {
@@ -517,9 +517,10 @@ func (s *SQLiteStore) TransitionScan(ctx context.Context, job *ScanJob, expected
 		placeholders[i] = "?"
 		args = append(args, string(status))
 	}
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=?
-		 WHERE id=? AND status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	//nolint:gosec // only fixed "?" placeholders are concatenated; statuses remain bound arguments
+	query := `UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=?
+		 WHERE id=? AND status IN (` + strings.Join(placeholders, ",") + `)`
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
@@ -700,7 +701,7 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if err != nil {
 		return 0, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(hub_seq), 0) + 1 FROM chat_aop_events WHERE session_id = ?`, sessionID,
 	).Scan(&cursor); err != nil {
