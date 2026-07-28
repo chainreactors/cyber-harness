@@ -1,11 +1,15 @@
 package commands
 
+import "github.com/chainreactors/aiscan/core/capability"
+
 func init() {
+	capability.Register(capability.Descriptor{ID: "core", Kind: capability.KindTool, Group: "core"})
 	RegisterFactory(Factory{
-		Group: "core",
+		Capability: "core",
 		Build: func(deps *Deps, reg *CommandRegistry) {
 			workDir := deps.WorkDir
 			if workDir == "" {
+				deps.Skip("core", "WorkDir")
 				return
 			}
 			timeout := deps.BashTimeout
@@ -15,12 +19,8 @@ func init() {
 			var readers []VirtualFileReader
 			var globbers []VirtualGlobber
 			if deps.SkillStore != nil {
-				if r, ok := deps.SkillStore.(VirtualFileReader); ok {
-					readers = append(readers, r)
-				}
-				if g, ok := deps.SkillStore.(VirtualGlobber); ok {
-					globbers = append(globbers, g)
-				}
+				readers = append(readers, deps.SkillStore)
+				globbers = append(globbers, deps.SkillStore)
 			}
 			reg.RegisterTool(NewReadTool(workDir, readers...))
 			reg.RegisterTool(NewWriteTool(workDir))

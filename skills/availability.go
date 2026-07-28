@@ -1,15 +1,7 @@
 package skills
 
-var blocked = map[string]bool{
-	"katana":  true,
-	"passive": true,
-}
-
-//nolint:unused // called from build-tagged files
-func enableSkill(name string) {
-	delete(blocked, name)
-}
+import "github.com/chainreactors/aiscan/core/capability"
 
 func skillAvailable(name string) bool {
-	return !blocked[name]
+	return capability.SkillEnabled(name)
 }

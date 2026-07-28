@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 const (

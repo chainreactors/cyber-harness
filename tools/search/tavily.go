@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 const (

@@ -1,39 +1,40 @@
 package tools
 
 import (
-	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/aiscan/core/deps"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
 func init() {
-	cfg.ExtraScannerUsage["scan"] = scan.Usage
+	capability.Register(capability.Descriptor{
+		ID: "scan", Kind: capability.KindScanner, Group: "scanner",
+		CLIName: "scan", Summary: "scan", Usage: scan.Usage,
+		Requires: []string{"scan.engine.Set.Gogo", "scan.engine.Set.Spray"},
+	})
 	commands.RegisterFactory(commands.Factory{
-		Group: "scanner",
-		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			es, _ := deps.EngineSet.(*engine.Set)
-			if es == nil {
+		Capability: "scan",
+		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
+			es, ok := deps.Get(d.Bag, engine.SetKey)
+			if !ok || es == nil || es.Gogo == nil || es.Spray == nil {
+				d.Skip("scan", deps.Name(engine.SetKey)+".Gogo+.Spray")
 				return
 			}
 
-			var scanOpts []scan.Option
-			for _, o := range deps.ScanOpts {
-				if opt, ok := o.(scan.Option); ok {
-					scanOpts = append(scanOpts, opt)
-				}
+			// copy: the bag's slice is shared with every other build
+			stored, _ := deps.Get(d.Bag, scan.OptsKey)
+			scanOpts := append([]scan.Option(nil), stored...)
+			if d.ScannerProxy != "" {
+				scanOpts = append(scanOpts, scan.WithProxy(d.ScannerProxy))
 			}
-			if deps.ScannerProxy != "" {
-				scanOpts = append(scanOpts, scan.WithProxy(deps.ScannerProxy))
-			}
-			if deps.DataBus != nil {
-				scanOpts = append(scanOpts, scan.WithDataBus(deps.DataBus))
+			if d.DataBus != nil {
+				scanOpts = append(scanOpts, scan.WithDataBus(d.DataBus))
 			}
 
-			if es.Gogo != nil && es.Spray != nil {
-				impl := scan.New(es, scanOpts...)
-				reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
-			}
+			impl := scan.New(es, scanOpts...)
+			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
 		},
 	})
 }

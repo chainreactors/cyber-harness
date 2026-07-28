@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/aop"
 )
 
 func createStoredSession(t *testing.T, store *SQLiteStore, id string) {

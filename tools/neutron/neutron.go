@@ -14,8 +14,8 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	scanengine "github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 	"github.com/chainreactors/neutron/templates"

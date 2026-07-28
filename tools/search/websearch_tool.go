@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
 )
 
 type WebSearchTool struct {

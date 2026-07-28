@@ -1,10 +1,14 @@
 package arsenal
 
-import "github.com/chainreactors/aiscan/pkg/commands"
+import (
+	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/aiscan/pkg/commands"
+)
 
 func init() {
+	capability.Register(capability.Descriptor{ID: "arsenal", Kind: capability.KindTool, Group: "arsenal"})
 	commands.RegisterFactory(commands.Factory{
-		Group: "arsenal",
+		Capability: "arsenal",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger := deps.GetLogger()
 

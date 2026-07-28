@@ -62,7 +62,7 @@ func httpAuthClient(timeoutSeconds int) *http.Client {
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 5
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:errcheck // DefaultTransport is always *http.Transport
+	transport := http.DefaultTransport.(*http.Transport).Clone()      //nolint:errcheck // DefaultTransport is always *http.Transport
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // scanner probes must tolerate self-signed certs
 	return &http.Client{
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,

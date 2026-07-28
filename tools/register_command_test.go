@@ -29,11 +29,10 @@ import (
 
 func buildRegistry(engineSet *engine.Set) *commands.CommandRegistry {
 	reg := commands.NewRegistry()
-	deps := &commands.Deps{
-		EngineSet: engineSet,
-		Resources: engineSet.Resources,
-	}
-	commands.BuildAll(deps, reg)
+	deps := &commands.Deps{}
+	commands.Provide(deps, engine.SetKey, engineSet)
+	commands.Provide(deps, resources.SetKey, engineSet.Resources)
+	buildTestGroups([]string{"scanner", "search"}, deps, reg)
 	return reg
 }
 

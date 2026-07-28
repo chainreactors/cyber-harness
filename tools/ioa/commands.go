@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/ioa/protocols"
 )
 

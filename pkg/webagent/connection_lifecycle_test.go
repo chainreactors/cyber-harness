@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/gorilla/websocket"

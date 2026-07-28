@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	_ "github.com/chainreactors/aiscan/tools/katana"
 	passivecmd "github.com/chainreactors/aiscan/tools/passive"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
@@ -25,12 +26,13 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
 	engineSet := &engine.Set{}
-	commands.BuildGroup("scanner", &commands.Deps{
-		WorkDir:   t.TempDir(),
-		EngineSet: engineSet,
-		DataBus:   bus,
-		Logger:    telemetry.NopLogger(),
-	}, registry)
+	deps := &commands.Deps{
+		WorkDir: t.TempDir(),
+		DataBus: bus,
+		Logger:  telemetry.NopLogger(),
+	}
+	commands.Provide(deps, engine.SetKey, engineSet)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
 
 	passiveEngine := &functionalPassiveEngine{}
 	passive := passivecmd.New(passiveEngine).WithLogger(telemetry.NopLogger())

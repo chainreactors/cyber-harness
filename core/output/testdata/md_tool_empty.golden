@@ -1,0 +1,22 @@
+# Scan Report
+
+---
+
+## Overview
+
+The scan identified 0 hosts across 0 open services.
+
+## Metrics
+
+| Metric | Value |
+| --- | ---: |
+| Inputs | 0 |
+| Open services | 0 |
+| Web endpoints | 0 |
+| Web probes | 0 |
+| Fingerprints | 0 |
+| Loots | 0 |
+| Errors | 0 |
+| Tasks | 0 |
+| Requests | 0 |
+| Duration |  |

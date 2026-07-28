@@ -9,8 +9,8 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
 	"github.com/chainreactors/sdk/gogo"

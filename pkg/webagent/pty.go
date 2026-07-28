@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
+	"github.com/chainreactors/aiscan/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/utils/pty"

@@ -6,7 +6,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
 type Base struct {

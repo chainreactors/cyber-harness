@@ -3,13 +3,20 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/utils/parsers"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
+	"github.com/chainreactors/utils/parsers"
 )
+
+// spray's runner construction mutates shared logger/option state inside the
+// upstream engine. A scan may schedule check, crawl and plugin capabilities in
+// parallel against the same engine, so keep one invocation active at a time
+// until its result stream is fully drained.
+var sprayExecutionMu sync.Mutex
 
 type SprayCheckOptions struct {
 	URLs          []string
@@ -40,6 +47,7 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	if eng == nil {
 		return nil, fmt.Errorf("spray engine is not available")
 	}
+	sprayExecutionMu.Lock()
 	if opts.Debug {
 		telemetry.EnableLogsDebug()
 	}
@@ -58,12 +66,14 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	}
 	if err != nil {
 		cancel()
+		sprayExecutionMu.Unlock()
 		return nil, err
 	}
 
 	out := make(chan *parsers.SprayResult)
 	go func() {
 		defer telemetry.SDKGoRecover("spray")
+		defer sprayExecutionMu.Unlock()
 		defer cancel()
 		defer close(out)
 		for {

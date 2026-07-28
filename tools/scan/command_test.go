@@ -16,8 +16,8 @@ import (
 
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/aiscan/tools/scan/pipeline"
 	"github.com/chainreactors/fingers/common"

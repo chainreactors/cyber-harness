@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/aop"
+	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
-	"github.com/chainreactors/aiscan/pkg/util"
+	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/aiscan/core/util"
 	"golang.org/x/term"
 )
 

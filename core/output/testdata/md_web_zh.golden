@@ -1,0 +1,67 @@
+# 侦察报告 · 10.0.0.1
+
+目标 `10.0.0.1`  ·  快速侦察  ·  <timestamp>
+
+---
+
+## 概述
+
+本次侦察共识别 3 台主机、4 个开放服务（含 2 个 Web 站点）。累计探测 3 条路径、命中 2 项 Web 指纹。**发现 3 项需优先复核的安全发现（凭证 / 弱口令 / 漏洞）。**另有 1 处探测报错。全程耗时 22.266s。
+
+## 资产明细
+
+### Example App — `http://10.0.0.1`
+
+- 开放服务：`tcp http 80`
+- HTTP 响应：`200`、`401`
+- Web 指纹：`nginx`、`basic-auth`
+- 已探测路径：3 条
+- 状态：`confirmed`
+
+#### 分析研判
+
+##### CVE-2021-41773 path traversal
+
+## Impact
+
+Arbitrary file read through `/cgi-bin/`.
+
+| Field | Value |
+|---|---|
+| CVSS | 9.8 |
+
+##### ssh root:root
+
+ssh root:root
+
+##### Admin console is reachable without authentication.
+
+##### Let me analyze the collected browser evidence.
+
+Let me analyze the collected browser evidence.
+
+## Evidence Analysis
+
+| Asset | Details |
+|---|---|
+| API | GET /api/scans |
+
+##### dial tcp 10.0.0.1:8443: connect: connection refused
+
+dial tcp 10.0.0.1:8443: connect: connection refused
+
+### MySQL 5.7.32 — `10.0.0.2:3306`
+
+- 开放服务：`tcp mysql 3306`
+- 状态：`loot`
+
+#### 分析研判
+
+##### mysql 5.7.32
+
+mysql 5.7.32
+
+## 其他存活主机
+
+- `10.0.0.2:icmp` · icmp
+- `10.0.0.3:445` · tcp smb 445

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	maxDimension   = 2000
+	maxDimension    = 2000
 	maxPayloadBytes = 4_500_000 // 4.5MB base64, below Anthropic's 5MB limit
 )
 

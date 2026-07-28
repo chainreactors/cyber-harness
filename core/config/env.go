@@ -3,30 +3,20 @@ package config
 import (
 	"os"
 	"strings"
-
-	"github.com/chainreactors/aiscan/pkg/agent"
 )
 
 type envLookup func(string) (string, bool)
 
-func ResolveRuntimeConfig(option *Option) (string, error) {
-	return resolveRuntimeConfig(option, true)
-}
-
-// ResolveRuntimeConfigCandidate resolves a staged configuration without
-// mutating process-wide state. It is used to validate a Web reload candidate
-// before the staged file is committed.
-func ResolveRuntimeConfigCandidate(option *Option) (string, error) {
-	return resolveRuntimeConfig(option, false)
-}
-
-func resolveRuntimeConfig(option *Option, applyProcessState bool) (string, error) {
+// ResolveRuntimeConfig resolves parsed configuration with environment and
+// defaults. Provider inference is supplied by the integration layer so config
+// remains independent of concrete LLM implementations.
+func ResolveRuntimeConfig(option *Option, applyProcessState bool, inferProvider func(string) string) (string, error) {
 	explicit := *option
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
 		return configPath, err
 	}
-	applyEnvironment(option, explicit, os.LookupEnv)
+	applyEnvironment(option, explicit, os.LookupEnv, inferProvider)
 	ApplyDefaults(option)
 	if _, err := ResolveOutputPolicy(option); err != nil {
 		return configPath, err
@@ -37,19 +27,19 @@ func resolveRuntimeConfig(option *Option, applyProcessState bool) (string, error
 	return configPath, nil
 }
 
-func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
-	applyLLMEnvironment(option, explicit, lookup)
+func applyEnvironment(option *Option, explicit Option, lookup envLookup, inferProvider func(string) string) {
+	applyLLMEnvironment(option, explicit, lookup, inferProvider)
 	applyScannerEnvironment(option, explicit, lookup)
 	applyReconEnvironment(option, explicit, lookup)
 }
 
-func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
+func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup, inferProvider func(string) string) {
 	providerExplicit := strings.TrimSpace(explicit.Provider) != ""
 	if v := firstEnv(lookup, "AISCAN_PROVIDER", "AISCAN_LLM_PROVIDER"); v != "" && !providerExplicit {
 		option.Provider = v
 	}
 
-	selectedProvider := selectedEnvProvider(option, lookup)
+	selectedProvider := selectedEnvProvider(option, lookup, inferProvider)
 	if option.Provider == "" && selectedProvider != "" && !providerExplicit {
 		option.Provider = selectedProvider
 	}
@@ -173,12 +163,12 @@ func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
 	}
 }
 
-func selectedEnvProvider(option *Option, lookup envLookup) string {
+func selectedEnvProvider(option *Option, lookup envLookup, inferProvider func(string) string) string {
 	if v := strings.ToLower(strings.TrimSpace(option.Provider)); v != "" {
 		return v
 	}
-	if option.BaseURL != "" {
-		return agent.InferProviderFromBaseURL(option.BaseURL)
+	if option.BaseURL != "" && inferProvider != nil {
+		return inferProvider(option.BaseURL)
 	}
 	if firstEnv(lookup, "ANTHROPIC_API_KEY") != "" {
 		return "anthropic"

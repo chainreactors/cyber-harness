@@ -17,8 +17,8 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	webstatic "github.com/chainreactors/aiscan/web"
@@ -58,7 +58,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
-			if _, err := cfg.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
+			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
 			candidate, err := initWebApp(ctx, &candidateOption, logger)
@@ -194,7 +194,7 @@ func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Lo
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := cfg.AppConfig(&option, cfg.RuntimeFeatures{
+	appCfg := runner.AppConfig(&option, runner.RuntimeFeatures{
 		ProviderEnabled:  true,
 		ProviderOptional: true,
 		ToolsEnabled:     true,

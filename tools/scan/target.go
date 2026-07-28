@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chainreactors/utils/parsers"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type target interface {

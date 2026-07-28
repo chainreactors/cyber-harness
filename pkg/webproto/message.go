@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
@@ -468,9 +468,6 @@ func TestSprayStatsHandlerSafeAfterCancel(t *testing.T) {
 }
 
 func TestZombieStatsHandlerSafeAfterCancel(t *testing.T) {
-	if raceEnabled {
-		t.Skip("zombie engine has known races under -race detector")
-	}
 	eng, err := sdkzombie.NewEngine(nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)

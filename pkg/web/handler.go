@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/agent/probe"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
