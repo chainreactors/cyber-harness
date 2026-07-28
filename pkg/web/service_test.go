@@ -1,7 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -9,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -39,6 +43,58 @@ func TestServiceStatusReportsLLMAvailability(t *testing.T) {
 	service := NewService(ServiceConfig{})
 	if service.Status().LLMAvailable {
 		t.Fatal("LLMAvailable = true, want false without provider")
+	}
+}
+
+func TestHandleUserMessageRejectsMissingSessionBeforePersisting(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+
+	if _, err := svc.HandleUserMessage(context.Background(), "missing", "hello", webproto.GoalExt{}); err == nil {
+		t.Fatal("HandleUserMessage() accepted a missing session")
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM chat_aop_events WHERE session_id = 'missing'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("missing session retained %d events", count)
+	}
+}
+
+func TestSendMessageReturnsNotFoundForMissingSession(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	handler := NewHandler(svc, nil, nil, nil, nil, "")
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/sessions/missing/messages", bytes.NewBufferString(`{"content":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestListMessagesReturnsNotFoundForMissingSession(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/sessions/missing/messages", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
@@ -47,6 +48,28 @@ func TestBroadcastConfigReload(t *testing.T) {
 		}
 	default:
 		t.Fatal("full agent got no config control message")
+	}
+}
+
+func TestBroadcastConfigReloadWaitsBehindCancellationFrames(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("busy-control", 1)
+	agent.controlCh <- WSMessage{Type: webproto.TypeRunCancel, TurnID: "task-1"}
+	pool.register(agent)
+
+	if n := pool.BroadcastConfigReload(); n != 1 {
+		t.Fatalf("notified = %d, want 1", n)
+	}
+	if msg := <-agent.controlCh; msg.Type != webproto.TypeRunCancel {
+		t.Fatalf("first control frame = %q, want %q", msg.Type, webproto.TypeRunCancel)
+	}
+	select {
+	case msg := <-agent.controlCh:
+		if msg.Type != "config" {
+			t.Fatalf("queued control frame = %q, want config", msg.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("config reload was dropped behind a full cancellation queue")
 	}
 }
 

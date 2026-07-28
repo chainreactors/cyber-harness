@@ -19,7 +19,7 @@ type SQLiteStore struct {
 }
 
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -28,6 +28,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate sqlite: %w", err)
+	}
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
+		db.Close()
+		if err != nil {
+			return nil, fmt.Errorf("verify sqlite foreign keys: %w", err)
+		}
+		return nil, fmt.Errorf("verify sqlite foreign keys: disabled")
 	}
 	return &SQLiteStore{db: db}, nil
 }
@@ -64,6 +72,7 @@ func migrate(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS chat_aop_events (
 			id         TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			hub_seq    INTEGER NOT NULL DEFAULT 0,
 			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
@@ -95,10 +104,32 @@ func migrate(db *sql.DB) error {
 		{table: "chat_messages", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "chat_messages", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "chat_messages", name: "metadata", definition: "TEXT NOT NULL DEFAULT ''"},
+		{table: "chat_aop_events", name: "hub_seq", definition: "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureSQLiteColumn(db, column); err != nil {
 			return err
 		}
+	}
+	if _, err := db.Exec(`
+		DROP TABLE IF EXISTS temp.aop_seq_backfill;
+		CREATE TEMP TABLE aop_seq_backfill (row_id INTEGER PRIMARY KEY, hub_seq INTEGER NOT NULL);
+		INSERT INTO aop_seq_backfill (row_id, hub_seq)
+		SELECT target.rowid,
+			COALESCE((
+				SELECT MAX(existing.hub_seq)
+				FROM chat_aop_events AS existing
+				WHERE existing.session_id = target.session_id AND existing.hub_seq > 0
+			), 0) + ROW_NUMBER() OVER (
+				PARTITION BY target.session_id ORDER BY target.created_at, target.rowid
+			)
+		FROM chat_aop_events AS target
+		WHERE target.hub_seq = 0;
+		UPDATE chat_aop_events
+		SET hub_seq = (SELECT backfill.hub_seq FROM aop_seq_backfill AS backfill WHERE backfill.row_id = chat_aop_events.rowid)
+		WHERE rowid IN (SELECT row_id FROM aop_seq_backfill);
+		DROP TABLE aop_seq_backfill;
+	`); err != nil {
+		return err
 	}
 
 	if _, err := db.Exec(`
@@ -134,18 +165,146 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
+	if err := ensureSessionForeignKeys(db); err != nil {
+		return err
+	}
 
 	if _, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_aop_events_session ON chat_aop_events(session_id, created_at, id);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_aop_events_session_seq ON chat_aop_events(session_id, hub_seq);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
 	`); err != nil {
 		return err
 	}
 	return wipeLegacyAOPEvents(db)
+}
+
+func ensureSessionForeignKeys(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	aopConstrained, err := hasCascadeForeignKey(tx, "chat_aop_events", "session_id", "chat_sessions", "id")
+	if err != nil {
+		return err
+	}
+	if aopConstrained {
+		if _, err := tx.Exec(`
+			DELETE FROM chat_aop_events
+			WHERE NOT EXISTS (
+				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_aop_events.session_id
+			)
+		`); err != nil {
+			return err
+		}
+	} else if err := rebuildAOPEventsWithForeignKey(tx); err != nil {
+		return err
+	}
+
+	scansConstrained, err := hasCascadeForeignKey(tx, "session_scans", "session_id", "chat_sessions", "id")
+	if err != nil {
+		return err
+	}
+	if scansConstrained {
+		if _, err := tx.Exec(`
+			DELETE FROM session_scans
+			WHERE NOT EXISTS (
+				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = session_scans.session_id
+			)
+		`); err != nil {
+			return err
+		}
+	} else if err := rebuildSessionScansWithForeignKey(tx); err != nil {
+		return err
+	}
+
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	violated := rows.Next()
+	rowsErr := rows.Err()
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if rowsErr != nil {
+		return rowsErr
+	}
+	if violated {
+		return fmt.Errorf("sqlite foreign key check failed after migration")
+	}
+	return tx.Commit()
+}
+
+func hasCascadeForeignKey(tx *sql.Tx, table, from, parent, to string) (bool, error) {
+	rows, err := tx.Query(`PRAGMA foreign_key_list(` + quoteSQLiteIdent(table) + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id, seq                           int
+			parentTable, fromColumn, toColumn string
+			onUpdate, onDelete, match         string
+		)
+		if err := rows.Scan(&id, &seq, &parentTable, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
+			return false, err
+		}
+		if parentTable == parent && fromColumn == from && toColumn == to && strings.EqualFold(onDelete, "CASCADE") {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func rebuildAOPEventsWithForeignKey(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		DROP TABLE IF EXISTS chat_aop_events_fk_migration;
+		CREATE TABLE chat_aop_events_fk_migration (
+			id         TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			hub_seq    INTEGER NOT NULL,
+			event_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		INSERT INTO chat_aop_events_fk_migration (rowid, id, session_id, hub_seq, event_json, created_at)
+		SELECT events.rowid, events.id, events.session_id, events.hub_seq, events.event_json, events.created_at
+		FROM chat_aop_events AS events
+		WHERE EXISTS (
+			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = events.session_id
+		)
+		ORDER BY events.rowid;
+		DROP TABLE chat_aop_events;
+		ALTER TABLE chat_aop_events_fk_migration RENAME TO chat_aop_events;
+	`)
+	return err
+}
+
+func rebuildSessionScansWithForeignKey(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		DROP TABLE IF EXISTS session_scans_fk_migration;
+		CREATE TABLE session_scans_fk_migration (
+			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			scan_id    TEXT NOT NULL,
+			PRIMARY KEY (session_id, scan_id)
+		);
+		INSERT INTO session_scans_fk_migration (session_id, scan_id)
+		SELECT links.session_id, links.scan_id
+		FROM session_scans AS links
+		WHERE EXISTS (
+			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = links.session_id
+		);
+		DROP TABLE session_scans;
+		ALTER TABLE session_scans_fk_migration RENAME TO session_scans;
+	`)
+	return err
 }
 
 type sqliteColumnMigration struct {
@@ -337,6 +496,41 @@ func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
 	return err
 }
 
+// TransitionScan updates a scan only while it is in one of the expected
+// states. Callers use the affected-row result to make terminal states
+// immutable when cancellation and completion race.
+func (s *SQLiteStore) TransitionScan(ctx context.Context, job *ScanJob, expected ...ScanStatus) (bool, error) {
+	if job == nil {
+		return false, fmt.Errorf("scan job is required")
+	}
+	if len(expected) == 0 {
+		return false, fmt.Errorf("at least one expected scan status is required")
+	}
+
+	placeholders := make([]string, len(expected))
+	args := []any{
+		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
+		string(job.Status), job.Progress, job.Report, marshalResult(job), job.Error,
+		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
+	}
+	for i, status := range expected {
+		placeholders[i] = "?"
+		args = append(args, string(status))
+	}
+	//nolint:gosec // only fixed "?" placeholders are concatenated; statuses remain bound arguments
+	query := `UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=?
+		 WHERE id=? AND status IN (` + strings.Join(placeholders, ",") + `)`
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM scans WHERE id=?`, id)
 	return err
@@ -460,11 +654,17 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 // --- Chat message CRUD ---
 
 func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
+	_, err := s.AppendMessage(ctx, msg)
+	return err
+}
+
+func (s *SQLiteStore) AppendMessage(ctx context.Context, msg *ChatMessage) (int64, error) {
 	event, err := messageEventFromChatMessage(msg)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return s.AddAOPEvent(ctx, msg.SessionID, event)
+	cursor, _, err := s.AppendAOPEvent(ctx, msg.SessionID, event)
+	return cursor, err
 }
 
 // ClearMessages deletes every message in a session without removing the session
@@ -476,66 +676,201 @@ func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error
 }
 
 func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event aop.Event) error {
+	_, _, err := s.AppendAOPEvent(ctx, sessionID, event)
+	return err
+}
+
+// AppendAOPEvent persists one durable event and assigns the authoritative
+// session-local cursor used by SSE replay and REST pagination. Message deltas
+// remain transient and return persisted=false.
+func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, event aop.Event) (cursor int64, persisted bool, err error) {
 	// Deltas are streaming fragments; only complete messages are persisted so a
 	// replayed history holds the authoritative state.
 	if event.Type == aop.TypeMessageDelta {
-		return nil
+		return 0, false, nil
 	}
 	raw, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	createdAt := event.TS
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO chat_aop_events (id, session_id, event_json, created_at) VALUES (?, ?, ?, ?)`,
-		generateID(), sessionID, string(raw), createdAt,
-	)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(hub_seq), 0) + 1 FROM chat_aop_events WHERE session_id = ?`, sessionID,
+	).Scan(&cursor); err != nil {
+		return 0, false, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO chat_aop_events (id, session_id, hub_seq, event_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+		generateID(), sessionID, cursor, string(raw), createdAt,
+	); err != nil {
+		return 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return cursor, true, nil
 }
 
 func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]aop.Event, error) {
+	page, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]aop.Event, 0, len(page))
+	for _, stored := range page {
+		events = append(events, stored.Event)
+	}
+	return events, nil
+}
+
+func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, before int64, limit int) ([]persistedAOPEvent, int64, error) {
 	if limit <= 0 {
 		limit = 10000
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT event_json FROM chat_aop_events WHERE session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT ?`,
-		sessionID, limit,
-	)
+	if limit > 10000 {
+		limit = 10000
+	}
+	query := `SELECT hub_seq, event_json FROM (
+		SELECT hub_seq, event_json FROM chat_aop_events
+		WHERE session_id = ? ORDER BY hub_seq DESC LIMIT ?
+	) ORDER BY hub_seq ASC`
+	args := []any{sessionID, limit + 1}
+	if before > 0 {
+		query = `SELECT hub_seq, event_json FROM (
+			SELECT hub_seq, event_json FROM chat_aop_events
+			WHERE session_id = ? AND hub_seq < ? ORDER BY hub_seq DESC LIMIT ?
+		) ORDER BY hub_seq ASC`
+		args = []any{sessionID, before, limit + 1}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	events := make([]persistedAOPEvent, 0, limit+1)
+	for rows.Next() {
+		var raw string
+		var cursor int64
+		if err := rows.Scan(&cursor, &raw); err != nil {
+			return nil, 0, err
+		}
+		var event aop.Event
+		if json.Unmarshal([]byte(raw), &event) == nil && event.Valid() {
+			events = append(events, persistedAOPEvent{Cursor: cursor, Event: event})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var next int64
+	if len(events) > limit {
+		events = events[1:]
+		if len(events) > 0 {
+			next = events[0].Cursor
+		}
+	}
+	return events, next, nil
+}
+
+func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, after int64, limit int) ([]persistedAOPEvent, error) {
+	if after <= 0 {
+		events, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
+		return events, err
+	}
+	query := `SELECT hub_seq, event_json FROM chat_aop_events WHERE session_id = ? AND hub_seq > ? ORDER BY hub_seq ASC`
+	args := []any{sessionID, after}
+	if limit > 0 {
+		if limit > 10000 {
+			limit = 10000
+		}
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	events := make([]aop.Event, 0)
+	var events []persistedAOPEvent
 	for rows.Next() {
+		var stored persistedAOPEvent
 		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
 			return nil, err
 		}
-		var event aop.Event
-		if json.Unmarshal([]byte(raw), &event) == nil && event.Valid() {
-			events = append(events, event)
+		if json.Unmarshal([]byte(raw), &stored.Event) == nil && stored.Event.Valid() {
+			events = append(events, stored)
 		}
 	}
 	return events, rows.Err()
 }
 
 func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	events, err := s.ListAOPEvents(ctx, sessionID, 10000)
+	page, err := s.ListMessagePage(ctx, sessionID, 0, limit)
 	if err != nil {
 		return nil, err
 	}
-	capacity := len(events)
-	if capacity > limit {
-		capacity = limit
+	return page.Items, nil
+}
+
+func (s *SQLiteStore) ListMessagePage(ctx context.Context, sessionID string, before int64, limit int) (ChatMessagePage, error) {
+	if limit <= 0 {
+		limit = 500
 	}
-	msgs := make([]*ChatMessage, 0, capacity)
-	for _, event := range events {
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT hub_seq, event_json FROM (
+		SELECT hub_seq, event_json FROM chat_aop_events
+		WHERE session_id = ? AND json_valid(event_json) AND json_extract(event_json, '$.type') = ?
+		ORDER BY hub_seq DESC LIMIT ?
+	) ORDER BY hub_seq ASC`
+	args := []any{sessionID, aop.TypeMessage, limit + 1}
+	if before > 0 {
+		query = `SELECT hub_seq, event_json FROM (
+			SELECT hub_seq, event_json FROM chat_aop_events
+			WHERE session_id = ? AND hub_seq < ? AND json_valid(event_json) AND json_extract(event_json, '$.type') = ?
+			ORDER BY hub_seq DESC LIMIT ?
+		) ORDER BY hub_seq ASC`
+		args = []any{sessionID, before, aop.TypeMessage, limit + 1}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return ChatMessagePage{}, err
+	}
+	defer rows.Close()
+	events := make([]persistedAOPEvent, 0, limit+1)
+	for rows.Next() {
+		var stored persistedAOPEvent
+		var raw string
+		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
+			return ChatMessagePage{}, err
+		}
+		if json.Unmarshal([]byte(raw), &stored.Event) == nil && stored.Event.Valid() {
+			events = append(events, stored)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return ChatMessagePage{}, err
+	}
+	var next int64
+	if len(events) > limit {
+		events = events[1:]
+		if len(events) > 0 {
+			next = events[0].Cursor
+		}
+	}
+	msgs := make([]*ChatMessage, 0, len(events))
+	for _, stored := range events {
+		event := stored.Event
 		if event.Type != aop.TypeMessage {
 			continue
 		}
@@ -559,6 +894,7 @@ func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit 
 			Role:      data.Role,
 			AgentName: event.Agent,
 			Content:   sb.String(),
+			Cursor:    stored.Cursor,
 		}
 		if msg.ID == "" {
 			msg.ID = generateID()
@@ -572,11 +908,8 @@ func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit 
 			msg.Metadata = ext.Metadata
 		}
 		msgs = append(msgs, msg)
-		if len(msgs) >= limit {
-			break
-		}
 	}
-	return msgs, nil
+	return ChatMessagePage{Items: msgs, NextCursor: next}, nil
 }
 
 // --- Session-scan association ---

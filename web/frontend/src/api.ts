@@ -663,6 +663,12 @@ export interface ChatMessage {
   content: string
   metadata?: Record<string, unknown>
   created_at: string
+  cursor?: number
+}
+
+export interface ChatMessagePage {
+  items: ChatMessage[]
+  next_cursor?: number
 }
 
 export type DomainEventType =
@@ -771,7 +777,11 @@ export async function uploadChatFile(sessionID: string, file: File): Promise<Fil
 }
 
 export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
-  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to list messages')
+  const page: ChatMessagePage = await apiJSON(
+    `/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`,
+    'Failed to list messages',
+  )
+  return page.items
 }
 
 // Fetch a scan's markdown report, re-rendered server-side in the given language

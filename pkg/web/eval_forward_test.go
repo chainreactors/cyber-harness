@@ -7,15 +7,17 @@ import (
 	"github.com/chainreactors/aiscan/pkg/aop"
 	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
+	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 type evalSink struct {
 	sid        string
+	found      bool
 	chatEvents []DomainEvent
 	aopEvents  []aop.Event
 }
 
-func (s *evalSink) TaskSession(string) (string, bool) { return s.sid, true }
+func (s *evalSink) TaskSession(string) (string, bool) { return s.sid, s.found }
 func (s *evalSink) BroadcastDomainEvent(_ string, event DomainEvent) {
 	s.chatEvents = append(s.chatEvents, event)
 }
@@ -24,7 +26,7 @@ func (s *evalSink) BroadcastAOPEvent(_ string, event aop.Event) {
 }
 
 func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
-	sink := &evalSink{sid: "sess-eval"}
+	sink := &evalSink{sid: "sess-eval", found: true}
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
 	remote := &remoteAgent{id: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
@@ -57,5 +59,20 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	compactDetail, ok, err := xcompact.GetDetail(sink.aopEvents[0])
 	if err != nil || !ok || compactDetail.TokensBefore != 1000 || compactDetail.KeptMessages != 8 {
 		t.Fatalf("compact detail = %#v, %v, %v", compactDetail, ok, err)
+	}
+}
+
+func TestForwardStandaloneScanAOPDoesNotCreateChatHistory(t *testing.T) {
+	sink := &evalSink{}
+	pool := NewAgentPool(NewHub())
+	pool.SetSessionLookup(sink)
+	event := aop.Event{
+		Type: aop.TypeStatus, TS: "2026-07-19T00:00:00Z",
+		SessionID: "scan-not-chat", Agent: "worker", Data: mustJSON(aop.StatusData{State: "running"}),
+	}
+	payload, _ := json.Marshal(event)
+	pool.forwardAOPEvent(&remoteAgent{}, WSMessage{Type: webproto.TypeAOP, TaskID: "scan-not-chat", Payload: payload})
+	if len(sink.aopEvents) != 0 {
+		t.Fatalf("standalone scan AOP was forwarded to chat history: %+v", sink.aopEvents)
 	}
 }

@@ -86,24 +86,7 @@ func LoadAndApplyConfig(option *Option) (string, error) {
 		return configPath, fmt.Errorf("load config %s: %w", configPath, err)
 	}
 	mergeOption(option, &loaded)
-	if err := loadRuntimeDefaults(configPath); err != nil {
-		return configPath, fmt.Errorf("load runtime defaults %s: %w", configPath, err)
-	}
 	return configPath, nil
-}
-
-func loadRuntimeDefaults(filename string) error {
-	c := newConfigLoader()
-	if err := c.LoadFiles(filename); err != nil {
-		return err
-	}
-	if v := c.String("scan.verify"); v != "" {
-		DefaultVerify = v
-	}
-	if v := c.String("search.tavily_keys"); v != "" {
-		DefaultTavilyKeys = v
-	}
-	return nil
 }
 
 func mergeOption(dst, src *Option) {
@@ -142,6 +125,8 @@ func mergeOption(dst, src *Option) {
 		dst.Providers = src.Providers
 	}
 	dst.ActiveProfile = ResolveString(dst.ActiveProfile, src.ActiveProfile)
+	dst.ScanConfig.Verify = ResolveString(dst.ScanConfig.Verify, src.ScanConfig.Verify)
+	dst.SearchConfig.TavilyKeys = ResolveString(dst.SearchConfig.TavilyKeys, src.SearchConfig.TavilyKeys)
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
 	}

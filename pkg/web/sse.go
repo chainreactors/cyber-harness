@@ -14,6 +14,7 @@ import (
 // HubEvent is the unit broadcast through the SSE hub. Type is the SSE
 // event name, Data is pre-serialized JSON written directly to the stream.
 type HubEvent struct {
+	ID   int64
 	Type string
 	Data json.RawMessage
 	// Reliable marks a terminal event that Broadcast must not drop under
@@ -91,7 +92,31 @@ func ServeSSEWithInitial(w http.ResponseWriter, r *http.Request, hub *Hub, id st
 	serveSSE(w, r, hub, id, initial, terminalEvents...)
 }
 
+func ServeSSEWithSnapshot(
+	w http.ResponseWriter,
+	r *http.Request,
+	hub *Hub,
+	id string,
+	snapshot func() ([]HubEvent, error),
+	terminalEvents ...string,
+) error {
+	ch, unsubscribe := hub.Subscribe(id)
+	defer unsubscribe()
+	initial, err := snapshot()
+	if err != nil {
+		return err
+	}
+	serveSSEChannel(w, r, ch, initial, terminalEvents...)
+	return nil
+}
+
 func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initial []HubEvent, terminalEvents ...string) {
+	ch, unsubscribe := hub.Subscribe(id)
+	defer unsubscribe()
+	serveSSEChannel(w, r, ch, initial, terminalEvents...)
+}
+
+func serveSSEChannel(w http.ResponseWriter, r *http.Request, ch <-chan HubEvent, initial []HubEvent, terminalEvents ...string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -105,10 +130,17 @@ func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initi
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ch, unsubscribe := hub.Subscribe(id)
-	defer unsubscribe()
+	var lastSentID int64
 	for _, event := range initial {
+		if event.ID > 0 {
+			fmt.Fprintf(w, "id: %d\n", event.ID)
+			lastSentID = event.ID
+		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
+		if isTerminalEvent(event.Type, terminalEvents) {
+			flusher.Flush()
+			return
+		}
 	}
 	flusher.Flush()
 
@@ -125,6 +157,13 @@ func serveSSE(w http.ResponseWriter, r *http.Request, hub *Hub, id string, initi
 		case event, ok := <-ch:
 			if !ok {
 				return
+			}
+			if event.ID > 0 && event.ID <= lastSentID {
+				continue
+			}
+			if event.ID > 0 {
+				fmt.Fprintf(w, "id: %d\n", event.ID)
+				lastSentID = event.ID
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
 			flusher.Flush()

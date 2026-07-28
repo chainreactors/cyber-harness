@@ -302,16 +302,14 @@ search:
   tavily_keys: "K1,K2"
 `)
 
-	withDefaults(t, func() {
-		if err := loadRuntimeDefaults(filepath.Join(dir, "aiscan.yaml")); err != nil {
-			t.Fatal(err)
-		}
-
-		cfg := AppConfig(&Option{}, RuntimeFeatures{ToolsEnabled: true}, telemetry.NopLogger())
-		if cfg.Tools.TavilyKeys != "K1,K2" {
-			t.Fatalf("tool config = %#v", cfg.Tools)
-		}
-	})
+	var option Option
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
+		t.Fatal(err)
+	}
+	cfg := AppConfig(&option, RuntimeFeatures{ToolsEnabled: true}, telemetry.NopLogger())
+	if cfg.Tools.TavilyKeys != "K1,K2" {
+		t.Fatalf("tool config = %#v", cfg.Tools)
+	}
 }
 
 func TestLoadScanDefaults(t *testing.T) {
@@ -321,15 +319,13 @@ scan:
   verify: critical
 `)
 
-	withDefaults(t, func() {
-		if err := loadRuntimeDefaults(filepath.Join(dir, "aiscan.yaml")); err != nil {
-			t.Fatal(err)
-		}
-
-		if DefaultVerify != "critical" {
-			t.Errorf("DefaultVerify: got %q, want %q", DefaultVerify, "critical")
-		}
-	})
+	var option Option
+	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
+		t.Fatal(err)
+	}
+	if got := AppConfig(&option, RuntimeFeatures{}, telemetry.NopLogger()).Scanner.VerifyMode; got != "critical" {
+		t.Errorf("VerifyMode: got %q, want %q", got, "critical")
+	}
 }
 
 func TestLoadAndApplyConfigDefaultFile(t *testing.T) {
@@ -799,6 +795,53 @@ llm:
 	if len(fallbacks) != 1 || fallbacks[0].APIKey != "dk-111" ||
 		fallbacks[0].MaxTokens != 8192 || fallbacks[0].ContextWindow != 128000 {
 		t.Errorf("fallbacks from list: %+v", fallbacks)
+	}
+}
+
+func TestResolveRuntimeConfigCandidateUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
+	for _, key := range []string{
+		"AISCAN_PROVIDER", "AISCAN_LLM_PROVIDER", "AISCAN_MODEL", "AISCAN_LLM_MODEL",
+		"AISCAN_BASE_URL", "AISCAN_BASEURL", "AISCAN_LLM_BASE_URL", "AISCAN_LLM_BASEURL",
+		"AISCAN_API_KEY", "AISCAN_LLM_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL", "OPENAI_API_KEY",
+	} {
+		t.Setenv(key, "")
+	}
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
+llm:
+  active_profile: staged
+  providers:
+    - id: old
+      provider: anthropic
+      api_key: old-key
+      model: old-model
+    - id: staged
+      provider: openai
+      base_url: https://staged.example/v1
+      api_key: staged-key
+      model: staged-model
+`)
+	path := filepath.Join(dir, "aiscan.yaml")
+
+	staged := Option{MiscOptions: MiscOptions{ConfigFile: path}}
+	if _, err := ResolveRuntimeConfigCandidate(&staged); err != nil {
+		t.Fatal(err)
+	}
+	got := ProviderConfig(&staged)
+	if staged.ActiveProfile != "staged" || got.Provider != "openai" || got.Model != "staged-model" || got.APIKey != "staged-key" {
+		t.Fatalf("staged profile was not selected: option=%+v provider=%+v", staged.LLMOptions, got)
+	}
+
+	explicit := Option{
+		MiscOptions: MiscOptions{ConfigFile: path},
+		LLMOptions:  LLMOptions{Provider: "deepseek", Model: "cli-model", APIKey: "cli-key"},
+	}
+	if _, err := ResolveRuntimeConfigCandidate(&explicit); err != nil {
+		t.Fatal(err)
+	}
+	got = ProviderConfig(&explicit)
+	if got.Provider != "deepseek" || got.Model != "cli-model" || got.APIKey != "cli-key" {
+		t.Fatalf("explicit CLI LLM values did not override staged config: %+v", got)
 	}
 }
 

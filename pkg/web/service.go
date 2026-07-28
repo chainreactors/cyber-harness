@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,14 +34,22 @@ var hubCommands = map[string]bool{"scan": true, "agents": true, "help": true}
 
 type ConfigStore interface {
 	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg webproto.DistributeConfig, err error)
-	SaveDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) error
+	PrepareDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error)
+	CommitDistributeConfig(ctx context.Context, prepared *PreparedConfig) error
+	DiscardDistributeConfig(prepared *PreparedConfig)
+}
+
+type PreparedConfig struct {
+	Config      webproto.DistributeConfig
+	RuntimePath string
+	TargetPath  string
 }
 
 type ServiceConfig struct {
 	Store         *SQLiteStore
 	App           *runner.App
 	ConfigStore   ConfigStore
-	AppFactory    func(ctx context.Context) (*runner.App, error)
+	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
 	AgentPool     *AgentPool
 	MaxConcurrent int
 	ScanTimeout   time.Duration
@@ -47,10 +57,11 @@ type ServiceConfig struct {
 
 type Service struct {
 	store   *SQLiteStore
-	appMu   sync.RWMutex
-	app     *runner.App
+	appMu   sync.Mutex
+	app     *managedApp
+	saveMu  sync.Mutex
 	config  ConfigStore
-	reload  func(ctx context.Context) (*runner.App, error)
+	reload  func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
 	agents  *AgentPool
 	hub     *Hub
 	sem     chan struct{}
@@ -58,9 +69,17 @@ type Service struct {
 
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
+	scanAgents   map[string]string
 	taskSessions map[string]string // taskID → sessionID
 	taskAgents   map[string]string // taskID → agentID
 	taskCanceled map[string]bool
+}
+
+type managedApp struct {
+	app     *runner.App
+	refs    int
+	retired bool
+	closed  bool
 }
 
 func NewService(cfg ServiceConfig) *Service {
@@ -74,7 +93,7 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 	svc := &Service{
 		store:        cfg.Store,
-		app:          cfg.App,
+		app:          wrapManagedApp(cfg.App),
 		config:       cfg.ConfigStore,
 		reload:       cfg.AppFactory,
 		agents:       cfg.AgentPool,
@@ -82,6 +101,7 @@ func NewService(cfg ServiceConfig) *Service {
 		sem:          make(chan struct{}, maxConcurrent),
 		timeout:      timeout,
 		cancels:      make(map[string]context.CancelFunc),
+		scanAgents:   make(map[string]string),
 		taskSessions: make(map[string]string),
 		taskAgents:   make(map[string]string),
 		taskCanceled: make(map[string]bool),
@@ -103,9 +123,19 @@ func (s *Service) Close() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.cancels))
+	for _, cancel := range s.cancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	s.appMu.Lock()
-	app := s.app
+	current := s.app
 	s.app = nil
+	app := retireManagedApp(current)
 	s.appMu.Unlock()
 	if app != nil {
 		app.Close()
@@ -113,7 +143,7 @@ func (s *Service) Close() {
 }
 
 func (s *Service) Status() ServiceStatus {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
 	status := ServiceStatus{
 		Version:      config.Version,
 		LLMAvailable: app != nil && app.Provider != nil,
@@ -123,6 +153,7 @@ func (s *Service) Status() ServiceStatus {
 		status.LLMModel = app.ProviderConfig.Model
 		status.LLMAPIKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
 	}
+	release()
 	if s.config != nil {
 		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
 			status.ConfigPath = path
@@ -152,22 +183,51 @@ func (s *Service) GetConfigStatus(ctx context.Context) (ConfigStatus, error) {
 }
 
 func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig) (ConfigStatus, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	if s.config == nil {
 		return ConfigStatus{}, fmt.Errorf("config store is not configured")
 	}
 	if err := ValidateLLMConfig(cfg.LLM); err != nil {
 		return ConfigStatus{}, err
 	}
-	if err := s.config.SaveDistributeConfig(ctx, cfg); err != nil {
+	prepared, err := s.config.PrepareDistributeConfig(ctx, cfg)
+	if err != nil {
 		return ConfigStatus{}, err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.config.DiscardDistributeConfig(prepared)
+		}
+	}()
+	if prepared == nil {
+		return ConfigStatus{}, fmt.Errorf("config store returned no prepared config")
+	}
+	if err := ValidateLLMConfig(prepared.Config.LLM); err != nil {
+		return ConfigStatus{}, err
+	}
+
+	var nextApp *runner.App
 	if s.reload != nil {
-		app, err := s.reload(ctx)
+		nextApp, err = s.reload(ctx, prepared)
 		if err != nil {
 			cs, _ := s.GetConfigStatus(ctx)
 			return cs, fmt.Errorf("reload aiscan runtime: %w", err)
 		}
-		s.swapApp(app)
+		if nextApp == nil {
+			return ConfigStatus{}, fmt.Errorf("reload aiscan runtime returned no app")
+		}
+	}
+	if err := s.config.CommitDistributeConfig(ctx, prepared); err != nil {
+		if nextApp != nil {
+			nextApp.Close()
+		}
+		return ConfigStatus{}, err
+	}
+	committed = true
+	if nextApp != nil {
+		s.swapApp(nextApp)
 	}
 	// Tell connected agents to hot-swap their own provider too — the hub reload
 	// above only refreshes the hub's in-process runtime, not the agent subprocesses.
@@ -240,7 +300,14 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		return nil, fmt.Errorf("store create: %w", err)
 	}
 
-	go s.runScan(job.ID) //nolint:gosec // G118: background scan outlives the request
+	runCtx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.cancels[job.ID] = cancel
+	s.mu.Unlock()
+	go func() { //nolint:gosec // G118: background scan intentionally outlives the request
+		defer cancel()
+		s.runScan(runCtx, job.ID)
+	}()
 
 	return job, nil
 }
@@ -272,21 +339,54 @@ func refreshStructuredAssets(job *ScanJob) {
 }
 
 func (s *Service) CancelScan(id string) error {
-	s.mu.Lock()
-	cancel, ok := s.cancels[id]
-	s.mu.Unlock()
-	if ok {
-		cancel()
-	}
 	ctx := context.Background()
 	job, err := s.store.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrScanNotFound, id)
+		}
 		return err
 	}
-	if job.Status == StatusRunning || job.Status == StatusQueued {
-		job.Status = StatusCanceled
-		job.UpdatedAt = time.Now()
-		return s.store.Update(ctx, job)
+	if job.Status == StatusCanceled {
+		return nil
+	}
+	if job.Status != StatusRunning && job.Status != StatusQueued {
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, job.Status)
+	}
+	job.Status = StatusCanceled
+	job.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(ctx, job, StatusRunning, StatusQueued)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		current, err := s.store.Get(ctx, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrScanNotFound, id)
+			}
+			return err
+		}
+		if current.Status == StatusCanceled {
+			return nil
+		}
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, current.Status)
+	}
+
+	s.mu.Lock()
+	cancel := s.cancels[id]
+	agentID := s.scanAgents[id]
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.hub.Broadcast(id, HubEvent{
+		Type:     "error",
+		Data:     mustJSON(map[string]string{"scan_id": id, "status": string(StatusCanceled), "error": "scan canceled"}),
+		Reliable: true,
+	})
+	if agentID != "" && s.agents != nil {
+		_ = s.agents.CancelTask(agentID, id)
 	}
 	return nil
 }
@@ -306,33 +406,41 @@ func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error
 	return job.Report, nil
 }
 
-func (s *Service) runScan(jobID string) {
-	s.sem <- struct{}{}
-	defer func() { <-s.sem }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-
-	s.mu.Lock()
-	s.cancels[jobID] = cancel
-	s.mu.Unlock()
+func (s *Service) runScan(runCtx context.Context, jobID string) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.cancels, jobID)
+		delete(s.scanAgents, jobID)
 		s.mu.Unlock()
 	}()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if job, err := s.store.Get(context.Background(), jobID); err == nil {
+				_, _ = s.failJob(job, fmt.Sprintf("scan runtime panic: %v", recovered))
+			}
+		}
+	}()
+
+	select {
+	case s.sem <- struct{}{}:
+	case <-runCtx.Done():
+		return
+	}
+	defer func() { <-s.sem }()
+
+	ctx, cancel := context.WithTimeout(runCtx, s.timeout)
+	defer cancel()
 
 	job, err := s.store.Get(ctx, jobID)
 	if err != nil {
 		return
 	}
-	if job.Status == StatusCanceled {
-		return
-	}
-
 	job.Status = StatusRunning
 	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
+	changed, err := s.store.TransitionScan(context.Background(), job, StatusQueued)
+	if err != nil || !changed {
+		return
+	}
 
 	s.hub.Broadcast(jobID, HubEvent{
 		Type: "status",
@@ -350,7 +458,13 @@ func (s *Service) runScan(jobID string) {
 func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	agent := s.agents.Pick()
 	if agent == nil {
-		s.failJob(job, "no agents available")
+		_, _ = s.failJob(job, "no agents available")
+		return
+	}
+	s.mu.Lock()
+	s.scanAgents[job.ID] = agent.id
+	s.mu.Unlock()
+	if ctx.Err() != nil {
 		return
 	}
 
@@ -361,33 +475,46 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 		Args:       map[string]any{"command": cmd},
 	})
 	if err != nil {
-		s.failJob(job, err.Error())
+		_, _ = s.failJob(job, err.Error())
 		return
 	}
 
 	// Progress lines stream to the SSE hub as tool.data events while the scan
 	// runs; the terminal tool.result carries the full text and the structured
 	// scan result in its details.
-	res, ok := <-resultCh
+	var res taskResult
+	var ok bool
+	select {
+	case <-ctx.Done():
+		_ = s.agents.CancelTask(agent.id, job.ID)
+		s.finishScanContext(job, ctx.Err())
+		return
+	case res, ok = <-resultCh:
+	}
+	if ctx.Err() != nil {
+		_ = s.agents.CancelTask(agent.id, job.ID)
+		s.finishScanContext(job, ctx.Err())
+		return
+	}
 	if !ok {
-		s.failJob(job, "agent disconnected")
+		_, _ = s.failJob(job, "agent disconnected")
 		return
 	}
 	if res.Err != "" {
-		s.failJob(job, res.Err)
+		_, _ = s.failJob(job, res.Err)
 		return
 	}
 	if progress := lastOutputLine(res.Output); progress != "" {
 		job.Progress = progress
 	}
 
-	var result *output.Result
-	if len(res.Result) > 0 {
-		result = &output.Result{}
-		_ = json.Unmarshal(res.Result, result)
+	result, err := decodeScanResult(res.Result)
+	if err != nil {
+		_, _ = s.failJob(job, err.Error())
+		return
 	}
 
-	s.completeJob(ctx, job, agent.id, result)
+	_, _ = s.completeJob(context.Background(), job, agent.id, result)
 }
 
 func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
@@ -402,14 +529,49 @@ func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
 	args := scanArgsForJob(job)
 	_, result, err := s.executeScan(ctx, args, streamWriter)
 	if err != nil {
-		s.failJob(job, err.Error())
+		s.finishScanContext(job, ctx.Err())
+		if ctx.Err() == nil {
+			_, _ = s.failJob(job, err.Error())
+		}
 		return
 	}
 	if streamWriter.job != nil {
 		job = streamWriter.job
 	}
+	if ctx.Err() != nil {
+		s.finishScanContext(job, ctx.Err())
+		return
+	}
 
-	s.completeJob(ctx, job, "", result)
+	_, _ = s.completeJob(context.Background(), job, "", result)
+}
+
+func decodeScanResult(raw json.RawMessage) (*output.Result, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, fmt.Errorf("agent scan returned an empty result envelope")
+	}
+	var result *output.Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode agent scan result: %w", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("agent scan returned a null result envelope")
+	}
+	return result, nil
+}
+
+func (s *Service) finishScanContext(job *ScanJob, err error) {
+	if err == nil {
+		return
+	}
+	if err == context.DeadlineExceeded {
+		_, _ = s.failJob(job, "scan timed out")
+		return
+	}
+	next := *job
+	next.Status = StatusCanceled
+	next.UpdatedAt = time.Now()
+	_, _ = s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
 }
 
 func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
@@ -419,12 +581,21 @@ func (s *Service) persistResultRecords(scanID, agentID string, result *output.Re
 	}
 }
 
-func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) {
-	job.Status = StatusCompleted
-	job.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
-	job.Result = result
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(ctx, job)
+func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) (bool, error) {
+	if result == nil {
+		return false, fmt.Errorf("scan result is required")
+	}
+	next := *job
+	next.Status = StatusCompleted
+	next.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
+	next.Result = result
+	next.Error = ""
+	next.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(ctx, &next, StatusRunning)
+	if err != nil || !changed {
+		return changed, err
+	}
+	*job = next
 	s.persistResultRecords(job.ID, agentID, result)
 	if len(result.Nodes) > 0 {
 		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
@@ -435,32 +606,82 @@ func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string,
 		Reliable: true,
 	})
 	s.broadcastScanComplete(job.ID, result)
+	return true, nil
 }
 
-func (s *Service) failJob(job *ScanJob, errMsg string) {
-	job.Status = StatusFailed
-	job.Error = errMsg
-	job.UpdatedAt = time.Now()
-	_ = s.store.Update(context.Background(), job)
+func (s *Service) failJob(job *ScanJob, errMsg string) (bool, error) {
+	next := *job
+	next.Status = StatusFailed
+	next.Error = errMsg
+	next.UpdatedAt = time.Now()
+	changed, err := s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
+	if err != nil || !changed {
+		return changed, err
+	}
+	*job = next
 	s.hub.Broadcast(job.ID, HubEvent{
 		Type:     "error",
 		Data:     mustJSON(map[string]string{"scan_id": job.ID, "error": errMsg}),
 		Reliable: true,
 	})
+	return true, nil
 }
 
 func (s *Service) aiAvailable() bool {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
+	defer release()
 	return app != nil && app.Provider != nil
 }
 
-func (s *Service) appSnapshot() *runner.App {
-	if s == nil {
+func wrapManagedApp(app *runner.App) *managedApp {
+	if app == nil {
 		return nil
 	}
-	s.appMu.RLock()
-	defer s.appMu.RUnlock()
-	return s.app
+	return &managedApp{app: app}
+}
+
+func retireManagedApp(ref *managedApp) *runner.App {
+	if ref == nil || ref.closed {
+		return nil
+	}
+	ref.retired = true
+	if ref.refs != 0 {
+		return nil
+	}
+	ref.closed = true
+	return ref.app
+}
+
+func (s *Service) acquireApp() (*runner.App, func()) {
+	if s == nil {
+		return nil, func() {}
+	}
+	s.appMu.Lock()
+	ref := s.app
+	if ref != nil && !ref.closed {
+		ref.refs++
+	}
+	s.appMu.Unlock()
+	if ref == nil || ref.closed {
+		return nil, func() {}
+	}
+
+	var once sync.Once
+	return ref.app, func() {
+		once.Do(func() {
+			var closeApp *runner.App
+			s.appMu.Lock()
+			ref.refs--
+			if ref.refs == 0 && ref.retired && !ref.closed {
+				ref.closed = true
+				closeApp = ref.app
+			}
+			s.appMu.Unlock()
+			if closeApp != nil {
+				closeApp.Close()
+			}
+		})
+	}
 }
 
 func (s *Service) swapApp(next *runner.App) {
@@ -469,10 +690,15 @@ func (s *Service) swapApp(next *runner.App) {
 	}
 	s.appMu.Lock()
 	prev := s.app
-	s.app = next
+	if prev != nil && prev.app == next {
+		s.appMu.Unlock()
+		return
+	}
+	s.app = wrapManagedApp(next)
+	closeApp := retireManagedApp(prev)
 	s.appMu.Unlock()
-	if prev != nil && prev != next {
-		prev.Close()
+	if closeApp != nil {
+		closeApp.Close()
 	}
 }
 
@@ -491,7 +717,8 @@ func scanArgsForJob(job *ScanJob) []string {
 }
 
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
-	app := s.appSnapshot()
+	app, release := s.acquireApp()
+	defer release()
 	if app == nil || app.Commands == nil {
 		return "", nil, fmt.Errorf("aiscan runtime is not ready")
 	}
@@ -564,8 +791,12 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 		}
 		current.Progress = line
 		current.UpdatedAt = time.Now()
-		if err := w.store.Update(context.Background(), current); err != nil {
+		changed, err := w.store.TransitionScan(context.Background(), current, StatusRunning)
+		if err != nil {
 			return 0, err
+		}
+		if !changed {
+			return 0, context.Canceled
 		}
 		w.job = current
 
@@ -1024,7 +1255,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	if s.agents != nil {
 		for _, task := range tasks {
 			if task.agentID != "" {
-				s.agents.CancelTask(task.agentID, task.taskID)
+				_ = s.agents.CancelTask(task.agentID, task.taskID)
 			}
 		}
 	}
@@ -1035,7 +1266,10 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*webproto.FileUploadResult, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("session not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return nil, fmt.Errorf("get upload session: %w", err)
 	}
 	if s.agents == nil {
 		return nil, fmt.Errorf("no agent pool available")
@@ -1083,6 +1317,7 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			map[string]any{"filename": filename, "path": result.Path})
 		return &result, nil
 	case <-ctx.Done():
+		_ = s.agents.CancelTask(agentID, taskID)
 		return nil, ctx.Err()
 	}
 }
@@ -1127,8 +1362,22 @@ func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMes
 	return s.store.ListMessages(ctx, sessionID, 500)
 }
 
+func (s *Service) GetMessagePage(ctx context.Context, sessionID string, before int64, limit int) (ChatMessagePage, error) {
+	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ChatMessagePage{}, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return ChatMessagePage{}, err
+	}
+	return s.store.ListMessagePage(ctx, sessionID, before, limit)
+}
+
 func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Event, error) {
 	return s.store.ListAOPEvents(ctx, sessionID, 10000)
+}
+
+func (s *Service) GetAOPEventsAfter(ctx context.Context, sessionID string, after int64) ([]persistedAOPEvent, error) {
+	return s.store.ListAOPEventsAfter(ctx, sessionID, after, 0)
 }
 
 func (s *Service) BroadcastDomainEvent(sessionID string, event DomainEvent) {
@@ -1147,14 +1396,20 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
 	if s == nil || s.hub == nil || sessionID == "" || !event.Valid() {
 		return
 	}
+	var cursor int64
 	if s.store != nil {
-		_ = s.store.AddAOPEvent(context.Background(), sessionID, event)
+		storedCursor, _, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
+		if err != nil {
+			return
+		}
+		cursor = storedCursor
 	}
-	s.broadcastAOPEvent(sessionID, event)
+	s.broadcastAOPEvent(sessionID, event, cursor)
 }
 
-func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event) {
+func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event, cursor int64) {
 	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
+		ID:       cursor,
 		Type:     "aop",
 		Data:     mustJSON(event),
 		Reliable: isReliableAOPEvent(event),
@@ -1250,6 +1505,13 @@ func (s *Service) persistRuntimeDomainEvent(sessionID string, event DomainEvent)
 
 func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.GoalExt) (*ChatMessage, error) {
 	now := time.Now()
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return nil, fmt.Errorf("get message session: %w", err)
+	}
 	msg := &ChatMessage{
 		ID:        generateID(),
 		SessionID: sessionID,
@@ -1258,26 +1520,24 @@ func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content stri
 		CreatedAt: now,
 		Queued:    s.sessionHasActiveTask(sessionID),
 	}
-	if err := s.store.AddMessage(ctx, msg); err != nil {
+	cursor, err := s.store.AppendMessage(ctx, msg)
+	if err != nil {
 		return nil, fmt.Errorf("store message: %w", err)
 	}
 	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event)
+		s.broadcastAOPEvent(sessionID, event, cursor)
 	}
 
 	// Update session timestamp and auto-title from first message.
-	session, err := s.store.GetSession(ctx, sessionID)
-	if err == nil {
-		session.UpdatedAt = now
-		if session.Title == "" {
-			title := content
-			if len(title) > 60 {
-				title = title[:60] + "..."
-			}
-			session.Title = title
+	session.UpdatedAt = now
+	if session.Title == "" {
+		title := content
+		if len(title) > 60 {
+			title = title[:60] + "..."
 		}
-		_ = s.store.UpdateSession(ctx, session)
+		session.Title = title
 	}
+	_ = s.store.UpdateSession(ctx, session)
 
 	//nolint:gosec // Agent dispatch must continue after the HTTP request returns.
 	go s.dispatchUserMessage(sessionID, msg, opts)
@@ -1637,9 +1897,12 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		Metadata:  meta,
 		CreatedAt: now,
 	}
-	_ = s.store.AddMessage(context.Background(), msg)
+	cursor, err := s.store.AppendMessage(context.Background(), msg)
+	if err != nil {
+		return
+	}
 	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event)
+		s.broadcastAOPEvent(sessionID, event, cursor)
 	}
 }
 

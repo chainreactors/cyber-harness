@@ -796,31 +796,24 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	t.Logf("received %d/%d messages under buffer pressure", received, 100)
 }
 
-func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
+func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	hub := NewHub()
-	pool := NewAgentPool(hub)
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/agent/ws", pool.HandleWS)
-	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(pool.List())
-	})
-	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
-		pool.HandleTerminalWS(r.PathValue("id"), w, r)
-	})
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"agents": len(pool.List()), "llm_available": false})
-	})
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := NewService(ServiceConfig{Store: store})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
+	t.Cleanup(svc.Close)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fileServer := http.FileServer(http.FS(staticSub))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	static := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
@@ -835,12 +828,26 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) {
 		}
 	})
 
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil, static, ""))
 	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/api/auth/session") //nolint:gosec // test-only local server
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("auth session route returned %d", resp.StatusCode)
+	}
 	return srv, pool
 }
 
-func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *websocket.Conn {
+type mockBrowserAgent struct { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	conn     *websocket.Conn
+	messages chan WSMessage
+	errors   chan error
+}
+
+func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowserAgent { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -860,13 +867,34 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *websocket.C
 	if ack.Type != "connected" {
 		t.Fatalf("expected connected, got %s", ack.Type)
 	}
-	return conn
+	agent := &mockBrowserAgent{
+		conn: conn, messages: make(chan WSMessage, 64), errors: make(chan error, 1),
+	}
+	go func() {
+		defer close(agent.messages)
+		for {
+			var msg WSMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				agent.errors <- err
+				return
+			}
+			agent.messages <- msg
+		}
+	}()
+	return agent
 }
 
-func launchBrowser(t *testing.T) *rod.Browser {
+func (a *mockBrowserAgent) Close() error { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	return a.conn.Close()
+}
+
+func launchBrowser(t *testing.T) *rod.Browser { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	path, ok := launcher.LookPath()
 	if !ok {
+		if os.Getenv("CI") != "" {
+			t.Fatal("chromium not found in CI e2e environment")
+		}
 		t.Skip("chromium not found, skipping browser e2e test")
 	}
 	u := launcher.New().Bin(path).Headless(true).Leakless(false).
@@ -877,51 +905,70 @@ func launchBrowser(t *testing.T) *rod.Browser {
 	return browser
 }
 
-func drainAgentMessages(conn *websocket.Conn, timeout time.Duration) []WSMessage {
+func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []WSMessage { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	var msgs []WSMessage
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	for {
-		var m WSMessage
-		if err := conn.ReadJSON(&m); err != nil {
-			break
-		}
-		msgs = append(msgs, m)
-	}
-	conn.SetReadDeadline(time.Time{})
-	return msgs
-}
-
-func findPTYFrame(msgs []WSMessage, typ pty.FrameType) (pty.Frame, bool) {
-	for _, m := range msgs {
-		if m.Type != webproto.TypePTY {
-			continue
-		}
-		frame, err := webproto.DecodePTYMessage(m)
-		if err == nil && frame.Type == typ {
-			return frame, true
+		select {
+		case msg, ok := <-agent.messages:
+			if !ok {
+				return msgs
+			}
+			msgs = append(msgs, msg)
+		case <-timer.C:
+			return msgs
 		}
 	}
-	return pty.Frame{}, false
 }
 
-func openFirstAgentTerminal(t *testing.T, page *rod.Page) {
+func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType) pty.Frame { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	if _, err := page.Timeout(500*time.Millisecond).ElementR("button", "Terminal"); err != nil {
-		if toggle, err := page.Timeout(500 * time.Millisecond).Element("button[aria-label='Expand sidebar']"); err == nil {
-			toggle.MustClick()
-			time.Sleep(200 * time.Millisecond)
-			page.MustWaitStable()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case msg, ok := <-agent.messages:
+			if !ok {
+				t.Fatalf("agent connection closed while waiting for %s", want)
+			}
+			frame, err := webproto.DecodePTYMessage(msg)
+			if err == nil && frame.Type == want {
+				return frame
+			}
+		case err := <-agent.errors:
+			t.Fatalf("agent read PTY %s: %v", want, err)
+		case <-timer.C:
+			t.Fatalf("timed out waiting for agent PTY %s", want)
 		}
 	}
-	page.MustElementR("button", "Terminal").MustClick()
-	time.Sleep(500 * time.Millisecond)
-	page.MustWaitStable()
 }
 
-func TestE2ETerminalOpenAndType(t *testing.T) {
-	if testing.Short() || os.Getenv("CI") != "" {
-		t.Skip("skipping e2e browser test (requires interactive terminal)")
+func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	t.Helper()
+	if err := agent.conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
+		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
 	}
+}
+
+func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	t.Helper()
+	terminal, err := page.Timeout(5*time.Second).ElementR("button", "Terminal")
+	if err != nil {
+		if toggle, toggleErr := page.Timeout(5 * time.Second).Element("button[aria-label='Expand sidebar']"); toggleErr == nil {
+			toggle.MustClick()
+			page.Timeout(5 * time.Second).MustWaitStable()
+		}
+		terminal, err = page.Timeout(5*time.Second).ElementR("button", "Terminal")
+	}
+	if err != nil {
+		t.Fatalf("terminal button not available: %v", err)
+	}
+	terminal.MustClick()
+	page.Timeout(5 * time.Second).MustWaitStable()
+}
+
+func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "e2e-agent")
 	defer agentConn.Close()
@@ -932,23 +979,19 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	}
 
 	browser := launchBrowser(t)
-	page := browser.MustPage(srv.URL).MustWaitStable()
+	page := browser.MustPage(srv.URL)
+	page.Timeout(5 * time.Second).MustWaitStable()
 
 	openFirstAgentTerminal(t, page)
 
 	// The terminal discovers the Runtime-owned REPL through pty.list; the browser
 	// never creates it.
-	initial := drainAgentMessages(agentConn, time.Second)
-
-	listMsg, ok := findPTYFrame(initial, pty.FrameList)
-	if !ok {
-		t.Fatalf("no pty.list received, got: %v", initial)
-	}
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID,
+	listMsg := readMockAgentPTY(t, agentConn, pty.FrameList)
+	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID,
 		Sessions: []pty.Info{{ID: "e2e-sess-1", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
-	attach := readAgentPTY(t, agentConn, pty.FrameAttach)
+	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
 	replStreamID := attach.StreamID
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
+	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
 		SessionID: "e2e-sess-1", Kind: "repl"})
 
 	time.Sleep(300 * time.Millisecond)
@@ -981,32 +1024,22 @@ func TestE2ETerminalOpenAndType(t *testing.T) {
 	}
 
 	// Agent sends output back — verify the output path works
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: replStreamID, Data: []byte("hello\r\n")})
+	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: replStreamID, Data: []byte("hello\r\n")})
 	time.Sleep(300 * time.Millisecond)
 
 	// Agent sends pty.closed
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
+	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
 		SessionID: "e2e-sess-1", State: pty.StateCompleted})
-	time.Sleep(500 * time.Millisecond)
-
-	// Verify xterm rendered "[session closed]"
-	termText := page.MustEval(`() => {
-		const rows = document.querySelectorAll('.xterm-rows > div');
-		let text = '';
-		rows.forEach(r => { text += r.textContent + '\\n'; });
-		return text;
-	}`).Str()
-	if !strings.Contains(termText, "session closed") {
-		t.Logf("terminal content: %q", termText)
+	refresh := readMockAgentPTY(t, agentConn, pty.FrameList)
+	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: refresh.StreamID})
+	if _, err := page.Timeout(5 * time.Second).Element(`[title='Console'], [title='控制台']`); err != nil {
+		t.Fatalf("terminal did not return to its idle console after close: %v", err)
 	}
 
-	t.Log("e2e terminal test: open → type → output → close verified")
+	t.Log("e2e terminal test: open → attach → input/output → close verified")
 }
 
-func TestE2ETerminalResize(t *testing.T) {
-	if testing.Short() || os.Getenv("CI") != "" {
-		t.Skip("skipping e2e browser test (requires interactive terminal)")
-	}
+func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	srv, pool := setupE2EServer(t)
 	agentConn := dialMockAgent(t, srv, "resize-agent")
 	defer agentConn.Close()
@@ -1017,18 +1050,21 @@ func TestE2ETerminalResize(t *testing.T) {
 	}
 
 	browser := launchBrowser(t)
-	page := browser.MustPage(srv.URL).MustWaitStable()
+	page := browser.MustPage(srv.URL)
+	page.Timeout(5 * time.Second).MustWaitStable()
 
 	openFirstAgentTerminal(t, page)
 
-	// Drain initial messages and reply
-	initial := drainAgentMessages(agentConn, time.Second)
-	if open, ok := findPTYFrame(initial, pty.FrameOpen); ok {
-		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "resize-sess"})
-	}
-	if list, ok := findPTYFrame(initial, pty.FrameList); ok {
-		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID})
-	}
+	list := readMockAgentPTY(t, agentConn, pty.FrameList)
+	writeMockAgentPTY(t, agentConn, pty.Frame{
+		Type: pty.FrameSessions, StreamID: list.StreamID,
+		Sessions: []pty.Info{{ID: "resize-sess", Kind: "repl", Name: "resize-repl", State: pty.StateRunning}},
+	})
+	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
+	writeMockAgentPTY(t, agentConn, pty.Frame{
+		Type: pty.FrameAttached, StreamID: attach.StreamID, SessionID: "resize-sess", Kind: "repl",
+	})
+	_ = drainAgentMessages(agentConn, 200*time.Millisecond)
 
 	// Trigger resize by changing viewport
 	page.MustSetViewport(1024, 768, 1, false)
@@ -1044,7 +1080,9 @@ func TestE2ETerminalResize(t *testing.T) {
 			break
 		}
 	}
-	t.Logf("resize message received: %v", resizeReceived)
+	if !resizeReceived {
+		t.Fatal("terminal resize did not reach the agent")
+	}
 }
 
 func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
@@ -1053,6 +1091,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	remote := &remoteAgent{
 		id:            "agent-1",
 		sendCh:        make(chan WSMessage, 1),
+		controlCh:     make(chan WSMessage, 1),
 		tasks:         map[string]chan taskResult{"task-1": resultCh},
 		turns:         map[string]int{"task-1": 1},
 		toolCalls:     make(map[string]struct{}),
@@ -1063,7 +1102,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	pool.CancelTask(remote.id, "task-1")
 
 	select {
-	case frame := <-remote.sendCh:
+	case frame := <-remote.controlCh:
 		if frame.Type != webproto.TypeRunCancel || frame.TurnID != "task-1" {
 			t.Fatalf("cancel frame = %+v", frame)
 		}

@@ -64,6 +64,7 @@ type remoteAgent struct {
 	// session.start's parent_session_id. Only a ROOT session.end converges the
 	// task; child ends are lifecycle noise.
 	childSessions map[string]map[string]struct{}
+	reloadPending bool
 	done          chan struct{}
 }
 
@@ -405,9 +406,9 @@ func (p *AgentPool) dispatchMessage(agentID, taskID string, msg webproto.Message
 
 // BroadcastConfigReload notifies every connected agent that the hub config
 // changed so each re-fetches and hot-swaps its LLM provider without a restart.
-// Config notifications use a dedicated control channel so task output cannot
-// starve or silently drop a provider change. A full channel already contains a
-// pending reload, so the latest persisted config will still be fetched.
+// Config notifications use the control channel so task output cannot starve a
+// provider change. Repeated reloads are coalesced while one is queued or waiting
+// for control-channel capacity; the agent always fetches the latest config.
 func (p *AgentPool) BroadcastConfigReload() int {
 	p.mu.RLock()
 	agents := make([]*remoteAgent, 0, len(p.agents))
@@ -417,16 +418,52 @@ func (p *AgentPool) BroadcastConfigReload() int {
 	p.mu.RUnlock()
 	n := 0
 	for _, a := range agents {
-		select {
-		case a.controlCh <- webproto.Message{Type: "config"}:
-			n++
-		default:
-			// A pending config control frame already causes the agent to fetch the
-			// newest persisted config, so this update is effectively coalesced.
+		if a.queueConfigReload() {
 			n++
 		}
 	}
 	return n
+}
+
+func (a *remoteAgent) queueConfigReload() bool {
+	if a == nil || a.controlCh == nil {
+		return false
+	}
+	a.mu.Lock()
+	if a.reloadPending {
+		a.mu.Unlock()
+		return true
+	}
+	a.reloadPending = true
+	a.mu.Unlock()
+
+	msg := webproto.Message{Type: "config"}
+	select {
+	case a.controlCh <- msg:
+		return true
+	default:
+	}
+
+	go func() {
+		if a.done == nil {
+			a.controlCh <- msg
+			return
+		}
+		select {
+		case a.controlCh <- msg:
+		case <-a.done:
+			a.mu.Lock()
+			a.reloadPending = false
+			a.mu.Unlock()
+		}
+	}()
+	return true
+}
+
+func (a *remoteAgent) finishConfigReload() {
+	a.mu.Lock()
+	a.reloadPending = false
+	a.mu.Unlock()
 }
 
 func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error {
@@ -442,10 +479,10 @@ func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error
 	}
 }
 
-func (p *AgentPool) CancelTask(agentID, taskID string) {
+func (p *AgentPool) CancelTask(agentID, taskID string) error {
 	a := p.get(agentID)
 	if a == nil {
-		return
+		return nil
 	}
 	a.mu.Lock()
 	resultCh, pending := a.tasks[taskID]
@@ -457,18 +494,42 @@ func (p *AgentPool) CancelTask(agentID, taskID string) {
 		delete(a.childSessions, taskID)
 	}
 	a.mu.Unlock()
-	select {
-	case a.sendCh <- func() webproto.Message {
-		if isToolCall {
-			return webproto.Message{Type: "cancel", TaskID: taskID}
-		}
-		return webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
-	}():
-	default:
+	if !pending {
+		return nil
 	}
-	if pending && resultCh != nil {
+	cancelMessage := webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
+	if isToolCall {
+		cancelMessage = webproto.Message{Type: "cancel", TaskID: taskID}
+	}
+	if resultCh != nil {
 		close(resultCh)
 	}
+	a.enqueueControl(cancelMessage)
+	return nil
+}
+
+// enqueueControl never drops a control frame because task traffic temporarily
+// fills the channel. The pending send is bounded by the agent connection's
+// lifetime and the writer always drains controlCh before sendCh.
+func (a *remoteAgent) enqueueControl(msg webproto.Message) {
+	if a == nil || a.controlCh == nil {
+		return
+	}
+	select {
+	case a.controlCh <- msg:
+		return
+	default:
+	}
+	go func() {
+		if a.done == nil {
+			a.controlCh <- msg
+			return
+		}
+		select {
+		case a.controlCh <- msg:
+		case <-a.done:
+		}
+	}()
 }
 
 // HandleTerminalWS bridges one browser terminal WebSocket to one remote agent.
@@ -692,7 +753,7 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 		commandsMenu:  info.CommandsMenu,
 		conn:          conn,
 		sendCh:        make(chan webproto.Message, 32),
-		controlCh:     make(chan webproto.Message, 1),
+		controlCh:     make(chan webproto.Message, 32),
 		connectAt:     time.Now(),
 		node:          info.Node,
 		runtime:       info.Runtime,
@@ -732,6 +793,9 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 			// Give control frames priority over task/output traffic.
 			select {
 			case msg := <-agent.controlCh:
+				if msg.Type == "config" {
+					agent.finishConfigReload()
+				}
 				if err := conn.WriteJSON(msg); err != nil {
 					closeBrokenConnection()
 					return
@@ -741,6 +805,9 @@ func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			select {
 			case msg := <-agent.controlCh:
+				if msg.Type == "config" {
+					agent.finishConfigReload()
+				}
 				if err := conn.WriteJSON(msg); err != nil {
 					closeBrokenConnection()
 					return
@@ -1010,8 +1077,6 @@ func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {
 		}
 		if sid, ok := p.sessions.TaskSession(correlationID); ok {
 			p.sessions.BroadcastAOPEvent(sid, aopEv)
-		} else if aopEv.SessionID != "" {
-			p.sessions.BroadcastAOPEvent(aopEv.SessionID, aopEv)
 		}
 	}
 

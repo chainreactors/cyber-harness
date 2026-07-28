@@ -3,10 +3,13 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/aop"
 	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
@@ -79,6 +82,7 @@ func TestBroadcastAOPEventPersistsRawEnvelope(t *testing.T) {
 	svc := NewService(ServiceConfig{Store: store})
 
 	const sid = "sess-aop"
+	createStoredSession(t, store, sid)
 	event := aop.Event{
 		Type:      aop.TypeMessage,
 		TS:        "2026-07-19T00:00:00Z",
@@ -109,6 +113,7 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "sess-eval")
 
 	event := aop.Event{
 		Type: "turn.end", TS: time.Now().UTC().Format(time.RFC3339Nano),
@@ -139,6 +144,7 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "sess-scan")
 
 	// A completed scan must leave a durable marker so its inline card survives a
 	// timeline rebuild (reload / session switch). The heavy Result is intentionally
@@ -168,5 +174,99 @@ func TestScanCompletePersistsMarkerMetadata(t *testing.T) {
 	empty, _ := store.ListMessages(context.Background(), "sess-scan-empty", 100)
 	if len(empty) != 0 {
 		t.Fatalf("empty-scanID persisted messages = %d, want 0", len(empty))
+	}
+}
+
+func TestScanEventsImmediatelyReplaysStoredTerminalState(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status ScanStatus
+		want   string
+	}{
+		{name: "completed", status: StatusCompleted, want: "event: complete"},
+		{name: "failed", status: StatusFailed, want: "event: error"},
+		{name: "canceled", status: StatusCanceled, want: "\"status\":\"canceled\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			now := time.Now()
+			job := &ScanJob{
+				ID: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: tc.status,
+				Error: "scan failed", CreatedAt: now, UpdatedAt: now,
+			}
+			if tc.status == StatusCompleted {
+				job.Result = &output.Result{}
+			}
+			if err := store.Create(context.Background(), job); err != nil {
+				t.Fatal(err)
+			}
+
+			svc := NewService(ServiceConfig{Store: store})
+			h := &handlerImpl{service: svc}
+			req := httptest.NewRequest("GET", "/api/scans/terminal-scan/events", nil)
+			req.SetPathValue("id", job.ID)
+			recorder := newLockedResponseRecorder()
+			done := make(chan struct{})
+			go func() {
+				h.scanEvents(recorder, req)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("terminal scan SSE did not return immediately")
+			}
+			if body := recorder.BodyString(); !strings.Contains(body, tc.want) {
+				t.Fatalf("SSE body = %q, want %q", body, tc.want)
+			}
+		})
+	}
+}
+
+func TestServeSSEWithSnapshotSubscribesBeforeReadingSnapshot(t *testing.T) {
+	hub := NewHub()
+	req := httptest.NewRequest("GET", "/events", nil)
+	recorder := newLockedResponseRecorder()
+
+	err := ServeSSEWithSnapshot(recorder, req, hub, "session-topic", func() ([]HubEvent, error) {
+		hub.Broadcast("session-topic", HubEvent{
+			Type: "turn.end", Data: mustJSON(map[string]string{"stop": "completed"}), Reliable: true,
+		})
+		return nil, nil
+	}, "turn.end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := recorder.BodyString(); !strings.Contains(body, "event: turn.end") {
+		t.Fatalf("SSE body = %q; event broadcast during snapshot was lost", body)
+	}
+}
+
+func TestServeSSEWithSnapshotDropsQueuedSnapshotDuplicates(t *testing.T) {
+	hub := NewHub()
+	req := httptest.NewRequest("GET", "/events", nil)
+	recorder := newLockedResponseRecorder()
+
+	err := ServeSSEWithSnapshot(recorder, req, hub, "session-topic", func() ([]HubEvent, error) {
+		hub.Broadcast("session-topic", HubEvent{ID: 2, Type: "aop", Data: mustJSON("duplicate")})
+		hub.Broadcast("session-topic", HubEvent{ID: 3, Type: "done", Data: mustJSON("new"), Reliable: true})
+		return []HubEvent{
+			{ID: 1, Type: "aop", Data: mustJSON("one")},
+			{ID: 2, Type: "aop", Data: mustJSON("duplicate")},
+		}, nil
+	}, "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := recorder.BodyString()
+	if strings.Count(body, "id: 2\n") != 1 {
+		t.Fatalf("snapshot cursor 2 was emitted more than once: %q", body)
+	}
+	if !strings.Contains(body, "id: 3\n") {
+		t.Fatalf("new queued event was not emitted: %q", body)
 	}
 }

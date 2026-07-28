@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -256,7 +258,14 @@ func (h *handlerImpl) getScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlerImpl) cancelScan(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.CancelScan(r.PathValue("id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, ErrScanNotFound):
+			writeError(w, http.StatusNotFound, ErrScanNotFound.Error())
+		case errors.Is(err, ErrScanNotCancelable):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "canceled"})
@@ -264,11 +273,40 @@ func (h *handlerImpl) cancelScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlerImpl) scanEvents(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := h.service.GetScan(r.Context(), id); err != nil {
+	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), id, func() ([]HubEvent, error) {
+		job, err := h.service.GetScan(r.Context(), id)
+		if err != nil {
+			return nil, err
+		}
+		return []HubEvent{scanSnapshotEvent(job)}, nil
+	}, "complete", "error")
+	if err != nil {
 		writeError(w, http.StatusNotFound, "scan not found")
-		return
 	}
-	ServeSSE(w, r, h.service.Hub(), id, "complete", "error")
+}
+
+func scanSnapshotEvent(job *ScanJob) HubEvent {
+	switch job.Status {
+	case StatusCompleted:
+		return HubEvent{
+			Type: "complete",
+			Data: mustJSON(map[string]any{"scan_id": job.ID, "status": string(job.Status), "result": job.Result}),
+		}
+	case StatusFailed, StatusCanceled:
+		errMsg := job.Error
+		if errMsg == "" && job.Status == StatusCanceled {
+			errMsg = "scan canceled"
+		}
+		return HubEvent{
+			Type: "error",
+			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "error": errMsg}),
+		}
+	default:
+		return HubEvent{
+			Type: "status",
+			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "progress": job.Progress}),
+		}
+	}
 }
 
 func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +389,10 @@ func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.service.HandleUserMessage(r.Context(), r.PathValue("id"), req.Content, opts)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -375,30 +417,60 @@ func (h *handlerImpl) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 const maxUploadSize = 50 << 20 // 50 MB
 
-func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
-	// Bound the total request body before parsing so an oversized multipart
-	// upload can't exhaust memory/disk (gosec G120). Allow modest headroom over
-	// maxUploadSize for the multipart envelope (boundaries and part headers).
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+(1<<20))
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil { //nolint:gosec // G120: body bounded by http.MaxBytesReader above
-		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
-		return
+var ErrUploadTooLarge = errors.New("uploaded file exceeds the size limit")
+
+func readMultipartUpload(w http.ResponseWriter, r *http.Request, maxSize int64) (string, []byte, error) {
+	if maxSize <= 0 {
+		return "", nil, fmt.Errorf("upload size limit must be positive")
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize+(1<<20))
+	if err := r.ParseMultipartForm(maxSize); err != nil { //nolint:gosec // G120: body is bounded above
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return "", nil, ErrUploadTooLarge
+		}
+		return "", nil, fmt.Errorf("parse multipart form: %w", err)
+	}
+	if r.MultipartForm != nil {
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file field")
-		return
+		return "", nil, fmt.Errorf("missing file field: %w", err)
 	}
 	defer file.Close()
+	if header.Size > maxSize {
+		return "", nil, ErrUploadTooLarge
+	}
 
-	data, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
+	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read file")
+		return "", nil, fmt.Errorf("read uploaded file: %w", err)
+	}
+	if int64(len(data)) > maxSize {
+		return "", nil, ErrUploadTooLarge
+	}
+	return header.Filename, data, nil
+}
+
+func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
+	filename, data, err := readMultipartUpload(w, r, maxUploadSize)
+	if err != nil {
+		if errors.Is(err, ErrUploadTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrUploadTooLarge.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), header.Filename, data)
+	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), filename, data)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -406,15 +478,33 @@ func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {
-	msgs, err := h.service.GetMessages(r.Context(), r.PathValue("id"))
+	before, err := parsePositiveInt64(r.URL.Query().Get("before"))
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid before cursor")
+		return
+	}
+	limit := 500
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil || parsed < 1 || parsed > 500 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+			return
+		}
+		limit = parsed
+	}
+	page, err := h.service.GetMessagePage(r.Context(), r.PathValue("id"), before, limit)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if msgs == nil {
-		msgs = []*ChatMessage{}
+	if page.Items == nil {
+		page.Items = []*ChatMessage{}
 	}
-	writeJSON(w, http.StatusOK, msgs)
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -423,16 +513,32 @@ func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	events, err := h.service.GetAOPEvents(r.Context(), id)
+	after, _ := parsePositiveInt64(r.Header.Get("Last-Event-ID"))
+	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), sessionTopic(id), func() ([]HubEvent, error) {
+		events, err := h.service.GetAOPEventsAfter(r.Context(), id, after)
+		if err != nil {
+			return nil, err
+		}
+		initial := make([]HubEvent, 0, len(events))
+		for _, event := range events {
+			initial = append(initial, HubEvent{ID: event.Cursor, Type: "aop", Data: mustJSON(event.Event)})
+		}
+		return initial, nil
+	}, "_never")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return
 	}
-	initial := make([]HubEvent, 0, len(events))
-	for _, event := range events {
-		initial = append(initial, HubEvent{Type: "aop", Data: mustJSON(event)})
+}
+
+func parsePositiveInt64(value string) (int64, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, nil
 	}
-	ServeSSEWithInitial(w, r, h.service.Hub(), sessionTopic(id), initial, "_never")
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("invalid positive integer %q", value)
+	}
+	return parsed, nil
 }
 
 // ── SCO Nodes ──

@@ -39,7 +39,12 @@
 
 ```
 Settings UI 保存
-  → Service.SaveConfig() 重建 hub 的 App (同步)
+  → Service.SaveConfig() 串行化保存请求
+  → PrepareDistributeConfig() 同目录写 0600 临时文件并 fsync
+  → AppFactory 从临时文件完整构建候选 App
+  → CommitDistributeConfig() 原子替换正式配置
+  → swapApp() 将新请求切到候选 App
+      └─ 旧 App 标记 retired，最后一个活动租约释放后才 Close
   → BroadcastConfigReload() 向所有 agent 推 "config" 消息 (非阻塞)
   → agent 收到后异步:
       FetchRemoteConfig(hubURL) 拉取最新配置
@@ -51,11 +56,11 @@ Settings UI 保存
   → hub 合并 identity → UI 徽章实时更新
 ```
 
-**失败隔离**: 重建 provider 失败时旧 provider 不变，日志记录原因。channel 满则跳过，agent 下次重连自然拉取。
+**失败隔离**: 候选 App 构建失败时删除临时文件，正式配置和旧 App 都不变；原子提交失败时同时关闭候选 App。只有配置落盘成功后才交换 App 和通知 agent。agent 重建 provider 失败时保留旧 provider；reload 已排队或正等待控制 channel 空间时，后续请求会合并，agent 拉取的仍是最新正式配置。
 
-**并发模型**: `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`。`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
+**并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/agents.go`, `pkg/webagent/agent.go`, `core/runner/runner.go`, `pkg/agent/agent.go`
+**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/webagent/agent.go`, `core/runner/runner.go`, `pkg/agent/agent.go`
 
 ---
 
