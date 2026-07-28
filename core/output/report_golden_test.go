@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -47,8 +48,9 @@ func checkReportGolden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("read golden (run go test -run %s -update-report-golden): %v", t.Name(), err)
 	}
-	if got != string(want) {
-		t.Errorf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", path, got, string(want))
+	wantText := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if got != wantText {
+		t.Errorf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", path, got, wantText)
 	}
 }
 
