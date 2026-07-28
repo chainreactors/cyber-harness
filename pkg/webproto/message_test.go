@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/utils/pty"
 )
 

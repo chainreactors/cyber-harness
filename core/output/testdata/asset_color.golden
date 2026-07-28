@@ -1,0 +1,43 @@
+Assets: 4 total
+Summary: 2 target(s), 4 service(s), 2 web endpoint(s), 3 probe(s), 3 loot(s), 1 error(s), 22.266s
+
+1. [1;32mExample App[0m
+   target: http://10.0.0.1
+   status: confirmed
+   [0;36mservice:[0m tcp http 80
+   [0;36mfingerprint:[0m nginx
+   [0;33mvuln:[0m [0;33m[confirmed][0m CVE-2021-41773 path traversal
+      [2m## Impact[0m
+      [2mArbitrary file read through `/cgi-bin/`.[0m
+      [2m| Field | Value |[0m
+      [2m|---|---|[0m
+      [2m| CVSS | 9.8 |[0m
+   [0;33mweakpass:[0m [0;33m[high][0m ssh root:root
+   [0;33mdeep:[0m [0;33m[info][0m Admin console is reachable without authentication.
+   [0;33mdeep:[0m [0;33m[response][0m Let me analyze the collected browser evidence.
+      [2mLet me analyze the collected browser evidence.[0m
+      [2m## Evidence Analysis[0m
+      [2m| Asset | Details |[0m
+      [2m|---|---|[0m
+      [2m| API | GET /api/scans |[0m
+   [0;31merror:[0m dial tcp 10.0.0.1:8443: connect: connection refused
+   sitemap:
+   [0;32m[200][0m [1;32m/[0m  [1;33m1256[0m  [0;32m"Example App"[0m [0;36m[nginx][0m [0;33m{nginx}[0m [0;33m{deep:response}[0m
+   ├──       [2m/admin[0m [0;33m{vuln:confirmed CVE-2021-41773 path traversal}[0m [0;33m{deep:info}[0m
+   │   ├── [0;32m[401][0m [1;32m/login[0m  [1;33m512[0m  [0;32m"Login"[0m [0;36m[basic-auth][0m
+   ├──       [2m/static[0m
+   │   ├── [0;32m[200][0m /app.js  [1;33m9001[0m
+   ├──       /10.0.0.1:22 [0;33m{weakpass:high ssh root:root}[0m
+
+2. [1;32mMySQL 5.7.32[0m
+   target: 10.0.0.2:3306
+   status: loot
+   [0;36mservice:[0m tcp mysql 3306
+   [0;33mfingerprint:[0m [0;33m[loot][0m mysql 5.7.32
+
+3. [1;32micmp[0m
+   target: 10.0.0.2:icmp
+   [0;36mservice:[0m icmp
+
+4. [1;32m10.0.0.3:445[0m
+   [0;36mservice:[0m tcp smb 445

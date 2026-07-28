@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/inbox"
 )
 
 func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {

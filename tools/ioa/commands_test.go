@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/ioa/protocols"
 )

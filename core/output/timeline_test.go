@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
+	"github.com/chainreactors/aiscan/core/aop"
+	xcommand "github.com/chainreactors/aiscan/core/aop/x/command"
 )
 
 func TestParseLineReadsNativeAOPEnvelope(t *testing.T) {

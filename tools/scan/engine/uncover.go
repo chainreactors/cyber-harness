@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/projectdiscovery/uncover/sources"
 )
 

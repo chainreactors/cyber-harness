@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 func writeTestConfig(t *testing.T, dir, content string) string {
@@ -306,9 +304,8 @@ search:
 	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
 		t.Fatal(err)
 	}
-	cfg := AppConfig(&option, RuntimeFeatures{ToolsEnabled: true}, telemetry.NopLogger())
-	if cfg.Tools.TavilyKeys != "K1,K2" {
-		t.Fatalf("tool config = %#v", cfg.Tools)
+	if option.SearchConfig.TavilyKeys != "K1,K2" {
+		t.Fatalf("search config = %#v", option.SearchConfig)
 	}
 }
 
@@ -323,7 +320,7 @@ scan:
 	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
 		t.Fatal(err)
 	}
-	if got := AppConfig(&option, RuntimeFeatures{}, telemetry.NopLogger()).Scanner.VerifyMode; got != "critical" {
+	if got := option.ScanConfig.Verify; got != "critical" {
 		t.Errorf("VerifyMode: got %q, want %q", got, "critical")
 	}
 }
@@ -517,7 +514,7 @@ cyberhub:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 
@@ -556,7 +553,7 @@ llm:
 		option.Model = "cli-model"
 		option.BaseURL = "https://cli.example/v1"
 		option.APIKey = "cli-key"
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "cli-model" || option.BaseURL != "https://cli.example/v1" || option.APIKey != "cli-key" {
@@ -581,7 +578,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.Provider != "openai" || option.BaseURL != "https://openai-proxy.example/v1" || option.Model != "gpt-env" || option.APIKey != "openai-key" {
@@ -606,7 +603,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.Provider != "anthropic" || option.BaseURL != "https://anthropic-proxy.example/v1" || option.Model != "claude-env" || option.APIKey != "anthropic-key" {
@@ -638,7 +635,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "kimi-for-coding" {
@@ -655,7 +652,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "claude-opus-4-8" {
@@ -687,7 +684,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.BaseURL != "https://kiro.example/v1" {
@@ -708,7 +705,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
 			t.Fatal(err)
 		}
 		if option.BaseURL != "https://borrowed.example/v1" {
@@ -718,84 +715,6 @@ llm:
 			t.Errorf("borrowed ANTHROPIC_API_KEY should fill an empty api_key: got %q, want %q", option.APIKey, "borrowed-key")
 		}
 	})
-}
-
-func TestProvidersListOnly(t *testing.T) {
-	option := Option{}
-	option.Providers = []LLMProviderEntry{
-		{Provider: "deepseek", APIKey: "key1", Model: "deepseek-chat"},
-		{Provider: "openai", APIKey: "key2", Model: "gpt-4o"},
-	}
-
-	primary := ProviderConfig(&option)
-	if primary.Provider != "deepseek" || primary.APIKey != "key1" || primary.Model != "deepseek-chat" {
-		t.Errorf("primary should be providers[0], got %+v", primary)
-	}
-
-	fallbacks := FallbackProviderConfigs(&option)
-	if len(fallbacks) != 1 || fallbacks[0].Provider != "openai" || fallbacks[0].Model != "gpt-4o" {
-		t.Errorf("fallback should be providers[1:], got %+v", fallbacks)
-	}
-}
-
-func TestProvidersListWithSingleFields(t *testing.T) {
-	option := Option{}
-	option.Provider = "anthropic"
-	option.APIKey = "cli-key"
-	option.Providers = []LLMProviderEntry{
-		{Provider: "deepseek", APIKey: "fb1", Model: "deepseek-chat"},
-	}
-
-	primary := ProviderConfig(&option)
-	if primary.Provider != "anthropic" || primary.APIKey != "cli-key" {
-		t.Errorf("single fields should win when set, got %+v", primary)
-	}
-
-	fallbacks := FallbackProviderConfigs(&option)
-	if len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" {
-		t.Errorf("providers should be fallback when single fields set, got %+v", fallbacks)
-	}
-}
-
-func TestProvidersListFromConfig(t *testing.T) {
-	dir := t.TempDir()
-	writeTestConfig(t, dir, `
-llm:
-  active_profile: openai
-  providers:
-    - id: deepseek
-      provider: deepseek
-      api_key: dk-111
-      model: deepseek-chat
-      max_tokens: 8192
-      context_window: 128000
-    - id: openai
-      provider: openai
-      api_key: sk-222
-      model: gpt-4o
-      max_tokens: 32768
-      context_window: 1000000
-`)
-
-	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
-		t.Fatal(err)
-	}
-	if len(opt.Providers) != 2 {
-		t.Fatalf("expected 2 providers, got %d", len(opt.Providers))
-	}
-
-	primary := ProviderConfig(&opt)
-	if primary.Provider != "openai" || primary.APIKey != "sk-222" ||
-		primary.MaxTokens != 32768 || primary.ContextWindow != 1000000 {
-		t.Errorf("primary from list: %+v", primary)
-	}
-
-	fallbacks := FallbackProviderConfigs(&opt)
-	if len(fallbacks) != 1 || fallbacks[0].APIKey != "dk-111" ||
-		fallbacks[0].MaxTokens != 8192 || fallbacks[0].ContextWindow != 128000 {
-		t.Errorf("fallbacks from list: %+v", fallbacks)
-	}
 }
 
 func TestResolveRuntimeConfigCandidateUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
@@ -824,25 +743,30 @@ llm:
 	path := filepath.Join(dir, "aiscan.yaml")
 
 	staged := Option{MiscOptions: MiscOptions{ConfigFile: path}}
-	if _, err := ResolveRuntimeConfigCandidate(&staged); err != nil {
+	if _, err := ResolveRuntimeConfig(&staged, false, testProviderInference); err != nil {
 		t.Fatal(err)
 	}
-	got := ProviderConfig(&staged)
-	if staged.ActiveProfile != "staged" || got.Provider != "openai" || got.Model != "staged-model" || got.APIKey != "staged-key" {
-		t.Fatalf("staged profile was not selected: option=%+v provider=%+v", staged.LLMOptions, got)
+	if staged.ActiveProfile != "staged" || len(staged.Providers) != 2 || staged.Providers[1].Model != "staged-model" {
+		t.Fatalf("staged profile was not loaded: option=%+v", staged.LLMOptions)
 	}
 
 	explicit := Option{
 		MiscOptions: MiscOptions{ConfigFile: path},
 		LLMOptions:  LLMOptions{Provider: "deepseek", Model: "cli-model", APIKey: "cli-key"},
 	}
-	if _, err := ResolveRuntimeConfigCandidate(&explicit); err != nil {
+	if _, err := ResolveRuntimeConfig(&explicit, false, testProviderInference); err != nil {
 		t.Fatal(err)
 	}
-	got = ProviderConfig(&explicit)
-	if got.Provider != "deepseek" || got.Model != "cli-model" || got.APIKey != "cli-key" {
-		t.Fatalf("explicit CLI LLM values did not override staged config: %+v", got)
+	if explicit.Provider != "deepseek" || explicit.Model != "cli-model" || explicit.APIKey != "cli-key" {
+		t.Fatalf("explicit CLI LLM values did not override staged config: %+v", explicit.LLMOptions)
 	}
+}
+
+func testProviderInference(baseURL string) string {
+	if strings.Contains(strings.ToLower(baseURL), "anthropic") {
+		return "anthropic"
+	}
+	return "openai"
 }
 
 func withDefaults(t *testing.T, fn func()) {

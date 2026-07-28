@@ -23,8 +23,8 @@ type State struct {
 	subscribeURL  string
 	activeNode    *clash.ProxyNode
 	activeURL     string
-	autoURL       string               // clash:// URL for auto mode
-	autoDial      proxyclient.Dial     // pre-built dial for auto mode
+	autoURL       string           // clash:// URL for auto mode
+	autoDial      proxyclient.Dial // pre-built dial for auto mode
 }
 
 func NewState(originalProxy string) *State {
@@ -151,7 +151,7 @@ func (s *State) TestNode(ctx context.Context, node *clash.ProxyNode) (time.Durat
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dial.DialContext(ctx, network, addr)
 		},
-		TLSClientConfig:  &tls.Config{},
+		TLSClientConfig:   &tls.Config{},
 		DisableKeepAlives: true,
 	}
 	client := &http.Client{

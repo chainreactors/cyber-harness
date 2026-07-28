@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/evaluator"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/evaluator"
+	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
 type agentRunFunc func(context.Context) (*agent.Result, error)

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/tmux"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/agent/inbox"
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 const (
@@ -110,7 +110,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (coretool.Resu
 		return coretool.Result{}, err
 	}
 
-	return t.waitOrBackground(execution, ctx, inboxFromContext(ctx)), nil
+	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx)), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command

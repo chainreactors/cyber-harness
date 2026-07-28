@@ -9,12 +9,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	apprunner "github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/webagent"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
@@ -43,7 +45,7 @@ func main() {
 
 	option := &cfg.Option{}
 	option.ConfigFile = configFile
-	if _, err := cfg.ResolveRuntimeConfig(option); err != nil {
+	if _, err := apprunner.ResolveRuntimeConfig(option); err != nil {
 		logger.Errorf("load config: %v", err)
 		os.Exit(1)
 	}
@@ -90,17 +92,15 @@ func initTools(ctx context.Context, option *cfg.Option, logger telemetry.Logger,
 	deps := &commands.Deps{
 		WorkDir:      workDir,
 		RunnerMode:   true,
-		EngineSet:    engineSet,
 		Logger:       logger,
 		DataBus:      dataBus,
 		ScannerProxy: option.Proxy,
 	}
 	if engineSet != nil {
-		deps.Resources = engineSet.Resources
+		commands.Provide(deps, engine.SetKey, engineSet)
+		commands.Provide(deps, resources.SetKey, engineSet.Resources)
 	}
-	for _, group := range []string{"core", "scanner", "arsenal"} {
-		commands.BuildGroup(group, deps, registry)
-	}
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core", "scanner", "arsenal"}}), deps, registry)
 	registry.SetLogger(logger)
 	return registry, nil
 }

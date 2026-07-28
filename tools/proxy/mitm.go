@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
 )

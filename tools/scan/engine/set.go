@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/aiscan/pkg/util"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/util"
 	"github.com/chainreactors/fingers/alias"
 	fingersLib "github.com/chainreactors/fingers/fingers"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"

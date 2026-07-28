@@ -7,9 +7,9 @@ import (
 	"io"
 	"sync"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/aop"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 

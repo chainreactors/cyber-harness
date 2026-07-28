@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/aop"
+	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 // A saturated subscriber buffer must never swallow a reliable terminal event.

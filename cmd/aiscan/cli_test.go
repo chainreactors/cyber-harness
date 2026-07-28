@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/pkg/runner"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
 	goflags "github.com/jessevdk/go-flags"
@@ -145,9 +145,6 @@ func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 }
 
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
-	if raceEnabled {
-		t.Skip("scanner pipeline has known races under -race; this test checks log output")
-	}
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
 	err := runner.RunDirectScannerMode(context.Background(), &cfg.Option{
@@ -165,9 +162,6 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 }
 
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
-	if raceEnabled {
-		t.Skip("scanner pipeline has known races under -race; this test checks log output")
-	}
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
 	err := runner.RunDirectScannerMode(context.Background(), &cfg.Option{
@@ -199,7 +193,7 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 	if opt.BaseURL != "https://api.deepseek.com" || opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
-	pcfg := cfg.ProviderConfig(&opt)
+	pcfg := runner.ProviderConfig(&opt)
 	if pcfg.Provider != "" {
 		t.Fatalf("provider should be unresolved before agent.ResolveProvider, got %q", pcfg.Provider)
 	}
@@ -309,7 +303,7 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 	if opt.AI || opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
-	pcfg := cfg.ProviderConfig(&opt)
+	pcfg := runner.ProviderConfig(&opt)
 	if pcfg.Provider != "" {
 		t.Fatalf("provider should be unresolved before agent.ResolveProvider, got %q", pcfg.Provider)
 	}
@@ -730,7 +724,7 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 
 		opt := &cfg.Option{}
 		cfg.ApplyDefaults(opt)
-		appCfg := cfg.AppConfig(opt, cfg.RuntimeFeatures{
+		appCfg := runner.AppConfig(opt, runner.RuntimeFeatures{
 			ProviderEnabled:  true,
 			ProviderOptional: true,
 			AIEnabled:        true,

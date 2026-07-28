@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 type WriteTool struct {

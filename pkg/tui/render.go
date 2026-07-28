@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/util"
+	"github.com/chainreactors/aiscan/core/util"
 	bspinner "github.com/charmbracelet/bubbles/spinner"
 )
 

@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	spraypkg "github.com/chainreactors/spray/pkg"
 	"github.com/chainreactors/utils/parsers"

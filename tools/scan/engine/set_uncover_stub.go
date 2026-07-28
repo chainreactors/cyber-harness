@@ -2,6 +2,6 @@
 
 package engine
 
-import "github.com/chainreactors/aiscan/pkg/telemetry"
+import "github.com/chainreactors/aiscan/core/telemetry"
 
 func (e *Set) SetupUncover(_ ReconOptions, _ telemetry.Logger) {}

@@ -4,7 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	agentprobe "github.com/chainreactors/aiscan/agent/probe"
+	"github.com/chainreactors/aiscan/pkg/probe"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
@@ -30,15 +31,15 @@ func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
 
 // TestLLM probes the supplied LLM settings, falling back to the stored API key
 // when the request leaves it blank, then delegates to pkg/probe.
-func (s *Service) TestLLM(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMTestResult, error) {
-	return probe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
+func (s *Service) TestLLM(ctx context.Context, req agentprobe.LLMProbeRequest) (agentprobe.LLMTestResult, error) {
+	return agentprobe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
 }
 
 // ListLLMModels enumerates the models the supplied LLM endpoint advertises,
 // falling back to the stored API key when the request leaves it blank, then
 // delegates to pkg/probe.
-func (s *Service) ListLLMModels(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMModelsResult, error) {
-	return probe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
+func (s *Service) ListLLMModels(ctx context.Context, req agentprobe.LLMProbeRequest) (agentprobe.LLMModelsResult, error) {
+	return agentprobe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
 }
 
 // storedLLMAPIKey returns the requested profile's persisted API key. A blank

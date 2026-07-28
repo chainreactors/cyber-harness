@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/aop"
 )
 
 type lockedResponseRecorder struct {

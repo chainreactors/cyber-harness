@@ -10,14 +10,13 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	transportpkg "github.com/chainreactors/aiscan/core/transport"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/runner"
+	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
 )
 
 func main() {
-	cfg.ScannerEnabled = false
-
 	var option cfg.Option
 	parser := goflags.NewParser(&option, goflags.Default&^goflags.PrintErrors)
 	parser.Usage = `[OPTIONS]
@@ -43,7 +42,7 @@ Examples:
 		return
 	}
 
-	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
+	cfgPath, err := runner.ResolveRuntimeConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
