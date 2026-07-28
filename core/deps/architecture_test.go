@@ -41,6 +41,7 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 		{dir: filepath.Join("core", "runner"), importPath: modulePath + "/core/" + "runner"},
 		{dir: filepath.Join("core", "transport"), importPath: modulePath + "/core/" + "transport"},
 		{dir: filepath.Join("cmd", "agent"), importPath: modulePath + "/cmd/" + "agent"},
+		{dir: filepath.Join("cmd", "runner"), importPath: modulePath + "/cmd/" + "runner"},
 	}
 	for _, item := range legacy {
 		legacyDir := filepath.Join(root, item.dir)
