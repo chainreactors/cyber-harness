@@ -16,11 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	_ "github.com/chainreactors/aiscan/tools/gogo"
 	_ "github.com/chainreactors/aiscan/tools/neutron"
 	_ "github.com/chainreactors/aiscan/tools/proton"
@@ -59,13 +60,14 @@ func TestScannerFunctionalRegression(t *testing.T) {
 	bus := eventbus.New[output.ToolDataEvent]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
-	commands.BuildGroup("scanner", &commands.Deps{
-		WorkDir:   workDir,
-		EngineSet: engineSet,
-		Resources: engineSet.Resources,
-		DataBus:   bus,
-		Logger:    telemetry.NopLogger(),
-	}, registry)
+	deps := &commands.Deps{
+		WorkDir: workDir,
+		DataBus: bus,
+		Logger:  telemetry.NopLogger(),
+	}
+	commands.Provide(deps, engine.SetKey, engineSet)
+	commands.Provide(deps, resources.SetKey, engineSet.Resources)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
 
 	required := []string{"scan", "gogo", "spray", "zombie", "neutron", "proton"}
 	for _, name := range required {
@@ -97,8 +99,7 @@ http:
 	cases := []functionalCase{
 		{
 			Name: "gogo/http-fingerprint-jsonl", Tool: "gogo",
-			Args:          []string{"-i", host, "-p", port, "-v", "-o", "jl", "-t", "20"},
-			SkipUnderRace: true,
+			Args: []string{"-i", host, "-p", port, "-v", "-o", "jl", "-t", "20"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"`+port+`"`, "nginx")
 				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
@@ -113,8 +114,7 @@ http:
 		},
 		{
 			Name: "gogo/target-file", Tool: "gogo",
-			Args:          []string{"-l", targetsFile, "-p", port, "-o", "jl", "-t", "20"},
-			SkipUnderRace: true,
+			Args: []string{"-l", targetsFile, "-p", port, "-o", "jl", "-t", "20"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"`+port+`"`)
 			},
@@ -196,9 +196,8 @@ http:
 		},
 		{
 			Name: "scan/quick-pipeline", Tool: "scan",
-			Args:          []string{"-i", host, "--ports", port, "--mode", "quick", "--verify=off", "--timeout", "2", "--no-color"},
-			Timeout:       30 * time.Second,
-			SkipUnderRace: true,
+			Args:    []string{"-i", host, "--ports", port, "--mode", "quick", "--verify=off", "--timeout", "2", "--no-color"},
+			Timeout: 30 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "[summary] completed", port)
 				requireEvent(t, result, "gogo", output.ToolDataService, nil)

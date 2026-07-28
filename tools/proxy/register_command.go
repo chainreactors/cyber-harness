@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/proxyclient"
 
@@ -18,8 +19,9 @@ import (
 )
 
 func init() {
+	capability.Register(capability.Descriptor{ID: "proxy", Kind: capability.KindService, Group: "proxy"})
 	commands.RegisterFactory(commands.Factory{
-		Group: "proxy",
+		Capability: "proxy",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			state := NewState(deps.ScannerProxy)
 			cmd := New(state)

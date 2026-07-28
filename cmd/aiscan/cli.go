@@ -15,9 +15,9 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/runner"
-	transportpkg "github.com/chainreactors/aiscan/core/transport"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/runner"
+	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -137,7 +137,7 @@ func aiscan() {
 		os.Exit(1)
 	}
 
-	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
+	cfgPath, err := runner.ResolveRuntimeConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)

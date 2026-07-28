@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
 type Event interface {

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
-	"github.com/chainreactors/aiscan/pkg/util"
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/aiscan/core/util"
 )
 
 const (

@@ -168,7 +168,14 @@ func (c *collector) TerminalString(color bool) string {
 }
 
 func (c *collector) ReportMarkdown() string {
-	return formatMarkdown(c)
+	return output.RenderReport(c.StructuredResult(), output.ReportOptions{
+		Style:        output.StyleMarkdown,
+		Title:        "Scan Report",
+		Sitemap:      true,
+		CollapseBare: true,
+		Metrics:      true,
+		Inventory:    true,
+	})
 }
 
 func (c *collector) JSONLines() (string, error) {

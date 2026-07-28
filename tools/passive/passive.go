@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/projectdiscovery/uncover/sources"
 )

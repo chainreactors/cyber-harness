@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/pkg/probe"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 

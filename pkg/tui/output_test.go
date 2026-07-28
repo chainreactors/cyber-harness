@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/aop"
+	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
 )
 
 type syncedBuffer struct {

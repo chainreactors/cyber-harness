@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/carapace-sh/carapace"
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/probe"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/agent/probe"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -1466,7 +1466,12 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 	}
 	r.output.SetContextWindow(contextWindow)
 	if r.option != nil {
-		cfg.ApplyResolvedProviderOptions(r.option, *resolved)
+		r.option.Provider = resolved.Provider
+		r.option.BaseURL = resolved.BaseURL
+		r.option.APIKey = resolved.APIKey
+		r.option.Model = resolved.Model
+		r.option.MaxTokens = resolved.MaxTokens
+		r.option.ContextWindow = resolved.ContextWindow
 		r.option.LLMProxy = resolved.Proxy
 	}
 	r.syncEvalToController()

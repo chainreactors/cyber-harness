@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 var _ tool.Executor = (*CommandRegistry)(nil)

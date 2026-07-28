@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token';
 const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
@@ -17,6 +17,20 @@ async function openAuthenticatedApp(page: Page) {
   expect(login.ok()).toBeTruthy();
   await page.goto('/');
   await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible();
+}
+
+async function requireRegisteredAgents(request: APIRequestContext) {
+  let agents: any[] = [];
+  await expect.poll(async () => {
+    const response = await request.get('/api/agents', { headers: apiHeaders() });
+    expect(response.ok()).toBeTruthy();
+    agents = await response.json();
+    return agents.length;
+  }, {
+    message: 'the E2E server must start and register its local mock-backed agent',
+    timeout: 15_000,
+  }).toBeGreaterThan(0);
+  return agents;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,15 +316,8 @@ test.describe('Agents API', () => {
 test.describe('Chat Session CRUD', () => {
   test('create, list, and delete a session', async ({ request }) => {
     // First, get available agents
-    const agentsRes = await request.get('/api/agents', { headers: apiHeaders() });
-    const agents = await agentsRes.json();
-    const agentID = agents.length > 0 ? agents[0].id : '';
-
-    // Skip if no agent is available
-    if (!agentID) {
-      test.skip();
-      return;
-    }
+    const agents = await requireRegisteredAgents(request);
+    const agentID = agents[0].id;
 
     // Create
     const createRes = await request.post('/api/chat/sessions', {
@@ -344,12 +351,7 @@ test.describe('Chat Session CRUD', () => {
 test.describe('Chat LLM round-trip', () => {
   test('send a message and receive an assistant response', async ({ request }) => {
     // Get agent
-    const agentsRes = await request.get('/api/agents', { headers: apiHeaders() });
-    const agents = await agentsRes.json();
-    if (agents.length === 0) {
-      test.skip();
-      return;
-    }
+    const agents = await requireRegisteredAgents(request);
     const agentID = agents[0].id;
 
     // Create session
@@ -375,7 +377,9 @@ test.describe('Chat LLM round-trip', () => {
         const msgRes = await request.get(`/api/chat/sessions/${sessionID}/messages`, {
           headers: apiHeaders(),
         });
-        const messages = await msgRes.json();
+        const page = await msgRes.json();
+        expect(Array.isArray(page.items)).toBeTruthy();
+        const messages = page.items;
         const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
         if (assistantMsgs.length > 0) {
           assistantMsg = assistantMsgs[assistantMsgs.length - 1];
@@ -396,7 +400,44 @@ test.describe('Chat LLM round-trip', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. SCO / Asset Pool API
+// 10. SSE reconnect and durable event cursor
+// ---------------------------------------------------------------------------
+
+test.describe('SSE reconnect', () => {
+  test('replays missing durable events after the browser reconnects', async ({ page, request, context }) => {
+    const agents = await requireRegisteredAgents(request);
+
+    const createRes = await request.post('/api/chat/sessions', {
+      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      data: { agent_id: agents[0].id },
+    });
+    expect(createRes.ok()).toBeTruthy();
+    const session = await createRes.json();
+
+    await openAuthenticatedApp(page);
+    await page.goto(`/sessions/${session.id}`);
+    const prompt = 'Reply with exactly one word: PONG';
+    const sendRes = await request.post(`/api/chat/sessions/${session.id}/messages`, {
+      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      data: { content: prompt },
+    });
+    expect(sendRes.ok()).toBeTruthy();
+
+    await expect(page.locator('p').filter({ hasText: prompt })).toBeVisible({ timeout: 10_000 });
+    await context.setOffline(true);
+    await page.waitForTimeout(3500);
+    await context.setOffline(false);
+
+    const resumed = page.getByText('PONG', { exact: true });
+    await expect(resumed).toBeVisible({ timeout: 15_000 });
+    await expect(resumed).toHaveCount(1);
+
+    await request.delete(`/api/chat/sessions/${session.id}`, { headers: apiHeaders() });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. SCO / Asset Pool API
 // ---------------------------------------------------------------------------
 
 test.describe('Asset Pool API', () => {

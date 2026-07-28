@@ -1,0 +1,116 @@
+# Scan Report
+
+---
+
+## Overview
+
+The scan identified 3 hosts across 4 open services (2 web sites). It probed 3 paths and matched 2 fingerprints. **3 security findings surfaced (credentials / weak passwords / vulnerabilities) — review these first.** 1 error occurred during probing. The scan took 22.266s.
+
+## Metrics
+
+| Metric | Value |
+| --- | ---: |
+| Inputs | 2 |
+| Open services | 4 |
+| Web endpoints | 2 |
+| Web probes | 3 |
+| Fingerprints | 2 |
+| Loots | 3 |
+| Errors | 1 |
+| Tasks | 7 |
+| Requests | 19 |
+| Duration | 22.266s |
+
+## Assets
+
+### Example App — `http://10.0.0.1`
+
+- Services: `tcp http 80`
+- HTTP: `200`, `401`
+- Fingerprints: `nginx`, `basic-auth`
+- Paths: 3
+- State: `confirmed`
+
+#### Sitemap
+
+```text
+[200] /  1256  "Example App" [nginx] {nginx} {deep:response}
+├──       /admin {vuln:confirmed CVE-2021-41773 path traversal} {deep:info}
+│   ├── [401] /login  512  "Login" [basic-auth]
+├──       /static
+│   ├── [200] /app.js  9001
+├──       /10.0.0.1:22 {weakpass:high ssh root:root}
+```
+
+#### Analysis
+
+##### CVE-2021-41773 path traversal
+
+## Impact
+
+Arbitrary file read through `/cgi-bin/`.
+
+| Field | Value |
+|---|---|
+| CVSS | 9.8 |
+
+##### ssh root:root
+
+ssh root:root
+
+##### Admin console is reachable without authentication.
+
+##### Let me analyze the collected browser evidence.
+
+Let me analyze the collected browser evidence.
+
+## Evidence Analysis
+
+| Asset | Details |
+|---|---|
+| API | GET /api/scans |
+
+##### dial tcp 10.0.0.1:8443: connect: connection refused
+
+dial tcp 10.0.0.1:8443: connect: connection refused
+
+### MySQL 5.7.32 — `10.0.0.2:3306`
+
+- Services: `tcp mysql 3306`
+- State: `loot`
+
+#### Analysis
+
+##### mysql 5.7.32
+
+mysql 5.7.32
+
+## Other live hosts
+
+- `10.0.0.2:icmp` · icmp
+- `10.0.0.3:445` · tcp smb 445
+
+## Open Services
+
+- `10.0.0.1:80` · tcp http 80
+- `10.0.0.2:3306` · tcp mysql 3306
+- `10.0.0.2:icmp` · icmp
+- `10.0.0.3:445` · tcp smb 445
+
+## Web Evidence
+
+- `http://10.0.0.1/` · `200` · "Example App" · `nginx`
+- `http://10.0.0.1/admin/login` · `401` · "Login" · `basic-auth`
+- `http://10.0.0.1/static/app.js` · `200`
+
+## Findings
+
+- **[verified]** CVE-2021-41773 path traversal — `http://10.0.0.1/admin`
+- ssh root:root — `10.0.0.1:22`
+- Admin console is reachable without authentication. — `http://10.0.0.1/admin`
+- Let me analyze the collected browser evidence. — `http://10.0.0.1`
+- mysql 5.7.32 — `10.0.0.2:3306`
+
+## Errors
+
+- dial tcp 10.0.0.1:8443: connect: connection refused

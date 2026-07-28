@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 // ListTool lists directory entries through the host filesystem API.

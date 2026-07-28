@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
-	"github.com/chainreactors/utils/parsers"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type ZombieWeakpassOptions struct {

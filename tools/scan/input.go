@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chainreactors/utils/parsers"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
+	"github.com/chainreactors/utils/parsers"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 

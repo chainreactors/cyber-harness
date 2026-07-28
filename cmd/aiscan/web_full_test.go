@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"gopkg.in/yaml.v3"

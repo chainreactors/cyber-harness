@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/aop"
 )
 
 func sessionEvent(t *testing.T, typ, sessionID string, data any) aop.Event {

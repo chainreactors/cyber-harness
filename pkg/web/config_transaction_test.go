@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/runner"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 

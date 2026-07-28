@@ -7,16 +7,17 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/aop"
+	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/runner"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/scan"
@@ -37,14 +38,14 @@ func init() {
 // Scanner engine initialization
 // ---------------------------------------------------------------------------
 
-func scannerInit(ctx context.Context, a *runner.App, rc cfg.RuntimeConfig, logger telemetry.Logger) {
+func scannerInit(ctx context.Context, a *runner.App, rc runner.ApplicationConfig, logger telemetry.Logger) {
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
 	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools,
 		a.Provider, a.ProviderConfig, a.Skills, a.DataBus, logger)
 }
 
-func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Logger) *engine.Set {
+func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.Logger) *engine.Set {
 	engineSet, err := engine.InitWithOptions(ctx, resources.Options{
 		CyberhubURL: sc.CyberhubURL,
 		APIKey:      sc.CyberhubKey,
@@ -67,8 +68,8 @@ func initEngines(ctx context.Context, sc cfg.ScannerConfig, logger telemetry.Log
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg cfg.ScannerConfig, toolCfg cfg.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
-	var scanOpts []any
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg runner.ScannerConfig, toolCfg runner.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
+	var scanOpts []scan.Option
 	if scanCfg.AIEnabled && llmProvider != nil {
 		scannerParent := agent.NewAgent(agent.Config{
 			Provider:      llmProvider,
@@ -99,19 +100,17 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 		WorkDir:      workDir,
 		BashTimeout:  toolCfg.BashTimeout,
 		SkillStore:   skillStore,
-		EngineSet:    engineSet,
 		ScannerProxy: scanCfg.Proxy,
-		ScanOpts:     scanOpts,
 		Logger:       logger,
 		TavilyKeys:   toolCfg.TavilyKeys,
 		DataBus:      dataBus,
 	}
+	commands.Provide(deps, scan.OptsKey, scanOpts)
 	if engineSet != nil {
-		deps.Resources = engineSet.Resources
+		commands.Provide(deps, engine.SetKey, engineSet)
+		commands.Provide(deps, resources.SetKey, engineSet.Resources)
 	}
-	commands.BuildGroup("scanner", deps, cmdReg)
-	commands.BuildGroup("proxy", deps, cmdReg)
-	commands.BuildGroup("ioa", deps, cmdReg)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner", "proxy", "ioa"}}), deps, cmdReg)
 	logger.Infof("%s", telemetry.StartupOK("scanner", strings.Join(cmdReg.GroupNames("scanner"), ",")))
 }
 

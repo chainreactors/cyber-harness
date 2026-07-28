@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/agent/tmux"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 type tmuxCommand struct {

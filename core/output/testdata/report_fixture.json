@@ -1,0 +1,173 @@
+{
+  "summary": {
+    "targets": 2,
+    "services": 4,
+    "webs": 2,
+    "probes": 3,
+    "loots": 3,
+    "errors": 1,
+    "tasks": 7,
+    "requests": 19,
+    "duration": "22.266s"
+  },
+  "assets": [
+    {
+      "id": "asset:http://10.0.0.1",
+      "key": "http://10.0.0.1",
+      "target": "http://10.0.0.1",
+      "title": "Example App",
+      "status": "confirmed",
+      "items": [
+        {
+          "kind": "service",
+          "source": "gogo_portscan",
+          "target": "10.0.0.1:80",
+          "title": "http",
+          "summary": "nginx/1.18.0",
+          "tags": ["tcp", "http", "80"],
+          "data": {"ip": "10.0.0.1", "port": "80", "protocol": "tcp", "service": "http", "banner": "nginx/1.18.0", "is_web": true}
+        },
+        {
+          "kind": "fingerprint",
+          "source": "gogo_portscan",
+          "target": "http://10.0.0.1",
+          "title": "nginx",
+          "tags": ["gogo_portscan", "nginx"],
+          "data": {"name": "nginx", "focus": false}
+        },
+        {
+          "kind": "loot",
+          "source": "vuln",
+          "target": "http://10.0.0.1/admin",
+          "status": "confirmed",
+          "title": "CVE-2021-41773 path traversal",
+          "summary": "CVE-2021-41773 path traversal",
+          "tags": ["vuln", "apache"],
+          "detail": "## Impact\n\nArbitrary file read through `/cgi-bin/`.\n\n| Field | Value |\n|---|---|\n| CVSS | 9.8 |",
+          "data": {"kind": "vuln", "verification_status": "confirmed"}
+        },
+        {
+          "kind": "loot",
+          "source": "weakpass",
+          "target": "10.0.0.1:22",
+          "status": "high",
+          "title": "ssh root:root",
+          "summary": "ssh root:root",
+          "tags": ["weakpass", "ssh"],
+          "data": {"kind": "weakpass"}
+        },
+        {
+          "kind": "note",
+          "source": "deep",
+          "target": "http://10.0.0.1/admin",
+          "status": "info",
+          "summary": "Admin console is reachable without authentication.",
+          "detail": "Admin console is reachable without authentication."
+        },
+        {
+          "kind": "response",
+          "source": "deep",
+          "target": "http://10.0.0.1",
+          "status": "response",
+          "detail": "Let me analyze the collected browser evidence.\n\n## Evidence Analysis\n\n| Asset | Details |\n|---|---|\n| API | GET /api/scans |"
+        },
+        {
+          "kind": "path",
+          "source": "spray_check",
+          "target": "http://10.0.0.1/",
+          "status": "200",
+          "title": "Example App",
+          "summary": "/",
+          "tags": ["spray_check", "nginx", "validated"],
+          "data": {"url": "http://10.0.0.1/", "path": "/", "status": 200, "length": 1256, "title": "Example App", "fingers": ["nginx"], "validated": true}
+        },
+        {
+          "kind": "path",
+          "source": "spray_check",
+          "target": "http://10.0.0.1/admin/login",
+          "status": "401",
+          "title": "Login",
+          "summary": "/admin/login",
+          "tags": ["spray_check", "basic-auth", "validated"],
+          "data": {"url": "http://10.0.0.1/admin/login", "path": "/admin/login", "status": 401, "length": 512, "title": "Login", "fingers": ["basic-auth"], "validated": true}
+        },
+        {
+          "kind": "path",
+          "source": "spray_crawl",
+          "target": "http://10.0.0.1/static/app.js",
+          "status": "200",
+          "title": "js data",
+          "summary": "/static/app.js",
+          "tags": ["spray_crawl"],
+          "data": {"url": "http://10.0.0.1/static/app.js", "path": "/static/app.js", "status": 200, "length": 9001, "title": "js data"}
+        },
+        {
+          "kind": "error",
+          "source": "spray_check",
+          "target": "scan",
+          "status": "error",
+          "summary": "dial tcp 10.0.0.1:8443: connect: connection refused",
+          "data": {"message": "dial tcp 10.0.0.1:8443: connect: connection refused"}
+        }
+      ]
+    },
+    {
+      "id": "asset:10.0.0.2:3306",
+      "key": "10.0.0.2:3306",
+      "target": "10.0.0.2:3306",
+      "title": "MySQL 5.7.32",
+      "status": "loot",
+      "items": [
+        {
+          "kind": "service",
+          "source": "gogo_portscan",
+          "target": "10.0.0.2:3306",
+          "title": "mysql",
+          "summary": "MySQL 5.7.32",
+          "tags": ["tcp", "mysql", "3306"],
+          "data": {"ip": "10.0.0.2", "port": "3306", "protocol": "tcp", "service": "mysql", "banner": "MySQL 5.7.32"}
+        },
+        {
+          "kind": "loot",
+          "source": "fingerprint",
+          "target": "10.0.0.2:3306",
+          "status": "loot",
+          "title": "mysql 5.7.32",
+          "summary": "mysql 5.7.32",
+          "tags": ["fingerprint", "mysql"],
+          "data": {"kind": "fingerprint"}
+        }
+      ]
+    },
+    {
+      "id": "asset:10.0.0.2:icmp",
+      "key": "10.0.0.2:icmp",
+      "target": "10.0.0.2:icmp",
+      "title": "icmp",
+      "items": [
+        {
+          "kind": "service",
+          "source": "gogo_portscan",
+          "target": "10.0.0.2:icmp",
+          "title": "icmp",
+          "tags": ["icmp"],
+          "data": {"ip": "10.0.0.2", "protocol": "icmp", "service": "icmp"}
+        }
+      ]
+    },
+    {
+      "id": "asset:10.0.0.3:445",
+      "key": "10.0.0.3:445",
+      "target": "10.0.0.3:445",
+      "items": [
+        {
+          "kind": "service",
+          "source": "gogo_portscan",
+          "target": "10.0.0.3:445",
+          "tags": ["tcp", "smb", "445"],
+          "data": {"ip": "10.0.0.3", "port": "445", "protocol": "tcp", "service": "smb"}
+        }
+      ]
+    }
+  ]
+}

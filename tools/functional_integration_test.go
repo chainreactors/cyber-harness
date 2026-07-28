@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	_ "github.com/chainreactors/aiscan/tools/gogo"
 	_ "github.com/chainreactors/aiscan/tools/neutron"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
@@ -38,10 +39,13 @@ func TestScannerPublicIntegration(t *testing.T) {
 	bus := eventbus.New[output.ToolDataEvent]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
-	commands.BuildGroup("scanner", &commands.Deps{
-		WorkDir: t.TempDir(), EngineSet: engineSet, Resources: engineSet.Resources,
+	deps := &commands.Deps{
+		WorkDir: t.TempDir(),
 		DataBus: bus, Logger: telemetry.NopLogger(),
-	}, registry)
+	}
+	commands.Provide(deps, engine.SetKey, engineSet)
+	commands.Provide(deps, resources.SetKey, engineSet.Resources)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
 	templateFile := filepath.Join(t.TempDir(), "redhaze-marker.yaml")
 	writeTestFile(t, templateFile, `id: redhaze-public-marker
 info:

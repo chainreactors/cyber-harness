@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/neutron"

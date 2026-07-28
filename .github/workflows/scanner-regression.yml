@@ -35,4 +35,4 @@ jobs:
         run: |
           go test -tags "full integration re2_cgo re2_static" -count=1 -timeout 8m -v \
             -run 'Test(ScannerPublicIntegration|FullScannerPublicIntegration)$' \
-            ./pkg/tools
+            ./tools

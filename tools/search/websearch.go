@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/agent/provider"
+	"github.com/chainreactors/aiscan/agent/provider"
 )
 
 func formatWebSearchResponse(resp *provider.WebSearchResponse, query string) string {

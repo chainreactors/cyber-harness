@@ -22,13 +22,12 @@ type functionalResult struct {
 }
 
 type functionalCase struct {
-	Name          string
-	Tool          string
-	Args          []string
-	Stdin         string
-	Timeout       time.Duration
-	SkipUnderRace bool
-	Check         func(*testing.T, functionalResult)
+	Name    string
+	Tool    string
+	Args    []string
+	Stdin   string
+	Timeout time.Duration
+	Check   func(*testing.T, functionalResult)
 }
 
 type functionalRecorder struct {
@@ -62,9 +61,6 @@ func runFunctionalCases(t *testing.T, registry *commands.CommandRegistry, record
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.Name, func(t *testing.T) {
-			if functionalRaceEnabled && testCase.SkipUnderRace {
-				t.Skip("upstream scanner has a known internal race")
-			}
 			if !registry.Has(testCase.Tool) {
 				t.Fatalf("tool %q is not registered", testCase.Tool)
 			}
