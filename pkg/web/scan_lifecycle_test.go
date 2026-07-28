@@ -137,6 +137,28 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 	waitScanStatus(t, store, running.ID, StatusCanceled)
 }
 
+type controlledDeadlineContext struct {
+	context.Context
+	done chan struct{}
+}
+
+func newControlledDeadlineContext() *controlledDeadlineContext {
+	return &controlledDeadlineContext{Context: context.Background(), done: make(chan struct{})}
+}
+
+func (c *controlledDeadlineContext) Done() <-chan struct{} { return c.done }
+
+func (c *controlledDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (c *controlledDeadlineContext) expire() { close(c.done) }
+
 func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
@@ -144,33 +166,93 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: 50 * time.Millisecond})
+	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
-	srv, _ := setupTestServerWithPool(t, pool)
-	conn := dialAgent(t, srv, "timeout-agent", []string{"scan"})
-	t.Cleanup(func() { _ = conn.Close() })
-	waitAgents(t, pool, 1)
+	agent := newFakeAgent("timeout-agent", 1)
+	pool.register(agent)
 
-	job, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false)
+	now := time.Now()
+	job := &ScanJob{
+		ID: "timeout-scan", Target: "127.0.0.1", Mode: "quick",
+		Status: StatusRunning, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	jobID := job.ID
+
+	ctx := newControlledDeadlineContext()
+	done := make(chan struct{})
+	go func() {
+		svc.runScanViaAgent(ctx, job)
+		close(done)
+	}()
+
+	var call webproto.Message
+	select {
+	case call = <-agent.sendCh:
+	case <-time.After(time.Second):
+		t.Fatal("agent did not receive scan dispatch")
+	}
+	if call.Type != webproto.TypeAOP || call.TaskID != jobID {
+		t.Fatalf("scan dispatch = %+v", call)
+	}
+
+	ctx.expire()
+	var cancel webproto.Message
+	select {
+	case cancel = <-agent.controlCh:
+	case <-time.After(time.Second):
+		t.Fatal("agent did not receive timeout cancellation")
+	}
+	if cancel.Type != "cancel" || cancel.TaskID != jobID {
+		t.Fatalf("timeout cancel frame = %+v", cancel)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out remote scan did not return")
+	}
+	failed := waitScanStatus(t, store, jobID, StatusFailed)
+	if failed.Error != "scan timed out" {
+		t.Fatalf("timeout error = %q", failed.Error)
+	}
+}
+
+func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var call webproto.Message
-	if err := conn.ReadJSON(&call); err != nil {
+	t.Cleanup(func() { _ = store.Close() })
+
+	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
+	agent := newFakeAgent("timeout-agent", 1)
+	pool.register(agent)
+
+	now := time.Now()
+	job := &ScanJob{
+		ID: "expired-scan", Target: "127.0.0.1", Mode: "quick",
+		Status: StatusRunning, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Create(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-	var cancel webproto.Message
-	if err := conn.ReadJSON(&cancel); err != nil {
-		t.Fatalf("agent did not receive timeout cancellation: %v", err)
-	}
-	if cancel.Type != "cancel" || cancel.TaskID != job.ID {
-		t.Fatalf("timeout cancel frame = %+v", cancel)
-	}
+	ctx := newControlledDeadlineContext()
+	ctx.expire()
+	svc.runScanViaAgent(ctx, job)
+
 	failed := waitScanStatus(t, store, job.ID, StatusFailed)
 	if failed.Error != "scan timed out" {
 		t.Fatalf("timeout error = %q", failed.Error)
+	}
+	select {
+	case msg := <-agent.sendCh:
+		t.Fatalf("expired scan was dispatched: %+v", msg)
+	default:
 	}
 }
 
