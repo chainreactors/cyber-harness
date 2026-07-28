@@ -9,10 +9,20 @@ import (
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-// ValidateLLMConfig accepts zero as "use the model default" and rejects
-// negative limits before an invalid configuration can be persisted.
+// ValidateLLMConfig accepts zero limits as "use the model default" and rejects
+// incomplete profiles before an invalid configuration can be persisted.
 func ValidateLLMConfig(cfg webproto.LLMConfig) error {
-	for _, profile := range cfg.Providers {
+	for i, profile := range cfg.Providers {
+		if strings.TrimSpace(profile.Model) == "" {
+			name := strings.TrimSpace(profile.Name)
+			if name == "" {
+				name = strings.TrimSpace(profile.ID)
+			}
+			if name == "" {
+				name = fmt.Sprintf("#%d", i+1)
+			}
+			return fmt.Errorf("LLM profile %q model is required", name)
+		}
 		if profile.MaxTokens < 0 {
 			return fmt.Errorf("LLM max_tokens must be zero or positive")
 		}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,19 +51,53 @@ func TestClampMaxTokens(t *testing.T) {
 		name                     string
 		configured, window, used int
 		want                     int
+		wantErr                  bool
 	}{
 		{name: "configured limit fits", configured: 16384, window: 128000, used: 10000, want: 16384},
 		{name: "remaining context clamps", configured: 32768, window: 100000, used: 80000, want: 15904},
-		{name: "safety margin exhausted", configured: 4096, window: 4096, used: 1, want: 1},
+		{name: "safety margin exhausted", configured: 4096, window: 4096, used: 1, wantErr: true},
 		{name: "default max tokens", configured: 0, window: 128000, used: 10000, want: DefaultMaxTokens},
 		{name: "unknown window leaves configured", configured: 12345, window: 0, used: 10000, want: 12345},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := clampMaxTokens(tt.configured, tt.window, tt.used); got != tt.want {
+			got, err := clampMaxTokens(tt.configured, tt.window, tt.used)
+			if tt.wantErr {
+				if !errors.Is(err, errContextWindowExhausted) {
+					t.Fatalf("clampMaxTokens(%d, %d, %d) error = %v, want context window exhausted", tt.configured, tt.window, tt.used, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("clampMaxTokens(%d, %d, %d) error = %v", tt.configured, tt.window, tt.used, err)
+			}
+			if got != tt.want {
 				t.Fatalf("clampMaxTokens(%d, %d, %d) = %d, want %d", tt.configured, tt.window, tt.used, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAgentRejectsExhaustedContextBeforeProviderCall(t *testing.T) {
+	callCount := 0
+	llm := &callbackProvider{
+		fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+			callCount++
+			return chatResponse(NewTextMessage("assistant", "unexpected")), nil
+		},
+	}
+
+	_, err := NewAgent(Config{
+		Provider:      llm,
+		Model:         "test",
+		ContextWindow: ContextSafetyTokens,
+		MaxRetries:    -1,
+	}).Run(context.Background(), TextInput("hello"))
+	if !errors.Is(err, errContextWindowExhausted) {
+		t.Fatalf("Run() error = %v, want context window exhausted", err)
+	}
+	if callCount != 0 {
+		t.Fatalf("provider call count = %d, want 0", callCount)
 	}
 }
 

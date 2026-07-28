@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, CheckCircle, Plus, Settings, Trash2, Zap } from 'lucide-react'
+import { Check, Plus, Settings, Trash2, Zap } from 'lucide-react'
 import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
 import type { ConfigStatus, ConnCheck, DistributeConfig, LLMProviderProfile, LLMTestResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, ResultLine } from '@cyber/ui'
@@ -24,6 +24,17 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'search', label: 'Search' },
   { key: 'ioa', label: 'Server' },
   { key: 'agent', label: 'Agent' },
+]
+
+const LLM_PROVIDERS = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'groq', label: 'Groq' },
+  { value: 'moonshot', label: 'Moonshot' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'zhipu', label: 'Zhipu GLM' },
 ]
 
 function emptyForm(): DistributeConfig {
@@ -99,7 +110,8 @@ function sectionStatus(
   const tag = (name: string, ok: boolean) => ({ key: name, label: `${name} ${ok ? t('configured') : t('notConfigured')}`, ok })
   switch (tab) {
     case 'llm':
-      return [{ key: 'llm', label: status?.llm_available ? t('llmReady') : t('llmOffline'), ok: !!status?.llm_available }]
+      const configured = !!(status?.llm_available && status.llm_model?.trim())
+      return [{ key: 'llm', label: configured ? t('llmConfigured') : t('llmNotConfigured'), ok: configured }]
     case 'cyberhub':
       return [tag('Cyberhub', !!(cs?.cyberhub.url && cs?.cyberhub.key_configured))]
     case 'recon':
@@ -126,15 +138,15 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [saved, setSaved] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('llm')
   const [selectedLLMProfileID, setSelectedLLMProfileID] = useState('default')
+  const [invalidModelProfileID, setInvalidModelProfileID] = useState('')
 
   useEffect(() => {
     if (!open) return
     setLoading(true)
     setError('')
-    setSaved(false)
+    setInvalidModelProfileID('')
     getConfigStatus()
       .then((s) => {
         const next = statusToForm(s)
@@ -148,15 +160,22 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
 
   const handleSave = async (event: FormEvent) => {
     event.preventDefault()
+
+    const invalidProfile = form.llm.providers.find(profile => !profile.model.trim())
+    if (invalidProfile) {
+      setActiveTab('llm')
+      setSelectedLLMProfileID(invalidProfile.id)
+      setInvalidModelProfileID(invalidProfile.id)
+      setError(t('modelRequiredProfile', { name: invalidProfile.name || invalidProfile.id || t('unnamedProfile') }))
+      return
+    }
+
     setSaving(true)
     setError('')
-    setSaved(false)
     try {
-      const next = await saveConfig(form)
-      setCs(next)
-      setForm(statusToForm(next))
-      setSaved(true)
+      await saveConfig(form)
       onSaved()
+      onClose()
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message || t('failedSave'))
@@ -169,10 +188,10 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
       <DialogContent
         onInteractOutside={(e) => e.preventDefault()}
-        className="block max-h-[85vh] w-full max-w-3xl gap-0 overflow-y-auto overflow-x-hidden rounded-2xl border-border/70 bg-card p-0 sm:rounded-2xl"
+        className="flex h-[85dvh] max-h-[42rem] w-full max-w-3xl gap-0 overflow-hidden rounded-lg border-border/70 bg-card p-0"
       >
-        <form onSubmit={handleSave}>
-        <DialogHeader className="flex flex-row items-center justify-between border-b border-border/60 px-4 py-3 pr-12 text-left">
+        <form onSubmit={handleSave} className="flex h-full min-h-0 w-full flex-col">
+        <DialogHeader className="flex shrink-0 flex-row items-center justify-between border-b border-border/60 px-4 py-3 pr-12 text-left">
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-primary" />
             <div>
@@ -182,7 +201,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
           </div>
         </DialogHeader>
 
-        <div className="flex gap-1 overflow-x-auto border-b border-border px-4 py-1">
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 py-1">
           {TABS.map((tab) => (
             <Button
               key={tab.key} type="button" variant="ghost" size="sm"
@@ -192,7 +211,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
           ))}
         </div>
 
-        <div className="p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex h-48 flex-col items-center justify-center gap-3 text-muted-foreground">
               <Spinner className="h-8 w-8" />
@@ -214,6 +233,17 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
                     cs={cs}
                     selectedProfileID={selectedLLMProfileID}
                     onSelectProfile={setSelectedLLMProfileID}
+                    invalidModelProfileID={invalidModelProfileID}
+                    onInvalidModel={(profile) => {
+                      setInvalidModelProfileID(profile.id)
+                      setError(t('modelRequiredProfile', { name: profile.name || profile.id || t('unnamedProfile') }))
+                    }}
+                    onModelChange={(profileID) => {
+                      if (invalidModelProfileID === profileID) {
+                        setInvalidModelProfileID('')
+                        setError('')
+                      }
+                    }}
                   />
                 )}
                 {activeTab === 'cyberhub' && <CyberhubTab form={form} setForm={setForm} cs={cs} />}
@@ -227,10 +257,9 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
           )}
 
           {error && <Callout tone="destructive" className="mt-3">{error}</Callout>}
-          {saved && <Callout tone="primary" icon={<CheckCircle className="h-4 w-4" />} className="mt-3">{t('saved')}</Callout>}
         </div>
 
-        <DialogFooter className="flex flex-row justify-end gap-2 border-t border-border/60 px-4 py-3 sm:space-x-0">
+        <DialogFooter className="flex shrink-0 flex-row justify-end gap-2 border-t border-border/60 px-4 py-3 sm:space-x-0">
           <Button type="button" variant="outline" onClick={onClose}>{t('close')}</Button>
           <Button type="submit" disabled={loading || saving}>{saving && <Spinner className="h-4 w-4" />}{t('save')}</Button>
         </DialogFooter>
@@ -248,13 +277,23 @@ function LLMTab({
   cs,
   selectedProfileID,
   onSelectProfile,
-}: TabProps & { selectedProfileID: string; onSelectProfile: (id: string) => void }) {
+  invalidModelProfileID,
+  onInvalidModel,
+  onModelChange,
+}: TabProps & {
+  selectedProfileID: string
+  onSelectProfile: (id: string) => void
+  invalidModelProfileID: string
+  onInvalidModel: (profile: LLMProviderProfile) => void
+  onModelChange: (profileID: string) => void
+}) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<LLMTestResult | null>(null)
   const [models, setModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
+  const [modelsNotice, setModelsNotice] = useState<string | null>(null)
 
   const profiles = form.llm.providers
   const profile = profiles.find(item => item.id === selectedProfileID) || profiles[0]
@@ -276,6 +315,8 @@ function LLMTab({
     setForm(current => ({ ...current, llm: { ...current.llm, providers: [...current.llm.providers, next] } }))
     onSelectProfile(next.id)
     setModels([])
+    setModelsError(null)
+    setModelsNotice(null)
     setResult(null)
   }
 
@@ -289,11 +330,17 @@ function LLMTab({
     }))
     onSelectProfile(remaining[0].id)
     setModels([])
+    setModelsError(null)
+    setModelsNotice(null)
     setResult(null)
   }
 
   const setActiveProfile = () => {
     if (!profile) return
+    if (!profile.model.trim()) {
+      onInvalidModel(profile)
+      return
+    }
     setForm(current => ({ ...current, llm: { ...current.llm, active_profile: profile.id } }))
   }
 
@@ -301,8 +348,10 @@ function LLMTab({
     if (!profile) return
     setFetchingModels(true)
     setModelsError(null)
+    setModelsNotice(null)
     try {
       const res = await listLLMModels({
+        profile_id: profile.id,
         provider: profile.provider,
         base_url: profile.base_url,
         api_key: profile.api_key,
@@ -310,7 +359,8 @@ function LLMTab({
       })
       if (res.ok) {
         setModels(res.models ?? [])
-        if ((res.models ?? []).length === 0) setModelsError(t('modelsEmpty'))
+        if (!res.supported) setModelsNotice(t('modelsUnsupported'))
+        else if ((res.models ?? []).length === 0) setModelsNotice(t('modelsEmpty'))
       } else {
         setModelsError(res.error || t('modelsFailed'))
       }
@@ -328,6 +378,7 @@ function LLMTab({
     setResult(null)
     try {
       const res = await testLLM({
+        profile_id: profile.id,
         provider: profile.provider,
         base_url: profile.base_url,
         api_key: profile.api_key,
@@ -345,6 +396,9 @@ function LLMTab({
 
   if (!profile) return null
 
+  const modelRequired = invalidModelProfileID === profile.id && !profile.model.trim()
+  const lowContextWindow = profile.context_window !== undefined && profile.context_window < 8192
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/15 p-2">
@@ -352,7 +406,7 @@ function LLMTab({
           const active = item.id === form.llm.active_profile
           const selected = item.id === profile.id
           return (
-            <button key={item.id} type="button" onClick={() => { onSelectProfile(item.id); setModels([]); setResult(null) }}>
+            <button key={item.id} type="button" onClick={() => { onSelectProfile(item.id); setModels([]); setModelsError(null); setModelsNotice(null); setResult(null) }}>
               <Badge
                 variant={active ? 'success' : selected ? 'secondary' : 'outline'}
                 className={cn('gap-1.5 py-1 text-xs transition-colors', selected && 'ring-2 ring-primary/15')}
@@ -376,14 +430,17 @@ function LLMTab({
         <Select value={profile.provider} onValueChange={(v) => updateProfile('provider', v)}>
           <SelectTrigger className="h-9 w-full"><SelectValue placeholder={t('selectProvider')} /></SelectTrigger>
           <SelectContent>
-            {['deepseek','openai','openrouter','ollama','groq','moonshot','anthropic'].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+            {LLM_PROVIDERS.map((provider) => <SelectItem key={provider.value} value={provider.value}>{provider.label}</SelectItem>)}
           </SelectContent>
         </Select>
       </Field>
-      <Field label={t('model')} error={modelsError}>
+      <Field label={t('model')} error={modelRequired ? t('modelRequired') : modelsError} hint={modelsNotice}>
         <ModelCombobox
           value={profile.model}
-          onChange={(v) => updateProfile('model', v)}
+          onChange={(v) => {
+            updateProfile('model', v)
+            if (v.trim()) onModelChange(profile.id)
+          }}
           models={models}
           loading={fetchingModels}
           error={modelsError}
@@ -392,14 +449,19 @@ function LLMTab({
         />
       </Field>
       <Field label={t('baseUrl')}><Input value={profile.base_url} onChange={(e) => updateProfile('base_url', e.target.value)} placeholder={t('providerDefault')} /></Field>
-      <Field label={t('contextWindow')}>
+      <Field
+        label={t('contextWindow')}
+        hint={lowContextWindow
+          ? <span role="status" className="text-destructive">{t('contextWindowLow')}</span>
+          : t('contextWindowAuto')}
+      >
         <Input
           type="number"
           min={1}
           step={1}
           value={profile.context_window ?? ''}
           onChange={(e) => updateProfile('context_window', positiveIntegerFromInput(e.target.value))}
-          placeholder={t('modelDefault')}
+          placeholder={t('contextWindowAuto')}
         />
       </Field>
       <Field label={t('maxTokens')}>
@@ -420,7 +482,7 @@ function LLMTab({
         </Field>
       </div>
       <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing || !profile.model}>
+        <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing || !profile.model.trim()}>
           {testing ? <ProbePulse /> : <Zap className="h-4 w-4" />}
           {testing ? t('testing') : t('testConnection')}
         </Button>

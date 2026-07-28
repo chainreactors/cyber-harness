@@ -162,7 +162,7 @@ test.describe('Config Panel', () => {
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     await expect(dialog).toContainText('Settings');
     // Should have LLM and other tabs
-    await expect(dialog.locator('button:has-text("LLM")')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'LLM', exact: true })).toBeVisible();
   });
 
   test('closes settings dialog', async ({ page }) => {
@@ -181,7 +181,7 @@ test.describe('Config Panel', () => {
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
     // Click LLM tab
-    const llmTab = dialog.locator('button:has-text("LLM")');
+    const llmTab = dialog.getByRole('button', { name: 'LLM', exact: true });
     if (await llmTab.isVisible()) {
       await llmTab.click();
     }
@@ -191,6 +191,61 @@ test.describe('Config Panel', () => {
     await expect(dialog).toContainText('Context window');
     await expect(dialog).toContainText('Maximum output');
     await expect(dialog).toContainText('API Key');
+  });
+
+  test('keeps dialog geometry stable when switching tabs', async ({ page }) => {
+    await openAuthenticatedApp(page);
+    await page.locator('button[aria-label="Open settings"]').click();
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await dialog.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
+
+    const before = await dialog.boundingBox();
+    await dialog.getByRole('button', { name: 'Cyberhub', exact: true }).click();
+    const after = await dialog.boundingBox();
+
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(1);
+  });
+
+  test('warns for a small context window and rejects an empty model', async ({ page }) => {
+    await openAuthenticatedApp(page);
+    await page.locator('button[aria-label="Open settings"]').click();
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel('Context window (tokens)').fill('4096');
+    await expect(dialog).toContainText('Below 8192 tokens');
+
+    await dialog.getByLabel('Model').fill('');
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('requires a model');
+  });
+
+  test('closes after a successful save', async ({ page }) => {
+    let saved = false;
+    await page.route('**/api/config', async (route) => {
+      if (route.request().method() !== 'PUT') {
+        await route.continue();
+        return;
+      }
+      saved = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await openAuthenticatedApp(page);
+    await page.locator('button[aria-label="Open settings"]').click();
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+    await expect(dialog).not.toBeVisible();
+    expect(saved).toBe(true);
   });
 });
 

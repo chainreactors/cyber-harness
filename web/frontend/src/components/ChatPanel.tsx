@@ -838,7 +838,14 @@ function systemCode(metadata?: Record<string, unknown>): string {
 
 function systemParams(metadata: Record<string, unknown>): Record<string, unknown> {
   const p = metadata.params
-  return p && typeof p === 'object' ? (p as Record<string, unknown>) : {}
+  if (p && typeof p === 'object') return p as Record<string, unknown>
+
+  const ext = metadata.ext
+  if (!ext || typeof ext !== 'object') return {}
+  const webExt = (ext as Record<string, unknown>)[webUserAgent]
+  if (!webExt || typeof webExt !== 'object') return {}
+  const params = (webExt as Record<string, unknown>).params
+  return params && typeof params === 'object' ? params as Record<string, unknown> : {}
 }
 
 function SystemMessageContent({ metadata, fallback }: { metadata: Record<string, unknown>; fallback: string }) {

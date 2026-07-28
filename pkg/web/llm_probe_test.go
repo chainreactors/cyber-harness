@@ -200,6 +200,53 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	}
 }
 
+func TestListLLMModelsUsesSelectedProfileStoredKey(t *testing.T) {
+	var gotAuth string
+	srv := stubModelsServer(t, []string{"m1"}, &gotAuth)
+	defer srv.Close()
+
+	store := &fakeConfigStore{}
+	store.cfg.LLM.ActiveProfile = "primary"
+	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
+		{ID: "primary", Provider: "openai", APIKey: "sk-primary"},
+		{ID: "secondary", Provider: "openai", APIKey: "sk-secondary"},
+	}
+	svc := NewService(ServiceConfig{ConfigStore: store})
+
+	res, err := svc.ListLLMModels(context.Background(), probe.LLMProbeRequest{
+		ProfileID: "secondary",
+		Provider:  "openai",
+		BaseURL:   srv.URL + "/v1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("expected ok, got error: %q", res.Error)
+	}
+	if gotAuth != "Bearer sk-secondary" {
+		t.Fatalf("expected selected profile key, got %q", gotAuth)
+	}
+}
+
+func TestListLLMModelsTreatsNotFoundAsUnsupported(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+
+	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
+	res, err := svc.ListLLMModels(context.Background(), probe.LLMProbeRequest{
+		Provider: "openai",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "sk-test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.OK || res.Supported || res.Error != "" {
+		t.Fatalf("result = %+v, want graceful unsupported response", res)
+	}
+}
+
 func TestListLLMModelsReportsTransportError(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
 	res, err := svc.ListLLMModels(context.Background(), probe.LLMProbeRequest{
