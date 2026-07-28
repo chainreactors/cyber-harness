@@ -52,11 +52,11 @@ aiscan -c /path/to/aiscan.yaml scan -i 192.168.1.0/24   # 指定配置文件
 ```yaml
 # LLM Provider
 llm:
-  provider: ""        # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic
+  provider: ""        # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic, zhipu
   base_url: ""        # API base URL（留空使用 provider 默认值）
   api_key: ""         # API key（建议使用环境变量）
   model: ""           # 模型名称
-  context_window: 0    # 模型上下文窗口；0 表示按模型推断，未知模型默认 128000
+  context_window: 0    # 真实 Token 数；0 表示按模型推断，未知模型默认 128000
   max_tokens: 0        # 单次最大输出；0 使用默认值 16384
   proxy: ""           # 访问 LLM API 的 HTTP proxy
 
@@ -161,7 +161,9 @@ misc:
 | `--timeout <秒>` | 整体超时（默认 3600） |
 | `-e, --eval` | 目标评估标准 — 独立 LLM 判断任务是否达成 |
 
-`max_tokens` 并非无条件发送：AIScan 会预估消息和工具 schema 的 token 数，并按 `context_window - 当前上下文 - 4096` 自动收紧。上下文接近窗口时会按 Pi 的默认策略自动压缩；服务端返回上下文溢出时会压缩并自动重试一次。
+`context_window` 使用真实整数，例如 128K 窗口填写 `128000`，不是 `128K`。所有正整数都可保存；Web 设置页会对小于 8192 的值显示非阻塞风险提示。
+
+`max_tokens` 并非无条件发送：AIScan 会预估消息和工具 schema 的 token 数，并按 `context_window - 当前上下文 - 4096` 自动收紧。若安全预留后没有输出空间，请求会在发送前返回包含窗口、预估输入和预留量的明确错误。上下文接近窗口时会按 Pi 的默认策略自动压缩；服务端返回上下文溢出时会压缩并自动重试一次。
 
 ### Scanner 参数
 
@@ -202,19 +204,22 @@ misc:
 
 | Provider | 默认 Base URL | 默认模型 | API Key 环境变量 |
 | --- | --- | --- | --- |
-| `openai` | `https://api.openai.com/v1` | `gpt-4o` | `OPENAI_API_KEY` |
-| `deepseek` | `https://api.deepseek.com/v1` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
-| `anthropic` | `https://api.anthropic.com/v1` | — | `ANTHROPIC_API_KEY` |
-| `openrouter` | `https://openrouter.ai/api/v1` | — | `OPENROUTER_API_KEY` |
-| `groq` | `https://api.groq.com/openai/v1` | — | `GROQ_API_KEY` |
-| `moonshot` | `https://api.moonshot.cn/v1` | — | `MOONSHOT_API_KEY` |
+| `openai` | `https://api.openai.com/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
+| `deepseek` | `https://api.deepseek.com/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
+| `anthropic` | `https://api.anthropic.com/v1` | — | `AISCAN_API_KEY` / `ANTHROPIC_API_KEY` |
+| `openrouter` | `https://openrouter.ai/api/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
+| `groq` | `https://api.groq.com/openai/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
+| `moonshot` | `https://api.moonshot.cn/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
 | `ollama` | `http://localhost:11434/v1` | — | 不需要 |
+| `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
 
-aiscan 可以从 `--base-url` 自动推断 provider（如 URL 包含 `deepseek.com` 自动识别为 `deepseek`）。
+`glm` 和 `bigmodel` 是 `zhipu` 的别名。已知 Provider 在 `base_url` 留空时使用上表地址；显式填写的地址始终优先。只提供 `base_url` 而不提供 Provider 时，Anthropic 官方域名会选择 Anthropic 协议，其他地址默认按 OpenAI 兼容协议处理。
 
 ### 多 Provider 配置
 
-配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。Web 设置页可以选择当前 profile，REPL 可通过 `/provider` 查看配置，并用 `/provider set` 显式应用新配置。
+配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 可通过 `/provider` 查看配置，并用 `/provider set` 显式应用新配置。
+
+Web 设置页拉取模型列表时使用当前编辑 Profile 的已保存密钥。若端点不提供 `GET /models`（返回 404），页面会保留手动模型输入，不把它显示为连接故障。
 
 Agent 只会重试当前 provider。重试耗尽后直接返回错误，不会自动切换到其他 profile，也不会把同一 turn 发给另一模型。
 
@@ -226,7 +231,7 @@ export OPENAI_API_KEY="sk-..."
 aiscan agent -p "检查目标" -i http://target.example
 
 # 指定 provider
-aiscan agent --provider deepseek --base-url https://api.deepseek.com --api-key "sk-..." --model deepseek-chat
+aiscan agent --provider deepseek --api-key "sk-..." --model deepseek-chat
 
 # Ollama 本地模型
 aiscan agent --provider ollama --model llama3 --base-url http://localhost:11434/v1

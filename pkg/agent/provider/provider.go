@@ -42,6 +42,28 @@ type ProviderConfig struct {
 	ContextWindow int    `yaml:"context_window,omitempty" config:"context_window"`
 }
 
+type providerPreset struct {
+	Protocol       string
+	BaseURL        string
+	APIKeyRequired bool
+}
+
+var providerPresets = map[string]providerPreset{
+	"openai":     {Protocol: "openai", BaseURL: "https://api.openai.com/v1", APIKeyRequired: true},
+	"anthropic":  {Protocol: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKeyRequired: true},
+	"deepseek":   {Protocol: "openai", BaseURL: "https://api.deepseek.com/v1", APIKeyRequired: true},
+	"openrouter": {Protocol: "openai", BaseURL: "https://openrouter.ai/api/v1", APIKeyRequired: true},
+	"groq":       {Protocol: "openai", BaseURL: "https://api.groq.com/openai/v1", APIKeyRequired: true},
+	"moonshot":   {Protocol: "openai", BaseURL: "https://api.moonshot.cn/v1", APIKeyRequired: true},
+	"ollama":     {Protocol: "openai", BaseURL: "http://localhost:11434/v1"},
+	"zhipu":      {Protocol: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", APIKeyRequired: true},
+}
+
+var providerAliases = map[string]string{
+	"bigmodel": "zhipu",
+	"glm":      "zhipu",
+}
+
 func NormalizeProvider(name string) string {
 	if strings.EqualFold(name, "anthropic") {
 		return "anthropic"
@@ -58,25 +80,33 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 		return nil, fmt.Errorf("context_window must be zero or positive")
 	}
 
-	if resolved.Provider == "" {
+	providerName := strings.ToLower(strings.TrimSpace(resolved.Provider))
+	if alias, ok := providerAliases[providerName]; ok {
+		providerName = alias
+	}
+
+	if providerName == "" {
 		if resolved.BaseURL != "" {
-			resolved.Provider = InferFromBaseURL(resolved.BaseURL)
+			providerName = InferFromBaseURL(resolved.BaseURL)
 		} else {
-			resolved.Provider = "openai"
-		}
-	}
-	resolved.Provider = NormalizeProvider(resolved.Provider)
-
-	if resolved.BaseURL == "" {
-		switch resolved.Provider {
-		case "anthropic":
-			resolved.BaseURL = "https://api.anthropic.com/v1"
-		default:
-			resolved.BaseURL = "https://api.openai.com/v1"
+			providerName = "openai"
 		}
 	}
 
-	if resolved.APIKey == "" {
+	preset, knownProvider := providerPresets[providerName]
+	if knownProvider {
+		if strings.TrimSpace(resolved.BaseURL) == "" {
+			resolved.BaseURL = preset.BaseURL
+		}
+		resolved.Provider = preset.Protocol
+	} else {
+		if strings.TrimSpace(resolved.BaseURL) == "" {
+			return nil, fmt.Errorf("unknown provider %q: set base_url for a custom OpenAI-compatible endpoint", providerName)
+		}
+		resolved.Provider = NormalizeProvider(providerName)
+	}
+
+	if strings.TrimSpace(resolved.APIKey) == "" && (!knownProvider || preset.APIKeyRequired) {
 		return nil, fmt.Errorf("no API key: set --api-key, llm.api_key, or AISCAN_API_KEY")
 	}
 

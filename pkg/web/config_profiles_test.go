@@ -57,7 +57,7 @@ func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 		func(p *webproto.LLMProviderConfig) { p.ContextWindow = -1 },
 	} {
 		var cfg webproto.DistributeConfig
-		profile := webproto.LLMProviderConfig{ID: "bad"}
+		profile := webproto.LLMProviderConfig{ID: "bad", Model: "test-model"}
 		mutate(&profile)
 		cfg.LLM.Providers = []webproto.LLMProviderConfig{profile}
 		if _, err := service.SaveConfig(context.Background(), cfg); err == nil {
@@ -66,5 +66,36 @@ func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 		if len(store.cfg.LLM.Providers) != 0 {
 			t.Fatal("invalid config was persisted")
 		}
+	}
+}
+
+func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
+	store := &fakeConfigStore{}
+	service := NewService(ServiceConfig{ConfigStore: store})
+	var cfg webproto.DistributeConfig
+	cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "empty", Name: "Empty", Model: "  "}}
+
+	if _, err := service.SaveConfig(context.Background(), cfg); err == nil {
+		t.Fatal("SaveConfig() accepted an empty profile model")
+	}
+	if len(store.cfg.LLM.Providers) != 0 {
+		t.Fatal("invalid config was persisted")
+	}
+}
+
+func TestActivateLLMProfileRejectsEmptyModel(t *testing.T) {
+	store := &fakeConfigStore{}
+	store.cfg.LLM.ActiveProfile = "primary"
+	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
+		{ID: "primary", Model: "gpt-primary"},
+		{ID: "empty", Model: ""},
+	}
+	service := NewService(ServiceConfig{ConfigStore: store})
+
+	if _, err := service.ActivateLLMProfile(context.Background(), "empty"); err == nil {
+		t.Fatal("ActivateLLMProfile() accepted an empty model")
+	}
+	if store.cfg.LLM.ActiveProfile != "primary" {
+		t.Fatalf("active profile = %q, want primary", store.cfg.LLM.ActiveProfile)
 	}
 }

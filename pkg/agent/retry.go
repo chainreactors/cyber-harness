@@ -21,7 +21,10 @@ type imageDisabler interface {
 	DisableImages()
 }
 
-var errEmptyResponse = errors.New("empty response from LLM")
+var (
+	errEmptyResponse          = errors.New("empty response from LLM")
+	errContextWindowExhausted = errors.New("context window exhausted")
+)
 
 const (
 	baseRetryDelay    = 500 * time.Millisecond
@@ -214,7 +217,12 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		CacheRetention: cfg.CacheRetention,
 		SessionID:      cfg.SessionID,
 	}
-	req.MaxTokens = clampMaxTokens(cfg.MaxTokens, cfg.ContextWindow, estimateRequestTokens(messages, tools))
+	estimatedInputTokens := estimateRequestTokens(messages, tools)
+	maxTokens, err := clampMaxTokens(cfg.MaxTokens, cfg.ContextWindow, estimatedInputTokens)
+	if err != nil {
+		return ChatMessage{}, nil, fmt.Errorf("cannot create LLM request at turn %d: %w", turn, err)
+	}
+	req.MaxTokens = maxTokens
 	em.status(aop.StatusLLMRequest, aop.NSAOP, aop.LLMRequest{Model: req.Model, Messages: len(req.Messages), MaxTokens: req.MaxTokens, Stream: cfg.Stream})
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(StreamingProvider); ok {
@@ -238,21 +246,24 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 	return msg, resp.Usage, nil
 }
 
-func clampMaxTokens(configured, contextWindow, contextTokens int) int {
+func clampMaxTokens(configured, contextWindow, contextTokens int) (int, error) {
 	if configured <= 0 {
 		configured = DefaultMaxTokens
 	}
 	if contextWindow <= 0 {
-		return configured
+		return configured, nil
 	}
 	available := contextWindow - contextTokens - ContextSafetyTokens
 	if available < 1 {
-		available = 1
+		return 0, fmt.Errorf(
+			"%w: context_window=%d, estimated_input_tokens=%d, safety_reserve=%d; increase context_window or reduce the conversation history",
+			errContextWindowExhausted, contextWindow, contextTokens, ContextSafetyTokens,
+		)
 	}
 	if configured > available {
-		return available
+		return available, nil
 	}
-	return configured
+	return configured, nil
 }
 
 func estimateRequestTokens(messages []ChatMessage, tools []ToolDefinition) int {

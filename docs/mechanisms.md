@@ -113,12 +113,12 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 ### LLM 探活
 
 - `TestLLM`: 发 `maxTokens=16` 的 "ping" completion 验证连通性
-- `ListLLMModels`: 调用 provider 的 `GET /models` 返回 model picklist
+- `ListLLMModels`: 调用 provider 的 `GET /models` 返回 model picklist；404 作为“不支持目录”正常降级为手动输入
 
 ### 安全
 
 - `redactURLError`: 从 `*url.Error` 中剥离 query string（FOFA/Hunter API key 在 query 中）
-- 空 APIKey 回退到 stored config 中的值（Settings UI 留空表示保持不变）
+- 空 APIKey 按请求携带的 `profile_id` 回退到对应 stored config；缺省 ID 才使用 active profile
 
 **文件**: `pkg/probe/conn.go`, `pkg/probe/llm.go`, `pkg/web/probe.go`, `pkg/web/handler.go`
 
@@ -128,7 +128,11 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 
 ### ListModels
 
-两个 provider 都实现 `ListModels(ctx) ([]string, error)`，通过 `GET {base}/models` 返回 model ID 列表。编译期 `capability_parity_test.go` 守卫能力对齐。
+两个协议 provider 都实现 `ListModels(ctx) ([]string, error)`，通过 `GET {base}/models` 返回 model ID 列表。编译期 `capability_parity_test.go` 守卫能力对齐。
+
+### Provider presets
+
+品牌 preset 在协议归一化前解析，为 OpenAI、Anthropic、DeepSeek、OpenRouter、Groq、Moonshot、Ollama 和 Zhipu GLM 提供默认 Base URL。`glm`、`bigmodel` 映射到 `zhipu`；显式 Base URL 不会被覆盖。Ollama preset 不要求 API Key。
 
 ### hint404 协议提示
 
@@ -136,7 +140,7 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ### InferFromBaseURL
 
-检测 `anthropic.com` 域名自动推断 provider，其他默认 `openai`。
+这里只推断传输协议：检测 `anthropic.com` 域名选择 `anthropic`，其他自定义地址默认使用 `openai` 兼容协议。品牌默认地址由 preset 解析，不依赖域名猜测。
 
 **文件**: `pkg/agent/provider/anthropic.go`, `pkg/agent/provider/openai.go`, `pkg/agent/provider/http.go`, `pkg/agent/provider/provider.go`
 
@@ -186,7 +190,7 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 - `params`: 插值变量（如 `{"filename": "note.txt", "path": "/tmp/..."}`)
 - `fallback`: 英文文本，供非 i18n 消费者 / 日志 / 测试使用
 
-持久化时 code+params 存入 `ChatMessage.Metadata` JSON，前端从中渲染本地化文本。
+AOP error 事件把 code 保存在标准 data 中，并把 params 保存在 `ext["aiscan.web"]`。通用 reducer 会保留该扩展块，前端从中渲染本地化文本；因此实时流和重放使用同一参数来源。
 
 已定义的 code:
 

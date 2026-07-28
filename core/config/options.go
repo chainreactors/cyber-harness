@@ -27,7 +27,7 @@ type ScanConfigOptions struct {
 }
 
 type LLMOptions struct {
-	Provider      string             `long:"provider" config:"provider" description:"LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot"`
+	Provider      string             `long:"provider" config:"provider" description:"LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot, zhipu"`
 	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
 	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
 	Model         string             `long:"model" config:"model" description:"LLM model name"`

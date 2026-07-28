@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -15,11 +16,12 @@ import (
 // to keep it unchanged). Model is only required for TestLLM; ListLLMModels
 // ignores it.
 type LLMProbeRequest struct {
-	Provider string `json:"provider"`
-	BaseURL  string `json:"base_url"`
-	APIKey   string `json:"api_key"`
-	Model    string `json:"model,omitempty"`
-	Proxy    string `json:"proxy"`
+	ProfileID string `json:"profile_id,omitempty"`
+	Provider  string `json:"provider"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	Model     string `json:"model,omitempty"`
+	Proxy     string `json:"proxy"`
 }
 
 // LLMTestResult reports whether a probe request reached the provider and
@@ -40,9 +42,10 @@ const llmProbeTimeout = 30 * time.Second
 // LLMModelsResult reports the model IDs discovered at the endpoint. ok=false
 // carries the reason (unsupported provider, auth failure, unreachable, …).
 type LLMModelsResult struct {
-	OK     bool     `json:"ok"`
-	Models []string `json:"models,omitempty"`
-	Error  string   `json:"error,omitempty"`
+	OK        bool     `json:"ok"`
+	Supported bool     `json:"supported"`
+	Models    []string `json:"models,omitempty"`
+	Error     string   `json:"error,omitempty"`
 }
 
 // modelLister is the optional capability a provider implements when its
@@ -89,11 +92,17 @@ func ListLLMModels(ctx context.Context, req LLMProbeRequest, storedAPIKey string
 
 	models, err := lister.ListModels(probeCtx)
 	if err != nil {
+		var apiErr *agent.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+			result.OK = true
+			return result, nil
+		}
 		result.Error = err.Error()
 		return result, nil
 	}
 
 	result.OK = true
+	result.Supported = true
 	result.Models = models
 	return result, nil
 }

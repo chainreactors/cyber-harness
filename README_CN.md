@@ -186,7 +186,7 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI 参数
-aiscan agent --provider deepseek --base-url https://api.deepseek.com --api-key sk-... --model deepseek-chat
+aiscan agent --provider deepseek --api-key sk-... --model deepseek-chat
 ```
 
 配置文件 `aiscan.yaml`：
@@ -200,7 +200,7 @@ llm:
   max_tokens: 16384        # 单次最大输出
 ```
 
-实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`。上下文接近配置窗口时会自动压缩。
+`context_window` 填写真实 Token 数，例如 `128000`，不要写 `128K`。小于 8192 的值可以保存，但 Web 页面会提示窗口可能过小。实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`；如果已没有输出空间，AIScan 会返回明确错误，而不是发送只允许输出 1 Token 的请求。上下文接近配置窗口时会自动压缩。
 
 ---
 

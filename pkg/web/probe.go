@@ -31,23 +31,32 @@ func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
 // TestLLM probes the supplied LLM settings, falling back to the stored API key
 // when the request leaves it blank, then delegates to pkg/probe.
 func (s *Service) TestLLM(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMTestResult, error) {
-	return probe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx))
+	return probe.TestLLM(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
 }
 
 // ListLLMModels enumerates the models the supplied LLM endpoint advertises,
 // falling back to the stored API key when the request leaves it blank, then
 // delegates to pkg/probe.
 func (s *Service) ListLLMModels(ctx context.Context, req probe.LLMProbeRequest) (probe.LLMModelsResult, error) {
-	return probe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx))
+	return probe.ListLLMModels(ctx, req, s.storedLLMAPIKey(ctx, req.ProfileID))
 }
 
-// storedLLMAPIKey returns the active profile's API key from the persisted
-// config, or "" when unavailable.
-func (s *Service) storedLLMAPIKey(ctx context.Context) string {
+// storedLLMAPIKey returns the requested profile's persisted API key. A blank
+// profileID keeps backward compatibility by selecting the active profile.
+func (s *Service) storedLLMAPIKey(ctx context.Context, profileID string) string {
 	if s.config == nil {
 		return ""
 	}
 	if dc, err := s.GetDistributeConfig(ctx); err == nil {
+		profileID = strings.TrimSpace(profileID)
+		if profileID != "" {
+			for _, profile := range dc.LLM.Providers {
+				if profile.ID == profileID {
+					return strings.TrimSpace(profile.APIKey)
+				}
+			}
+			return ""
+		}
 		return strings.TrimSpace(dc.LLM.Active().APIKey)
 	}
 	return ""

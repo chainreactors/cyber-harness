@@ -219,7 +219,7 @@ func TestEffectiveCompactionLimitsFitSmallContext(t *testing.T) {
 }
 
 func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
-	long := strings.Repeat("x", 240)
+	long := strings.Repeat("x", 9000)
 	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
 		chatResponse(NewTextMessage("assistant", "history checkpoint")),
 		chatResponse(NewTextMessage("assistant", "turn-prefix checkpoint")),
@@ -230,7 +230,7 @@ func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
 		Tools:         commands.NewRegistry(),
 		Model:         "custom",
 		MaxTokens:     64,
-		ContextWindow: 180,
+		ContextWindow: 8192,
 		Compaction: CompactionSettings{
 			ReserveTokens:    40,
 			KeepRecentTokens: 20,

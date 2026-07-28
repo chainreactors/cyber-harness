@@ -187,7 +187,7 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI arguments
-aiscan agent --provider deepseek --base-url https://api.deepseek.com --api-key sk-... --model deepseek-chat
+aiscan agent --provider deepseek --api-key sk-... --model deepseek-chat
 ```
 
 Config file `aiscan.yaml`:
@@ -201,7 +201,7 @@ llm:
   max_tokens: 16384        # Maximum output per response
 ```
 
-The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. Automatic compaction starts as the context approaches the configured window.
+`context_window` is a literal token count: use `128000`, not `128K`. Values below 8192 are accepted, but the Web UI warns that they may be too small. The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. If no output space remains, AIScan returns a clear error instead of sending a one-token request. Automatic compaction starts as the context approaches the configured window.
 
 ---
 
