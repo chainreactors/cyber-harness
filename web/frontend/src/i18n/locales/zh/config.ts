@@ -1,7 +1,7 @@
 export default {
   settings: '设置',
-  llmReady: 'LLM 就绪',
-  llmOffline: 'LLM 离线',
+  llmConfigured: 'LLM 已配置',
+  llmNotConfigured: 'LLM 未配置',
   configLoaded: '配置已加载',
   configMissing: '配置缺失',
   configured: '已配置',
@@ -25,6 +25,7 @@ export default {
   // model list auto-fetch
   fetchModels: '拉取模型列表',
   modelsEmpty: '该端点未返回任何模型，请手动填写',
+  modelsUnsupported: '该端点不提供模型列表，请手动填写模型',
   modelsFailed: '拉取模型列表失败',
   modelsCount: '{{count}} 个模型',
   modelsLoading: '正在拉取模型…',
@@ -32,7 +33,9 @@ export default {
   modelSearchNoMatch: '没有匹配 “{{query}}” 的模型',
   modelUseCustom: '按回车使用 “{{query}}”',
   baseUrl: 'Base URL',
-  contextWindow: '上下文窗口',
+  contextWindow: '上下文窗口（Token）',
+  contextWindowLow: '低于 8192 Token，实际请求可能没有足够的输入和输出空间',
+  contextWindowAuto: '留空则根据模型自动推断',
   maxTokens: '最大输出',
   proxy: '代理',
   apiKey: 'API Key',
@@ -57,6 +60,8 @@ export default {
   // placeholder hints
   configuredKeep: '已配置；留空则保持不变',
   requiredUnlessOllama: '必填（ollama 除外）',
+  modelRequired: '模型不能为空',
+  modelRequiredProfile: '配置 “{{name}}” 的模型不能为空',
   providerDefault: '留空则使用 Provider 默认值',
   modelDefault: '留空则使用模型默认值',
   cyberhubApiKey: 'Cyberhub API Key',

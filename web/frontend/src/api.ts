@@ -355,6 +355,7 @@ export async function activateLLMProfile(id: string): Promise<ConfigStatus> {
 // LLMTestRequest — POST /api/config/llm/test body. Leave api_key blank to
 // reuse the key already stored on the server.
 export interface LLMTestRequest {
+  profile_id?: string;
   provider: string;
   base_url: string;
   api_key: string;
@@ -385,6 +386,7 @@ export async function testLLM(req: LLMTestRequest): Promise<LLMTestResult> {
 // without a model (listing is what fills the model field). Leave api_key blank
 // to reuse the key already stored on the server.
 export interface LLMModelsRequest {
+  profile_id?: string;
   provider: string;
   base_url: string;
   api_key: string;
@@ -395,6 +397,7 @@ export interface LLMModelsRequest {
 // GET /models route. ok=false carries the reason in `error`.
 export interface LLMModelsResult {
   ok: boolean;
+  supported: boolean;
   models?: string[];
   error?: string;
 }

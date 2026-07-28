@@ -1,7 +1,7 @@
 export default {
   settings: 'Settings',
-  llmReady: 'LLM Ready',
-  llmOffline: 'LLM Offline',
+  llmConfigured: 'LLM configured',
+  llmNotConfigured: 'LLM not configured',
   configLoaded: 'Config Loaded',
   configMissing: 'Config Missing',
   configured: 'Configured',
@@ -25,6 +25,7 @@ export default {
   // model list auto-fetch
   fetchModels: 'Fetch model list',
   modelsEmpty: 'Endpoint returned no models — enter one manually',
+  modelsUnsupported: 'This endpoint does not expose a model list; enter the model manually',
   modelsFailed: 'Failed to fetch model list',
   modelsCount: '{{count}} models',
   modelsLoading: 'Fetching models…',
@@ -32,7 +33,9 @@ export default {
   modelSearchNoMatch: 'No model matches “{{query}}”',
   modelUseCustom: 'Press Enter to use “{{query}}”',
   baseUrl: 'Base URL',
-  contextWindow: 'Context window',
+  contextWindow: 'Context window (tokens)',
+  contextWindowLow: 'Below 8192 tokens, requests may not have enough room for both input and output',
+  contextWindowAuto: 'Leave empty to infer from the model',
   maxTokens: 'Maximum output',
   proxy: 'Proxy',
   apiKey: 'API Key',
@@ -57,6 +60,8 @@ export default {
   // placeholder hints
   configuredKeep: 'configured; leave blank to keep',
   requiredUnlessOllama: 'required unless ollama',
+  modelRequired: 'Model is required',
+  modelRequiredProfile: 'Profile “{{name}}” requires a model',
   providerDefault: 'leave empty for provider default',
   modelDefault: 'leave empty for model default',
   cyberhubApiKey: 'cyberhub API key',
