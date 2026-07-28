@@ -7,7 +7,17 @@ WEB_ADDR ?= 127.0.0.1:8080
 WEB_TOKEN ?=
 BIN_DIR ?= bin
 
-RE2_TAGS := re2_cgo re2_static
+# The bundled static CRE2 archive only exists for linux/amd64 and
+# windows/amd64. Other native builds use go-re2's embedded WASM runtime.
+RE2_TAGS_DEFAULT :=
+ifeq ($(OS),Windows_NT)
+RE2_TAGS_DEFAULT := re2_cgo re2_static
+else ifeq ($(shell uname -s),Linux)
+ifeq ($(shell uname -m),x86_64)
+RE2_TAGS_DEFAULT := re2_cgo re2_static
+endif
+endif
+RE2_TAGS ?= $(RE2_TAGS_DEFAULT)
 
 ifeq ($(OS),Windows_NT)
 EXE := .exe
