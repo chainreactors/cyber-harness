@@ -21,12 +21,12 @@ func main() {
 	parser := goflags.NewParser(&option, goflags.Default&^goflags.PrintErrors)
 	parser.Usage = `[OPTIONS]
 
-aiscan-agent - Minimal AI agent with Arsenal toolkit
+AIScan agent example - reference wiring for the root agent packages
 
-Examples:
-  aiscan-agent -p "list available tools using arsenal"
-  aiscan-agent -p "install nuclei and scan target" -i http://target.com
-  aiscan-agent --base-url https://api.deepseek.com --model deepseek-v4-pro`
+Run manually:
+  go run ./examples/agent -p "list available tools using arsenal"
+  go run ./examples/agent -p "install nuclei and scan target" -i http://target.com
+  go run ./examples/agent --base-url https://api.deepseek.com --model deepseek-v4-pro`
 
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
@@ -38,7 +38,7 @@ Examples:
 	}
 
 	if option.Version {
-		fmt.Printf("aiscan-agent v%s\n", cfg.Version)
+		fmt.Printf("AIScan agent example v%s\n", cfg.Version)
 		return
 	}
 
@@ -85,7 +85,7 @@ Examples:
 		interruptMu.Unlock()
 	})
 	if err != nil {
-		logger.Errorf("agent failed: %s", err)
+		logger.Errorf("agent example failed: %s", err)
 		os.Exit(1)
 	}
 }

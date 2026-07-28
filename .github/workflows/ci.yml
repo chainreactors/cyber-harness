@@ -344,7 +344,7 @@ jobs:
             -v \
             ./pkg/web
 
-  # ── Build (depends on test, 3 parallel profiles) ──────────────
+  # ── Build (depends on test, 2 parallel profiles) ──────────────
 
   build:
     runs-on: ubuntu-22.04
@@ -361,10 +361,6 @@ jobs:
             main: ./cmd/aiscan
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
             generate: true
-          - id: agent
-            main: ./cmd/agent
-            tags: "forceposix emptytemplates noembed osusergo netgo"
-            generate: false
     steps:
       - name: Checkout
         uses: actions/checkout@v6
