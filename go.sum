@@ -193,8 +193,8 @@ github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe h1:n1pFLHHYX
 github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe/go.mod h1:ygxMqZQ/hGY2uegUvC0LbR538hbgNH7HP4dTuv/jfSM=
 github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131 h1:gTrBbrASTvndSBr2XL75Kdw8fAM3xw/dikTqMNzoQBE=
 github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131/go.mod h1:c4kezBtDrE4sBIH6qF0+OShJ3/fijZENyxcUbcfZ/qQ=
-github.com/chainreactors/proxyclient v1.1.1-0.20260714062913-bce898a8f790 h1:We2R3rJUQBI6GGmA2kM3IOK+yvPn5NsXHhpbKiVsPE0=
-github.com/chainreactors/proxyclient v1.1.1-0.20260714062913-bce898a8f790/go.mod h1:m0kmv5rgzac2q3HMYBlQULc+mubGILrPx1IiPQWcQHc=
+github.com/chainreactors/proxyclient v1.1.1-0.20260728110701-74504679dc47 h1:2Dmj2xnsUb0cy7yY37l3Qt8GQEWjos7vC/kJar6qc9A=
+github.com/chainreactors/proxyclient v1.1.1-0.20260728110701-74504679dc47/go.mod h1:DPIRtV3QMlIvdoHAn55XFxSZCn5XW1uuLx2PaKeKcwE=
 github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3 h1:WVEb3Bjq3AC67oa9pNjHJfIH+mX6PozJO3S5ccVZJYQ=
 github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3/go.mod h1:4BG8xIxTebn0VoOTEwQ2pmYIB3K2qwGINxnRHALBNZg=
 github.com/chainreactors/sdk v0.3.4-0.20260708104745-dcad8620f5e9 h1:zHGP9WFSpTyZYWeKDHPDoEysmNYjck25Wv8/eVtpYBE=
