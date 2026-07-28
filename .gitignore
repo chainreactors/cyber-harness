@@ -27,6 +27,8 @@ out/
 scan_results.jsonl
 pw_driver_bin
 node_modules/
+web/frontend/playwright-report/
+web/frontend/test-results/
 community.yaml
 
 # Local runtime state / operator artifacts
