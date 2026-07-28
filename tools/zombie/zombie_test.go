@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {

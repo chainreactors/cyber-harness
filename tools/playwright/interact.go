@@ -548,7 +548,7 @@ var keyNameMap = map[string]input.Key{
 	"home": input.Home, "end": input.End,
 	"pageup": input.PageUp, "pagedown": input.PageDown,
 	"insert": input.Insert,
-	"f1": input.F1, "f2": input.F2, "f3": input.F3, "f4": input.F4,
+	"f1":     input.F1, "f2": input.F2, "f3": input.F3, "f4": input.F4,
 	"f5": input.F5, "f6": input.F6, "f7": input.F7, "f8": input.F8,
 	"f9": input.F9, "f10": input.F10, "f11": input.F11, "f12": input.F12,
 	"shift": input.ShiftLeft, "control": input.ControlLeft,

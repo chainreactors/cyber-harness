@@ -17,8 +17,8 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
-	"github.com/ysmood/gson"
 	katanajs "github.com/projectdiscovery/katana/pkg/engine/headless/js"
+	"github.com/ysmood/gson"
 )
 
 const (
@@ -742,26 +742,26 @@ func (c *Command) execDetach(ctx context.Context, args []string) (string, error)
 
 type openOpts struct {
 	commonOpts
-	sessName         string
-	opTimeout        time.Duration
-	noSpeedUp        bool
-	ignoreHTTPSErrs  bool
-	viewportSize     string // "WxH"
-	geolocation      string // "lat,lon"
-	timezone         string
-	colorScheme      string // light|dark
-	lang             string
-	device           string
-	loadStoragePath  string
-	saveStoragePath  string // stored on Session, dumped at close
-	saveHARPath      string // stored on Session, dumped at close
-	saveHARGlob      string
-	proxyServer      string
-	proxyBypass      string
-	blockSW          bool
-	record           bool
-	headed           bool
-	cdpURL           string
+	sessName        string
+	opTimeout       time.Duration
+	noSpeedUp       bool
+	ignoreHTTPSErrs bool
+	viewportSize    string // "WxH"
+	geolocation     string // "lat,lon"
+	timezone        string
+	colorScheme     string // light|dark
+	lang            string
+	device          string
+	loadStoragePath string
+	saveStoragePath string // stored on Session, dumped at close
+	saveHARPath     string // stored on Session, dumped at close
+	saveHARGlob     string
+	proxyServer     string
+	proxyBypass     string
+	blockSW         bool
+	record          bool
+	headed          bool
+	cdpURL          string
 }
 
 func parseOpenOpts(args []string, usage string) (openOpts, error) {
@@ -958,13 +958,13 @@ func parseGeolocation(s string) (float64, float64, error) {
 
 // storageState mirrors the Playwright storage state format.
 type storageState struct {
-	Cookies        []json.RawMessage        `json:"cookies"`
-	LocalStorage   []localStorageEntry       `json:"origins"`
+	Cookies      []json.RawMessage   `json:"cookies"`
+	LocalStorage []localStorageEntry `json:"origins"`
 }
 
 type localStorageEntry struct {
-	Origin       string           `json:"origin"`
-	LocalStorage []nameValuePair  `json:"localStorage"`
+	Origin       string          `json:"origin"`
+	LocalStorage []nameValuePair `json:"localStorage"`
 }
 
 type nameValuePair struct {

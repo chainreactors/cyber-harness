@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent"
+	"github.com/chainreactors/aiscan/agent"
 )
 
 // gateProvider blocks the first call until released; later calls answer

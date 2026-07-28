@@ -187,7 +187,7 @@ import (
     "fmt"
 
     "github.com/chainreactors/aiscan/pkg/commands"
-    "github.com/chainreactors/aiscan/pkg/telemetry"
+    "github.com/chainreactors/aiscan/core/telemetry"
 )
 
 type Command struct {
@@ -268,7 +268,7 @@ package whatweb
 
 import (
     "github.com/chainreactors/aiscan/pkg/commands"
-    "github.com/chainreactors/aiscan/pkg/telemetry"
+    "github.com/chainreactors/aiscan/core/telemetry"
 )
 
 func init() {
@@ -570,7 +570,7 @@ agent_background: true
 Agent 类型 Skill 通过 `skills.Store.AgentTypes()` 收集，注入到 `SubAgentTool` 中：
 
 ```go
-// core/runner/runner.go
+// pkg/runner/runner.go
 subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.AgentType, error) {
     s, ok := rt.App.Skills.ByName(name)
     if !ok || !s.Agent { return error }

@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/aop"
+	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
@@ -346,7 +347,7 @@ func TestRunConnectionPTYRoundTrip(t *testing.T) {
 	defer cancel()
 
 	reg := commands.NewRegistry()
-	commands.BuildGroup("core", &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5}, reg)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5}, reg)
 
 	done := make(chan error, 1)
 	go func() {
@@ -427,7 +428,7 @@ func TestRunConnectionPushesPTYSessionsOnManagerEvents(t *testing.T) {
 	defer cancel()
 
 	reg := commands.NewRegistry()
-	commands.BuildGroup("core", &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5}, reg)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5}, reg)
 	mgr := RegistryPTYManager(reg)
 	if mgr == nil {
 		t.Fatal("bash command did not expose tmux manager")

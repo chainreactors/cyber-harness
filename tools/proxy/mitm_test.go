@@ -177,9 +177,6 @@ func TestMITMCapture_NonHTTP_Fallback(t *testing.T) {
 }
 
 func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: mitmproxy internal goroutine scheduling causes i/o timeout on CI")
-	}
 	// Server-first protocol (like SSH): server sends banner, client waits.
 	// MITM should timeout on Peek and fallback to raw transfer.
 	tcpServer, err := net.Listen("tcp", "127.0.0.1:0")
@@ -187,16 +184,19 @@ func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tcpServer.Close()
+	serverReady := make(chan error, 1)
 	go func() {
-		for {
-			conn, err := tcpServer.Accept()
-			if err != nil {
-				return
-			}
-			conn.Write([]byte("SSH-2.0-TestServer\r\n"))
+		conn, err := tcpServer.Accept()
+		if err != nil {
+			serverReady <- err
+			return
+		}
+		defer conn.Close()
+		_, err = conn.Write([]byte("SSH-2.0-TestServer\r\n"))
+		serverReady <- err
+		if err == nil {
 			buf := make([]byte, 256)
-			conn.Read(buf)
-			conn.Close()
+			_, _ = conn.Read(buf)
 		}
 	}()
 
@@ -209,31 +209,49 @@ func TestMITMCapture_ServerFirst_Fallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, err := dial(ctx, "tcp", tcpServer.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	select {
+	case err := <-serverReady:
+		if err != nil {
+			t.Fatalf("server banner write: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server did not accept proxy connection: %v", ctx.Err())
+	}
 
 	buf := make([]byte, 64)
-	// The banner only arrives after the MITM's ~3s peek timeout expires and it
-	// falls back to raw transfer. Keep this deadline well above that timeout so
-	// scheduling jitter under -race / CI load can't race it (was 8s → flaky).
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	n, err := io.ReadAtLeast(conn, buf, 3)
-	if err != nil {
-		t.Fatalf("expected SSH banner data, got error: %v", err)
+	type readResult struct {
+		n   int
+		err error
 	}
-	banner := string(buf[:n])
+	readDone := make(chan readResult, 1)
+	go func() {
+		n, err := io.ReadAtLeast(conn, buf, 3)
+		readDone <- readResult{n: n, err: err}
+	}()
+	var read readResult
+	select {
+	case read = <-readDone:
+	case <-ctx.Done():
+		t.Fatalf("proxy did not enter raw fallback after synchronized banner write: %v", ctx.Err())
+	}
+	if read.err != nil {
+		t.Fatalf("expected SSH banner data, got error: %v", read.err)
+	}
+	banner := string(buf[:read.n])
 	if !strings.Contains(banner, "SSH-") && !strings.Contains(banner, "SH-") {
 		t.Fatalf("expected SSH banner fragment, got %q", banner)
 	}
 	if store.Count() != 0 {
 		t.Fatalf("server-first protocol should not capture flows, got %d", store.Count())
 	}
-	t.Logf("server-first fallback OK: received %q, 0 flows captured", string(buf[:n]))
+	t.Logf("server-first fallback OK: received %q, 0 flows captured", string(buf[:read.n]))
 }
 
 // === Latency Benchmark ===
@@ -387,7 +405,7 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 		store.Add(Flow{
 			Method:     "GET",
 			URL:        fmt.Sprintf("http://host%d.com/path%d", i%10, i),
-			StatusCode: 200 + (i % 5) * 100,
+			StatusCode: 200 + (i%5)*100,
 			Host:       fmt.Sprintf("host%d.com", i%10),
 		})
 	}

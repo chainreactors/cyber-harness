@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	scanengine "github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/neutron/common"
 	"github.com/chainreactors/neutron/templates"

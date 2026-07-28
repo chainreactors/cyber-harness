@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/agent"
 )
 
 // assertUniformWidth checks every line of a rendered box has the same visible

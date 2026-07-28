@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xcompact "github.com/chainreactors/aiscan/pkg/aop/x/compact"
-	xeval "github.com/chainreactors/aiscan/pkg/aop/x/eval"
+	"github.com/chainreactors/aiscan/core/aop"
+	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 

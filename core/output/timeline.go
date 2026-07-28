@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
-	xcommand "github.com/chainreactors/aiscan/pkg/aop/x/command"
+	"github.com/chainreactors/aiscan/core/aop"
+	xcommand "github.com/chainreactors/aiscan/core/aop/x/command"
 	"github.com/chainreactors/utils/parsers"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"

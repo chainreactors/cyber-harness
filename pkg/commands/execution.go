@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/agent/tmux"
+	"github.com/chainreactors/aiscan/agent/tmux"
 )
 
 // Execution is one shell or built-in command invocation. Its ID is always the

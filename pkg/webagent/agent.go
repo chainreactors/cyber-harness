@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/runner"
-	"github.com/chainreactors/aiscan/pkg/agent"
-	"github.com/chainreactors/aiscan/pkg/aop"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
+	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
@@ -37,7 +37,7 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return err
 	}
 
-	appConfig := cfg.AppConfig(option, cfg.RuntimeFeatures{
+	appConfig := runner.AppConfig(option, runner.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
 	}, logger)
 	appConfig.IOA = remoteIOAConfig(option, identityRef)
@@ -46,7 +46,7 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		return err
 	}
 	defer application.Close()
-	cfg.ApplyResolvedProviderOptions(option, application.ProviderConfig)
+	runner.ApplyResolvedProviderOptions(option, application.ProviderConfig)
 	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
 		ExistingApp: application, NoOutput: true, REPLMode: runner.REPLPersistent,
 	})
@@ -172,7 +172,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, app *runner.Ap
 		logger.Warnf("config reload: fetch remote config: %s", err)
 		return nil, "", err
 	}
-	providerConfig := cfg.ProviderConfig(remoteOpt)
+	providerConfig := runner.ProviderConfig(remoteOpt)
 	resolved, err := agent.ResolveProvider(&providerConfig)
 	if err != nil {
 		logger.Warnf("config reload: resolve provider: %s", err)
@@ -321,11 +321,11 @@ func webNodeRef(option *cfg.Option) (protocols.NodeRef, error) {
 	return protocols.NodeRef{ID: name, Authority: authority}, nil
 }
 
-func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *cfg.IOAConfig {
+func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *runner.IOAConfig {
 	if option == nil || option.IOAURL == "" {
 		return nil
 	}
-	return &cfg.IOAConfig{
+	return &runner.IOAConfig{
 		URL:           option.IOAURL,
 		NodeID:        option.IOANodeID,
 		NodeName:      option.IOANodeName,

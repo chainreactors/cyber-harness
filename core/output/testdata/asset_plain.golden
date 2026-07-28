@@ -1,0 +1,43 @@
+Assets: 4 total
+Summary: 2 target(s), 4 service(s), 2 web endpoint(s), 3 probe(s), 3 loot(s), 1 error(s), 22.266s
+
+1. Example App
+   target: http://10.0.0.1
+   status: confirmed
+   service: tcp http 80
+   fingerprint: nginx
+   vuln: [confirmed] CVE-2021-41773 path traversal
+      ## Impact
+      Arbitrary file read through `/cgi-bin/`.
+      | Field | Value |
+      |---|---|
+      | CVSS | 9.8 |
+   weakpass: [high] ssh root:root
+   deep: [info] Admin console is reachable without authentication.
+   deep: [response] Let me analyze the collected browser evidence.
+      Let me analyze the collected browser evidence.
+      ## Evidence Analysis
+      | Asset | Details |
+      |---|---|
+      | API | GET /api/scans |
+   error: dial tcp 10.0.0.1:8443: connect: connection refused
+   sitemap:
+   [200] /  1256  "Example App" [nginx] {nginx} {deep:response}
+   ├──       /admin {vuln:confirmed CVE-2021-41773 path traversal} {deep:info}
+   │   ├── [401] /login  512  "Login" [basic-auth]
+   ├──       /static
+   │   ├── [200] /app.js  9001
+   ├──       /10.0.0.1:22 {weakpass:high ssh root:root}
+
+2. MySQL 5.7.32
+   target: 10.0.0.2:3306
+   status: loot
+   service: tcp mysql 3306
+   fingerprint: [loot] mysql 5.7.32
+
+3. icmp
+   target: 10.0.0.2:icmp
+   service: icmp
+
+4. 10.0.0.3:445
+   service: tcp smb 445

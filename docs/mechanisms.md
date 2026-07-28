@@ -60,7 +60,7 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/webagent/agent.go`, `core/runner/runner.go`, `pkg/agent/agent.go`
+**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/webagent/agent.go`, `pkg/runner/runner.go`, `agent/agent.go`
 
 ---
 
@@ -94,7 +94,7 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 
 **评估器门控修正**: 旧逻辑只对 Terminated/Completed 执行评估，turn-capped（Stopped）或 token-capped（Budget）的 agent 被静默跳过。新逻辑只在 Error/Canceled 时跳过。
 
-**文件**: `pkg/agent/event_json.go`, `pkg/agent/evaluator/loop.go`, `pkg/web/agents.go`, `pkg/web/service.go`
+**文件**: `agent/aop_emit.go`, `agent/evaluator/loop.go`, `pkg/web/agents.go`, `pkg/web/service.go`
 
 ---
 
@@ -147,7 +147,7 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 这里只推断传输协议：检测 `anthropic.com` 域名选择 `anthropic`，其他自定义地址默认使用 `openai` 兼容协议。品牌默认地址由 preset 解析，不依赖域名猜测。
 
-**文件**: `pkg/agent/provider/anthropic.go`, `pkg/agent/provider/openai.go`, `pkg/agent/provider/http.go`, `pkg/agent/provider/provider.go`
+**文件**: `agent/provider/anthropic.go`, `agent/provider/openai.go`, `agent/provider/http.go`, `agent/provider/provider.go`
 
 ---
 
@@ -234,7 +234,7 @@ AOP error 事件把 code 保存在标准 data 中，并把 params 保存在 `ext
 
 scan、agent joined、session cleared 等产品事件保留独立的 `DomainEvent`，不携带 Agent 的 role/content/message ID 字段。
 
-**文件**: `core/runner/`, `pkg/aop/`, `pkg/web/service.go`
+**文件**: `pkg/runner/`, `core/aop/`, `pkg/web/service.go`
 
 ---
 
@@ -260,7 +260,7 @@ scan、agent joined、session cleared 等产品事件保留独立的 `DomainEven
 
 跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web timeline 在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不再处理 Markdown 或终端格式。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/tui/ioa.go`, `pkg/aop/x/command/command.go`, `core/output/timeline.go`
+**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/tui/ioa.go`, `core/aop/x/command/command.go`, `core/output/timeline.go`
 
 ---
 

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	passivecmd "github.com/chainreactors/aiscan/tools/passive"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )

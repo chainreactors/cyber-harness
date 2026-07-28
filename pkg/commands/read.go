@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/agent/truncate"
+	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 const (

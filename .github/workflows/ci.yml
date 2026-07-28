@@ -70,11 +70,38 @@ jobs:
             exit 1
           fi
 
+  quality:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check dependency layers, registered skips, and repository debt
+        run: go test -count=1 ./core/deps
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check whitespace and submodule pins
+        run: |
+          git diff --check HEAD
+          git diff --exit-code --submodule=diff
+          git submodule foreach --recursive 'test -z "$(git status --porcelain)"'
+
   # ── Unit tests (depends on tidy) ──────────────────────────────
 
   test:
     runs-on: ubuntu-22.04
-    needs: tidy
+    needs: [tidy, quality]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -152,13 +179,66 @@ jobs:
         run: |
           go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
             -run 'MultiRound|SendCtrlC' \
-            ./pkg/agent/tmux/
+            ./agent/tmux/
 
       - name: Run agent tmux integration tests
         run: |
           go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
             -run 'AgentTmux' \
-            ./pkg/agent/
+            ./agent/
+
+  windows-test:
+    runs-on: windows-2022
+    needs: [tidy, quality]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run native Windows package tests
+        run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
+
+      - name: Compile and test the full CLI on Windows
+        run: go test -count=1 -tags full ./cmd/aiscan
+
+  race-stress:
+    runs-on: ubuntu-22.04
+    needs: [tidy, quality]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Repeat agent and runner concurrency tests
+        run: |
+          go test -race -count=20 -timeout 15m \
+            -run 'Test(ConcurrentEmitWhileRegistering|SetProviderRaceWithRun|ResetDoesNotAllowConcurrentPrompt|StreamingProviderEmitsMessageUpdates)$' \
+            ./agent/...
+          go test -race -count=20 -timeout 15m \
+            -run 'Test(StdioSameSessionFIFOOrder|StdioSessionsRunConcurrently|StdioDrainWaitsForInFlightAndQueued|RuntimeSessionDirectLoopUsesSessionScheduler|RuntimeSessionRejectsRequestsPastPendingLimit|SessionContextCancellationStopsActiveRun|ActiveRunSteersAsyncInputWithoutSecondLifecycle)$' \
+            ./pkg/runner/...
+
+      - name: Repeat web SSE, cancellation, and reload concurrency tests
+        run: |
+          go test -race -count=20 -timeout 20m \
+            -run 'Test(BroadcastAOPEventPersistsRawEnvelope|ServeSSEWithSnapshotSubscribesBeforeReadingSnapshot|ServeSSEWithSnapshotDropsQueuedSnapshotDuplicates|SessionEventsReplayHasNoSideEffects|SessionEventsResumesAfterLastEventID|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskUsesControlChannelWhenTaskQueueIsFull|CancelTaskWaitsForSaturatedControlChannel|CompleteJobCannotOverwriteCanceledScan|BroadcastConfigReload|BroadcastConfigReloadWaitsBehindCancellationFrames|HandleConfigReloadResultUpdatesAgentStatus|SaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp|SaveConfigCommitFailureClosesCandidateAndKeepsCurrentApp|SaveConfigSerializesConcurrentCandidates)$' \
+            ./pkg/web
 
   scanner-functional:
     runs-on: ubuntu-22.04
@@ -209,6 +289,9 @@ jobs:
           go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m \
             ./core/resources/...
 
+      - name: Check generated resources are committed
+        run: git diff --exit-code
+
   # ── E2E tests (depends on test) ───────────────────────────────
 
   e2e:
@@ -239,6 +322,20 @@ jobs:
           npm --prefix web/frontend ci
           npm --prefix web/frontend run build
           test -s web/static/index.html
+
+      - name: Install Playwright Chromium
+        working-directory: web/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend Playwright E2E
+        working-directory: web/frontend
+        run: npm run test:e2e
+
+      - name: Run cyber-ui viewer tests
+        working-directory: web/frontend/cyber-ui
+        run: |
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm --filter @cyber/viewer test
 
       - name: Run e2e tests
         run: |
@@ -303,7 +400,7 @@ jobs:
 
       - name: Build all platforms (${{ matrix.id }})
         run: |
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             IFS='/' read -r goos goarch <<< "$target"
             echo "  compile ${goos}/${goarch}"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \

@@ -3,7 +3,7 @@ package webagent
 import (
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/aop"
+	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 

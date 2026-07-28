@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/utils/parsers"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type eventKind string

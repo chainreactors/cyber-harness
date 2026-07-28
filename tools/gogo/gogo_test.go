@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 )

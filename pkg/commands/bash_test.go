@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	tmux "github.com/chainreactors/aiscan/agent/tmux"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	tmux "github.com/chainreactors/aiscan/pkg/agent/tmux"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/telemetry"
 )
 
 // ---------------------------------------------------------------------------
