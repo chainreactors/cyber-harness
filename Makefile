@@ -57,7 +57,7 @@ prepare:
 	mkdir -p "$(BIN_DIR)"
 
 aop-gen:
-	$(GO) generate ./pkg/aop/...
+	$(GO) generate ./core/aop/...
 
 frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
