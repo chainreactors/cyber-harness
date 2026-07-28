@@ -71,17 +71,15 @@ git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
 go build -o aiscan ./cmd/aiscan                          # standard
 go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/katana/passive)
-go build -o aiscan-agent ./cmd/agent                      # developer-only lightweight agent runtime
 ```
 
-GitHub Releases publish only the standard and full editions. The lightweight
-agent runtime remains available for developers to build from source. The full
-target builds the frontend first so the latest `web/static` assets are embedded
-into the binary:
+The standalone agent executable is no longer a maintained build or release
+target. Reference wiring remains in `examples/agent` and can be run manually
+with `go run ./examples/agent --help`. The full target builds the frontend first
+so the latest `web/static` assets are embedded into the binary:
 
 ```bash
 make                                                      # standard edition
-make agent                                                # developer-only lightweight agent runtime
 make full                                                 # frontend + full edition
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
 ```

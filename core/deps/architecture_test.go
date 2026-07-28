@@ -40,6 +40,7 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 		{dir: filepath.Join("pkg", "util"), importPath: modulePath + "/pkg/" + "util"},
 		{dir: filepath.Join("core", "runner"), importPath: modulePath + "/core/" + "runner"},
 		{dir: filepath.Join("core", "transport"), importPath: modulePath + "/core/" + "transport"},
+		{dir: filepath.Join("cmd", "agent"), importPath: modulePath + "/cmd/" + "agent"},
 	}
 	for _, item := range legacy {
 		legacyDir := filepath.Join(root, item.dir)
@@ -78,6 +79,31 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAgentExampleIsNotMaintainedBuildTarget(t *testing.T) {
+	root := repositoryRoot(t)
+	example := filepath.Join(root, "examples", "agent", "main.go")
+	if _, err := os.Stat(example); err != nil {
+		t.Fatalf("agent example is missing: %v", err)
+	}
+
+	for _, rel := range []string{
+		filepath.Join(".github", "workflows", "ci.yml"),
+		"Makefile",
+		"build.sh",
+	} {
+		path := filepath.Join(root, rel)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", relative(root, path), err)
+		}
+		for _, forbidden := range []string{"cmd/agent", "examples/agent", "aiscan-agent"} {
+			if strings.Contains(string(content), forbidden) {
+				t.Errorf("maintained build file %s references agent binary token %q", relative(root, path), forbidden)
+			}
+		}
 	}
 }
 

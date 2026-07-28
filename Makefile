@@ -28,25 +28,22 @@ NPM ?= npm
 endif
 
 STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
-AGENT_BIN ?= $(BIN_DIR)/aiscan-agent$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 
-# Standard/full match release artifacts; agent remains a developer build target.
+# Standard/full match release artifacts.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo cstx_native $(RE2_TAGS)
-AGENT_TAGS := forceposix emptytemplates noembed osusergo netgo
 FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim $(RE2_TAGS)
 BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: help prepare frontend aop-gen standard agent full web-build web-run web all clean
+.PHONY: help prepare frontend aop-gen standard full web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets:"
 	@echo "  make / make standard  Build the standard AIScan edition"
-	@echo "  make agent            Build the developer-only lightweight agent runtime"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
-	@echo "  make all              Build all three editions"
+	@echo "  make all              Build the standard and full editions"
 	@echo ""
 	@echo "Variables:"
 	@echo "  BIN_DIR=path          Binary output directory (default: $(BIN_DIR))"
@@ -66,10 +63,6 @@ standard: prepare
 	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
-agent: prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "-s -w" -tags "$(AGENT_TAGS)" -o "$(AGENT_BIN)" ./cmd/agent
-	@echo "Built agent edition: $(AGENT_BIN)"
-
 # The full binary embeds web/static, so frontend must finish first.
 full: frontend prepare
 	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
@@ -83,7 +76,7 @@ web-run:
 web: full
 	"$(FULL_BIN)" web --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
 
-all: standard agent full
+all: standard full
 
 clean:
-	rm -f "$(STANDARD_BIN)" "$(AGENT_BIN)" "$(FULL_BIN)"
+	rm -f "$(STANDARD_BIN)" "$(FULL_BIN)"
