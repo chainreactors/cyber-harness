@@ -464,7 +464,8 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	s.mu.Lock()
 	s.scanAgents[job.ID] = agent.id
 	s.mu.Unlock()
-	if ctx.Err() != nil {
+	if err := ctx.Err(); err != nil {
+		s.finishScanContext(job, err)
 		return
 	}
 
