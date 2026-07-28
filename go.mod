@@ -13,7 +13,7 @@ require (
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6
 	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
-	github.com/chainreactors/proxyclient v1.1.1-0.20260714062913-bce898a8f790
+	github.com/chainreactors/proxyclient v1.1.1-0.20260728110701-74504679dc47
 	github.com/chainreactors/proxyclient/extra v0.0.0-20260527160727-36cf133952c3
 	github.com/chainreactors/sdk v0.3.4-0.20260708104745-dcad8620f5e9
 	github.com/chainreactors/sdk/gogo v0.0.0-20260708104745-dcad8620f5e9
