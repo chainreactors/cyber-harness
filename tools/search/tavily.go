@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -70,8 +69,6 @@ func NewTavilySearch(builtinKeys string) *TavilySearch {
 		}
 	}
 
-	addKeys(os.Getenv("TAVILY_API_KEY"))
-	addKeys(os.Getenv("TAVILY_API_KEYS"))
 	addKeys(builtinKeys)
 
 	if len(keys) > 0 {

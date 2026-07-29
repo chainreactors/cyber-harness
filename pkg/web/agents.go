@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/webproto"
@@ -926,7 +927,7 @@ func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg webproto.Message) {
 		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &result) == nil {
 			a.mu.Lock()
 			if result.OK {
-				a.status.Provider = result.Provider
+				a.status.Provider = agentprovider.NormalizeProvider(result.Provider)
 				a.status.Model = result.Model
 				a.status.ConfigError = ""
 			} else {

@@ -101,7 +101,7 @@ func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 func (c *CyberhubSearch) Run(_ context.Context, execution *commands.Execution) (any, error) {
 	args := execution.Args
 	if c.index == nil {
-		return nil, fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (CYBERHUB_URL, CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
+		return nil, fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (AISCAN_CYBERHUB_URL, AISCAN_CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
 	}
 
 	var opts cyberhubFlags

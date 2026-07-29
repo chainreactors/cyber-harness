@@ -244,13 +244,14 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 	cmdReg := commands.NewRegistry()
 	workDir, _ := os.Getwd()
 	deps := &commands.Deps{
-		WorkDir:     workDir,
-		BashTimeout: rc.Tools.BashTimeout,
-		SkillStore:  skillStore,
-		Provider:    llmProvider,
-		Logger:      logger,
-		TavilyKeys:  rc.Tools.TavilyKeys,
-		Hooks:       hookRegistry,
+		WorkDir:           workDir,
+		BashTimeout:       rc.Tools.BashTimeout,
+		SkillStore:        skillStore,
+		Provider:          llmProvider,
+		Logger:            logger,
+		TavilyKeys:        rc.Tools.TavilyKeys,
+		PlaywrightSession: rc.Tools.PlaywrightSession,
+		Hooks:             hookRegistry,
 	}
 	plan := capability.Select(capability.Options{
 		Groups:        []string{"core", "arsenal", "search", "browser"},

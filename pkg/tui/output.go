@@ -82,7 +82,7 @@ func NewAgentOutput(option *cfg.Option) *AgentOutput {
 	return newAgentOutput(option, os.Stdout, os.Stderr,
 		term.IsTerminal(int(os.Stdout.Fd())),
 		term.IsTerminal(int(os.Stderr.Fd())),
-		resolveRenderMode())
+		resolveRenderMode(renderModeValue(option)))
 }
 
 func NewStaticAgentOutput(option *cfg.Option) *AgentOutput {
@@ -93,7 +93,14 @@ func NewStaticAgentOutput(option *cfg.Option) *AgentOutput {
 }
 
 func NewAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {
-	return newAgentOutputWithWriters(option, stdout, stderr, terminal, resolveRenderMode())
+	return newAgentOutputWithWriters(option, stdout, stderr, terminal, resolveRenderMode(renderModeValue(option)))
+}
+
+func renderModeValue(option *cfg.Option) string {
+	if option == nil {
+		return ""
+	}
+	return option.RenderMode
 }
 
 func NewStaticAgentOutputWithWriters(option *cfg.Option, stdout, stderr io.Writer, terminal bool) *AgentOutput {

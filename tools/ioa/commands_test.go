@@ -493,10 +493,10 @@ func TestDefaultSpaceSkipsJoin(t *testing.T) {
 func TestLLMIOAToolUsage(t *testing.T) {
 	apiKey := os.Getenv("LIVE_TEST_API_KEY")
 	if apiKey == "" {
-		apiKey = os.Getenv("DEEPSEEK_API_KEY")
+		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("set LIVE_TEST_API_KEY or DEEPSEEK_API_KEY to run live LLM IOA test")
+		t.Skip("set LIVE_TEST_API_KEY or OPENAI_API_KEY to run live LLM IOA test")
 	}
 	baseURL := envOr("LIVE_TEST_BASE_URL", "https://api.deepseek.com")
 	model := envOr("LIVE_TEST_MODEL", "deepseek-v4-pro")

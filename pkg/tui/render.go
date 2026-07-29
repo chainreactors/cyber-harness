@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +23,8 @@ const (
 	ModeForwarded
 )
 
-func resolveRenderMode() RenderMode {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("AISCAN_RENDER"))) {
+func resolveRenderMode(value string) RenderMode {
+	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "static", "plain", "noninteractive", "non-interactive", "off":
 		return ModeStatic
 	case "forwarded", "forward", "remote", "pipe":

@@ -194,8 +194,8 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
 	pcfg := runner.ProviderConfig(&opt)
-	if pcfg.Provider != "" {
-		t.Fatalf("provider should be unresolved before agent.ResolveProvider, got %q", pcfg.Provider)
+	if pcfg.Provider != "openai" {
+		t.Fatalf("provider = %q, want openai protocol", pcfg.Provider)
 	}
 	resolved, err := agent.ResolveProvider(&pcfg)
 	if err != nil {
@@ -304,8 +304,8 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
 	pcfg := runner.ProviderConfig(&opt)
-	if pcfg.Provider != "" {
-		t.Fatalf("provider should be unresolved before agent.ResolveProvider, got %q", pcfg.Provider)
+	if pcfg.Provider != "openai" {
+		t.Fatalf("provider = %q, want openai protocol", pcfg.Provider)
 	}
 	resolved, err := agent.ResolveProvider(&pcfg)
 	if err != nil {

@@ -31,8 +31,8 @@ type UncoverEngine struct {
 	avail    []string
 }
 
-// NewUncoverEngine builds an engine from ReconOptions credentials merged with
-// environment-provided keys (for sources like shodan, censys, etc.).
+// NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
+// not read process environment variables; core/config owns that boundary.
 func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine {
 	if logger == nil {
 		logger = telemetry.NopLogger()
@@ -55,7 +55,7 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 		p.Hunter = append(p.Hunter, opts.HunterToken)
 	}
 
-	p.LoadProviderKeysFromEnv()
+	applyCredentials(p, opts.Credentials)
 
 	keys := p.GetKeys()
 	// uncover's GetKeys only populates the FofaEmail/FofaKey pair when the stored
@@ -85,6 +85,38 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	}
 	e.avail = e.detectSources()
 	return e
+}
+
+func applyCredentials(p *sources.Provider, values map[string]string) {
+	appendValue := func(dst *[]string, name string) {
+		if value := strings.TrimSpace(values[name]); value != "" {
+			*dst = append(*dst, value)
+		}
+	}
+	appendPair := func(dst *[]string, first, second string) {
+		left := strings.TrimSpace(values[first])
+		right := strings.TrimSpace(values[second])
+		if left != "" && right != "" {
+			*dst = append(*dst, left+":"+right)
+		}
+	}
+
+	appendValue(&p.Shodan, "SHODAN_API_KEY")
+	appendValue(&p.Quake, "QUAKE_TOKEN")
+	appendValue(&p.Netlas, "NETLAS_API_KEY")
+	appendValue(&p.CriminalIP, "CRIMINALIP_API_KEY")
+	appendValue(&p.Publicwww, "PUBLICWWW_API_KEY")
+	appendValue(&p.HunterHow, "HUNTERHOW_API_KEY")
+	appendValue(&p.ZoomEye, "ZOOMEYE_API_KEY")
+	appendValue(&p.Driftnet, "DRIFTNET_API_KEY")
+	appendValue(&p.Daydaymap, "DAYDAYMAP_API_KEY")
+	appendValue(&p.Odin, "ODIN_API_KEY")
+	appendValue(&p.BinaryEdge, "BINARYEDGE_API_KEY")
+	appendValue(&p.Onyphe, "ONYPHE_API_KEY")
+	appendValue(&p.GreyNoise, "GREYNOISE_API_KEY")
+	appendValue(&p.NerdyData, "NERDYDATA_API_KEY")
+	appendPair(&p.Censys, "CENSYS_API_TOKEN", "CENSYS_ORGANIZATION_ID")
+	appendPair(&p.Google, "GOOGLE_API_KEY", "GOOGLE_API_CX")
 }
 
 func (e *UncoverEngine) detectSources() []string {

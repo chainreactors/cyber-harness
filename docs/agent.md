@@ -530,13 +530,15 @@ llm:
       model: gpt-4o
       api_key: "sk-..."
     - id: deepseek
-      provider: deepseek
+      provider: openai
+      base_url: "https://api.deepseek.com/v1"
       model: deepseek-chat
       api_key: "..."
     - id: ollama
-      provider: ollama
+      provider: openai
       model: llama3
       base_url: "http://localhost:11434/v1"
+      api_key: "local"
 ```
 
 `active_profile` 按 `id` 选择当前项；未设置时使用列表第一项。完整格式参见 [参考手册](reference.md)。
@@ -549,8 +551,8 @@ REPL 中使用 `/provider` 命令查看当前和其他可用配置：
 aiscan> /provider
 Provider profiles:
   1. openai / gpt-4o          # active
-  2. deepseek / deepseek-chat  # configured
-  3. ollama / llama3           # configured
+  2. openai / deepseek-chat   # deepseek profile
+  3. openai / llama3          # ollama profile
 ```
 
 切换通过 Web 设置页，或 REPL 的 `/provider set --provider ... --model ...` 显式完成。

@@ -24,25 +24,27 @@ type ApplicationProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL  string
-	CyberhubKey  string
-	CyberhubMode string
-	AIEnabled    bool
-	VerifyMode   string
-	Proxy        string
-	FofaEmail    string
-	FofaKey      string
-	HunterToken  string
-	HunterAPIKey string
-	ReconProxy   string
-	ReconLimit   int
+	CyberhubURL        string
+	CyberhubKey        string
+	CyberhubMode       string
+	AIEnabled          bool
+	VerifyMode         string
+	Proxy              string
+	FofaEmail          string
+	FofaKey            string
+	HunterToken        string
+	HunterAPIKey       string
+	ReconProxy         string
+	ReconLimit         int
+	UncoverCredentials map[string]string
 }
 
 type ToolConfig struct {
-	Enabled       bool
-	BashTimeout   int
-	TavilyKeys    string
-	OptionalTools []string // optional tool groups to enable (e.g. "search", "browser")
+	Enabled           bool
+	BashTimeout       int
+	TavilyKeys        string
+	PlaywrightSession string
+	OptionalTools     []string // optional tool groups to enable (e.g. "search", "browser")
 }
 
 type IOAConfig struct {

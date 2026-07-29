@@ -46,13 +46,19 @@ type Command struct {
 	proxyURL string
 
 	// Browser mode: headed (GUI) vs headless, optional CDP endpoint.
-	headed bool
-	cdpURL string
+	headed         bool
+	cdpURL         string
+	defaultSession string
 }
 
 // New creates a playwright pseudo-command.
 func New(workDir string) *Command {
 	return &Command{workDir: workDir}
+}
+
+func (c *Command) WithDefaultSession(session string) *Command {
+	c.defaultSession = strings.TrimSpace(session)
+	return c
 }
 
 // SetProxy updates the proxy URL for new browser launches.
@@ -245,8 +251,9 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		return nil, fmt.Errorf("playwright: subcommand required\n\n%s", c.Usage())
 	}
 
-	// Extract global -s flag (playwright-cli alignment) and PLAYWRIGHT_CLI_SESSION env var.
-	globalSession := os.Getenv("PLAYWRIGHT_CLI_SESSION")
+	// Extract global -s flag. The environment-derived default is resolved once
+	// by core/config and injected when the command is constructed.
+	globalSession := c.defaultSession
 	var cleanArgs []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-s" && i+1 < len(args) {

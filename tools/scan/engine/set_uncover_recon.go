@@ -43,5 +43,13 @@ func mergeReconOptions(base, next ReconOptions) ReconOptions {
 	if next.Limit != 0 {
 		base.Limit = next.Limit
 	}
+	if len(next.Credentials) > 0 {
+		if base.Credentials == nil {
+			base.Credentials = make(map[string]string, len(next.Credentials))
+		}
+		for key, value := range next.Credentials {
+			base.Credentials[key] = value
+		}
+	}
 	return base
 }

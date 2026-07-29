@@ -227,6 +227,13 @@ func TestNameAndUsage(t *testing.T) {
 	}
 }
 
+func TestWithDefaultSession(t *testing.T) {
+	command := New(".").WithDefaultSession(" session-1 ")
+	if command.defaultSession != "session-1" {
+		t.Fatalf("default session = %q", command.defaultSession)
+	}
+}
+
 func TestFormatTextOutput_Truncation(t *testing.T) {
 	long := strings.Repeat("a", maxOutputLen+100)
 	out := formatTextOutput("https://example.com", long)
