@@ -2,10 +2,11 @@ package webproto
 
 import "testing"
 
-func TestMigrateLLMConfigNormalizesProviderProtocol(t *testing.T) {
+func TestMigrateLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
 	config := LLMConfig{Providers: []LLMProviderConfig{
-		{ID: "deepseek", Provider: "deepseek", BaseURL: "https://api.deepseek.com/v1"},
-		{ID: "claude", Provider: "anthropic"},
+		{ID: "openai", Provider: " OPENAI ", BaseURL: "https://api.deepseek.com/v1"},
+		{ID: "claude", Provider: "ANTHROPIC"},
+		{ID: "invalid", Provider: "deepseek"},
 	}}
 	MigrateLLMConfig(&config, LLMProviderConfig{})
 
@@ -14,5 +15,8 @@ func TestMigrateLLMConfigNormalizesProviderProtocol(t *testing.T) {
 	}
 	if config.Providers[1].Provider != "anthropic" {
 		t.Fatalf("Anthropic provider = %q", config.Providers[1].Provider)
+	}
+	if config.Providers[2].Provider != "deepseek" {
+		t.Fatalf("unsupported provider must not be rewritten, got %q", config.Providers[2].Provider)
 	}
 }

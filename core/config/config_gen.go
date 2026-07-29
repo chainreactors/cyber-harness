@@ -9,13 +9,13 @@ import (
 const configFileHeader = `# aiscan 配置文件
 #
 # 运行时: aiscan 自动加载 ./aiscan.yaml 或 <二进制所在目录>/aiscan.yaml
-# 优先级: CLI > AIScan/集成环境变量 > 配置文件 > Provider 兼容环境变量 > 默认值
+# 优先级: CLI > AIScan/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
 # 生成:   aiscan --init
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
 #
 # LLM 配置支持两种格式:
-#   格式一 — 单 provider 简写（兼容旧配置）:
+#   格式一 — 单 provider 简写:
 #     llm:
 #       provider: openai
 #       base_url: https://api.deepseek.com/v1

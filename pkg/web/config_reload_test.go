@@ -102,7 +102,7 @@ func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
 	pool.register(a)
 
 	payload, _ := json.Marshal(webproto.ConfigReloadResult{
-		OK: true, Provider: "deepseek", Model: "deepseek-v4-pro",
+		OK: true, Provider: "openai", Model: "deepseek-v4-pro",
 	})
 	pool.handleAgentMessage(a, WSMessage{Type: "config.result", Payload: payload})
 	got := a.info().Status

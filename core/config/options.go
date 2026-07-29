@@ -24,10 +24,10 @@ type Option struct {
 
 	// Runtime-only environment settings. Business packages receive these values
 	// after ResolveRuntimeConfig instead of reading the process environment.
-	RenderMode        string            `no-flag:"true"`
-	REPLMode          string            `no-flag:"true"`
-	PlaywrightSession string            `no-flag:"true"`
-	ReconProviderKeys map[string]string `no-flag:"true"`
+	RenderMode         string            `no-flag:"true"`
+	REPLMode           string            `no-flag:"true"`
+	PlaywrightSession  string            `no-flag:"true"`
+	UncoverCredentials map[string]string `no-flag:"true"`
 }
 
 type ScanConfigOptions struct {

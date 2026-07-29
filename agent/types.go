@@ -57,6 +57,7 @@ var (
 	ResolveProvider          = provider.Resolve
 	InferProviderFromBaseURL = provider.InferFromBaseURL
 	NormalizeProvider        = provider.NormalizeProvider
+	IsSupportedProvider      = provider.IsSupportedProvider
 
 	ErrCallTimeout      = provider.ErrCallTimeout
 	ErrStreamStalled    = provider.ErrStreamStalled

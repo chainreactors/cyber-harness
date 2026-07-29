@@ -1,6 +1,21 @@
 package web
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/chainreactors/aiscan/pkg/webproto"
+)
+
+func TestValidateLLMConfigRejectsUnsupportedProvider(t *testing.T) {
+	cfg := webproto.LLMConfig{Providers: []webproto.LLMProviderConfig{{
+		Provider: "deepseek",
+		Model:    "deepseek-chat",
+	}}}
+	if err := ValidateLLMConfig(cfg); err == nil || !strings.Contains(err.Error(), "use openai or anthropic") {
+		t.Fatalf("ValidateLLMConfig() error = %v", err)
+	}
+}
 
 func TestValidateTarget(t *testing.T) {
 	tests := []struct {

@@ -73,8 +73,8 @@ func MigrateLLMConfig(llm *LLMConfig, flat LLMProviderConfig) {
 	llm.ActiveProfile = active.ID
 }
 
-// NormalizeLLMProvider collapses vendor labels to the two supported wire
-// protocols while preserving the profile's endpoint, model, and identity.
+// NormalizeLLMProvider canonicalizes protocol casing and infers the protocol
+// from base_url when omitted. Validation rejects unsupported protocols.
 func NormalizeLLMProvider(profile LLMProviderConfig) LLMProviderConfig {
 	if strings.TrimSpace(profile.Provider) != "" {
 		profile.Provider = agentprovider.NormalizeProvider(profile.Provider)

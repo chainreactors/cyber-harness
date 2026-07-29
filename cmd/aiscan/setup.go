@@ -63,7 +63,7 @@ func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.
 		HunterAPIKey: sc.HunterAPIKey,
 		IngressProxy: sc.ReconProxy,
 		Limit:        sc.ReconLimit,
-		ProviderKeys: sc.ReconProviderKeys,
+		Credentials:  sc.UncoverCredentials,
 	}
 	engineSet.SetupUncover(recon, logger)
 	return engineSet

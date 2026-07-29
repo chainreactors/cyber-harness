@@ -67,8 +67,8 @@ func TestNewUncoverEngineDoesNotRereadCredentialEnvironment(t *testing.T) {
 	}
 }
 
-func TestNewUncoverEngineUsesInjectedProviderKeys(t *testing.T) {
-	eng := NewUncoverEngine(ReconOptions{ProviderKeys: map[string]string{
+func TestNewUncoverEngineUsesInjectedCredentials(t *testing.T) {
+	eng := NewUncoverEngine(ReconOptions{Credentials: map[string]string{
 		"SHODAN_API_KEY": "shodan-key",
 	}}, nil)
 	if eng.keys.Shodan != "shodan-key" || !sourceAvailable(eng, "shodan") {

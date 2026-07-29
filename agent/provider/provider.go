@@ -42,33 +42,27 @@ type ProviderConfig struct {
 	ContextWindow int    `yaml:"context_window,omitempty" config:"context_window"`
 }
 
-type providerPreset struct {
-	Protocol       string
-	BaseURL        string
-	APIKeyRequired bool
-}
+const (
+	ProviderOpenAI    = "openai"
+	ProviderAnthropic = "anthropic"
+)
 
-var providerPresets = map[string]providerPreset{
-	"openai":     {Protocol: "openai", BaseURL: "https://api.openai.com/v1", APIKeyRequired: true},
-	"anthropic":  {Protocol: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKeyRequired: true},
-	"deepseek":   {Protocol: "openai", BaseURL: "https://api.deepseek.com/v1", APIKeyRequired: true},
-	"openrouter": {Protocol: "openai", BaseURL: "https://openrouter.ai/api/v1", APIKeyRequired: true},
-	"groq":       {Protocol: "openai", BaseURL: "https://api.groq.com/openai/v1", APIKeyRequired: true},
-	"moonshot":   {Protocol: "openai", BaseURL: "https://api.moonshot.cn/v1", APIKeyRequired: true},
-	"ollama":     {Protocol: "openai", BaseURL: "http://localhost:11434/v1"},
-	"zhipu":      {Protocol: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", APIKeyRequired: true},
-}
-
-var providerAliases = map[string]string{
-	"bigmodel": "zhipu",
-	"glm":      "zhipu",
+var providerBaseURLs = map[string]string{
+	ProviderOpenAI:    "https://api.openai.com/v1",
+	ProviderAnthropic: "https://api.anthropic.com/v1",
 }
 
 func NormalizeProvider(name string) string {
-	if strings.EqualFold(name, "anthropic") {
-		return "anthropic"
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func IsSupportedProvider(name string) bool {
+	switch NormalizeProvider(name) {
+	case ProviderOpenAI, ProviderAnthropic:
+		return true
+	default:
+		return false
 	}
-	return "openai"
 }
 
 func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
@@ -80,33 +74,19 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 		return nil, fmt.Errorf("context_window must be zero or positive")
 	}
 
-	providerName := strings.ToLower(strings.TrimSpace(resolved.Provider))
-	if alias, ok := providerAliases[providerName]; ok {
-		providerName = alias
-	}
-
+	providerName := NormalizeProvider(resolved.Provider)
 	if providerName == "" {
-		if resolved.BaseURL != "" {
-			providerName = InferFromBaseURL(resolved.BaseURL)
-		} else {
-			providerName = "openai"
-		}
+		providerName = InferFromBaseURL(resolved.BaseURL)
 	}
-
-	preset, knownProvider := providerPresets[providerName]
-	if knownProvider {
-		if strings.TrimSpace(resolved.BaseURL) == "" {
-			resolved.BaseURL = preset.BaseURL
-		}
-		resolved.Provider = preset.Protocol
-	} else {
-		if strings.TrimSpace(resolved.BaseURL) == "" {
-			return nil, fmt.Errorf("unknown provider %q: set base_url for a custom OpenAI-compatible endpoint", providerName)
-		}
-		resolved.Provider = NormalizeProvider(providerName)
+	if !IsSupportedProvider(providerName) {
+		return nil, fmt.Errorf("unsupported provider %q: use openai or anthropic", providerName)
 	}
+	if strings.TrimSpace(resolved.BaseURL) == "" {
+		resolved.BaseURL = providerBaseURLs[providerName]
+	}
+	resolved.Provider = providerName
 
-	if strings.TrimSpace(resolved.APIKey) == "" && (!knownProvider || preset.APIKeyRequired) {
+	if strings.TrimSpace(resolved.APIKey) == "" {
 		return nil, fmt.Errorf("no API key: set --api-key, llm.api_key, or AISCAN_API_KEY")
 	}
 
@@ -131,9 +111,7 @@ func NewProvider(cfg *ProviderConfig) (Provider, error) {
 }
 
 // inferImageSupport guesses whether a provider+model combination accepts
-// image content parts based on the provider type and model name heuristics.
-// Defaults to true for known provider types (anthropic/openai) and falls
-// back to model-name heuristics for unknown providers.
+// image content parts based on the protocol and model name heuristics.
 func inferImageSupport(provider, model string) bool {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -163,16 +141,20 @@ func inferImageSupport(provider, model string) bool {
 // silent failure.
 func InferFromBaseURL(baseURL string) string {
 	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
-		return "anthropic"
+		return ProviderAnthropic
 	}
-	return "openai"
+	return ProviderOpenAI
 }
 
 func NewProviderFromResolved(cfg *ProviderConfig) (Provider, error) {
-	if strings.ToLower(cfg.Provider) == "anthropic" {
+	switch NormalizeProvider(cfg.Provider) {
+	case ProviderAnthropic:
 		return NewAnthropicProvider(cfg)
+	case ProviderOpenAI:
+		return NewOpenAIProvider(cfg)
+	default:
+		return nil, fmt.Errorf("unsupported provider %q: use openai or anthropic", cfg.Provider)
 	}
-	return NewOpenAIProvider(cfg)
 }
 
 // Model capability registry extracted from pi's models.generated.ts.
