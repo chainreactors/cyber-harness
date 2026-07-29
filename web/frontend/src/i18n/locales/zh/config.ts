@@ -59,7 +59,7 @@ export default {
   autoSaveSessions: '自动保存会话',
   // placeholder hints
   configuredKeep: '已配置；留空则保持不变',
-  requiredUnlessOllama: '必填（ollama 除外）',
+  apiKeyRequired: '需要 API Key',
   modelRequired: '模型不能为空',
   modelRequiredProfile: '配置 “{{name}}” 的模型不能为空',
   providerDefault: '留空则使用 Provider 默认值',

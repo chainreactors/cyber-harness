@@ -33,6 +33,7 @@ type ReconOptions struct {
 	HunterAPIKey string // 华顺信安后台 API 管理生成的 api-key (推荐, 64 位 hex)
 	Limit        int
 	IngressProxy string // 给 uncover 的全局出站代理 (http://, https://, socks5://, socks5h://)
+	ProviderKeys map[string]string
 }
 
 type Set struct {

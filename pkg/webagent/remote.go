@@ -38,6 +38,7 @@ func fetchRemoteConfig(webURL string) (*cfg.Option, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
 		return nil, fmt.Errorf("decode remote config: %w", err)
 	}
+	webproto.MigrateLLMConfig(&dc.LLM, webproto.LLMProviderConfig{})
 	return distributeToOption(&dc), nil
 }
 
@@ -66,6 +67,9 @@ func distributeToOption(d *webproto.DistributeConfig) *cfg.Option {
 		},
 		ScanConfig: cfg.ScanConfigOptions{
 			Verify: d.Scan.Verify,
+		},
+		SearchConfig: cfg.SearchConfigOptions{
+			TavilyKeys: d.Search.TavilyKeys,
 		},
 	}
 	opt.FofaEmail = d.Recon.FofaEmail

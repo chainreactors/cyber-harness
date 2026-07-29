@@ -275,3 +275,5 @@ scan、agent joined、session cleared 等产品事件保留独立的 `DomainEven
 对 `BaseURL`、`APIKey` 同理。
 
 **文件**: `core/config/env.go`
+
+所有 AIScan 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。

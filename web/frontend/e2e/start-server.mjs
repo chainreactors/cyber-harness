@@ -67,7 +67,7 @@ await writeFile(configPath, `llm:
   providers:
     - id: e2e
       name: E2E DeepSeek
-      provider: deepseek
+      provider: openai
       base_url: http://${host}:${llmAddress.port}/v1
       api_key: test-key
       model: deepseek-chat

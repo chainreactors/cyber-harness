@@ -138,6 +138,7 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.LLM.ContextWindow = active.ContextWindow
 	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
 	for _, profile := range d.LLM.Providers {
+		profile = webproto.NormalizeLLMProvider(profile)
 		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
 			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
 			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",

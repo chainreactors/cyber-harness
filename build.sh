@@ -7,7 +7,7 @@
 #   ./build.sh -o linux/amd64                   # 快速编译单一平台
 #   ./build.sh -o "linux/amd64 darwin/arm64"    # 编译指定平台
 #   ./build.sh --config prod.yaml               # 使用指定配置文件
-#   ./build.sh --llm-model deepseek-chat        # CLI 覆盖配置文件中的值
+#   ./build.sh --llm-provider openai --llm-model deepseek-chat  # OpenAI-compatible
 #   ./build.sh --embed                          # 嵌入扫描资源（不加 emptytemplates/noembed tag）
 #   ./build.sh --ioa                            # 同时编译 ioa server 二进制
 
@@ -109,7 +109,7 @@ aiscan 构建脚本
   --profile PROFILE     构建配置: agent (~28MB), mini (默认, ~77MB), full (~123MB)
 
 LLM 覆盖（优先级高于 aiscan.yaml）:
-  --llm-provider NAME
+  --llm-provider TYPE   openai (OpenAI-compatible) or anthropic
   --llm-base-url URL
   --llm-api-key KEY
   --llm-model NAME
@@ -137,7 +137,7 @@ Web Search:
   ./build.sh -o linux/amd64                     # 快速编译单平台
   ./build.sh --config prod.yaml -o linux/amd64  # 使用生产配置编译
   ./build.sh --cyberhub-url http://10.0.0.1:9000 --cyberhub-key mykey
-  ./build.sh --llm-provider deepseek --llm-model deepseek-chat
+  ./build.sh --llm-provider openai --llm-base-url https://api.deepseek.com/v1 --llm-model deepseek-chat
   ./build.sh --embed                            # 嵌入资源的完整构建
   ./build.sh -g                                 # 打印 ldflags（用于自定义构建命令）
   ./build.sh --profile agent -o linux/amd64      # agent 构建 (仅 agent REPL + Arsenal, 无内置扫描器)

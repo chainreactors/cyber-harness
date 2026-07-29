@@ -519,7 +519,7 @@ cyberhub:
 		}
 
 		checks := []struct{ field, got, want string }{
-			{"Provider", option.Provider, "deepseek"},
+			{"Provider", option.Provider, "openai"},
 			{"BaseURL", option.BaseURL, "https://env.example/v1"},
 			{"APIKey", option.APIKey, "env-key"},
 			{"Model", option.Model, "env-model"},
@@ -608,6 +608,103 @@ llm:
 		}
 		if option.Provider != "anthropic" || option.BaseURL != "https://anthropic-proxy.example/v1" || option.Model != "claude-env" || option.APIKey != "anthropic-key" {
 			t.Fatalf("Anthropic env aliases not applied: %#v", option.LLMOptions)
+		}
+	})
+}
+
+func TestResolveRuntimeConfigNormalizesLegacyProviderToOpenAI(t *testing.T) {
+	t.Setenv("AISCAN_PROVIDER", "")
+	t.Setenv("AISCAN_LLM_PROVIDER", "")
+	t.Setenv("AISCAN_API_KEY", "")
+	t.Setenv("AISCAN_LLM_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "openai-compatible-key")
+	t.Setenv("DEEPSEEK_API_KEY", "ignored-vendor-key")
+
+	withDefaults(t, func() {
+		dir := t.TempDir()
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(origDir)
+
+		option := Option{LLMOptions: LLMOptions{Provider: "deepseek"}}
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
+			t.Fatal(err)
+		}
+		if option.Provider != "openai" || option.APIKey != "openai-compatible-key" {
+			t.Fatalf("legacy provider was not normalized: %#v", option.LLMOptions)
+		}
+	})
+}
+
+func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
+	values := map[string]string{
+		"DEEPSEEK_API_KEY":  "vendor-key",
+		"DEEPSEEK_BASE_URL": "https://vendor.example/v1",
+		"DEEPSEEK_MODEL":    "vendor-model",
+	}
+	lookup := func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
+
+	option := Option{LLMOptions: LLMOptions{Provider: "deepseek"}}
+	applyEnvironment(&option, option, lookup, testProviderInference)
+	normalizeProviderOptions(&option, testProviderInference)
+	if option.Provider != "openai" || option.APIKey != "" || option.BaseURL != "" || option.Model != "" {
+		t.Fatalf("vendor-specific LLM environment should be ignored: %#v", option.LLMOptions)
+	}
+}
+
+func TestApplyEnvironmentCentralizesRuntimeAndReconValues(t *testing.T) {
+	values := map[string]string{
+		"AISCAN_DATA_DIR":        "env-data",
+		"AISCAN_RENDER":          "static",
+		"AISCAN_REPL":            "fast",
+		"PLAYWRIGHT_CLI_SESSION": "browser-1",
+		"SHODAN_API_KEY":         "shodan-key",
+	}
+	lookup := func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
+
+	option := Option{MiscOptions: MiscOptions{DataDir: "config-data"}}
+	applyEnvironment(&option, Option{}, lookup, testProviderInference)
+	if option.DataDir != "env-data" || option.RenderMode != "static" || option.REPLMode != "fast" || option.PlaywrightSession != "browser-1" {
+		t.Fatalf("runtime environment not resolved: %#v", option)
+	}
+	if option.ReconProviderKeys["SHODAN_API_KEY"] != "shodan-key" {
+		t.Fatalf("recon provider environment not resolved: %#v", option.ReconProviderKeys)
+	}
+
+	cli := Option{MiscOptions: MiscOptions{DataDir: "cli-data"}}
+	applyEnvironment(&cli, cli, lookup, testProviderInference)
+	if cli.DataDir != "cli-data" {
+		t.Fatalf("CLI data dir should win over env: got %q", cli.DataDir)
+	}
+}
+
+func TestResolveRuntimeConfigTavilyPriority(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "search:\n  tavily_keys: config-key\n")
+	t.Setenv("TAVILY_API_KEY", "env-key")
+
+	withDefaults(t, func() {
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chdir(origDir)
+
+		option := Option{ReconOptions: ReconOptions{TavilyKey: "cli-key"}}
+		if _, err := ResolveRuntimeConfig(&option, true, testProviderInference); err != nil {
+			t.Fatal(err)
+		}
+		if option.TavilyKey != "cli-key" || option.SearchConfig.TavilyKeys != "config-key" {
+			t.Fatalf("Tavily sources were not centralized: cli=%q config=%q", option.TavilyKey, option.SearchConfig.TavilyKeys)
 		}
 	})
 }
@@ -757,7 +854,7 @@ llm:
 	if _, err := ResolveRuntimeConfig(&explicit, false, testProviderInference); err != nil {
 		t.Fatal(err)
 	}
-	if explicit.Provider != "deepseek" || explicit.Model != "cli-model" || explicit.APIKey != "cli-key" {
+	if explicit.Provider != "openai" || explicit.Model != "cli-model" || explicit.APIKey != "cli-key" {
 		t.Fatalf("explicit CLI LLM values did not override staged config: %+v", explicit.LLMOptions)
 	}
 }

@@ -514,7 +514,8 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 // ---------------------------------------------------------------------------
 
 func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string, logger telemetry.Logger) error {
-	features, scannerArgs, err := DirectScannerRuntimeFeatures(rest)
+	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
+	features, scannerArgs, err := DirectScannerRuntimeFeaturesWithDefault(rest, defaultVerify)
 	if err != nil {
 		return err
 	}
