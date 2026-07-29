@@ -38,7 +38,10 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	}
 	defer store.Close()
 
-	application, err := initWebApp(ctx, explicitOption, logger)
+	// The initial app must use the fully resolved option, including values loaded
+	// from the config file and environment. explicitOption is only the seed for
+	// later staged reloads, where the candidate config is resolved independently.
+	application, err := initWebApp(ctx, option, logger)
 	if err != nil {
 		return fmt.Errorf("init aiscan: %s", err)
 	}
