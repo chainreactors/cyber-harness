@@ -18,6 +18,14 @@ func TestParseTavilyArgsBasicQuery(t *testing.T) {
 	}
 }
 
+func TestNewTavilySearchUsesInjectedKeysOnly(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "ambient-key")
+	search := NewTavilySearch("resolved-key")
+	if search.apiKey != "resolved-key" || len(search.apiKeys) != 1 {
+		t.Fatalf("ambient environment bypassed resolved config: %#v", search.apiKeys)
+	}
+}
+
 func TestParseTavilyArgsWithNum(t *testing.T) {
 	query, num, err := parseTavilyArgs([]string{"nginx", "--num", "8"})
 	if err != nil {

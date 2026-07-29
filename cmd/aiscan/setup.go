@@ -63,6 +63,7 @@ func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.
 		HunterAPIKey: sc.HunterAPIKey,
 		IngressProxy: sc.ReconProxy,
 		Limit:        sc.ReconLimit,
+		ProviderKeys: sc.ReconProviderKeys,
 	}
 	engineSet.SetupUncover(recon, logger)
 	return engineSet
@@ -97,13 +98,14 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 
 	workDir, _ := os.Getwd()
 	deps := &commands.Deps{
-		WorkDir:      workDir,
-		BashTimeout:  toolCfg.BashTimeout,
-		SkillStore:   skillStore,
-		ScannerProxy: scanCfg.Proxy,
-		Logger:       logger,
-		TavilyKeys:   toolCfg.TavilyKeys,
-		DataBus:      dataBus,
+		WorkDir:           workDir,
+		BashTimeout:       toolCfg.BashTimeout,
+		SkillStore:        skillStore,
+		ScannerProxy:      scanCfg.Proxy,
+		Logger:            logger,
+		TavilyKeys:        toolCfg.TavilyKeys,
+		PlaywrightSession: toolCfg.PlaywrightSession,
+		DataBus:           dataBus,
 	}
 	commands.Provide(deps, scan.OptsKey, scanOpts)
 	if engineSet != nil {

@@ -17,6 +17,7 @@ func ResolveRuntimeConfig(option *Option, applyProcessState bool, inferProvider 
 		return configPath, err
 	}
 	applyEnvironment(option, explicit, os.LookupEnv, inferProvider)
+	normalizeProviderOptions(option, inferProvider)
 	ApplyDefaults(option)
 	if _, err := ResolveOutputPolicy(option); err != nil {
 		return configPath, err
@@ -31,6 +32,7 @@ func applyEnvironment(option *Option, explicit Option, lookup envLookup, inferPr
 	applyLLMEnvironment(option, explicit, lookup, inferProvider)
 	applyScannerEnvironment(option, explicit, lookup)
 	applyReconEnvironment(option, explicit, lookup)
+	applyRuntimeEnvironment(option, explicit, lookup)
 }
 
 func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup, inferProvider func(string) string) {
@@ -109,17 +111,17 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup, infe
 
 func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.CyberhubURL) == "" {
-		if v := firstEnv(lookup, "CYBERHUB_URL", "AISCAN_CYBERHUB_URL"); v != "" {
+		if v := firstEnv(lookup, "AISCAN_CYBERHUB_URL", "CYBERHUB_URL"); v != "" {
 			option.CyberhubURL = v
 		}
 	}
 	if strings.TrimSpace(explicit.CyberhubKey) == "" {
-		if v := firstEnv(lookup, "CYBERHUB_KEY", "AISCAN_CYBERHUB_KEY"); v != "" {
+		if v := firstEnv(lookup, "AISCAN_CYBERHUB_KEY", "CYBERHUB_KEY"); v != "" {
 			option.CyberhubKey = v
 		}
 	}
 	if strings.TrimSpace(explicit.CyberhubMode) == "" {
-		if v := firstEnv(lookup, "CYBERHUB_MODE", "AISCAN_CYBERHUB_MODE"); v != "" {
+		if v := firstEnv(lookup, "AISCAN_CYBERHUB_MODE", "CYBERHUB_MODE"); v != "" {
 			option.CyberhubMode = v
 		}
 	}
@@ -161,26 +163,75 @@ func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
 			option.ReconProxy = v
 		}
 	}
+	applyReconProviderEnvironment(option, lookup)
+}
+
+func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) {
+	if strings.TrimSpace(explicit.DataDir) == "" {
+		if v := firstEnv(lookup, "AISCAN_DATA_DIR"); v != "" {
+			option.DataDir = v
+		}
+	}
+	if strings.TrimSpace(explicit.RenderMode) == "" {
+		option.RenderMode = firstEnv(lookup, "AISCAN_RENDER")
+	}
+	if strings.TrimSpace(explicit.REPLMode) == "" {
+		option.REPLMode = firstEnv(lookup, "AISCAN_REPL")
+	}
+	if strings.TrimSpace(explicit.PlaywrightSession) == "" {
+		option.PlaywrightSession = firstEnv(lookup, "PLAYWRIGHT_CLI_SESSION")
+	}
+}
+
+var reconProviderEnvNames = []string{
+	"SHODAN_API_KEY",
+	"QUAKE_TOKEN",
+	"NETLAS_API_KEY",
+	"CRIMINALIP_API_KEY",
+	"PUBLICWWW_API_KEY",
+	"HUNTERHOW_API_KEY",
+	"ZOOMEYE_API_KEY",
+	"DRIFTNET_API_KEY",
+	"DAYDAYMAP_API_KEY",
+	"CENSYS_API_TOKEN",
+	"CENSYS_ORGANIZATION_ID",
+	"GOOGLE_API_KEY",
+	"GOOGLE_API_CX",
+	"ODIN_API_KEY",
+	"BINARYEDGE_API_KEY",
+	"ONYPHE_API_KEY",
+	"GREYNOISE_API_KEY",
+	"NERDYDATA_API_KEY",
+}
+
+func applyReconProviderEnvironment(option *Option, lookup envLookup) {
+	for _, name := range reconProviderEnvNames {
+		if value := firstEnv(lookup, name); value != "" {
+			if option.ReconProviderKeys == nil {
+				option.ReconProviderKeys = make(map[string]string)
+			}
+			option.ReconProviderKeys[name] = value
+		}
+	}
 }
 
 func selectedEnvProvider(option *Option, lookup envLookup, inferProvider func(string) string) string {
 	if v := strings.ToLower(strings.TrimSpace(option.Provider)); v != "" {
-		return v
+		return normalizeProviderName(v)
 	}
 	if option.BaseURL != "" && inferProvider != nil {
 		return inferProvider(option.BaseURL)
 	}
-	if firstEnv(lookup, "ANTHROPIC_API_KEY") != "" {
-		return "anthropic"
-	}
-	if firstEnv(lookup, "OPENAI_API_KEY") != "" {
-		return "openai"
+	for _, providerName := range []string{"anthropic", "openai"} {
+		if providerAPIKeyEnv(providerName, lookup) != "" {
+			return providerName
+		}
 	}
 	return ""
 }
 
 func providerBaseURLEnv(providerName string, lookup envLookup) string {
-	providerName = strings.ToLower(strings.TrimSpace(providerName))
+	providerName = canonicalEnvProvider(providerName)
 	if providerName == "" {
 		return ""
 	}
@@ -193,7 +244,7 @@ func providerBaseURLEnv(providerName string, lookup envLookup) string {
 }
 
 func providerModelEnv(providerName string, lookup envLookup) string {
-	providerName = strings.ToLower(strings.TrimSpace(providerName))
+	providerName = canonicalEnvProvider(providerName)
 	if providerName == "" {
 		return ""
 	}
@@ -201,13 +252,41 @@ func providerModelEnv(providerName string, lookup envLookup) string {
 }
 
 func providerAPIKeyEnv(providerName string, lookup envLookup) string {
-	providerName = strings.ToLower(strings.TrimSpace(providerName))
-	switch providerName {
-	case "anthropic":
-		return firstEnv(lookup, "ANTHROPIC_API_KEY")
-	default:
-		return firstEnv(lookup, "OPENAI_API_KEY")
+	providerName = canonicalEnvProvider(providerName)
+	if providerName == "" {
+		return ""
 	}
+	return firstEnv(lookup, providerEnvName(providerName, "API_KEY"))
+}
+
+func canonicalEnvProvider(providerName string) string {
+	if strings.TrimSpace(providerName) == "" {
+		return ""
+	}
+	return normalizeProviderName(providerName)
+}
+
+func normalizeProviderOptions(option *Option, inferProvider func(string) string) {
+	if strings.TrimSpace(option.Provider) != "" {
+		option.Provider = normalizeProviderName(option.Provider)
+	} else if strings.TrimSpace(option.BaseURL) != "" && inferProvider != nil {
+		option.Provider = normalizeProviderName(inferProvider(option.BaseURL))
+	}
+	for i := range option.Providers {
+		providerName := strings.TrimSpace(option.Providers[i].Provider)
+		if providerName != "" {
+			option.Providers[i].Provider = normalizeProviderName(providerName)
+		} else if inferProvider != nil {
+			option.Providers[i].Provider = normalizeProviderName(inferProvider(option.Providers[i].BaseURL))
+		}
+	}
+}
+
+func normalizeProviderName(name string) string {
+	if strings.EqualFold(strings.TrimSpace(name), "anthropic") {
+		return "anthropic"
+	}
+	return "openai"
 }
 
 func providerEnvName(providerName, suffix string) string {

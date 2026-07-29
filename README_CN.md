@@ -186,7 +186,7 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI 参数
-aiscan agent --provider deepseek --api-key sk-... --model deepseek-chat
+aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
 ```
 
 配置文件 `aiscan.yaml`：

@@ -38,7 +38,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	}
 	defer store.Close()
 
-	application, err := initWebApp(ctx, option, logger)
+	application, err := initWebApp(ctx, explicitOption, logger)
 	if err != nil {
 		return fmt.Errorf("init aiscan: %s", err)
 	}
@@ -269,6 +269,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming w
 		}
 		current = parseDistributeConfig(data)
 	}
+	webproto.MigrateLLMConfig(&incoming.LLM, webproto.LLMProviderConfig{})
 
 	// Preserve existing secrets when incoming value is empty.
 	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)

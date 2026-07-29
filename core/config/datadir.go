@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -24,14 +23,12 @@ func SetDataDir(dir string) {
 }
 
 // DataDir returns the resolved .aiscan data directory.
-// Priority: AISCAN_DATA_DIR env > config/CLI --data-dir > <binary_dir>/.aiscan
+// Priority is resolved centrally before this function is called:
+// CLI > AISCAN_DATA_DIR > config > <binary_dir>/.aiscan.
 func DataDir() string {
 	dataDirOnce.Do(func() {
 		dataDirMu.Lock()
 		defer dataDirMu.Unlock()
-		if v := strings.TrimSpace(os.Getenv("AISCAN_DATA_DIR")); v != "" {
-			resolvedDataDir = v
-		}
 		if resolvedDataDir == "" {
 			if exe, err := os.Executable(); err == nil {
 				resolvedDataDir = filepath.Join(filepath.Dir(exe), dataDirName)

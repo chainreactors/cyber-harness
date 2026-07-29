@@ -25,10 +25,10 @@ func TestActivateLLMProfileSelectsByID(t *testing.T) {
 	if store.cfg.LLM.ActiveProfile != "fast" || store.cfg.LLM.Providers[0].ID != "primary" {
 		t.Fatalf("active profile not switched by id: %+v", store.cfg.LLM)
 	}
-	if active := store.cfg.LLM.Active(); active.Model != "deepseek-fast" || active.APIKey != "key-2" {
+	if active := store.cfg.LLM.Active(); active.Provider != "openai" || active.Model != "deepseek-fast" || active.APIKey != "key-2" {
 		t.Fatalf("Active() did not resolve the selected profile: %+v", active)
 	}
-	if status.LLM.ActiveProfile != "fast" || status.LLM.Model != "deepseek-fast" {
+	if status.LLM.ActiveProfile != "fast" || status.LLM.Provider != "openai" || status.LLM.Model != "deepseek-fast" {
 		t.Fatalf("status not synchronized: %+v", status.LLM)
 	}
 }

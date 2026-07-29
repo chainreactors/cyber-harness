@@ -8,13 +8,17 @@ import (
 )
 
 func DirectScannerRuntimeFeatures(rest []string) (RuntimeFeatures, []string, error) {
+	return DirectScannerRuntimeFeaturesWithDefault(rest, config.DefaultVerify)
+}
+
+func DirectScannerRuntimeFeaturesWithDefault(rest []string, defaultVerify string) (RuntimeFeatures, []string, error) {
 	if len(rest) == 0 {
 		return RuntimeFeatures{}, nil, fmt.Errorf("missing scanner command")
 	}
 	if rest[0] != "scan" {
 		return RuntimeFeatures{}, rest, nil
 	}
-	verifyMode, explicit := scannerVerifyMode(rest[1:])
+	verifyMode, explicit := scannerVerifyMode(rest[1:], defaultVerify)
 	sniperEnabled := HasScannerFlag(rest[1:], "--sniper")
 	deepEnabled := HasScannerFlag(rest[1:], "--deep")
 	aiSkillRequested := sniperEnabled || deepEnabled
@@ -104,7 +108,7 @@ func isDirectScannerJSONOutput(rest []string) bool {
 	return false
 }
 
-func scannerVerifyMode(args []string) (string, bool) {
+func scannerVerifyMode(args []string, defaultVerify string) (string, bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		key, value, hasValue := strings.Cut(arg, "=")
@@ -119,7 +123,7 @@ func scannerVerifyMode(args []string) (string, bool) {
 		}
 		return "", true
 	}
-	return defaultVerifyMode(), false
+	return defaultVerifyMode(defaultVerify), false
 }
 
 func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
@@ -144,8 +148,8 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 	return append(out, flag+"="+value)
 }
 
-func defaultVerifyMode() string {
-	value := strings.ToLower(strings.TrimSpace(config.DefaultVerify))
+func defaultVerifyMode(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
 		return "off"
 	}

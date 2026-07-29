@@ -27,14 +27,8 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 const LLM_PROVIDERS = [
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'ollama', label: 'Ollama' },
-  { value: 'groq', label: 'Groq' },
-  { value: 'moonshot', label: 'Moonshot' },
+  { value: 'openai', label: 'OpenAI-compatible' },
   { value: 'anthropic', label: 'Anthropic' },
-  { value: 'zhipu', label: 'Zhipu GLM' },
 ]
 
 function emptyForm(): DistributeConfig {
@@ -54,6 +48,7 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
   const profiles: LLMProviderProfile[] = cs.llm.profiles?.length
     ? cs.llm.profiles.map(profile => ({
         ...profile,
+        provider: normalizeProvider(profile.provider),
         api_key: '',
         context_window: positiveInteger(profile.context_window),
         max_tokens: positiveInteger(profile.max_tokens),
@@ -61,7 +56,7 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
     : [{
         id: cs.llm.active_profile || 'default',
         name: cs.llm.model || cs.llm.provider || 'Default',
-        provider: cs.llm.provider,
+        provider: normalizeProvider(cs.llm.provider),
         base_url: cs.llm.base_url,
         api_key: '',
         model: cs.llm.model,
@@ -85,6 +80,10 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
 
 function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
   return { id, name: 'New LLM', provider: 'openai', base_url: '', api_key: '', model: '', proxy: '' }
+}
+
+function normalizeProvider(provider: string): 'openai' | 'anthropic' {
+  return provider.trim().toLowerCase() === 'anthropic' ? 'anthropic' : 'openai'
 }
 
 function positiveInteger(value: number | undefined): number | undefined {
@@ -478,7 +477,7 @@ function LLMTab({
       <div className="sm:col-span-2">
         <Field label={t('apiKey')}>
           <Input type="password" value={profile.api_key} onChange={(e) => updateProfile('api_key', e.target.value)}
-            placeholder={configuredProfile?.api_key_configured ? t('configuredKeep') : t('requiredUnlessOllama')} />
+            placeholder={configuredProfile?.api_key_configured ? t('configuredKeep') : t('apiKeyRequired')} />
         </Field>
       </div>
       <div className="sm:col-span-2 flex flex-wrap items-center gap-3">

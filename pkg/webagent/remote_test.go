@@ -37,7 +37,7 @@ func TestFetchRemoteConfigUsesBearerTokenFromURL(t *testing.T) {
 		t.Fatalf("unexpected remote option: %+v", option.LLMOptions)
 	}
 	primary := option.Providers[0]
-	if primary.Provider != "deepseek" || primary.Model != "deepseek-chat" {
+	if primary.Provider != "openai" || primary.Model != "deepseek-chat" {
 		t.Fatalf("unexpected primary profile: %+v", primary)
 	}
 	if primary.MaxTokens != 8192 || primary.ContextWindow != 128000 {

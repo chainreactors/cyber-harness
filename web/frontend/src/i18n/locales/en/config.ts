@@ -59,7 +59,7 @@ export default {
   autoSaveSessions: 'Auto-save sessions',
   // placeholder hints
   configuredKeep: 'configured; leave blank to keep',
-  requiredUnlessOllama: 'required unless ollama',
+  apiKeyRequired: 'API key required',
   modelRequired: 'Model is required',
   modelRequiredProfile: 'Profile “{{name}}” requires a model',
   providerDefault: 'leave empty for provider default',

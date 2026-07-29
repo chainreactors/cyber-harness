@@ -19,7 +19,7 @@ func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {
 		t.Fatalf("primary profile = %+v", primary)
 	}
 	fallbacks := FallbackProviderConfigs(&option)
-	if len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" || fallbacks[0].APIKey != "dk-111" {
+	if len(fallbacks) != 1 || fallbacks[0].Provider != "openai" || fallbacks[0].APIKey != "dk-111" {
 		t.Fatalf("fallback profiles = %+v", fallbacks)
 	}
 }
@@ -33,7 +33,7 @@ func TestProviderConfigExplicitFieldsWin(t *testing.T) {
 	if primary.Provider != "anthropic" || primary.APIKey != "cli-key" || primary.Model != "cli-model" {
 		t.Fatalf("explicit provider = %+v", primary)
 	}
-	if fallbacks := FallbackProviderConfigs(&option); len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" {
+	if fallbacks := FallbackProviderConfigs(&option); len(fallbacks) != 1 || fallbacks[0].Provider != "openai" {
 		t.Fatalf("fallback profiles = %+v", fallbacks)
 	}
 }

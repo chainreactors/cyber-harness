@@ -12,7 +12,7 @@ func init() {
 	commands.RegisterFactory(commands.Factory{
 		Capability: "browser",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			impl := New(deps.WorkDir)
+			impl := New(deps.WorkDir).WithDefaultSession(deps.PlaywrightSession)
 			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run, Close: impl.Close}, "browser")
 		},
 	})

@@ -1,13 +1,15 @@
 package runner
 
 import (
+	"strings"
+
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
 )
 
 func defaultProviderConfig() agent.ProviderConfig {
 	return agent.ProviderConfig{
-		Provider: cfg.DefaultProvider,
+		Provider: agent.NormalizeProvider(cfg.DefaultProvider),
 		BaseURL:  cfg.DefaultBaseURL,
 		APIKey:   cfg.DefaultAPIKey,
 		Model:    cfg.DefaultModel,
@@ -19,8 +21,14 @@ func hasSingleProviderFields(option *cfg.Option) bool {
 }
 
 func entryToProviderConfig(entry cfg.LLMProviderEntry) agent.ProviderConfig {
+	providerName := strings.TrimSpace(entry.Provider)
+	if providerName == "" {
+		providerName = agent.InferProviderFromBaseURL(entry.BaseURL)
+	} else {
+		providerName = agent.NormalizeProvider(providerName)
+	}
 	cfg := agent.ProviderConfig{
-		Provider:      entry.Provider,
+		Provider:      providerName,
 		BaseURL:       entry.BaseURL,
 		APIKey:        entry.APIKey,
 		Model:         entry.Model,
@@ -66,12 +74,12 @@ func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
 	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
-		cfg.Provider = option.Provider
+		cfg.Provider = agent.NormalizeProvider(option.Provider)
 	}
 	if option.BaseURL != "" {
 		cfg.BaseURL = option.BaseURL
 		if option.Provider == "" {
-			cfg.Provider = ""
+			cfg.Provider = agent.InferProviderFromBaseURL(option.BaseURL)
 		}
 	}
 	if option.APIKey != "" {
