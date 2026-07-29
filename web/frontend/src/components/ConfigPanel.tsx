@@ -26,9 +26,19 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'agent', label: 'Agent' },
 ]
 
-const LLM_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI-compatible' },
-  { value: 'anthropic', label: 'Anthropic' },
+type LLMProtocol = 'openai' | 'anthropic'
+
+const LLM_PROVIDER_PRESETS: { value: string; label: string; protocol: LLMProtocol; baseUrl: string }[] = [
+  { value: 'openai', label: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1' },
+  { value: 'anthropic', label: 'Anthropic', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com/v1' },
+  { value: 'deepseek', label: 'DeepSeek', protocol: 'openai', baseUrl: 'https://api.deepseek.com/v1' },
+  { value: 'openrouter', label: 'OpenRouter', protocol: 'openai', baseUrl: 'https://openrouter.ai/api/v1' },
+  { value: 'groq', label: 'Groq', protocol: 'openai', baseUrl: 'https://api.groq.com/openai/v1' },
+  { value: 'moonshot', label: 'Moonshot', protocol: 'openai', baseUrl: 'https://api.moonshot.cn/v1' },
+  { value: 'ollama', label: 'Ollama', protocol: 'openai', baseUrl: 'http://localhost:11434/v1' },
+  { value: 'zhipu', label: 'Zhipu GLM', protocol: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+  { value: 'custom-openai', label: '', protocol: 'openai', baseUrl: '' },
+  { value: 'custom-anthropic', label: '', protocol: 'anthropic', baseUrl: '' },
 ]
 
 function emptyForm(): DistributeConfig {
@@ -48,7 +58,6 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
   const profiles: LLMProviderProfile[] = cs.llm.profiles?.length
     ? cs.llm.profiles.map(profile => ({
         ...profile,
-        provider: normalizeProvider(profile.provider),
         api_key: '',
         context_window: positiveInteger(profile.context_window),
         max_tokens: positiveInteger(profile.max_tokens),
@@ -56,7 +65,7 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
     : [{
         id: cs.llm.active_profile || 'default',
         name: cs.llm.model || cs.llm.provider || 'Default',
-        provider: normalizeProvider(cs.llm.provider),
+        provider: cs.llm.provider,
         base_url: cs.llm.base_url,
         api_key: '',
         model: cs.llm.model,
@@ -79,11 +88,15 @@ function statusToForm(cs: ConfigStatus): DistributeConfig {
 }
 
 function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
-  return { id, name: 'New LLM', provider: 'openai', base_url: '', api_key: '', model: '', proxy: '' }
+  return { id, name: 'New LLM', provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
 }
 
-function normalizeProvider(provider: string): 'openai' | 'anthropic' {
-  return provider.trim().toLowerCase() === 'anthropic' ? 'anthropic' : 'openai'
+function providerPresetValue(profile: LLMProviderProfile): string {
+  const baseURL = profile.base_url.trim().replace(/\/+$/, '')
+  if (!baseURL) return `custom-${profile.provider}`
+  return LLM_PROVIDER_PRESETS.find(preset =>
+    preset.protocol === profile.provider && preset.baseUrl.replace(/\/+$/, '') === baseURL
+  )?.value || `custom-${profile.provider}`
 }
 
 function positiveInteger(value: number | undefined): number | undefined {
@@ -298,15 +311,33 @@ function LLMTab({
   const profile = profiles.find(item => item.id === selectedProfileID) || profiles[0]
   const configuredProfile = cs?.llm.profiles?.find(item => item.id === profile?.id)
 
-  const updateProfile = <K extends keyof LLMProviderProfile,>(key: K, value: LLMProviderProfile[K]) => {
+  const patchProfile = (patch: Partial<LLMProviderProfile>) => {
     if (!profile) return
     setForm(current => ({
       ...current,
       llm: {
         ...current.llm,
-        providers: current.llm.providers.map(item => item.id === profile.id ? { ...item, [key]: value } : item),
+        providers: current.llm.providers.map(item => item.id === profile.id ? { ...item, ...patch } : item),
       },
     }))
+  }
+
+  const updateProfile = <K extends keyof LLMProviderProfile,>(key: K, value: LLMProviderProfile[K]) => {
+    patchProfile({ [key]: value } as Partial<LLMProviderProfile>)
+  }
+
+  const resetProviderState = () => {
+    setModels([])
+    setModelsError(null)
+    setModelsNotice(null)
+    setResult(null)
+  }
+
+  const selectProviderPreset = (value: string) => {
+    const selected = LLM_PROVIDER_PRESETS.find(item => item.value === value)
+    if (!selected) return
+    patchProfile({ provider: selected.protocol, base_url: selected.baseUrl })
+    resetProviderState()
   }
 
   const addProfile = () => {
@@ -425,11 +456,15 @@ function LLMTab({
       <Field label={t('profileName')}>
         <Input value={profile.name} onChange={(e) => updateProfile('name', e.target.value)} placeholder={t('profileNameHint')} />
       </Field>
-      <Field label={t('provider')}>
-        <Select value={profile.provider} onValueChange={(v) => updateProfile('provider', v)}>
+      <Field label={t('provider')} hint={t('providerPresetHint')}>
+        <Select value={providerPresetValue(profile)} onValueChange={selectProviderPreset}>
           <SelectTrigger className="h-9 w-full"><SelectValue placeholder={t('selectProvider')} /></SelectTrigger>
           <SelectContent>
-            {LLM_PROVIDERS.map((provider) => <SelectItem key={provider.value} value={provider.value}>{provider.label}</SelectItem>)}
+            {LLM_PROVIDER_PRESETS.map((preset) => (
+              <SelectItem key={preset.value} value={preset.value}>
+                {preset.label || t(preset.protocol === 'openai' ? 'customOpenAI' : 'customAnthropic')} · {preset.protocol}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Field>

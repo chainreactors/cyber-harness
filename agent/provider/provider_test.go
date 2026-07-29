@@ -22,14 +22,6 @@ func TestResolveProviderPresets(t *testing.T) {
 	}{
 		{name: "openai", provider: "openai", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://api.openai.com/v1"},
 		{name: "anthropic", provider: "anthropic", apiKey: "key", wantProtocol: "anthropic", wantBaseURL: "https://api.anthropic.com/v1"},
-		{name: "deepseek", provider: "deepseek", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://api.deepseek.com/v1"},
-		{name: "openrouter", provider: "openrouter", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://openrouter.ai/api/v1"},
-		{name: "groq", provider: "groq", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://api.groq.com/openai/v1"},
-		{name: "moonshot", provider: "moonshot", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://api.moonshot.cn/v1"},
-		{name: "ollama", provider: "ollama", wantProtocol: "openai", wantBaseURL: "http://localhost:11434/v1"},
-		{name: "zhipu", provider: "zhipu", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://open.bigmodel.cn/api/paas/v4"},
-		{name: "glm alias", provider: "glm", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://open.bigmodel.cn/api/paas/v4"},
-		{name: "bigmodel alias", provider: "bigmodel", apiKey: "key", wantProtocol: "openai", wantBaseURL: "https://open.bigmodel.cn/api/paas/v4"},
 	}
 
 	for _, tt := range tests {
@@ -45,30 +37,18 @@ func TestResolveProviderPresets(t *testing.T) {
 	}
 }
 
-func TestResolvePreservesExplicitDeepSeekBaseURL(t *testing.T) {
-	resolved, err := Resolve(&ProviderConfig{
-		Provider: "deepseek",
-		BaseURL:  "https://gateway.example/v1",
-		APIKey:   "key",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.BaseURL != "https://gateway.example/v1" || resolved.Provider != "openai" {
-		t.Fatalf("Resolve() = %+v", resolved)
-	}
-}
-
-func TestResolveUnknownProviderRequiresBaseURL(t *testing.T) {
-	_, err := Resolve(&ProviderConfig{Provider: "custom", APIKey: "key"})
-	if err == nil || !strings.Contains(err.Error(), "base_url") {
-		t.Fatalf("Resolve() error = %v, want base_url guidance", err)
+func TestResolveRejectsUnsupportedProvider(t *testing.T) {
+	for _, name := range []string{"deepseek", "openrouter", "ollama", "custom"} {
+		_, err := Resolve(&ProviderConfig{Provider: name, BaseURL: "https://gateway.example/v1", APIKey: "key"})
+		if err == nil || !strings.Contains(err.Error(), "use openai or anthropic") {
+			t.Fatalf("Resolve(%q) error = %v", name, err)
+		}
 	}
 }
 
 func TestResolveUsesBaseURL(t *testing.T) {
 	cfg, err := Resolve(&ProviderConfig{
-		Provider: "ollama",
+		Provider: "openai",
 		BaseURL:  "http://localhost:11434/v1",
 		APIKey:   "test-key",
 	})
@@ -93,7 +73,7 @@ func TestResolveRejectsNegativeModelLimits(t *testing.T) {
 
 func TestResolvePreservesExplicitBaseURL(t *testing.T) {
 	cfg, err := Resolve(&ProviderConfig{
-		Provider: "ollama",
+		Provider: "openai",
 		BaseURL:  "http://base-url.example/v1",
 		APIKey:   "test-key",
 	})

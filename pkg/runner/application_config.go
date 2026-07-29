@@ -24,19 +24,19 @@ type ApplicationProviderConfig struct {
 }
 
 type ScannerConfig struct {
-	CyberhubURL       string
-	CyberhubKey       string
-	CyberhubMode      string
-	AIEnabled         bool
-	VerifyMode        string
-	Proxy             string
-	FofaEmail         string
-	FofaKey           string
-	HunterToken       string
-	HunterAPIKey      string
-	ReconProxy        string
-	ReconLimit        int
-	ReconProviderKeys map[string]string
+	CyberhubURL        string
+	CyberhubKey        string
+	CyberhubMode       string
+	AIEnabled          bool
+	VerifyMode         string
+	Proxy              string
+	FofaEmail          string
+	FofaKey            string
+	HunterToken        string
+	HunterAPIKey       string
+	ReconProxy         string
+	ReconLimit         int
+	UncoverCredentials map[string]string
 }
 
 type ToolConfig struct {

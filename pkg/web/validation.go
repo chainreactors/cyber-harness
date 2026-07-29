@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
@@ -13,6 +14,10 @@ import (
 // incomplete profiles before an invalid configuration can be persisted.
 func ValidateLLMConfig(cfg webproto.LLMConfig) error {
 	for i, profile := range cfg.Providers {
+		profile = webproto.NormalizeLLMProvider(profile)
+		if !agentprovider.IsSupportedProvider(profile.Provider) {
+			return fmt.Errorf("LLM provider %q is unsupported: use openai or anthropic", profile.Provider)
+		}
 		if strings.TrimSpace(profile.Model) == "" {
 			name := strings.TrimSpace(profile.Name)
 			if name == "" {

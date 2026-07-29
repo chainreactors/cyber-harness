@@ -141,7 +141,7 @@
   },
   {
     "path": "tools/ioa/commands_test.go",
-    "format": "set LIVE_TEST_API_KEY or DEEPSEEK_API_KEY to run live LLM IOA test",
+    "format": "set LIVE_TEST_API_KEY or OPENAI_API_KEY to run live LLM IOA test",
     "count": 1,
     "category": "live_llm",
     "reason": "The IOA integration calls a live model endpoint and requires an explicit credential."

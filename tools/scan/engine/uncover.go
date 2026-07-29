@@ -55,7 +55,7 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 		p.Hunter = append(p.Hunter, opts.HunterToken)
 	}
 
-	applyProviderKeys(p, opts.ProviderKeys)
+	applyCredentials(p, opts.Credentials)
 
 	keys := p.GetKeys()
 	// uncover's GetKeys only populates the FofaEmail/FofaKey pair when the stored
@@ -87,7 +87,7 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	return e
 }
 
-func applyProviderKeys(p *sources.Provider, values map[string]string) {
+func applyCredentials(p *sources.Provider, values map[string]string) {
 	appendValue := func(dst *[]string, name string) {
 		if value := strings.TrimSpace(values[name]); value != "" {
 			*dst = append(*dst, value)

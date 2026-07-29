@@ -12,7 +12,7 @@ func TestActivateLLMProfileSelectsByID(t *testing.T) {
 	store.cfg.LLM.ActiveProfile = "primary"
 	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
 		{ID: "primary", Name: "Primary", Provider: "openai", Model: "gpt-primary", APIKey: "key-1"},
-		{ID: "fast", Name: "Fast", Provider: "deepseek", Model: "deepseek-fast", APIKey: "key-2"},
+		{ID: "fast", Name: "Fast", Provider: "openai", Model: "deepseek-fast", APIKey: "key-2"},
 	}
 	service := NewService(ServiceConfig{ConfigStore: store})
 
