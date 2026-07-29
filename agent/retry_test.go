@@ -424,6 +424,13 @@ func TestRetryDelayBackoffSequence(t *testing.T) {
 			t.Errorf("attempt %d: RetryDelay = %s, want %s", i, got, w)
 		}
 	}
+
+	if got := RetryDelay(-1); got != time.Second {
+		t.Errorf("negative attempt: RetryDelay = %s, want 1s", got)
+	}
+	if got := RetryDelay(64); got != 10*time.Second {
+		t.Errorf("large attempt: RetryDelay = %s, want 10s", got)
+	}
 }
 
 func TestComputeRetryDelaySequence(t *testing.T) {
