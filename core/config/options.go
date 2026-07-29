@@ -21,6 +21,13 @@ type Option struct {
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
 	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
+
+	// Runtime-only environment settings. Business packages receive these values
+	// after ResolveRuntimeConfig instead of reading the process environment.
+	RenderMode         string            `no-flag:"true"`
+	REPLMode           string            `no-flag:"true"`
+	PlaywrightSession  string            `no-flag:"true"`
+	UncoverCredentials map[string]string `no-flag:"true"`
 }
 
 type ScanConfigOptions struct {
@@ -32,7 +39,7 @@ type SearchConfigOptions struct {
 }
 
 type LLMOptions struct {
-	Provider      string             `long:"provider" config:"provider" description:"LLM provider: openai (default), anthropic, deepseek, openrouter, ollama, groq, moonshot, zhipu"`
+	Provider      string             `long:"provider" config:"provider" description:"LLM protocol: openai (OpenAI-compatible, default) or anthropic"`
 	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
 	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
 	Model         string             `long:"model" config:"model" description:"LLM model name"`

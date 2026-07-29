@@ -127,7 +127,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		stdout:   stdout,
 		stderr:   stderr,
 	}
-	if isTerminal && isLocalAgentTerminal(t) && resolveRenderMode() == ModeInteractive {
+	if isTerminal && isLocalAgentTerminal(t) && resolveRenderMode(renderModeValue(option)) == ModeInteractive {
 		bridge := newReadlineConsoleBridge(c.Shell(), t.Out, func() bool {
 			return repl.readlineActive.Load()
 		})
@@ -503,7 +503,11 @@ func (r *AgentConsole) fastInputEnabled() bool {
 	if r != nil && r.terminal != nil && r.terminal.Control != nil {
 		isTerminal = r.terminal.Control.IsTerminal()
 	}
-	return fastInputEnabledForMode(os.Getenv("AISCAN_REPL"), isTerminal)
+	mode := ""
+	if r != nil && r.option != nil {
+		mode = r.option.REPLMode
+	}
+	return fastInputEnabledForMode(mode, isTerminal)
 }
 
 func fastInputEnabledForMode(mode string, _ bool) bool {

@@ -135,9 +135,9 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 
 两个协议 provider 都实现 `ListModels(ctx) ([]string, error)`，通过 `GET {base}/models` 返回 model ID 列表。编译期 `capability_parity_test.go` 守卫能力对齐。
 
-### Provider presets
+### Provider 协议
 
-品牌 preset 在协议归一化前解析，为 OpenAI、Anthropic、DeepSeek、OpenRouter、Groq、Moonshot、Ollama 和 Zhipu GLM 提供默认 Base URL。`glm`、`bigmodel` 映射到 `zhipu`；显式 Base URL 不会被覆盖。Ollama preset 不要求 API Key。
+运行时只接受 `openai` 和 `anthropic`。两者分别提供官方默认 Base URL；其他模型服务必须显式使用 `openai` 协议并填写 `base_url`。不识别品牌名称，也不做别名映射。
 
 ### hint404 协议提示
 
@@ -145,7 +145,7 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ### InferFromBaseURL
 
-这里只推断传输协议：检测 `anthropic.com` 域名选择 `anthropic`，其他自定义地址默认使用 `openai` 兼容协议。品牌默认地址由 preset 解析，不依赖域名猜测。
+这里只推断传输协议：检测 `anthropic.com` 域名选择 `anthropic`，其他自定义地址默认使用 `openai` 兼容协议。
 
 **文件**: `agent/provider/anthropic.go`, `agent/provider/openai.go`, `agent/provider/http.go`, `agent/provider/provider.go`
 
@@ -275,3 +275,5 @@ scan、agent joined、session cleared 等产品事件保留独立的 `DomainEven
 对 `BaseURL`、`APIKey` 同理。
 
 **文件**: `core/config/env.go`
+
+所有 AIScan 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。

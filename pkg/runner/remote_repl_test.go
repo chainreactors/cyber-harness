@@ -15,9 +15,7 @@ func TestRuntimeOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	t.Setenv("AISCAN_REPL", "fast")
-
-	option := &cfg.Option{}
+	option := &cfg.Option{REPLMode: "fast"}
 	rt, err := NewAgentRuntime(ctx, option, telemetry.NopLogger(), &RuntimeConfig{
 		ProviderOptional: true,
 		NoOutput:         true,
@@ -137,8 +135,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	t.Setenv("AISCAN_REPL", "fast")
-	rt, err := NewAgentRuntime(ctx, &cfg.Option{}, telemetry.NopLogger(), &RuntimeConfig{
+	rt, err := NewAgentRuntime(ctx, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), &RuntimeConfig{
 		ProviderOptional: true,
 		NoOutput:         true,
 		REPLMode:         REPLEphemeral,

@@ -35,8 +35,10 @@ aiscan [全局参数] <subcommand> [子命令参数]
 ### 配置优先级
 
 ```
-CLI 参数 > 环境变量 > 配置文件 > 编译时默认值
+CLI 参数 > AIScan/集成环境变量 > 配置文件 > 协议环境变量 > 编译时默认值
 ```
+
+`AISCAN_*`、FOFA、Hunter、Tavily 等明确属于 AIScan 的环境变量会覆盖配置文件。`OPENAI_*`、`ANTHROPIC_*` 只用于填补配置文件中的空值。
 
 ### 配置文件
 
@@ -52,7 +54,7 @@ aiscan -c /path/to/aiscan.yaml scan -i 192.168.1.0/24   # 指定配置文件
 ```yaml
 # LLM Provider
 llm:
-  provider: ""        # openai, deepseek, openrouter, ollama, groq, moonshot, anthropic, zhipu
+  provider: ""        # 协议类型：openai（默认，兼容所有 OpenAI API）或 anthropic
   base_url: ""        # API base URL（留空使用 provider 默认值）
   api_key: ""         # API key（建议使用环境变量）
   model: ""           # 模型名称
@@ -60,13 +62,13 @@ llm:
   max_tokens: 0        # 单次最大输出；0 使用默认值 16384
   proxy: ""           # 访问 LLM API 的 HTTP proxy
 
-  # 多 provider 配置（可选；只手动切换，不自动 fallback）
+  # 多 LLM profile 配置（可选；只手动切换，不自动 fallback）
   active_profile: deepseek
   providers:
     - id: deepseek
       name: DeepSeek
-      provider: deepseek
-      base_url: https://api.deepseek.com
+      provider: openai
+      base_url: https://api.deepseek.com/v1
       api_key: "sk-..."
       model: deepseek-chat
       context_window: 128000
@@ -140,7 +142,7 @@ misc:
 
 | 参数 | 说明 |
 | --- | --- |
-| `--provider` | LLM provider 名称（openai、deepseek、openrouter、ollama 等） |
+| `--provider` | LLM 协议类型：`openai`（OpenAI-compatible）或 `anthropic` |
 | `--base-url` | LLM API base URL |
 | `--api-key` | LLM API key（也可用环境变量） |
 | `--model` | 模型名称（默认 `gpt-4o`） |
@@ -198,24 +200,18 @@ misc:
 
 ---
 
-## LLM Provider
+## LLM 协议与 Profile
 
-### 支持的 Provider
+### 支持的协议
 
-| Provider | 默认 Base URL | 默认模型 | API Key 环境变量 |
+| 协议 | 用途 | 默认 Base URL | 环境变量 |
 | --- | --- | --- | --- |
-| `openai` | `https://api.openai.com/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
-| `deepseek` | `https://api.deepseek.com/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
-| `anthropic` | `https://api.anthropic.com/v1` | — | `AISCAN_API_KEY` / `ANTHROPIC_API_KEY` |
-| `openrouter` | `https://openrouter.ai/api/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
-| `groq` | `https://api.groq.com/openai/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
-| `moonshot` | `https://api.moonshot.cn/v1` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
-| `ollama` | `http://localhost:11434/v1` | — | 不需要 |
-| `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | — | `AISCAN_API_KEY` / `OPENAI_API_KEY` |
+| `openai` | OpenAI 及 DeepSeek、OpenRouter、Groq、Moonshot、Ollama 等 OpenAI-compatible API | `https://api.openai.com/v1` | `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` |
+| `anthropic` | Anthropic Messages API 及兼容网关 | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` |
 
-`glm` 和 `bigmodel` 是 `zhipu` 的别名。已知 Provider 在 `base_url` 留空时使用上表地址；显式填写的地址始终优先。只提供 `base_url` 而不提供 Provider 时，Anthropic 官方域名会选择 Anthropic 协议，其他地址默认按 OpenAI 兼容协议处理。
+除 Anthropic 协议外，其余模型服务统一使用 `openai`，通过 `base_url`、`model` 和 `api_key` 指定实际服务。其他 provider 名称会直接报错。
 
-### 多 Provider 配置
+### 多 LLM Profile 配置
 
 配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 可通过 `/provider` 查看配置，并用 `/provider set` 显式应用新配置。
 
@@ -230,11 +226,11 @@ Agent 只会重试当前 provider。重试耗尽后直接返回错误，不会�
 export OPENAI_API_KEY="sk-..."
 aiscan agent -p "检查目标" -i http://target.example
 
-# 指定 provider
-aiscan agent --provider deepseek --api-key "sk-..." --model deepseek-chat
+# DeepSeek（OpenAI-compatible）
+aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key "sk-..." --model deepseek-chat
 
-# Ollama 本地模型
-aiscan agent --provider ollama --model llama3 --base-url http://localhost:11434/v1
+# Ollama（OpenAI-compatible；部分部署可使用任意非空 API key）
+aiscan agent --provider openai --model llama3 --base-url http://localhost:11434/v1 --api-key local
 
 # 任意 OpenAI 兼容 API
 aiscan agent --base-url https://my-proxy.example/v1 --api-key "$MY_KEY" --model my-model
@@ -380,7 +376,7 @@ aiscan passive -s hunter 'domain.suffix="example.com"'
 Cyberhub 提供外部指纹库和 POC 模板，可以扩充或替换内置资源。
 
 ```bash
-aiscan scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cyberhub-key "$CYBERHUB_KEY"
+aiscan scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cyberhub-key "$AISCAN_CYBERHUB_KEY"
 ```
 
 资源模式：`merge`（默认，合并内置和远程）或 `override`（远程覆盖内置）。
@@ -422,23 +418,36 @@ scan:
 | 变量 | 说明 |
 | --- | --- |
 | `OPENAI_API_KEY` | OpenAI API key |
-| `OPENAI_BASE_URL` / `OPENAI_BASEURL` | OpenAI/Codex 风格 API base URL |
+| `OPENAI_BASE_URL` | OpenAI-compatible API base URL |
 | `OPENAI_MODEL` | OpenAI/Codex 风格模型名 |
-| `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
-| `ANTHROPIC_BASE_URL` / `ANTHROPIC_BASEURL` | Claude Code 风格 API base URL |
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible API base URL |
 | `ANTHROPIC_MODEL` | Claude Code 风格模型名 |
-| `OPENROUTER_API_KEY` | OpenRouter API key |
-| `GROQ_API_KEY` | Groq API key |
-| `MOONSHOT_API_KEY` | Moonshot API key |
 | `AISCAN_API_KEY` | 统一 fallback API key（所有 provider 通用） |
-| `AISCAN_BASE_URL` / `AISCAN_LLM_BASE_URL` | 统一 LLM API base URL |
-| `AISCAN_MODEL` / `AISCAN_LLM_MODEL` | 统一模型名 |
-| `AISCAN_PROVIDER` / `AISCAN_LLM_PROVIDER` | 统一 provider 名称 |
+| `AISCAN_BASE_URL` | 统一 LLM API base URL |
+| `AISCAN_MODEL` | 统一模型名 |
+| `AISCAN_PROVIDER` | 协议类型：`openai` 或 `anthropic` |
 | `AISCAN_LLM_PROXY` | LLM API 请求代理 |
-| `TAVILY_API_KEY` | Tavily Web Search API key（agent `web_search` 工具） |
+| `AISCAN_DATA_DIR` | 数据目录；优先级低于显式 `--data-dir` |
+| `AISCAN_PROXY` | 扫描工具代理 |
+| `AISCAN_CYBERHUB_URL` | Cyberhub URL |
+| `AISCAN_CYBERHUB_KEY` | Cyberhub API key |
+| `AISCAN_CYBERHUB_MODE` | Cyberhub 资源模式 |
+| `TAVILY_API_KEY` | Tavily Web Search API key，多个 key 可逗号分隔 |
 | `FOFA_EMAIL` / `FOFA_KEY` | FOFA 凭据 |
-| `HUNTER_API_KEY` | Hunter API key |
+| `HUNTER_API_KEY` / `HUNTER_TOKEN` | Hunter 凭据 |
+| `RECON_PROXY` | 被动测绘出站代理 |
+| `SHODAN_API_KEY`、`QUAKE_TOKEN`、`ZOOMEYE_API_KEY`、`NETLAS_API_KEY` | Uncover 数据源凭据 |
+| `CENSYS_API_TOKEN` / `CENSYS_ORGANIZATION_ID` | Censys 凭据 |
+| `CRIMINALIP_API_KEY`、`PUBLICWWW_API_KEY`、`HUNTERHOW_API_KEY` | Uncover 数据源凭据 |
+| `BINARYEDGE_API_KEY`、`ONYPHE_API_KEY`、`GREYNOISE_API_KEY` | Uncover 数据源凭据 |
+| `DRIFTNET_API_KEY`、`DAYDAYMAP_API_KEY`、`ODIN_API_KEY`、`NERDYDATA_API_KEY` | Uncover 数据源凭据 |
+| `GOOGLE_API_KEY` / `GOOGLE_API_CX` | Google Search 凭据 |
+| `AISCAN_RENDER` | 终端渲染模式：interactive、static、forwarded |
+| `AISCAN_REPL` | REPL 输入模式：readline 或 fast |
+| `PLAYWRIGHT_CLI_SESSION` | Playwright 默认 session |
+
+运行时业务环境变量只在 `core/config` 解析一次，再通过运行时配置下传。`PATH`、子进程环境继承以及 Go 标准库的 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 属于操作系统级行为，不纳入业务配置优先级。前端开发服务器的 `AISCAN_BACKEND_URL` 是 Vite 构建期配置，也不进入 Go 运行时配置。
 
 ---
 

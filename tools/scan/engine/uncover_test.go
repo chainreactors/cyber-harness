@@ -49,6 +49,33 @@ func TestNewUncoverEngineFofaLegacyEmailKey(t *testing.T) {
 	}
 }
 
+func TestNewUncoverEngineDoesNotRereadCredentialEnvironment(t *testing.T) {
+	t.Setenv("FOFA_EMAIL", "env@example.com")
+	t.Setenv("FOFA_KEY", "env-key")
+	t.Setenv("HUNTER_API_KEY", "env-hunter")
+
+	eng := NewUncoverEngine(ReconOptions{
+		FofaEmail:    "cli@example.com",
+		FofaKey:      "cli-key",
+		HunterAPIKey: "cli-hunter",
+	}, nil)
+	if eng.keys.FofaEmail != "cli@example.com" || eng.keys.FofaKey != "cli-key" {
+		t.Fatalf("FOFA environment bypassed resolved config: %#v", eng.keys)
+	}
+	if eng.keys.HunterToken != "cli-hunter" {
+		t.Fatalf("Hunter environment bypassed resolved config: %#v", eng.keys)
+	}
+}
+
+func TestNewUncoverEngineUsesInjectedCredentials(t *testing.T) {
+	eng := NewUncoverEngine(ReconOptions{Credentials: map[string]string{
+		"SHODAN_API_KEY": "shodan-key",
+	}}, nil)
+	if eng.keys.Shodan != "shodan-key" || !sourceAvailable(eng, "shodan") {
+		t.Fatalf("injected provider key not applied: %#v", eng.keys)
+	}
+}
+
 func sourceAvailable(e *UncoverEngine, name string) bool {
 	for _, s := range e.Sources() {
 		if s == name {

@@ -96,11 +96,16 @@ func isRetryableByMessage(err error) bool {
 // backward compatibility with external callers such as runner and webagent
 // reconnect logic.
 func RetryDelay(attempt int) time.Duration {
-	delay := time.Second << uint(attempt)
-	if delay > 10*time.Second {
-		delay = 10 * time.Second
+	if attempt < 0 {
+		attempt = 0
 	}
-	return delay
+	// Clamp before shifting. A large attempt previously overflowed the duration
+	// shift to zero, turning a persistent authentication failure into a tight
+	// reconnect loop that could saturate the control plane.
+	if attempt >= 4 {
+		return 10 * time.Second
+	}
+	return time.Second << uint(attempt)
 }
 
 // retryDelayFor computes the backoff for an LLM call retry. It honors a

@@ -1,6 +1,11 @@
 package webproto
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	agentprovider "github.com/chainreactors/aiscan/agent/provider"
+)
 
 // LLMProviderConfig is one named LLM profile. The profile selected by
 // ActiveProfile is the runtime primary provider; the remaining entries are
@@ -32,10 +37,10 @@ func (c LLMConfig) Active() LLMProviderConfig {
 	}
 	for _, p := range c.Providers {
 		if p.ID == c.ActiveProfile {
-			return p
+			return NormalizeLLMProvider(p)
 		}
 	}
-	return c.Providers[0]
+	return NormalizeLLMProvider(c.Providers[0])
 }
 
 // MigrateLLMConfig normalizes a freshly loaded config exactly once: a legacy
@@ -53,6 +58,7 @@ func MigrateLLMConfig(llm *LLMConfig, flat LLMProviderConfig) {
 		llm.Providers = []LLMProviderConfig{flat}
 	}
 	for i := range llm.Providers {
+		llm.Providers[i] = NormalizeLLMProvider(llm.Providers[i])
 		if llm.Providers[i].ID == "" {
 			llm.Providers[i].ID = fmt.Sprintf("profile-%d", i+1)
 		}
@@ -65,6 +71,17 @@ func MigrateLLMConfig(llm *LLMConfig, flat LLMProviderConfig) {
 	}
 	active := llm.Active()
 	llm.ActiveProfile = active.ID
+}
+
+// NormalizeLLMProvider canonicalizes protocol casing and infers the protocol
+// from base_url when omitted. Validation rejects unsupported protocols.
+func NormalizeLLMProvider(profile LLMProviderConfig) LLMProviderConfig {
+	if strings.TrimSpace(profile.Provider) != "" {
+		profile.Provider = agentprovider.NormalizeProvider(profile.Provider)
+	} else {
+		profile.Provider = agentprovider.InferFromBaseURL(profile.BaseURL)
+	}
+	return profile
 }
 
 // DistributeConfig is the configuration payload sent from the web server

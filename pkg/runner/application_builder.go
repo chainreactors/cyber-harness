@@ -25,24 +25,26 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 			Optional:  features.ProviderOptional,
 		},
 		Scanner: ScannerConfig{
-			CyberhubURL:  option.CyberhubURL,
-			CyberhubKey:  option.CyberhubKey,
-			CyberhubMode: option.CyberhubMode,
-			AIEnabled:    features.AIEnabled,
-			VerifyMode:   cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify),
-			Proxy:        option.Proxy,
-			FofaEmail:    option.FofaEmail,
-			FofaKey:      option.FofaKey,
-			HunterToken:  option.HunterToken,
-			HunterAPIKey: option.HunterAPIKey,
-			ReconProxy:   option.ReconProxy,
-			ReconLimit:   intOptionValue(option.ReconLimit),
+			CyberhubURL:        option.CyberhubURL,
+			CyberhubKey:        option.CyberhubKey,
+			CyberhubMode:       option.CyberhubMode,
+			AIEnabled:          features.AIEnabled,
+			VerifyMode:         cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify),
+			Proxy:              option.Proxy,
+			FofaEmail:          option.FofaEmail,
+			FofaKey:            option.FofaKey,
+			HunterToken:        option.HunterToken,
+			HunterAPIKey:       option.HunterAPIKey,
+			ReconProxy:         option.ReconProxy,
+			ReconLimit:         intOptionValue(option.ReconLimit),
+			UncoverCredentials: cloneStringMap(option.UncoverCredentials),
 		},
 		Tools: ToolConfig{
-			Enabled:       features.ToolsEnabled,
-			BashTimeout:   300,
-			TavilyKeys:    resolveTavilyKeys(option.TavilyKey, cfg.ResolveString(option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys)),
-			OptionalTools: option.Tools,
+			Enabled:           features.ToolsEnabled,
+			BashTimeout:       300,
+			TavilyKeys:        resolveTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
+			PlaywrightSession: option.PlaywrightSession,
+			OptionalTools:     option.Tools,
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),
@@ -70,14 +72,24 @@ func intOptionValue(p *int) int {
 	return 0
 }
 
-func resolveTavilyKeys(flagKey, configKeys string) string {
-	flagKey = strings.TrimSpace(flagKey)
-	configKeys = strings.TrimSpace(configKeys)
-	if flagKey != "" && configKeys != "" {
-		return flagKey + "," + configKeys
+func resolveTavilyKeys(primary string, fallbacks ...string) string {
+	keys := make([]string, 0, len(fallbacks)+1)
+	for _, raw := range append([]string{primary}, fallbacks...) {
+		raw = strings.TrimSpace(raw)
+		if raw != "" {
+			keys = append(keys, raw)
+		}
 	}
-	if flagKey != "" {
-		return flagKey
+	return strings.Join(keys, ",")
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
 	}
-	return configKeys
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }

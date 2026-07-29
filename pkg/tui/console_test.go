@@ -9,13 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -86,15 +86,21 @@ func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
 	}
 }
 
+type consoleTextTool struct {
+	output string
+}
+
+func (t *consoleTextTool) Name() string                { return "bash" }
+func (t *consoleTextTool) Description() string         { return "console output test tool" }
+func (t *consoleTextTool) Definition() tool.Definition { return tool.Definition{} }
+func (t *consoleTextTool) Execute(context.Context, string) (tool.Result, error) {
+	return tool.TextResult(t.output), nil
+}
+
 func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell assertion is unix-only")
-	}
 	var stdout, stderr bytes.Buffer
 	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(t.TempDir(), 5)
-	defer bash.Close()
-	registry.RegisterTool(bash)
+	registry.RegisterTool(&consoleTextTool{output: "DIRECT_OK"})
 	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{Commands: registry}, nil, &stdout, &stderr)
 
 	if _, err := repl.ExecuteLineAndWait("!printf DIRECT_OK"); err != nil {

@@ -10,7 +10,7 @@ func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {
 	option := cfg.Option{LLMOptions: cfg.LLMOptions{
 		ActiveProfile: "openai",
 		Providers: []cfg.LLMProviderEntry{
-			{ID: "deepseek", Provider: "deepseek", APIKey: "dk-111", Model: "deepseek-chat", MaxTokens: 8192},
+			{ID: "deepseek", Provider: "openai", APIKey: "dk-111", Model: "deepseek-chat", MaxTokens: 8192},
 			{ID: "openai", Provider: "openai", APIKey: "sk-222", Model: "gpt-4o", MaxTokens: 32768},
 		},
 	}}
@@ -19,7 +19,7 @@ func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {
 		t.Fatalf("primary profile = %+v", primary)
 	}
 	fallbacks := FallbackProviderConfigs(&option)
-	if len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" || fallbacks[0].APIKey != "dk-111" {
+	if len(fallbacks) != 1 || fallbacks[0].Provider != "openai" || fallbacks[0].APIKey != "dk-111" {
 		t.Fatalf("fallback profiles = %+v", fallbacks)
 	}
 }
@@ -27,13 +27,13 @@ func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {
 func TestProviderConfigExplicitFieldsWin(t *testing.T) {
 	option := cfg.Option{LLMOptions: cfg.LLMOptions{
 		Provider: "anthropic", APIKey: "cli-key", Model: "cli-model",
-		Providers: []cfg.LLMProviderEntry{{Provider: "deepseek", APIKey: "fallback-key", Model: "deepseek-chat"}},
+		Providers: []cfg.LLMProviderEntry{{Provider: "openai", APIKey: "fallback-key", Model: "deepseek-chat"}},
 	}}
 	primary := ProviderConfig(&option)
 	if primary.Provider != "anthropic" || primary.APIKey != "cli-key" || primary.Model != "cli-model" {
 		t.Fatalf("explicit provider = %+v", primary)
 	}
-	if fallbacks := FallbackProviderConfigs(&option); len(fallbacks) != 1 || fallbacks[0].Provider != "deepseek" {
+	if fallbacks := FallbackProviderConfigs(&option); len(fallbacks) != 1 || fallbacks[0].Provider != "openai" {
 		t.Fatalf("fallback profiles = %+v", fallbacks)
 	}
 }

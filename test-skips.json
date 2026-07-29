@@ -98,13 +98,6 @@
     "reason": "Two mixed HTTP/headless templates reference variables unavailable to the headless-only compile fixture."
   },
   {
-    "path": "pkg/tui/console_test.go",
-    "format": "shell assertion is unix-only",
-    "count": 1,
-    "category": "platform",
-    "reason": "The assertion targets POSIX shell rendering."
-  },
-  {
     "path": "pkg/web/agents_test.go",
     "format": "chromium not found, skipping browser e2e test",
     "count": 1,
@@ -141,7 +134,7 @@
   },
   {
     "path": "tools/ioa/commands_test.go",
-    "format": "set LIVE_TEST_API_KEY or DEEPSEEK_API_KEY to run live LLM IOA test",
+    "format": "set LIVE_TEST_API_KEY or OPENAI_API_KEY to run live LLM IOA test",
     "count": 1,
     "category": "live_llm",
     "reason": "The IOA integration calls a live model endpoint and requires an explicit credential."

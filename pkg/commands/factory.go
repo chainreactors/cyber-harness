@@ -35,14 +35,15 @@ type Deps struct {
 	SkillStore  SkillSource
 	RunnerMode  bool
 
-	Provider     provider.Provider
-	ScannerProxy string
-	Logger       telemetry.Logger
-	NodeName     string
-	NodeMeta     map[string]any
-	TavilyKeys   string // comma-separated Tavily API keys (build-time fallback)
-	DataBus      *eventbus.Bus[output.ToolDataEvent]
-	Hooks        *hooks.Registry
+	Provider          provider.Provider
+	ScannerProxy      string
+	Logger            telemetry.Logger
+	NodeName          string
+	NodeMeta          map[string]any
+	TavilyKeys        string // comma-separated Tavily API keys
+	PlaywrightSession string
+	DataBus           *eventbus.Bus[output.ToolDataEvent]
+	Hooks             *hooks.Registry
 }
 
 // Provide stores a typed dependency, allocating the bag on first use so a
