@@ -48,9 +48,6 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 		return nil, fmt.Errorf("spray engine is not available")
 	}
 	sprayExecutionMu.Lock()
-	if opts.Debug {
-		telemetry.EnableLogsDebug()
-	}
 	runCtx, cancel := sprayInvocationContext(ctx, opts)
 	sprayCtx := spray.NewContext().
 		WithContext(runCtx).
@@ -139,6 +136,11 @@ func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
 func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 	sprayOpt := spray.NewDefaultOption()
 	coreOpt := sprayOpt.Option
+	// The SDK configures its shared logger once when the engine is initialized,
+	// and scan --debug configures it before pipeline workers start. Keeping the
+	// per-run Quiet flag enabled makes upstream NewRunner call SetQuiet while
+	// other engines are logging, which races on the shared logger.
+	coreOpt.Quiet = false
 	coreOpt.Threads = opts.Threads
 	coreOpt.Timeout = opts.Timeout
 	coreOpt.Host = opts.Host
@@ -159,9 +161,6 @@ func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 		coreOpt.CrawlDepth = opts.CrawlDepth
 	}
 	coreOpt.Debug = opts.Debug
-	if opts.Debug {
-		coreOpt.Quiet = false
-	}
 	if opts.Proxy != "" {
 		coreOpt.Proxies = []string{opts.Proxy}
 	}
