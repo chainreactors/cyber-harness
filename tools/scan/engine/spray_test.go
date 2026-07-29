@@ -38,6 +38,16 @@ func TestBuildSprayOptionAppliesDebugAndRuntimeOptions(t *testing.T) {
 	}
 }
 
+func TestBuildSprayOptionAvoidsPerRunGlobalLoggerMutation(t *testing.T) {
+	opt := buildSprayOption(SprayCheckOptions{})
+	if opt.Quiet {
+		t.Fatal("quiet = true; upstream NewRunner would mutate the shared logger")
+	}
+	if !opt.NoBar {
+		t.Fatal("no bar = false; SDK runs must not install a global progress writer")
+	}
+}
+
 func TestDefaultSprayInvocationTimeoutBoundsCrawl(t *testing.T) {
 	got := defaultSprayInvocationTimeout(SprayCheckOptions{Timeout: 5, Crawl: true, CrawlDepth: 2})
 	if got != 80*time.Second {
