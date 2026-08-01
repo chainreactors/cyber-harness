@@ -20,10 +20,11 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
 )
 
@@ -118,7 +119,19 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		localAgents.StopAll()
 	}()
 
-	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
+	httpHandler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
+	grpcServer := web.NewGRPCServer(accessKey, service, pool)
+	handler := h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/aop.ChatService/") || strings.HasPrefix(r.URL.Path, "/aiscan.chat.SessionService/") {
+			httpHandler.ServeHTTP(w, r)
+			return
+		}
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+			return
+		}
+		httpHandler.ServeHTTP(w, r)
+	}), &http2.Server{})
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -127,6 +140,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 
 	go func() {
 		<-ctx.Done()
+		grpcServer.Stop()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutCancel()
 		_ = srv.Shutdown(shutCtx)
@@ -226,17 +240,17 @@ type webConfigStore struct {
 	mu       sync.Mutex
 }
 
-func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, webproto.DistributeConfig, error) {
+func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, cfg.DistributeConfig, error) {
 	if err := ctx.Err(); err != nil {
-		return "", false, webproto.DistributeConfig{}, err
+		return "", false, cfg.DistributeConfig{}, err
 	}
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, webproto.DistributeConfig{}, nil
+		return p, false, cfg.DistributeConfig{}, nil
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return p, false, webproto.DistributeConfig{}, err
+		return p, false, cfg.DistributeConfig{}, err
 	}
 	dc := parseDistributeConfig(data)
 	return p, true, dc, nil
@@ -245,18 +259,18 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 // parseDistributeConfig decodes the YAML settings file and migrates a legacy
 // flat llm section into the provider profile list — the only place the flat
 // representation is still accepted.
-func parseDistributeConfig(data []byte) webproto.DistributeConfig {
-	var dc webproto.DistributeConfig
+func parseDistributeConfig(data []byte) cfg.DistributeConfig {
+	var dc cfg.DistributeConfig
 	_ = yaml.Unmarshal(data, &dc)
 	var legacy struct {
-		LLM webproto.LLMProviderConfig `yaml:"llm"`
+		LLM cfg.LLMProviderConfig `yaml:"llm"`
 	}
 	_ = yaml.Unmarshal(data, &legacy)
-	webproto.MigrateLLMConfig(&dc.LLM, legacy.LLM)
+	cfg.MigrateLLMConfig(&dc.LLM, legacy.LLM)
 	return dc
 }
 
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) (*web.PreparedConfig, error) {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming cfg.DistributeConfig) (*web.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -264,7 +278,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming w
 	defer s.mu.Unlock()
 
 	p, loaded := s.resolveConfigPath()
-	var current webproto.DistributeConfig
+	var current cfg.DistributeConfig
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -272,7 +286,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming w
 		}
 		current = parseDistributeConfig(data)
 	}
-	webproto.MigrateLLMConfig(&incoming.LLM, webproto.LLMProviderConfig{})
+	cfg.MigrateLLMConfig(&incoming.LLM, cfg.LLMProviderConfig{})
 
 	// Preserve existing secrets when incoming value is empty.
 	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
@@ -360,8 +374,8 @@ func preserveSecret(incoming *string, existing string) {
 	}
 }
 
-func preserveLLMProfileSecrets(incoming *webproto.LLMConfig, existing webproto.LLMConfig) {
-	byID := make(map[string]webproto.LLMProviderConfig, len(existing.Providers))
+func preserveLLMProfileSecrets(incoming *cfg.LLMConfig, existing cfg.LLMConfig) {
+	byID := make(map[string]cfg.LLMProviderConfig, len(existing.Providers))
 	for _, profile := range existing.Providers {
 		if profile.ID != "" {
 			byID[profile.ID] = profile

@@ -180,12 +180,5 @@
     "count": 1,
     "category": "external_api",
     "reason": "The Hunter integration requires a user-supplied service credential."
-  },
-  {
-    "path": "web/frontend/e2e/aiscan-web.spec.ts",
-    "format": "LLM_API_KEY env var required",
-    "count": 2,
-    "category": "live_llm",
-    "reason": "Provider connectivity and model discovery checks are retained as opt-in live endpoint coverage."
   }
 ]

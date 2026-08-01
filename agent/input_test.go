@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // pngBytes is a minimal PNG header so http.DetectContentType sniffs image/png.
@@ -127,12 +127,12 @@ func TestInputImageEmptySource(t *testing.T) {
 }
 
 func TestInputFromAOPMessageMapsParts(t *testing.T) {
-	input := InputFromAOPMessage(aop.MessageData{
-		MessageID: "m-1",
-		Role:      "user",
-		Parts: []aop.MessagePart{
-			{Type: aop.PartText, Text: "hi"},
-			{Type: aop.PartImage, Image: &aop.ImageSource{Base64: "AAAA", MediaType: "image/png"}},
+	input := InputFromAOPMessage(&aop.Message{
+		Id:   "m-1",
+		Role: "user",
+		Content: []*aop.Content{
+			aop.Text("hi"),
+			aop.Image("image/png", []byte{0, 0, 0}),
 		},
 	})
 	if len(input.Parts) != 2 || input.Parts[0].Text != "hi" || input.Parts[1].Image == nil {

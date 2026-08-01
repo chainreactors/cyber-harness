@@ -7,7 +7,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/provider"
-	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
@@ -30,7 +30,7 @@ func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, g
 
 // NewLoopConfigWithInput preserves transport controls and multimodal parts on
 // the first evaluation round. Boundaries that already published the user input
-// use this constructor so NoEcho is not lost when entering Goal mode.
+// use this constructor so the original multimodal input is preserved in Goal mode.
 func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, input agent.Input, criteria string, maxRounds int) EvalLoopConfig {
 	return newLoopConfig(p, model, logger, strings.TrimSpace(input.Text()), input, criteria, maxRounds)
 }
@@ -91,7 +91,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 			return finish(result), lastVerdict, result.Err
 		}
 
-		a.EmitStatus(xeval.StateStart, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds}, cfg.TurnID)
+		a.EmitStatus(ext.EvalStateStart, ext.EvalNamespace, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0))}, cfg.TurnID)
 
 		verdict, evalErr := cfg.Evaluator.Evaluate(
 			ctx, cfg.Goal, cfg.Criteria,
@@ -100,7 +100,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 
 		if evalErr != nil {
 			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", round, evalErr)
-			a.EmitStatus(xeval.StateError, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds, Error: evalErr.Error()}, cfg.TurnID)
+			a.EmitStatus(ext.EvalStateError, ext.EvalNamespace, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Error: evalErr.Error()}, cfg.TurnID)
 			if round == cfg.MaxEvalRounds {
 				return finish(result), lastVerdict, evalErr
 			}
@@ -110,7 +110,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 		}
 
 		lastVerdict = verdict
-		a.EmitStatus(xeval.StateEnd, xeval.NS, xeval.Detail{Round: round, MaxRounds: cfg.MaxEvalRounds, Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
+		a.EmitStatus(ext.EvalStateEnd, ext.EvalNamespace, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
 		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", round, verdict.Pass, verdict.InheritContext, verdict.Reason)
 
 		if verdict.Pass {

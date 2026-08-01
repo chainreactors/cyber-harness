@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/output"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
@@ -22,7 +24,25 @@ func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
 	}
 }
 
-func TestSQLiteStoreWipesLegacyTextEvents(t *testing.T) {
+func TestListSessionPageDoesNotDeadlockOnNonEmptyStore(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "session-page.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "session-1")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	sessions, more, err := store.ListSessionPage(ctx, 0, 100, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if more || len(sessions) != 1 || sessions[0].ID != "session-1" {
+		t.Fatalf("ListSessionPage = %+v more=%v", sessions, more)
+	}
+}
+
+func TestSQLiteStoreIgnoresNonProtoJSONEventsWithoutDeletingHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -50,7 +70,11 @@ func TestSQLiteStoreWipesLegacyTextEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(events) != 0 {
-		t.Fatalf("legacy text events survived the wipe: %+v", events)
+		t.Fatalf("non-protobuf JSON event was decoded: %+v", events)
+	}
+	var rows int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM chat_aop_events WHERE session_id = 's1'`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("stored history rows = %d, err=%v; want preserved row", rows, err)
 	}
 }
 
@@ -80,7 +104,7 @@ func TestSQLiteStoreBackfillsDurableEventSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	rows, err := store.db.Query(`SELECT hub_seq, id FROM chat_aop_events WHERE session_id = 's1' ORDER BY hub_seq`)
+	rows, err := store.db.Query(`SELECT cursor, id FROM chat_aop_events WHERE session_id = 's1' ORDER BY cursor`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,21 +118,22 @@ func TestSQLiteStoreBackfillsDurableEventSequence(t *testing.T) {
 		}
 		got = append(got, id)
 		if seq != len(got) {
-			t.Fatalf("hub_seq for %s = %d, want %d", id, seq, len(got))
+			t.Fatalf("cursor for %s = %d, want %d", id, seq, len(got))
 		}
 	}
 	if len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
 		t.Fatalf("backfilled order = %v, want [e1 e2]", got)
 	}
-	cursor, persisted, err := store.AppendAOPEvent(context.Background(), "s1", aop.Event{
-		Type: aop.TypeStatus, TS: "2026-07-19T00:00:03Z", SessionID: "s1", Agent: "aiscan", Data: json.RawMessage(`{}`),
+	cursor, persisted, err := store.AppendAOPEvent(context.Background(), "s1", &aop.Event{
+		Id: "e3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: "s1", Emitter: "aiscan",
+		Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}},
 	})
 	if err != nil || !persisted || cursor != 3 {
 		t.Fatalf("AppendAOPEvent cursor = %d, persisted = %v, err = %v; want 3, true, nil", cursor, persisted, err)
 	}
 }
 
-func TestSQLiteStoreMessageRoundTrip(t *testing.T) {
+func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -118,105 +143,59 @@ func TestSQLiteStoreMessageRoundTrip(t *testing.T) {
 	createStoredSession(t, store, "s1")
 
 	created := time.Date(2026, 7, 19, 1, 2, 3, 0, time.UTC)
-	if err := store.AddMessage(ctx, &ChatMessage{
-		ID: "m1", SessionID: "s1", Role: "user", Content: "hello",
-		Metadata: json.RawMessage(`{"code":"x"}`), CreatedAt: created,
-	}); err != nil {
+	user := &aop.Event{
+		Id: "e-user", EmittedAt: timestamppb.New(created), SessionId: "s1", Emitter: "operator",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}},
+	}
+	_ = ext.SetWebMessage(user, ext.WebMessageExtension{Metadata: []byte(`{"code":"x"}`)})
+	if err := store.AddAOPEvent(ctx, "s1", user); err != nil {
 		t.Fatal(err)
 	}
-	assistant := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        created.Add(time.Second).Format(time.RFC3339Nano),
-		SessionID: "s1",
-		Agent:     "aiscan",
-		Data: mustJSON(aop.MessageData{
-			MessageID: "m-1", Role: "assistant",
-			Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hi there"}},
-		}),
+	assistant := &aop.Event{
+		Id: "e-message", EmittedAt: timestamppb.New(created.Add(time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Payload: &aop.Event_Message{Message: &aop.Message{
+			Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("hi there")},
+		}},
 	}
 	if err := store.AddAOPEvent(ctx, "s1", assistant); err != nil {
 		t.Fatal(err)
 	}
 	// Deltas are streaming fragments and must never be persisted.
-	delta := aop.Event{
-		Type:      aop.TypeMessageDelta,
-		TS:        created.Add(2 * time.Second).Format(time.RFC3339Nano),
-		SessionID: "s1",
-		Agent:     "aiscan",
-		Data: mustJSON(aop.MessageDeltaData{
-			MessageID: "m-1", PartIndex: 0, PartType: aop.PartText, Delta: "hi",
-		}),
+	delta := &aop.Event{
+		Id: "e-delta", EmittedAt: timestamppb.New(created.Add(2 * time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{
+			MessageId: "m-1", ContentIndex: 0, Value: &aop.MessageDelta_Text{Text: "hi"},
+		}},
 	}
 	if err := store.AddAOPEvent(ctx, "s1", delta); err != nil {
 		t.Fatal(err)
-	}
-
-	msgs, err := store.ListMessages(ctx, "s1", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 2 {
-		t.Fatalf("messages = %+v, want 2", msgs)
-	}
-	if msgs[0].ID != "m1" || msgs[0].Role != "user" || msgs[0].Content != "hello" {
-		t.Fatalf("user message = %+v", msgs[0])
-	}
-	var meta map[string]any
-	if err := json.Unmarshal(msgs[0].Metadata, &meta); err != nil || meta["code"] != "x" {
-		t.Fatalf("user metadata = %s, err = %v", msgs[0].Metadata, err)
-	}
-	if msgs[1].ID != "m-1" || msgs[1].Role != "assistant" || msgs[1].Content != "hi there" {
-		t.Fatalf("assistant message = %+v", msgs[1])
 	}
 
 	events, err := store.ListAOPEvents(ctx, "s1", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want 2", events)
+	}
+	if message := events[0].GetMessage(); message.GetId() != "m1" || message.GetRole() != "user" || message.GetContent()[0].GetText().GetText() != "hello" {
+		t.Fatalf("user event = %+v", events[0])
+	}
+	var meta map[string]any
+	webExtension, ok, err := ext.GetWebMessage(events[0])
+	if err != nil || !ok {
+		t.Fatalf("web extension = %+v, ok = %v, err = %v", webExtension, ok, err)
+	}
+	if err := json.Unmarshal(webExtension.Metadata, &meta); err != nil || meta["code"] != "x" {
+		t.Fatalf("user metadata = %s, err = %v", webExtension.Metadata, err)
+	}
+	if message := events[1].GetMessage(); message.GetId() != "m-1" || message.GetRole() != "assistant" || message.GetContent()[0].GetText().GetText() != "hi there" {
+		t.Fatalf("assistant event = %+v", events[1])
+	}
 	for _, e := range events {
-		if e.Type == aop.TypeMessageDelta {
+		if e.GetMessageDelta() != nil {
 			t.Fatalf("delta was persisted: %+v", e)
 		}
-	}
-}
-
-func TestSQLiteStoreMessagePaginationIgnoresNonMessageDensity(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "message-pages.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	createStoredSession(t, store, "s1")
-
-	for message := 1; message <= 4; message++ {
-		for event := 0; event < 25; event++ {
-			if err := store.AddAOPEvent(ctx, "s1", aop.Event{
-				Type: aop.TypeStatus, TS: time.Now().UTC().Format(time.RFC3339Nano), SessionID: "s1", Agent: "aiscan", Data: json.RawMessage(`{}`),
-			}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := store.AddMessage(ctx, &ChatMessage{
-			ID: string(rune('0' + message)), SessionID: "s1", Role: "user", Content: "message", CreatedAt: time.Now().UTC(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	latest, err := store.ListMessagePage(ctx, "s1", 0, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(latest.Items) != 2 || latest.Items[0].ID != "3" || latest.Items[1].ID != "4" || latest.NextCursor == 0 {
-		t.Fatalf("latest page = %+v", latest)
-	}
-	older, err := store.ListMessagePage(ctx, "s1", latest.NextCursor, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(older.Items) != 2 || older.Items[0].ID != "1" || older.Items[1].ID != "2" || older.NextCursor != 0 {
-		t.Fatalf("older page = %+v", older)
 	}
 }
 
@@ -313,8 +292,9 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	if err := store.CreateSession(ctx, session); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddMessage(ctx, &ChatMessage{
-		ID: "message-cascade", SessionID: session.ID, Role: "user", Content: "hello", CreatedAt: now,
+	if err := store.AddAOPEvent(ctx, session.ID, &aop.Event{
+		Id: "event-cascade", EmittedAt: timestamppb.New(now), SessionId: session.ID, Emitter: "operator",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "message-cascade", Role: "user", Content: []*aop.Content{aop.Text("hello")}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,18 +316,19 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreRejectsMessageForMissingSession(t *testing.T) {
+func TestSQLiteStoreRejectsAOPEventForMissingSession(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	err = store.AddMessage(context.Background(), &ChatMessage{
-		ID: "orphan-message", SessionID: "missing", Role: "user", Content: "hello", CreatedAt: time.Now(),
+	err = store.AddAOPEvent(context.Background(), "missing", &aop.Event{
+		Id: "orphan-event", EmittedAt: timestamppb.Now(), SessionId: "missing", Emitter: "operator",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "orphan-message", Role: "user", Content: []*aop.Content{aop.Text("hello")}}},
 	})
 	if err == nil {
-		t.Fatal("AddMessage() created an orphan event")
+		t.Fatal("AddAOPEvent() created an orphan event")
 	}
 }
 

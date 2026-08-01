@@ -59,12 +59,12 @@ export function TerminalDetails({
             <DetailRow label={t('tdState')} value={stateLabel(session.state || '') || session.state} />
             <DetailRow label={t('tdCommand')} value={session.command} mono />
             <DetailRow label="PID" value={positiveNumber(session.pid)} />
-            <DetailRow label={t('tdStarted')} value={formatDateTime(session.started_at)} />
-            <DetailRow label={t('tdActivity')} value={formatDateTime(session.last_activity_at)} />
-            <DetailRow label={t('tdEnded')} value={formatDateTime(session.ended_at)} />
-            <DetailRow label={t('tdExit')} value={session.state === 'running' ? undefined : session.exit_code} />
-            <DetailRow label={t('tdKill')} value={session.kill_cause} />
-            <DetailRow label={t('tdOutput')} value={formatBytes(session.output_bytes)} />
+            <DetailRow label={t('tdStarted')} value={formatDateTime(session.startedAt)} />
+            <DetailRow label={t('tdActivity')} value={formatDateTime(session.lastActivityAt)} />
+            <DetailRow label={t('tdEnded')} value={formatDateTime(session.endedAt)} />
+            <DetailRow label={t('tdExit')} value={session.state === 'running' ? undefined : session.exitCode} />
+            <DetailRow label={t('tdKill')} value={session.killCause} />
+            <DetailRow label={t('tdOutput')} value={formatBytes(session.outputBytes)} />
           </>
         ) : (
           <DetailRow label={t('tdState')} value={t('starting')} />

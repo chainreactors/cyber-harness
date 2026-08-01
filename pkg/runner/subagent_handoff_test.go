@@ -2,13 +2,12 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -60,40 +59,37 @@ func waitHandoffBodies(t *testing.T, client *handoffClient, count int) (int, []p
 	return 0, bodies
 }
 
-func handoffEvent(t *testing.T, typ, sessionID, agentName string, data any) aop.Event {
+func handoffEvent(t *testing.T, sessionID, agentName string, event *aop.Event) *aop.Event {
 	t.Helper()
-	raw, err := json.Marshal(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return aop.Event{Type: typ, SessionID: sessionID, Agent: agentName, Data: raw}
+	event.SessionId = sessionID
+	event.Emitter = agentName
+	return event
 }
 
 func TestIOAHandoffFromAOPBus(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[aop.Event]()
+	bus := eventbus.New[*aop.Event]()
 	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
-	start := handoffEvent(t, aop.TypeSessionStart, "child-session", "worker", aop.SessionStartData{
+	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
 		Model:            "test-model",
-		ParentSessionID:  "parent-session",
-		ParentToolCallID: "spawn-1",
-	})
-	if err := delegation.Set(&start, delegation.DelegationDetail{
+		ParentSessionId:  "parent-session",
+		ParentToolCallId: "spawn-1",
+	}}})
+	if err := ext.SetDelegation(start, ext.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
-		RunMode:   delegation.DelegationDetailRunModeForeground,
+		RunMode:   ext.DelegationRunForeground,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	bus.Emit(start)
 
-	bus.Emit(handoffEvent(t, aop.TypeMessage, "child-session", "worker", aop.MessageData{
-		MessageID: "m-1", Role: "assistant",
-		Parts: []aop.MessagePart{{Type: aop.PartText, Text: "inspection complete"}},
-	}))
-	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "child-session", "worker", aop.TurnEndData{Stop: "completed"}))
+	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{
+		Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("inspection complete")},
+	}}}))
+	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 
 	spaceCalls, bodies := waitHandoffBodies(t, client, 2)
 	if spaceCalls != 1 {
@@ -136,23 +132,24 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 
 func TestIOAHandoffFailedRun(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[aop.Event]()
+	bus := eventbus.New[*aop.Event]()
 	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
-	start := handoffEvent(t, aop.TypeSessionStart, "child-session", "worker", aop.SessionStartData{
-		ParentSessionID:  "parent-session",
-		ParentToolCallID: "spawn-2",
-	})
-	if err := delegation.Set(&start, delegation.DelegationDetail{
+	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
+		ParentSessionId: "parent-session", ParentToolCallId: "spawn-2",
+	}}})
+	if err := ext.SetDelegation(start, ext.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
-		RunMode:   delegation.DelegationDetailRunModeBackground,
+		RunMode:   ext.DelegationRunBackground,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	bus.Emit(start)
-	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "child-session", "worker", aop.TurnEndData{Stop: "error", Error: "boom"}))
+	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
+		StopReason: "error", Error: &aop.ProtocolError{Message: "boom"},
+	}}}))
 
 	_, bodies := waitHandoffBodies(t, client, 2)
 	retMeta, ok := bodies[1].Meta["subagent"].(map[string]any)
@@ -166,12 +163,12 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 
 func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[aop.Event]()
+	bus := eventbus.New[*aop.Event]()
 	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
-	bus.Emit(handoffEvent(t, aop.TypeSessionStart, "root-session", "aiscan", aop.SessionStartData{Model: "test-model"}))
-	bus.Emit(handoffEvent(t, aop.TypeTurnEnd, "root-session", "aiscan", aop.TurnEndData{Stop: "completed"}))
+	bus.Emit(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}}))
+	bus.Emit(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {

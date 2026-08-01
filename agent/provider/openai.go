@@ -51,13 +51,16 @@ func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatCompletion
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	captureFrame(ctx, RawFrame{Provider: p.Name(), Protocol: ProviderOpenAI, Direction: "request", Transport: "http", Payload: bodyBytes, MediaType: "application/json"})
 
 	data, err := (&apiRequest{client: p.client, timeout: timeoutFromConfig(p.config.Timeout)}).do(
 		ctx, "POST", p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 	)
 	if err != nil {
+		captureAPIErrorFrame(ctx, p.Name(), ProviderOpenAI, err)
 		return nil, hint404(err, p.completionEndpoint(), "Anthropic", "anthropic")
 	}
+	captureFrame(ctx, RawFrame{Provider: p.Name(), Protocol: ProviderOpenAI, Direction: "response", Transport: "http", Payload: data, MediaType: "application/json"})
 
 	var result ChatCompletionResponse
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -84,7 +87,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 	}
 
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
-		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
+		p.completionEndpoint(), bodyBytes, p.setAuthHeaders, p.Name(), ProviderOpenAI,
 		true,
 		func(_ string, data []byte) (ChatCompletionStreamEvent, error) {
 			return parseOpenAIStreamChunk(data)

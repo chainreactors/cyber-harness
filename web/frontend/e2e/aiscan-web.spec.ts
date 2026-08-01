@@ -1,13 +1,61 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token';
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
-const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
-const LLM_API_KEY = process.env.LLM_API_KEY || '';
-const LLM_MODEL = process.env.LLM_MODEL || '';
+const WEB_BASE_URL = process.env.BASE_URL || `http://127.0.0.1:${process.env.AISCAN_E2E_PORT || '38080'}`;
+const execFileAsync = promisify(execFile);
+const externalGoClientDir = fileURLToPath(new URL('../../../examples/external-go-client/', import.meta.url));
 
 function apiHeaders() {
   return { Authorization: `Bearer ${API_TOKEN}` };
+}
+
+function rpcID(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function connectRPC(request: APIRequestContext, procedure: string, data: Record<string, unknown>) {
+  const response = await request.post(procedure, {
+    headers: {
+      ...apiHeaders(),
+      'Content-Type': 'application/json',
+      'Connect-Protocol-Version': '1',
+    },
+    data,
+  });
+  if (!response.ok()) {
+    const body = await response.text();
+    expect(response.ok(), `${procedure}: ${body}`).toBeTruthy();
+  }
+  return response.json();
+}
+
+async function openChatSession(request: APIRequestContext, participant: string) {
+  const sessionID = rpcID('session');
+  const response = await connectRPC(request, '/aop.ChatService/OpenSession', {
+    requestId: rpcID('open'), sessionId: sessionID, participant,
+  });
+  expect(response.accepted?.id).toBe(sessionID);
+  return response.accepted;
+}
+
+async function deleteChatSession(request: APIRequestContext, sessionID: string) {
+  return connectRPC(request, '/aiscan.chat.SessionService/DeleteSession', {
+    requestId: rpcID('delete'), sessionId: sessionID,
+  });
+}
+
+async function runChatTurn(request: APIRequestContext, sessionID: string, content: string) {
+  const turnID = rpcID('turn');
+  const messageID = rpcID('message');
+  const response = await connectRPC(request, '/aop.ChatService/RunTurn', {
+    requestId: rpcID('run'), sessionId: sessionID, turnId: turnID,
+    input: { id: messageID, role: 'user', content: [{ text: { text: content } }] },
+  });
+  expect(response.accepted?.turnId).toBe(turnID);
+  return { turnID, messageID };
 }
 
 async function openAuthenticatedApp(page: Page) {
@@ -279,14 +327,17 @@ test.describe('Config API', () => {
   });
 
   test('LLM connectivity test succeeds with explicit config', async ({ request }) => {
-    test.skip(!LLM_API_KEY, 'LLM_API_KEY env var required');
+    const configResponse = await request.get('/api/config', { headers: apiHeaders() });
+    expect(configResponse.ok()).toBeTruthy();
+    const config = await configResponse.json();
     const res = await request.post('/api/config/llm/test', {
       headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
       data: {
-        provider: LLM_PROVIDER,
-        base_url: LLM_BASE_URL,
-        api_key: LLM_API_KEY,
-        model: LLM_MODEL,
+        profile_id: config.llm.active_profile,
+        provider: config.llm.provider,
+        base_url: config.llm.base_url,
+        api_key: '',
+        model: config.llm.model,
       },
     });
     expect(res.ok()).toBeTruthy();
@@ -315,32 +366,26 @@ test.describe('Agents API', () => {
 
 test.describe('Chat Session CRUD', () => {
   test('create, list, and delete a session', async ({ request }) => {
-    // First, get available agents
     const agents = await requireRegisteredAgents(request);
     const agentID = agents[0].id;
 
-    // Create
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agentID },
-    });
-    expect(createRes.ok()).toBeTruthy();
-    const session = await createRes.json();
+    const session = await openChatSession(request, agentID);
     expect(session.id).toBeTruthy();
-    expect(session.agent_id).toBe(agentID);
+    expect(session.participant).toBe(agentID);
 
-    // List
-    const listRes = await request.get('/api/chat/sessions', { headers: apiHeaders() });
-    expect(listRes.ok()).toBeTruthy();
-    const sessions = await listRes.json();
-    expect(Array.isArray(sessions)).toBeTruthy();
-    expect(sessions.some((s: any) => s.id === session.id)).toBeTruthy();
-
-    // Delete
-    const delRes = await request.delete(`/api/chat/sessions/${session.id}`, {
-      headers: apiHeaders(),
+    const listed = await connectRPC(request, '/aiscan.chat.SessionService/ListSessions', {
+      limit: 100, includeClosed: true,
     });
-    expect(delRes.ok()).toBeTruthy();
+    expect(Array.isArray(listed.sessions)).toBeTruthy();
+    expect(listed.sessions.some((record: any) => record.session?.id === session.id)).toBeTruthy();
+
+    const deleted = await deleteChatSession(request, session.id);
+    expect(deleted.accepted?.id).toBe(session.id);
+  });
+
+  test('legacy chat REST routes are removed', async ({ request }) => {
+    const response = await request.get('/api/chat/sessions', { headers: apiHeaders() });
+    expect(response.status()).toBe(404);
   });
 });
 
@@ -350,37 +395,24 @@ test.describe('Chat Session CRUD', () => {
 
 test.describe('Chat LLM round-trip', () => {
   test('send a message and receive an assistant response', async ({ request }) => {
-    // Get agent
     const agents = await requireRegisteredAgents(request);
     const agentID = agents[0].id;
 
-    // Create session
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agentID },
-    });
-    const session = await createRes.json();
+    const session = await openChatSession(request, agentID);
     const sessionID = session.id;
 
     try {
-      // Send message
-      const sendRes = await request.post(`/api/chat/sessions/${sessionID}/messages`, {
-        headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-        data: { content: 'Reply with exactly one word: PONG' },
-      });
-      expect(sendRes.ok()).toBeTruthy();
+      await runChatTurn(request, sessionID, 'Reply with exactly one word: PONG');
 
-      // Poll for assistant response (up to 30s)
       let assistantMsg: any = null;
       for (let i = 0; i < 15; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        const msgRes = await request.get(`/api/chat/sessions/${sessionID}/messages`, {
-          headers: apiHeaders(),
+        const listed = await connectRPC(request, '/aop.ChatService/ListEvents', {
+          sessionId: sessionID, limit: 500,
         });
-        const page = await msgRes.json();
-        expect(Array.isArray(page.items)).toBeTruthy();
-        const messages = page.items;
-        const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
+        const assistantMsgs = listed.events
+          .map((delivery: any) => delivery.event?.message)
+          .filter((message: any) => message?.role === 'assistant');
         if (assistantMsgs.length > 0) {
           assistantMsg = assistantMsgs[assistantMsgs.length - 1];
           break;
@@ -388,42 +420,50 @@ test.describe('Chat LLM round-trip', () => {
       }
 
       expect(assistantMsg).not.toBeNull();
-      expect(assistantMsg.content).toBeTruthy();
-      expect(assistantMsg.content.length).toBeGreaterThan(0);
+      expect(assistantMsg.content?.length).toBeGreaterThan(0);
     } finally {
-      // Cleanup
-      await request.delete(`/api/chat/sessions/${sessionID}`, {
-        headers: apiHeaders(),
-      });
+      await deleteChatSession(request, sessionID);
     }
   });
 });
 
+test.describe('External Go Connect client', () => {
+  test('an independent Go module opens, runs, and streams a turn', async ({ request }) => {
+    const agents = await requireRegisteredAgents(request);
+    const { stdout, stderr } = await execFileAsync('go', [
+      'run', '.',
+      '-url', WEB_BASE_URL,
+      '-token', API_TOKEN,
+      '-agent', agents[0].id,
+      '-prompt', 'Reply with exactly one word: PONG',
+      '-timeout', '30s',
+    ], {
+      cwd: externalGoClientDir,
+      timeout: 45_000,
+      env: { ...process.env, GOWORK: 'off' },
+    });
+    expect(stderr).not.toContain('error:');
+    expect(stdout).toContain('PONG');
+    expect(stdout).toContain('stop=completed');
+  });
+});
+
 // ---------------------------------------------------------------------------
-// 10. SSE reconnect and durable event cursor
+// 10. Connect stream reconnect and durable event cursor
 // ---------------------------------------------------------------------------
 
-test.describe('SSE reconnect', () => {
+test.describe('Connect stream reconnect', () => {
   test('replays missing durable events after the browser reconnects', async ({ page, request, context }) => {
     const agents = await requireRegisteredAgents(request);
 
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agents[0].id },
-    });
-    expect(createRes.ok()).toBeTruthy();
-    const session = await createRes.json();
+    const session = await openChatSession(request, agents[0].id);
 
     await openAuthenticatedApp(page);
     await page.goto(`/sessions/${session.id}`);
+    await expect(page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })).toBeVisible();
     const prompt = 'Reply with exactly one word: PONG';
-    const sendRes = await request.post(`/api/chat/sessions/${session.id}/messages`, {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { content: prompt },
-    });
-    expect(sendRes.ok()).toBeTruthy();
+    await runChatTurn(request, session.id, prompt);
 
-    await expect(page.locator('p').filter({ hasText: prompt })).toBeVisible({ timeout: 10_000 });
     await context.setOffline(true);
     await page.waitForTimeout(3500);
     await context.setOffline(false);
@@ -432,7 +472,7 @@ test.describe('SSE reconnect', () => {
     await expect(resumed).toBeVisible({ timeout: 15_000 });
     await expect(resumed).toHaveCount(1);
 
-    await request.delete(`/api/chat/sessions/${session.id}`, { headers: apiHeaders() });
+    await deleteChatSession(request, session.id);
   });
 });
 
@@ -460,12 +500,12 @@ test.describe('Asset Pool API', () => {
 // 11. Scans API
 // ---------------------------------------------------------------------------
 
-test.describe('Scans API', () => {
-  test('list scans returns array', async ({ request }) => {
-    const res = await request.get('/api/scans', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(Array.isArray(body)).toBeTruthy();
+test.describe('Scan ConnectRPC', () => {
+  test('lists scans through ScanService and retires the REST route', async ({ request }) => {
+    const body = await connectRPC(request, '/aiscan.scan.ScanService/ListScans', {});
+    expect(Array.isArray(body.scans ?? [])).toBeTruthy();
+    const legacy = await request.get('/api/scans', { headers: apiHeaders() });
+    expect(legacy.status()).toBe(404);
   });
 });
 
@@ -474,6 +514,62 @@ test.describe('Scans API', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Chat UI', () => {
+  test('sends natural language and receives the streamed answer in the browser', async ({ page, request }) => {
+    const agents = await requireRegisteredAgents(request);
+    const session = await openChatSession(request, agents[0].id);
+    const browserErrors: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error') browserErrors.push(`console: ${message.text()}`);
+    });
+    page.on('pageerror', (error) => browserErrors.push(`page: ${error.message}`));
+    page.on('requestfailed', (failed) => {
+      if (!failed.failure()?.errorText.includes('ERR_ABORTED')) {
+        browserErrors.push(`request: ${failed.method()} ${failed.url()} ${failed.failure()?.errorText}`);
+      }
+    });
+
+    try {
+      await openAuthenticatedApp(page);
+      await page.goto(`/sessions/${session.id}`);
+      const input = page.getByRole('textbox', { name: 'Type a message... (/ for commands)' });
+      await input.fill('Reply with exactly one word: PONG');
+      await page.getByRole('button', { name: 'Send message' }).click();
+      await expect(page.getByText('PONG', { exact: true })).toBeVisible({ timeout: 20_000 });
+      expect(browserErrors).toEqual([]);
+    } finally {
+      await deleteChatSession(request, session.id);
+    }
+  });
+
+  test('terminal WebSocket exchanges TerminalFrame protobuf JSON', async ({ page, request }) => {
+    const agents = await requireRegisteredAgents(request);
+    await openAuthenticatedApp(page);
+    const result = await page.evaluate(async ({ agentID }) => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
+      return await new Promise<{ type?: string; sessions?: unknown[]; error?: string }>((resolve, reject) => {
+        const socket = new WebSocket(url);
+        const timer = window.setTimeout(() => {
+          socket.close();
+          reject(new Error('terminal WebSocket timeout'));
+        }, 10_000);
+        socket.onopen = () => socket.send(JSON.stringify({ type: 'list' }));
+        socket.onerror = () => reject(new Error('terminal WebSocket error'));
+        socket.onmessage = (event) => {
+          const frame = JSON.parse(String(event.data));
+          if (frame.type !== 'sessions' && frame.type !== 'error') return;
+          window.clearTimeout(timer);
+          socket.send(JSON.stringify({ type: 'detach' }));
+          socket.close();
+          resolve(frame);
+        };
+      });
+    }, { agentID: agents[0].id });
+    expect(result.error).toBeFalsy();
+    expect(result.type).toBe('sessions');
+    expect(Array.isArray(result.sessions)).toBeTruthy();
+  });
+
   test('UI renders the main chat area', async ({ page }) => {
     await openAuthenticatedApp(page);
     await page.waitForLoadState('networkidle');
@@ -545,13 +641,16 @@ test.describe('Theme', () => {
 
 test.describe('LLM Models', () => {
   test('can fetch available models from provider', async ({ request }) => {
-    test.skip(!LLM_API_KEY, 'LLM_API_KEY env var required');
+    const configResponse = await request.get('/api/config', { headers: apiHeaders() });
+    expect(configResponse.ok()).toBeTruthy();
+    const config = await configResponse.json();
     const res = await request.post('/api/config/llm/models', {
       headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
       data: {
-        provider: LLM_PROVIDER,
-        base_url: LLM_BASE_URL,
-        api_key: LLM_API_KEY,
+        profile_id: config.llm.active_profile,
+        provider: config.llm.provider,
+        base_url: config.llm.base_url,
+        api_key: '',
       },
     });
     expect(res.ok()).toBeTruthy();

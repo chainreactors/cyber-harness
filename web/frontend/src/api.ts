@@ -19,9 +19,33 @@ export interface ScanJob {
 }
 
 import type { SCONode } from '@cyber/cstx-easm';
-import type { AOPEvent } from '@cyber/agent-protocol';
+import { Code, ConnectError, createClient } from '@connectrpc/connect'
+import { createConnectTransport } from '@connectrpc/connect-web'
+import {
+  ChatService,
+  ScanService,
+  ScanStatus,
+  SessionService,
+  type Event as AOPEvent,
+  type EventDelivery,
+  type Scan as ProtoScan,
+  type SessionRecord,
+} from '@cyber/aop';
 export type { SCONode };
 export type { AOPEvent };
+
+const connectTransport = createConnectTransport({
+  baseUrl: window.location.origin,
+  useBinaryFormat: false,
+})
+
+// One AIScan facade is initialized for the application. The generated service
+// clients are lightweight API groups and all share this single transport.
+const aiscanRPC = {
+  chat: createClient(ChatService, connectTransport),
+  sessions: createClient(SessionService, connectTransport),
+  scans: createClient(ScanService, connectTransport),
+}
 
 export interface ScanResult {
   summary: ScanResultSummary;
@@ -111,8 +135,6 @@ export interface ScanEvent {
   error?: string;
   result?: ScanResult;
 }
-
-type RawScanEventType = ScanEvent['type'] | 'output';
 
 export interface ScanOptions {
   verify: boolean;
@@ -470,11 +492,14 @@ export async function stopLocalAgent(name: string): Promise<void> {
 }
 
 export async function submitScan(target: string, mode: string, options: ScanOptions, project?: string): Promise<ScanJob> {
-  return apiJSON('/api/scans', 'Failed to submit scan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target, mode, ...options, project }),
-  });
+	void project
+	try {
+		const response = await aiscanRPC.scans.submitScan({ requestId: newRPCID(), target, mode, options })
+		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to submit scan')
+		return scanToView(response.outcome.value)
+	} catch (error) {
+		throw connectFailure(error, 'Failed to submit scan')
+	}
 }
 
 export async function getAssets(project?: string): Promise<PoolAsset[]> {
@@ -549,96 +574,72 @@ export async function deleteProject(id: string): Promise<void> {
 }
 
 export async function getScan(id: string): Promise<ScanJob> {
-  return apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Scan not found');
+	try {
+		const response = await aiscanRPC.scans.getScan({ scanId: id })
+		if (!response.scan) throw new Error('Scan not found')
+		return scanToView(response.scan)
+	} catch (error) {
+		throw connectFailure(error, 'Scan not found')
+	}
 }
 
 export async function listScans(project?: string): Promise<ScanJob[]> {
-  const q = project ? `?project=${encodeURIComponent(project)}` : '';
-  return apiJSON(`/api/scans${q}`, 'Failed to list scans');
+	void project
+	try {
+		const response = await aiscanRPC.scans.listScans({})
+		return response.scans.map(scanToView)
+	} catch (error) {
+		throw connectFailure(error, 'Failed to list scans')
+	}
 }
 
 export async function deleteScan(id: string): Promise<void> {
-  await apiJSON(`/api/scans/${encodeURIComponent(id)}`, 'Failed to delete scan', { method: 'DELETE' });
-}
-
-// subscribeSSE is the module-private EventSource primitive: one place that
-// wires named handlers, extracts the data string, and manages lifecycle.
-// Handlers receive the raw data string (possibly empty) and decide on parsing.
-function subscribeSSE(
-  url: string,
-  handlers: Record<string, (data: string, raw: Event) => void>,
-  opts?: { onOpen?: () => void; onError?: () => void },
-): EventSource {
-  const es = new EventSource(url)
-  if (opts?.onOpen) es.addEventListener('open', () => opts.onOpen!())
-  if (opts?.onError) es.addEventListener('error', () => opts.onError!())
-  for (const [type, handler] of Object.entries(handlers)) {
-    es.addEventListener(type, (e: Event) => {
-      const data = 'data' in e ? (e as MessageEvent).data : undefined
-      if (typeof data !== 'string') return
-      handler(data, e)
-    })
-  }
-  return es
+	try {
+		const response = await aiscanRPC.scans.cancelScan({ requestId: newRPCID(), scanId: id })
+		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to cancel scan')
+	} catch (error) {
+		throw connectFailure(error, 'Failed to cancel scan')
+	}
 }
 
 export function subscribeScanEvents(
   id: string,
   onEvent: (event: ScanEvent) => void,
 ): () => void {
-  let es: EventSource | null = null
-  const close = () => es?.close()
-  const handler = (type: RawScanEventType) => (data: string) => {
-    if (data === '') {
-      if (type === 'error') {
-        void getScan(id)
-          .then((job) => {
-            if (job.status === 'completed') {
-              onEvent({ type: 'complete', scan_id: id, status: job.status });
-              close();
-            } else if (job.status === 'failed' || job.status === 'canceled') {
-              onEvent({
-                type: 'error',
-                scan_id: id,
-                error: job.error || `Scan ${job.status}`,
-              });
-              close();
-            }
-          })
-          .catch(() => {});
-      }
-      return;
-    }
-
-    let event: ScanEvent;
-    try {
-      const parsed = JSON.parse(data);
-      const normalizedType = type === 'output' ? 'progress' : type;
-      const parsedType = parsed?.type === 'output' ? 'progress' : parsed?.type || normalizedType;
-      event = {
-        scan_id: id,
-        ...parsed,
-        type: parsedType,
-      };
-    } catch {
-      event = { type: type === 'output' ? 'progress' : type, scan_id: id, data };
-    }
-
-    onEvent(event);
-    if (event.type === 'complete' || event.type === 'error') {
-      close();
-    }
-  };
-  es = subscribeSSE(`/api/scans/${encodeURIComponent(id)}/events`, {
-    progress: handler('progress'),
-    status: handler('status'),
-    stats: handler('stats'),
-    complete: handler('complete'),
-    error: handler('error'),
-    output: handler('output'),
-  });
-
-  return () => es?.close();
+	const controller = new AbortController()
+	void (async () => {
+		try {
+			for await (const response of aiscanRPC.scans.watchScanEvents({ scanId: id }, { signal: controller.signal })) {
+				const value = response.event
+				if (!value) continue
+				switch (value.payload.case) {
+					case 'snapshot': {
+						const scan = scanToView(value.payload.value)
+						onEvent({ type: scan.status === 'completed' ? 'complete' : scan.status === 'failed' || scan.status === 'canceled' ? 'error' : 'status', scan_id: id, status: scan.status, error: scan.error, result: scan.result })
+						break
+					}
+					case 'status':
+						onEvent({ type: 'status', scan_id: id, status: scanStatusName(value.payload.value) })
+						break
+					case 'progress':
+						onEvent({ type: 'progress', scan_id: id, data: value.payload.value.data })
+						break
+					case 'stats':
+						onEvent({ type: 'stats', scan_id: id })
+						break
+					case 'completed':
+						onEvent({ type: 'complete', scan_id: id, status: 'completed', result: decodeEncoded<ScanResult>(value.payload.value.result) })
+						break
+					case 'failed':
+						onEvent({ type: 'error', scan_id: id, status: value.payload.value.canceled ? 'canceled' : 'failed', error: value.payload.value.message })
+						break
+				}
+			}
+		} catch (error) {
+			if (!controller.signal.aborted) connectFailure(error, 'Scan event stream disconnected')
+		}
+	})()
+	return () => controller.abort()
 }
 
 // --- Chat session types ---
@@ -664,49 +665,73 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>
   created_at: string
   cursor?: number
-}
-
-export interface ChatMessagePage {
-  items: ChatMessage[]
-  next_cursor?: number
-}
-
-export type DomainEventType =
-  | 'scan_started' | 'scan_progress' | 'scan_complete'
-  | 'agent_joined' | 'session_cleared'
-
-export interface DomainEvent {
-  type: DomainEventType
-  session_id: string
-  agent_id?: string
-  agent_name?: string
-  scan_id?: string
-  result?: ScanResult
-  data?: string
+  turn_id?: string
 }
 
 // --- Chat session API ---
 
 export async function createChatSession(agentID: string, title?: string, scanID?: string): Promise<ChatSession> {
-  return apiJSON('/api/chat/sessions', 'Failed to create session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent_id: agentID, title: title || '', scan_id: scanID || '' }),
-  })
+  void scanID
+  try {
+    const response = await aiscanRPC.chat.openSession({
+      requestId: newRPCID(),
+      sessionId: newRPCID(),
+      participant: agentID,
+      title: title || '',
+    })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to create session')
+    const now = new Date().toISOString()
+    return {
+      id: response.outcome.value.id,
+      agent_id: response.outcome.value.participant,
+      title: response.outcome.value.title,
+      status: response.outcome.value.state === 'closed' ? 'archived' : 'active',
+      created_at: now,
+      updated_at: now,
+    }
+  } catch (error) {
+    throw connectFailure(error, 'Failed to create session')
+  }
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {
-  return apiJSON('/api/chat/sessions', 'Failed to list sessions')
+  try {
+    const response = await aiscanRPC.sessions.listSessions({ limit: 100, includeClosed: true })
+    return response.sessions.map(sessionRecordToView)
+  } catch (error) {
+    throw connectFailure(error, 'Failed to list sessions')
+  }
 }
 
 export async function getChatSession(id: string): Promise<ChatSession> {
-  return apiJSON(`/api/chat/sessions/${encodeURIComponent(id)}`, 'Session not found')
+  try {
+    const response = await aiscanRPC.sessions.getSession({ sessionId: id })
+    if (!response.session) throw new Error('Session not found')
+    return sessionRecordToView(response.session)
+  } catch (error) {
+    throw connectFailure(error, 'Session not found')
+  }
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
-  await apiJSON(`/api/chat/sessions/${encodeURIComponent(id)}`, 'Failed to delete session', {
-    method: 'DELETE',
-  })
+  try {
+    const response = await aiscanRPC.sessions.deleteSession({ requestId: newRPCID(), sessionId: id })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to delete session')
+  } catch (error) {
+    throw connectFailure(error, 'Failed to delete session')
+  }
+}
+
+export async function resetChatSession(id: string): Promise<ChatSession> {
+  try {
+    const response = await aiscanRPC.sessions.resetSession({ requestId: newRPCID(), sessionId: id })
+    if (response.outcome.case !== 'accepted' || !response.outcome.value.current) {
+      throw rejectionError(response.outcome.case === 'rejected' ? response.outcome.value : undefined, 'Failed to reset session')
+    }
+    return sessionRecordToView(response.outcome.value.current)
+  } catch (error) {
+    throw connectFailure(error, 'Failed to reset session')
+  }
 }
 
 // SlashCommandSpec mirrors pkg/slashcmd.Spec — the server's canonical view of a
@@ -722,37 +747,101 @@ export interface SlashCommandSpec {
 }
 
 export async function fetchSessionCommands(sessionID: string): Promise<SlashCommandSpec[]> {
-  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/commands`, 'Failed to load commands')
+  try {
+    const response = await aiscanRPC.sessions.listCommands({ sessionId: sessionID })
+    return response.commands.map((command) => ({
+      name: command.name,
+      aliases: command.aliases,
+      usage: command.usage,
+      description: command.description,
+      scope: 0,
+    }))
+  } catch (error) {
+    throw connectFailure(error, 'Failed to load commands')
+  }
 }
 
 export async function sendChatMessage(
   sessionID: string,
   content: string,
-  opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number },
+  opts?: {
+    persist?: boolean
+    evalCriteria?: string
+    evalMaxRounds?: number
+    messageID?: string
+    turnID?: string
+    requestID?: string
+    continueSession?: boolean
+  },
 ): Promise<ChatMessage> {
-  const body: Record<string, unknown> = { content }
-  // Goal mode: the only run-control the backend acts on is a natural-language
-  // completion criteria judged by an independent evaluator for up to N rounds
-  // (webagent runChatEval). Persist without criteria is just a normal message.
-  if (opts?.persist) {
-    const criteria = opts.evalCriteria?.trim()
-    if (criteria) {
-      body.persist = true
-      body.eval_criteria = criteria
-      if (opts.evalMaxRounds && opts.evalMaxRounds > 0) body.eval_max_rounds = opts.evalMaxRounds
-    }
+  const messageID = opts?.messageID || newRPCID()
+  const turnID = opts?.turnID || newRPCID()
+  const extensions = []
+  const criteria = opts?.persist ? opts.evalCriteria?.trim() : ''
+  if (criteria) {
+    const value = JSON.stringify({ evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
+    extensions.push({
+      namespace: 'io.chainreactors.aiscan.run',
+      value: { data: new TextEncoder().encode(value), mediaType: 'application/protobuf+json' },
+    })
   }
-  return apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`, 'Failed to send message', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  try {
+    const response = await aiscanRPC.chat.runTurn({
+      requestId: opts?.requestID || newRPCID(),
+      sessionId: sessionID,
+      turnId: turnID,
+      continueSession: opts?.continueSession === true,
+      input: {
+        id: messageID,
+        role: 'user',
+        content: opts?.continueSession ? [] : [{ value: { case: 'text', value: { text: content } } }],
+      },
+      extensions,
+    })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to send message')
+    return {
+      id: messageID,
+      session_id: sessionID,
+      role: 'user',
+      content,
+      created_at: new Date().toISOString(),
+      turn_id: response.outcome.value.turnId,
+    }
+  } catch (error) {
+    throw connectFailure(error, 'Failed to send message')
+  }
 }
 
-export async function cancelChatSession(sessionID: string): Promise<void> {
-  await apiJSON(`/api/chat/sessions/${encodeURIComponent(sessionID)}/cancel`, 'Failed to pause response', {
-    method: 'POST',
-  })
+export async function executeChatCommand(sessionID: string, line: string): Promise<void> {
+  try {
+    const response = await aiscanRPC.sessions.executeCommand({ requestId: newRPCID(), sessionId: sessionID, line })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to execute command')
+  } catch (error) {
+    throw connectFailure(error, 'Failed to execute command')
+  }
+}
+
+export async function cancelChatSession(sessionID: string, turnID: string): Promise<void> {
+  if (!turnID) throw new Error('No active turn')
+  try {
+    const response = await aiscanRPC.chat.cancelTurn({
+      requestId: newRPCID(), sessionId: sessionID, turnId: turnID, reason: 'user_requested',
+    })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to pause response')
+  } catch (error) {
+    throw connectFailure(error, 'Failed to pause response')
+  }
+}
+
+export async function closeChatSession(sessionID: string): Promise<void> {
+  try {
+    const response = await aiscanRPC.chat.closeSession({
+      requestId: newRPCID(), sessionId: sessionID, reason: 'completed',
+    })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to close session')
+  } catch (error) {
+    throw connectFailure(error, 'Failed to close session')
+  }
 }
 
 export interface FileUploadResult {
@@ -763,79 +852,194 @@ export interface FileUploadResult {
 }
 
 export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
-  const form = new FormData()
-  form.append('file', file)
-  const resp = await authenticatedFetch(`/api/chat/sessions/${encodeURIComponent(sessionID)}/upload`, {
-    method: 'POST',
-    body: form,
-  })
-  if (!resp.ok) {
-    const body = await resp.text()
-    throw new Error(body || `Upload failed: ${resp.status}`)
+  try {
+    const response = await aiscanRPC.sessions.uploadSessionFile({
+      requestId: newRPCID(),
+      sessionId: sessionID,
+      filename: file.name,
+      mediaType: file.type || 'application/octet-stream',
+      data: new Uint8Array(await file.arrayBuffer()),
+    })
+    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Upload failed')
+    return {
+      filename: response.outcome.value.filename,
+      path: response.outcome.value.path,
+      size: Number(response.outcome.value.size),
+    }
+  } catch (error) {
+    throw connectFailure(error, 'Upload failed')
   }
-  return resp.json()
 }
 
 export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
-  const page: ChatMessagePage = await apiJSON(
-    `/api/chat/sessions/${encodeURIComponent(sessionID)}/messages`,
-    'Failed to list messages',
-  )
-  return page.items
+  try {
+    const response = await aiscanRPC.chat.listEvents({ sessionId: sessionID, limit: 500 })
+    return response.events.flatMap((delivery) => deliveryToChatMessage(delivery) || [])
+  } catch (error) {
+    throw connectFailure(error, 'Failed to list messages')
+  }
 }
 
 // Fetch a scan's markdown report, re-rendered server-side in the given language
 // ('en' | 'zh'). Returns '' when the report isn't ready yet (404) so callers can
 // just show a placeholder.
 export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
-  const res = await authenticatedFetch(`/api/scans/${encodeURIComponent(scanID)}/report?lang=${encodeURIComponent(lang)}`)
-  if (!res.ok) return ''
-  return res.text()
+	try {
+		const response = await aiscanRPC.scans.getScanReport({ scanId: scanID, language: lang })
+		return response.markdown
+	} catch {
+		return ''
+	}
 }
 
-export function subscribeDomainEvents(
+export function subscribeAOPEvents(
   sessionID: string,
-  onEvent: (event: DomainEvent) => void,
+  onEvent: (event: AOPEvent) => void,
   onReconnect?: () => void,
-  onAOP?: (event: AOPEvent) => void,
-  onOpen?: () => void,
 ): () => void {
-  const eventTypes: DomainEventType[] = [
-    'scan_started', 'scan_progress', 'scan_complete',
-    'agent_joined', 'session_cleared',
-  ]
-
-  const handlers: Record<string, (data: string) => void> = {}
-  for (const type of eventTypes) {
-    handlers[type] = (data: string) => {
-      if (data === '') return
+  const controller = new AbortController()
+  let cursor = ''
+  void (async () => {
+    let retry = 250
+    while (!controller.signal.aborted) {
       try {
-        const parsed = JSON.parse(data)
-        onEvent({ ...parsed, type })
-      } catch {
-        onEvent({ type, session_id: sessionID, data } as DomainEvent)
+        for await (const response of aiscanRPC.chat.watchEvents(
+          { sessionId: sessionID, afterCursor: cursor },
+          { signal: controller.signal },
+        )) {
+          const delivery = response.delivery
+          if (!delivery?.event) continue
+          cursor = delivery.cursor
+          onEvent(delivery.event)
+          retry = 250
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return
+        connectFailure(error, 'Event stream disconnected')
+        onReconnect?.()
+        await new Promise((resolve) => window.setTimeout(resolve, retry))
+        retry = Math.min(retry * 2, 5000)
       }
     }
+  })()
+  return () => controller.abort()
+}
+
+function sessionRecordToView(record: SessionRecord): ChatSession {
+  const session = record.session
+  if (!session) throw new Error('Session record is missing its AOP session')
+  return {
+    id: session.id,
+    agent_id: session.participant,
+    agent_name: record.agentName || undefined,
+    title: session.title,
+    status: session.state === 'closed' ? 'archived' : 'active',
+    scan_ids: record.scanIds,
+    created_at: timestampToISOString(record.createdAt),
+    updated_at: timestampToISOString(record.updatedAt),
   }
-  handlers['aop'] = (data: string) => {
-    if (data === '') return
+}
+
+function timestampToISOString(value?: { seconds: bigint; nanos: number }): string {
+  if (!value) return new Date(0).toISOString()
+  return new Date(Number(value.seconds) * 1000 + Math.floor(value.nanos / 1_000_000)).toISOString()
+}
+
+function scanStatusName(value: ScanStatus): ScanJob['status'] {
+	switch (value) {
+		case ScanStatus.QUEUED: return 'queued'
+		case ScanStatus.RUNNING: return 'running'
+		case ScanStatus.COMPLETED: return 'completed'
+		case ScanStatus.FAILED: return 'failed'
+		case ScanStatus.CANCELED: return 'canceled'
+		default: return 'queued'
+	}
+}
+
+function decodeEncoded<T>(value?: { data: Uint8Array }): T | undefined {
+	if (!value?.data?.length) return undefined
+	try {
+		return JSON.parse(new TextDecoder().decode(value.data)) as T
+	} catch {
+		return undefined
+	}
+}
+
+function scanToView(scan: ProtoScan): ScanJob {
+	return {
+		id: scan.id,
+		target: scan.target,
+		mode: scan.mode,
+		verify: scan.options?.verify,
+		sniper: scan.options?.sniper,
+		deep: scan.options?.deep,
+		status: scanStatusName(scan.status),
+		progress: scan.progress || undefined,
+		report: scan.report || undefined,
+		result: decodeEncoded<ScanResult>(scan.result),
+		error: scan.error || undefined,
+		created_at: timestampToISOString(scan.createdAt),
+		updated_at: timestampToISOString(scan.updatedAt),
+	}
+}
+
+function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
+  const event = delivery.event
+  if (!event || event.payload.case !== 'message') return null
+  const message = event.payload.value
+  const text = message.content
+    .filter((part) => part.value.case === 'text')
+    .map((part) => part.value.case === 'text' ? part.value.value.text : '')
+    .join('\n')
+  const webExtension = event.extensions.find((extension) => extension.namespace === 'io.chainreactors.aiscan.web')
+  let metadata: Record<string, unknown> | undefined
+  let agentID: string | undefined
+  if (webExtension?.value?.data?.length) {
     try {
-      const parsed = JSON.parse(data) as AOPEvent
-      if (parsed.session_id && parsed.agent && parsed.type && parsed.ts && parsed.data) onAOP?.(parsed)
-    } catch {
-      // Ignore malformed protocol frames; platform events continue normally.
-    }
+      const decoded = JSON.parse(new TextDecoder().decode(webExtension.value.data)) as Record<string, unknown>
+      agentID = typeof decoded.agentId === 'string' ? decoded.agentId : undefined
+      metadata = decoded.metadata && typeof decoded.metadata === 'object' ? decoded.metadata as Record<string, unknown> : undefined
+    } catch {}
   }
+  const role = message.role === 'assistant' || message.role === 'system' ? message.role : 'user'
+  return {
+    id: message.id,
+    session_id: event.sessionId,
+    role,
+    agent_id: agentID,
+    agent_name: event.emitter,
+    content: text,
+    metadata,
+    created_at: timestampToISOString(event.emittedAt),
+    cursor: delivery.cursor ? Number(delivery.cursor) : undefined,
+    turn_id: event.turnId || undefined,
+  }
+}
 
-  // EventSource reconnects automatically. Reconcile platform-domain state
-  // from REST; AOP itself is replayed from durable storage by the SSE endpoint.
-  const es = subscribeSSE(
-    `/api/chat/sessions/${encodeURIComponent(sessionID)}/events`,
-    handlers,
-    { onOpen, onError: onReconnect },
-  )
+function rejectionError(value: { code?: string; message?: string } | undefined, fallback: string): Error {
+  return new Error(value?.message || value?.code || fallback)
+}
 
-  return () => es.close()
+function connectFailure(error: unknown, fallback: string): Error {
+  const failure = ConnectError.from(error)
+  if (failure.code === Code.Unauthenticated) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
+  return new Error(failure.rawMessage || failure.message || fallback)
+}
+
+function newRPCID(): string {
+  const value = globalThis.crypto
+  if (value && typeof value.randomUUID === 'function') {
+    try { return value.randomUUID() } catch {}
+  }
+  if (value && typeof value.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16)
+    value.getRandomValues(bytes)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (item) => item.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 export function agentTerminalWebSocketURL(agentID: string): string {

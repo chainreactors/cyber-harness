@@ -50,20 +50,20 @@ session.end
 
 ## Transport
 
-stdio 与 WebSocket 共用 `webproto.Message` 语义帧：
+stdio 与 WebSocket 共用生成的 `aiscan.transport.ServerFrame/AgentFrame`，
+分别以标准 protobuf JSON 传输；gRPC 使用同一消息的 protobuf binary：
 
 ```text
-session.open / session.opened
-session.close / session.closed
-run / run.cancel
-command / command.result
-aop
-error
+open_session / close_session
+run_turn / cancel_turn
+command / command_result
+event
+operation_error
 ```
 
 - Web Run API 只使用 `turn_id` 关联；协议中不存在独立的 `run_id`；
 - Runner 身份使用注册消息中的 `NodeRef.ID`；它是节点路由身份，不进入 `Session → Run` 领域模型，也不与 `turn_id` 混用；
-- direct structured tool execution 使用 `command / command.result`，不再把 inbound AOP 当 RPC；
+- direct structured tool execution 使用 `tool_call` / AOP `tool_result`；
 - PTY、file RPC、node status/config 仍属于各自控制或终端平面，不伪装成 Agent Turn。
 
 ## 并发与异步输入
@@ -81,4 +81,5 @@ error
 
 - 不双读、双写旧协议；
 - SQLite 保留 sessions、messages、assets、records；
-- 旧 `chat_aop_events` 在 migration version 2 时一次性清空，因为旧 Session/Turn 边界不能安全重解释。
+- `chat_aop_events.event_json` 只存标准 protobuf JSON；迁移保留已有历史，不做双读写；
+- SQLite delivery 列统一为 `cursor`，旧 `hub_seq` 仅执行一次列重命名。

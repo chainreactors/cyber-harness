@@ -2,16 +2,18 @@ package web
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type lockedResponseRecorder struct {
@@ -51,9 +53,9 @@ func (r *lockedResponseRecorder) BodyString() string {
 	return r.Body.String()
 }
 
-// Replay (SQLite → SSE) must be a pure read: no frames to agents, no task
-// lifecycle changes, no new events persisted.
-func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
+// ListEvents replay is a pure read: it must not dispatch frames, converge an
+// in-flight task, or append another copy of a terminal event.
+func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "replay.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -62,15 +64,9 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 
 	pool := NewAgentPool(NewHub())
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
-	h := &handlerImpl{service: svc, agents: pool}
-
-	// A connected agent with an in-flight chat task.
 	remote := &remoteAgent{
-		id:     "agent-1",
-		name:   "worker",
-		sendCh: make(chan WSMessage, 8),
-		tasks:  map[string]chan taskResult{},
-		turns:  map[string]int{},
+		id: "agent-1", name: "worker", sendCh: make(chan *transport.ServerFrame, 8),
+		tasks: map[string]chan taskResult{}, turns: map[string]int{},
 	}
 	taskCh := make(chan taskResult, 1)
 	remote.tasks["task-1"] = taskCh
@@ -81,70 +77,38 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored := []aop.Event{
-		{
-			Type: aop.TypeMessage, TS: "2026-07-19T00:00:01Z", SessionID: session.ID, Agent: "aiscan",
-			Data: mustJSON(aop.MessageData{MessageID: "m-1", Role: "user", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hi"}}}),
-		},
-		{
-			Type: aop.TypeToolCall, TS: "2026-07-19T00:00:02Z", SessionID: session.ID, Agent: "aiscan",
-			Data: mustJSON(aop.ToolCallData{ToolCallID: "tc-1", ToolName: "bash", Args: map[string]string{"command": "ls"}}),
-		},
-		{
-			Type: aop.TypeTurnEnd, TS: "2026-07-19T00:00:03Z", SessionID: session.ID, TurnID: "turn-1", Agent: "aiscan",
-			Data: mustJSON(aop.TurnEndData{Stop: "completed"}),
-		},
+	arguments, _ := aop.JSONValue(map[string]string{"command": "ls"})
+	stored := []*aop.Event{
+		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.ID, Emitter: "aiscan",
+			Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hi")}}}},
+		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.ID, Emitter: "aiscan",
+			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "tc-1", Name: "bash", Arguments: arguments}}},
+		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.ID, TurnId: "turn-1", Emitter: "aiscan",
+			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}},
 	}
-	for _, ev := range stored {
-		if err := store.AddAOPEvent(ctx, session.ID, ev); err != nil {
+	for _, event := range stored {
+		if err := store.AddAOPEvent(ctx, session.ID, event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	before, err := store.ListAOPEvents(ctx, session.ID, 100)
+
+	response, err := NewAOPChatServer(svc).ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	reqCtx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest("GET", "/api/chat/sessions/"+session.ID+"/events", nil).WithContext(reqCtx)
-	req.SetPathValue("id", session.ID)
-	rec := newLockedResponseRecorder()
-
-	done := make(chan struct{})
-	go func() {
-		h.sessionEvents(rec, req)
-		close(done)
-	}()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(rec.BodyString(), "turn.end") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	if len(response.Events) != len(stored) {
+		t.Fatalf("replayed events = %d, want %d", len(response.Events), len(stored))
 	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("sessionEvents did not return after request cancel")
-	}
-
-	body := rec.BodyString()
-	for _, ev := range stored {
-		raw, _ := json.Marshal(ev.Data)
-		if !strings.Contains(body, string(raw)) {
-			t.Fatalf("replayed stream is missing %s event data %s", ev.Type, raw)
+	for index, delivery := range response.Events {
+		if !proto.Equal(delivery.Event, stored[index]) {
+			t.Fatalf("delivery %d = %v, want %v", index, delivery.Event, stored[index])
 		}
 	}
-
-	// No agent frame was produced by the replay.
 	select {
-	case msg := <-remote.sendCh:
-		t.Fatalf("replay dispatched a frame to the agent: %+v", msg)
+	case frame := <-remote.sendCh:
+		t.Fatalf("replay dispatched a frame: %v", frame)
 	default:
 	}
-	// The in-flight task was not converged by replayed terminal events.
 	remote.mu.Lock()
 	_, stillRegistered := remote.tasks["task-1"]
 	remote.mu.Unlock()
@@ -152,21 +116,17 @@ func TestSessionEventsReplayHasNoSideEffects(t *testing.T) {
 		t.Fatal("replay converged the in-flight task")
 	}
 	select {
-	case res, ok := <-taskCh:
-		t.Fatalf("replay wrote to the task channel: res=%+v ok=%v", res, ok)
+	case result, ok := <-taskCh:
+		t.Fatalf("replay wrote to task channel: result=%+v ok=%v", result, ok)
 	default:
 	}
-	// Replay is read-only on the store.
 	after, err := store.ListAOPEvents(ctx, session.ID, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) != len(before) {
-		t.Fatalf("event count changed by replay: before=%d after=%d", len(before), len(after))
+	if err != nil || len(after) != len(stored) {
+		t.Fatalf("stored events after replay = %d, %v", len(after), err)
 	}
 }
 
-func TestSessionEventsResumesAfterLastEventID(t *testing.T) {
+func TestWatchEventsResumesAfterCursor(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -178,36 +138,28 @@ func TestSessionEventsResumesAfterLastEventID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for seq := 1; seq <= 3; seq++ {
-		if err := store.AddAOPEvent(context.Background(), session.ID, aop.Event{
-			Type: aop.TypeStatus, TS: time.Now().UTC().Format(time.RFC3339Nano), SessionID: session.ID, Agent: "aiscan",
-			Data: mustJSON(map[string]int{"seq": seq}),
+		detail, _ := aop.JSONValue(map[string]int{"seq": seq})
+		if err := store.AddAOPEvent(context.Background(), session.ID, &aop.Event{
+			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.ID, Emitter: "aiscan",
+			Payload: &aop.Event_Status{Status: &aop.Status{State: "running", Detail: detail}},
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	reqCtx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest("GET", "/api/chat/sessions/"+session.ID+"/events", nil).WithContext(reqCtx)
-	req.Header.Set("Last-Event-ID", "2")
-	req.SetPathValue("id", session.ID)
-	recorder := newLockedResponseRecorder()
-	done := make(chan struct{})
-	go func() {
-		(&handlerImpl{service: svc}).sessionEvents(recorder, req)
-		close(done)
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(recorder.BodyString(), "id: 3\n") {
-		time.Sleep(10 * time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	var deliveries []*aop.EventDelivery
+	err = NewAOPChatServer(svc).(*aopChatServer).watchEvents(&aop.WatchEventsRequest{
+		SessionId: session.ID, AfterCursor: "2",
+	}, ctx, func(response *aop.WatchEventsResponse) error {
+		deliveries = append(deliveries, response.Delivery)
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WatchEvents error = %v, want context canceled", err)
 	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("sessionEvents did not return after request cancel")
-	}
-	body := recorder.BodyString()
-	if strings.Contains(body, "id: 1\n") || strings.Contains(body, "id: 2\n") || !strings.Contains(body, "id: 3\n") {
-		t.Fatalf("resume body = %q, want only events after cursor 2", body)
+	if len(deliveries) != 1 || deliveries[0].Cursor != "3" || deliveries[0].Event.Id != "3" {
+		t.Fatalf("resumed deliveries = %v, want only cursor 3", deliveries)
 	}
 }

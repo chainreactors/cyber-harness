@@ -11,15 +11,15 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
 
-func testBus(handler func(aop.Event)) *eventbus.Bus[aop.Event] {
-	b := eventbus.New[aop.Event]()
+func testBus(handler func(*aop.Event)) *eventbus.Bus[*aop.Event] {
+	b := eventbus.New[*aop.Event]()
 	if handler != nil {
 		b.Subscribe(handler)
 	}
@@ -258,17 +258,19 @@ func containsEvent(events []string, want string) bool {
 	return false
 }
 
-func eventTypes(events []aop.Event) []string {
+func eventTypes(events []*aop.Event) []string {
 	out := make([]string, 0, len(events))
 	for _, event := range events {
-		out = append(out, event.Type)
+		out = append(out, aop.Kind(event))
 	}
 	return out
 }
 
-func lastEvent(events []aop.Event) aop.Event {
+func eventKind(event *aop.Event) string { return aop.Kind(event) }
+
+func lastEvent(events []*aop.Event) *aop.Event {
 	if len(events) == 0 {
-		return aop.Event{}
+		return nil
 	}
 	return events[len(events)-1]
 }

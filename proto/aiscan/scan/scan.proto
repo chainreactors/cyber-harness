@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package aiscan.scan;
+
+import "aop/chat.proto";
+import "aop/value.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/chainreactors/aiscan/aop/aiscan/scan;scan";
+
+enum ScanStatus {
+  SCAN_STATUS_UNSPECIFIED = 0;
+  SCAN_STATUS_QUEUED = 1;
+  SCAN_STATUS_RUNNING = 2;
+  SCAN_STATUS_COMPLETED = 3;
+  SCAN_STATUS_FAILED = 4;
+  SCAN_STATUS_CANCELED = 5;
+}
+
+message ScanOptions {
+  bool verify = 1;
+  bool sniper = 2;
+  bool deep = 3;
+}
+
+message Scan {
+  string id = 1;
+  string target = 2;
+  string mode = 3;
+  ScanOptions options = 4;
+  ScanStatus status = 5;
+  string progress = 6;
+  string report = 7;
+  aop.EncodedValue result = 8;
+  string error = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message SubmitScanRequest {
+  string request_id = 1;
+  string target = 2;
+  string mode = 3;
+  ScanOptions options = 4;
+}
+
+message SubmitScanResponse {
+  string request_id = 1;
+  oneof outcome {
+    Scan accepted = 2;
+    aop.Rejection rejected = 3;
+  }
+}
+
+message GetScanRequest {
+  string scan_id = 1;
+}
+
+message GetScanResponse {
+  Scan scan = 1;
+}
+
+message ListScansRequest {}
+
+message ListScansResponse {
+  repeated Scan scans = 1;
+}
+
+message CancelScanRequest {
+  string request_id = 1;
+  string scan_id = 2;
+}
+
+message CancelScanResponse {
+  string request_id = 1;
+  oneof outcome {
+    Scan accepted = 2;
+    aop.Rejection rejected = 3;
+  }
+}
+
+message WatchScanEventsRequest {
+  string scan_id = 1;
+}
+
+message ScanProgress {
+  string data = 1;
+}
+
+message ScanStats {
+  map<string, uint64> values = 1;
+}
+
+message ScanCompleted {
+  aop.EncodedValue result = 1;
+}
+
+message ScanFailed {
+  string message = 1;
+  bool canceled = 2;
+}
+
+// SessionScanEvent links a completed scan into an AOP session timeline without
+// reintroducing a parallel web-only domain event envelope.
+message SessionScanEvent {
+  string scan_id = 1;
+  ScanStatus status = 2;
+}
+
+message ScanEvent {
+  string scan_id = 1;
+  uint64 sequence = 2;
+  google.protobuf.Timestamp emitted_at = 3;
+  oneof payload {
+    Scan snapshot = 10;
+    ScanStatus status = 11;
+    ScanProgress progress = 12;
+    ScanStats stats = 13;
+    ScanCompleted completed = 14;
+    ScanFailed failed = 15;
+  }
+}
+
+message WatchScanEventsResponse {
+  ScanEvent event = 1;
+}
+
+message GetScanReportRequest {
+  string scan_id = 1;
+  string language = 2;
+}
+
+message GetScanReportResponse {
+  string markdown = 1;
+  string media_type = 2;
+}
+
+service ScanService {
+  rpc SubmitScan(SubmitScanRequest) returns (SubmitScanResponse);
+  rpc GetScan(GetScanRequest) returns (GetScanResponse);
+  rpc ListScans(ListScansRequest) returns (ListScansResponse);
+  rpc CancelScan(CancelScanRequest) returns (CancelScanResponse);
+  rpc WatchScanEvents(WatchScanEventsRequest) returns (stream WatchScanEventsResponse);
+  rpc GetScanReport(GetScanReportRequest) returns (GetScanReportResponse);
+}

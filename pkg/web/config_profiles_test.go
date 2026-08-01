@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	proto "github.com/chainreactors/aiscan/core/config"
 )
 
 func TestActivateLLMProfileSelectsByID(t *testing.T) {
 	store := &fakeConfigStore{}
 	store.cfg.LLM.ActiveProfile = "primary"
-	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
+	store.cfg.LLM.Providers = []proto.LLMProviderConfig{
 		{ID: "primary", Name: "Primary", Provider: "openai", Model: "gpt-primary", APIKey: "key-1"},
 		{ID: "fast", Name: "Fast", Provider: "openai", Model: "deepseek-fast", APIKey: "key-2"},
 	}
@@ -34,9 +34,9 @@ func TestActivateLLMProfileSelectsByID(t *testing.T) {
 }
 
 func TestConfigStatusIncludesModelLimits(t *testing.T) {
-	var cfg webproto.DistributeConfig
+	var cfg proto.DistributeConfig
 	cfg.LLM.ActiveProfile = "large"
-	cfg.LLM.Providers = []webproto.LLMProviderConfig{{
+	cfg.LLM.Providers = []proto.LLMProviderConfig{{
 		ID: "large", Provider: "anthropic", Model: "glm-5.2[1m]",
 		MaxTokens: 32768, ContextWindow: 1000000,
 	}}
@@ -52,14 +52,14 @@ func TestConfigStatusIncludesModelLimits(t *testing.T) {
 func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 	store := &fakeConfigStore{}
 	service := NewService(ServiceConfig{ConfigStore: store})
-	for _, mutate := range []func(*webproto.LLMProviderConfig){
-		func(p *webproto.LLMProviderConfig) { p.MaxTokens = -1 },
-		func(p *webproto.LLMProviderConfig) { p.ContextWindow = -1 },
+	for _, mutate := range []func(*proto.LLMProviderConfig){
+		func(p *proto.LLMProviderConfig) { p.MaxTokens = -1 },
+		func(p *proto.LLMProviderConfig) { p.ContextWindow = -1 },
 	} {
-		var cfg webproto.DistributeConfig
-		profile := webproto.LLMProviderConfig{ID: "bad", Model: "test-model"}
+		var cfg proto.DistributeConfig
+		profile := proto.LLMProviderConfig{ID: "bad", Model: "test-model"}
 		mutate(&profile)
-		cfg.LLM.Providers = []webproto.LLMProviderConfig{profile}
+		cfg.LLM.Providers = []proto.LLMProviderConfig{profile}
 		if _, err := service.SaveConfig(context.Background(), cfg); err == nil {
 			t.Fatal("SaveConfig() accepted a negative model limit")
 		}
@@ -72,8 +72,8 @@ func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
 	store := &fakeConfigStore{}
 	service := NewService(ServiceConfig{ConfigStore: store})
-	var cfg webproto.DistributeConfig
-	cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "empty", Name: "Empty", Model: "  "}}
+	var cfg proto.DistributeConfig
+	cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "empty", Name: "Empty", Model: "  "}}
 
 	if _, err := service.SaveConfig(context.Background(), cfg); err == nil {
 		t.Fatal("SaveConfig() accepted an empty profile model")
@@ -86,7 +86,7 @@ func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
 func TestActivateLLMProfileRejectsEmptyModel(t *testing.T) {
 	store := &fakeConfigStore{}
 	store.cfg.LLM.ActiveProfile = "primary"
-	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
+	store.cfg.LLM.Providers = []proto.LLMProviderConfig{
 		{ID: "primary", Model: "gpt-primary"},
 		{ID: "empty", Model: ""},
 	}

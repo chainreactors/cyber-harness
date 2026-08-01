@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -161,7 +161,7 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 	if err != nil {
 		return err
 	}
-	run, err := session.Run(ctx, runner.RunInput{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
+	run, err := session.Run(ctx, runner.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
 	if err != nil {
 		return err
 	}

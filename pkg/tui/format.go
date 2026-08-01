@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
 	"github.com/charmbracelet/glamour"
@@ -231,17 +231,20 @@ func formatTokenUsage(u *agent.Usage) string {
 // Message summarisation helpers
 // ---------------------------------------------------------------------------
 
-func summarizeMessageData(msg aop.MessageData) (role string, contentLen int, reasoningLen int, preview string) {
+func summarizeMessageData(msg *aop.Message) (role string, contentLen int, reasoningLen int, preview string) {
+	if msg == nil {
+		return "", 0, 0, ""
+	}
 	role = msg.Role
-	for _, p := range msg.Parts {
-		switch p.Type {
-		case aop.PartText:
-			contentLen += len(p.Text)
+	for _, content := range msg.Content {
+		switch value := content.Value.(type) {
+		case *aop.Content_Text:
+			contentLen += len(value.Text.Text)
 			if preview == "" {
-				preview = truncate.Clip(p.Text, agentDebugPreviewLimit)
+				preview = truncate.Clip(value.Text.Text, agentDebugPreviewLimit)
 			}
-		case aop.PartReasoning:
-			reasoningLen += len(p.Text)
+		case *aop.Content_Reasoning:
+			reasoningLen += len(value.Reasoning.Text)
 		}
 	}
 	return role, contentLen, reasoningLen, preview

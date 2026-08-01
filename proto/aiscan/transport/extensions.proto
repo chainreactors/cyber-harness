@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package aiscan.transport;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/chainreactors/aiscan/aop/aiscan/transport;transport";
+
+message CommandDetail {
+  string line = 1;
+  string presentation = 2;
+}
+
+message CompactDetail {
+  string error = 1;
+  uint64 kept_messages = 2;
+  uint64 tokens_after = 3;
+  uint64 tokens_before = 4;
+}
+
+message DelegationDetail {
+  string agent_id = 1;
+  string agent_name = 2;
+  string agent_type = 3;
+  string context_mode = 4;
+  string run_mode = 5;
+  string task = 6;
+}
+
+message EvalControl {
+  string criteria = 1;
+  uint32 max_rounds = 2;
+}
+
+message EvalDetail {
+  string error = 1;
+  uint32 max_rounds = 2;
+  bool pass = 3;
+  string reason = 4;
+  uint32 round = 5;
+}
+
+message BudgetWarning {
+  uint64 context_tokens = 1;
+  uint64 token_budget = 2;
+}
+
+message LLMRequestDetail {
+  string model = 1;
+  uint32 messages = 2;
+  uint32 max_tokens = 3;
+  bool stream = 4;
+}
+
+message WebMessageExtension {
+  string agent_id = 1;
+  bytes metadata = 2;
+  google.protobuf.Struct params = 3;
+}

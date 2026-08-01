@@ -7,25 +7,25 @@ import (
 	"testing"
 	"time"
 
+	proto "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 type transactionalConfigStore struct {
 	mu         sync.Mutex
-	cfg        webproto.DistributeConfig
+	cfg        proto.DistributeConfig
 	commitErr  error
 	discarded  int
 	prepareLog []string
 }
 
-func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, webproto.DistributeConfig, error) {
+func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, proto.DistributeConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return "config.yaml", true, s.cfg, nil
 }
 
-func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error) {
+func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg proto.DistributeConfig) (*PreparedConfig, error) {
 	s.mu.Lock()
 	s.prepareLog = append(s.prepareLog, cfg.LLM.Active().Model)
 	s.mu.Unlock()
@@ -62,10 +62,10 @@ func (c *recordingCloser) Close() {
 	c.once.Do(func() { close(c.done) })
 }
 
-func configForModel(model string) webproto.DistributeConfig {
-	var cfg webproto.DistributeConfig
+func configForModel(model string) proto.DistributeConfig {
+	var cfg proto.DistributeConfig
 	cfg.LLM.ActiveProfile = "primary"
-	cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "primary", Provider: "openai", Model: model}}
+	cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "primary", Provider: "openai", Model: model}}
 	return cfg
 }
 

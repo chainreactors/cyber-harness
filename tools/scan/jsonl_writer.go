@@ -1,13 +1,13 @@
 package scan
 
 import (
-	"encoding/json"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type scanJSONLWriter struct {
@@ -16,7 +16,7 @@ type scanJSONLWriter struct {
 	agentUnsub func()
 }
 
-func newScanJSONLWriter(path string, scanBus *eventbus.Bus[pipeline.Observation], agentBus *eventbus.Bus[aop.Event]) (*scanJSONLWriter, error) {
+func newScanJSONLWriter(path string, scanBus *eventbus.Bus[pipeline.Observation], agentBus *eventbus.Bus[*aop.Event]) (*scanJSONLWriter, error) {
 	tw, err := output.NewTimelineWriter(path)
 	if err != nil {
 		return nil, err
@@ -58,8 +58,8 @@ func (w *scanJSONLWriter) handleObservation(obs pipeline.Observation) {
 	}
 }
 
-func (w *scanJSONLWriter) handleAgentEvent(event aop.Event) {
-	raw, _ := json.Marshal(event)
+func (w *scanJSONLWriter) handleAgentEvent(event *aop.Event) {
+	raw, _ := protojson.Marshal(event)
 	w.w.WriteRaw(raw)
 }
 

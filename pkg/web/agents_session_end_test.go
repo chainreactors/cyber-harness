@@ -1,35 +1,24 @@
 package web
 
 import (
-	"encoding/json"
+	"context"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
-func sessionEvent(t *testing.T, typ, sessionID string, data any) aop.Event {
+func sessionEvent(t *testing.T, sessionID string, event *aop.Event) *aop.Event {
 	t.Helper()
-	raw, err := json.Marshal(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return aop.Event{
-		Type:      typ,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: sessionID,
-		Agent:     "test-agent",
-		Data:      raw,
-	}
+	event.SessionId = sessionID
+	event.Emitter = "test-agent"
+	return event
 }
 
-func forwardEvent(t *testing.T, pool *AgentPool, remote *remoteAgent, taskID string, ev aop.Event) {
+func forwardEvent(t *testing.T, pool *AgentPool, remote *remoteAgent, taskID string, event *aop.Event) {
 	t.Helper()
-	payload, err := json.Marshal(ev)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool.forwardAOPEvent(remote, WSMessage{Type: "aop", TurnID: taskID, Payload: payload})
+	pool.forwardAOPFrame(remote, taskID, event)
 }
 
 func newChatTaskRemote() (*remoteAgent, chan taskResult) {
@@ -79,8 +68,8 @@ func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnStart, "agent-session", aop.TurnStartData{}))
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 
 	res := readResult(t, ch)
 	if res.Err != "" {
@@ -98,10 +87,15 @@ func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 
 	// A mid-run AOP error is display-only; the terminal turn.end carries
 	// the failure.
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeError, "agent-session", aop.ErrorData{Message: "boom"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_Error{Error: &aop.ProtocolError{Message: "boom"}}}))
 	assertTaskOpen(t, remote, ch)
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "error", Error: "boom"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{
+		TurnId: "task-1",
+		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
+			StopReason: "error", Error: &aop.ProtocolError{Message: "boom"},
+		}},
+	}))
 	res := readResult(t, ch)
 	if res.Err != "boom" {
 		t.Fatalf("err = %q, want %q", res.Err, "boom")
@@ -114,7 +108,12 @@ func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
 	remote, ch := newChatTaskRemote()
 
 	// The agent reports the ctx error on cancel; it must not surface as a task error.
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "canceled", Error: "context canceled"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{
+		TurnId: "task-1",
+		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
+			StopReason: "canceled", Error: &aop.ProtocolError{Message: "context canceled"},
+		}},
+	}))
 	res := readResult(t, ch)
 	if res.Err != "" {
 		t.Fatalf("err = %q, want empty for canceled run", res.Err)
@@ -126,11 +125,11 @@ func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionStart, "child-1", aop.SessionStartData{ParentSessionID: "agent-session"}))
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeSessionEnd, "child-1", aop.SessionEndData{Reason: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "child-1", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentSessionId: "agent-session"}}}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "child-1", &aop.Event{Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}}))
 	assertTaskOpen(t, remote, ch)
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
+	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 	readResult(t, ch)
 }
 
@@ -139,15 +138,60 @@ func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
-	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, aop.TypeTurnEnd, "agent-session", aop.TurnEndData{Stop: "completed"}))
+	event := sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
+	forwardEvent(t, pool, remote, "task-1", event)
 	res := readResult(t, ch)
 	if res.Err != "" {
 		t.Fatalf("err = %q, want empty", res.Err)
 	}
 
-	// A leftover complete frame (mixed-version agent) must be a no-op.
-	pool.handleAgentMessage(remote, WSMessage{Type: "complete", TaskID: "task-1"})
+	// Duplicate terminal events must be idempotent.
+	forwardEvent(t, pool, remote, "task-1", event)
 	if _, ok := <-ch; ok {
 		t.Fatal("channel delivered a second result")
 	}
+}
+
+func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
+	store, err := NewSQLiteStore(t.TempDir() + "/chat.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "session-1")
+	service := NewService(ServiceConfig{Store: store})
+	pool := NewAgentPool(service.Hub())
+	service.SetAgentPool(pool)
+	remote := &remoteAgent{
+		id: "agent-1", name: "agent-1", sendCh: make(chan *transport.ServerFrame, 2), controlCh: make(chan *transport.ServerFrame, 2),
+		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: make(map[string]struct{}),
+		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+	}
+	pool.agents[remote.id] = remote
+	if _, err := store.db.Exec(`UPDATE chat_sessions SET agent_id = ? WHERE id = ?`, remote.id, "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	service.handleAgentRun("session-1", &aop.RunTurnRequest{
+		RequestId: "run-1", SessionId: "session-1", TurnId: "turn-1",
+		Input: &aop.Message{Role: "user", Content: []*aop.Content{aop.Text("hello")}},
+	})
+	pool.unregister(remote)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		events, _ := store.ListAOPEvents(context.Background(), "session-1", 10)
+		if len(events) == 1 {
+			ended := events[0].GetTurnEnded()
+			if events[0].TurnId != "turn-1" || events[0].Seq != 1 || ended == nil || ended.Error.GetCode() != "agent_disconnected" {
+				t.Fatalf("terminal event = %+v", events[0])
+			}
+			service.BroadcastAOPEvent("session-1", &aop.Event{SessionId: "session-1", TurnId: "turn-1", Seq: 2, Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
+			after, _ := store.ListAOPEvents(context.Background(), "session-1", 10)
+			if len(after) != 1 {
+				t.Fatalf("late duplicate terminal persisted: %+v", after)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("disconnect terminal event was not persisted")
 }

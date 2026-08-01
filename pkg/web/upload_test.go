@@ -1,79 +1,34 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"mime/multipart"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	"connectrpc.com/connect"
+	chatpb "github.com/chainreactors/aiscan/aop/aiscan/chat"
+	"github.com/chainreactors/aiscan/aop/aiscan/chat/chatconnect"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
-func newMultipartUploadRequest(t *testing.T, filename string, data []byte) *http.Request {
-	t.Helper()
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := part.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest("POST", "/upload", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	return req
-}
-
-func TestReadMultipartUploadEnforcesExactFileLimit(t *testing.T) {
-	for _, size := range []int{7, 8} {
-		req := newMultipartUploadRequest(t, "note.txt", bytes.Repeat([]byte("x"), size))
-		filename, data, err := readMultipartUpload(httptest.NewRecorder(), req, 8)
-		if err != nil {
-			t.Fatalf("size %d: %v", size, err)
-		}
-		if filename != "note.txt" || len(data) != size {
-			t.Fatalf("size %d: filename=%q bytes=%d", size, filename, len(data))
-		}
-	}
-
-	req := newMultipartUploadRequest(t, "large.txt", bytes.Repeat([]byte("x"), 9))
-	if _, _, err := readMultipartUpload(httptest.NewRecorder(), req, 8); !errors.Is(err, ErrUploadTooLarge) {
-		t.Fatalf("size 9 error = %v, want ErrUploadTooLarge", err)
-	}
-}
-
-func TestReadMultipartUploadRejectsMalformedBody(t *testing.T) {
-	req := httptest.NewRequest("POST", "/upload", bytes.NewBufferString("not multipart"))
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=missing")
-	if _, _, err := readMultipartUpload(httptest.NewRecorder(), req, 8); err == nil || errors.Is(err, ErrUploadTooLarge) {
-		t.Fatalf("malformed multipart error = %v", err)
-	}
-}
-
-func TestUploadReturnsNotFoundForMissingSession(t *testing.T) {
+func TestUploadConnectRPCRejectsMissingSession(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
-	req := newMultipartUploadRequest(t, "note.txt", []byte("hello"))
-	req.URL.Path = "/api/chat/sessions/missing/upload"
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
+	server := httptest.NewServer(NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, ""))
+	defer server.Close()
+	client := chatconnect.NewSessionServiceClient(server.Client(), server.URL, connect.WithProtoJSON())
+	response, err := client.UploadSessionFile(context.Background(), connect.NewRequest(&chatpb.UploadSessionFileRequest{
+		RequestId: "upload-1", SessionId: "missing", Filename: "note.txt", Data: []byte("hello"),
+	}))
+	if err != nil || response.Msg.GetRejected().GetCode() != "NOT_FOUND" {
+		t.Fatalf("UploadSessionFile = %v, %v", response, err)
 	}
 }
 
@@ -105,7 +60,7 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 		done <- err
 	}()
 
-	var upload webproto.Message
+	var upload *transport.ServerFrame
 	select {
 	case upload = <-remote.sendCh:
 	case <-time.After(time.Second):
@@ -122,14 +77,15 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	}
 
 	remote.mu.Lock()
-	_, pending := remote.tasks[upload.TaskID]
+	taskID := upload.GetFileUpload().GetTaskId()
+	_, pending := remote.tasks[taskID]
 	remote.mu.Unlock()
 	if pending {
 		t.Fatal("canceled upload remained in the agent task map")
 	}
 	select {
 	case msg := <-remote.controlCh:
-		if msg.Type != webproto.TypeRunCancel || msg.TurnID != upload.TaskID {
+		if msg.GetCancelTurn().GetTurnId() != taskID {
 			t.Fatalf("upload cancel frame = %+v", msg)
 		}
 	default:

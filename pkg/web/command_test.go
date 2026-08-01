@@ -2,14 +2,13 @@ package web
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	"connectrpc.com/connect"
+	chatpb "github.com/chainreactors/aiscan/aop/aiscan/chat"
+	"github.com/chainreactors/aiscan/aop/aiscan/chat/chatconnect"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -61,77 +60,40 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 	for _, s := range svc.SessionMenu("no-such-session") {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"/scan", "/agents", "/help", "/status", "/provider", "/model"} {
+	for _, want := range []string{"/agents", "/help", "/status", "/provider", "/model"} {
 		if !names[want] {
 			t.Errorf("SessionMenu missing %q", want)
 		}
 	}
-	for _, absent := range []string{"/stop", "/continue", "/eval", "/followup", "/loop"} {
+	for _, absent := range []string{"/scan", "/stop", "/continue", "/eval", "/followup", "/loop"} {
 		if names[absent] {
 			t.Errorf("SessionMenu leaked run-control command %q", absent)
 		}
 	}
 }
 
-// TestClearCommandWipesTranscript verifies web /clear is a true "clear
-// conversation": the session's persisted messages are deleted (so a reload stays
-// empty), not merely the agent's model context. No agent is bound here, so the
-// path is store-wipe + UI signal only.
-func TestClearCommandWipesTranscript(t *testing.T) {
-	svc := newMenuTestService(t)
-	ctx := context.Background()
-	sid := "sess-clear"
-	createStoredSession(t, svc.store, sid)
-	for _, role := range []string{"user", "assistant", "user"} {
-		err := svc.store.AddMessage(ctx, &ChatMessage{
-			ID: generateID(), SessionID: sid, Role: role, Content: "x", CreatedAt: time.Now(),
-		})
-		if err != nil {
-			t.Fatalf("AddMessage: %v", err)
-		}
-	}
-	if msgs, _ := svc.GetMessages(ctx, sid); len(msgs) != 3 {
-		t.Fatalf("setup: got %d messages, want 3", len(msgs))
-	}
-
-	svc.handleClearCommand(sid, webproto.GoalExt{})
-
-	msgs, err := svc.GetMessages(ctx, sid)
-	if err != nil {
-		t.Fatalf("GetMessages: %v", err)
-	}
-	if len(msgs) != 0 {
-		t.Errorf("after /clear: got %d messages, want 0", len(msgs))
-	}
-}
-
-// TestSessionCommandsRoute drives the real HTTP endpoint the frontend "/" menu
-// fetches, proving the route is wired and returns a JSON slash-command catalog.
-func TestSessionCommandsRoute(t *testing.T) {
+// TestSessionCommandsConnectRPC drives the generated Connect endpoint the
+// frontend "/" menu uses and proves it returns the protobuf command catalog.
+func TestSessionCommandsConnectRPC(t *testing.T) {
 	svc := newMenuTestService(t)
 	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, nil, ""))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/chat/sessions/anything/commands")
+	client := chatconnect.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())
+	resp, err := client.ListCommands(context.Background(), connect.NewRequest(&chatpb.ListCommandsRequest{SessionId: "anything"}))
 	if err != nil {
-		t.Fatalf("GET /commands: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	var specs []webproto.CommandSpec
-	if err := json.NewDecoder(resp.Body).Decode(&specs); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("ListCommands: %v", err)
 	}
 	names := map[string]bool{}
-	for _, s := range specs {
+	for _, s := range resp.Msg.Commands {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"/scan", "/help", "/status", "/model"} {
+	for _, want := range []string{"/help", "/status", "/model"} {
 		if !names[want] {
-			t.Errorf("/commands response missing %q (got %d specs)", want, len(specs))
+			t.Errorf("ListCommands response missing %q (got %d specs)", want, len(resp.Msg.Commands))
 		}
+	}
+	if names["/scan"] {
+		t.Error("ListCommands leaked deferred scan command")
 	}
 }

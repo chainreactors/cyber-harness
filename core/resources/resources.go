@@ -42,7 +42,7 @@ type Set struct {
 	NeutronConfig    *neutron.Config
 	Fingers          *fingers.Engine
 	Neutron          *neutron.Engine
-	configs map[string]map[string][]byte
+	configs          map[string]map[string][]byte
 }
 
 // Init loads scanner resources once for aiscan and prepares SDK configs.
@@ -64,7 +64,7 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 	set := &Set{
 		Mode:          mode,
 		RemoteEnabled: opts.CyberhubURL != "" && opts.APIKey != "",
-		configs: defaultConfigs(),
+		configs:       defaultConfigs(),
 	}
 
 	if set.RemoteEnabled {
@@ -150,7 +150,7 @@ func NormalizeMode(mode string) (string, error) {
 func defaultConfigs() map[string]map[string][]byte {
 	shared := loadEngineConfigs("http", "socket", "port")
 	return map[string]map[string][]byte{
-		"gogo":   mergeConfigs(shared,
+		"gogo": mergeConfigs(shared,
 			"fingerprinthub_web", "fingerprinthub_service",
 			"extract", "workflow", "neutron"),
 		"spray":  mergeConfigs(shared, "extract", "spray_rule", "spray_dict", "spray_common"),

@@ -23,9 +23,9 @@
       "@cyber/theme": ["./cyber-ui/packages/theme/src"],
       "@cyber/markdown": ["./cyber-ui/packages/markdown/src"],
       "@cyber/terminal": ["./cyber-ui/packages/terminal/src"],
+	  "@cyber/aop": ["./cyber-ui/packages/aop/src"],
       "@cyber/cstx": ["./cyber-ui/packages/cstx/src"],
       "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"],
-      "@cyber/agent-protocol": ["./src/compat/agent-protocol.ts"],
       "@cyber/viewer": ["./cyber-ui/packages/viewer/src"],
       "@cyber/ioa": ["./src/compat/ioa.tsx"]
     }
@@ -36,9 +36,9 @@
     "cyber-ui/packages/theme/src",
     "cyber-ui/packages/markdown/src",
     "cyber-ui/packages/terminal/src",
+	"cyber-ui/packages/aop/src",
     "cyber-ui/packages/cstx/src",
     "cyber-ui/packages/cstx-easm/src",
-    "cyber-ui/packages/agent-protocol/src",
     "cyber-ui/packages/viewer/src",
     "cyber-ui/packages/ioa/src"
   ],

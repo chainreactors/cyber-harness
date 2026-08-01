@@ -12,64 +12,64 @@ import (
 type ActionType int8
 
 const (
-	ActionNavigate    ActionType = iota + 1 // navigate to a URL
-	ActionScript                            // execute JavaScript
-	ActionClick                             // left-click an element
-	ActionRightClick                        // right-click an element
-	ActionTextInput                         // type text into an input
-	ActionScreenshot                        // capture screenshot
-	ActionTimeInput                         // set a time input value
-	ActionSelectInput                       // select an option
-	ActionFilesInput                        // set file input
-	ActionWaitDOM                           // wait for DOMContentLoaded
-	ActionWaitFCP                           // wait for First Contentful Paint
-	ActionWaitFMP                           // wait for First Meaningful Paint
-	ActionWaitIdle                          // wait for network idle
-	ActionWaitLoad                          // wait for page load
-	ActionWaitStable                        // wait for page stability
-	ActionGetResource                       // fetch a sub-resource
-	ActionExtract                           // extract element content
-	ActionSetMethod                         // override request method
-	ActionAddHeader                         // append a request header
-	ActionSetHeader                         // replace a request header
-	ActionDeleteHeader                      // remove a request header
-	ActionSetBody                           // override request body
-	ActionWaitEvent                         // wait for a DOM/CDP event
-	ActionKeyboard                          // press a key combination
-	ActionDebug                             // log debug info
-	ActionSleep                             // sleep for duration
-	ActionWaitVisible                       // wait for element visibility
-	ActionDialog                            // handle JS dialog (deprecated, use waitdialog)
-	ActionWaitDialog                        // wait for JS dialog and capture type+message
+	ActionNavigate     ActionType = iota + 1 // navigate to a URL
+	ActionScript                             // execute JavaScript
+	ActionClick                              // left-click an element
+	ActionRightClick                         // right-click an element
+	ActionTextInput                          // type text into an input
+	ActionScreenshot                         // capture screenshot
+	ActionTimeInput                          // set a time input value
+	ActionSelectInput                        // select an option
+	ActionFilesInput                         // set file input
+	ActionWaitDOM                            // wait for DOMContentLoaded
+	ActionWaitFCP                            // wait for First Contentful Paint
+	ActionWaitFMP                            // wait for First Meaningful Paint
+	ActionWaitIdle                           // wait for network idle
+	ActionWaitLoad                           // wait for page load
+	ActionWaitStable                         // wait for page stability
+	ActionGetResource                        // fetch a sub-resource
+	ActionExtract                            // extract element content
+	ActionSetMethod                          // override request method
+	ActionAddHeader                          // append a request header
+	ActionSetHeader                          // replace a request header
+	ActionDeleteHeader                       // remove a request header
+	ActionSetBody                            // override request body
+	ActionWaitEvent                          // wait for a DOM/CDP event
+	ActionKeyboard                           // press a key combination
+	ActionDebug                              // log debug info
+	ActionSleep                              // sleep for duration
+	ActionWaitVisible                        // wait for element visibility
+	ActionDialog                             // handle JS dialog (deprecated, use waitdialog)
+	ActionWaitDialog                         // wait for JS dialog and capture type+message
 )
 
 var actionTypeNames = map[ActionType]string{
-	ActionNavigate:    "navigate",
-	ActionScript:      "script",
-	ActionClick:       "click",
-	ActionRightClick:  "rightclick",
-	ActionTextInput:   "text",
-	ActionScreenshot:  "screenshot",
-	ActionTimeInput:   "time",
-	ActionSelectInput: "select",
-	ActionFilesInput:  "files",
-	ActionWaitDOM:     "waitdom",
-	ActionWaitFCP:     "waitfcp",
-	ActionWaitFMP:     "waitfmp",
-	ActionWaitIdle:    "waitidle",
-	ActionWaitLoad:    "waitload",
-	ActionWaitStable:  "waitstable",
-	ActionGetResource: "getresource",
-	ActionExtract:     "extract",
-	ActionSetMethod:   "setmethod",
-	ActionAddHeader:   "addheader",
-	ActionSetHeader:   "setheader",
+	ActionNavigate:     "navigate",
+	ActionScript:       "script",
+	ActionClick:        "click",
+	ActionRightClick:   "rightclick",
+	ActionTextInput:    "text",
+	ActionScreenshot:   "screenshot",
+	ActionTimeInput:    "time",
+	ActionSelectInput:  "select",
+	ActionFilesInput:   "files",
+	ActionWaitDOM:      "waitdom",
+	ActionWaitFCP:      "waitfcp",
+	ActionWaitFMP:      "waitfmp",
+	ActionWaitIdle:     "waitidle",
+	ActionWaitLoad:     "waitload",
+	ActionWaitStable:   "waitstable",
+	ActionGetResource:  "getresource",
+	ActionExtract:      "extract",
+	ActionSetMethod:    "setmethod",
+	ActionAddHeader:    "addheader",
+	ActionSetHeader:    "setheader",
 	ActionDeleteHeader: "deleteheader",
-	ActionSetBody:     "setbody",
-	ActionWaitEvent:   "waitevent",
-	ActionKeyboard:    "keyboard",
-	ActionDebug:       "debug",
-	ActionSleep:       "sleep",
+	ActionSetBody:      "setbody",
+	ActionWaitEvent:    "waitevent",
+	ActionKeyboard:     "keyboard",
+	ActionDebug:        "debug",
+	ActionSleep:        "sleep",
 	ActionWaitVisible:  "waitvisible",
 	ActionDialog:       "dialog",
 	ActionWaitDialog:   "waitdialog",

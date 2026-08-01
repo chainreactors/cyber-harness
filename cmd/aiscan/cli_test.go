@@ -218,6 +218,7 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 	var buf bytes.Buffer
 	writeHelp(parser, &buf)
 	help := buf.String()
+	searchableHelp := help + "\n" + strings.Join(strings.Fields(help), " ")
 	for _, wants := range [][]string{
 		{"agent [OPTIONS]"},
 		{"Agent Options:"},
@@ -228,7 +229,7 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 		{"--transport", "/transport"},
 		{"--server-url", "/server-url"},
 	} {
-		if !containsAny(help, wants...) {
+		if !containsAny(searchableHelp, wants...) {
 			want := strings.Join(wants, " or ")
 			t.Fatalf("agent help missing %q:\n%s", want, help)
 		}

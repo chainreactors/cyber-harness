@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	proto "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/probe"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
-type cfgT = webproto.DistributeConfig
+type cfgT = proto.DistributeConfig
 
 // configWith builds a DistributeConfig, letting each test set only the fields
 // it cares about. Pass nil for an empty config.

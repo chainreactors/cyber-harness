@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { fromJson, type JsonValue } from '@bufbuild/protobuf'
+import { ScanStatus, SessionScanEventSchema } from '@cyber/aop'
 import { usePolling } from './usePolling'
 import {
   cancelChatSession,
+  closeChatSession,
   createChatSession,
   deleteChatSession,
+  executeChatCommand,
   getChatSession,
   listAgents,
   listChatMessages,
   listChatSessions,
+  resetChatSession,
   sendChatMessage,
-  subscribeDomainEvents,
+  subscribeAOPEvents,
   getScan,
 } from '../api'
-import type { AgentInfo, AOPEvent, DomainEvent, ChatMessage, ChatSession, ScanResult } from '../api'
+import type { AgentInfo, AOPEvent, ChatMessage, ChatSession, ScanResult } from '../api'
 import {
   isRootPath,
   parseRoute,
@@ -42,6 +47,13 @@ function safeUUID(): string {
     return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10, 16).join('')}`
   }
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function aopExtension(event: AOPEvent, namespace: string): Record<string, unknown> | undefined {
+  const extension = event.extensions.find((item) => item.namespace === namespace)
+  if (!extension?.value?.data.length) return undefined
+  try { return JSON.parse(new TextDecoder().decode(extension.value.data)) as Record<string, unknown> }
+  catch { return undefined }
 }
 
 export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking'
@@ -109,8 +121,8 @@ export function useChatSession() {
   const [error, setError] = useState('')
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
-  const scanLinesRef = useRef<Map<string, string[]>>(new Map())
   const activeSessionRef = useRef<string | null>(null)
+  const activeTurnRef = useRef<string>('')
   // Latest roster (mirrors `agents`) so click handlers can resolve an id → node
   // key without waiting for a re-render, and the stable key of the node the user
   // last chose. Selection is tracked by this key, not the transient id, so the
@@ -127,7 +139,7 @@ export function useChatSession() {
   // session id. activateSession repaints this snapshot synchronously on
   // re-entry, so switching back to a session jumps straight to its conversation
   // instead of blanking for a round-trip. Writing on every durable change (vs.
-  // snapshotting on leave) keeps the cache live with streamed SSE updates
+  // snapshotting on leave) keeps the cache live with streamed Connect updates
   // without threading cache writes through every setMessages call site — and
   // because each render's id and messages are captured together, a switch can
   // never file the incoming session's state under the outgoing session's key.
@@ -189,10 +201,10 @@ export function useChatSession() {
   // Both a cold open and a cache restore want this cleared — only their handling
   // of the durable state (messages/timeline/scans) differs.
   function resetTransientState() {
+	activeTurnRef.current = ''
     setIsThinking(false)
     setPendingResponse(false)
     setError('')
-    scanLinesRef.current = new Map()
   }
 
   function resetSessionState() {
@@ -211,9 +223,8 @@ export function useChatSession() {
     setMessages(snap.messages)
     timelineRef.current = snap.timeline
     setTimeline(snap.timeline)
-    // The SSE endpoint replays the complete AOP history on every connection.
-    // Restoring a cached copy here would append that history again each time
-    // the user reopens this session.
+    // A new WatchEvents subscription starts at cursor zero and replays the
+    // complete AOP history. Avoid restoring another AOP copy from the cache.
     setAOPEvents([])
     setScanResults(snap.scanResults)
     resetTransientState()
@@ -235,114 +246,71 @@ export function useChatSession() {
     setTimelineItems((prev) => prev.map((item) => item.id === id ? updater(item) : item))
   }
 
-  // A Run converges only on turn.end. Session lifecycle is independent and a
-  // turn-scoped error is diagnostic until its terminal turn.end arrives.
+  // A Run converges only on turn_ended. Session lifecycle is independent and a
+  // turn-scoped error is diagnostic until its terminal turn_ended arrives.
   function finalizeRun() {
+	activeTurnRef.current = ''
     setIsThinking(false)
     setPendingResponse(false)
   }
 
-  function handleDomainEvent(event: DomainEvent) {
-    const now = Date.now()
-
-    switch (event.type) {
-      case 'session_cleared':
-        // Web /clear wiped this session's transcript server-side; mirror it in the
-        // UI. resetSessionState() empties messages+timeline — and since the timeline
-        // is a projection of messages, a page reload re-derives an empty view too.
-        resetSessionState()
-        break
-
-      case 'scan_started':
-        if (event.scan_id) {
-          scanLinesRef.current.set(event.scan_id, [])
-          appendTimeline({
-            id: `scan-${event.scan_id}`,
-            kind: 'scan_started',
-            timestamp: now,
-            scanID: event.scan_id,
-            scanLines: [],
-            content: event.data,
-          })
-        }
-        break
-
-      case 'scan_progress':
-        if (event.scan_id && event.data) {
-          const lines = scanLinesRef.current.get(event.scan_id) || []
-          lines.push(event.data)
-          scanLinesRef.current.set(event.scan_id, lines)
-          updateTimelineItem(`scan-${event.scan_id}`, (item) => ({
-            ...item,
-            scanLines: [...lines],
-          }))
-        }
-        break
-
-      case 'scan_complete':
-        if (event.scan_id && event.result) {
-          setScanResults((prev) => {
-            const next = new Map(prev)
-            next.set(event.scan_id!, event.result!)
-            return next
-          })
-          appendTimeline({
-            id: `scanres-${event.scan_id}`,
-            kind: 'scan_complete',
-            timestamp: now,
-            scanID: event.scan_id,
-            scanResult: event.result,
-          })
-        }
-        setPendingResponse(false)
-        break
-
-      case 'agent_joined':
-        break
-    }
-  }
-
   function handleAOPEvent(event: AOPEvent) {
     setAOPEvents((previous) => {
-      if (event.seq !== undefined && previous.some(
-        (item) => item.session_id === event.session_id
-          && item.agent === event.agent
-          && item.seq === event.seq
-          && item.type === event.type
-          && item.ts === event.ts,
-      )) return previous
+      if (event.id && previous.some((item) => item.id === event.id)) return previous
       return [...previous, event]
     })
-    switch (event.type) {
-      case 'turn.start':
+    switch (event.payload.case) {
+      case 'turnStarted':
+		activeTurnRef.current = event.turnId
         setPendingResponse(true)
         setIsThinking(true)
         break
-      case 'message.delta':
-      case 'tool.call':
+      case 'messageDelta':
+      case 'toolCall':
         setPendingResponse(true)
         setIsThinking(false)
         break
-      case 'turn.end':
+      case 'turnEnded':
         finalizeRun()
         break
-      case 'session.end':
+      case 'sessionEnded':
         break
+      case 'extension': {
+        const extension = event.payload.value
+        if (extension.type !== 'io.chainreactors.aiscan.scan' || !extension.value?.data.length) break
+        try {
+          const raw = JSON.parse(new TextDecoder().decode(extension.value.data)) as JsonValue
+          const scan = fromJson(SessionScanEventSchema, raw)
+          if (!scan.scanId || scan.status !== ScanStatus.COMPLETED) break
+          const timelineID = `scanres-${scan.scanId}`
+          setTimelineItems((previous) => previous.some((item) => item.id === timelineID)
+            ? previous
+            : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
+          void getScan(scan.scanId).then((job) => {
+            if (!job.result) return
+            setScanResults((previous) => new Map(previous).set(scan.scanId, job.result!))
+            updateTimelineItem(timelineID, (item) => ({ ...item, scanResult: job.result }))
+          }).catch(() => {})
+        } catch {
+          // Ignore malformed product extensions; the AOP stream remains usable.
+        }
+        break
+      }
       case 'error': {
-        const data = event.data as { code?: string; message?: string }
+        const data = event.payload.value
         // Hub-originated failures carry a translatable code plus i18n params
         // in the aiscan.web extension; agent errors are plain text.
-        const params = event.ext?.['aiscan.web']?.params as Record<string, unknown> | undefined
+        const params = aopExtension(event, 'io.chainreactors.aiscan.web')?.params as Record<string, unknown> | undefined
         if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
         else setError(String(data.message ?? 'Agent error'))
-        if (!event.turn_id) finalizeRun()
+        if (!event.turnId) finalizeRun()
         break
       }
     }
   }
 
   // Rebuild the platform timeline from persisted messages. Assistant content is
-  // NOT rebuilt here — the SSE AOP replay is the sole source of agent history
+  // NOT rebuilt here — WatchEvents replay is the sole source of agent history
   // (it carries the complete message/tool/status stream); this only restores the
   // platform artifacts the AOP stream doesn't render: scan-result cards
   // (persisted as system markers) and the user/system conversation shell shown
@@ -351,36 +319,16 @@ export function useChatSession() {
     const built: TimelineItem[] = []
     for (const msg of msgs) {
       const timestamp = new Date(msg.created_at).getTime()
-      if (metadataString(msg.metadata, 'event_type') === 'scan_complete') {
-        const scanID = metadataString(msg.metadata, 'scan_id')
-        if (!scanID) continue
-        // The heavy Result isn't persisted in the marker — the card pulls it from
-        // the scanResults map (loaded from the session's scan_ids on activation).
-        // Same id as the live append so a rebuild that races the live event
-        // upserts instead of duplicating.
-        built.push({
-          id: `scanres-${scanID}`,
-          kind: 'scan_complete',
-          timestamp,
-          scanID,
-        })
-        continue
-      }
       if (msg.role === 'assistant') continue
       built.push({ id: msg.id, kind: 'message', timestamp, message: msg })
     }
     return built
   }
 
-  // Chat SSE has no server-side backlog, so a terminal event lost during an
-  // EventSource reconnect would strand the composer as "busy" forever. On each
-  // SSE connection error, reconcile against persisted truth: if the run's
-  // aggregate assistant reply is already the tail, the turn ended during the gap
-  // — rebuild the timeline from messages (which clears streaming) and release the
-  // composer. If the tail is still the user's message (or a mid-run tool step),
-  // the run is in flight; leave it for the reconnected stream to finish. This is
-  // conservative by design — it never finalizes a turn that hasn't persisted its
-  // reply — and it's idempotent, so firing on every reconnect attempt is safe.
+  // WatchEvents reconnects from its last durable cursor. This extra reconciliation
+  // is a conservative UI fallback when transport failure and component state
+  // updates cross: a persisted assistant tail proves the run progressed far enough
+  // to rebuild the visible message projection while cursor replay catches up.
   async function reconcileAfterReconnect(id: string) {
     if (id !== activeSessionRef.current) return
     const activation = activationRef.current
@@ -460,16 +408,10 @@ export function useChatSession() {
     } catch {}
 
     if (activation !== activationRef.current) return
-    unsubRef.current = subscribeDomainEvents(
+    unsubRef.current = subscribeAOPEvents(
       id,
-      handleDomainEvent,
-      () => reconcileAfterReconnect(id),
       handleAOPEvent,
-      () => {
-        // Reconnects also replay the complete history, so each connection is a
-        // replacement snapshot rather than an incremental continuation.
-        if (id === activeSessionRef.current) setAOPEvents([])
-      },
+      () => reconcileAfterReconnect(id),
     )
   }
 
@@ -508,28 +450,67 @@ export function useChatSession() {
     if (!sessionID) return
     const trimmed = content.trim()
     if (!trimmed) return
+	const lower = trimmed.toLowerCase()
+	if (lower === '/clear') {
+		try {
+			const next = await resetChatSession(sessionID)
+			await refreshSessions()
+			await activateSession(next.id, 'push')
+		} catch (err: any) {
+			setError(err.message || 'Failed to reset session')
+		}
+		return
+	}
+	if (lower === '/stop') {
+		await handleCancelMessage()
+		return
+	}
+	if (lower === '/exit' || lower === '/quit') {
+		try {
+			await closeChatSession(sessionID)
+			await refreshSessions()
+		} catch (err: any) {
+			setError(err.message || 'Failed to close session')
+		}
+		return
+	}
+	const continueSession = lower === '/continue'
+	let runContent = trimmed
+	if (lower.startsWith('/followup ')) runContent = trimmed.slice(trimmed.indexOf(' ') + 1).trim()
+	const command = !continueSession
+		&& (runContent.startsWith('!') || (runContent.startsWith('/') && !runContent.startsWith('/skill:') && !lower.startsWith('/followup ')))
+	if (command) {
+		const msgID = safeUUID()
+		const optimistic: ChatMessage = { id: msgID, session_id: sessionID, role: 'user', content: runContent, created_at: new Date().toISOString() }
+		setMessages((prev) => [...prev, optimistic])
+		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
+		try {
+			await executeChatCommand(sessionID, runContent)
+		} catch (err: any) {
+			setError(err.message || 'Failed to execute command')
+		}
+		return
+	}
 
     const msgID = safeUUID()
 
-    const optimistic: ChatMessage = {
+	const optimistic: ChatMessage = {
       id: msgID,
       session_id: sessionID,
       role: 'user',
-      content: trimmed,
+		content: runContent,
       created_at: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, optimistic])
-    appendTimeline({
-      id: msgID,
-      kind: 'message',
-      timestamp: Date.now(),
-      message: optimistic,
-    })
+	if (!continueSession) {
+		setMessages((prev) => [...prev, optimistic])
+		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
+	}
     setError('')
     setPendingResponse(true)
 
     try {
-      await sendChatMessage(sessionID, trimmed, opts)
+		const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
+		activeTurnRef.current = sent.turn_id || ''
       await refreshSessions()
     } catch (err: any) {
       setPendingResponse(false)
@@ -661,9 +642,9 @@ export function useChatSession() {
   async function handleCancelMessage() {
     const sessionID = activeSessionRef.current
     if (!sessionID) return
-    finalizeRun()
     try {
-      await cancelChatSession(sessionID)
+		await cancelChatSession(sessionID, activeTurnRef.current)
+		finalizeRun()
       await refreshSessions()
     } catch (err: any) {
       setError(err.message || 'Failed to pause response')
@@ -723,9 +704,4 @@ export function useChatSession() {
     cancelMessage: handleCancelMessage,
     clearError,
   }
-}
-
-function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
-  const value = metadata?.[key]
-  return typeof value === 'string' ? value : ''
 }

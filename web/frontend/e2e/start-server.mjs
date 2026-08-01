@@ -73,6 +73,19 @@ await writeFile(configPath, `llm:
       model: deepseek-chat
 `, { mode: 0o600 })
 
+const npmCommand = process.platform === 'win32' ? 'cmd.exe' : 'npm'
+const npmArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm run build'] : ['run', 'build']
+const frontendBuild = spawnSync(npmCommand, npmArgs, {
+  cwd: resolve(root, 'web/frontend'),
+  stdio: 'inherit',
+})
+if (frontendBuild.status !== 0) {
+  if (frontendBuild.error) console.error(frontendBuild.error)
+  mockLLM.close()
+  await rm(workDir, { recursive: true, force: true })
+  process.exit(frontendBuild.status ?? 1)
+}
+
 const build = spawnSync('go', ['build', '-tags', 'full', '-o', binary, './cmd/aiscan'], {
   cwd: root,
   stdio: 'inherit',

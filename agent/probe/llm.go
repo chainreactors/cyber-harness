@@ -11,7 +11,7 @@ import (
 
 // LLMProbeRequest carries the connection parameters the user wants to verify
 // or use for model enumeration. It mirrors the LLM section of
-// webproto.DistributeConfig. An empty APIKey means "use the key already stored
+// config.DistributeConfig. An empty APIKey means "use the key already stored
 // in the config" (matching the settings UI where a configured key is left blank
 // to keep it unchanged). Model is only required for TestLLM; ListLLMModels
 // ignores it.
