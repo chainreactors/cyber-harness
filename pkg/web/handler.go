@@ -2,15 +2,12 @@ package web
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/chainreactors/aiscan/agent/probe"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	config "github.com/chainreactors/aiscan/core/config"
 )
 
 type Handler struct {
@@ -26,13 +23,18 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	}
 	h := &handlerImpl{service: service, agents: agents, ioa: console, accessKey: accessKey}
 	registerAuthRoutes(mux, accessKey)
+	connectHandler := NewConnectHandler(accessKey, service)
+	mux.Handle("/aop.ChatService/", connectHandler)
+	mux.Handle("/aiscan.chat.SessionService/", connectHandler)
+	mux.Handle("/aiscan.scan.ScanService/", connectHandler)
+	// Retired REST/SSE protocol roots must not fall through to the SPA and
+	// masquerade as successful HTML responses.
+	legacyNotFound := func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+	mux.HandleFunc("/api/chat", legacyNotFound)
+	mux.HandleFunc("/api/chat/", legacyNotFound)
+	mux.HandleFunc("/api/scans", legacyNotFound)
+	mux.HandleFunc("/api/scans/", legacyNotFound)
 
-	mux.HandleFunc("POST /api/scans", h.createScan)
-	mux.HandleFunc("GET /api/scans", h.listScans)
-	mux.HandleFunc("GET /api/scans/{id}", h.getScan)
-	mux.HandleFunc("DELETE /api/scans/{id}", h.cancelScan)
-	mux.HandleFunc("GET /api/scans/{id}/events", h.scanEvents)
-	mux.HandleFunc("GET /api/scans/{id}/report", h.scanReport)
 	mux.HandleFunc("GET /api/status", h.serviceStatus)
 	mux.HandleFunc("GET /api/config", h.getConfig)
 	mux.HandleFunc("PUT /api/config", h.saveConfig)
@@ -52,18 +54,6 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	mux.HandleFunc("DELETE /api/sco/nodes", h.deleteSCONodes)
 	mux.HandleFunc("POST /api/sco/import", h.importSCONodes)
 	mux.HandleFunc("GET /api/sco/artifacts", h.listSupportedArtifacts)
-
-	// Chat session routes
-	mux.HandleFunc("POST /api/chat/sessions", h.createSession)
-	mux.HandleFunc("GET /api/chat/sessions", h.listSessions)
-	mux.HandleFunc("GET /api/chat/sessions/{id}", h.getSession)
-	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.deleteSession)
-	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.sendMessage)
-	mux.HandleFunc("POST /api/chat/sessions/{id}/cancel", h.cancelSession)
-	mux.HandleFunc("POST /api/chat/sessions/{id}/upload", h.uploadFile)
-	mux.HandleFunc("GET /api/chat/sessions/{id}/messages", h.listMessages)
-	mux.HandleFunc("GET /api/chat/sessions/{id}/commands", h.sessionCommands)
-	mux.HandleFunc("GET /api/chat/sessions/{id}/events", h.sessionEvents)
 
 	if agents != nil {
 		mux.HandleFunc("/api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +82,8 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Connect-Content-Encoding, Connect-Accept-Encoding, Grpc-Timeout, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-User-Agent")
+	w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding, Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -144,7 +135,7 @@ func (h *handlerImpl) getConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlerImpl) saveConfig(w http.ResponseWriter, r *http.Request) {
-	var req webproto.DistributeConfig
+	var req config.DistributeConfig
 	if err := decodeJSON(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -209,7 +200,7 @@ func (h *handlerImpl) listLLMModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlerImpl) testConn(w http.ResponseWriter, r *http.Request) {
-	var cfg webproto.DistributeConfig
+	var cfg config.DistributeConfig
 	if !decodeOptionalBody(w, r, &cfg) {
 		return
 	}
@@ -219,326 +210,6 @@ func (h *handlerImpl) testConn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-func (h *handlerImpl) createScan(w http.ResponseWriter, r *http.Request) {
-	var req ScanRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	job, err := h.service.SubmitScan(r.Context(), req.Target, req.Mode, req.Verify, req.Sniper, req.Deep)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, job)
-}
-
-func (h *handlerImpl) listScans(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.service.ListScans(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if jobs == nil {
-		jobs = []*ScanJob{}
-	}
-	writeJSON(w, http.StatusOK, jobs)
-}
-
-func (h *handlerImpl) getScan(w http.ResponseWriter, r *http.Request) {
-	job, err := h.service.GetScan(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, job)
-}
-
-func (h *handlerImpl) cancelScan(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.CancelScan(r.PathValue("id")); err != nil {
-		switch {
-		case errors.Is(err, ErrScanNotFound):
-			writeError(w, http.StatusNotFound, ErrScanNotFound.Error())
-		case errors.Is(err, ErrScanNotCancelable):
-			writeError(w, http.StatusConflict, err.Error())
-		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "canceled"})
-}
-
-func (h *handlerImpl) scanEvents(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), id, func() ([]HubEvent, error) {
-		job, err := h.service.GetScan(r.Context(), id)
-		if err != nil {
-			return nil, err
-		}
-		return []HubEvent{scanSnapshotEvent(job)}, nil
-	}, "complete", "error")
-	if err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
-	}
-}
-
-func scanSnapshotEvent(job *ScanJob) HubEvent {
-	switch job.Status {
-	case StatusCompleted:
-		return HubEvent{
-			Type: "complete",
-			Data: mustJSON(map[string]any{"scan_id": job.ID, "status": string(job.Status), "result": job.Result}),
-		}
-	case StatusFailed, StatusCanceled:
-		errMsg := job.Error
-		if errMsg == "" && job.Status == StatusCanceled {
-			errMsg = "scan canceled"
-		}
-		return HubEvent{
-			Type: "error",
-			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "error": errMsg}),
-		}
-	default:
-		return HubEvent{
-			Type: "status",
-			Data: mustJSON(map[string]string{"scan_id": job.ID, "status": string(job.Status), "progress": job.Progress}),
-		}
-	}
-}
-
-func (h *handlerImpl) scanReport(w http.ResponseWriter, r *http.Request) {
-	report, err := h.service.GetReport(r.Context(), r.PathValue("id"), r.URL.Query().Get("lang"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "scan not found")
-		return
-	}
-	if report == "" {
-		writeError(w, http.StatusNotFound, "report not ready")
-		return
-	}
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, report) //nolint:gosec // Content-Type is text/markdown, not HTML
-}
-
-// --- Chat session handlers ---
-
-func (h *handlerImpl) createSession(w http.ResponseWriter, r *http.Request) {
-	var req CreateSessionRequest
-	if r.ContentLength > 0 {
-		_ = decodeJSON(r.Body, &req)
-	}
-	if req.AgentID == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
-		return
-	}
-	session, err := h.service.CreateSession(r.Context(), req.AgentID, req.Title)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, session)
-}
-
-func (h *handlerImpl) listSessions(w http.ResponseWriter, r *http.Request) {
-	sessions, err := h.service.ListSessions(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if sessions == nil {
-		sessions = []*ChatSession{}
-	}
-	writeJSON(w, http.StatusOK, sessions)
-}
-
-func (h *handlerImpl) getSession(w http.ResponseWriter, r *http.Request) {
-	session, err := h.service.GetSession(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, session)
-}
-
-func (h *handlerImpl) deleteSession(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.DeleteSession(r.Context(), r.PathValue("id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (h *handlerImpl) sendMessage(w http.ResponseWriter, r *http.Request) {
-	var req SendMessageRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if strings.TrimSpace(req.Content) == "" {
-		writeError(w, http.StatusBadRequest, "content is required")
-		return
-	}
-	opts := webproto.GoalExt{
-		EvalCriteria:    strings.TrimSpace(req.EvalCriteria),
-		EvalMaxRounds:   req.EvalMaxRounds,
-		PersistMaxTurns: req.PersistMaxTurns,
-	}
-	msg, err := h.service.HandleUserMessage(r.Context(), r.PathValue("id"), req.Content, opts)
-	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, msg)
-}
-
-// sessionCommands returns the web "/" command menu for a session: hub-scope
-// commands merged with the bound agent's reported agent-scope commands (skills
-// included). The frontend renders its slash-command popup from this, so the menu
-// always reflects what actually works instead of a hand-maintained list.
-func (h *handlerImpl) sessionCommands(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.service.SessionMenu(r.PathValue("id")))
-}
-
-func (h *handlerImpl) cancelSession(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.CancelSession(r.Context(), r.PathValue("id")); err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
-}
-
-const maxUploadSize = 50 << 20 // 50 MB
-
-var ErrUploadTooLarge = errors.New("uploaded file exceeds the size limit")
-
-func readMultipartUpload(w http.ResponseWriter, r *http.Request, maxSize int64) (string, []byte, error) {
-	if maxSize <= 0 {
-		return "", nil, fmt.Errorf("upload size limit must be positive")
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSize+(1<<20))
-	if err := r.ParseMultipartForm(maxSize); err != nil { //nolint:gosec // G120: body is bounded above
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			return "", nil, ErrUploadTooLarge
-		}
-		return "", nil, fmt.Errorf("parse multipart form: %w", err)
-	}
-	if r.MultipartForm != nil {
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		return "", nil, fmt.Errorf("missing file field: %w", err)
-	}
-	defer file.Close()
-	if header.Size > maxSize {
-		return "", nil, ErrUploadTooLarge
-	}
-
-	data, err := io.ReadAll(io.LimitReader(file, maxSize+1))
-	if err != nil {
-		return "", nil, fmt.Errorf("read uploaded file: %w", err)
-	}
-	if int64(len(data)) > maxSize {
-		return "", nil, ErrUploadTooLarge
-	}
-	return header.Filename, data, nil
-}
-
-func (h *handlerImpl) uploadFile(w http.ResponseWriter, r *http.Request) {
-	filename, data, err := readMultipartUpload(w, r, maxUploadSize)
-	if err != nil {
-		if errors.Is(err, ErrUploadTooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrUploadTooLarge.Error())
-			return
-		}
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	result, err := h.service.HandleFileUpload(r.Context(), r.PathValue("id"), filename, data)
-	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (h *handlerImpl) listMessages(w http.ResponseWriter, r *http.Request) {
-	before, err := parsePositiveInt64(r.URL.Query().Get("before"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid before cursor")
-		return
-	}
-	limit := 500
-	if value := r.URL.Query().Get("limit"); value != "" {
-		parsed, parseErr := strconv.Atoi(value)
-		if parseErr != nil || parsed < 1 || parsed > 500 {
-			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
-			return
-		}
-		limit = parsed
-	}
-	page, err := h.service.GetMessagePage(r.Context(), r.PathValue("id"), before, limit)
-	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			writeError(w, http.StatusNotFound, ErrSessionNotFound.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if page.Items == nil {
-		page.Items = []*ChatMessage{}
-	}
-	writeJSON(w, http.StatusOK, page)
-}
-
-func (h *handlerImpl) sessionEvents(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if _, err := h.service.GetSession(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
-		return
-	}
-	after, _ := parsePositiveInt64(r.Header.Get("Last-Event-ID"))
-	err := ServeSSEWithSnapshot(w, r, h.service.Hub(), sessionTopic(id), func() ([]HubEvent, error) {
-		events, err := h.service.GetAOPEventsAfter(r.Context(), id, after)
-		if err != nil {
-			return nil, err
-		}
-		initial := make([]HubEvent, 0, len(events))
-		for _, event := range events {
-			initial = append(initial, HubEvent{ID: event.Cursor, Type: "aop", Data: mustJSON(event.Event)})
-		}
-		return initial, nil
-	}, "_never")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-	}
-}
-
-func parsePositiveInt64(value string) (int64, error) {
-	if strings.TrimSpace(value) == "" {
-		return 0, nil
-	}
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed < 0 {
-		return 0, fmt.Errorf("invalid positive integer %q", value)
-	}
-	return parsed, nil
 }
 
 // ── SCO Nodes ──

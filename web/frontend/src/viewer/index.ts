@@ -45,7 +45,7 @@ export type {
   TimelineItem as CyberTimelineItem,
   ExtensionTimelineItem,
 } from '../../cyber-ui/packages/viewer/src/types/timeline'
-export type { AOPEvent } from '@cyber/agent-protocol'
+export type { Event as AOPEvent } from '@cyber/aop'
 
 export type { MessageBubbleProps, MessageBubbleVariant } from '../../cyber-ui/packages/viewer/src/components/chat/MessageBubble'
 export type { ChatThinkingProps } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'

@@ -6,7 +6,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
@@ -22,7 +22,7 @@ func (p *fixedProvider) ChatCompletion(_ context.Context, request *provider.Chat
 	return p.response, nil
 }
 
-func TestRunWithEvalPreservesInitialInputNoEcho(t *testing.T) {
+func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing.T) {
 	agentProvider := &fixedProvider{response: &provider.ChatCompletionResponse{
 		Choices: []provider.Choice{{Message: provider.NewTextMessage("assistant", "done")}},
 	}}
@@ -40,9 +40,9 @@ func TestRunWithEvalPreservesInitialInputNoEcho(t *testing.T) {
 		}}},
 	}}
 
-	bus := eventbus.New[aop.Event]()
-	var events []aop.Event
-	bus.Subscribe(func(event aop.Event) { events = append(events, event) })
+	bus := eventbus.New[*aop.Event]()
+	var events []*aop.Event
+	bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
 	ag := agent.NewAgent(agent.Config{
 		Provider:  agentProvider,
 		Model:     "test",
@@ -54,7 +54,6 @@ func TestRunWithEvalPreservesInitialInputNoEcho(t *testing.T) {
 			{Text: "inspect this"},
 			{Image: &agent.InputImage{Base64: "AA==", MediaType: "image/png"}},
 		},
-		NoEcho: true,
 	}
 
 	result, verdict, err := RunWithEval(context.Background(), ag,
@@ -66,17 +65,14 @@ func TestRunWithEvalPreservesInitialInputNoEcho(t *testing.T) {
 		t.Fatalf("RunWithEval() result = %+v, verdict = %+v", result, verdict)
 	}
 
+	var userMessages int
 	for _, event := range events {
-		if event.Type != aop.TypeMessage {
-			continue
+		if aop.Kind(event) == "message" && event.GetMessage().GetRole() == "user" {
+			userMessages++
 		}
-		data, decodeErr := aop.DecodeData[aop.MessageData](event)
-		if decodeErr != nil {
-			t.Fatalf("decode message event: %v", decodeErr)
-		}
-		if data.Role == "user" {
-			t.Fatalf("NoEcho eval emitted user message: %+v", event)
-		}
+	}
+	if userMessages != 1 {
+		t.Fatalf("canonical user messages = %d, want 1", userMessages)
 	}
 
 	if agentProvider.request == nil {

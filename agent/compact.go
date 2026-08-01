@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/truncate"
 )
 
@@ -90,10 +90,10 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	}
 	a.mu.Unlock()
 
-	em.status(xcompact.StateStart, "", nil)
+	em.status(ext.CompactStateStart, "", nil)
 	newMsgs, result, err := compactHistory(ctx, cfg, msgs)
 	if err != nil {
-		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: err.Error()})
+		em.status(ext.CompactStateError, ext.CompactNamespace, &ext.CompactDetail{Error: err.Error()})
 		return nil, err
 	}
 
@@ -101,7 +101,7 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	a.state.Messages = newMsgs
 	a.mu.Unlock()
 
-	em.status(xcompact.StateEnd, xcompact.NS, xcompact.Detail{TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter, KeptMessages: result.KeptMessages})
+	em.status(ext.CompactStateEnd, ext.CompactNamespace, &ext.CompactDetail{TokensBefore: uint64(max(result.TokensBefore, 0)), TokensAfter: uint64(max(result.TokensAfter, 0)), KeptMessages: uint64(max(result.KeptMessages, 0))})
 	return result, nil
 }
 

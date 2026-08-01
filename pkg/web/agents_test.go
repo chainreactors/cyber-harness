@@ -15,18 +15,43 @@ import (
 
 	webstatic "github.com/chainreactors/aiscan/web"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Keep wire fixtures concise without exposing a production alias.
-type WSMessage = webproto.Message
+func writeAgentFrame(t *testing.T, conn *websocket.Conn, frame *transport.AgentFrame) {
+	t.Helper()
+	raw, err := protojson.Marshal(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readServerFrame(t *testing.T, conn *websocket.Conn) *transport.ServerFrame {
+	t.Helper()
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := new(transport.ServerFrame)
+	if err := protojson.Unmarshal(raw, frame); err != nil {
+		t.Fatal(err)
+	}
+	return frame
+}
 
 type recordingSCOStore struct {
 	scanID string
@@ -44,15 +69,9 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSCOStore(store)
 	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","value":"127.0.0.1"}`)
-	payload, err := json.Marshal(map[string]any{
-		"call_id": "call-gogo-1",
-		"nodes":   []json.RawMessage{node},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pool.handleAgentMessage(&remoteAgent{}, WSMessage{Type: "tool.sco", Payload: payload})
+	pool.handleAgentFrame(&remoteAgent{}, &transport.AgentFrame{Payload: &transport.AgentFrame_ScoNodes{ScoNodes: &transport.ScoNodes{
+		CallId: "call-gogo-1", Nodes: [][]byte{node},
+	}}})
 
 	if store.scanID != "call-gogo-1" {
 		t.Fatalf("scan id = %q, want tool call id", store.scanID)
@@ -63,26 +82,17 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 }
 
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
-	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, webproto.AgentStatus{Space: "case-test"})
+	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, transport.AgentStatus{Space: "case-test"})
 }
 
 func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
 	t.Helper()
-	if err := conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
-		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
-	}
+	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}})
 }
 
 func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
 	t.Helper()
-	var msg WSMessage
-	if err := conn.ReadJSON(&msg); err != nil {
-		t.Fatalf("agent read PTY %s: %v", want, err)
-	}
-	frame, err := webproto.DecodePTYMessage(msg)
-	if err != nil {
-		t.Fatalf("decode agent PTY %s: %v", want, err)
-	}
+	frame := terminalcodec.FromProto(readServerFrame(t, conn).GetTerminal())
 	if frame.Type != want {
 		t.Fatalf("agent expected PTY %s, got %s", want, frame.Type)
 	}
@@ -91,16 +101,24 @@ func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Fr
 
 func writeBrowserPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
 	t.Helper()
-	if err := conn.WriteJSON(frame); err != nil {
+	raw, err := terminalcodec.Marshal(frame)
+	if err != nil {
+		t.Fatalf("marshal browser PTY %s: %v", frame.Type, err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
 		t.Fatalf("browser write PTY %s: %v", frame.Type, err)
 	}
 }
 
 func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
 	t.Helper()
-	var frame pty.Frame
-	if err := conn.ReadJSON(&frame); err != nil {
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
 		t.Fatalf("browser read PTY %s: %v", want, err)
+	}
+	frame, err := terminalcodec.Unmarshal(raw)
+	if err != nil {
+		t.Fatalf("decode browser PTY %s: %v", want, err)
 	}
 	if frame.Type != want {
 		t.Fatalf("browser expected PTY %s, got %s", want, frame.Type)
@@ -108,7 +126,7 @@ func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.
 	return frame
 }
 
-func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status webproto.AgentStatus) *websocket.Conn {
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status transport.AgentStatus) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -118,18 +136,14 @@ func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, comm
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	reg, _ := json.Marshal(webproto.RegisterPayload{
-		Name:     name,
-		Commands: commands,
-		Node:     protocols.NodeRef{ID: nodeID, Authority: srv.URL},
-		Status:   status,
-		Stats:    webproto.AgentStats{TotalTokens: 42},
-	})
-	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
-	var ack WSMessage
-	conn.ReadJSON(&ack)
-	if ack.Type != "connected" {
-		t.Fatalf("expected connected, got %s", ack.Type)
+	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Hello{Hello: &transport.AgentHello{
+		AgentId: nodeID, Name: name, Authority: srv.URL, Commands: commands,
+		Status: &transport.AgentStatus{Space: status.Space, Provider: status.Provider, Model: status.Model, Bound: status.Bound, ConfigError: status.ConfigError},
+		Stats:  &transport.AgentStats{TotalTokens: 42},
+	}}})
+	ack := readServerFrame(t, conn)
+	if ack.GetAccepted() == nil {
+		t.Fatalf("expected accepted, got %+v", ack)
 	}
 	return conn
 }
@@ -221,58 +235,47 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	agentID := pool.List()[0].ID
 
-	progressCh, unsub := pool.hub.Subscribe("task-1")
+	progressCh, _, unsub := pool.hub.SubscribeScan("task-1")
 	defer unsub()
 
-	resultCh, err := pool.DispatchToolCall(agentID, "task-1", aop.ToolCallData{
-		ToolCallID: "task-1",
-		ToolName:   "bash",
-		Args:       map[string]any{"command": "scan -i 1.2.3.4"},
+	arguments, _ := aop.JSONValue(map[string]any{"command": "scan -i 1.2.3.4"})
+	resultCh, err := pool.DispatchToolCall(agentID, "task-1", &aop.ToolCall{
+		Id: "task-1", Name: "bash", Arguments: arguments,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var cmd WSMessage
-	conn.ReadJSON(&cmd)
-	if cmd.Type != webproto.TypeAOP || cmd.TaskID != "task-1" {
+	cmd := readServerFrame(t, conn)
+	if cmd.GetToolCall().GetTaskId() != "task-1" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	var callEvent aop.Event
-	if err := json.Unmarshal(cmd.Payload, &callEvent); err != nil {
-		t.Fatal(err)
-	}
-	if callEvent.Type != aop.TypeToolCall || callEvent.TurnID != "task-1" {
-		t.Fatalf("unexpected tool.call event: %+v", callEvent)
-	}
-	call, err := aop.DecodeData[aop.ToolCallData](callEvent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	args, _ := call.Args.(map[string]any)
-	if call.ToolName != "bash" || args["command"] != "scan -i 1.2.3.4" {
+	call := cmd.GetToolCall().GetCall()
+	args, _ := aop.DecodeJSON[map[string]any](call.Arguments)
+	if call.Name != "bash" || args["command"] != "scan -i 1.2.3.4" {
 		t.Fatalf("unexpected tool.call data: %+v", call)
 	}
 
-	progress, _ := json.Marshal(output.ToolDataEvent{Tool: "bash", Kind: output.ToolDataProgress, Data: "port 80 open", CallID: "task-1"})
-	conn.WriteJSON(WSMessage{Type: "tool.data", TaskID: "task-1", Payload: progress})
+	progress, _ := aop.JSONValue("port 80 open")
+	writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: "task-1", Payload: &transport.AgentFrame_ToolTelemetry{ToolTelemetry: &transport.ToolTelemetry{
+		Tool: "bash", Kind: output.ToolDataProgress, CallId: "task-1", Data: progress,
+	}}})
 	select {
 	case evt := <-progressCh:
-		if !strings.Contains(string(evt.Data), "port 80 open") {
-			t.Fatalf("unexpected progress: %s", evt.Data)
+		if !strings.Contains(evt.GetProgress().GetData(), "port 80 open") {
+			t.Fatalf("unexpected progress: %v", evt)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
 
-	resultData, _ := json.Marshal(aop.ToolResultData{
-		ToolCallID: "task-1", ToolName: "bash", Content: "done", Details: map[string]int{"ports": 3},
-	})
-	resultEvent := callEvent
-	resultEvent.Type = aop.TypeToolResult
-	resultEvent.TS = time.Now().UTC().Format(time.RFC3339Nano)
-	resultEvent.Data = resultData
-	conn.WriteJSON(WSMessage{Type: webproto.TypeAOP, TaskID: "task-1", TurnID: "task-1", Payload: webproto.MustJSON(resultEvent)})
+	detail, _ := aop.JSONValue(map[string]int{"ports": 3})
+	writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: "task-1", Payload: &transport.AgentFrame_Event{Event: &aop.Event{
+		Id: "result-1", EmittedAt: timestamppb.Now(), SessionId: "task-1", TurnId: "task-1", Emitter: "worker",
+		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{
+			CallId: "task-1", Name: "bash", Output: []*aop.Content{aop.Text("done")}, Detail: detail,
+		}},
+	}}})
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {
@@ -286,10 +289,10 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	}
 }
 
-func TestWSDispatchChatUsesChatMessage(t *testing.T) {
+func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",
-		webproto.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
+		transport.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -303,20 +306,16 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var cmd WSMessage
-	conn.ReadJSON(&cmd)
-	if cmd.Type != webproto.TypeRun || cmd.TurnID != "task-chat" {
+	cmd := readServerFrame(t, conn)
+	if cmd.GetRunTurn().GetTurnId() != "task-chat" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	var run webproto.RunPayload
-	if err := json.Unmarshal(cmd.Payload, &run); err != nil {
-		t.Fatal(err)
-	}
-	if len(run.Parts) != 1 || run.Parts[0].Text != "hello" {
+	run := cmd.GetRunTurn()
+	if len(run.Input.Content) != 1 || run.Input.Content[0].GetText().GetText() != "hello" {
 		t.Fatalf("unexpected run input: %+v", run)
 	}
 
-	conn.WriteJSON(turnEndMessage("task-chat", "sess-chat", "completed"))
+	writeAgentFrame(t, conn, turnEndMessage("task-chat", "sess-chat", "completed"))
 	select {
 	case res := <-resultCh:
 		if res.Err != "" {
@@ -329,28 +328,22 @@ func TestWSDispatchChatUsesChatMessage(t *testing.T) {
 
 // turnEndMessage builds the agent→hub AOP turn.end frame that converges
 // a chat task.
-func turnEndMessage(turnID, sessionID, stop string) WSMessage {
-	data, _ := json.Marshal(aop.TurnEndData{Stop: stop})
-	payload, _ := json.Marshal(aop.Event{
-		Type:      aop.TypeTurnEnd,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: sessionID,
-		TurnID:    turnID,
-		Agent:     "agent",
-		Data:      data,
-	})
-	return WSMessage{Type: "aop", TurnID: turnID, Payload: payload}
+func turnEndMessage(turnID, sessionID, stop string) *transport.AgentFrame {
+	return &transport.AgentFrame{CorrelationId: turnID, Payload: &transport.AgentFrame_Event{Event: &aop.Event{
+		Id: "end-" + turnID, EmittedAt: timestamppb.Now(), SessionId: sessionID, TurnId: turnID, Emitter: "agent",
+		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stop}},
+	}}}
 }
 
 // TestDispatchRunCarriesGoalOptions guards the Goal-mode wiring: the
 // eval criteria and round budget must survive into the AOP user message ext so
 // the agent can run the evaluator loop. This whole channel was silently dropped
-// once (SendMessageRequest{Content} only), leaving the Goal panel a dead
+// once (when an adapter forwarded only plain text), leaving the Goal panel a dead
 // control — this test fails loudly if that regresses.
 func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
-		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
+		transport.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -359,39 +352,33 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	resultCh, err := pool.DispatchRun(agent.id, "task-goal", webproto.RunPayload{
-		SessionID: "sess-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "audit target"}},
-		NoEcho: true, EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5,
+	options, _ := aop.ProtoJSONValue(&transport.RunOptions{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	resultCh, err := pool.DispatchRun(agent.id, &aop.RunTurnRequest{
+		RequestId: "task-goal", SessionId: "sess-1", TurnId: "task-goal",
+		Input:      &aop.Message{Id: "input-task-goal", Role: "user", Content: []*aop.Content{aop.Text("audit target")}},
+		Extensions: []*aop.Extension{{Namespace: "io.chainreactors.aiscan.run", Value: options}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var opened WSMessage
-	if err := conn.ReadJSON(&opened); err != nil {
-		t.Fatal(err)
-	}
-	if opened.Type != webproto.TypeSessionOpen {
+	opened := readServerFrame(t, conn)
+	if opened.GetOpenSession() == nil {
 		t.Fatalf("first frame = %+v, want session.open", opened)
 	}
-	var cmd WSMessage
-	if err := conn.ReadJSON(&cmd); err != nil {
-		t.Fatal(err)
-	}
-	var inbound webproto.RunPayload
-	if cmd.Type != webproto.TypeRun || json.Unmarshal(cmd.Payload, &inbound) != nil {
+	cmd := readServerFrame(t, conn)
+	inbound := cmd.GetRunTurn()
+	if inbound == nil {
 		t.Fatalf("dispatch did not carry a Run: %+v", cmd)
 	}
-	if inbound.SessionID != "sess-1" || len(inbound.Parts) != 1 || inbound.Parts[0].Text != "audit target" {
+	if inbound.SessionId != "sess-1" || len(inbound.Input.Content) != 1 || inbound.Input.Content[0].GetText().GetText() != "audit target" {
 		t.Errorf("run = %+v", inbound)
 	}
-	if inbound.EvalCriteria != "find at least one SQLi" || inbound.EvalMaxRounds != 5 {
-		t.Errorf("goal options = %+v", inbound)
+	var gotOptions transport.RunOptions
+	if err := aop.DecodeProtoJSON(inbound.Extensions[0].Value, &gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
+		t.Errorf("goal options = %+v, err=%v", gotOptions, err)
 	}
-	if !inbound.NoEcho {
-		t.Error("hub-sent user message must set no_echo")
-	}
-	conn.WriteJSON(turnEndMessage("task-goal", "sess-1", "completed"))
+	writeAgentFrame(t, conn, turnEndMessage("task-goal", "sess-1", "completed"))
 	select {
 	case <-resultCh:
 	case <-time.After(time.Second):
@@ -414,7 +401,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
-		webproto.AgentStatus{Provider: "openai", Model: "test-model"})
+		transport.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -432,33 +419,15 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		var msg WSMessage
-		if err := conn.ReadJSON(&msg); err != nil {
-			t.Errorf("read upload message: %v", err)
-			return
-		}
-		if msg.Type != "upload" || msg.TaskID == "" || msg.DataB64 == "" {
+		msg := readServerFrame(t, conn)
+		upload := msg.GetFileUpload()
+		if upload == nil || upload.TaskId == "" || len(upload.Data) == 0 {
 			t.Errorf("unexpected upload message: %+v", msg)
 			return
 		}
-		var payload webproto.FileUploadPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			t.Errorf("decode upload payload: %v", err)
-			return
-		}
-		result := webproto.FileUploadResult{
-			Filename: payload.Filename,
-			Path:     `C:\tmp\note.txt`,
-			Size:     payload.FileSize,
-		}
-		if err := conn.WriteJSON(WSMessage{
-			Type:    "complete",
-			TaskID:  msg.TaskID,
-			Data:    result.Path,
-			Payload: mustJSON(result),
-		}); err != nil {
-			t.Errorf("write upload completion: %v", err)
-		}
+		writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: msg.CorrelationId, Payload: &transport.AgentFrame_FileResult{FileResult: &transport.FileResult{
+			TaskId: upload.TaskId, Filename: upload.Filename, Path: `C:\tmp\note.txt`, Size: int64(len(upload.Data)),
+		}}})
 	}()
 
 	result, err := svc.HandleFileUpload(ctx, session.ID, "note.txt", []byte("hello"))
@@ -475,15 +444,16 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 		t.Fatal("timeout waiting for agent upload reply")
 	}
 
-	msgs, err := store.ListMessages(ctx, session.ID, 10)
+	events, err := store.ListAOPEvents(ctx, session.ID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 persisted message, got %d", len(msgs))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 persisted AOP event, got %d", len(events))
 	}
-	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "File uploaded: note.txt") || !strings.Contains(msgs[0].Content, result.Path) {
-		t.Fatalf("unexpected persisted upload message: %+v", msgs[0])
+	message := events[0].GetMessage()
+	if message.GetRole() != "system" || !strings.Contains(message.GetContent()[0].GetText().GetText(), "File uploaded: note.txt") || !strings.Contains(message.GetContent()[0].GetText().GetText(), result.Path) {
+		t.Fatalf("unexpected persisted upload event: %+v", events[0])
 	}
 	// The English Content is only a fallback; the localizable contract lives in
 	// Metadata as {code, params} so the message stays translatable after reload.
@@ -491,7 +461,11 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 		Code   string            `json:"code"`
 		Params map[string]string `json:"params"`
 	}
-	if err := json.Unmarshal(msgs[0].Metadata, &meta); err != nil {
+	webExtension, ok, err := ext.GetWebMessage(events[0])
+	if err != nil || !ok {
+		t.Fatalf("web extension = %+v, ok = %v, err = %v", webExtension, ok, err)
+	}
+	if err := json.Unmarshal(webExtension.Metadata, &meta); err != nil {
 		t.Fatalf("decode system message metadata: %v", err)
 	}
 	if meta.Code != SysFileUploaded || meta.Params["filename"] != "note.txt" || meta.Params["path"] != result.Path {
@@ -517,21 +491,23 @@ func TestWSPick(t *testing.T) {
 	}
 }
 
-func TestWSLegacyTelemetryIsNotProjected(t *testing.T) {
+func TestWSUnrecognizedExtensionIsNotProjected(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgent(t, srv, "tele-agent", []string{"scan"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
 
-	progressCh, unsub := pool.hub.Subscribe("task-2")
+	progressCh, _, unsub := pool.hub.SubscribeScan("task-2")
 	defer unsub()
 
-	conn.WriteJSON(WSMessage{Type: "agent.turn_start", TaskID: "task-2", Data: "turn 1"})
+	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_OperationError{OperationError: &transport.OperationError{
+		TaskId: "unknown-task", Code: "IGNORED", Message: "not progress telemetry",
+	}}})
 
 	select {
 	case evt := <-progressCh:
-		t.Fatalf("legacy telemetry was projected into progress: %+v", evt)
+		t.Fatalf("non-telemetry frame was projected into progress: %+v", evt)
 	case <-time.After(100 * time.Millisecond):
 	}
 }
@@ -843,7 +819,7 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 
 type mockBrowserAgent struct { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	conn     *websocket.Conn
-	messages chan WSMessage
+	messages chan *transport.ServerFrame
 	errors   chan error
 }
 
@@ -857,24 +833,26 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowser
 	if err != nil {
 		t.Fatalf("dial agent: %v", err)
 	}
-	reg, _ := json.Marshal(webproto.RegisterPayload{
-		Name: name, Commands: []string{"tmux"},
-		Node: protocols.NodeRef{ID: "node-" + name, Authority: srv.URL},
-	})
-	conn.WriteJSON(WSMessage{Type: "register", Payload: reg})
-	var ack WSMessage
-	conn.ReadJSON(&ack)
-	if ack.Type != "connected" {
-		t.Fatalf("expected connected, got %s", ack.Type)
+	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Hello{Hello: &transport.AgentHello{
+		AgentId: "node-" + name, Name: name, Authority: srv.URL, Commands: []string{"tmux"},
+	}}})
+	ack := readServerFrame(t, conn)
+	if ack.GetAccepted() == nil {
+		t.Fatalf("expected accepted, got %+v", ack)
 	}
 	agent := &mockBrowserAgent{
-		conn: conn, messages: make(chan WSMessage, 64), errors: make(chan error, 1),
+		conn: conn, messages: make(chan *transport.ServerFrame, 64), errors: make(chan error, 1),
 	}
 	go func() {
 		defer close(agent.messages)
 		for {
-			var msg WSMessage
-			if err := conn.ReadJSON(&msg); err != nil {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				agent.errors <- err
+				return
+			}
+			msg := new(transport.ServerFrame)
+			if err := protojson.Unmarshal(raw, msg); err != nil {
 				agent.errors <- err
 				return
 			}
@@ -905,8 +883,8 @@ func launchBrowser(t *testing.T) *rod.Browser { //nolint:unused // referenced by
 	return browser
 }
 
-func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []WSMessage { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
-	var msgs []WSMessage
+func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []*transport.ServerFrame { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	var msgs []*transport.ServerFrame
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
@@ -932,8 +910,8 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 			if !ok {
 				t.Fatalf("agent connection closed while waiting for %s", want)
 			}
-			frame, err := webproto.DecodePTYMessage(msg)
-			if err == nil && frame.Type == want {
+			frame := terminalcodec.FromProto(msg.GetTerminal())
+			if frame.Type == want {
 				return frame
 			}
 		case err := <-agent.errors:
@@ -946,9 +924,7 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 
 func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	if err := agent.conn.WriteJSON(webproto.NewPTYMessage(frame)); err != nil {
-		t.Fatalf("agent write PTY %s: %v", frame.Type, err)
-	}
+	writeAgentFrame(t, agent.conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}})
 }
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
@@ -1012,8 +988,8 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 	inputs := drainAgentMessages(agentConn, time.Second)
 	gotInput := false
 	for _, m := range inputs {
-		frame, err := webproto.DecodePTYMessage(m)
-		if err == nil && frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
+		frame := terminalcodec.FromProto(m.GetTerminal())
+		if frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
 			gotInput = true
 			break
 		}
@@ -1073,8 +1049,8 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 	msgs := drainAgentMessages(agentConn, time.Second)
 	resizeReceived := false
 	for _, m := range msgs {
-		frame, err := webproto.DecodePTYMessage(m)
-		if err == nil && frame.Type == pty.FrameResize {
+		frame := terminalcodec.FromProto(m.GetTerminal())
+		if frame.Type == pty.FrameResize {
 			resizeReceived = true
 			t.Logf("resize received: %+v", frame)
 			break
@@ -1090,8 +1066,8 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	resultCh := make(chan taskResult, 1)
 	remote := &remoteAgent{
 		id:            "agent-1",
-		sendCh:        make(chan WSMessage, 1),
-		controlCh:     make(chan WSMessage, 1),
+		sendCh:        make(chan *transport.ServerFrame, 1),
+		controlCh:     make(chan *transport.ServerFrame, 1),
 		tasks:         map[string]chan taskResult{"task-1": resultCh},
 		turns:         map[string]int{"task-1": 1},
 		toolCalls:     make(map[string]struct{}),
@@ -1099,11 +1075,11 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	}
 	pool.agents[remote.id] = remote
 
-	pool.CancelTask(remote.id, "task-1")
+	pool.CancelTask(remote.id, "task-1", "session-1")
 
 	select {
 	case frame := <-remote.controlCh:
-		if frame.Type != webproto.TypeRunCancel || frame.TurnID != "task-1" {
+		if frame.GetCancelTurn().GetSessionId() != "session-1" || frame.GetCancelTurn().GetTurnId() != "task-1" {
 			t.Fatalf("cancel frame = %+v", frame)
 		}
 	default:

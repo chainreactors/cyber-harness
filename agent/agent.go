@@ -6,8 +6,10 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	providerpkg "github.com/chainreactors/aiscan/agent/provider"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"google.golang.org/protobuf/proto"
 )
 
 type Agent struct {
@@ -57,14 +59,14 @@ func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Resul
 		cfg.TurnID = randomID()
 		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
 	}
+	if cfg.CaptureProviderFrames {
+		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
+	}
 	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
-	if input.NoEcho {
-		msg.Meta = map[string]any{"no_echo": true}
-	}
 	if err := cfg.Inbox.Push(msg); err != nil {
 		return nil, fmt.Errorf("push prompt: %w", err)
 	}
@@ -115,6 +117,9 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 	if cfg.TurnID == "" {
 		cfg.TurnID = randomID()
 		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
+	}
+	if cfg.CaptureProviderFrames {
+		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
 	}
 	cfg.Messages = a.MessagesSnapshot()
 	result, runErr := runLoop(runCtx, cfg)
@@ -215,35 +220,36 @@ func (a *Agent) DeriveNamed(name string) *Agent {
 	return a.deriveNamed(name, "", nil)
 }
 
-func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
+func (a *Agent) deriveNamed(name, parentToolCallID string, detail *ext.DelegationDetail) *Agent {
 	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
 }
 
-func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
+func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ext.DelegationDetail) *Agent {
 	return NewAgent(Config{
-		Provider:         cfg.Provider,
-		Tools:            cfg.Tools,
-		Model:            cfg.Model,
-		MaxTokens:        cfg.MaxTokens,
-		ContextWindow:    cfg.ContextWindow,
-		Logger:           cfg.Logger,
-		MaxRetries:       cfg.MaxRetries,
-		MaxParallelTools: cfg.MaxParallelTools,
-		Stream:           cfg.Stream,
-		Temperature:      cfg.Temperature,
-		CacheRetention:   cfg.CacheRetention,
-		Bus:              cfg.Bus,
-		Hooks:            cfg.Hooks,
-		AgentName:        name,
-		ParentSessionID:  cfg.SessionID,
-		ParentToolCallID: parentToolCallID,
-		Delegation:       detail,
+		Provider:              cfg.Provider,
+		Tools:                 cfg.Tools,
+		Model:                 cfg.Model,
+		MaxTokens:             cfg.MaxTokens,
+		ContextWindow:         cfg.ContextWindow,
+		Logger:                cfg.Logger,
+		MaxRetries:            cfg.MaxRetries,
+		MaxParallelTools:      cfg.MaxParallelTools,
+		Stream:                cfg.Stream,
+		Temperature:           cfg.Temperature,
+		CacheRetention:        cfg.CacheRetention,
+		CaptureProviderFrames: cfg.CaptureProviderFrames,
+		Bus:                   cfg.Bus,
+		Hooks:                 cfg.Hooks,
+		AgentName:             name,
+		ParentSessionID:       cfg.SessionID,
+		ParentToolCallID:      parentToolCallID,
+		Delegation:            detail,
 	})
 }
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state, namespace string, detail any, turnID ...string) {
+func (a *Agent) EmitStatus(state, namespace string, detail proto.Message, turnID ...string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()

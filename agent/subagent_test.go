@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -66,9 +66,9 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 
 	activeInbox := inbox.NewBuffered(DefaultInboxCapacity)
 	var mu sync.Mutex
-	var events []aop.Event
-	bus := eventbus.New[aop.Event]()
-	bus.Subscribe(func(event aop.Event) {
+	var events []*aop.Event
+	bus := eventbus.New[*aop.Event]()
+	bus.Subscribe(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -98,24 +98,24 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, event := range events {
-		if event.Type != aop.TypeSessionStart || event.Agent != "context-worker" {
+		if eventKind(event) != "session.started" || event.Emitter != "context-worker" {
 			continue
 		}
-		data, err := aop.DecodeData[aop.SessionStartData](event)
-		if err != nil {
-			t.Fatalf("decode session.start: %v", err)
+		data := event.GetSessionStarted()
+		if data == nil {
+			t.Fatal("session.started payload missing")
 		}
-		if data.ParentSessionID != "active-session" {
-			t.Fatalf("parent session = %q, want active-session", data.ParentSessionID)
+		if data.ParentSessionId != "active-session" {
+			t.Fatalf("parent session = %q, want active-session", data.ParentSessionId)
 		}
-		if data.ParentToolCallID != "spawn-context" {
-			t.Fatalf("parent tool call = %q, want spawn-context", data.ParentToolCallID)
+		if data.ParentToolCallId != "spawn-context" {
+			t.Fatalf("parent tool call = %q, want spawn-context", data.ParentToolCallId)
 		}
-		detail, ok, err := delegation.Get(event)
+		detail, ok, err := ext.GetDelegation(event)
 		if err != nil || !ok {
 			t.Fatalf("delegation ext = %#v, %v, %v", detail, ok, err)
 		}
-		if detail.AgentName != "context-worker" || detail.Task != "work" || detail.RunMode != delegation.DelegationDetailRunModeBackground {
+		if detail.AgentName != "context-worker" || detail.Task != "work" || detail.RunMode != ext.DelegationRunBackground {
 			t.Fatalf("delegation detail = %#v", detail)
 		}
 		return
@@ -124,9 +124,9 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 }
 
 func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
-	bus := eventbus.New[aop.Event]()
-	events := make(chan aop.Event, 1)
-	bus.Subscribe(func(event aop.Event) { events <- event })
+	bus := eventbus.New[*aop.Event]()
+	events := make(chan *aop.Event, 1)
+	bus.Subscribe(func(event *aop.Event) { events <- event })
 	em := newAOPEmitter(bus, "aiscan", "parent-session", "", "", nil, 0)
 
 	em.toolCall("spawn-1", "subagent", map[string]any{
@@ -138,14 +138,14 @@ func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
 	}, "")
 
 	event := <-events
-	detail, ok, err := delegation.Get(event)
+	detail, ok, err := ext.GetDelegation(event)
 	if err != nil || !ok {
 		t.Fatalf("delegation ext = %#v, %v, %v", detail, ok, err)
 	}
 	if detail.Task != "inspect the repository" || detail.AgentName != "explorer" || detail.AgentType != "reviewer" {
 		t.Fatalf("delegation detail = %#v", detail)
 	}
-	if detail.RunMode != delegation.DelegationDetailRunModeBackground || detail.ContextMode != delegation.DelegationDetailContextModeFork {
+	if detail.RunMode != ext.DelegationRunBackground || detail.ContextMode != ext.DelegationContextFork {
 		t.Fatalf("delegation modes = %#v", detail)
 	}
 }

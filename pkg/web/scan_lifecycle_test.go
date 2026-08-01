@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	scanpb "github.com/chainreactors/aiscan/aop/aiscan/scan"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want ScanStatus) *ScanJob {
@@ -50,11 +52,8 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var call webproto.Message
-	if err := conn.ReadJSON(&call); err != nil {
-		t.Fatal(err)
-	}
-	if call.Type != webproto.TypeAOP || call.TaskID != job.ID {
+	call := readServerFrame(t, conn)
+	if call.GetToolCall().GetTaskId() != job.ID {
 		t.Fatalf("scan dispatch = %+v", call)
 	}
 	waitScanStatus(t, store, job.ID, StatusRunning)
@@ -63,11 +62,8 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-	var cancel webproto.Message
-	if err := conn.ReadJSON(&cancel); err != nil {
-		t.Fatalf("agent did not receive scan cancellation: %v", err)
-	}
-	if cancel.Type != "cancel" || cancel.TaskID != job.ID {
+	cancel := readServerFrame(t, conn)
+	if cancel.GetCancelOperation().GetTaskId() != job.ID {
 		t.Fatalf("cancel frame = %+v", cancel)
 	}
 
@@ -81,10 +77,10 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	}
 
 	// A result that races with cancellation must not resurrect the scan.
-	resultJSON, _ := json.Marshal(&output.Result{})
-	pool.handleAgentMessage(pool.Pick(), webproto.Message{
-		Type: "complete", TaskID: job.ID, Payload: resultJSON,
-	})
+	resultJSON, _ := aop.JSONValue(&output.Result{})
+	pool.handleAgentFrame(pool.Pick(), &transport.AgentFrame{CorrelationId: job.ID, Payload: &transport.AgentFrame_Event{Event: &aop.Event{
+		SessionId: job.ID, TurnId: job.ID, Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: job.ID, Detail: resultJSON}},
+	}}})
 	time.Sleep(20 * time.Millisecond)
 	if got, err := store.Get(context.Background(), job.ID); err != nil || got.Status != StatusCanceled {
 		t.Fatalf("late result changed canceled scan: job=%+v err=%v", got, err)
@@ -110,10 +106,7 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var call webproto.Message
-	if err := conn.ReadJSON(&call); err != nil {
-		t.Fatal(err)
-	}
+	_ = readServerFrame(t, conn)
 	waitScanStatus(t, store, running.ID, StatusRunning)
 
 	queued, err := svc.SubmitScan(context.Background(), "127.0.0.2", "quick", false, false, false)
@@ -130,10 +123,7 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-	var cancel webproto.Message
-	if err := conn.ReadJSON(&cancel); err != nil {
-		t.Fatal(err)
-	}
+	_ = readServerFrame(t, conn)
 	waitScanStatus(t, store, running.ID, StatusCanceled)
 }
 
@@ -189,24 +179,24 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 		close(done)
 	}()
 
-	var call webproto.Message
+	var call *transport.ServerFrame
 	select {
 	case call = <-agent.sendCh:
 	case <-time.After(time.Second):
 		t.Fatal("agent did not receive scan dispatch")
 	}
-	if call.Type != webproto.TypeAOP || call.TaskID != jobID {
+	if call.GetToolCall().GetTaskId() != jobID {
 		t.Fatalf("scan dispatch = %+v", call)
 	}
 
 	ctx.expire()
-	var cancel webproto.Message
+	var cancel *transport.ServerFrame
 	select {
 	case cancel = <-agent.controlCh:
 	case <-time.After(time.Second):
 		t.Fatal("agent did not receive timeout cancellation")
 	}
-	if cancel.Type != "cancel" || cancel.TaskID != jobID {
+	if cancel.GetCancelOperation().GetTaskId() != jobID {
 		t.Fatalf("timeout cancel frame = %+v", cancel)
 	}
 	select {
@@ -270,7 +260,7 @@ func TestCancelTaskUsesControlChannelWhenTaskQueueIsFull(t *testing.T) {
 	remote := newFakeAgent("agent-1", 1)
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	remote.tasks["scan-1"] = make(chan taskResult, 1)
-	remote.sendCh <- webproto.Message{Type: "busy"}
+	remote.sendCh <- &transport.ServerFrame{Payload: &transport.ServerFrame_Exec{Exec: &transport.ExecRequest{TaskId: "busy"}}}
 	pool.agents[remote.id] = remote
 
 	if err := pool.CancelTask(remote.id, "scan-1"); err != nil {
@@ -278,7 +268,7 @@ func TestCancelTaskUsesControlChannelWhenTaskQueueIsFull(t *testing.T) {
 	}
 	select {
 	case msg := <-remote.controlCh:
-		if msg.Type != "cancel" || msg.TaskID != "scan-1" {
+		if msg.GetCancelOperation().GetTaskId() != "scan-1" {
 			t.Fatalf("control cancellation = %+v", msg)
 		}
 	default:
@@ -292,7 +282,7 @@ func TestCancelTaskWaitsForSaturatedControlChannel(t *testing.T) {
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	resultCh := make(chan taskResult, 1)
 	remote.tasks["scan-1"] = resultCh
-	remote.controlCh <- webproto.Message{Type: "config"}
+	remote.controlCh <- &transport.ServerFrame{Payload: &transport.ServerFrame_ReloadConfig{ReloadConfig: &transport.ReloadConfig{}}}
 	pool.agents[remote.id] = remote
 
 	if err := pool.CancelTask(remote.id, "scan-1"); err != nil {
@@ -310,7 +300,7 @@ func TestCancelTaskWaitsForSaturatedControlChannel(t *testing.T) {
 	<-remote.controlCh
 	select {
 	case msg := <-remote.controlCh:
-		if msg.Type != "cancel" || msg.TaskID != "scan-1" {
+		if msg.GetCancelOperation().GetTaskId() != "scan-1" {
 			t.Fatalf("queued cancellation = %+v", msg)
 		}
 	case <-time.After(time.Second):
@@ -389,13 +379,14 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodDelete, "/api/scans/"+job.ID, nil)
-	handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("DELETE completed scan status = %d, body = %s; want %d", recorder.Code, recorder.Body.String(), http.StatusConflict)
+	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &scanpb.CancelScanRequest{
+		RequestId: "cancel-completed", ScanId: job.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetRejected().GetCode() != "FAILED_PRECONDITION" {
+		t.Fatalf("CancelScan rejection = %+v; want FAILED_PRECONDITION", response.GetRejected())
 	}
 	stored, err := store.Get(context.Background(), job.ID)
 	if err != nil {
@@ -413,12 +404,13 @@ func TestCancelMissingScanReturnsNotFound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodDelete, "/api/scans/missing", nil)
-	handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("DELETE missing scan status = %d, body = %s; want %d", recorder.Code, recorder.Body.String(), http.StatusNotFound)
+	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &scanpb.CancelScanRequest{
+		RequestId: "cancel-missing", ScanId: "missing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetRejected().GetCode() != "NOT_FOUND" {
+		t.Fatalf("CancelScan rejection = %+v; want NOT_FOUND", response.GetRejected())
 	}
 }

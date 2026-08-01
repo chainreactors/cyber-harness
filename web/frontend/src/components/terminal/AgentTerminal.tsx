@@ -8,12 +8,14 @@ import type { AgentInfo } from '../../api'
 import { Button, Tooltip, TooltipTrigger, TooltipContent } from '@cyber/ui'
 import {
   type PTYSession,
+  type PTYFrameInit,
   type TerminalStatus,
   activitySeq,
   compareSessionsByActivity,
   encodeTerminalData,
   mergeSession,
   parsePTYFrame,
+  serializePTYFrame,
   sessionFromFrame,
   sessionsFromFrame,
   sessionTitle,
@@ -96,8 +98,8 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     const fitTerminal = () => {
       try { fit.fit() } catch {}
     }
-    const sendTo = (message: Record<string, unknown>) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message))
+    const sendTo = (message: PTYFrameInit) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(serializePTYFrame(message))
     }
     const requestDesiredSession = (knownSessions: PTYSession[] = sessionsRef.current) => {
       if (ws.readyState !== WebSocket.OPEN) return
@@ -108,24 +110,24 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
       fitTerminal()
       term.reset()
       if (desired?.id) {
-        sendTo({ type: 'attach', session_id: desired.id, ...size() })
+        sendTo({ type: 'attach', sessionId: desired.id, ...size() })
         return
       }
       desiredSessionIDRef.current = ''
       const repl = knownSessions.find((s) => s.state === 'running' && s.kind === 'repl' && (s.name === REPL_NAME || !s.name))
         || knownSessions.find((s) => s.state === 'running' && s.kind === 'repl')
       if (repl?.id) {
-        sendTo({ type: 'attach', session_id: repl.id, ...size() })
+        sendTo({ type: 'attach', sessionId: repl.id, ...size() })
       }
     }
 
     const dataDisposable = term.onData((data) => {
       if (!activeRef.current) return
-      sendTo({ type: 'input', session_id: activeRef.current, data: encodeTerminalData(data) })
+      sendTo({ type: 'input', sessionId: activeRef.current, data: encodeTerminalData(data) })
     })
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (!activeRef.current) return
-      sendTo({ type: 'resize', session_id: activeRef.current, cols, rows })
+      sendTo({ type: 'resize', sessionId: activeRef.current, cols, rows })
     })
 
     ws.onopen = () => {
@@ -145,7 +147,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
         case 'opened':
         case 'attached': {
           const session = sessionFromFrame(msg)
-          const id = msg.session_id || session?.id || ''
+          const id = msg.sessionId || session?.id || ''
           if (session) rememberSession(session)
           if (id) {
             activeRef.current = id
@@ -155,13 +157,13 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
           }
           setStatus('connected')
           fitTerminal()
-          if (id) sendTo({ type: 'resize', session_id: id, ...size() })
+          if (id) sendTo({ type: 'resize', sessionId: id, ...size() })
           sendTo({ type: 'list' })
           term.focus()
           break
         }
         case 'output': {
-          const id = msg.session_id || ''
+          const id = msg.sessionId || ''
           if (id && activeRef.current && id !== activeRef.current) { markSessionUnread(id); break }
           writeTerminalData(term, msg)
           markSessionRead(id || activeRef.current)
@@ -169,7 +171,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
         }
         case 'closed': {
           const session = sessionFromFrame(msg)
-          const id = msg.session_id || session?.id || ''
+          const id = msg.sessionId || session?.id || ''
           const known = sessionsRef.current.find((s) => s.id === id) || null
           const current = session ? { ...known, ...session } : known
           if (session) rememberSession(session)
@@ -207,7 +209,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
       ws.onclose = null
       ws.onerror = null
       ws.onopen = null
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'detach' }))
+      if (ws.readyState === WebSocket.OPEN) ws.send(serializePTYFrame({ type: 'detach' }))
       ws.close()
       resizeDisposable.dispose()
       dataDisposable.dispose()
@@ -233,8 +235,8 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     }
   }, [agent.id, terminalReadySeq])
 
-  function send(message: Record<string, unknown>) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(message))
+  function send(message: PTYFrameInit) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(serializePTYFrame(message))
   }
 
   function terminalSize() {
@@ -286,7 +288,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     activeRef.current = session.id
     setActiveID(session.id)
     markSessionRead(session.id, session)
-    send({ type: 'attach', session_id: session.id, ...terminalSize() })
+    send({ type: 'attach', sessionId: session.id, ...terminalSize() })
   }
 
   function attachRepl() {
@@ -306,7 +308,7 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
 
   function stopActiveSession() {
     if (!activeID || activeSession?.kind === 'repl') return
-    send({ type: 'kill', session_id: activeID })
+    send({ type: 'kill', sessionId: activeID })
   }
 
   const activeTitle = activeSession ? sessionTitle(activeSession) : activeID

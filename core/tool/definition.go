@@ -2,7 +2,7 @@ package tool
 
 // Definition describes a tool the LLM can invoke.
 type Definition struct {
-	Type     string             `json:"type"`
+	Type     string  `json:"type"`
 	Function FuncDef `json:"function"`
 }
 

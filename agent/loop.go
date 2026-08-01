@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,8 +11,9 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
@@ -73,9 +75,12 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				}
 				for _, cm := range inboxMsgs[i].ToChatMessages() {
 					transcript.append(cm)
-					noEcho, _ := inboxMsgs[i].Meta["no_echo"].(bool)
-					if inboxMsgs[i].Origin == inbox.OriginUser && !noEcho {
-						em.message("user", messagePartsFromChat(cm))
+					if inboxMsgs[i].Origin == inbox.OriginUser {
+						if cm.AOPMessageID != "" {
+							em.messageWithIdentity(cm.AOPMessageID, cm.Role, cm.Name, messagePartsFromChat(cm))
+						} else {
+							em.message(cm.Role, messagePartsFromChat(cm))
+						}
 					}
 				}
 			}
@@ -158,7 +163,9 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				return end(result, result.Err, StopReasonBudget)
 			}
 			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
-				em.status(aop.StatusTokenBudgetWarning, aop.NSAOP, aop.BudgetWarning{ContextTokens: transcript.contextTokens, TokenBudget: cfg.TokenBudget})
+				em.status(statusTokenBudgetWarning, aopStatusNamespace, &transport.BudgetWarning{
+					ContextTokens: uint64(max(transcript.contextTokens, 0)), TokenBudget: uint64(max(cfg.TokenBudget, 0)),
+				})
 				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
 			}
 		}
@@ -280,7 +287,7 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		return false, nil
 	}
 
-	em.status(xcompact.StateStart, "", nil)
+	em.status(ext.CompactStateStart, "", nil)
 	newMessages, result, err := compactHistory(ctx, CompactConfig{
 		Provider:         cfg.Provider,
 		Model:            cfg.Model,
@@ -289,14 +296,14 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		MaxTokens:        cfg.MaxTokens,
 	}, transcript.messages)
 	if err != nil {
-		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: err.Error()})
+		em.status(ext.CompactStateError, ext.CompactNamespace, &ext.CompactDetail{Error: err.Error()})
 		return false, err
 	}
 	transcript.replace(newMessages, result.TokensAfter)
-	em.status(xcompact.StateEnd, xcompact.NS, xcompact.Detail{
-		TokensBefore: result.TokensBefore,
-		TokensAfter:  result.TokensAfter,
-		KeptMessages: result.KeptMessages,
+	em.status(ext.CompactStateEnd, ext.CompactNamespace, &ext.CompactDetail{
+		TokensBefore: uint64(max(result.TokensBefore, 0)),
+		TokensAfter:  uint64(max(result.TokensAfter, 0)),
+		KeptMessages: uint64(max(result.KeptMessages, 0)),
 	})
 	cfg.Logger.Importantf("context compacted reason=%s tokens=%d->%d kept_messages=%d",
 		reason, result.TokensBefore, result.TokensAfter, result.KeptMessages)
@@ -541,13 +548,21 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution, time.Since(startedAt).Milliseconds())
 }
 
-// eventContent returns the AOP tool.result payload: a plain string, or the
-// {content, images} variant when the tool returned images.
-func (e toolExecution) eventContent() any {
-	if e.fullResult != nil {
-		return aop.ToolResultContentFromResult(*e.fullResult, e.eventResultText())
+func (e toolExecution) eventContent() []*aop.Content {
+	content := []*aop.Content{aop.Text(e.eventResultText())}
+	if e.fullResult == nil {
+		return content
 	}
-	return e.eventResultText()
+	for _, block := range e.fullResult.Content {
+		if block.Type != "image" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(block.Base64Data)
+		if err == nil {
+			content = append(content, aop.Image(block.MimeType, data))
+		}
+	}
+	return content
 }
 
 func (e toolExecution) eventResultText() string {

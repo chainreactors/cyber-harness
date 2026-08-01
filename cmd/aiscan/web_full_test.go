@@ -10,10 +10,10 @@ import (
 	"runtime"
 	"testing"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 	"gopkg.in/yaml.v3"
 )
 
@@ -93,11 +93,11 @@ func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
 	}
 }
 
-func configForWebStore(model, apiKey string) webproto.DistributeConfig {
-	var cfg webproto.DistributeConfig
-	cfg.LLM.ActiveProfile = "primary"
-	cfg.LLM.Providers = []webproto.LLMProviderConfig{{
+func configForWebStore(model, apiKey string) cfg.DistributeConfig {
+	var value cfg.DistributeConfig
+	value.LLM.ActiveProfile = "primary"
+	value.LLM.Providers = []cfg.LLMProviderConfig{{
 		ID: "primary", Provider: "openai", Model: model, APIKey: apiKey,
 	}}
-	return cfg
+	return value
 }

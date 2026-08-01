@@ -11,6 +11,9 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.9.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-web": "^2.1.2",
     "@radix-ui/react-context-menu": "^2.3.3",
     "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-dropdown-menu": "^2.1.0",
@@ -46,6 +49,7 @@
     "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@bufbuild/protoc-gen-es": "^2.13.0",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/typography": "^0.5.15",
     "@types/chroma-js": "^2.4.5",

@@ -1,16 +1,19 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,7 +75,7 @@ func migrate(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS chat_aop_events (
 			id         TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			hub_seq    INTEGER NOT NULL DEFAULT 0,
+			cursor     INTEGER NOT NULL DEFAULT 0,
 			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
@@ -82,10 +85,21 @@ func migrate(db *sql.DB) error {
 			scan_id    TEXT NOT NULL,
 			PRIMARY KEY (session_id, scan_id)
 		);
+
+		CREATE TABLE IF NOT EXISTS aop_request_journal (
+			request_id    TEXT PRIMARY KEY,
+			method        TEXT NOT NULL,
+			request_hash  BLOB NOT NULL,
+			response_json TEXT NOT NULL,
+			created_at    TEXT NOT NULL
+		);
 	`); err != nil {
 		return err
 	}
 
+	if err := renameAOPCursorColumn(db); err != nil {
+		return err
+	}
 	for _, column := range []sqliteColumnMigration{
 		{table: "scans", name: "mode", definition: "TEXT NOT NULL DEFAULT 'quick'"},
 		{table: "scans", name: "ai", definition: "INTEGER NOT NULL DEFAULT 0"},
@@ -104,30 +118,30 @@ func migrate(db *sql.DB) error {
 		{table: "chat_messages", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "chat_messages", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{table: "chat_messages", name: "metadata", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_aop_events", name: "hub_seq", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{table: "chat_aop_events", name: "cursor", definition: "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureSQLiteColumn(db, column); err != nil {
 			return err
 		}
 	}
 	if _, err := db.Exec(`
-		DROP TABLE IF EXISTS temp.aop_seq_backfill;
-		CREATE TEMP TABLE aop_seq_backfill (row_id INTEGER PRIMARY KEY, hub_seq INTEGER NOT NULL);
-		INSERT INTO aop_seq_backfill (row_id, hub_seq)
+		DROP TABLE IF EXISTS temp.aop_cursor_backfill;
+		CREATE TEMP TABLE aop_cursor_backfill (row_id INTEGER PRIMARY KEY, cursor INTEGER NOT NULL);
+		INSERT INTO aop_cursor_backfill (row_id, cursor)
 		SELECT target.rowid,
 			COALESCE((
-				SELECT MAX(existing.hub_seq)
+				SELECT MAX(existing.cursor)
 				FROM chat_aop_events AS existing
-				WHERE existing.session_id = target.session_id AND existing.hub_seq > 0
+				WHERE existing.session_id = target.session_id AND existing.cursor > 0
 			), 0) + ROW_NUMBER() OVER (
 				PARTITION BY target.session_id ORDER BY target.created_at, target.rowid
 			)
 		FROM chat_aop_events AS target
-		WHERE target.hub_seq = 0;
+		WHERE target.cursor = 0;
 		UPDATE chat_aop_events
-		SET hub_seq = (SELECT backfill.hub_seq FROM aop_seq_backfill AS backfill WHERE backfill.row_id = chat_aop_events.rowid)
-		WHERE rowid IN (SELECT row_id FROM aop_seq_backfill);
-		DROP TABLE aop_seq_backfill;
+		SET cursor = (SELECT backfill.cursor FROM aop_cursor_backfill AS backfill WHERE backfill.row_id = chat_aop_events.rowid)
+		WHERE rowid IN (SELECT row_id FROM aop_cursor_backfill);
+		DROP TABLE aop_cursor_backfill;
 	`); err != nil {
 		return err
 	}
@@ -174,13 +188,53 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
 		CREATE INDEX IF NOT EXISTS idx_aop_events_session ON chat_aop_events(session_id, created_at, id);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_aop_events_session_seq ON chat_aop_events(session_id, hub_seq);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_aop_events_session_cursor ON chat_aop_events(session_id, cursor);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
 	`); err != nil {
 		return err
 	}
-	return wipeLegacyAOPEvents(db)
+	return nil
+}
+
+func (s *SQLiteStore) LoadAOPRequest(ctx context.Context, requestID, method string, requestHash []byte, response protobuf.Message) (found, conflict bool, err error) {
+	if s == nil || strings.TrimSpace(requestID) == "" || response == nil {
+		return false, false, nil
+	}
+	var storedMethod string
+	var storedHash []byte
+	var raw string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT method, request_hash, response_json FROM aop_request_journal WHERE request_id = ?`, requestID,
+	).Scan(&storedMethod, &storedHash, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if storedMethod != method || !bytes.Equal(storedHash, requestHash) {
+		return false, true, nil
+	}
+	if err := protojson.Unmarshal([]byte(raw), response); err != nil {
+		return false, false, err
+	}
+	return true, false, nil
+}
+
+func (s *SQLiteStore) SaveAOPRequest(ctx context.Context, requestID, method string, requestHash []byte, response protobuf.Message) error {
+	if s == nil || strings.TrimSpace(requestID) == "" || response == nil {
+		return nil
+	}
+	raw, err := protojson.Marshal(response)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO aop_request_journal (request_id, method, request_hash, response_json, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, requestID, method, requestHash, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 func ensureSessionForeignKeys(db *sql.DB) error {
@@ -270,12 +324,12 @@ func rebuildAOPEventsWithForeignKey(tx *sql.Tx) error {
 		CREATE TABLE chat_aop_events_fk_migration (
 			id         TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			hub_seq    INTEGER NOT NULL,
+			cursor     INTEGER NOT NULL,
 			event_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);
-		INSERT INTO chat_aop_events_fk_migration (rowid, id, session_id, hub_seq, event_json, created_at)
-		SELECT events.rowid, events.id, events.session_id, events.hub_seq, events.event_json, events.created_at
+		INSERT INTO chat_aop_events_fk_migration (rowid, id, session_id, cursor, event_json, created_at)
+		SELECT events.rowid, events.id, events.session_id, events.cursor, events.event_json, events.created_at
 		FROM chat_aop_events AS events
 		WHERE EXISTS (
 			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = events.session_id
@@ -313,6 +367,25 @@ type sqliteColumnMigration struct {
 	definition string
 }
 
+func renameAOPCursorColumn(db *sql.DB) error {
+	hasOld, err := sqliteColumnExists(db, "chat_aop_events", "hub_seq")
+	if err != nil || !hasOld {
+		return err
+	}
+	hasCursor, err := sqliteColumnExists(db, "chat_aop_events", "cursor")
+	if err != nil {
+		return err
+	}
+	if hasCursor {
+		return fmt.Errorf("chat_aop_events contains both hub_seq and cursor")
+	}
+	_, err = db.Exec(`
+		DROP INDEX IF EXISTS idx_aop_events_session_seq;
+		ALTER TABLE chat_aop_events RENAME COLUMN hub_seq TO cursor;
+	`)
+	return err
+}
+
 func ensureSQLiteColumn(db *sql.DB, column sqliteColumnMigration) error {
 	tableExists, err := sqliteTableExists(db, column.table)
 	if err != nil || !tableExists {
@@ -338,75 +411,6 @@ func sqliteTableExists(db *sql.DB, table string) (bool, error) {
 	var count int
 	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count)
 	return count > 0, err
-}
-
-// wipeLegacyAOPEvents performs the one-time breaking AOP lifecycle cutover.
-// Sessions/messages/assets/records stay intact; only protocol event history is
-// cleared because old session/turn boundaries cannot be reinterpreted safely.
-func wipeLegacyAOPEvents(db *sql.DB) error {
-	exists, err := sqliteTableExists(db, "chat_aop_events")
-	if err != nil || !exists {
-		return err
-	}
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return err
-	}
-	if version >= 2 {
-		return nil
-	}
-	if _, err := db.Exec(`DELETE FROM chat_aop_events`); err != nil {
-		return err
-	}
-	_, err = db.Exec(`PRAGMA user_version = 2`)
-	return err
-}
-
-// messageEventFromChatMessage converts a hub-authored chat message (user input,
-// system notices) into an AOP message event for persistence and broadcast.
-func messageEventFromChatMessage(msg *ChatMessage) (aop.Event, error) {
-	if msg == nil || msg.SessionID == "" {
-		return aop.Event{}, fmt.Errorf("chat message requires session_id")
-	}
-	createdAt := msg.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now()
-	}
-	agentName := strings.TrimSpace(msg.AgentName)
-	if agentName == "" {
-		agentName = "aiscan.web"
-	}
-	role := msg.Role
-	if role == "" {
-		role = "user"
-	}
-	data, err := json.Marshal(aop.MessageData{
-		MessageID: msg.ID,
-		Role:      role,
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: msg.Content}},
-	})
-	if err != nil {
-		return aop.Event{}, err
-	}
-	ext := webproto.WebMessageExt{AgentID: msg.AgentID}
-	if len(msg.Metadata) > 0 {
-		if json.Valid(msg.Metadata) {
-			ext.Metadata = msg.Metadata
-		} else if raw, err := json.Marshal(string(msg.Metadata)); err == nil {
-			ext.Metadata = raw
-		}
-	}
-	event := aop.Event{
-		Type:      aop.TypeMessage,
-		TS:        createdAt.UTC().Format(time.RFC3339Nano),
-		SessionID: msg.SessionID,
-		Agent:     agentName,
-		Data:      data,
-	}
-	if ext.AgentID != "" || len(ext.Metadata) > 0 {
-		_ = webproto.SetWebExt(&event, ext)
-	}
-	return event, nil
 }
 
 func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
@@ -638,6 +642,60 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*ChatSessi
 	return sessions, rows.Err()
 }
 
+func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*ChatSession, bool, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at
+		FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+	args := []any{limit + 1, offset}
+	if !includeClosed {
+		query = `SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at
+			FROM chat_sessions WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+		args = []any{SessionActive, limit + 1, offset}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	sessions := make([]*ChatSession, 0, limit+1)
+	for rows.Next() {
+		var cs ChatSession
+		var createdAt, updatedAt string
+		if err := rows.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &cs.TopicID, &createdAt, &updatedAt); err != nil {
+			_ = rows.Close()
+			return nil, false, err
+		}
+		cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		sessions = append(sessions, &cs)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, false, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, false, err
+	}
+	// SQLiteStore intentionally uses one connection. Enrich only after closing
+	// the session row set; querying SessionScanIDs inside rows.Next would wait on
+	// the connection held by the outer query and deadlock every non-empty page.
+	for _, session := range sessions {
+		session.ScanIDs, _ = s.SessionScanIDs(ctx, session.ID)
+	}
+	hasMore := len(sessions) > limit
+	if hasMore {
+		sessions = sessions[:limit]
+	}
+	return sessions, hasMore, nil
+}
+
 func (s *SQLiteStore) UpdateSession(ctx context.Context, session *ChatSession) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE chat_sessions SET title=?, status=?, topic_id=?, updated_at=? WHERE id=?`,
@@ -651,51 +709,27 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
-// --- Chat message CRUD ---
-
-func (s *SQLiteStore) AddMessage(ctx context.Context, msg *ChatMessage) error {
-	_, err := s.AppendMessage(ctx, msg)
-	return err
-}
-
-func (s *SQLiteStore) AppendMessage(ctx context.Context, msg *ChatMessage) (int64, error) {
-	event, err := messageEventFromChatMessage(msg)
-	if err != nil {
-		return 0, err
-	}
-	cursor, _, err := s.AppendAOPEvent(ctx, msg.SessionID, event)
-	return cursor, err
-}
-
-// ClearMessages deletes every message in a session without removing the session
-// itself — the store half of web /clear ("clear conversation"). Messages are leaf
-// rows (nothing references them), so a single delete suffices.
-func (s *SQLiteStore) ClearMessages(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM chat_aop_events WHERE session_id = ?`, sessionID)
-	return err
-}
-
-func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event aop.Event) error {
+func (s *SQLiteStore) AddAOPEvent(ctx context.Context, sessionID string, event *aop.Event) error {
 	_, _, err := s.AppendAOPEvent(ctx, sessionID, event)
 	return err
 }
 
 // AppendAOPEvent persists one durable event and assigns the authoritative
-// session-local cursor used by SSE replay and REST pagination. Message deltas
+// session-local cursor used by ListEvents/WatchEvents replay. Message deltas
 // remain transient and return persisted=false.
-func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, event aop.Event) (cursor int64, persisted bool, err error) {
+func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, event *aop.Event) (cursor int64, persisted bool, err error) {
 	// Deltas are streaming fragments; only complete messages are persisted so a
 	// replayed history holds the authoritative state.
-	if event.Type == aop.TypeMessageDelta {
+	if event == nil || event.GetMessageDelta() != nil || event.GetToolCallDelta() != nil {
 		return 0, false, nil
 	}
-	raw, err := json.Marshal(event)
+	raw, err := protojson.Marshal(event)
 	if err != nil {
 		return 0, false, err
 	}
-	createdAt := event.TS
-	if createdAt == "" {
-		createdAt = time.Now().UTC().Format(time.RFC3339Nano)
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if event.EmittedAt != nil {
+		createdAt = event.EmittedAt.AsTime().UTC().Format(time.RFC3339Nano)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -703,12 +737,12 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(hub_seq), 0) + 1 FROM chat_aop_events WHERE session_id = ?`, sessionID,
+		`SELECT COALESCE(MAX(cursor), 0) + 1 FROM chat_aop_events WHERE session_id = ?`, sessionID,
 	).Scan(&cursor); err != nil {
 		return 0, false, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO chat_aop_events (id, session_id, hub_seq, event_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO chat_aop_events (id, session_id, cursor, event_json, created_at) VALUES (?, ?, ?, ?, ?)`,
 		generateID(), sessionID, cursor, string(raw), createdAt,
 	); err != nil {
 		return 0, false, err
@@ -719,16 +753,36 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	return cursor, true, nil
 }
 
-func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]aop.Event, error) {
+func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]*aop.Event, error) {
 	page, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
 	if err != nil {
 		return nil, err
 	}
-	events := make([]aop.Event, 0, len(page))
+	events := make([]*aop.Event, 0, len(page))
 	for _, stored := range page {
 		events = append(events, stored.Event)
 	}
 	return events, nil
+}
+
+func (s *SQLiteStore) MaxAOPEventSeq(ctx context.Context, sessionID string) (uint64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT event_json FROM chat_aop_events WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var maximum uint64
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return 0, err
+		}
+		event := new(aop.Event)
+		if protojson.Unmarshal([]byte(raw), event) == nil && event.Seq > maximum {
+			maximum = event.Seq
+		}
+	}
+	return maximum, rows.Err()
 }
 
 func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, before int64, limit int) ([]persistedAOPEvent, int64, error) {
@@ -738,16 +792,16 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 	if limit > 10000 {
 		limit = 10000
 	}
-	query := `SELECT hub_seq, event_json FROM (
-		SELECT hub_seq, event_json FROM chat_aop_events
-		WHERE session_id = ? ORDER BY hub_seq DESC LIMIT ?
-	) ORDER BY hub_seq ASC`
+	query := `SELECT cursor, event_json FROM (
+		SELECT cursor, event_json FROM chat_aop_events
+		WHERE session_id = ? ORDER BY cursor DESC LIMIT ?
+	) ORDER BY cursor ASC`
 	args := []any{sessionID, limit + 1}
 	if before > 0 {
-		query = `SELECT hub_seq, event_json FROM (
-			SELECT hub_seq, event_json FROM chat_aop_events
-			WHERE session_id = ? AND hub_seq < ? ORDER BY hub_seq DESC LIMIT ?
-		) ORDER BY hub_seq ASC`
+		query = `SELECT cursor, event_json FROM (
+			SELECT cursor, event_json FROM chat_aop_events
+			WHERE session_id = ? AND cursor < ? ORDER BY cursor DESC LIMIT ?
+		) ORDER BY cursor ASC`
 		args = []any{sessionID, before, limit + 1}
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -762,8 +816,8 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 		if err := rows.Scan(&cursor, &raw); err != nil {
 			return nil, 0, err
 		}
-		var event aop.Event
-		if json.Unmarshal([]byte(raw), &event) == nil && event.Valid() {
+		event := new(aop.Event)
+		if protojson.Unmarshal([]byte(raw), event) == nil && event.SessionId != "" && event.Payload != nil {
 			events = append(events, persistedAOPEvent{Cursor: cursor, Event: event})
 		}
 	}
@@ -785,7 +839,7 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 		events, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
 		return events, err
 	}
-	query := `SELECT hub_seq, event_json FROM chat_aop_events WHERE session_id = ? AND hub_seq > ? ORDER BY hub_seq ASC`
+	query := `SELECT cursor, event_json FROM chat_aop_events WHERE session_id = ? AND cursor > ? ORDER BY cursor ASC`
 	args := []any{sessionID, after}
 	if limit > 0 {
 		if limit > 10000 {
@@ -806,110 +860,12 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
 			return nil, err
 		}
-		if json.Unmarshal([]byte(raw), &stored.Event) == nil && stored.Event.Valid() {
+		stored.Event = new(aop.Event)
+		if protojson.Unmarshal([]byte(raw), stored.Event) == nil && stored.Event.SessionId != "" && stored.Event.Payload != nil {
 			events = append(events, stored)
 		}
 	}
 	return events, rows.Err()
-}
-
-func (s *SQLiteStore) ListMessages(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error) {
-	page, err := s.ListMessagePage(ctx, sessionID, 0, limit)
-	if err != nil {
-		return nil, err
-	}
-	return page.Items, nil
-}
-
-func (s *SQLiteStore) ListMessagePage(ctx context.Context, sessionID string, before int64, limit int) (ChatMessagePage, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	query := `SELECT hub_seq, event_json FROM (
-		SELECT hub_seq, event_json FROM chat_aop_events
-		WHERE session_id = ? AND json_valid(event_json) AND json_extract(event_json, '$.type') = ?
-		ORDER BY hub_seq DESC LIMIT ?
-	) ORDER BY hub_seq ASC`
-	args := []any{sessionID, aop.TypeMessage, limit + 1}
-	if before > 0 {
-		query = `SELECT hub_seq, event_json FROM (
-			SELECT hub_seq, event_json FROM chat_aop_events
-			WHERE session_id = ? AND hub_seq < ? AND json_valid(event_json) AND json_extract(event_json, '$.type') = ?
-			ORDER BY hub_seq DESC LIMIT ?
-		) ORDER BY hub_seq ASC`
-		args = []any{sessionID, before, aop.TypeMessage, limit + 1}
-	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return ChatMessagePage{}, err
-	}
-	defer rows.Close()
-	events := make([]persistedAOPEvent, 0, limit+1)
-	for rows.Next() {
-		var stored persistedAOPEvent
-		var raw string
-		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
-			return ChatMessagePage{}, err
-		}
-		if json.Unmarshal([]byte(raw), &stored.Event) == nil && stored.Event.Valid() {
-			events = append(events, stored)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return ChatMessagePage{}, err
-	}
-	var next int64
-	if len(events) > limit {
-		events = events[1:]
-		if len(events) > 0 {
-			next = events[0].Cursor
-		}
-	}
-	msgs := make([]*ChatMessage, 0, len(events))
-	for _, stored := range events {
-		event := stored.Event
-		if event.Type != aop.TypeMessage {
-			continue
-		}
-		var data aop.MessageData
-		if json.Unmarshal(event.Data, &data) != nil {
-			continue
-		}
-		var sb strings.Builder
-		for _, part := range data.Parts {
-			if part.Type != aop.PartText || part.Text == "" {
-				continue
-			}
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(part.Text)
-		}
-		msg := &ChatMessage{
-			ID:        data.MessageID,
-			SessionID: sessionID,
-			Role:      data.Role,
-			AgentName: event.Agent,
-			Content:   sb.String(),
-			Cursor:    stored.Cursor,
-		}
-		if msg.ID == "" {
-			msg.ID = generateID()
-		}
-		if msg.Role == "" {
-			msg.Role = "assistant"
-		}
-		msg.CreatedAt, _ = time.Parse(time.RFC3339Nano, event.TS)
-		if ext, ok, err := webproto.GetWebExt(event); err == nil && ok {
-			msg.AgentID = ext.AgentID
-			msg.Metadata = ext.Metadata
-		}
-		msgs = append(msgs, msg)
-	}
-	return ChatMessagePage{Items: msgs, NextCursor: next}, nil
 }
 
 // --- Session-scan association ---

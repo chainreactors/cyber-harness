@@ -5,36 +5,119 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	agentprovider "github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
+	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // AgentInfo is the public view of a connected agent.
 type AgentInfo struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Commands     []string               `json:"commands,omitempty"`
-	CommandsMenu []webproto.CommandSpec `json:"commands_menu,omitempty"`
-	Busy         bool                   `json:"busy"`
-	ConnectAt    time.Time              `json:"connected_at"`
-	Node         protocols.NodeRef      `json:"node"`
-	Runtime      webproto.AgentRuntime  `json:"runtime,omitempty"`
-	Status       webproto.AgentStatus   `json:"status,omitempty"`
-	Stats        webproto.AgentStats    `json:"stats,omitempty"`
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	Commands     []string                 `json:"commands,omitempty"`
+	CommandsMenu []*transport.CommandSpec `json:"commands_menu,omitempty"`
+	Busy         bool                     `json:"busy"`
+	ConnectAt    time.Time                `json:"connected_at"`
+	Node         protocols.NodeRef        `json:"node"`
+	Runtime      AgentRuntimeView         `json:"runtime,omitempty"`
+	Status       AgentStatusView          `json:"status,omitempty"`
+	Stats        AgentStatsView           `json:"stats,omitempty"`
+}
+
+type AgentRuntimeView struct {
+	Hostname     string         `json:"hostname,omitempty"`
+	Username     string         `json:"username,omitempty"`
+	WorkingDir   string         `json:"working_dir,omitempty"`
+	OS           string         `json:"os,omitempty"`
+	Arch         string         `json:"arch,omitempty"`
+	PID          int32          `json:"pid,omitempty"`
+	Capabilities []string       `json:"capabilities,omitempty"`
+	Meta         map[string]any `json:"meta,omitempty"`
+}
+
+type AgentStatusView struct {
+	Provider    string `json:"provider,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Space       string `json:"space,omitempty"`
+	Bound       bool   `json:"bound"`
+	ConfigError string `json:"config_error,omitempty"`
+}
+
+type AgentStatsView struct {
+	Turns            uint64 `json:"turns,omitempty"`
+	ToolCalls        uint64 `json:"tool_calls,omitempty"`
+	RunningTools     uint64 `json:"running_tools,omitempty"`
+	PromptTokens     uint64 `json:"prompt_tokens,omitempty"`
+	CompletionTokens uint64 `json:"completion_tokens,omitempty"`
+	TotalTokens      uint64 `json:"total_tokens,omitempty"`
+	CacheReadTokens  uint64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens uint64 `json:"cache_write_tokens,omitempty"`
+	Assets           uint64 `json:"assets,omitempty"`
+	Loots            uint64 `json:"loots,omitempty"`
+	LastEvent        string `json:"last_event,omitempty"`
+}
+
+func cloneCommandSpecs(values []*transport.CommandSpec) []*transport.CommandSpec {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]*transport.CommandSpec, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			out = append(out, protobuf.Clone(value).(*transport.CommandSpec))
+		}
+	}
+	return out
+}
+
+func runtimeView(value *transport.AgentRuntimeInfo) AgentRuntimeView {
+	if value == nil {
+		return AgentRuntimeView{}
+	}
+	view := AgentRuntimeView{
+		Hostname: value.Hostname, Username: value.Username, WorkingDir: value.WorkingDir,
+		OS: value.Os, Arch: value.Arch, PID: value.Pid, Capabilities: append([]string(nil), value.Capabilities...),
+	}
+	if value.Metadata != nil {
+		view.Meta, _ = aop.DecodeJSON[map[string]any](value.Metadata)
+	}
+	return view
+}
+
+func statusView(value *transport.AgentStatus) AgentStatusView {
+	if value == nil {
+		return AgentStatusView{}
+	}
+	return AgentStatusView{Provider: value.Provider, Model: value.Model, Space: value.Space, Bound: value.Bound, ConfigError: value.ConfigError}
+}
+
+func statsView(value *transport.AgentStats) AgentStatsView {
+	if value == nil {
+		return AgentStatsView{}
+	}
+	return AgentStatsView{
+		Turns: value.Turns, ToolCalls: value.ToolCalls, RunningTools: value.RunningTools,
+		PromptTokens: value.InputTokens, CompletionTokens: value.OutputTokens, TotalTokens: value.TotalTokens,
+		CacheReadTokens: value.CacheReadTokens, CacheWriteTokens: value.CacheWriteTokens,
+		Assets: value.Assets, Loots: value.Loots, LastEvent: value.LastEvent,
+	}
 }
 
 type taskResult struct {
 	Output string
 	Result json.RawMessage
+	File   *transport.FileResult
 	Err    string
 	Turn   int
 }
@@ -43,15 +126,15 @@ type remoteAgent struct {
 	id           string
 	name         string
 	commands     []string
-	commandsMenu []webproto.CommandSpec
-	conn         *websocket.Conn
-	sendCh       chan webproto.Message
-	controlCh    chan webproto.Message
+	commandsMenu []*transport.CommandSpec
+	close        func()
+	sendCh       chan *transport.ServerFrame
+	controlCh    chan *transport.ServerFrame
 	connectAt    time.Time
 	node         protocols.NodeRef
-	runtime      webproto.AgentRuntime
-	status       webproto.AgentStatus
-	stats        webproto.AgentStats
+	runtime      *transport.AgentRuntimeInfo
+	status       *transport.AgentStatus
+	stats        *transport.AgentStats
 
 	mu           sync.Mutex
 	tasks        map[string]chan taskResult
@@ -76,31 +159,30 @@ func (a *remoteAgent) info() AgentInfo {
 		ID:           a.id,
 		Name:         a.name,
 		Commands:     a.commands,
-		CommandsMenu: a.commandsMenu,
+		CommandsMenu: cloneCommandSpecs(a.commandsMenu),
 		Busy:         len(a.tasks) > 0,
 		ConnectAt:    a.connectAt,
 		Node:         a.node,
-		Runtime:      a.runtime,
-		Status:       a.status,
-		Stats:        a.stats,
+		Runtime:      runtimeView(a.runtime),
+		Status:       statusView(a.status),
+		Stats:        statsView(a.stats),
 	}
 }
 
 // commandSpecs returns the agent's reported "/verb" catalog (its agent-scope
 // menu commands plus one per loaded skill). Immutable after register, so it
 // needs no lock. The hub merges it with its hub-scope commands in SessionMenu.
-func (a *remoteAgent) commandSpecs() []webproto.CommandSpec {
+func (a *remoteAgent) commandSpecs() []*transport.CommandSpec {
 	if a == nil {
 		return nil
 	}
-	return a.commandsMenu
+	return cloneCommandSpecs(a.commandsMenu)
 }
 
 // SessionLookup resolves a task ID to its owning chat session.
 type SessionLookup interface {
 	TaskSession(taskID string) (sessionID string, ok bool)
-	BroadcastDomainEvent(sessionID string, event DomainEvent)
-	BroadcastAOPEvent(sessionID string, event aop.Event)
+	BroadcastAOPEvent(sessionID string, event *aop.Event)
 }
 
 // RecordStore is the subset of Store needed for record persistence.
@@ -159,8 +241,8 @@ func (p *AgentPool) SetSCOStore(store SCOStore) {
 // dangled every chat session bound to it — the session freezes the agent id at
 // creation, so on reconnect the stored id resolved to nothing and the chat
 // rejected every message as "not connected" even with the agent right back.
-func agentKey(info webproto.RegisterPayload) string {
-	return info.Node.URI()
+func agentKey(agentID, authority string) string {
+	return (protocols.NodeRef{ID: agentID, Authority: authority}).URI()
 }
 
 func (p *AgentPool) register(a *remoteAgent) {
@@ -173,7 +255,9 @@ func (p *AgentPool) register(a *remoteAgent) {
 	// Tear the stale connection down: its read loop then exits and its
 	// identity-checked unregister no-ops, leaving `a` alone in the slot.
 	if old != nil && old != a {
-		_ = old.conn.Close()
+		if old.close != nil {
+			old.close()
+		}
 	}
 	p.rebindPTY(a)
 }
@@ -268,12 +352,12 @@ func (p *AgentPool) PickChat() *remoteAgent {
 
 // DispatchToolCall sends a canonical AOP tool.call to a tool-capable node.
 // The task completes only on the matching AOP tool.result.
-func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallData) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchToolCall(agentID, taskID string, call *aop.ToolCall) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
 	}
-	call.ToolCallID = taskID
+	call.Id = taskID
 	sessionID := taskID
 	if p.sessions != nil {
 		if sid, ok := p.sessions.TaskSession(taskID); ok {
@@ -284,23 +368,21 @@ func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallDa
 	if agentName == "" {
 		agentName = a.id
 	}
-	data, err := json.Marshal(call)
-	if err != nil {
-		return nil, fmt.Errorf("marshal tool.call: %w", err)
+	event := &aop.Event{
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, TurnId: taskID, Emitter: agentName,
+		Payload: &aop.Event_ToolCall{ToolCall: call},
 	}
-	event := aop.Event{
-		Type: aop.TypeToolCall, TS: time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: sessionID, TurnID: taskID, Agent: agentName, Data: data,
-	}
-	payload, _ := json.Marshal(event)
 	a.mu.Lock()
 	if a.toolCalls == nil {
 		a.toolCalls = map[string]struct{}{}
 	}
 	a.toolCalls[taskID] = struct{}{}
 	a.mu.Unlock()
-	ch, err := p.dispatchMessage(agentID, taskID, webproto.Message{
-		Type: webproto.TypeAOP, TaskID: taskID, TurnID: taskID, Payload: payload,
+	ch, err := p.dispatchFrame(agentID, taskID, &transport.ServerFrame{
+		CorrelationId: taskID,
+		Payload: &transport.ServerFrame_ToolCall{ToolCall: &transport.ToolCallRequest{
+			TaskId: taskID, SessionId: sessionID, TurnId: taskID, Call: call,
+		}},
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -316,72 +398,112 @@ func (p *AgentPool) DispatchToolCall(agentID, taskID string, call aop.ToolCallDa
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
 func (p *AgentPool) DispatchChat(agentID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchRun(agentID, taskID, webproto.RunPayload{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
+	return p.DispatchRun(agentID, &aop.RunTurnRequest{
+		RequestId: taskID, TurnId: taskID,
+		Input: &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: prompt}}}}},
+	})
 }
 
-func (p *AgentPool) DispatchRun(agentID, turnID string, run webproto.RunPayload) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchOpenSession(agentID string, request *aop.OpenSessionRequest) (<-chan taskResult, error) {
+	if request == nil || strings.TrimSpace(request.RequestId) == "" || strings.TrimSpace(request.SessionId) == "" {
+		return nil, fmt.Errorf("open session request_id and session_id are required")
+	}
+	return p.dispatchFrame(agentID, request.RequestId, &transport.ServerFrame{
+		CorrelationId: request.RequestId,
+		Payload:       &transport.ServerFrame_OpenSession{OpenSession: request},
+	})
+}
+
+func (p *AgentPool) SessionOpen(agentID, sessionID string) bool {
+	agent := p.get(agentID)
+	if agent == nil {
+		return false
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	_, ok := agent.openSessions[sessionID]
+	return ok
+}
+
+func (p *AgentPool) DispatchCloseSession(agentID string, request *aop.CloseSessionRequest) (<-chan taskResult, error) {
+	if request == nil || strings.TrimSpace(request.RequestId) == "" || strings.TrimSpace(request.SessionId) == "" {
+		return nil, fmt.Errorf("close session request_id and session_id are required")
+	}
+	return p.dispatchFrame(agentID, request.RequestId, &transport.ServerFrame{
+		CorrelationId: request.RequestId,
+		Payload:       &transport.ServerFrame_CloseSession{CloseSession: request},
+	})
+}
+
+func (p *AgentPool) DispatchRun(agentID string, request *aop.RunTurnRequest) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
 	}
-	if run.SessionID != "" {
+	if request == nil || request.Input == nil || request.TurnId == "" {
+		return nil, fmt.Errorf("run request with input and turn_id is required")
+	}
+	if request.SessionId != "" {
 		a.mu.Lock()
-		_, opened := a.openSessions[run.SessionID]
+		_, opened := a.openSessions[request.SessionId]
 		if !opened {
-			a.openSessions[run.SessionID] = struct{}{}
+			a.openSessions[request.SessionId] = struct{}{}
 		}
 		a.mu.Unlock()
 		if !opened {
-			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: run.SessionID})
 			select {
-			case a.sendCh <- webproto.Message{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			case a.sendCh <- &transport.ServerFrame{CorrelationId: "open:" + request.SessionId, Payload: &transport.ServerFrame_OpenSession{OpenSession: &aop.OpenSessionRequest{
+				RequestId: "open:" + request.SessionId, SessionId: request.SessionId, Participant: agentID,
+			}}}:
 			default:
 				a.mu.Lock()
-				delete(a.openSessions, run.SessionID)
+				delete(a.openSessions, request.SessionId)
 				a.mu.Unlock()
 				return nil, fmt.Errorf("agent %s send channel full", agentID)
 			}
 		}
 	}
-	payload, err := json.Marshal(run)
-	if err != nil {
-		return nil, fmt.Errorf("marshal run: %w", err)
-	}
-	return p.dispatchMessage(agentID, turnID, webproto.Message{Type: webproto.TypeRun, TurnID: turnID, Payload: payload})
+	return p.dispatchFrame(agentID, request.TurnId, &transport.ServerFrame{
+		CorrelationId: request.TurnId, Payload: &transport.ServerFrame_RunTurn{RunTurn: request},
+	})
 }
 
-func (p *AgentPool) DispatchCommand(agentID, taskID string, command webproto.CommandPayload) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchCommand(agentID string, command *transport.CommandRequest) (<-chan taskResult, error) {
+	if command == nil || command.TaskId == "" {
+		return nil, fmt.Errorf("command task_id is required")
+	}
+	taskID := command.TaskId
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
 	}
-	if command.SessionID != "" {
+	if command.SessionId != "" {
 		a.mu.Lock()
-		_, opened := a.openSessions[command.SessionID]
+		_, opened := a.openSessions[command.SessionId]
 		if !opened {
-			a.openSessions[command.SessionID] = struct{}{}
+			a.openSessions[command.SessionId] = struct{}{}
 		}
 		a.mu.Unlock()
 		if !opened {
-			openPayload, _ := json.Marshal(webproto.SessionOpenPayload{SessionID: command.SessionID})
 			select {
-			case a.sendCh <- webproto.Message{Type: webproto.TypeSessionOpen, Payload: openPayload}:
+			case a.sendCh <- &transport.ServerFrame{CorrelationId: "open:" + command.SessionId, Payload: &transport.ServerFrame_OpenSession{OpenSession: &aop.OpenSessionRequest{
+				RequestId: "open:" + command.SessionId, SessionId: command.SessionId, Participant: agentID,
+			}}}:
 			default:
 				a.mu.Lock()
-				delete(a.openSessions, command.SessionID)
+				delete(a.openSessions, command.SessionId)
 				a.mu.Unlock()
 				return nil, fmt.Errorf("agent %s send channel full", agentID)
 			}
 		}
 	}
-	payload, err := json.Marshal(command)
-	if err != nil {
-		return nil, fmt.Errorf("marshal command: %w", err)
-	}
-	return p.dispatchMessage(agentID, taskID, webproto.Message{Type: webproto.TypeCommand, TaskID: taskID, Payload: payload})
+	return p.dispatchFrame(agentID, taskID, &transport.ServerFrame{
+		CorrelationId: taskID,
+		Payload:       &transport.ServerFrame_Command{Command: protobuf.Clone(command).(*transport.CommandRequest)},
+	})
 }
 
-func (p *AgentPool) dispatchMessage(agentID, taskID string, msg webproto.Message) (<-chan taskResult, error) {
+func (p *AgentPool) dispatchFrame(agentID, taskID string, frame *transport.ServerFrame) (<-chan taskResult, error) {
 	a := p.get(agentID)
 	if a == nil {
 		return nil, fmt.Errorf("agent %s not connected", agentID)
@@ -393,7 +515,7 @@ func (p *AgentPool) dispatchMessage(agentID, taskID string, msg webproto.Message
 	a.mu.Unlock()
 
 	select {
-	case a.sendCh <- msg:
+	case a.sendCh <- frame:
 	default:
 		a.mu.Lock()
 		delete(a.tasks, taskID)
@@ -438,20 +560,20 @@ func (a *remoteAgent) queueConfigReload() bool {
 	a.reloadPending = true
 	a.mu.Unlock()
 
-	msg := webproto.Message{Type: "config"}
+	frame := &transport.ServerFrame{Payload: &transport.ServerFrame_ReloadConfig{ReloadConfig: &transport.ReloadConfig{}}}
 	select {
-	case a.controlCh <- msg:
+	case a.controlCh <- frame:
 		return true
 	default:
 	}
 
 	go func() {
 		if a.done == nil {
-			a.controlCh <- msg
+			a.controlCh <- frame
 			return
 		}
 		select {
-		case a.controlCh <- msg:
+		case a.controlCh <- frame:
 		case <-a.done:
 			a.mu.Lock()
 			a.reloadPending = false
@@ -467,20 +589,20 @@ func (a *remoteAgent) finishConfigReload() {
 	a.mu.Unlock()
 }
 
-func (p *AgentPool) SendAgentMessage(agentID string, msg webproto.Message) error {
+func (p *AgentPool) sendAgentFrame(agentID string, frame *transport.ServerFrame) error {
 	a := p.get(agentID)
 	if a == nil {
 		return fmt.Errorf("agent %s not connected", agentID)
 	}
 	select {
-	case a.sendCh <- msg:
+	case a.sendCh <- frame:
 		return nil
 	default:
 		return fmt.Errorf("agent %s send channel full", agentID)
 	}
 }
 
-func (p *AgentPool) CancelTask(agentID, taskID string) error {
+func (p *AgentPool) CancelTask(agentID, taskID string, sessionID ...string) error {
 	a := p.get(agentID)
 	if a == nil {
 		return nil
@@ -498,36 +620,42 @@ func (p *AgentPool) CancelTask(agentID, taskID string) error {
 	if !pending {
 		return nil
 	}
-	cancelMessage := webproto.Message{Type: webproto.TypeRunCancel, TurnID: taskID}
+	var chatSessionID string
+	if len(sessionID) > 0 {
+		chatSessionID = sessionID[0]
+	}
+	cancelFrame := &transport.ServerFrame{CorrelationId: taskID, Payload: &transport.ServerFrame_CancelTurn{CancelTurn: &aop.CancelTurnRequest{
+		RequestId: taskID, SessionId: chatSessionID, TurnId: taskID,
+	}}}
 	if isToolCall {
-		cancelMessage = webproto.Message{Type: "cancel", TaskID: taskID}
+		cancelFrame = &transport.ServerFrame{CorrelationId: taskID, Payload: &transport.ServerFrame_CancelOperation{CancelOperation: &transport.CancelOperation{TaskId: taskID}}}
 	}
 	if resultCh != nil {
 		close(resultCh)
 	}
-	a.enqueueControl(cancelMessage)
+	a.enqueueControl(cancelFrame)
 	return nil
 }
 
 // enqueueControl never drops a control frame because task traffic temporarily
 // fills the channel. The pending send is bounded by the agent connection's
 // lifetime and the writer always drains controlCh before sendCh.
-func (a *remoteAgent) enqueueControl(msg webproto.Message) {
+func (a *remoteAgent) enqueueControl(frame *transport.ServerFrame) {
 	if a == nil || a.controlCh == nil {
 		return
 	}
 	select {
-	case a.controlCh <- msg:
+	case a.controlCh <- frame:
 		return
 	default:
 	}
 	go func() {
 		if a.done == nil {
-			a.controlCh <- msg
+			a.controlCh <- frame
 			return
 		}
 		select {
-		case a.controlCh <- msg:
+		case a.controlCh <- frame:
 		case <-a.done:
 		}
 	}()
@@ -555,7 +683,11 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	write := func(frame pty.Frame) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		return conn.WriteJSON(frame)
+		data, err := terminalcodec.Marshal(frame)
+		if err != nil {
+			return err
+		}
+		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
 	go func() {
@@ -579,16 +711,21 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 	}
 
 	for {
-		var frame pty.Frame
-		if err := conn.ReadJSON(&frame); err != nil {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
 			return
+		}
+		frame, err := terminalcodec.Unmarshal(data)
+		if err != nil {
+			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: "invalid terminal protobuf JSON: " + err.Error()})
+			continue
 		}
 		if frame.Type == "" {
 			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: "PTY frame type is required"})
 			continue
 		}
 		frame.StreamID = terminalID
-		if err := p.SendAgentMessage(agentID, webproto.NewPTYMessage(frame)); err != nil {
+		if err := p.sendAgentFrame(agentID, &transport.ServerFrame{Payload: &transport.ServerFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}}); err != nil {
 			_ = write(pty.Frame{Type: pty.FrameError, StreamID: terminalID, Error: err.Error()})
 			continue
 		}
@@ -596,11 +733,11 @@ func (p *AgentPool) HandleTerminalWS(agentID string, w http.ResponseWriter, r *h
 }
 
 func (p *AgentPool) CancelPTY(agentID, terminalID string) {
-	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameKill, StreamID: terminalID}))
+	_ = p.sendAgentFrame(agentID, &transport.ServerFrame{Payload: &transport.ServerFrame_Terminal{Terminal: terminalcodec.ToProto(pty.Frame{Type: pty.FrameKill, StreamID: terminalID})}})
 }
 
 func (p *AgentPool) CloseTerminal(agentID, terminalID string) {
-	_ = p.SendAgentMessage(agentID, webproto.NewPTYMessage(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
+	_ = p.sendAgentFrame(agentID, &transport.ServerFrame{Payload: &transport.ServerFrame_Terminal{Terminal: terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID})}})
 }
 
 func (p *AgentPool) subscribePTY(agentID, terminalID string) (<-chan pty.Frame, bool, func()) {
@@ -661,41 +798,11 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 		terminalID := terminalID
 		go func() {
 			select {
-			case agent.sendCh <- webproto.NewPTYMessage(pty.Frame{Type: pty.FrameList, StreamID: terminalID}):
+			case agent.sendCh <- &transport.ServerFrame{Payload: &transport.ServerFrame_Terminal{Terminal: terminalcodec.ToProto(pty.Frame{Type: pty.FrameList, StreamID: terminalID})}}:
 			case <-agent.done:
 			}
 		}()
 	}
-}
-
-func (p *AgentPool) forwardPTYMessage(msg webproto.Message) bool {
-	if msg.Type != webproto.TypePTY {
-		return false
-	}
-	frame, err := webproto.DecodePTYMessage(msg)
-	if err != nil || frame.StreamID == "" {
-		return true
-	}
-	p.ptyMu.RLock()
-	ch := p.ptySubs[frame.StreamID]
-	if ch != nil {
-		select {
-		case ch <- frame:
-		default:
-			p.ptyDrops.Add(1)
-			select {
-			case <-ch:
-			default:
-			}
-			select {
-			case ch <- frame:
-			default:
-				p.ptyDrops.Add(1)
-			}
-		}
-	}
-	p.ptyMu.RUnlock()
-	return true
 }
 
 // --- WebSocket handler ---
@@ -717,315 +824,6 @@ func buildUpgrader(origins []string) websocket.Upgrader {
 	}
 }
 
-// HandleWS upgrades to WebSocket and manages the agent lifecycle.
-// This single endpoint replaces register + stream + output + complete.
-func (p *AgentPool) HandleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := p.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-
-	// First message must be register.
-	var reg webproto.Message
-	if err := conn.ReadJSON(&reg); err != nil || reg.Type != "register" {
-		conn.Close()
-		return
-	}
-	var info webproto.RegisterPayload
-	if reg.Payload != nil {
-		_ = json.Unmarshal(reg.Payload, &info)
-	}
-	// Resolve the stable pool key from the raw payload before the display-name
-	// default below, so an anonymous client still gets a unique per-connection id
-	// instead of every nameless agent colliding on the literal "agent".
-	id := agentKey(info)
-	if id == "" {
-		conn.Close()
-		return
-	}
-	if info.Name == "" {
-		info.Name = "agent"
-	}
-
-	agent := &remoteAgent{
-		id:            id,
-		name:          info.Name,
-		commands:      info.Commands,
-		commandsMenu:  info.CommandsMenu,
-		conn:          conn,
-		sendCh:        make(chan webproto.Message, 32),
-		controlCh:     make(chan webproto.Message, 32),
-		connectAt:     time.Now(),
-		node:          info.Node,
-		runtime:       info.Runtime,
-		status:        info.Status,
-		stats:         info.Stats,
-		tasks:         make(map[string]chan taskResult),
-		turns:         make(map[string]int),
-		openSessions:  make(map[string]struct{}),
-		childSessions: make(map[string]map[string]struct{}),
-		done:          make(chan struct{}),
-	}
-	p.register(agent)
-	defer func() {
-		p.unregister(agent)
-		conn.Close()
-		close(agent.done)
-	}()
-
-	// Send connected ack.
-	ack, _ := json.Marshal(map[string]string{"agent_id": agent.id, "name": agent.name})
-	if err := conn.WriteJSON(webproto.Message{Type: "connected", Payload: ack}); err != nil {
-		return
-	}
-
-	// Write goroutine: sendCh → WebSocket.
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		closeBrokenConnection := func() {
-			// A failed writer must tear down the shared WebSocket so the read
-			// loop exits, unregisters this agent, and lets the client reconnect.
-			// Otherwise the pool keeps a zombie "online" agent whose sendCh has
-			// no consumer; PTY open/list requests then disappear indefinitely.
-			_ = conn.Close()
-		}
-		for {
-			// Give control frames priority over task/output traffic.
-			select {
-			case msg := <-agent.controlCh:
-				if msg.Type == "config" {
-					agent.finishConfigReload()
-				}
-				if err := conn.WriteJSON(msg); err != nil {
-					closeBrokenConnection()
-					return
-				}
-				continue
-			default:
-			}
-			select {
-			case msg := <-agent.controlCh:
-				if msg.Type == "config" {
-					agent.finishConfigReload()
-				}
-				if err := conn.WriteJSON(msg); err != nil {
-					closeBrokenConnection()
-					return
-				}
-			case msg, ok := <-agent.sendCh:
-				if !ok {
-					return
-				}
-				if err := conn.WriteJSON(msg); err != nil {
-					closeBrokenConnection()
-					return
-				}
-			case <-ticker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					closeBrokenConnection()
-					return
-				}
-			case <-agent.done:
-				return
-			}
-		}
-	}()
-
-	// Read loop: WebSocket → dispatch.
-	for {
-		var msg webproto.Message
-		if err := conn.ReadJSON(&msg); err != nil {
-			return
-		}
-		p.handleAgentMessage(agent, msg)
-	}
-}
-
-func (p *AgentPool) handleAgentMessage(a *remoteAgent, msg webproto.Message) {
-	if p.forwardPTYMessage(msg) {
-		return
-	}
-
-	switch msg.Type {
-	case "agent.stats":
-		var stats webproto.AgentStats
-		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &stats) == nil {
-			a.mu.Lock()
-			a.stats = stats
-			a.mu.Unlock()
-		}
-
-	case "agent.status":
-		var status webproto.AgentStatus
-		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &status) == nil {
-			a.mu.Lock()
-			if status.Provider != "" {
-				a.status.Provider = status.Provider
-			}
-			if status.Model != "" {
-				a.status.Model = status.Model
-			}
-			a.status.Bound = status.Bound
-			a.status.ConfigError = status.ConfigError
-			if status.Space != "" {
-				a.status.Space = status.Space
-			}
-			a.mu.Unlock()
-		}
-
-	case "tool.data":
-		// Progress lines stream live to the scan/console topics; structured
-		// scanner data persists through the libcstx-normalized tool.sco path.
-		if p.hub == nil || msg.TaskID == "" {
-			return
-		}
-		var event output.ToolDataEvent
-		if json.Unmarshal(msg.Payload, &event) != nil || event.Kind != output.ToolDataProgress {
-			return
-		}
-		line, ok := event.Data.(string)
-		if !ok {
-			return
-		}
-		data := output.StripANSI(line)
-		if data == "" {
-			return
-		}
-		p.hub.Broadcast(msg.TaskID, HubEvent{
-			Type: "progress",
-			Data: mustJSON(map[string]string{"scan_id": msg.TaskID, "data": data}),
-		})
-		p.forwardToSession(a, msg.TaskID, DomainEvent{
-			Type:   DomainEventScanProgress,
-			ScanID: msg.TaskID,
-			Data:   data,
-		})
-
-	case "tool.sco":
-		if p.sco == nil || len(msg.Payload) == 0 {
-			return
-		}
-		var payload struct {
-			CallID string            `json:"call_id"`
-			Nodes  []json.RawMessage `json:"nodes"`
-		}
-		if json.Unmarshal(msg.Payload, &payload) != nil || len(payload.Nodes) == 0 {
-			return
-		}
-		scanID := payload.CallID
-		if scanID == "" {
-			scanID = msg.TaskID
-		}
-		if scanID == "" {
-			scanID = "standalone"
-		}
-		_ = p.sco.UpsertSCONodes(context.Background(), scanID, payload.Nodes)
-
-	case "config.result":
-		var result webproto.ConfigReloadResult
-		if len(msg.Payload) > 0 && json.Unmarshal(msg.Payload, &result) == nil {
-			a.mu.Lock()
-			if result.OK {
-				a.status.Provider = agentprovider.NormalizeProvider(result.Provider)
-				a.status.Model = result.Model
-				a.status.ConfigError = ""
-			} else {
-				a.status.ConfigError = result.Error
-			}
-			a.mu.Unlock()
-		}
-
-	case webproto.TypeSessionOpened:
-		var payload webproto.SessionLifecyclePayload
-		if json.Unmarshal(msg.Payload, &payload) == nil && payload.SessionID != "" {
-			a.mu.Lock()
-			a.openSessions[payload.SessionID] = struct{}{}
-			a.mu.Unlock()
-		}
-
-	case webproto.TypeSessionClosed:
-		var payload webproto.SessionLifecyclePayload
-		if json.Unmarshal(msg.Payload, &payload) == nil && payload.SessionID != "" {
-			a.mu.Lock()
-			delete(a.openSessions, payload.SessionID)
-			a.mu.Unlock()
-		}
-
-	case webproto.TypeCommandResult:
-		a.mu.Lock()
-		ch, ok := a.tasks[msg.TaskID]
-		_, isToolCall := a.toolCalls[msg.TaskID]
-		if ok {
-			delete(a.tasks, msg.TaskID)
-			delete(a.turns, msg.TaskID)
-			delete(a.toolCalls, msg.TaskID)
-		}
-		a.mu.Unlock()
-		if ok && ch != nil {
-			result := taskResult{Result: msg.Payload}
-			if isToolCall {
-				result = taskResult{Err: "direct tool task returned command.result; expected AOP tool.result"}
-			}
-			ch <- result
-			close(ch)
-		}
-
-	// complete/error are the terminal envelopes of the file RPCs only; agent
-	// semantics (chat, tool calls) converge on AOP events.
-	case "complete":
-		a.mu.Lock()
-		ch, ok := a.tasks[msg.TaskID]
-		turn := a.turns[msg.TaskID]
-		if ok {
-			delete(a.tasks, msg.TaskID)
-			delete(a.turns, msg.TaskID)
-			delete(a.toolCalls, msg.TaskID)
-			delete(a.childSessions, msg.TaskID)
-		}
-		a.mu.Unlock()
-		if ok && ch != nil {
-			res := taskResult{Output: msg.Data, Result: msg.Payload, Turn: turn}
-			ch <- res
-			close(ch)
-		}
-
-	case "error":
-		correlationID := msg.TurnID
-		if correlationID == "" {
-			correlationID = msg.TaskID
-		}
-		a.mu.Lock()
-		ch, ok := a.tasks[correlationID]
-		turn := a.turns[correlationID]
-		if ok {
-			delete(a.tasks, correlationID)
-			delete(a.turns, correlationID)
-			delete(a.toolCalls, correlationID)
-			delete(a.childSessions, correlationID)
-		}
-		a.mu.Unlock()
-		if ok && ch != nil {
-			var payload webproto.ErrorPayload
-			errText := msg.Data
-			if json.Unmarshal(msg.Payload, &payload) == nil && payload.Message != "" {
-				errText = payload.Message
-			}
-			ch <- taskResult{Err: errText, Turn: turn}
-			close(ch)
-		}
-
-	case "aop":
-		// The transport identifies only the protocol. Event semantics live in
-		// the untouched AOP payload and are validated once at this ingress.
-		p.forwardAOPEvent(a, msg)
-
-	default:
-		// Unknown control frames are intentionally not projected into another
-		// protocol. Producers must emit either a documented control frame or AOP.
-	}
-}
-
 func (p *AgentPool) recordScanResultStats(a *remoteAgent, payload json.RawMessage) {
 	if a == nil || len(payload) == 0 {
 		return
@@ -1035,67 +833,23 @@ func (p *AgentPool) recordScanResultStats(a *remoteAgent, payload json.RawMessag
 		return
 	}
 	a.mu.Lock()
-	a.stats.Assets += len(result.Assets)
+	if a.stats == nil {
+		a.stats = &transport.AgentStats{}
+	}
+	a.stats.Assets += uint64(len(result.Assets))
 	if result.Summary.Loots > 0 {
-		a.stats.Loots += result.Summary.Loots
+		a.stats.Loots += uint64(result.Summary.Loots)
 	} else {
-		a.stats.Loots += len(result.Loots)
+		a.stats.Loots += uint64(len(result.Loots))
 	}
 	a.mu.Unlock()
-}
-
-func (p *AgentPool) forwardToSession(a *remoteAgent, taskID string, event DomainEvent) {
-	if p.sessions == nil || taskID == "" {
-		return
-	}
-	sid, ok := p.sessions.TaskSession(taskID)
-	if !ok {
-		return
-	}
-	if event.AgentID == "" {
-		event.AgentID = a.id
-	}
-	if event.AgentName == "" {
-		event.AgentName = a.name
-	}
-	p.sessions.BroadcastDomainEvent(sid, event)
-}
-
-func (p *AgentPool) forwardAOPEvent(a *remoteAgent, msg webproto.Message) {
-	var aopEv aop.Event
-	if len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &aopEv)
-	}
-	if !aopEv.Valid() {
-		return
-	}
-	// Session-topic broadcast is optional (scans dispatched outside chat have
-	// no chat session); task convergence below is not.
-	if p.sessions != nil {
-		correlationID := msg.TurnID
-		if msg.TaskID != "" {
-			correlationID = msg.TaskID
-		}
-		if sid, ok := p.sessions.TaskSession(correlationID); ok {
-			p.sessions.BroadcastAOPEvent(sid, aopEv)
-		}
-	}
-
-	switch aopEv.Type {
-	case aop.TypeTurnEnd:
-		p.convergeTaskOnTurnEnd(a, msg.TurnID, aopEv)
-
-	case aop.TypeToolResult:
-		p.convergeTaskOnToolResult(a, msg.TaskID, aopEv)
-	}
-
 }
 
 // convergeTaskOnToolResult closes a tool.call task on its terminal
 // tool.result: text content becomes the task output, structured Details the
 // scan result, and an is_error content the task error. tool.result events of
 // chat tasks (LLM tool use) are not terminals and pass through.
-func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev aop.Event) {
+func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev *aop.Event) {
 	a.mu.Lock()
 	if _, isToolCall := a.toolCalls[taskID]; !isToolCall {
 		a.mu.Unlock()
@@ -1113,20 +867,15 @@ func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev a
 	if !ok || ch == nil {
 		return
 	}
-	var d aop.ToolResultData
-	if err := json.Unmarshal(ev.Data, &d); err != nil {
-		ch <- taskResult{Err: "decode tool.result: " + err.Error(), Turn: turn}
-		close(ch)
-		return
-	}
-	res := taskResult{Output: aop.ToolResultText(d.Content), Turn: turn}
+	d := ev.GetToolResult()
+	res := taskResult{Output: aopToolResultText(d.Output), Turn: turn}
 	if d.IsError {
 		res.Err = res.Output
 		res.Output = ""
 	}
 	var details json.RawMessage
-	if d.Details != nil {
-		details, _ = json.Marshal(d.Details)
+	if d.Detail != nil {
+		details = append(details, d.Detail.Data...)
 		res.Result = details
 	}
 	ch <- res
@@ -1139,7 +888,7 @@ func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev a
 // ends: this terminal event drives task cleanup; child (derived sub-agent)
 // session ends and mid-run AOP error events are not terminal. Idempotent —
 // a file-RPC complete frame arriving after this close is a no-op.
-func (p *AgentPool) convergeTaskOnTurnEnd(a *remoteAgent, taskID string, ev aop.Event) {
+func (p *AgentPool) convergeTaskOnTurnEnd(a *remoteAgent, taskID string, ev *aop.Event) {
 	if taskID == "" {
 		return
 	}
@@ -1156,16 +905,27 @@ func (p *AgentPool) convergeTaskOnTurnEnd(a *remoteAgent, taskID string, ev aop.
 	if !ok || ch == nil {
 		return
 	}
-	var d aop.TurnEndData
-	_ = json.Unmarshal(ev.Data, &d)
+	d := ev.GetTurnEnded()
 	res := taskResult{Turn: turn}
 	// A canceled run still carries the ctx error ("context canceled") — only
 	// non-canceled stops surface it as a task error.
-	if d.Stop != "canceled" && d.Error != "" {
-		res.Err = d.Error
+	if d.StopReason != "canceled" && d.Error != nil {
+		res.Err = d.Error.Message
 	}
 	ch <- res
 	close(ch)
+}
+
+func aopToolResultText(content []*aop.Content) string {
+	var parts []string
+	for _, item := range content {
+		if text := item.GetText().GetText(); text != "" {
+			parts = append(parts, text)
+		} else if opaque := item.GetOpaque(); opaque != nil {
+			parts = append(parts, string(opaque.Value.GetData()))
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (p *AgentPool) persistResultRecords(a *remoteAgent, taskID string, payload json.RawMessage) {

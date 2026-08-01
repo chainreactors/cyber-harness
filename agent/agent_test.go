@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
@@ -73,7 +72,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus:      testBus(func(e aop.Event) { events = append(events, e.Type) }),
+		Bus:      testBus(func(e *aop.Event) { events = append(events, eventKind(e)) }),
 	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -91,7 +90,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	if !hasToolMessage(requests[1].Messages, "call-1", "tool output") {
 		t.Fatalf("second request missing tool result: %#v", requests[1].Messages)
 	}
-	if !containsEvent(events, aop.TypeToolCall) || !containsEvent(events, aop.TypeToolResult) {
+	if !containsEvent(events, "tool.call") || !containsEvent(events, "tool.result") {
 		t.Fatalf("tool events missing: %#v", events)
 	}
 }
@@ -162,12 +161,12 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
-	var events []aop.Event
+	var events []*aop.Event
 	a := NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event aop.Event) {
+		Bus: testBus(func(event *aop.Event) {
 			events = append(events, event)
 		}),
 	})
@@ -180,9 +179,9 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("result = %#v, want result with Err", result)
 	}
 	if got := eventTypes(events); !reflect.DeepEqual(got, []string{
-		aop.TypeMessage,
-		aop.TypeStatus,
-		aop.TypeError,
+		"message",
+		"status",
+		"error",
 	}) {
 		t.Fatalf("events = %#v", got)
 	}
@@ -190,12 +189,12 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("turns = %d, want 1", result.Turns)
 	}
 	last := lastEvent(events)
-	if last.Type != aop.TypeError {
+	if eventKind(last) != "error" {
 		t.Fatalf("last event = %#v, want error", last)
 	}
-	var endData aop.ErrorData
-	if err := json.Unmarshal(last.Data, &endData); err != nil {
-		t.Fatal(err)
+	endData := last.GetError()
+	if endData == nil {
+		t.Fatal("error event missing payload")
 	}
 	if endData.Message == "" {
 		t.Fatalf("error event missing message: %+v", endData)
@@ -824,18 +823,15 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	systemPrompt := buildTmuxTestPrompt(registry)
 
 	var events []string
-	handleEvent := func(event aop.Event) {
-		switch event.Type {
-		case aop.TypeToolCall:
-			var data aop.ToolCallData
-			if json.Unmarshal(event.Data, &data) == nil {
-				args, _ := json.Marshal(data.Args)
-				events = append(events, fmt.Sprintf("[TOOL] %s → %s", data.ToolName, args))
+	handleEvent := func(event *aop.Event) {
+		switch eventKind(event) {
+		case "tool.call":
+			if data := event.GetToolCall(); data != nil {
+				events = append(events, fmt.Sprintf("[TOOL] %s → %s", data.Name, data.GetArguments().GetData()))
 			}
-		case aop.TypeToolResult:
-			var data aop.ToolResultData
-			if json.Unmarshal(event.Data, &data) == nil {
-				result := fmt.Sprintf("%v", data.Content)
+		case "tool.result":
+			if data := event.GetToolResult(); data != nil {
+				result := fmt.Sprintf("%v", data.Output)
 				if len(result) > 300 {
 					result = result[:300] + "..."
 				}
@@ -978,8 +974,8 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	systemPrompt := "You are a math tutor. " +
 		strings.Repeat("You always answer arithmetic questions with just the numeric result. ", 30)
 
-	var events []aop.Event
-	handler := func(e aop.Event) {
+	var events []*aop.Event
+	handler := func(e *aop.Event) {
 		events = append(events, e)
 	}
 
@@ -991,7 +987,7 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e aop.Event) { handler(e) }),
+		Bus:            testBus(func(e *aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
@@ -1128,9 +1124,9 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	calcTool := &recordingTool{name: "calculate", output: "42"}
 	tools.RegisterTool(calcTool)
 
-	var usageEvents []aop.Event
-	handler := func(e aop.Event) {
-		if e.Type == aop.TypeUsage {
+	var usageEvents []*aop.Event
+	handler := func(e *aop.Event) {
+		if eventKind(e) == "usage" {
 			usageEvents = append(usageEvents, e)
 		}
 	}
@@ -1141,7 +1137,7 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e aop.Event) { handler(e) }),
+		Bus:            testBus(func(e *aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
@@ -1185,10 +1181,9 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	}
 
 	for i, e := range usageEvents {
-		var data aop.UsageData
-		if json.Unmarshal(e.Data, &data) == nil {
+		if data := e.GetUsage(); data != nil {
 			t.Logf("Usage event %d: prompt=%d cache_read=%d cache_write=%d",
-				i, data.InputTokens, data.CacheReadTokens, data.CacheWriteTokens)
+				i, data.InputTokens, data.Detail["cache_read"], data.Detail["cache_write"])
 		}
 	}
 }

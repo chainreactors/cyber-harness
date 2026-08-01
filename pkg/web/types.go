@@ -1,19 +1,19 @@
 package web
 
 import (
-	"encoding/json"
 	"errors"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	config "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 var (
 	ErrScanNotFound      = errors.New("scan not found")
 	ErrScanNotCancelable = errors.New("scan cannot be canceled")
 	ErrSessionNotFound   = errors.New("session not found")
+	ErrTurnNotFound      = errors.New("turn not found")
 )
 
 type ScanStatus string
@@ -40,14 +40,6 @@ type ScanJob struct {
 	Error     string         `json:"error,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
-}
-
-type ScanRequest struct {
-	Target string `json:"target"`
-	Mode   string `json:"mode"`
-	Verify bool   `json:"verify,omitempty"`
-	Sniper bool   `json:"sniper,omitempty"`
-	Deep   bool   `json:"deep,omitempty"`
 }
 
 type ServiceStatus struct {
@@ -124,7 +116,7 @@ type LLMProfileStatus struct {
 }
 
 // ConfigStatusFromDistribute builds a masked ConfigStatus from raw config.
-func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loaded bool) ConfigStatus {
+func ConfigStatusFromDistribute(d *config.DistributeConfig, path string, loaded bool) ConfigStatus {
 	var cs ConfigStatus
 	cs.ConfigPath = path
 	cs.ConfigLoaded = loaded
@@ -138,7 +130,7 @@ func ConfigStatusFromDistribute(d *webproto.DistributeConfig, path string, loade
 	cs.LLM.ContextWindow = active.ContextWindow
 	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
 	for _, profile := range d.LLM.Providers {
-		profile = webproto.NormalizeLLMProvider(profile)
+		profile = config.NormalizeLLMProvider(profile)
 		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
 			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
 			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
@@ -187,39 +179,10 @@ type ChatSession struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type ChatMessage struct {
-	ID        string          `json:"id"`
-	SessionID string          `json:"session_id"`
-	Role      string          `json:"role"`
-	AgentID   string          `json:"agent_id,omitempty"`
-	AgentName string          `json:"agent_name,omitempty"`
-	Content   string          `json:"content"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
-	Cursor    int64           `json:"cursor,omitempty"`
-	// Queued is a transient send-time hint: true when the message was accepted
-	// while another chat task is still running on the session, so the client
-	// can render it as pending-in-queue rather than in-flight.
-	Queued bool `json:"queued,omitempty"`
-}
-
-type ChatMessagePage struct {
-	Items      []*ChatMessage `json:"items"`
-	NextCursor int64          `json:"next_cursor,omitempty"`
-}
-
 type persistedAOPEvent struct {
 	Cursor int64
-	Event  aop.Event
+	Event  *aop.Event
 }
-
-const (
-	DomainEventScanStarted    = "scan_started"
-	DomainEventScanProgress   = "scan_progress"
-	DomainEventScanComplete   = "scan_complete"
-	DomainEventAgentJoined    = "agent_joined"
-	DomainEventSessionCleared = "session_cleared"
-)
 
 // System message codes. A backend-generated system message carries a stable
 // Code (+ optional Params) so the client can localize it via i18n; Content
@@ -233,28 +196,3 @@ const (
 	SysAgentsList        = "agents_list" // params: count, agents[]
 	SysAgentNotConnected = "agent_not_connected"
 )
-
-type DomainEvent struct {
-	Type      string         `json:"type"`
-	SessionID string         `json:"session_id"`
-	AgentID   string         `json:"agent_id,omitempty"`
-	AgentName string         `json:"agent_name,omitempty"`
-	ScanID    string         `json:"scan_id,omitempty"`
-	Result    *output.Result `json:"result,omitempty"`
-	Data      string         `json:"data,omitempty"`
-	Transient bool           `json:"-"`
-}
-
-type SendMessageRequest struct {
-	Content string `json:"content"`
-	// Goal-mode run controls (optional). The frontend sends these when the user
-	// enables the Goal panel; a plain chat send leaves them zero.
-	EvalCriteria    string `json:"eval_criteria,omitempty"`
-	EvalMaxRounds   int    `json:"eval_max_rounds,omitempty"`
-	PersistMaxTurns int    `json:"persist_max_turns,omitempty"`
-}
-
-type CreateSessionRequest struct {
-	AgentID string `json:"agent_id"`
-	Title   string `json:"title,omitempty"`
-}

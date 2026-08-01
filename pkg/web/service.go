@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,30 +16,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
-	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	scanpb "github.com/chainreactors/aiscan/aop/aiscan/scan"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/tui"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 	scantool "github.com/chainreactors/aiscan/tools/scan"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// hubCommands are the 3 commands that run on the web hub, not the agent.
-var hubCommands = map[string]bool{"scan": true, "agents": true, "help": true}
-
 type ConfigStore interface {
-	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg webproto.DistributeConfig, err error)
-	PrepareDistributeConfig(ctx context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error)
+	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg config.DistributeConfig, err error)
+	PrepareDistributeConfig(ctx context.Context, cfg config.DistributeConfig) (*PreparedConfig, error)
 	CommitDistributeConfig(ctx context.Context, prepared *PreparedConfig) error
 	DiscardDistributeConfig(prepared *PreparedConfig)
 }
 
 type PreparedConfig struct {
-	Config      webproto.DistributeConfig
+	Config      config.DistributeConfig
 	RuntimePath string
 	TargetPath  string
 }
@@ -73,6 +71,10 @@ type Service struct {
 	taskSessions map[string]string // taskID → sessionID
 	taskAgents   map[string]string // taskID → agentID
 	taskCanceled map[string]bool
+
+	eventMu    sync.Mutex
+	sessionSeq map[string]uint64
+	endedTurns map[string]bool
 }
 
 type managedApp struct {
@@ -105,6 +107,8 @@ func NewService(cfg ServiceConfig) *Service {
 		taskSessions: make(map[string]string),
 		taskAgents:   make(map[string]string),
 		taskCanceled: make(map[string]bool),
+		sessionSeq:   make(map[string]uint64),
+		endedTurns:   make(map[string]bool),
 	}
 	if cfg.AgentPool != nil {
 		cfg.AgentPool.SetSessionLookup(svc)
@@ -182,7 +186,7 @@ func (s *Service) GetConfigStatus(ctx context.Context) (ConfigStatus, error) {
 	return ConfigStatusFromDistribute(&dc, path, loaded), nil
 }
 
-func (s *Service) SaveConfig(ctx context.Context, cfg webproto.DistributeConfig) (ConfigStatus, error) {
+func (s *Service) SaveConfig(ctx context.Context, cfg config.DistributeConfig) (ConfigStatus, error) {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	if s.config == nil {
@@ -262,9 +266,9 @@ func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (ConfigStat
 	return s.SaveConfig(ctx, cfg)
 }
 
-func (s *Service) GetDistributeConfig(ctx context.Context) (webproto.DistributeConfig, error) {
+func (s *Service) GetDistributeConfig(ctx context.Context) (config.DistributeConfig, error) {
 	if s.config == nil {
-		return webproto.DistributeConfig{}, fmt.Errorf("config store is not configured")
+		return config.DistributeConfig{}, fmt.Errorf("config store is not configured")
 	}
 	_, _, dc, err := s.config.GetDistributeConfig(ctx)
 	return dc, err
@@ -380,11 +384,7 @@ func (s *Service) CancelScan(id string) error {
 	if cancel != nil {
 		cancel()
 	}
-	s.hub.Broadcast(id, HubEvent{
-		Type:     "error",
-		Data:     mustJSON(map[string]string{"scan_id": id, "status": string(StatusCanceled), "error": "scan canceled"}),
-		Reliable: true,
-	})
+	s.hub.BroadcastScan(scanFailedEvent(id, "scan canceled", true), true)
 	if agentID != "" && s.agents != nil {
 		_ = s.agents.CancelTask(agentID, id)
 	}
@@ -442,10 +442,7 @@ func (s *Service) runScan(runCtx context.Context, jobID string) {
 		return
 	}
 
-	s.hub.Broadcast(jobID, HubEvent{
-		Type: "status",
-		Data: mustJSON(map[string]string{"scan_id": jobID, "status": string(StatusRunning)}),
-	})
+	s.hub.BroadcastScan(scanStatusEvent(jobID, StatusRunning), false)
 
 	// Try agent dispatch first, fall back to local execution.
 	if s.agents != nil && s.agents.Count() > 0 {
@@ -470,10 +467,9 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	}
 
 	cmd := "scan " + strings.Join(scanArgsForJob(job), " ")
-	resultCh, err := s.agents.DispatchToolCall(agent.id, job.ID, aop.ToolCallData{
-		ToolCallID: job.ID,
-		ToolName:   "bash",
-		Args:       map[string]any{"command": cmd},
+	args, _ := aop.JSONValue(map[string]any{"command": cmd})
+	resultCh, err := s.agents.DispatchToolCall(agent.id, job.ID, &aop.ToolCall{
+		Id: job.ID, Name: "bash", Kind: "function", Arguments: args,
 	})
 	if err != nil {
 		_, _ = s.failJob(job, err.Error())
@@ -519,7 +515,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 }
 
 func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
-	streamWriter := &sseStreamWriter{
+	streamWriter := &scanStreamWriter{
 		hub:    s.hub,
 		scanID: job.ID,
 		store:  s.store,
@@ -601,12 +597,8 @@ func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string,
 	if len(result.Nodes) > 0 {
 		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
 	}
-	s.hub.Broadcast(job.ID, HubEvent{
-		Type:     "complete",
-		Data:     mustJSON(map[string]any{"scan_id": job.ID, "status": "completed", "result": result}),
-		Reliable: true,
-	})
-	s.broadcastScanComplete(job.ID, result)
+	s.hub.BroadcastScan(scanCompletedEvent(job.ID, result), true)
+	s.broadcastScanComplete(job.ID)
 	return true, nil
 }
 
@@ -620,11 +612,7 @@ func (s *Service) failJob(job *ScanJob, errMsg string) (bool, error) {
 		return changed, err
 	}
 	*job = next
-	s.hub.Broadcast(job.ID, HubEvent{
-		Type:     "error",
-		Data:     mustJSON(map[string]string{"scan_id": job.ID, "error": errMsg}),
-		Reliable: true,
-	})
+	s.hub.BroadcastScan(scanFailedEvent(job.ID, errMsg, false), true)
 	return true, nil
 }
 
@@ -750,7 +738,7 @@ func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writ
 	return text.String(), result, nil
 }
 
-type sseStreamWriter struct {
+type scanStreamWriter struct {
 	hub    *Hub
 	scanID string
 	store  *SQLiteStore
@@ -759,7 +747,7 @@ type sseStreamWriter struct {
 	buf    []byte
 }
 
-func (w *sseStreamWriter) Write(p []byte) (int, error) {
+func (w *scanStreamWriter) Write(p []byte) (int, error) {
 	if w.ctx != nil {
 		select {
 		case <-w.ctx.Done():
@@ -801,10 +789,7 @@ func (w *sseStreamWriter) Write(p []byte) (int, error) {
 		}
 		w.job = current
 
-		w.hub.Broadcast(w.scanID, HubEvent{
-			Type: "progress",
-			Data: mustJSON(map[string]string{"scan_id": w.scanID, "data": line}),
-		})
+		w.hub.BroadcastScan(scanProgressEvent(w.scanID, line), false)
 	}
 	return len(p), nil
 }
@@ -827,10 +812,6 @@ func lastOutputLine(s string) string {
 }
 
 // --- Chat session service methods ---
-
-func sessionTopic(id string) string {
-	return "session:" + id
-}
 
 func (s *Service) TaskSession(taskID string) (string, bool) {
 	s.mu.Lock()
@@ -886,7 +867,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	if s.agents != nil {
 		for _, task := range tasks {
 			if task.agentID != "" {
-				_ = s.agents.CancelTask(task.agentID, task.taskID)
+				_ = s.agents.CancelTask(task.agentID, task.taskID, sessionID)
 			}
 		}
 	}
@@ -894,7 +875,39 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*webproto.FileUploadResult, error) {
+func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) error {
+	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+		return err
+	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return ErrTurnNotFound
+	}
+	s.mu.Lock()
+	sid, pending := s.taskSessions[turnID]
+	agentID := s.taskAgents[turnID]
+	if pending && sid == sessionID {
+		s.taskCanceled[turnID] = true
+	} else {
+		pending = false
+	}
+	s.mu.Unlock()
+	if !pending {
+		return ErrTurnNotFound
+	}
+	if s.agents != nil && agentID != "" {
+		if err := s.agents.CancelTask(agentID, turnID, sessionID); err != nil {
+			return err
+		}
+	}
+	s.BroadcastAOPEvent(sessionID, &aop.Event{
+		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
+		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "canceled"}},
+	})
+	return nil
+}
+
+func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*transport.FileResult, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -910,23 +923,14 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 		return nil, fmt.Errorf("session has no assigned agent")
 	}
 
-	payload := webproto.FileUploadPayload{
-		Filename:  filename,
-		FileSize:  int64(len(data)),
-		MimeType:  http.DetectContentType(data),
-		SessionID: sessionID,
-	}
-	payloadJSON, _ := json.Marshal(payload)
-
 	taskID := generateID()
-	msg := webproto.Message{
-		Type:    "upload",
-		TaskID:  taskID,
-		DataB64: base64.StdEncoding.EncodeToString(data),
-		Payload: payloadJSON,
-	}
-
-	resultCh, err := s.agents.dispatchMessage(agentID, taskID, msg)
+	resultCh, err := s.agents.dispatchFrame(agentID, taskID, &transport.ServerFrame{
+		CorrelationId: taskID,
+		Payload: &transport.ServerFrame_FileUpload{FileUpload: &transport.FileUploadRequest{
+			TaskId: taskID, SessionId: sessionID, Filename: filename,
+			MediaType: http.DetectContentType(data), Data: data,
+		}},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("agent dispatch failed: %w", err)
 	}
@@ -936,17 +940,14 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 		if !ok {
 			return nil, fmt.Errorf("agent disconnected during upload")
 		}
-		var result webproto.FileUploadResult
-		if len(res.Result) == 0 || json.Unmarshal(res.Result, &result) != nil {
+		result := res.File
+		if result == nil {
 			return nil, fmt.Errorf("agent upload returned no result envelope")
-		}
-		if result.Error != "" {
-			return nil, fmt.Errorf("agent upload error: %s", result.Error)
 		}
 		s.broadcastSystemMessage(sessionID, SysFileUploaded,
 			fmt.Sprintf("File uploaded: %s → %s", filename, result.Path),
 			map[string]any{"filename": filename, "path": result.Path})
-		return &result, nil
+		return result, nil
 	case <-ctx.Done():
 		_ = s.agents.CancelTask(agentID, taskID)
 		return nil, ctx.Err()
@@ -989,42 +990,11 @@ func (s *Service) DeleteSession(ctx context.Context, id string) error {
 	return s.store.DeleteSession(ctx, id)
 }
 
-func (s *Service) GetMessages(ctx context.Context, sessionID string) ([]*ChatMessage, error) {
-	return s.store.ListMessages(ctx, sessionID, 500)
-}
-
-func (s *Service) GetMessagePage(ctx context.Context, sessionID string, before int64, limit int) (ChatMessagePage, error) {
-	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ChatMessagePage{}, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
-		}
-		return ChatMessagePage{}, err
+func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
+	if s == nil || s.hub == nil || sessionID == "" || event == nil || event.Payload == nil {
+		return
 	}
-	return s.store.ListMessagePage(ctx, sessionID, before, limit)
-}
-
-func (s *Service) GetAOPEvents(ctx context.Context, sessionID string) ([]aop.Event, error) {
-	return s.store.ListAOPEvents(ctx, sessionID, 10000)
-}
-
-func (s *Service) GetAOPEventsAfter(ctx context.Context, sessionID string, after int64) ([]persistedAOPEvent, error) {
-	return s.store.ListAOPEventsAfter(ctx, sessionID, after, 0)
-}
-
-func (s *Service) BroadcastDomainEvent(sessionID string, event DomainEvent) {
-	event.SessionID = sessionID
-	if !event.Transient {
-		s.persistRuntimeDomainEvent(sessionID, event)
-	}
-	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
-		Type:     event.Type,
-		Data:     mustJSON(event),
-		Reliable: isTerminalDomainEvent(event.Type),
-	})
-}
-
-func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
-	if s == nil || s.hub == nil || sessionID == "" || !event.Valid() {
+	if !s.prepareAOPEvent(sessionID, event) {
 		return
 	}
 	var cursor int64
@@ -1038,13 +1008,60 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event aop.Event) {
 	s.broadcastAOPEvent(sessionID, event, cursor)
 }
 
-func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event, cursor int64) {
-	s.hub.Broadcast(sessionTopic(sessionID), HubEvent{
-		ID:       cursor,
-		Type:     "aop",
-		Data:     mustJSON(event),
-		Reliable: isReliableAOPEvent(event),
-	})
+func (s *Service) prepareAOPEvent(sessionID string, event *aop.Event) bool {
+	if event.SessionId == "" {
+		event.SessionId = sessionID
+	}
+	if event.Id == "" {
+		event.Id = generateID()
+	}
+	if event.EmittedAt == nil {
+		event.EmittedAt = timestamppb.Now()
+	}
+	sequenceKey := event.SessionId
+	if event.Seq == 0 && s.store != nil {
+		s.eventMu.Lock()
+		_, initialized := s.sessionSeq[sequenceKey]
+		s.eventMu.Unlock()
+		if !initialized {
+			if maximum, err := s.store.MaxAOPEventSeq(context.Background(), sequenceKey); err == nil {
+				s.eventMu.Lock()
+				if _, exists := s.sessionSeq[sequenceKey]; !exists {
+					s.sessionSeq[sequenceKey] = maximum
+				}
+				s.eventMu.Unlock()
+			}
+		}
+	}
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if event.GetTurnEnded() != nil && event.TurnId != "" {
+		terminalKey := sequenceKey + "\x00" + event.TurnId
+		if s.endedTurns[terminalKey] {
+			return false
+		}
+		s.endedTurns[terminalKey] = true
+	}
+	if event.Seq == 0 {
+		s.sessionSeq[sequenceKey]++
+		event.Seq = s.sessionSeq[sequenceKey]
+	} else if event.Seq > s.sessionSeq[sequenceKey] {
+		s.sessionSeq[sequenceKey] = event.Seq
+	}
+	return true
+}
+
+func (s *Service) resetTurnTerminal(sessionID, turnID string) {
+	if sessionID == "" || turnID == "" {
+		return
+	}
+	s.eventMu.Lock()
+	delete(s.endedTurns, sessionID+"\x00"+turnID)
+	s.eventMu.Unlock()
+}
+
+func (s *Service) broadcastAOPEvent(sessionID string, event *aop.Event, cursor int64) {
+	s.hub.BroadcastAOP(sessionID, AOPDelivery{Cursor: cursor, Event: event}, isReliableAOPEvent(event))
 }
 
 // broadcastHubError emits a hub-originated failure as an AOP error event: the
@@ -1052,221 +1069,46 @@ func (s *Service) broadcastAOPEvent(sessionID string, event aop.Event, cursor in
 // locales), message is the English fallback, and params feed i18n
 // interpolation via the aiscan.web extension.
 func (s *Service) broadcastHubError(sessionID, code, message string, params map[string]any) {
-	data, _ := json.Marshal(aop.ErrorData{Code: code, Message: message})
-	event := aop.Event{
-		Type:      aop.TypeError,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: sessionID,
-		Agent:     "aiscan.web",
-		Data:      data,
+	event := &aop.Event{
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Payload: &aop.Event_Error{Error: &aop.ProtocolError{Code: code, Message: message}},
 	}
 	if len(params) > 0 {
-		_ = webproto.SetWebExt(&event, webproto.WebMessageExt{Params: params})
+		if values, err := structpb.NewStruct(params); err == nil {
+			_ = ext.SetWebMessage(event, ext.WebMessageExtension{Params: values})
+		}
 	}
 	s.BroadcastAOPEvent(sessionID, event)
 }
 
-func isReliableAOPEvent(event aop.Event) bool {
-	switch event.Type {
-	case aop.TypeSessionEnd, aop.TypeError, aop.TypeToolResult, aop.TypeTurnEnd, aop.TypeMessage:
+func (s *Service) broadcastHubTurnEnded(sessionID, turnID, code, message string) {
+	ended := &aop.TurnEnded{StopReason: "error", Error: &aop.ProtocolError{Code: code, Message: message}}
+	s.BroadcastAOPEvent(sessionID, &aop.Event{
+		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
+		Payload: &aop.Event_TurnEnded{TurnEnded: ended},
+	})
+}
+
+func isReliableAOPEvent(event *aop.Event) bool {
+	switch payload := event.Payload.(type) {
+	case *aop.Event_SessionEnded, *aop.Event_Error, *aop.Event_ToolResult, *aop.Event_TurnEnded, *aop.Event_Message:
 		return true
-	case aop.TypeStatus:
+	case *aop.Event_Status:
 		// Status entries that drive durable UI state (eval/compact banners,
 		// budget warnings) must survive reconnect; the rest are evictable.
-		data, err := aop.DecodeData[aop.StatusData](event)
-		if err != nil {
-			return false
-		}
-		switch data.State {
-		case xeval.StateEnd, xcompact.StateEnd, aop.StatusTokenBudgetWarning:
+		switch payload.Status.State {
+		case ext.EvalStateEnd, ext.CompactStateEnd, "token_budget_warning":
 			return true
 		}
 	}
 	return false
 }
 
-// isTerminalDomainEvent classifies terminal platform events. Agent run lifecycle
-// (including hub-originated failures) is carried exclusively by AOP.
-func isTerminalDomainEvent(t string) bool {
-	return t == DomainEventScanComplete
-}
-
-func (s *Service) persistRuntimeDomainEvent(sessionID string, event DomainEvent) {
-	if s == nil || s.store == nil || sessionID == "" {
-		return
-	}
-
-	now := time.Now()
-	msg := &ChatMessage{
-		ID:        generateID(),
-		SessionID: sessionID,
-		AgentID:   event.AgentID,
-		AgentName: event.AgentName,
-		CreatedAt: now,
-	}
-	metadata := map[string]any{
-		"event_type": event.Type,
-	}
-
-	switch event.Type {
-	case DomainEventScanComplete:
-		// Persist a lightweight marker so the inline scan card survives a reload /
-		// session switch. The heavy Result payload is NOT stored here — it stays
-		// reloadable via the session_scans link (getScan), and the client fills the
-		// card from its scanResults map keyed by this scan_id. Without this marker
-		// the scan is invisible to any timeline rebuilt from messages (a page
-		// reload, an SSE reconnect, or a session switch that revalidates against
-		// the store), even though the result itself is still fetchable.
-		if event.ScanID == "" {
-			return
-		}
-		msg.Role = "system"
-		msg.Content = "scan complete"
-		metadata["scan_id"] = event.ScanID
-
-	default:
-		return
-	}
-
-	if data, err := json.Marshal(metadata); err == nil {
-		msg.Metadata = data
-	}
-	_ = s.store.AddMessage(context.Background(), msg)
-}
-
-func (s *Service) HandleUserMessage(ctx context.Context, sessionID, content string, opts webproto.GoalExt) (*ChatMessage, error) {
-	now := time.Now()
-	session, err := s.store.GetSession(ctx, sessionID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
-		}
-		return nil, fmt.Errorf("get message session: %w", err)
-	}
-	msg := &ChatMessage{
-		ID:        generateID(),
-		SessionID: sessionID,
-		Role:      "user",
-		Content:   content,
-		CreatedAt: now,
-		Queued:    s.sessionHasActiveTask(sessionID),
-	}
-	cursor, err := s.store.AppendMessage(ctx, msg)
-	if err != nil {
-		return nil, fmt.Errorf("store message: %w", err)
-	}
-	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event, cursor)
-	}
-
-	// Update session timestamp and auto-title from first message.
-	session.UpdatedAt = now
-	if session.Title == "" {
-		title := content
-		if len(title) > 60 {
-			title = title[:60] + "..."
-		}
-		session.Title = title
-	}
-	_ = s.store.UpdateSession(ctx, session)
-
-	//nolint:gosec // Agent dispatch must continue after the HTTP request returns.
-	go s.dispatchUserMessage(sessionID, msg, opts)
-
-	return msg, nil
-}
-
-// sessionHasActiveTask reports whether any task (chat turn or scan) is
-// currently running on the session — used to mark freshly sent messages as
-// queued rather than in-flight.
-func (s *Service) sessionHasActiveTask(sessionID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sid := range s.taskSessions {
-		if sid == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Service) dispatchUserMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
-	content := strings.TrimSpace(msg.Content)
-	if strings.HasPrefix(content, "!") {
-		s.handleAgentCommand(sessionID, content)
-		return
-	}
-
-	// A typed "/verb" is routed by scope. Hub-scope commands (scan pipeline,
-	// agent roster, merged help) run here. Agent-scope commands (/status,
-	// /provider, /<skill>, ...) and unknown verbs fall through to the agent,
-	// where the AgentConsole bridge runs the real REPL — so the full REPL
-	// command set and `!bash` work from the browser without a parallel switch.
-	if verb, args, ok := parseCommand(content); ok {
-		// /clear is a true "clear conversation" on the web: it must wipe the
-		// visible+persisted transcript, not just reset the agent's model context.
-		// Owned end-to-end by the hub so it does both (see handleClearCommand).
-		if verb == "clear" {
-			s.handleClearCommand(sessionID, opts)
-			return
-		}
-		if hubCommands[verb] {
-			s.runHubCommand(sessionID, verb, args)
-			return
-		}
-		switch verb {
-		case "stop":
-			_ = s.CancelSession(context.Background(), sessionID)
-			return
-		case "exit", "quit":
-			s.closeRemoteSession(sessionID)
-			return
-		case "continue":
-			s.handleAgentRun(sessionID, webproto.RunPayload{
-				SessionID: sessionID, Continue: true, NoEcho: true,
-				MaxTurns: opts.PersistMaxTurns, EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
-			})
-			return
-		case "followup":
-			followup := *msg
-			followup.Content = strings.TrimSpace(args)
-			s.handleChatMessage(sessionID, &followup, opts)
-			return
-		default:
-			if !strings.HasPrefix(content, "/skill:") {
-				s.handleAgentCommand(sessionID, content)
-				return
-			}
-		}
-	}
-
-	s.handleChatMessage(sessionID, msg, opts)
-}
-
-// handleClearCommand implements web /clear as "clear conversation": it deletes the
-// session's persisted messages (incl. the "/clear" message itself) and signals the
-// open UI to empty its timeline, then forwards /clear to the bound agent so its
-// in-memory model context resets too. The agent's "Context cleared." reply lands in
-// the now-empty transcript as the sole confirmation line; with no agent bound, the
-// emptied view is itself the confirmation.
-func (s *Service) handleClearCommand(sessionID string, opts webproto.GoalExt) {
-	_ = s.store.ClearMessages(context.Background(), sessionID)
-	// Transient: a live-only signal to connected clients — the cleared state is
-	// already durable in the store, so a reconnecting client re-derives it on load.
-	s.BroadcastDomainEvent(sessionID, DomainEvent{Type: DomainEventSessionCleared, Transient: true})
-	if s.sessionAgent(sessionID) != nil {
-		s.handleAgentCommand(sessionID, "/clear")
-	}
-}
-
-// runHubCommand executes a hub-scope slash command — one that needs hub state
-// (the scan pipeline, the connected-agent roster, or the merged help catalog).
+// runHubCommand executes a product-level slash command that needs hub state.
 // name is the canonical catalog name without its leading slash. Agent-scope
 // commands never reach here; they fall through to the agent bridge.
 func (s *Service) runHubCommand(sessionID, name, args string) {
 	switch name {
-	case "scan":
-		s.handleScanCommand(sessionID, args)
 	case "agents":
 		s.handleAgentsCommand(sessionID)
 	case "help":
@@ -1317,11 +1159,10 @@ func (s *Service) handleHelpCommand(sessionID string) {
 // commands plus the bound agent's reported agent-scope commands (its skills
 // included). It falls back to the static agent-scope menu when no agent is
 // bound, so the menu is populated even before an agent connects. This is the
-// single source both the "/" menu (GET .../commands) and /help render from.
-func (s *Service) SessionMenu(sessionID string) []webproto.CommandSpec {
-	hubSpecs := []webproto.CommandSpec{
+// single source both SessionService/ListCommands and /help render from.
+func (s *Service) SessionMenu(sessionID string) []*transport.CommandSpec {
+	hubSpecs := []*transport.CommandSpec{
 		{Name: "/help", Description: "查看命令面板"},
-		{Name: "/scan", Description: "在本会话运行扫描", Usage: "/scan <target> [--mode full] [--verify] [--sniper] [--deep]"},
 		{Name: "/agents", Description: "列出已连接的 agent"},
 	}
 	agentSpecs := s.sessionAgent(sessionID).commandSpecs()
@@ -1331,54 +1172,6 @@ func (s *Service) SessionMenu(sessionID string) []webproto.CommandSpec {
 		agentSpecs = tui.WebMenuSpecs(r.StaticCommands())
 	}
 	return append(hubSpecs, agentSpecs...)
-}
-
-func (s *Service) handleScanCommand(sessionID, args string) {
-	ctx := context.Background()
-	parts := strings.Fields(args)
-	if len(parts) == 0 {
-		s.broadcastHubError(sessionID, "scan_usage", "usage: /scan <target> [--mode full] [--verify] [--sniper] [--deep]", nil)
-		return
-	}
-
-	target := parts[0]
-	mode := "quick"
-	var verify, sniper, deep bool
-	for _, p := range parts[1:] {
-		switch p {
-		case "--mode":
-			// next arg handled below
-		case "full":
-			mode = "full"
-		case "--verify":
-			verify = true
-		case "--sniper":
-			sniper = true
-		case "--deep":
-			deep = true
-		}
-	}
-	for i, p := range parts {
-		if p == "--mode" && i+1 < len(parts) {
-			mode = parts[i+1]
-		}
-	}
-
-	job, err := s.SubmitScan(ctx, target, mode, verify, sniper, deep)
-	if err != nil {
-		s.broadcastHubError(sessionID, "scan_submit", fmt.Sprintf("scan failed: %s", err), map[string]any{"error": err.Error()})
-		return
-	}
-
-	_ = s.store.LinkScanToSession(ctx, sessionID, job.ID)
-
-	s.registerSessionTask(job.ID, sessionID, "")
-
-	s.BroadcastDomainEvent(sessionID, DomainEvent{
-		Type:   DomainEventScanStarted,
-		ScanID: job.ID,
-		Data:   fmt.Sprintf("Scan started: %s (%s)", target, mode),
-	})
 }
 
 func (s *Service) handleAgentsCommand(sessionID string) {
@@ -1420,17 +1213,7 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	return s.agents.get(session.AgentID)
 }
 
-func (s *Service) handleChatMessage(sessionID string, msg *ChatMessage, opts webproto.GoalExt) {
-	run := webproto.RunPayload{
-		SessionID: sessionID,
-		Parts:     []aop.MessagePart{{Type: aop.PartText, Text: strings.TrimSpace(msg.Content)}},
-		NoEcho:    true, MaxTurns: opts.PersistMaxTurns,
-		EvalCriteria: opts.EvalCriteria, EvalMaxRounds: opts.EvalMaxRounds,
-	}
-	s.handleAgentRun(sessionID, run)
-}
-
-func (s *Service) handleAgentRun(sessionID string, run webproto.RunPayload) {
+func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) {
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -1438,55 +1221,86 @@ func (s *Service) handleAgentRun(sessionID string, run webproto.RunPayload) {
 		return
 	}
 
-	taskID := generateID()
+	taskID := strings.TrimSpace(request.TurnId)
+	if taskID == "" {
+		taskID = generateID()
+	}
+	if request.RequestId == "" {
+		request.RequestId = taskID
+	}
+	request.TurnId = taskID
+	request.SessionId = sessionID
+	s.resetTurnTerminal(sessionID, taskID)
 	s.registerSessionTask(taskID, sessionID, agent.id)
 
-	s.BroadcastDomainEvent(sessionID, DomainEvent{
-		Type:      DomainEventAgentJoined,
-		AgentID:   agent.id,
-		AgentName: agent.name,
-	})
-
-	resultCh, err := s.agents.DispatchRun(agent.id, taskID, run)
+	resultCh, err := s.agents.DispatchRun(agent.id, request)
 	if err != nil {
 		s.finishSessionTask(taskID)
-		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
+		s.broadcastHubTurnEnded(sessionID, taskID, "dispatch_failed", err.Error())
 		return
 	}
 
 	go func() {
 		res, ok := <-resultCh
 		canceled := s.finishSessionTask(taskID)
-		if !ok {
-			// Agent dropped mid-run: signal completion so the composer releases
-			// instead of hanging on the streaming indicator (mirrors the command
-			// path above).
-			s.broadcastHubError(sessionID, "agent_disconnected", "agent disconnected", nil)
-			return
-		}
 		if canceled {
 			return
 		}
+		if !ok {
+			s.broadcastHubTurnEnded(sessionID, taskID, "agent_disconnected", "agent disconnected")
+			return
+		}
 		if res.Err != "" {
-			s.broadcastHubError(sessionID, "", res.Err, nil)
+			s.broadcastHubTurnEnded(sessionID, taskID, "agent_run_failed", res.Err)
 		}
 	}()
 }
 
 func (s *Service) handleAgentCommand(sessionID, line string) {
+	if _, err := s.ExecuteSessionCommand(sessionID, line); err != nil {
+		s.broadcastHubError(sessionID, "", err.Error(), nil)
+	}
+}
+
+func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", fmt.Errorf("command line is required")
+	}
+	if _, err := s.store.GetSession(context.Background(), sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
+		}
+		return "", err
+	}
+	if verb, args, ok := parseCommand(line); ok {
+		switch verb {
+		case "help", "agents":
+			operationID := generateID()
+			go s.runHubCommand(sessionID, verb, args)
+			return operationID, nil
+		case "clear":
+			return "", fmt.Errorf("clear requires ResetSession")
+		case "stop":
+			return "", fmt.Errorf("stop requires CancelTurn")
+		case "exit", "quit":
+			return "", fmt.Errorf("exit requires CloseSession")
+		case "continue", "followup":
+			return "", fmt.Errorf("%s requires RunTurn", verb)
+		case "scan":
+			return "", fmt.Errorf("scan is not available through the chat protocol")
+		}
+	}
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
-		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
-			"Agent is not connected. Reconnect the agent to continue chatting.", nil)
-		return
+		return "", fmt.Errorf("agent is not connected")
 	}
 	taskID := generateID()
 	s.registerSessionTask(taskID, sessionID, agent.id)
-	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, webproto.CommandPayload{SessionID: sessionID, Line: line})
+	resultCh, err := s.agents.DispatchCommand(agent.id, &transport.CommandRequest{TaskId: taskID, SessionId: sessionID, Line: line})
 	if err != nil {
 		s.finishSessionTask(taskID)
-		s.broadcastHubError(sessionID, "dispatch_failed", err.Error(), nil)
-		return
+		return "", err
 	}
 	go func() {
 		res, ok := <-resultCh
@@ -1498,6 +1312,7 @@ func (s *Service) handleAgentCommand(sessionID, line string) {
 			s.broadcastHubError(sessionID, "", res.Err, nil)
 		}
 	}()
+	return taskID, nil
 }
 
 func (s *Service) closeRemoteSession(sessionID string) {
@@ -1505,8 +1320,13 @@ func (s *Service) closeRemoteSession(sessionID string) {
 	if err != nil || s.agents == nil || session.AgentID == "" {
 		return
 	}
-	payload, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: sessionID, Reason: "completed"})
-	_ = s.agents.SendAgentMessage(session.AgentID, webproto.Message{Type: webproto.TypeSessionClose, Payload: payload})
+	requestID := "close:" + sessionID
+	_ = s.agents.sendAgentFrame(session.AgentID, &transport.ServerFrame{
+		CorrelationId: requestID,
+		Payload: &transport.ServerFrame_CloseSession{CloseSession: &aop.CloseSessionRequest{
+			RequestId: requestID, SessionId: sessionID, Reason: "completed",
+		}},
+	})
 }
 
 // broadcastSystemMessage persists + broadcasts a system message. code names a
@@ -1515,29 +1335,20 @@ func (s *Service) closeRemoteSession(sessionID string) {
 // tests. params feeds i18n interpolation and is stored next to code so the
 // message stays localizable after a reload.
 func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, params map[string]any) {
-	now := time.Now()
-	var meta json.RawMessage
+	event := &aop.Event{
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Payload: &aop.Event_Message{Message: &aop.Message{
+			Id: generateID(), Role: "system", Content: []*aop.Content{aop.Text(fallback)},
+		}},
+	}
 	if code != "" {
-		meta, _ = json.Marshal(map[string]any{"code": code, "params": params})
+		metadata, _ := json.Marshal(map[string]any{"code": code, "params": params})
+		_ = ext.SetWebMessage(event, ext.WebMessageExtension{Metadata: metadata})
 	}
-	msg := &ChatMessage{
-		ID:        generateID(),
-		SessionID: sessionID,
-		Role:      "system",
-		Content:   fallback,
-		Metadata:  meta,
-		CreatedAt: now,
-	}
-	cursor, err := s.store.AppendMessage(context.Background(), msg)
-	if err != nil {
-		return
-	}
-	if event, err := messageEventFromChatMessage(msg); err == nil {
-		s.broadcastAOPEvent(sessionID, event, cursor)
-	}
+	s.BroadcastAOPEvent(sessionID, event)
 }
 
-func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
+func (s *Service) broadcastScanComplete(scanID string) {
 	s.mu.Lock()
 	sid, ok := s.taskSessions[scanID]
 	s.mu.Unlock()
@@ -1547,9 +1358,16 @@ func (s *Service) broadcastScanComplete(scanID string, result *output.Result) {
 	if s.finishSessionTask(scanID) {
 		return
 	}
-	s.BroadcastDomainEvent(sid, DomainEvent{
-		Type:   DomainEventScanComplete,
-		ScanID: scanID,
-		Result: result,
+	_ = s.store.LinkScanToSession(context.Background(), sid, scanID)
+	value, err := aop.ProtoJSONValue(&scanpb.SessionScanEvent{ScanId: scanID, Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED})
+	if err != nil {
+		return
+	}
+	s.BroadcastAOPEvent(sid, &aop.Event{
+		SessionId: sid,
+		Emitter:   "aiscan.web",
+		Payload: &aop.Event_Extension{Extension: &aop.ExtensionEvent{
+			Type: "io.chainreactors.aiscan.scan", Value: value,
+		}},
 	})
 }

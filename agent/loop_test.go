@@ -10,7 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -41,8 +41,8 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event aop.Event) {
-			events = append(events, event.Type)
+		Bus: testBus(func(event *aop.Event) {
+			events = append(events, eventKind(event))
 		}),
 	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
@@ -53,12 +53,12 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	}
 
 	want := []string{
-		aop.TypeMessage,
-		aop.TypeStatus,
-		aop.TypeToolCall,
-		aop.TypeToolResult,
-		aop.TypeStatus,
-		aop.TypeMessage,
+		"message",
+		"status",
+		"tool.call",
+		"tool.result",
+		"status",
+		"message",
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
@@ -153,17 +153,17 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event aop.Event) {
-			if event.Type != aop.TypeMessageDelta {
+		Bus: testBus(func(event *aop.Event) {
+			if eventKind(event) != "message.delta" {
 				return
 			}
-			data, err := aop.DecodeData[aop.MessageDeltaData](event)
-			if err != nil {
+			data := event.GetMessageDelta()
+			if data == nil {
 				return
 			}
 			updates++
-			if data.PartType == aop.PartText {
-				contentDeltas = append(contentDeltas, data.Delta)
+			if _, ok := data.Value.(*aop.MessageDelta_Text); ok {
+				contentDeltas = append(contentDeltas, data.GetText())
 			}
 		}),
 	})).Run(context.Background(), TextInput("stream"))
@@ -196,18 +196,18 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event aop.Event) {
-			if event.Type != aop.TypeUsage {
+		Bus: testBus(func(event *aop.Event) {
+			if eventKind(event) != "usage" {
 				return
 			}
-			data, err := aop.DecodeData[aop.UsageData](event)
-			if err != nil {
+			data := event.GetUsage()
+			if data == nil {
 				return
 			}
 			updateUsage = &Usage{
-				PromptTokens:     data.InputTokens,
-				CompletionTokens: data.OutputTokens,
-				TotalTokens:      data.TotalTokens,
+				PromptTokens:     int(data.InputTokens),
+				CompletionTokens: int(data.OutputTokens),
+				TotalTokens:      int(data.TotalTokens),
 			}
 		}),
 	})).Run(context.Background(), TextInput("stream"))
@@ -238,8 +238,8 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 		Tools:    tools,
 		Model:    "test",
 		Stream:   true,
-		Bus: testBus(func(event aop.Event) {
-			if event.Type == aop.TypeMessageDelta {
+		Bus: testBus(func(event *aop.Event) {
+			if eventKind(event) == "message.delta" {
 				sawUpdate = true
 			}
 		}),
@@ -574,12 +574,12 @@ func TestTokenBudgetWarning(t *testing.T) {
 		Tools:       tools,
 		Model:       "test",
 		TokenBudget: 1000,
-		Bus: testBus(func(event aop.Event) {
-			if event.Type != aop.TypeStatus {
+		Bus: testBus(func(event *aop.Event) {
+			if eventKind(event) != "status" {
 				return
 			}
-			data, err := aop.DecodeData[aop.StatusData](event)
-			if err == nil && data.State == aop.StatusTokenBudgetWarning {
+			data := event.GetStatus()
+			if data != nil && data.State == statusTokenBudgetWarning {
 				sawWarning = true
 			}
 		}),
@@ -765,17 +765,16 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 		},
 	}
 
-	var turnEndUsage *aop.UsageData
+	var turnEndUsage *aop.TokenUsage
 	_, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event aop.Event) {
-			switch event.Type {
-			case aop.TypeUsage:
-				if data, err := aop.DecodeData[aop.UsageData](event); err == nil {
-					u := data
-					turnEndUsage = &u
+		Bus: testBus(func(event *aop.Event) {
+			switch eventKind(event) {
+			case "usage":
+				if data := event.GetUsage(); data != nil {
+					turnEndUsage = data
 				}
 			}
 		}),
@@ -1228,14 +1227,13 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		},
 	}
 
-	var captured *aop.UsageData
-	handler := func(e aop.Event) {
-		if e.Type != aop.TypeUsage {
+	var captured *aop.TokenUsage
+	handler := func(e *aop.Event) {
+		if eventKind(e) != "usage" {
 			return
 		}
-		if data, err := aop.DecodeData[aop.UsageData](e); err == nil {
-			u := data
-			captured = &u
+		if data := e.GetUsage(); data != nil {
+			captured = data
 		}
 	}
 
@@ -1244,7 +1242,7 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		Tools:        commands.NewRegistry(),
 		Model:        "test",
 		SystemPrompt: "sys",
-		Bus:          testBus(func(e aop.Event) { handler(e) }),
+		Bus:          testBus(func(e *aop.Event) { handler(e) }),
 		Logger:       telemetry.NopLogger(),
 	})).Run(context.Background(), TextInput("test"))
 	if err != nil {
@@ -1254,11 +1252,11 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 	if captured == nil {
 		t.Fatal("usage event missing")
 	}
-	if captured.CacheReadTokens != 60 {
-		t.Errorf("usage CacheReadTokens = %d, want 60", captured.CacheReadTokens)
+	if captured.Detail["cache_read"] != 60 {
+		t.Errorf("usage cache_read = %d, want 60", captured.Detail["cache_read"])
 	}
-	if captured.CacheWriteTokens != 20 {
-		t.Errorf("usage CacheWriteTokens = %d, want 20", captured.CacheWriteTokens)
+	if captured.Detail["cache_write"] != 20 {
+		t.Errorf("usage cache_write = %d, want 20", captured.Detail["cache_write"])
 	}
-	fmt.Printf("Event carries cache usage: read=%d write=%d\n", captured.CacheReadTokens, captured.CacheWriteTokens)
+	fmt.Printf("Event carries cache usage: read=%d write=%d\n", captured.Detail["cache_read"], captured.Detail["cache_write"])
 }

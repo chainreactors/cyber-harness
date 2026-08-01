@@ -6,6 +6,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/chainreactors/aiscan/pkg/web/auth"
 )
 
 func TestAccessKeyAuthBrowserSession(t *testing.T) {
@@ -54,7 +56,7 @@ func TestAccessKeyAuthBearerStillSupported(t *testing.T) {
 
 	invalid := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
 	invalid.Header.Set("Authorization", "Bearer wrong-token")
-	invalid.AddCookie(&http.Cookie{Name: authCookieName, Value: sessionValue("test-token")})
+	invalid.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
 	invalidRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(invalidRecorder, invalid)
 	if invalidRecorder.Code != http.StatusUnauthorized {
@@ -89,31 +91,31 @@ func TestLoginCookieSecurityAttributes(t *testing.T) {
 func TestAuthenticate(t *testing.T) {
 	req := func() *http.Request { return httptest.NewRequest(http.MethodGet, "/api/x", nil) }
 
-	if !authenticate(req(), "") {
+	if !auth.AuthenticateRequest(req(), "") {
 		t.Fatal("empty key must authenticate (dev mode)")
 	}
 
 	bearer := req()
 	bearer.Header.Set("Authorization", "Bearer test-token")
-	if !authenticate(bearer, "test-token") {
+	if !auth.AuthenticateRequest(bearer, "test-token") {
 		t.Fatal("valid bearer rejected")
 	}
 
 	// An invalid bearer must not fall back to a valid cookie.
 	mixed := req()
 	mixed.Header.Set("Authorization", "Bearer wrong-token")
-	mixed.AddCookie(&http.Cookie{Name: authCookieName, Value: sessionValue("test-token")})
-	if authenticate(mixed, "test-token") {
+	mixed.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
+	if auth.AuthenticateRequest(mixed, "test-token") {
 		t.Fatal("invalid bearer fell back to cookie")
 	}
 
 	cookie := req()
-	cookie.AddCookie(&http.Cookie{Name: authCookieName, Value: sessionValue("test-token")})
-	if !authenticate(cookie, "test-token") {
+	cookie.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
+	if !auth.AuthenticateRequest(cookie, "test-token") {
 		t.Fatal("valid session cookie rejected")
 	}
 
-	if authenticate(req(), "test-token") {
+	if auth.AuthenticateRequest(req(), "test-token") {
 		t.Fatal("credential-less request authenticated")
 	}
 }

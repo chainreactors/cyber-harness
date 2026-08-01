@@ -82,12 +82,9 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
 // already renders them as scan cards. Drop them from the stream handed to the
 // AOP reducer so they don't also appear as bare "scan complete" bubbles.
 function isPlatformMarkerEvent(event: AOPEvent): boolean {
-  if (event.type !== 'message') return false
-  const data = event.data as { role?: string } | undefined
-  if (data?.role !== 'system') return false
-  const ext = event.ext
-  if (!ext) return false
-  for (const value of Object.values(ext)) {
+  if (event.payload.case !== 'message' || event.payload.value.role !== 'system') return false
+  for (const extension of event.extensions) {
+    const value = decodeExtension(extension.value?.data)
     if (!value || typeof value !== 'object') continue
     const meta = (value as Record<string, unknown>).metadata
     if (meta && typeof meta === 'object' && (meta as Record<string, unknown>).event_type) return true
@@ -99,50 +96,40 @@ function isPlatformMarkerEvent(event: AOPEvent): boolean {
 // execution inputs, not operator-authored chat messages. The hub is the sole
 // author of user messages on this surface, so keep only its canonical copy.
 function isInternalUserEvent(event: AOPEvent): boolean {
-  if (event.type !== 'message' || event.agent === webUserAgent) return false
-  const data = event.data as { role?: string } | undefined
-  return data?.role === 'user'
+  return event.payload.case === 'message'
+    && event.emitter !== webUserAgent
+    && event.payload.value.role === 'user'
 }
 
 function eventText(event: AOPEvent): string {
-  const data = event.data as {
-    content?: string
-    parts?: Array<{ type?: string; text?: string }>
-  } | undefined
-  if (typeof data?.content === 'string') return data.content
-  return (data?.parts ?? [])
-    .filter((part) => part.type === 'text' && part.text)
-    .map((part) => part.text as string)
+  if (event.payload.case !== 'message') return ''
+  return event.payload.value.content
+    .filter((part) => part.value.case === 'text')
+    .map((part) => part.value.case === 'text' ? part.value.value.text : '')
     .join('\n')
 }
 
-function markdownCodeFence(text: string): string {
-  let fence = '```'
-  while (text.includes(fence)) fence += '`'
-  return `${fence}\n${text}\n${fence}`
-}
-
 function presentAOPEvent(event: AOPEvent): AOPEvent {
-  if (event.type !== 'message') return event
-  const command = event.ext?.command as { presentation?: string } | undefined
-  if (command?.presentation !== 'preformatted') return event
-  const data = event.data as { parts?: Array<{ type?: string; text?: string }> }
-  return {
-    ...event,
-    data: {
-      ...data,
-      parts: (data.parts ?? []).map((part) => (
-        part.type === 'text' && part.text ? { ...part, text: markdownCodeFence(part.text) } : part
-      )),
-    },
-  }
+  return event
 }
 
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
-  for (const value of Object.values(event.ext ?? {})) {
+  for (const extension of event.extensions) {
+    const value = decodeExtension(extension.value?.data)
     if (value && typeof value === 'object') return value as Record<string, unknown>
   }
   return {}
+}
+
+function decodeExtension(data?: Uint8Array): unknown {
+  if (!data?.length) return undefined
+  try { return JSON.parse(new TextDecoder().decode(data)) }
+  catch { return undefined }
+}
+
+function eventTimestamp(event: AOPEvent): number {
+  if (!event.emittedAt) return 0
+  return Number(event.emittedAt.seconds) * 1000 + event.emittedAt.nanos / 1_000_000
 }
 
 function reduceConversationAOP(
@@ -151,39 +138,39 @@ function reduceConversationAOP(
   streaming: boolean,
 ): ViewerTimelineItem[] {
   const childStarts = new Map<string, AOPEvent>()
-  const visibleSessionIDs = new Set(events.map((event) => event.session_id))
+  const visibleSessionIDs = new Set(events.map((event) => event.sessionId))
   for (const event of events) {
-    if (event.type !== 'session.start') continue
-    const data = event.data as { parent_session_id?: string; parent_tool_call_id?: string }
+    if (event.payload.case !== 'sessionStarted') continue
+    const data = event.payload.value
     const ext = extensionBlock(event)
-    const delegated = !!data.parent_tool_call_id
+    const delegated = !!data.parentToolCallId
       || (ext.delegation !== null && typeof ext.delegation === 'object')
     // The root agent also points at the platform chat session, which is not an
     // AOP stream. Only fold a run when its parent is another visible AOP session.
-    if (delegated && data.parent_session_id && visibleSessionIDs.has(data.parent_session_id)) {
-      childStarts.set(event.session_id, event)
+    if (delegated && data.parentSessionId && visibleSessionIDs.has(data.parentSessionId)) {
+      childStarts.set(event.sessionId, event)
     }
   }
 
   const childIDs = new Set(childStarts.keys())
   const topLevel = reduceAOPToTimeline(
-    events.filter((event) => !childIDs.has(event.session_id)).map(presentAOPEvent),
+    events.filter((event) => !childIDs.has(event.sessionId)).map(presentAOPEvent),
     { streaming, lifecycle: 'errors' },
   ) as ViewerTimelineItem[]
 
   const childRuns: ViewerTimelineItem[] = []
   for (const [sessionID, start] of childStarts) {
-    const childEvents = events.filter((event) => event.session_id === sessionID)
-    const end = [...childEvents].reverse().find((event) => event.type === 'session.end')
-    const endData = end?.data as { stop?: string; error?: string } | undefined
+    const childEvents = events.filter((event) => event.sessionId === sessionID)
+    const end = [...childEvents].reverse().find((event) => event.payload.case === 'sessionEnded')
+    const endReason = end?.payload.case === 'sessionEnded' ? end.payload.value.reason : undefined
     const ext = extensionBlock(start)
     const delegation = ext.delegation && typeof ext.delegation === 'object'
       ? ext.delegation as Record<string, unknown>
       : ext
     const promptEvent = sourceEvents.find(
-      (event) => event.session_id === sessionID && isInternalUserEvent(event),
+      (event) => event.sessionId === sessionID && isInternalUserEvent(event),
     )
-    const stop = endData?.stop
+    const stop = endReason
     const status = !end
       ? 'running'
       : stop === 'error'
@@ -191,7 +178,7 @@ function reduceConversationAOP(
         : stop === 'canceled' || stop === 'terminated' || stop === 'stopped'
           ? 'canceled'
           : 'completed'
-    const timestamp = Date.parse(start.ts)
+    const timestamp = eventTimestamp(start)
     const items = reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
       streaming: streaming && !end,
       lifecycle: 'errors',
@@ -201,8 +188,8 @@ function reduceConversationAOP(
       id: `subagent:${sessionID}`,
       kind: 'subagent_run',
       timestamp: Number.isFinite(timestamp) ? timestamp : 0,
-      actorName: start.agent,
-      name: typeof delegation.agent_name === 'string' ? delegation.agent_name : start.agent || 'Sub-agent',
+      actorName: start.emitter,
+      name: typeof delegation.agent_name === 'string' ? delegation.agent_name : start.emitter || 'Sub-agent',
       prompt: typeof delegation.task === 'string' ? delegation.task : (promptEvent ? eventText(promptEvent) : ''),
       mode: typeof delegation.run_mode === 'string' ? delegation.run_mode : undefined,
       sessionID,
@@ -414,7 +401,7 @@ export default function ChatPanel({
     setEvalMaxRounds(3)
   }
 
-  // The "/" command menu is served by the hub (GET .../commands): hub-scope
+  // The "/" command menu comes from SessionService/ListCommands: hub-scope
   // commands merged with the bound agent's reported commands (skills included),
   // so it always mirrors the real command set instead of a hardcoded list.
   // Descriptions prefer the local i18n string (keyed cmd<Name>) and fall back to
@@ -490,7 +477,7 @@ export default function ChatPanel({
       } else if (a.mode === 'upload' && activeSessionID) {
         try {
           await uploadChatFile(activeSessionID, a.file)
-        } catch { /* upload error shown via SSE system message */ }
+        } catch { /* upload error is surfaced by the Connect call */ }
       }
     }
     const fullContent = contextParts.length > 0

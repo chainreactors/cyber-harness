@@ -1,6 +1,7 @@
 package deps_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -28,6 +29,22 @@ func TestLayerImportsAreUnidirectional(t *testing.T) {
 	})
 }
 
+func TestAOPProtocolLayerHasNoRuntimeDependencies(t *testing.T) {
+	root := repositoryRoot(t)
+	assertNoFirstPartyImports(t, filepath.Join(root, "aop"), map[string]bool{
+		"agent": true,
+		"core":  true,
+		"pkg":   true,
+		"tools": true,
+		"cmd":   true,
+	})
+}
+
+func TestRunnerDoesNotDependOnWeb(t *testing.T) {
+	root := repositoryRoot(t)
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/web")
+}
+
 func TestLegacyPackagesCannotReturn(t *testing.T) {
 	root := repositoryRoot(t)
 	legacy := []struct {
@@ -42,13 +59,19 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 		{dir: filepath.Join("core", "transport"), importPath: modulePath + "/core/" + "transport"},
 		{dir: filepath.Join("cmd", "agent"), importPath: modulePath + "/cmd/" + "agent"},
 		{dir: filepath.Join("cmd", "runner"), importPath: modulePath + "/cmd/" + "runner"},
+		{dir: filepath.Join("core", "aop"), importPath: modulePath + "/core/aop"},
+		{dir: filepath.Join("pkg", "webproto"), importPath: modulePath + "/pkg/webproto"},
+		{dir: filepath.Join("pkg", "webagent"), importPath: modulePath + "/pkg/webagent"},
+		{dir: filepath.Join("pkg", "web", "proto"), importPath: modulePath + "/pkg/web/proto"},
+		{dir: filepath.Join("internal", "aoputil"), importPath: modulePath + "/internal/aoputil"},
+		{dir: filepath.Join("internal", "gen"), importPath: modulePath + "/internal/gen"},
+		{dir: "api", importPath: modulePath + "/api"},
+		{dir: filepath.Join("aop", "ext"), importPath: modulePath + "/aop/ext"},
 	}
 	for _, item := range legacy {
 		legacyDir := filepath.Join(root, item.dir)
-		if _, err := os.Stat(legacyDir); err == nil {
-			t.Errorf("legacy package directory still exists: %s", legacyDir)
-		} else if !os.IsNotExist(err) {
-			t.Errorf("stat legacy package directory: %v", err)
+		if hasGoFiles(legacyDir) {
+			t.Errorf("legacy package still contains Go files: %s", legacyDir)
 		}
 	}
 
@@ -80,6 +103,93 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGeneratedProtobufLivesUnderAOP(t *testing.T) {
+	root := repositoryRoot(t)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != root && shouldSkipTree(root, path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".pb.go") && !strings.HasSuffix(name, ".connect.go") {
+			return nil
+		}
+		rel := filepath.ToSlash(relative(root, path))
+		if !strings.HasPrefix(rel, "aop/") {
+			t.Errorf("generated protobuf file outside aop/: %s", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWebProtocolDoesNotDefineGenericJSONEnvelope(t *testing.T) {
+	root := repositoryRoot(t)
+	tree := filepath.Join(root, "pkg", "web")
+	err := filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			typeSpec, ok := node.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			structure, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			hasTypeString, hasRawPayload := false, false
+			for _, field := range structure.Fields.List {
+				for _, name := range field.Names {
+					if name.Name == "Type" && expressionName(field.Type) == "string" {
+						hasTypeString = true
+					}
+					if (name.Name == "Data" || name.Name == "Payload" || name.Name == "Value" || name.Name == "Body") && expressionName(field.Type) == "json.RawMessage" {
+						hasRawPayload = true
+					}
+				}
+			}
+			if hasTypeString && hasRawPayload {
+				t.Errorf("generic Type + json.RawMessage envelope %s in %s", typeSpec.Name.Name, relative(root, path))
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLiveBrokerDoesNotUseJSON(t *testing.T) {
+	root := repositoryRoot(t)
+	path := filepath.Join(root, "pkg", "web", "broker.go")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"encoding/json", "json.RawMessage", "protojson"} {
+		if strings.Contains(string(content), forbidden) {
+			t.Errorf("live broker contains JSON bridge %q", forbidden)
+		}
 	}
 }
 
@@ -136,6 +246,58 @@ func assertNoFirstPartyImports(t *testing.T, tree string, forbidden map[string]b
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertNoImportPrefix(t *testing.T, tree, forbidden string) {
+	t.Helper()
+	root := repositoryRoot(t)
+	err := filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		imports, parseErr := importsInFile(path)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, importPath := range imports {
+			if importPath == forbidden || strings.HasPrefix(importPath, forbidden+"/") {
+				t.Errorf("forbidden dependency %q in %s", importPath, relative(root, path))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hasGoFiles(tree string) bool {
+	found := false
+	_ = filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".go" {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func expressionName(expression ast.Expr) string {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name
+	case *ast.SelectorExpr:
+		return expressionName(value.X) + "." + value.Sel.Name
+	default:
+		return ""
 	}
 }
 

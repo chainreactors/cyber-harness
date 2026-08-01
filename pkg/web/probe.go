@@ -5,19 +5,19 @@ import (
 	"strings"
 
 	agentprobe "github.com/chainreactors/aiscan/agent/probe"
+	config "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/probe"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 )
 
 // TestConn probes one settings section's external dependencies, resolving blank
 // secrets against the stored config, then delegates to pkg/probe. Probe failures
 // live inside the response; a returned error only signals an untestable section.
-func (s *Service) TestConn(ctx context.Context, section string, in webproto.DistributeConfig) ([]probe.ConnCheck, error) {
+func (s *Service) TestConn(ctx context.Context, section string, in config.DistributeConfig) ([]probe.ConnCheck, error) {
 	stored, _ := s.storedConfig(ctx)
 	return probe.TestConn(ctx, section, toProbeConfig(in), toProbeConfig(stored))
 }
 
-func toProbeConfig(dc webproto.DistributeConfig) probe.ProbeConfig {
+func toProbeConfig(dc config.DistributeConfig) probe.ProbeConfig {
 	return probe.ProbeConfig{
 		Cyberhub: probe.CyberhubProbe{URL: dc.Cyberhub.URL, Key: dc.Cyberhub.Key},
 		Recon: probe.ReconProbe{
@@ -65,13 +65,13 @@ func (s *Service) storedLLMAPIKey(ctx context.Context, profileID string) string 
 
 // storedConfig returns the config persisted on the server, or ok=false when no
 // config store is wired or it cannot be read.
-func (s *Service) storedConfig(ctx context.Context) (webproto.DistributeConfig, bool) {
+func (s *Service) storedConfig(ctx context.Context) (config.DistributeConfig, bool) {
 	if s.config == nil {
-		return webproto.DistributeConfig{}, false
+		return config.DistributeConfig{}, false
 	}
 	dc, err := s.GetDistributeConfig(ctx)
 	if err != nil {
-		return webproto.DistributeConfig{}, false
+		return config.DistributeConfig{}, false
 	}
 	return dc, true
 }

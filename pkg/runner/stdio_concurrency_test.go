@@ -3,14 +3,13 @@ package runner
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
 // stdioGateProvider blocks every call until the gate closes, recording the
@@ -78,9 +77,8 @@ func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider
 	h.rt = newBareRuntime(t, nil, prov)
 	h.rt.config.Model = "test"
 	h.rt.config.MaxTurns = 4
-	h.rt.Subscribe(func(event aop.Event) {
-		payload, _ := json.Marshal(event)
-		_ = h.emit(webproto.Message{Type: webproto.TypeAOP, TurnID: event.TurnID, Payload: payload})
+	h.rt.Subscribe(func(event *aop.Event) {
+		_ = h.emit(&transport.AgentFrame{CorrelationId: event.TurnId, Payload: &transport.AgentFrame_Event{Event: event}})
 	})
 	return h
 }
@@ -133,23 +131,23 @@ func TestStdioSessionsRunConcurrently(t *testing.T) {
 
 	close(prov.gate)
 	h.drain()
-	h.accept(protocolLine(t, webproto.Message{Type: webproto.TypeSessionClose, Payload: mustJSON(t, webproto.SessionLifecyclePayload{SessionID: "s1", Reason: "completed"})}))
-	h.accept(protocolLine(t, webproto.Message{Type: webproto.TypeSessionClose, Payload: mustJSON(t, webproto.SessionLifecyclePayload{SessionID: "s2", Reason: "completed"})}))
+	h.accept(closeSessionLine(t, "s1", "completed"))
+	h.accept(closeSessionLine(t, "s2", "completed"))
 
 	// Interleaved output must stay valid AOP: every line decodes, and both
 	// sessions produced their session brackets.
-	events := decodeAOPMessages(t, decodeProtocolLines(t, &output))
+	events := decodeAOPMessages(decodeAgentFrames(t, &output))
 	starts := map[string]bool{}
 	ends := map[string]bool{}
 	for _, e := range events {
-		if e.SessionID != "s1" && e.SessionID != "s2" {
+		if e.SessionId != "s1" && e.SessionId != "s2" {
 			t.Fatalf("event with foreign session: %+v", e)
 		}
-		switch e.Type {
-		case aop.TypeSessionStart:
-			starts[e.SessionID] = true
-		case aop.TypeSessionEnd:
-			ends[e.SessionID] = true
+		switch e.Payload.(type) {
+		case *aop.Event_SessionStarted:
+			starts[e.SessionId] = true
+		case *aop.Event_SessionEnded:
+			ends[e.SessionId] = true
 		}
 	}
 	if !starts["s1"] || !starts["s2"] || !ends["s1"] || !ends["s2"] {

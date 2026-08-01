@@ -8,14 +8,14 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
 // AOPEventSubscriber connects a console-local renderer to the runtime AOP
 // bus and returns an unsubscribe function owned by that console attachment.
-type AOPEventSubscriber func(func(aop.Event)) func()
+type AOPEventSubscriber func(func(*aop.Event)) func()
 
 // RunRemoteAgentConsoleWithControl adapts a byte-stream terminal while keeping
 // event rendering scoped to the attached agent session.
@@ -48,8 +48,8 @@ func subscribeAgentOutput(output *AgentOutput, session *agent.Agent, subscribers
 		return func() {}
 	}
 	sessionID := session.SessionID()
-	return subscribers[0](func(event aop.Event) {
-		if sessionID == "" || event.SessionID == sessionID {
+	return subscribers[0](func(event *aop.Event) {
+		if sessionID == "" || event.SessionId == sessionID {
 			output.HandleEvent(event)
 		}
 	})

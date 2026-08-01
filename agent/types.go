@@ -8,8 +8,8 @@ import (
 	"github.com/chainreactors/aiscan/agent/hooks"
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
@@ -30,6 +30,7 @@ type ImageURL = provider.ImageURL
 type ChatCompletionRequest = provider.ChatCompletionRequest
 type ChatCompletionResponse = provider.ChatCompletionResponse
 type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
+type ProviderRawFrame = provider.RawFrame
 type Choice = provider.Choice
 type Usage = provider.Usage
 type APIError = provider.APIError
@@ -145,7 +146,7 @@ type Config struct {
 	TokenBudget      int
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              *eventbus.Bus[aop.Event]
+	Bus              *eventbus.Bus[*aop.Event]
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
 	Hooks *hooks.Registry
@@ -165,33 +166,36 @@ type Config struct {
 	TurnID           string
 	ParentSessionID  string
 	ParentToolCallID string
-	Delegation       *delegation.DelegationDetail
+	Delegation       *ext.DelegationDetail
 	// AgentName tags emitted AOP events; defaults to "aiscan".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
 	// restored; Result.MessageCounter carries the final value for saving.
 	MessageCounter int64
+	// CaptureProviderFrames emits exact provider request/response bytes as AOP
+	// ProviderFrame events. Disabled by default because payloads may be sensitive.
+	CaptureProviderFrames bool
 
 	emitter *aopEmitter
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config            { c.Provider = p; return c }
-func (c Config) WithTools(t tool.Executor) Config          { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config                 { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config          { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config    { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config                  { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config           { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config      { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config                { c.MaxTokens = n; return c }
-func (c Config) WithContextWindow(n int) Config            { c.ContextWindow = n; return c }
-func (c Config) WithTemperature(t float64) Config          { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config               { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config              { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config     { c.Expander = e; return c }
+func (c Config) WithProvider(p Provider) Config             { c.Provider = p; return c }
+func (c Config) WithTools(t tool.Executor) Config           { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config                  { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config           { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []ChatMessage) Config     { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                   { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config            { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config       { c.Logger = l; return c }
+func (c Config) WithBus(b *eventbus.Bus[*aop.Event]) Config { c.Bus = b; return c }
+func (c Config) WithMaxTokens(n int) Config                 { c.MaxTokens = n; return c }
+func (c Config) WithContextWindow(n int) Config             { c.ContextWindow = n; return c }
+func (c Config) WithTemperature(t float64) Config           { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config                { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config               { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config      { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
@@ -245,7 +249,7 @@ func (c Config) init() Config {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	if c.Bus == nil {
-		c.Bus = eventbus.New[aop.Event]()
+		c.Bus = eventbus.New[*aop.Event]()
 	}
 	if c.emitter == nil {
 		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)

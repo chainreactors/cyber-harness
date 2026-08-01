@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,17 +10,10 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/webproto"
 	"github.com/chainreactors/utils/parsers"
 )
-
-func TestScanRequestFields(t *testing.T) {
-	req := ScanRequest{Verify: true, Deep: true}
-	if !req.Verify || req.Sniper || !req.Deep {
-		t.Fatalf("scan request = verify:%v sniper:%v deep:%v", req.Verify, req.Sniper, req.Deep)
-	}
-}
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
 	job := &ScanJob{
@@ -46,7 +38,7 @@ func TestServiceStatusReportsLLMAvailability(t *testing.T) {
 	}
 }
 
-func TestHandleUserMessageRejectsMissingSessionBeforePersisting(t *testing.T) {
+func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -54,8 +46,12 @@ func TestHandleUserMessageRejectsMissingSessionBeforePersisting(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
-	if _, err := svc.HandleUserMessage(context.Background(), "missing", "hello", webproto.GoalExt{}); err == nil {
-		t.Fatal("HandleUserMessage() accepted a missing session")
+	response, err := NewAOPChatServer(svc).RunTurn(context.Background(), &aop.RunTurnRequest{
+		RequestId: "run-1", SessionId: "missing", TurnId: "turn-1",
+		Input: &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: "hello"}}}}},
+	})
+	if err != nil || response.GetRejected().GetCode() != "NOT_FOUND" {
+		t.Fatalf("RunTurn = %v, %v", response, err)
 	}
 	var count int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM chat_aop_events WHERE session_id = 'missing'`).Scan(&count); err != nil {
@@ -66,35 +62,31 @@ func TestHandleUserMessageRejectsMissingSessionBeforePersisting(t *testing.T) {
 	}
 }
 
-func TestSendMessageReturnsNotFoundForMissingSession(t *testing.T) {
+func TestLegacyChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	handler := NewHandler(svc, nil, nil, nil, nil, "")
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/sessions/missing/messages", bytes.NewBufferString(`{"content":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestListMessagesReturnsNotFoundForMissingSession(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	handler := NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, "")
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/chat/sessions/missing/messages", nil))
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", recorder.Code, recorder.Body.String())
+	handler := NewHandler(svc, nil, nil, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), "")
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/chat"},
+		{method: http.MethodGet, path: "/api/chat/sessions"},
+		{method: http.MethodPost, path: "/api/chat/sessions/missing/messages"},
+		{method: http.MethodGet, path: "/api/scans"},
+		{method: http.MethodGet, path: "/api/scans/missing/events"},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status = %d, body = %s; want 404", test.method, test.path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 

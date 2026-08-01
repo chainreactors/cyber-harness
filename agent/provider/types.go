@@ -41,6 +41,8 @@ func ImagePart(mimeType, base64Data, detail string) ContentPart {
 }
 
 type ChatMessage struct {
+	AOPMessageID     string        `json:"-"`
+	Name             string        `json:"name,omitempty"`
 	Role             string        `json:"role"`
 	Content          *string       `json:"content,omitempty"`
 	ContentParts     []ContentPart `json:"-"`

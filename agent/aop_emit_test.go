@@ -6,26 +6,28 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
 // streamEventCollector records message/message.delta events from the bus.
 type streamEventCollector struct {
 	mu       sync.Mutex
-	deltas   []aop.MessageDeltaData
-	messages []aop.MessageData
+	deltas   []*aop.MessageDelta
+	messages []*aop.Message
 }
 
-func (c *streamEventCollector) handler(event aop.Event) {
-	switch event.Type {
-	case aop.TypeMessageDelta:
-		if d, err := aop.DecodeData[aop.MessageDeltaData](event); err == nil {
+func (c *streamEventCollector) handler(event *aop.Event) {
+	switch eventKind(event) {
+	case "message.delta":
+		if d := event.GetMessageDelta(); d != nil {
 			c.mu.Lock()
 			c.deltas = append(c.deltas, d)
 			c.mu.Unlock()
 		}
-	case aop.TypeMessage:
-		if d, err := aop.DecodeData[aop.MessageData](event); err == nil {
+	case "message":
+		if d := event.GetMessage(); d != nil {
 			c.mu.Lock()
 			c.messages = append(c.messages, d)
 			c.mu.Unlock()
@@ -33,10 +35,10 @@ func (c *streamEventCollector) handler(event aop.Event) {
 	}
 }
 
-func (c *streamEventCollector) assistantMessages() []aop.MessageData {
+func (c *streamEventCollector) assistantMessages() []*aop.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []aop.MessageData
+	var out []*aop.Message
 	for _, m := range c.messages {
 		if m.Role == "assistant" {
 			out = append(out, m)
@@ -71,27 +73,27 @@ func TestStreamDeltasAndFinalMessageShareMessageID(t *testing.T) {
 	}
 
 	collector.mu.Lock()
-	deltas := append([]aop.MessageDeltaData(nil), collector.deltas...)
+	deltas := append([]*aop.MessageDelta(nil), collector.deltas...)
 	collector.mu.Unlock()
 	if len(deltas) != 4 {
 		t.Fatalf("deltas = %d, want 4", len(deltas))
 	}
-	messageID := deltas[0].MessageID
+	messageID := deltas[0].MessageId
 	if messageID == "" {
 		t.Fatal("delta has empty message_id")
 	}
 	for _, d := range deltas {
-		if d.MessageID != messageID {
-			t.Fatalf("delta message_id = %q, want stable %q", d.MessageID, messageID)
+		if d.MessageId != messageID {
+			t.Fatalf("delta message_id = %q, want stable %q", d.MessageId, messageID)
 		}
-		switch d.PartType {
-		case aop.PartReasoning:
-			if d.PartIndex != 0 {
-				t.Fatalf("reasoning delta part_index = %d, want 0", d.PartIndex)
+		switch d.Value.(type) {
+		case *aop.MessageDelta_Reasoning:
+			if d.ContentIndex != 0 {
+				t.Fatalf("reasoning delta content_index = %d, want 0", d.ContentIndex)
 			}
-		case aop.PartText:
-			if d.PartIndex != 1 {
-				t.Fatalf("text delta part_index = %d, want 1 (reasoning present)", d.PartIndex)
+		case *aop.MessageDelta_Text:
+			if d.ContentIndex != 1 {
+				t.Fatalf("text delta content_index = %d, want 1 (reasoning present)", d.ContentIndex)
 			}
 		}
 	}
@@ -100,13 +102,13 @@ func TestStreamDeltasAndFinalMessageShareMessageID(t *testing.T) {
 	if len(finals) != 1 {
 		t.Fatalf("assistant messages = %d, want 1", len(finals))
 	}
-	if finals[0].MessageID != messageID {
-		t.Fatalf("final message id = %q, want delta id %q", finals[0].MessageID, messageID)
+	if finals[0].Id != messageID {
+		t.Fatalf("final message id = %q, want delta id %q", finals[0].Id, messageID)
 	}
-	if len(finals[0].Parts) != 2 ||
-		finals[0].Parts[0].Type != aop.PartReasoning || finals[0].Parts[0].Text != "think-hard" ||
-		finals[0].Parts[1].Type != aop.PartText || finals[0].Parts[1].Text != "ans-wer" {
-		t.Fatalf("final parts = %+v", finals[0].Parts)
+	if len(finals[0].Content) != 2 ||
+		finals[0].Content[0].GetReasoning().GetText() != "think-hard" ||
+		finals[0].Content[1].GetText().GetText() != "ans-wer" {
+		t.Fatalf("final content = %+v", finals[0].Content)
 	}
 }
 
@@ -160,22 +162,68 @@ func TestMessageIDStableAcrossStreamRetry(t *testing.T) {
 	}
 
 	collector.mu.Lock()
-	deltas := append([]aop.MessageDeltaData(nil), collector.deltas...)
+	deltas := append([]*aop.MessageDelta(nil), collector.deltas...)
 	collector.mu.Unlock()
 	if len(deltas) == 0 {
 		t.Fatal("no deltas recorded")
 	}
-	messageID := deltas[0].MessageID
+	messageID := deltas[0].MessageId
 	for _, d := range deltas {
-		if d.MessageID != messageID {
-			t.Fatalf("delta id %q differs from %q after retry", d.MessageID, messageID)
+		if d.MessageId != messageID {
+			t.Fatalf("delta id %q differs from %q after retry", d.MessageId, messageID)
 		}
 	}
 	finals := collector.assistantMessages()
 	if len(finals) != 1 {
 		t.Fatalf("assistant messages = %d, want exactly 1 across retries", len(finals))
 	}
-	if finals[0].MessageID != messageID {
-		t.Fatalf("final message id = %q, want %q", finals[0].MessageID, messageID)
+	if finals[0].Id != messageID {
+		t.Fatalf("final message id = %q, want %q", finals[0].Id, messageID)
+	}
+}
+
+func TestStatusPreservesTypedExtensionNamespace(t *testing.T) {
+	bus := eventbus.New[*aop.Event]()
+	var emitted *aop.Event
+	bus.Subscribe(func(event *aop.Event) { emitted = event })
+	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0)
+	emitter.status(ext.CompactStateEnd, ext.CompactNamespace, &ext.CompactDetail{
+		TokensBefore: 1000,
+		TokensAfter:  400,
+		KeptMessages: 8,
+	})
+
+	if emitted == nil || emitted.GetStatus().GetState() != ext.CompactStateEnd {
+		t.Fatalf("status event = %+v", emitted)
+	}
+	detail, ok, err := ext.GetCompactDetail(emitted)
+	if err != nil || !ok || detail.TokensBefore != 1000 || detail.TokensAfter != 400 || detail.KeptMessages != 8 {
+		t.Fatalf("compact detail = %+v, ok=%v, err=%v", detail, ok, err)
+	}
+	if emitted.GetStatus().Detail != nil {
+		t.Fatal("status detail must have one canonical representation in event.extensions")
+	}
+}
+
+func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
+	bus := eventbus.New[*aop.Event]()
+	var emitted *aop.Event
+	bus.Subscribe(func(event *aop.Event) { emitted = event })
+	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0).turn("turn-1")
+	emitter.toolResult("call-1", "scan", []*aop.Content{
+		aop.Text("done"),
+		aop.Image("image/png", []byte("image")),
+	}, map[string]any{"ports": 3}, true, true, 12)
+
+	result := emitted.GetToolResult()
+	if result == nil || result.CallId != "call-1" || result.Name != "scan" || !result.Terminate || !result.IsError || result.DurationMs != 12 {
+		t.Fatalf("tool result = %+v", result)
+	}
+	if len(result.Output) != 2 || result.Output[0].GetText().GetText() != "done" || string(result.Output[1].GetMedia().GetResource().GetData()) != "image" {
+		t.Fatalf("tool result output = %+v", result.Output)
+	}
+	detail, err := aop.DecodeJSON[map[string]int](result.Detail)
+	if err != nil || detail["ports"] != 3 {
+		t.Fatalf("tool result detail = %+v, err=%v", detail, err)
 	}
 }

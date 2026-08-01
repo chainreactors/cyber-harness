@@ -209,6 +209,7 @@ llm:
 | [Scan 模式详解](docs/scan.md) | 扫描流水线、AI 增强、输出格式 |
 | [Agent 模式详解](docs/agent.md) | Agent 工具集、Goal Evaluation、REPL |
 | [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
+| [Web 自然语言 API](docs/web-chat-api.md) | API 接口、Go 接入示例和调试排障 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
 | [Changelog](docs/changelog.md) | 版本变更记录 |
 

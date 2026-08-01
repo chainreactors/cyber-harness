@@ -3,20 +3,19 @@ package runner
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// RunStdio hosts the same explicit Session/Run/Command protocol used by the
-// WebSocket adapter. Both stdin and stdout are webproto.Message JSONL streams.
+// RunStdio carries generated ServerFrame/AgentFrame messages as protobuf JSONL.
 func RunStdio(ctx context.Context, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) error {
 	host := newStdioHost(ctx, option, logger, output)
 	if err := host.init(); err != nil {
@@ -46,7 +45,7 @@ type stdioHost struct {
 	logger telemetry.Logger
 
 	encMu  sync.Mutex
-	enc    *json.Encoder
+	output io.Writer
 	encErr error
 
 	rt *AgentRuntime
@@ -54,7 +53,7 @@ type stdioHost struct {
 
 func newStdioHost(ctx context.Context, option *cfg.Option, logger telemetry.Logger, output io.Writer) *stdioHost {
 	return &stdioHost{
-		ctx: ctx, option: option, logger: logger, enc: json.NewEncoder(output),
+		ctx: ctx, option: option, logger: logger, output: output,
 	}
 }
 
@@ -64,11 +63,8 @@ func (h *stdioHost) init() error {
 		return err
 	}
 	h.rt = rt
-	rt.Subscribe(func(event aop.Event) {
-		payload, err := json.Marshal(event)
-		if err == nil {
-			_ = h.emit(webproto.Message{Type: webproto.TypeAOP, TurnID: event.TurnID, Payload: payload})
-		}
+	rt.Subscribe(func(event *aop.Event) {
+		_ = h.emit(&transport.AgentFrame{CorrelationId: event.TurnId, Payload: &transport.AgentFrame_Event{Event: event}})
 	})
 	return nil
 }
@@ -79,22 +75,26 @@ func (h *stdioHost) close() {
 	}
 }
 
-func (h *stdioHost) emit(message webproto.Message) error {
+func (h *stdioHost) emit(message *transport.AgentFrame) error {
 	h.encMu.Lock()
 	defer h.encMu.Unlock()
 	if h.encErr != nil {
 		return h.encErr
 	}
-	if err := h.enc.Encode(message); err != nil {
+	data, err := protojson.Marshal(message)
+	if err == nil {
+		data = append(data, '\n')
+		_, err = h.output.Write(data)
+	}
+	if err != nil {
 		h.encErr = err
 		return err
 	}
 	return nil
 }
 
-func (h *stdioHost) emitError(turnID string, err error) {
-	payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
-	_ = h.emit(webproto.Message{Type: webproto.TypeError, TurnID: turnID, Payload: payload})
+func (h *stdioHost) emitError(correlationID string, err error) {
+	_ = h.emit(operationError(correlationID, correlationID, err.Error()))
 }
 
 func (h *stdioHost) err() error {
@@ -107,13 +107,13 @@ func (h *stdioHost) err() error {
 }
 
 func (h *stdioHost) accept(line string) {
-	var message webproto.Message
-	if err := json.Unmarshal([]byte(line), &message); err != nil {
+	message := new(transport.ServerFrame)
+	if err := protojson.Unmarshal([]byte(line), message); err != nil {
 		h.emitError("", fmt.Errorf("decode frame: %w", err))
 		return
 	}
-	if h.rt == nil || !h.rt.HandleProtocol(h.ctx, message, func(response webproto.Message) { _ = h.emit(response) }) {
-		h.emitError(message.TurnID, fmt.Errorf("unsupported frame type %q", message.Type))
+	if h.rt == nil || !h.rt.HandleServerFrame(h.ctx, message, func(response *transport.AgentFrame) { _ = h.emit(response) }) {
+		h.emitError(message.CorrelationId, fmt.Errorf("unsupported server frame"))
 	}
 }
 

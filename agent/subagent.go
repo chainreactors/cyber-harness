@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
@@ -164,20 +164,20 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 	}
 }
 
-func delegationFromToolCall(toolName string, args any) (delegation.DelegationDetail, bool) {
+func delegationFromToolCall(toolName string, args any) (ext.DelegationDetail, bool) {
 	if toolName != "subagent" {
-		return delegation.DelegationDetail{}, false
+		return ext.DelegationDetail{}, false
 	}
 	values, ok := args.(map[string]any)
 	if !ok {
-		return delegation.DelegationDetail{}, false
+		return ext.DelegationDetail{}, false
 	}
 	if action, _ := values["action"].(string); action != "" && action != "create" {
-		return delegation.DelegationDetail{}, false
+		return ext.DelegationDetail{}, false
 	}
 	task, _ := values["prompt"].(string)
 	if strings.TrimSpace(task) == "" {
-		return delegation.DelegationDetail{}, false
+		return ext.DelegationDetail{}, false
 	}
 	name, _ := values["name"].(string)
 	typeName, _ := values["type"].(string)
@@ -185,22 +185,22 @@ func delegationFromToolCall(toolName string, args any) (delegation.DelegationDet
 	return delegationDetail(task, typeName, name, mode), true
 }
 
-func delegationDetail(task, typeName, name, mode string) delegation.DelegationDetail {
-	detail := delegation.DelegationDetail{
+func delegationDetail(task, typeName, name, mode string) ext.DelegationDetail {
+	detail := ext.DelegationDetail{
 		Task:      task,
 		AgentName: name,
 		AgentType: typeName,
 	}
 	switch mode {
 	case "sync":
-		detail.RunMode = delegation.DelegationDetailRunModeForeground
-		detail.ContextMode = delegation.DelegationDetailContextModeFresh
+		detail.RunMode = ext.DelegationRunForeground
+		detail.ContextMode = ext.DelegationContextFresh
 	case "async":
-		detail.RunMode = delegation.DelegationDetailRunModeBackground
-		detail.ContextMode = delegation.DelegationDetailContextModeFresh
+		detail.RunMode = ext.DelegationRunBackground
+		detail.ContextMode = ext.DelegationContextFresh
 	case "fork":
-		detail.RunMode = delegation.DelegationDetailRunModeBackground
-		detail.ContextMode = delegation.DelegationDetailContextModeFork
+		detail.RunMode = ext.DelegationRunBackground
+		detail.ContextMode = ext.DelegationContextFork
 	}
 	return detail
 }

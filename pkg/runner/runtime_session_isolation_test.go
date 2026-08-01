@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -21,8 +21,8 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 	if reg == nil {
 		reg = commands.NewRegistry()
 	}
-	publicBus := eventbus.New[aop.Event]()
-	kernelBus := eventbus.New[aop.Event]()
+	publicBus := eventbus.New[*aop.Event]()
+	kernelBus := eventbus.New[*aop.Event]()
 	events := newSessionEmitter(publicBus)
 	kernelBus.Subscribe(events.emit)
 	rt := &AgentRuntime{

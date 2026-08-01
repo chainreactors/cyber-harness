@@ -23,7 +23,7 @@ require (
 	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
 	github.com/chainreactors/tui/readline v0.0.0-20260723062039-ed89e758c21b
 	github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d
-	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260722180147-5b1816060721
 	github.com/chainreactors/utils/parsers v0.0.3
 	github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721
 	github.com/chainreactors/zombie v1.3.0
@@ -49,6 +49,13 @@ require (
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
+)
+
+require (
+	connectrpc.com/connect v1.20.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251222181119-0a764e51fe1b // indirect
+	google.golang.org/grpc v1.78.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 require (

@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/ioa/protocols"
 )
 
-func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
+func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[*aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
 	if bus == nil || client == nil || spaceName == "" {
 		return func() {}
 	}
@@ -31,16 +31,16 @@ func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[aop.Event
 		client:    client,
 		spaceName: spaceName,
 		logger:    logger,
-		events:    make(chan aop.Event, 256),
+		events:    make(chan *aop.Event, 256),
 		pending:   make(map[string]*handoffState),
 		bySession: make(map[string]string),
 	}
-	unsub := bus.Subscribe(func(event aop.Event) {
+	unsub := bus.Subscribe(func(event *aop.Event) {
 		select {
 		case r.events <- event:
 		case <-ctx.Done():
 		default:
-			r.logger.Warnf("ioa handoff queue full, dropping %s", event.Type)
+			r.logger.Warnf("ioa handoff queue full, dropping %s", aop.Kind(event))
 		}
 	})
 	go r.run(ctx)
@@ -66,7 +66,7 @@ type ioaHandoffRecorder struct {
 	client    protocols.ClientAPI
 	spaceName string
 	logger    telemetry.Logger
-	events    chan aop.Event
+	events    chan *aop.Event
 
 	mu        sync.Mutex
 	spaceID   string
@@ -80,24 +80,24 @@ func (r *ioaHandoffRecorder) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case event := <-r.events:
-			switch event.Type {
-			case aop.TypeSessionStart:
+			switch event.Payload.(type) {
+			case *aop.Event_SessionStarted:
 				r.onSessionStart(event)
-			case aop.TypeMessage:
+			case *aop.Event_Message:
 				r.onMessage(event)
-			case aop.TypeTurnEnd:
+			case *aop.Event_TurnEnded:
 				r.onTurnEnd(event)
 			}
 		}
 	}
 }
 
-func (r *ioaHandoffRecorder) onSessionStart(event aop.Event) {
-	data, err := aop.DecodeData[aop.SessionStartData](event)
-	if err != nil || data.ParentToolCallID == "" {
+func (r *ioaHandoffRecorder) onSessionStart(event *aop.Event) {
+	data := event.GetSessionStarted()
+	if data.ParentToolCallId == "" {
 		return
 	}
-	detail, ok, err := delegation.Get(event)
+	detail, ok, err := ext.GetDelegation(event)
 	if err != nil || !ok {
 		return
 	}
@@ -106,9 +106,9 @@ func (r *ioaHandoffRecorder) onSessionStart(event aop.Event) {
 		typeName:        detail.AgentType,
 		mode:            handoffMode(detail),
 		model:           data.Model,
-		parentSessionID: data.ParentSessionID,
-		toolCallID:      data.ParentToolCallID,
-		sessionID:       event.SessionID,
+		parentSessionID: data.ParentSessionId,
+		toolCallID:      data.ParentToolCallId,
+		sessionID:       event.SessionId,
 	}
 	title, message := formatSubAgentHandoff(true, state.name, "delegated", detail.Task, nil)
 	msgID, err := r.send("delegate", "delegated", state, title, message, "")
@@ -123,21 +123,21 @@ func (r *ioaHandoffRecorder) onSessionStart(event aop.Event) {
 	r.mu.Unlock()
 }
 
-func (r *ioaHandoffRecorder) onMessage(event aop.Event) {
+func (r *ioaHandoffRecorder) onMessage(event *aop.Event) {
 	r.mu.Lock()
-	toolCallID, ok := r.bySession[event.SessionID]
+	toolCallID, ok := r.bySession[event.SessionId]
 	r.mu.Unlock()
 	if !ok {
 		return
 	}
-	data, err := aop.DecodeData[aop.MessageData](event)
-	if err != nil || data.Role != "assistant" {
+	data := event.GetMessage()
+	if data.Role != "assistant" {
 		return
 	}
 	var sb strings.Builder
-	for _, part := range data.Parts {
-		if part.Type == aop.PartText {
-			sb.WriteString(part.Text)
+	for _, part := range data.Content {
+		if text := part.GetText().GetText(); text != "" {
+			sb.WriteString(text)
 		}
 	}
 	if sb.Len() == 0 {
@@ -150,24 +150,21 @@ func (r *ioaHandoffRecorder) onMessage(event aop.Event) {
 	r.mu.Unlock()
 }
 
-func (r *ioaHandoffRecorder) onTurnEnd(event aop.Event) {
+func (r *ioaHandoffRecorder) onTurnEnd(event *aop.Event) {
 	r.mu.Lock()
-	toolCallID, ok := r.bySession[event.SessionID]
+	toolCallID, ok := r.bySession[event.SessionId]
 	var state *handoffState
 	if ok {
 		state = r.pending[toolCallID]
 		delete(r.pending, toolCallID)
-		delete(r.bySession, event.SessionID)
+		delete(r.bySession, event.SessionId)
 	}
 	r.mu.Unlock()
 	if state == nil {
 		return
 	}
-	data, err := aop.DecodeData[aop.TurnEndData](event)
-	if err != nil {
-		return
-	}
-	status := data.Stop
+	data := event.GetTurnEnded()
+	status := data.StopReason
 	if status == string(agent.StopReasonError) {
 		status = "failed"
 	}
@@ -175,8 +172,8 @@ func (r *ioaHandoffRecorder) onTurnEnd(event aop.Event) {
 		status = "completed"
 	}
 	var runErr error
-	if data.Error != "" {
-		runErr = errors.New(data.Error)
+	if data.Error != nil {
+		runErr = errors.New(data.Error.Message)
 	}
 	title, message := formatSubAgentHandoff(false, state.name, status, state.output, runErr)
 	if _, err := r.send("return", status, state, title, message, state.msgID); err != nil {
@@ -235,11 +232,11 @@ func (r *ioaHandoffRecorder) resolveSpace(ctx context.Context) (string, error) {
 	return r.spaceID, nil
 }
 
-func handoffMode(detail delegation.DelegationDetail) string {
-	if detail.ContextMode == delegation.DelegationDetailContextModeFork {
+func handoffMode(detail ext.DelegationDetail) string {
+	if detail.ContextMode == ext.DelegationContextFork {
 		return "fork"
 	}
-	if detail.RunMode == delegation.DelegationDetailRunModeForeground {
+	if detail.RunMode == ext.DelegationRunForeground {
 		return "sync"
 	}
 	return "async"

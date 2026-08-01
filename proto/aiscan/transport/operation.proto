@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package aiscan.transport;
+
+option go_package = "github.com/chainreactors/aiscan/aop/aiscan/transport;transport";
+
+message CommandRequest {
+  string task_id = 1;
+  string session_id = 2;
+  string line = 3;
+}
+
+// RunOptions carries AIScan-only turn behavior in the
+// io.chainreactors.aiscan.run AOP extension.
+message RunOptions {
+  string eval_criteria = 1;
+  uint32 eval_max_rounds = 2;
+}
+
+message CommandResult {
+  string task_id = 1;
+  bytes result = 2;
+  string media_type = 3;
+}
+
+message FileReadRequest {
+  string task_id = 1;
+  string path = 2;
+}
+
+message FileWriteRequest {
+  string task_id = 1;
+  string path = 2;
+  bytes data = 3;
+}
+
+message FileListRequest {
+  string task_id = 1;
+  string path = 2;
+}
+
+message FileMkdirRequest {
+  string task_id = 1;
+  string path = 2;
+}
+
+message FileUploadRequest {
+  string task_id = 1;
+  string session_id = 2;
+  string filename = 3;
+  string media_type = 4;
+  bytes data = 5;
+}
+
+message FileEntry {
+  string name = 1;
+  bool is_directory = 2;
+  int64 size = 3;
+}
+
+message FileResult {
+  string task_id = 1;
+  string path = 2;
+  string filename = 3;
+  int64 size = 4;
+  bytes data = 5;
+  repeated FileEntry entries = 6;
+}
+
+enum ExecStream {
+  EXEC_STREAM_UNSPECIFIED = 0;
+  EXEC_STREAM_STDOUT = 1;
+  EXEC_STREAM_STDERR = 2;
+}
+
+message ExecRequest {
+  string task_id = 1;
+  string command = 2;
+  string cwd = 3;
+  uint32 timeout_seconds = 4;
+  map<string, string> env = 5;
+}
+
+message ExecOutput {
+  string task_id = 1;
+  ExecStream stream = 2;
+  bytes data = 3;
+}
+
+message ExecResult {
+  string task_id = 1;
+  int32 exit_code = 2;
+  string state = 3;
+  string kill_cause = 4;
+}
+
+message CancelOperation {
+  string task_id = 1;
+}
+
+message OperationError {
+  string task_id = 1;
+  string code = 2;
+  string message = 3;
+  bool retryable = 4;
+}
+
+message ReloadConfig {}
+
+message ConfigReloadResult {
+  bool ok = 1;
+  string provider = 2;
+  string model = 3;
+  string error = 4;
+}

@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	config "github.com/chainreactors/aiscan/core/config"
 )
 
 // ValidateLLMConfig accepts zero limits as "use the model default" and rejects
 // incomplete profiles before an invalid configuration can be persisted.
-func ValidateLLMConfig(cfg webproto.LLMConfig) error {
+func ValidateLLMConfig(cfg config.LLMConfig) error {
 	for i, profile := range cfg.Providers {
-		profile = webproto.NormalizeLLMProvider(profile)
+		profile = config.NormalizeLLMProvider(profile)
 		if !agentprovider.IsSupportedProvider(profile.Provider) {
 			return fmt.Errorf("LLM provider %q is unsupported: use openai or anthropic", profile.Provider)
 		}

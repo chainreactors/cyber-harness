@@ -9,19 +9,19 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent/probe"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	proto "github.com/chainreactors/aiscan/core/config"
 )
 
 // fakeConfigStore is a minimal in-memory ConfigStore for probe tests.
 type fakeConfigStore struct {
-	cfg webproto.DistributeConfig
+	cfg proto.DistributeConfig
 }
 
-func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, webproto.DistributeConfig, error) {
+func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, proto.DistributeConfig, error) {
 	return "config.yaml", true, f.cfg, nil
 }
 
-func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg webproto.DistributeConfig) (*PreparedConfig, error) {
+func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg proto.DistributeConfig) (*PreparedConfig, error) {
 	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
 }
 
@@ -97,7 +97,7 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
+	store.cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
@@ -187,7 +187,7 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
+	store.cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
@@ -213,7 +213,7 @@ func TestListLLMModelsUsesSelectedProfileStoredKey(t *testing.T) {
 
 	store := &fakeConfigStore{}
 	store.cfg.LLM.ActiveProfile = "primary"
-	store.cfg.LLM.Providers = []webproto.LLMProviderConfig{
+	store.cfg.LLM.Providers = []proto.LLMProviderConfig{
 		{ID: "primary", Provider: "openai", APIKey: "sk-primary"},
 		{ID: "secondary", Provider: "openai", APIKey: "sk-secondary"},
 	}

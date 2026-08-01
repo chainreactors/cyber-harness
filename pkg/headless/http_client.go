@@ -26,14 +26,14 @@ func newHTTPClient(proxy string, timeout time.Duration) *http.Client {
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS10,
 		},
-		DialContext:           (&net.Dialer{Timeout: timeout}).DialContext,
-		MaxIdleConns:          500,
-		MaxIdleConnsPerHost:   500,
-		MaxConnsPerHost:       500,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:  10 * time.Second,
-		DisableKeepAlives:     false,
-		ForceAttemptHTTP2:     true,
+		DialContext:         (&net.Dialer{Timeout: timeout}).DialContext,
+		MaxIdleConns:        500,
+		MaxIdleConnsPerHost: 500,
+		MaxConnsPerHost:     500,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DisableKeepAlives:   false,
+		ForceAttemptHTTP2:   true,
 	}
 
 	if proxy != "" {

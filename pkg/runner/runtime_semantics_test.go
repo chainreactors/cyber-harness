@@ -10,11 +10,12 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
-	xcommand "github.com/chainreactors/aiscan/core/aop/x/command"
+	aop "github.com/chainreactors/aiscan/aop"
+	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"google.golang.org/protobuf/proto"
 )
 
 type runtimeSemanticProvider struct {
@@ -55,15 +56,15 @@ func (p *runtimeSemanticProvider) callCount() int {
 func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, provider)
-	var all []aop.Event
-	unsubscribe := rt.Subscribe(func(event aop.Event) { all = append(all, event) })
+	var all []*aop.Event
+	unsubscribe := rt.Subscribe(func(event *aop.Event) { all = append(all, event) })
 	defer unsubscribe()
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "hello"}}})
+	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Content: []*aop.Content{aop.Text("hello")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,25 +75,25 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var turnEvents []aop.Event
+	var turnEvents []*aop.Event
 	for _, event := range all {
-		if event.TurnID != "turn-1" {
+		if event.TurnId != "turn-1" {
 			continue
 		}
 		turnEvents = append(turnEvents, event)
-		if event.SessionID != "session-1" || event.TurnID != "turn-1" {
+		if event.SessionId != "session-1" || event.TurnId != "turn-1" {
 			t.Fatalf("run event identity = %+v", event)
 		}
 	}
-	if len(turnEvents) < 2 || turnEvents[0].Type != aop.TypeTurnStart || turnEvents[len(turnEvents)-1].Type != aop.TypeTurnEnd {
+	if len(turnEvents) < 2 || turnEvents[0].GetTurnStarted() == nil || turnEvents[len(turnEvents)-1].GetTurnEnded() == nil {
 		t.Fatalf("turn events = %+v", turnEvents)
 	}
 	starts, ends := 0, 0
 	for _, event := range turnEvents {
-		if event.Type == aop.TypeTurnStart {
+		if event.GetTurnStarted() != nil {
 			starts++
 		}
-		if event.Type == aop.TypeTurnEnd {
+		if event.GetTurnEnded() != nil {
 			ends++
 		}
 	}
@@ -102,8 +103,49 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	if err := rt.CloseSession(context.Background(), "session-1", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if all[0].Type != aop.TypeSessionStart || all[len(all)-1].Type != aop.TypeSessionEnd {
+	if all[0].GetSessionStarted() == nil || all[len(all)-1].GetSessionEnded() == nil {
 		t.Fatalf("session lifecycle = %+v", all)
+	}
+}
+
+func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
+	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
+	events := make(chan *aop.Event, 16)
+	unsubscribe := rt.Subscribe(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) })
+	defer unsubscribe()
+
+	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{RequestId: "open-1", SessionId: "session-1"})
+	if opened.GetAccepted() == nil {
+		t.Fatalf("OpenAOPSession = %v", opened)
+	}
+	input := &aop.Message{
+		Id: "client-message-1", Role: "user", Name: "operator",
+		Content: []*aop.Content{aop.Text("preserve my identity")},
+	}
+	run := rt.RunAOPTurn(context.Background(), &aop.RunTurnRequest{
+		RequestId: "run-1", SessionId: "session-1", TurnId: "turn-1", Input: input,
+	})
+	if run.GetAccepted() == nil {
+		t.Fatalf("RunAOPTurn = %v", run)
+	}
+
+	var emitted *aop.Message
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if message := event.GetMessage(); message != nil && message.Id == input.Id {
+				emitted = message
+			}
+			if event.TurnId == "turn-1" && event.GetTurnEnded() != nil {
+				if !proto.Equal(emitted, input) {
+					t.Fatalf("emitted input = %v, want %v", emitted, input)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("turn did not finish")
+		}
 	}
 }
 
@@ -136,8 +178,8 @@ func TestSessionContextCancellationStopsActiveRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := session.Run(context.Background(), RunInput{
-		TurnID: "turn-1",
-		Parts:  []aop.MessagePart{{Type: aop.PartText, Text: "hello"}},
+		TurnID:  "turn-1",
+		Content: []*aop.Content{aop.Text("hello")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -163,9 +205,9 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := session.MessagesSnapshot()
-	var commandEvent aop.Event
-	rt.Subscribe(func(event aop.Event) {
-		if event.Type == aop.TypeMessage && event.TurnID == "" {
+	var commandEvent *aop.Event
+	rt.Subscribe(func(event *aop.Event) {
+		if event.GetMessage() != nil && event.TurnId == "" {
 			commandEvent = event
 		}
 	})
@@ -173,13 +215,13 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Parts) != 1 || !strings.Contains(result.Parts[0].Text, "COMMAND_OK") {
+	if len(result.Content) != 1 || !strings.Contains(result.Content[0].GetText().GetText(), "COMMAND_OK") {
 		t.Fatalf("command result = %+v", result)
 	}
-	if commandEvent.Type != aop.TypeMessage || commandEvent.TurnID != "" {
+	if commandEvent == nil || commandEvent.GetMessage() == nil || commandEvent.TurnId != "" {
 		t.Fatalf("command AOP event = %+v", commandEvent)
 	}
-	detail, ok, err := xcommand.GetDetail(commandEvent)
+	detail, ok, err := ext.GetCommandDetail(commandEvent)
 	if err != nil || !ok || detail.Line != "!printf COMMAND_OK" || detail.Presentation != CommandPresentationPreformatted {
 		t.Fatalf("command extension = %+v ok=%v err=%v", detail, ok, err)
 	}
@@ -192,13 +234,13 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newBareRuntime(t, nil, provider)
-	var events []aop.Event
-	rt.Subscribe(func(event aop.Event) { events = append(events, event) })
+	var events []*aop.Event
+	rt.Subscribe(func(event *aop.Event) { events = append(events, event) })
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Parts: []aop.MessagePart{{Type: aop.PartText, Text: "start"}}})
+	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Content: []*aop.Content{aop.Text("start")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,13 +261,13 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	}
 	starts, ends := 0, 0
 	for _, event := range events {
-		if event.TurnID != "turn-1" {
+		if event.TurnId != "turn-1" {
 			continue
 		}
-		if event.Type == aop.TypeTurnStart {
+		if event.GetTurnStarted() != nil {
 			starts++
 		}
-		if event.Type == aop.TypeTurnEnd {
+		if event.GetTurnEnded() != nil {
 			ends++
 		}
 	}
@@ -241,9 +283,9 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ended := make(chan aop.Event, 1)
-	rt.Subscribe(func(event aop.Event) {
-		if event.SessionID == "session-1" && event.Type == aop.TypeTurnEnd {
+	ended := make(chan *aop.Event, 1)
+	rt.Subscribe(func(event *aop.Event) {
+		if event.SessionId == "session-1" && event.GetTurnEnded() != nil {
 			ended <- event
 		}
 	})
@@ -252,7 +294,7 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 	}
 	select {
 	case event := <-ended:
-		if event.TurnID == "" {
+		if event.TurnId == "" {
 			t.Fatal("automatic Run has no turn_id")
 		}
 	case <-time.After(time.Second):

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
@@ -228,7 +228,9 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		return ChatMessage{}, nil, fmt.Errorf("cannot create LLM request at turn %d: %w", turn, err)
 	}
 	req.MaxTokens = maxTokens
-	em.status(aop.StatusLLMRequest, aop.NSAOP, aop.LLMRequest{Model: req.Model, Messages: len(req.Messages), MaxTokens: req.MaxTokens, Stream: cfg.Stream})
+	em.status(statusLLMRequest, aopStatusNamespace, &transport.LLMRequestDetail{
+		Model: req.Model, Messages: uint32(len(req.Messages)), MaxTokens: uint32(max(req.MaxTokens, 0)), Stream: cfg.Stream,
+	})
 	if cfg.Stream {
 		if streaming, ok := cfg.Provider.(StreamingProvider); ok {
 			return streamAssistantMessageWithUsage(ctx, streaming, req, em, cfg.Logger, turn, messageID)
@@ -315,14 +317,14 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 			builder.Apply(event.Delta)
 			if event.Delta.ReasoningContent != nil && *event.Delta.ReasoningContent != "" {
 				seenReasoning = true
-				em.messageDelta(messageID, 0, aop.PartReasoning, *event.Delta.ReasoningContent)
+				em.messageDelta(messageID, 0, partReasoning, *event.Delta.ReasoningContent)
 			}
 			if event.Delta.Content != nil && *event.Delta.Content != "" {
 				textIndex := 0
 				if seenReasoning {
 					textIndex = 1
 				}
-				em.messageDelta(messageID, textIndex, aop.PartText, *event.Delta.Content)
+				em.messageDelta(messageID, textIndex, partText, *event.Delta.Content)
 			}
 		}
 	}

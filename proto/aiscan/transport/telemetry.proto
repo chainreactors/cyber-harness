@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package aiscan.transport;
+
+import "aop/value.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/chainreactors/aiscan/aop/aiscan/transport;transport";
+
+message AgentRuntimeInfo {
+  string hostname = 1;
+  string username = 2;
+  string working_dir = 3;
+  string os = 4;
+  string arch = 5;
+  int32 pid = 6;
+  repeated string capabilities = 7;
+  aop.EncodedValue metadata = 8;
+}
+
+message AgentStatus {
+  string provider = 1;
+  string model = 2;
+  string space = 3;
+  bool bound = 4;
+  string config_error = 5;
+}
+
+message AgentStats {
+  uint64 turns = 1;
+  uint64 tool_calls = 2;
+  uint64 running_tools = 3;
+  uint64 input_tokens = 4;
+  uint64 output_tokens = 5;
+  uint64 total_tokens = 6;
+  uint64 cache_read_tokens = 7;
+  uint64 cache_write_tokens = 8;
+  uint64 assets = 9;
+  uint64 loots = 10;
+  string last_event = 11;
+}
+
+message ToolDefinition {
+  string type = 1;
+  string name = 2;
+  string description = 3;
+  aop.EncodedValue input_schema = 4;
+}
+
+message CommandSpec {
+  string name = 1;
+  repeated string aliases = 2;
+  string usage = 3;
+  string description = 4;
+}
+
+message ToolTelemetry {
+  string tool = 1;
+  string kind = 2;
+  string target = 3;
+  aop.EncodedValue data = 4;
+  string call_id = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message ScoNodes {
+  string call_id = 1;
+  repeated bytes nodes = 2;
+}

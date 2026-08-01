@@ -2,63 +2,106 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	aop "github.com/chainreactors/aiscan/aop"
+	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
-func TestProtocolErrorsKeepDistinctCorrelationIDs(t *testing.T) {
+func TestServerFrameErrorsKeepDistinctCorrelationIDs(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 
-	var runError webproto.Message
-	if !rt.HandleProtocol(context.Background(), webproto.Message{
-		Type: webproto.TypeRun, TurnID: "turn-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { runError = message }) {
+	var runResponse *transport.AgentFrame
+	if !rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
+		CorrelationId: "turn-correlation",
+		Payload:       &transport.ServerFrame_RunTurn{RunTurn: &aop.RunTurnRequest{RequestId: "run-1"}},
+	}, func(frame *transport.AgentFrame) { runResponse = frame }) {
 		t.Fatal("run frame was not handled")
 	}
-	if runError.Type != webproto.TypeError || runError.TurnID != "turn-1" || runError.TaskID != "" {
-		t.Fatalf("run error correlation = %+v", runError)
+	if runResponse.CorrelationId != "turn-correlation" || runResponse.GetRunTurn().GetRejected() == nil {
+		t.Fatalf("run response = %+v", runResponse)
 	}
 
-	var commandError webproto.Message
-	if !rt.HandleProtocol(context.Background(), webproto.Message{
-		Type: webproto.TypeCommand, TaskID: "command-1", Payload: json.RawMessage(`{`),
-	}, func(message webproto.Message) { commandError = message }) {
+	var commandResponse *transport.AgentFrame
+	if !rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
+		CorrelationId: "command-correlation",
+		Payload: &transport.ServerFrame_Command{Command: &transport.CommandRequest{
+			TaskId: "command-1",
+		}},
+	}, func(frame *transport.AgentFrame) { commandResponse = frame }) {
 		t.Fatal("command frame was not handled")
 	}
-	if commandError.Type != webproto.TypeError || commandError.TaskID != "command-1" || commandError.TurnID != "" {
-		t.Fatalf("command error correlation = %+v", commandError)
+	if commandResponse.CorrelationId != "command-correlation" || commandResponse.GetOperationError().GetTaskId() != "command-1" {
+		t.Fatalf("command response = %+v", commandResponse)
 	}
 }
 
-func TestProtocolRequiresTurnID(t *testing.T) {
+func TestServerFrameRequiresTurnID(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	var response webproto.Message
-	rt.HandleProtocol(context.Background(), webproto.Message{
-		Type: webproto.TypeRun, Payload: webproto.MustJSON(webproto.RunPayload{SessionID: "session-1"}),
-	}, func(message webproto.Message) { response = message })
-	var payload webproto.ErrorPayload
-	_ = json.Unmarshal(response.Payload, &payload)
-	if response.Type != webproto.TypeError || !strings.Contains(payload.Message, "turn_id is required") {
-		t.Fatalf("response = %+v payload=%+v", response, payload)
+	var response *transport.AgentFrame
+	rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
+		Payload: &transport.ServerFrame_RunTurn{RunTurn: &aop.RunTurnRequest{
+			RequestId: "run-1", SessionId: "session-1", Input: &aop.Message{Role: "user"},
+		}},
+	}, func(frame *transport.AgentFrame) { response = frame })
+	rejected := response.GetRunTurn().GetRejected()
+	if rejected == nil || !strings.Contains(rejected.Message, "turn_id") {
+		t.Fatalf("response = %+v", response)
 	}
 }
 
-func TestProtocolSessionOpenIsIdempotent(t *testing.T) {
+func TestServerFrameSessionOpenIsIdempotent(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	request := webproto.Message{
-		Type:    webproto.TypeSessionOpen,
-		Payload: webproto.MustJSON(webproto.SessionOpenPayload{SessionID: "session-1"}),
+	request := &transport.ServerFrame{
+		CorrelationId: "open-1",
+		Payload: &transport.ServerFrame_OpenSession{OpenSession: &aop.OpenSessionRequest{
+			RequestId: "open-1", SessionId: "session-1",
+		}},
 	}
 	for i := 0; i < 2; i++ {
-		var response webproto.Message
-		if !rt.HandleProtocol(context.Background(), request, func(message webproto.Message) { response = message }) {
-			t.Fatal("session.open was not handled")
+		var response *transport.AgentFrame
+		if !rt.HandleServerFrame(context.Background(), request, func(frame *transport.AgentFrame) { response = frame }) {
+			t.Fatal("session open was not handled")
 		}
-		if response.Type != webproto.TypeSessionOpened {
+		if response.GetOpenSession().GetAccepted().GetId() != "session-1" {
 			t.Fatalf("open %d response = %+v", i, response)
 		}
+	}
+}
+
+func TestCancelAOPTurnRequiresMatchingSession(t *testing.T) {
+	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
+	rt := newBareRuntime(t, nil, provider)
+	defer close(provider.release)
+	if response := rt.OpenAOPSession(&aop.OpenSessionRequest{SessionId: "session-1"}); response.GetAccepted() == nil {
+		t.Fatalf("open = %v", response)
+	}
+	run := rt.RunAOPTurn(context.Background(), &aop.RunTurnRequest{
+		SessionId: "session-1", TurnId: "turn-1",
+		Input: &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: "hello"}}}}},
+	})
+	if run.GetAccepted() == nil {
+		t.Fatalf("run = %v", run)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("run did not start")
+	}
+	wrong := rt.CancelAOPTurn(&aop.CancelTurnRequest{SessionId: "session-2", TurnId: "turn-1"})
+	if wrong.GetRejected().GetCode() != "NOT_FOUND" {
+		t.Fatalf("wrong-session cancel = %v", wrong)
+	}
+	rt.mu.RLock()
+	stillActive := rt.runs["turn-1"] != nil
+	rt.mu.RUnlock()
+	if !stillActive {
+		t.Fatal("wrong-session cancel stopped the turn")
+	}
+	matched := rt.CancelAOPTurn(&aop.CancelTurnRequest{SessionId: "session-1", TurnId: "turn-1"})
+	if matched.GetAccepted().GetTurnId() != "turn-1" {
+		t.Fatalf("matching cancel = %v", matched)
 	}
 }

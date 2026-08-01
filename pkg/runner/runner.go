@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -35,8 +35,8 @@ type AgentRuntime struct {
 	systemPrompt   string
 	option         *cfg.Option
 	config         agent.Config
-	bus            *eventbus.Bus[aop.Event]
-	kernelBus      *eventbus.Bus[aop.Event]
+	bus            *eventbus.Bus[*aop.Event]
+	kernelBus      *eventbus.Bus[*aop.Event]
 	sessionEvents  *sessionEmitter
 	output         *tui.AgentOutput
 	configFile     string
@@ -192,12 +192,12 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		}
 	}
 
-	publicBus := eventbus.New[aop.Event]()
+	publicBus := eventbus.New[*aop.Event]()
 	if rt.output != nil {
 		publicBus.Subscribe(rt.output.HandleEvent)
 	}
 	rt.bus = publicBus
-	rt.kernelBus = eventbus.New[aop.Event]()
+	rt.kernelBus = eventbus.New[*aop.Event]()
 	rt.sessionEvents = newSessionEmitter(publicBus)
 	rt.kernelBus.Subscribe(rt.sessionEvents.emit)
 
@@ -219,15 +219,16 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	}
 
 	rt.config = agent.Config{
-		Provider:       rt.app.Provider,
-		Tools:          rt.app.Commands,
-		Model:          rt.app.ProviderConfig.Model,
-		MaxTokens:      rt.app.ProviderConfig.MaxTokens,
-		ContextWindow:  rt.app.ProviderConfig.ContextWindow,
-		Logger:         logger,
-		CacheRetention: agent.CacheShort,
-		Bus:            rt.kernelBus,
-		Hooks:          rt.app.Hooks,
+		Provider:              rt.app.Provider,
+		Tools:                 rt.app.Commands,
+		Model:                 rt.app.ProviderConfig.Model,
+		MaxTokens:             rt.app.ProviderConfig.MaxTokens,
+		ContextWindow:         rt.app.ProviderConfig.ContextWindow,
+		Logger:                logger,
+		CacheRetention:        agent.CacheShort,
+		Bus:                   rt.kernelBus,
+		Hooks:                 rt.app.Hooks,
+		CaptureProviderFrames: option.CaptureProviderFrames,
 	}
 
 	if option.SaveSession {
@@ -471,7 +472,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 	run, err := session.Run(ctx, RunInput{
-		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: task}},
+		Content:  []*aop.Content{aop.Text(task)},
 		MaxTurns: rt.config.MaxTurns, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 	if err != nil {
