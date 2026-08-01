@@ -70,6 +70,8 @@ type neutronResult struct {
 	Tags      []string `json:"tags,omitempty"`
 	Fingers   []string `json:"fingers,omitempty"`
 	Extracts  []string `json:"extracts,omitempty"`
+	Request   string   `json:"request,omitempty"`
+	Response  string   `json:"response,omitempty"`
 	Error     string   `json:"error,omitempty"`
 }
 
@@ -444,6 +446,11 @@ func neutronResultFromExecution(target string, result *sdkneutron.ExecuteResult)
 	}
 	if opResult := result.Value(); opResult != nil {
 		record.Extracts = append([]string(nil), opResult.OutputExtracts()...)
+		// The engine captures the exchange (protocols/http/request.go sets these
+		// on the operator result); dropping it here left every consumer unable to
+		// show what was actually sent, so a match had no reviewable evidence.
+		record.Request = opResult.Request
+		record.Response = opResult.Response
 	}
 	if err := result.Error(); err != nil {
 		record.Error = err.Error()
