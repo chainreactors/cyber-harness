@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 
 func TestNormalizeNucleiStyleArgs(t *testing.T) {
@@ -166,4 +167,31 @@ func templateIDs(items []*templates.Template) []string {
 		}
 	}
 	return out
+}
+
+func TestNeutronResultFromExecutionCarriesExchange(t *testing.T) {
+	op := &operators.Result{
+		Request:  "GET /am/version HTTP/1.1\r\nHost: example.test\r\n\r\n",
+		Response: "HTTP/1.1 200 OK\r\n\r\nidentifier=3.3M2.0",
+	}
+	op.Matched = true
+	record := neutronResultFromExecution(
+		"https://example.test",
+		&sdkneutron.ExecuteResult{TypedResult: sdktypes.NewResult(true, nil, op)},
+	)
+	if record.Request != op.Request {
+		t.Fatalf("request not carried through: got %q, want %q", record.Request, op.Request)
+	}
+	if record.Response != op.Response {
+		t.Fatalf("response not carried through: got %q, want %q", record.Response, op.Response)
+	}
+
+	// Consumers read the JSON, not the struct: a missing tag is the same outage.
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(formatNeutronResult(record, true)), &decoded); err != nil {
+		t.Fatalf("decode neutron JSON: %v", err)
+	}
+	if decoded["request"] != op.Request || decoded["response"] != op.Response {
+		t.Fatalf("exchange missing from JSON output: %#v", decoded)
+	}
 }
