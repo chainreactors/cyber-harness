@@ -6,9 +6,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -71,6 +73,52 @@ type StatusReader interface {
 	Status() *types.SystemStatus
 }
 
+type SessionService interface {
+	ListSessions(context.Context, *types.ListSessionsRequest) (*types.ListSessionsResponse, error)
+	GetSession(context.Context, *types.GetSessionRequest) (*types.GetSessionResponse, error)
+	ResetSession(context.Context, *types.ResetSessionRequest) (*types.ResetSessionResponse, error)
+	DeleteSession(context.Context, *types.DeleteSessionRequest) (*types.DeleteSessionResponse, error)
+	ListCommands(context.Context, *types.ListCommandsRequest) (*types.ListCommandsResponse, error)
+	ListEvents(context.Context, *aop.ListEventsRequest) (*aop.ListEventsResponse, error)
+}
+
+type ScanService interface {
+	SubmitScan(context.Context, *types.SubmitScanRequest) (*types.SubmitScanResponse, error)
+	GetScan(context.Context, *types.GetScanRequest) (*types.GetScanResponse, error)
+	ListScans(context.Context, *types.ListScansRequest) (*types.ListScansResponse, error)
+	CancelScan(context.Context, *types.CancelScanRequest) (*types.CancelScanResponse, error)
+	GetScanReport(context.Context, *types.GetScanReportRequest) (*types.GetScanReportResponse, error)
+}
+
+type ConfigService interface {
+	GetConfig(context.Context, *types.GetConfigRequest) (*types.GetConfigResponse, error)
+	UpdateConfig(context.Context, *types.UpdateConfigRequest) (*types.UpdateConfigResponse, error)
+	ActivateProfile(context.Context, *types.ActivateProfileRequest) (*types.ActivateProfileResponse, error)
+	TestLLM(context.Context, *types.LLMProbeRequest) (*types.LLMProbeResult, error)
+	ListModels(context.Context, *types.LLMProbeRequest) (*types.ListModelsResult, error)
+	TestConnection(context.Context, *types.TestConnectionRequest) (*types.TestConnectionResponse, error)
+}
+
+type SCOService interface {
+	ListNodes(context.Context, *types.ListNodesRequest) (*types.ListNodesResponse, error)
+	GetNode(context.Context, *types.GetNodeRequest) (*types.GetNodeResponse, error)
+	GetStats(context.Context, *types.GetStatsRequest) (*types.GetStatsResponse, error)
+	DeleteNodes(context.Context, *types.DeleteNodesRequest) (*types.DeleteNodesResponse, error)
+	ImportNodes(context.Context, *types.ImportNodesRequest) (*types.ImportNodesResponse, error)
+	ListArtifacts(context.Context, *types.ListArtifactsRequest) (*types.ListArtifactsResponse, error)
+}
+
+// Management is the protocol-neutral business surface consumed by transport
+// adapters. It deliberately hides API's concrete service composition.
+type Management interface {
+	SessionService() SessionService
+	ScanService() ScanService
+	ConfigService() ConfigService
+	SCOService() SCOService
+	ListAgents(*types.ListAgentsRequest) *types.ListAgentsResponse
+	GetStatus(*types.GetStatusRequest) *types.GetStatusResponse
+}
+
 type API struct {
 	Sessions  *Sessions
 	Config    *Config
@@ -80,6 +128,13 @@ type API struct {
 	Status    StatusReader
 	ServerURL string
 }
+
+func (a *API) SessionService() SessionService { return a.Sessions }
+func (a *API) ScanService() ScanService       { return a.Scans }
+func (a *API) ConfigService() ConfigService   { return a.Config }
+func (a *API) SCOService() SCOService         { return a.SCO }
+
+var _ Management = (*API)(nil)
 
 func (a *API) ListAgents(*types.ListAgentsRequest) *types.ListAgentsResponse {
 	response := &types.ListAgentsResponse{}
