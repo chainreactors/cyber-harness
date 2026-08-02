@@ -16,17 +16,18 @@ import (
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
+	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *web.SQLiteStore, app *runner.App, token string) (*web.Service, *web.AgentPool, http.Handler) {
-	service := web.NewService(web.ServiceConfig{Store: store, App: app})
-	pool := web.NewAgentPool(service.Hub())
+func newHeadlessHandler(store *webservice.SQLiteStore, app *runner.App, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
+	service := webservice.NewService(webservice.ServiceConfig{Store: store, App: app, AccessKey: token})
+	pool := webservice.NewAgentPool(service.Hub())
 	pool.SetSCOStore(store)
 	service.SetAgentPool(pool)
-	return service, pool, web.NewHandler(service, nil, nil, token)
+	return service, pool, web.NewHandler(service, nil, nil)
 }
 
 // acp server: aiscan headless node — no UI, RPC + AOP WebSocket only, with an
@@ -54,7 +55,7 @@ func main() {
 		token = fmt.Sprintf("acp-%d", time.Now().UnixNano())
 	}
 
-	store, err := web.NewSQLiteStore(dbPath)
+	store, err := webservice.NewSQLiteStore(dbPath)
 	if err != nil {
 		logger.Errorf("open database: %v", err)
 		os.Exit(1)

@@ -2,19 +2,23 @@ package web
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 )
 
 type Handler struct{ handler http.Handler }
 
-func NewHandler(service *Service, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
+func NewHandler(service Service, ioaHandler http.Handler, static http.Handler) *Handler {
+	auth := service.Auth()
 	mux := http.NewServeMux()
-	registerAuthRoutes(mux, accessKey)
-	RegisterConnectServices(mux, accessKey, service)
-	if service != nil && service.agents != nil {
-		mux.HandleFunc(ApplicationWebSocketPath, service.HandleApplicationWebSocket)
-		mux.HandleFunc(NodeWebSocketPath, service.agents.HandleNodeWebSocket)
+	auth.RegisterRoutes(mux)
+	RegisterConnectServices(mux, service)
+	if service != nil {
+		if handler := service.ApplicationWebSocketHandler(); handler != nil {
+			mux.Handle(ApplicationWebSocketPath, handler)
+		}
+		if handler := service.NodeWebSocketHandler(); handler != nil {
+			mux.Handle(NodeWebSocketPath, handler)
+		}
 	}
 	if ioaHandler != nil {
 		mux.Handle("/ioa/", http.StripPrefix("/ioa", ioaHandler))
@@ -26,7 +30,7 @@ func NewHandler(service *Service, ioaHandler http.Handler, static http.Handler, 
 	if static != nil {
 		mux.Handle("/", static)
 	}
-	return &Handler{handler: AccessKeyAuth(accessKey)(mux)}
+	return &Handler{handler: auth.Middleware(mux)}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,21 +49,4 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func decodeJSON(body io.ReadCloser, value any) error {
-	defer body.Close()
-	return json.NewDecoder(body).Decode(value)
-}
-
-func decodeBody(w http.ResponseWriter, r *http.Request, value any) bool {
-	if err := decodeJSON(r.Body, value); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return false
-	}
-	return true
 }

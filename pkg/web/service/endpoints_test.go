@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"net/http"
@@ -16,7 +16,7 @@ func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	service := NewService(ServiceConfig{})
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
-	server := httptest.NewServer(NewHandler(service, nil, nil, ""))
+	server := httptest.NewServer(newHandler(service, nil, nil, ""))
 	t.Cleanup(func() {
 		server.Close()
 		service.Close()
@@ -39,7 +39,10 @@ func TestLegacyAOPWebSocketPathReturnsNotFound(t *testing.T) {
 func TestApplicationEndpointRejectsAgentHello(t *testing.T) {
 	server, _ := newEndpointTestServer(t)
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + ApplicationWebSocketPath
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, response, err := websocket.DefaultDialer.Dial(url, nil)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +59,10 @@ func TestApplicationEndpointRejectsAgentHello(t *testing.T) {
 func TestNodeEndpointRejectsNonAgentHelloFirstFrame(t *testing.T) {
 	server, _ := newEndpointTestServer(t)
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + NodeWebSocketPath
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, response, err := websocket.DefaultDialer.Dial(url, nil)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

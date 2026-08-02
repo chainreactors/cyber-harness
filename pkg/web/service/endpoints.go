@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"context"
@@ -6,13 +6,14 @@ import (
 	"net/http"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	ApplicationWebSocketPath = "/api/aop/application/ws"
-	NodeWebSocketPath        = "/api/aop/node/ws"
+	ApplicationWebSocketPath = web.ApplicationWebSocketPath
+	NodeWebSocketPath        = web.NodeWebSocketPath
 )
 
 func serveEnvelopeWebSocket(upgrader websocket.Upgrader, serve func(context.Context, aop.EnvelopeStream) error, w http.ResponseWriter, r *http.Request) {
@@ -36,6 +37,20 @@ func (s *Service) HandleApplicationWebSocket(w http.ResponseWriter, r *http.Requ
 	serveEnvelopeWebSocket(s.agents.upgrader, s.ServeApplication, w, r)
 }
 
+func (s *Service) ApplicationWebSocketHandler() http.Handler {
+	if s == nil || s.agents == nil {
+		return nil
+	}
+	return http.HandlerFunc(s.HandleApplicationWebSocket)
+}
+
+func (s *Service) NodeWebSocketHandler() http.Handler {
+	if s == nil || s.agents == nil {
+		return nil
+	}
+	return http.HandlerFunc(s.agents.HandleNodeWebSocket)
+}
+
 func (p *AgentPool) HandleNodeWebSocket(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		http.Error(w, "node AOP WebSocket is unavailable", http.StatusServiceUnavailable)
@@ -54,7 +69,7 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 	if err != nil {
 		return err
 	}
-	connection, err := NewConnection(ctx, stream)
+	connection, err := web.NewConnection(ctx, stream)
 	if err != nil {
 		return err
 	}

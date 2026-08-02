@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"bytes"
@@ -6,18 +6,16 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/chainreactors/aiscan/pkg/web/auth"
 )
 
 func TestAccessKeyAuthBrowserSession(t *testing.T) {
 	mux := http.NewServeMux()
-	registerAuthRoutes(mux, "test-token")
+	registerTestAuthRoutes(mux, "test-token")
 	mux.HandleFunc("GET /api/protected", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	server := httptest.NewServer(AccessKeyAuth("test-token")(mux))
+	server := httptest.NewServer(newAccessKeyAuth("test-token")(mux))
 	defer server.Close()
 
 	jar, err := cookiejar.New(nil)
@@ -40,11 +38,33 @@ func TestAccessKeyAuthBrowserSession(t *testing.T) {
 	assertStatus(t, client, http.MethodGet, server.URL+"/api/protected", nil, http.StatusUnauthorized)
 }
 
+func TestServiceOwnsHandlerAuthentication(t *testing.T) {
+	service := NewService(ServiceConfig{AccessKey: "test-token"})
+	defer service.Close()
+	server := httptest.NewServer(newHandler(service, nil, nil))
+	defer server.Close()
+
+	assertStatus(t, server.Client(), http.MethodGet, server.URL+"/api/missing", nil, http.StatusUnauthorized)
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/missing", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("authenticated missing route status = %d, want %d", response.StatusCode, http.StatusNotFound)
+	}
+}
+
 func TestAccessKeyAuthBearerStillSupported(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := AccessKeyAuth("test-token")(next)
+	handler := newAccessKeyAuth("test-token")(next)
 
 	valid := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
 	valid.Header.Set("Authorization", "Bearer test-token")
@@ -56,7 +76,7 @@ func TestAccessKeyAuthBearerStillSupported(t *testing.T) {
 
 	invalid := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
 	invalid.Header.Set("Authorization", "Bearer wrong-token")
-	invalid.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
+	invalid.AddCookie(&http.Cookie{Name: CookieName, Value: SessionValue("test-token")})
 	invalidRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(invalidRecorder, invalid)
 	if invalidRecorder.Code != http.StatusUnauthorized {
@@ -66,7 +86,7 @@ func TestAccessKeyAuthBearerStillSupported(t *testing.T) {
 
 func TestLoginCookieSecurityAttributes(t *testing.T) {
 	mux := http.NewServeMux()
-	registerAuthRoutes(mux, "test-token")
+	registerTestAuthRoutes(mux, "test-token")
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"token":"test-token"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-Proto", "https")
@@ -91,31 +111,31 @@ func TestLoginCookieSecurityAttributes(t *testing.T) {
 func TestAuthenticate(t *testing.T) {
 	req := func() *http.Request { return httptest.NewRequest(http.MethodGet, "/api/x", nil) }
 
-	if !auth.AuthenticateRequest(req(), "") {
+	if !NewAuth("").Authenticate(req()) {
 		t.Fatal("empty key must authenticate (dev mode)")
 	}
 
 	bearer := req()
 	bearer.Header.Set("Authorization", "Bearer test-token")
-	if !auth.AuthenticateRequest(bearer, "test-token") {
+	if !NewAuth("test-token").Authenticate(bearer) {
 		t.Fatal("valid bearer rejected")
 	}
 
 	// An invalid bearer must not fall back to a valid cookie.
 	mixed := req()
 	mixed.Header.Set("Authorization", "Bearer wrong-token")
-	mixed.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
-	if auth.AuthenticateRequest(mixed, "test-token") {
+	mixed.AddCookie(&http.Cookie{Name: CookieName, Value: SessionValue("test-token")})
+	if NewAuth("test-token").Authenticate(mixed) {
 		t.Fatal("invalid bearer fell back to cookie")
 	}
 
 	cookie := req()
-	cookie.AddCookie(&http.Cookie{Name: auth.CookieName, Value: auth.SessionValue("test-token")})
-	if !auth.AuthenticateRequest(cookie, "test-token") {
+	cookie.AddCookie(&http.Cookie{Name: CookieName, Value: SessionValue("test-token")})
+	if !NewAuth("test-token").Authenticate(cookie) {
 		t.Fatal("valid session cookie rejected")
 	}
 
-	if auth.AuthenticateRequest(req(), "test-token") {
+	if NewAuth("test-token").Authenticate(req()) {
 		t.Fatal("credential-less request authenticated")
 	}
 }

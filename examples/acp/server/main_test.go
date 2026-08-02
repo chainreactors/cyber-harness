@@ -11,7 +11,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/web"
+	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -30,7 +30,7 @@ type wsPeer struct {
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	store, err := web.NewSQLiteStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := webservice.NewSQLiteStore(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

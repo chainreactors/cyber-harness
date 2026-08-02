@@ -1,6 +1,6 @@
 //go:build e2e
 
-package web
+package service
 
 import "testing"
 

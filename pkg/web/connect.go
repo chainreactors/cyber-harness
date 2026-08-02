@@ -11,7 +11,6 @@ import (
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
-	"github.com/chainreactors/aiscan/pkg/web/auth"
 )
 
 // Protobuf JSON base64-encodes SCO import bytes, so the 50 MiB business limit
@@ -34,20 +33,21 @@ func (s connectEnvelopeStream) Send(envelope *aop.Envelope) error {
 // Endpoint projection for Connect, gRPC, and gRPC-Web clients.
 type connectServer struct {
 	api     *managementapi.API
-	service *Service
+	service Service
 }
 
 // RegisterConnectServices mounts management RPCs and the AOP bidirectional
-// stream directly onto mux. The generated handler negotiates Connect, gRPC
-// and gRPC-Web on the same paths.
-func RegisterConnectServices(mux *http.ServeMux, accessKey string, service *Service) {
-	interceptor := connectAuthInterceptor{accessKey: accessKey}
+// stream using only the unified Service abstraction. The handler negotiates
+// Connect, gRPC and gRPC-Web on the same paths.
+func RegisterConnectServices(mux *http.ServeMux, service Service) {
+	auth := service.Auth()
+	interceptor := connectAuthInterceptor{auth: auth}
 	opts := []connect.HandlerOption{
 		connect.WithInterceptors(interceptor),
 		connect.WithReadMaxBytes(connectMaxMessageBytes),
 		connect.WithSendMaxBytes(connectMaxMessageBytes),
 	}
-	server := &connectServer{api: service.api, service: service}
+	server := &connectServer{api: service.API(), service: service}
 	register := func(path string, handler http.Handler) { mux.Handle(path, handler) }
 	path, handler := rpc.NewAOPServiceHandler(server, opts...)
 	register(path, handler)
@@ -213,11 +213,11 @@ func asConnectError(err error) error {
 	return connect.NewError(code, err)
 }
 
-type connectAuthInterceptor struct{ accessKey string }
+type connectAuthInterceptor struct{ auth Auth }
 
 func (i connectAuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		if !connectAuthenticated(req.Header(), i.accessKey) {
+		if !connectAuthenticated(req.Header(), i.auth) {
 			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid or missing access key"))
 		}
 		return next(ctx, req)
@@ -230,15 +230,15 @@ func (i connectAuthInterceptor) WrapStreamingClient(next connect.StreamingClient
 
 func (i connectAuthInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		if !connectAuthenticated(conn.RequestHeader(), i.accessKey) {
+		if !connectAuthenticated(conn.RequestHeader(), i.auth) {
 			return connect.NewError(connect.CodeUnauthenticated, errors.New("invalid or missing access key"))
 		}
 		return next(ctx, conn)
 	}
 }
 
-func connectAuthenticated(header http.Header, accessKey string) bool {
-	return auth.AuthenticateRequest(&http.Request{Header: header}, accessKey)
+func connectAuthenticated(header http.Header, auth Auth) bool {
+	return auth == nil || auth.Authenticate(&http.Request{Header: header})
 }
 
 var (

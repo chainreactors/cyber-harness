@@ -18,10 +18,11 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
-	node "github.com/chainreactors/aiscan/pkg/node"
+	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -32,7 +33,7 @@ func init() {
 }
 
 func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) error {
-	store, err := web.NewSQLiteStore(opts.DB)
+	store, err := webservice.NewSQLiteStore(opts.DB)
 	if err != nil {
 		return fmt.Errorf("open database: %s", err)
 	}
@@ -51,11 +52,16 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	}
 
 	configFile := option.ConfigFile
-	service := web.NewService(web.ServiceConfig{
+	accessKey := opts.Token
+	if accessKey == "" {
+		accessKey = protocols.NewToken()
+	}
+	service := webservice.NewService(webservice.ServiceConfig{
 		Store:       store,
 		App:         application,
+		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		AppFactory: func(ctx context.Context, prepared *web.PreparedConfig) (*runner.App, error) {
+		AppFactory: func(ctx context.Context, prepared *webservice.PreparedConfig) (*runner.App, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -87,11 +93,11 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 
 	wireWebApp(application, store)
 
-	var pool *web.AgentPool
+	var pool *webservice.AgentPool
 	if option.Debug {
-		pool = web.NewAgentPool(service.Hub(), "*")
+		pool = webservice.NewAgentPool(service.Hub(), "*")
 	} else {
-		pool = web.NewAgentPool(service.Hub())
+		pool = webservice.NewAgentPool(service.Hub())
 	}
 	pool.SetSCOStore(store)
 	service.SetAgentPool(pool)
@@ -101,10 +107,6 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	accessKey := opts.Token
-	if accessKey == "" {
-		accessKey = protocols.NewToken()
-	}
 	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
 	ioaWebIdentity, err := ioaSvc.AuthRegister(ctx, protocols.AuthRegister{
 		Name:        "aiscan.web",
@@ -115,8 +117,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	if err != nil {
 		return fmt.Errorf("register IOA web identity: %w", err)
 	}
-	ioaHandler := web.ShareWebAuthWithIOA(
-		accessKey,
+	ioaHandler := service.Auth().ShareWithIOA(
 		ioaWebIdentity.Token,
 		ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc)),
 	)
@@ -128,7 +129,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler := web.NewHandler(service, ioaHandler, newSPAFileServer(staticSub), accessKey)
+	httpHandler := web.NewHandler(service, ioaHandler, newSPAFileServer(staticSub))
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -166,7 +167,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	return nil
 }
 
-func wireWebApp(application *runner.App, store *web.SQLiteStore) {
+func wireWebApp(application *runner.App, store *webservice.SQLiteStore) {
 	if application == nil || store == nil || application.SCOSidecar == nil {
 		return
 	}
@@ -275,7 +276,7 @@ func parseDistributeConfig(data []byte) *types.DistributeConfig {
 	return dc
 }
 
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*web.PreparedConfig, error) {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*webservice.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -350,12 +351,12 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		_ = os.Remove(tmpPath)
 		return nil, err
 	}
-	return &web.PreparedConfig{
+	return &webservice.PreparedConfig{
 		Config: incoming, RuntimePath: tmpPath, TargetPath: p,
 	}, nil
 }
 
-func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *web.PreparedConfig) error {
+func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *webservice.PreparedConfig) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -375,7 +376,7 @@ func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *w
 	return nil
 }
 
-func (s *webConfigStore) DiscardDistributeConfig(prepared *web.PreparedConfig) {
+func (s *webConfigStore) DiscardDistributeConfig(prepared *webservice.PreparedConfig) {
 	if prepared == nil || prepared.RuntimePath == "" {
 		return
 	}

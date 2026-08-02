@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	web "github.com/chainreactors/aiscan/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -33,7 +34,7 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		return fmt.Errorf("AgentHello node_id is required")
 	}
 
-	connection, err := NewConnection(parent, stream)
+	connection, err := web.NewConnection(parent, stream)
 	if err != nil {
 		return err
 	}
