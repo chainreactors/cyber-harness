@@ -2,25 +2,26 @@ import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cyber/ui'
-import { fetchScanReport, type ScanResult } from '../../api'
-import { buildFindings } from '../../lib/scan-result'
+import { fetchScanReport, type SCONode } from '../../api'
+import { buildSCOModel } from '@cyber/cstx-easm'
+import { buildFindingsFromSCO } from '../../lib/scan-result'
 import { MarkdownContent } from '@/markdown'
 import AssetResultView from '../AssetResultView'
 import FindingsPanel from '../FindingsPanel'
 
 interface Props {
   scanID: string
-  result: ScanResult
+  nodes: SCONode[]
 }
 
-export default function ScanSummaryCard({ scanID, result }: Props) {
+export default function ScanSummaryCard({ scanID, nodes }: Props) {
   const { t } = useTranslation('scan')
   const { t: tf, i18n } = useTranslation('findings')
-  const findingsCount = useMemo(() => buildFindings(result).length, [result])
+  const model = useMemo(() => buildSCOModel(nodes), [nodes])
+  const findings = useMemo(() => buildFindingsFromSCO(model), [model])
   const [tab, setTab] = useState('assets')
   const [reportMd, setReportMd] = useState('')
   const [reportLoadedKey, setReportLoadedKey] = useState('')
-  const s = result.summary
   const lang = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'
   const reportKey = `${scanID}:${lang}`
 
@@ -45,35 +46,34 @@ export default function ScanSummaryCard({ scanID, result }: Props) {
             <h3 className="text-sm font-semibold text-foreground">{t('scanComplete')}</h3>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-[11px] text-muted-foreground">
-            <span>{tf('detailSummary', { targets: s.targets, services: s.services })}</span>
-            {s.webs > 0 && <MetaDivider label={`${tf('web')} ${s.webs}`} />}
-            {s.probes > 0 && <MetaDivider label={`${tf('probes')} ${s.probes}`} />}
-            {s.errors > 0 && <MetaDivider label={`${tf('errors')} ${s.errors}`} tone="error" />}
+            <span>{tf('detailSummary', { targets: model.metrics.ips, services: model.metrics.ports })}</span>
+            {model.metrics.urls > 0 && <MetaDivider label={`${tf('web')} ${model.metrics.urls}`} />}
+            {model.metrics.vulns > 0 && <MetaDivider label={`${tf('vulns')} ${model.metrics.vulns}`} tone="error" />}
           </div>
         </div>
-        {s.duration && (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{s.duration}</span>
+        {model.metrics.duration && (
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{model.metrics.duration}</span>
         )}
       </header>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto w-full justify-start rounded-none border-y border-border/60 bg-transparent px-4 py-0">
           <ResultTab value="assets">{tf('assets')}</ResultTab>
-          {findingsCount > 0 && (
+          {findings.length > 0 && (
             <ResultTab value="findings">
               {tf('findings')}
-              <span className="ml-1 tabular-nums text-muted-foreground">{findingsCount}</span>
+              <span className="ml-1 tabular-nums text-muted-foreground">{findings.length}</span>
             </ResultTab>
           )}
           <ResultTab value="report">{tf('report')}</ResultTab>
         </TabsList>
 
         <TabsContent value="assets" className="mt-0 p-4 sm:p-5">
-          <AssetResultView result={result} anchorPrefix={scanID} />
+          <AssetResultView model={model} anchorPrefix={scanID} />
         </TabsContent>
-        {findingsCount > 0 && (
+        {findings.length > 0 && (
           <TabsContent value="findings" className="mt-0 p-4 sm:p-5">
-            <FindingsPanel result={result} />
+            <FindingsPanel findings={findings} />
           </TabsContent>
         )}
         <TabsContent value="report" className="mt-0 p-4 sm:p-5">

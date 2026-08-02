@@ -14,7 +14,7 @@ const IOAConsole = lazy(() => import('./components/IOAConsole'))
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider } from '@cyber/theme'
 import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, listSCONodes, logout } from './api'
-import type { IOAMessage, IOANode, LLMProfileStatus, ServerStatus } from './api'
+import type { IOAMessage, IOANode, LLMProviderView, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
 import type { MentionPopupApi } from './viewer'
 import { useChatSession } from './hooks/useChatSession'
@@ -51,7 +51,7 @@ export default function App() {
   const confirm = useConfirm()
   const chat = useChatSession()
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
-  const [llmProfiles, setLLMProfiles] = useState<LLMProfileStatus[]>([])
+  const [llmProfiles, setLLMProfiles] = useState<LLMProviderView[]>([])
   const [activeLLMProfile, setActiveLLMProfile] = useState('')
   const [switchingLLM, setSwitchingLLM] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
@@ -73,9 +73,9 @@ export default function App() {
     const [statusResult, configResult] = await Promise.allSettled([getStatus(), getConfigStatus()])
     if (statusResult.status === 'fulfilled') setServerStatus(statusResult.value)
     if (configResult.status === 'fulfilled') {
-      const profiles = configResult.value.llm.profiles ?? []
+      const profiles = configResult.value.llm?.providers ?? []
       setLLMProfiles(profiles)
-      setActiveLLMProfile(configResult.value.llm.active_profile || profiles[0]?.id || '')
+      setActiveLLMProfile(configResult.value.llm?.activeProfile || profiles[0]?.id || '')
     }
   }, [])
 
@@ -133,15 +133,15 @@ export default function App() {
     [scoNodes, ioaNodes, ioaMessages],
   )
 
-  const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  const model = serverStatus?.llmModel || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
 
   const handleSwitchLLM = useCallback(async (profileID: string) => {
     if (!profileID || profileID === activeLLMProfile) return
     setSwitchingLLM(true)
     try {
       const next = await activateLLMProfile(profileID)
-      setLLMProfiles(next.llm.profiles ?? [])
-      setActiveLLMProfile(next.llm.active_profile || profileID)
+      setLLMProfiles(next.llm?.providers ?? [])
+      setActiveLLMProfile(next.llm?.activeProfile || profileID)
       await refreshStatus()
       setHealthNonce((nonce) => nonce + 1)
     } catch {
@@ -150,7 +150,7 @@ export default function App() {
       setSwitchingLLM(false)
     }
   }, [activeLLMProfile, refreshStatus])
-  const activeSession = chat.sessions.find((s) => s.id === chat.activeSessionID) || null
+  const activeSession = chat.sessions.find((s) => s.session?.id === chat.activeSessionID) || null
   // The open session's bound agent has dropped off the live roster (its node
   // exited / the hub restarted). The transcript still shows, but a new turn
   // can't be dispatched until it reconnects — surface that in the chat panel.
@@ -235,7 +235,7 @@ export default function App() {
             <AssetPoolButton count={scoNodes.length} onClick={() => setAssetPanelOpen(true)} />
             <IOAConsoleButton onClick={() => openIOAConsole()} />
             <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
-            <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
+            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} />
             {/* Separate workspace nav (assets / IOA / agents / connect) from the
                 account utilities (settings / logout) so the row reads as two groups. */}
             <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
@@ -274,8 +274,8 @@ export default function App() {
             activeSessionID={chat.activeSessionID}
             hasActiveSession={chat.activeSessionID !== null}
             agentOffline={activeAgentOffline}
-            agentName={activeSession?.agent_name}
-            agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
+            agentName={activeSession?.agentName}
+            agents={chat.agents.map((a) => ({ id: a.nodeUri, name: a.hello?.name || '' }))}
             onCreateSession={handleCreateSession}
             onOpenTerminal={handleOpenTerminal}
             onOpenIOA={openIOAConsole}
@@ -334,7 +334,7 @@ function LLMProfileSwitcher({
   disabled,
   onChange,
 }: {
-  profiles: LLMProfileStatus[]
+  profiles: LLMProviderView[]
   activeProfileID: string
   fallbackModel: string
   disabled: boolean
