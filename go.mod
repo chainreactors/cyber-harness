@@ -49,6 +49,8 @@ require (
 	github.com/projectdiscovery/uncover v1.2.1
 	github.com/projectdiscovery/utils v0.10.1
 	github.com/spf13/cobra v1.10.2
+	github.com/uptrace/bun v1.2.18
+	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	github.com/ysmood/gson v0.7.3
 	golang.org/x/image v0.42.0
 	golang.org/x/sys v0.46.0
@@ -56,6 +58,14 @@ require (
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
+)
+
+require (
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
+	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 )
 
 require (
@@ -192,7 +202,7 @@ require (
 	github.com/lukasbob/srcset v0.0.0-20190730101422-86b742e617f3 // indirect
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
 	github.com/mark3labs/mcp-go v0.45.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/metacubex/utls v1.7.3 // indirect
