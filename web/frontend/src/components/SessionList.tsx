@@ -30,19 +30,19 @@ interface Props {
   agents?: AgentView[]
   sessions?: SessionRecord[]
   activeSessionID: string | null
-  selectedAgentID: string | null
-  terminalAgentID: string | null
-  onSelectAgent: (id: string) => void
+  selectedNodeURI: string | null
+  terminalNodeURI: string | null
+  onSelectNode: (nodeURI: string) => void
   onSelectSession: (id: string) => void
-  onCreateSession: (agentID: string) => void
+  onCreateSession: (nodeURI: string) => void
   onDeleteSession: (id: string) => void
-  onOpenTerminal: (agentID: string) => void
+  onOpenTerminal: (nodeURI: string) => void
 }
 
 export default function SessionList({
   open, onToggle, agents = [], sessions = [],
-  activeSessionID, selectedAgentID, terminalAgentID,
-  onSelectAgent, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
+  activeSessionID, selectedNodeURI, terminalNodeURI,
+  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: Props) {
   const { t } = useTranslation('sidebar')
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -163,10 +163,10 @@ export default function SessionList({
                     key={agent.nodeUri}
                     agent={agent}
                     sessions={own}
-                    isSelected={agent.nodeUri === selectedAgentID}
+                    isSelected={agent.nodeUri === selectedNodeURI}
                     activeSessionID={activeSessionID}
-                    terminalActive={agent.nodeUri === terminalAgentID}
-                    onSelectAgent={() => onSelectAgent(agent.nodeUri)}
+                    terminalActive={agent.nodeUri === terminalNodeURI}
+                    onSelectNode={() => onSelectNode(agent.nodeUri)}
                     onSelectSession={onSelectSession}
                     onCreateSession={() => onCreateSession(agent.nodeUri)}
                     onDeleteSession={onDeleteSession}
@@ -203,8 +203,8 @@ export default function SessionList({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    active={agent.nodeUri === selectedAgentID}
-                    onClick={() => { onSelectAgent(agent.nodeUri); onToggle() }}
+                    active={agent.nodeUri === selectedNodeURI}
+                    onClick={() => { onSelectNode(agent.nodeUri); onToggle() }}
                     className="relative"
                   >
                     <Monitor className="w-4 h-4 text-muted-foreground" />
@@ -246,14 +246,14 @@ function SidebarPreferences({ expanded }: { expanded: boolean }) {
 
 function AgentGroup({
   agent, sessions, isSelected, activeSessionID, terminalActive,
-  onSelectAgent, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
+  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: {
   agent: AgentView
   sessions: SessionRecord[]
   isSelected: boolean
   activeSessionID: string | null
   terminalActive: boolean
-  onSelectAgent: () => void
+  onSelectNode: () => void
   onSelectSession: (id: string) => void
   onCreateSession: () => void
   onDeleteSession: (id: string) => void
@@ -267,7 +267,7 @@ function AgentGroup({
 
   function handleToggle() {
     setExpanded(!expanded)
-    onSelectAgent()
+    onSelectNode()
   }
 
   return (

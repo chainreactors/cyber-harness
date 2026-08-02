@@ -59,7 +59,7 @@ export default function App() {
   const [assetPanelOpen, setAssetPanelOpen] = useState(false)
   const [ioaConsoleOpen, setIOAConsoleOpen] = useState(false)
   const [ioaConsoleTarget, setIOAConsoleTarget] = useState<IOAConsoleTarget | null>(null)
-  const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
+  const [agentPanelFocusNodeURI, setAgentPanelFocusNodeURI] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
   const [healthNonce, setHealthNonce] = useState(0)
@@ -165,10 +165,10 @@ export default function App() {
     }
   }
 
-  function handleOpenTerminal(agentID: string) {
-    setAgentPanelFocusID(agentID)
+  function handleOpenTerminal(nodeURI: string) {
+    setAgentPanelFocusNodeURI(nodeURI)
     setAgentPanelOpen(true)
-    chat.selectAgent(agentID)
+    chat.selectNode(nodeURI)
     closeSidebarOnMobile()
   }
 
@@ -178,9 +178,9 @@ export default function App() {
     closeSidebarOnMobile()
   }
 
-  function handleCreateSession(agentID: string) {
+  function handleCreateSession(nodeURI: string) {
     setAgentPanelOpen(false)
-    chat.createSession(agentID)
+    chat.createSession(nodeURI)
     closeSidebarOnMobile()
   }
 
@@ -193,13 +193,13 @@ export default function App() {
 
   // Agent node clicked (roster / terminal open) → open the agent console focused
   // on that node.
-  function handleOpenNode(agentID: string) {
-    setAgentPanelFocusID(agentID)
+  function handleOpenNode(nodeURI: string) {
+    setAgentPanelFocusNodeURI(nodeURI)
     setAgentPanelOpen(true)
   }
 
   function handleOpenAgentPanel() {
-    setAgentPanelFocusID(null)
+    setAgentPanelFocusNodeURI(null)
     setAgentPanelOpen(true)
   }
 
@@ -255,9 +255,9 @@ export default function App() {
             agents={chat.agents}
             sessions={chat.sessions}
             activeSessionID={chat.activeSessionID}
-            selectedAgentID={chat.selectedAgentID}
-            terminalAgentID={agentPanelOpen ? agentPanelFocusID : null}
-            onSelectAgent={chat.selectAgent}
+            selectedNodeURI={chat.selectedNodeURI}
+            terminalNodeURI={agentPanelOpen ? agentPanelFocusNodeURI : null}
+            onSelectNode={chat.selectNode}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}
@@ -275,7 +275,7 @@ export default function App() {
             hasActiveSession={chat.activeSessionID !== null}
             agentOffline={activeAgentOffline}
             agentName={activeSession?.agentName}
-            agents={chat.agents.map((a) => ({ id: a.nodeUri, name: a.hello?.name || '' }))}
+            agents={chat.agents.map((a) => ({ nodeURI: a.nodeUri, name: a.hello?.name || '' }))}
             onCreateSession={handleCreateSession}
             onOpenTerminal={handleOpenTerminal}
             onOpenIOA={openIOAConsole}
@@ -299,7 +299,7 @@ export default function App() {
       <AgentPanel
         open={agentPanelOpen}
         agents={chat.agents}
-        focusAgentID={agentPanelFocusID ?? undefined}
+        focusNodeURI={agentPanelFocusNodeURI ?? undefined}
         onClose={() => setAgentPanelOpen(false)}
       />
 

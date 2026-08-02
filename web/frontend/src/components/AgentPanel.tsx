@@ -36,13 +36,13 @@ interface AgentPanelProps {
   /** The roster from useChatSession — avoids a redundant listAgents poll. */
   agents: AgentView[]
   /** When opened from a deck node click, focus this agent's console. */
-  focusAgentID?: string
+  focusNodeURI?: string
   onClose: () => void
 }
 
-export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, onClose }: AgentPanelProps) {
+export default function AgentPanel({ open, agents: rosterAgents, focusNodeURI, onClose }: AgentPanelProps) {
   const { t } = useTranslation('agent')
-  const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusAgentID)
+  const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusNodeURI)
   const showAgentList = agents.length > 1
 
   return (
@@ -92,7 +92,7 @@ export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, o
 // Derives selection state from the parent-provided roster (useChatSession
 // already polls listAgents every 5s). No internal fetch or polling — the agent
 // list is a prop, so the panel never double-polls.
-function useAgentDirectory(open: boolean, roster: AgentView[], focusAgentID?: string) {
+function useAgentDirectory(open: boolean, roster: AgentView[], focusNodeURI?: string) {
   const [selectedID, setSelectedID] = useState('')
 
   // Keep selection valid as the roster changes (agents disconnect / reconnect).
@@ -108,14 +108,14 @@ function useAgentDirectory(open: boolean, roster: AgentView[], focusAgentID?: st
   const focusAppliedRef = useRef(false)
   useEffect(() => {
     focusAppliedRef.current = false
-  }, [open, focusAgentID])
+  }, [open, focusNodeURI])
   useEffect(() => {
     if (focusAppliedRef.current) return
-    if (open && focusAgentID && roster.some((a) => a.nodeUri === focusAgentID)) {
-      setSelectedID(focusAgentID)
+    if (open && focusNodeURI && roster.some((a) => a.nodeUri === focusNodeURI)) {
+      setSelectedID(focusNodeURI)
       focusAppliedRef.current = true
     }
-  }, [open, focusAgentID, roster])
+  }, [open, focusNodeURI, roster])
 
   const selected = roster.find((agent) => agent.nodeUri === selectedID) || roster[0] || null
 
