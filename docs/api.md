@@ -7,6 +7,7 @@
 - 输出：`WatchEvents` 推送的 `Event` 流（流式增量 + 完整消息 + 结束信号）
 - 以 Android（Kotlin）为完整示例，同样适用于 iOS / 桌面 / 其他后端
 - Go 参考实现：`examples/acp/client`；协议规范：`web/frontend/cyber-ui/packages/aop/SPEC.md`
+- **字段级权威参考**（从 proto 自动生成）：[api/aop.md](api/aop.md)（实时平面）、[api/rpc.md](api/rpc.md)（管理平面）
 
 ---
 
