@@ -25,7 +25,7 @@ func (t *AgentStatsTracker) Snapshot() *aop.AgentStats {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return proto.Clone(&t.stats).(*aop.AgentStats)
+	return proto.CloneOf(&t.stats)
 }
 
 // Observe records an AOP event and returns updated stats if the stats changed.
@@ -55,7 +55,7 @@ func (t *AgentStatsTracker) Observe(e *aop.Event) (*aop.AgentStats, bool) {
 			t.stats.RunningTools--
 		}
 	default:
-		return proto.Clone(&t.stats).(*aop.AgentStats), false
+		return proto.CloneOf(&t.stats), false
 	}
-	return proto.Clone(&t.stats).(*aop.AgentStats), true
+	return proto.CloneOf(&t.stats), true
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
@@ -18,46 +19,83 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
+func namespaceMessage[T protobuf.Message](message protobuf.Message) (T, error) {
+	value, ok := message.(T)
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("unexpected namespace message %T", message)
+	}
+	return value, nil
+}
+
 func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux, error) {
 	mux := aop.NewNamespaceMux()
 	if err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentCoreMessage(agent, envelope, message.(*aop.ProtocolMessage))
+		value, err := namespaceMessage[*aop.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentCoreMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentCommandMessage(agent, envelope, message.(*types.CommandProtocolMessage))
+		value, err := namespaceMessage[*types.CommandProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentCommandMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentFileMessage(agent, envelope, message.(*filepb.ProtocolMessage))
+		value, err := namespaceMessage[*filepb.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentFileMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentExecMessage(agent, envelope, message.(*execpb.ProtocolMessage))
+		value, err := namespaceMessage[*execpb.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentExecMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentReloadMessage(agent, message.(*types.ReloadProtocolMessage))
+		value, err := namespaceMessage[*types.ReloadProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentReloadMessage(agent, value)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.forwardPTYFrame(terminalcodec.FromProto(message.(*ptypb.ProtocolMessage)))
+		value, err := namespaceMessage[*ptypb.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.forwardPTYFrame(terminalcodec.FromProto(value))
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		if progress := message.(*toolpb.ProtocolMessage).GetProgress(); progress != nil {
+		value, err := namespaceMessage[*toolpb.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		if progress := value.GetProgress(); progress != nil {
 			p.handleToolProgress(envelope.ReplyTo, progress)
 		}
 		return nil
@@ -65,7 +103,11 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 		return nil, err
 	}
 	if err := mux.Register(&scopb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentSCOMessage(ctx, envelope, message.(*scopb.ProtocolMessage))
+		value, err := namespaceMessage[*scopb.ProtocolMessage](message)
+		if err != nil {
+			return err
+		}
+		p.handleAgentSCOMessage(ctx, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -121,7 +163,7 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 		if payload.AgentStats == nil {
 			agent.stats = &aop.AgentStats{}
 		} else {
-			agent.stats = protobuf.Clone(payload.AgentStats).(*aop.AgentStats)
+			agent.stats = protobuf.CloneOf(payload.AgentStats)
 		}
 		agent.mu.Unlock()
 
@@ -189,7 +231,7 @@ func (p *AgentPool) handleAgentFileMessage(agent *remoteAgent, envelope *aop.Env
 		return
 	}
 	if result := value.GetResult(); result != nil {
-		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{File: protobuf.Clone(result).(*filepb.Result)})
+		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{File: protobuf.CloneOf(result)})
 	}
 }
 
@@ -295,7 +337,7 @@ func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progres
 	if value == nil {
 		return
 	}
-	event := output.ToolDataEvent{Tool: value.Tool, Kind: output.ToolDataProgress, Target: value.Target, Data: value.Text, CallID: operationID}
+	event := output.ToolDataEvent{Kind: output.ToolDataProgress, Data: value.Text, CallID: operationID}
 	if value.Timestamp != nil {
 		event.Timestamp = value.Timestamp.AsTime()
 	} else {

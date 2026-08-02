@@ -142,7 +142,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 	}
 	detail := delegationDetail(task, typeName, name, mode)
 	parentCfg := parent.configSnapshot()
-	sub := deriveNamedFromConfig(parentCfg, name, parentToolCallID, &detail)
+	sub := deriveNamedFromConfig(parentCfg, name, parentToolCallID, detail)
 	if resolved != nil {
 		if resolved.FormattedPrompt != "" {
 			prompt = resolved.FormattedPrompt + "\n\n" + prompt
@@ -166,20 +166,20 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 	}
 }
 
-func delegationFromToolCall(toolName string, args any) (types.DelegationDetail, bool) {
+func delegationFromToolCall(toolName string, args any) (*types.DelegationDetail, bool) {
 	if toolName != "subagent" {
-		return types.DelegationDetail{}, false
+		return nil, false
 	}
 	values, ok := args.(map[string]any)
 	if !ok {
-		return types.DelegationDetail{}, false
+		return nil, false
 	}
 	if action, _ := values["action"].(string); action != "" && action != "create" {
-		return types.DelegationDetail{}, false
+		return nil, false
 	}
 	task, _ := values["prompt"].(string)
 	if strings.TrimSpace(task) == "" {
-		return types.DelegationDetail{}, false
+		return nil, false
 	}
 	name, _ := values["name"].(string)
 	typeName, _ := values["type"].(string)
@@ -187,8 +187,8 @@ func delegationFromToolCall(toolName string, args any) (types.DelegationDetail, 
 	return delegationDetail(task, typeName, name, mode), true
 }
 
-func delegationDetail(task, typeName, name, mode string) types.DelegationDetail {
-	detail := types.DelegationDetail{
+func delegationDetail(task, typeName, name, mode string) *types.DelegationDetail {
+	detail := &types.DelegationDetail{
 		Task:      task,
 		AgentName: name,
 		AgentType: typeName,

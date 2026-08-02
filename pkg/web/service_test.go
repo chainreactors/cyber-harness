@@ -225,8 +225,8 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 		SessionId: "agent-session", TurnId: "turn-1", Emitter: "test-agent",
 		Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}},
 	}
-	_ = types.SetEvalDetail(event, types.EvalDetail{Round: 1, Pass: true, Reason: "found SQLi"})
-	_ = types.SetCompactDetail(event, types.CompactDetail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
+	_ = types.SetEvalDetail(event, &types.EvalDetail{Round: 1, Pass: true, Reason: "found SQLi"})
+	_ = types.SetCompactDetail(event, &types.CompactDetail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
 	pool.forwardAOPFrame(remote, "turn-1", event)
 
 	if len(sink.aopEvents) == 0 {

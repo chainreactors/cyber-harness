@@ -18,9 +18,8 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 // it accepts a session, records the watch subscription, and on RunTurn
 // replies with a receipt and streams a delta plus turn_end over the watch.
 type scriptedHub struct {
-	t          *testing.T
-	prompt     chan string
-	watchReady chan string
+	t      *testing.T
+	prompt chan string
 }
 
 func (h *scriptedHub) send(conn *websocket.Conn, replyTo string, message protobuf.Message) {

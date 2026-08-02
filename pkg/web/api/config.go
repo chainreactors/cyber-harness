@@ -186,7 +186,7 @@ func (c *Config) Activate(ctx context.Context, id string) (*types.ConfigView, er
 	if !found {
 		return nil, Errorf(CodeNotFound, "LLM profile %q was not found", id)
 	}
-	next := proto.Clone(stored).(*types.DistributeConfig)
+	next := proto.CloneOf(stored)
 	if next.Llm == nil {
 		next.Llm = &types.LLMConfig{}
 	}

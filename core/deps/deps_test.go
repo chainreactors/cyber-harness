@@ -483,7 +483,7 @@ func hasGoFiles(tree string) bool {
 	found := false
 	_ = filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 		if !entry.IsDir() && filepath.Ext(path) == ".go" {
 			found = true

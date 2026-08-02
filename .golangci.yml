@@ -31,6 +31,8 @@ linters:
         - G301
         - G302
         - G306
+        - G115
+        - G122
         - G703
       confidence: medium
     govet:
@@ -71,7 +73,7 @@ linters:
       - templates
       - third_party$
       - builtin$
-      - examples$
+      - ^examples/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
@@ -81,4 +83,4 @@ formatters:
     paths:
       - third_party$
       - builtin$
-      - examples$
+      - ^examples/

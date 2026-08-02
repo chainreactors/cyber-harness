@@ -144,7 +144,7 @@ func (e *aopEmitter) messageDelta(messageID string, contentIndex int, partType, 
 func (e *aopEmitter) toolCall(call *aop.ToolCall) {
 	event := &aop.Event{Payload: &aop.Event_ToolCall{ToolCall: call}}
 	if detail, ok := delegationFromToolCall(call.Name, decodeToolArguments(call)); ok {
-		e.emitWithExt(event, &detail)
+		e.emitWithExt(event, detail)
 		return
 	}
 	e.emit(event)
@@ -162,7 +162,7 @@ func (e *aopEmitter) usage(usage *aop.TokenUsage, model string) {
 	if usage == nil {
 		return
 	}
-	value := proto.Clone(usage).(*aop.TokenUsage)
+	value := proto.CloneOf(usage)
 	value.Model = model
 	e.emit(&aop.Event{Payload: &aop.Event_Usage{Usage: value}})
 }
@@ -173,9 +173,10 @@ func (e *aopEmitter) errorEvt(err error, retryable bool) {
 
 func (e *aopEmitter) providerFrame(frame ProviderRawFrame) {
 	direction := aop.Direction_DIRECTION_UNSPECIFIED
-	if frame.Direction == "request" {
+	switch frame.Direction {
+	case "request":
 		direction = aop.Direction_DIRECTION_REQUEST
-	} else if frame.Direction == "response" {
+	case "response":
 		direction = aop.Direction_DIRECTION_RESPONSE
 	}
 	e.emit(&aop.Event{Payload: &aop.Event_ProviderFrame{ProviderFrame: &aop.ProviderFrame{

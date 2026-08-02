@@ -1114,7 +1114,7 @@ func TestEvalEndRendering(t *testing.T) {
 	o := testOutput(&stderr, 1, false)
 
 	passed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
-	_ = types.SetEvalDetail(passed, types.EvalDetail{Round: 1, Pass: true, Reason: "all checks passed"})
+	_ = types.SetEvalDetail(passed, &types.EvalDetail{Round: 1, Pass: true, Reason: "all checks passed"})
 	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
@@ -1129,7 +1129,7 @@ func TestEvalEndRendering(t *testing.T) {
 
 	stderr.Reset()
 	failed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
-	_ = types.SetEvalDetail(failed, types.EvalDetail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
+	_ = types.SetEvalDetail(failed, &types.EvalDetail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
 	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {

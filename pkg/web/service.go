@@ -445,7 +445,7 @@ func (s *Service) finishScanContext(scan *types.Scan, err error) {
 		_, _ = s.failScan(scan, "scan timed out")
 		return
 	}
-	next := proto.Clone(scan).(*types.Scan)
+	next := proto.CloneOf(scan)
 	next.Status = types.ScanStatus_SCAN_STATUS_CANCELED
 	next.UpdatedAt = nowProto()
 	_, _ = s.store.TransitionScan(context.Background(), next, types.ScanStatus_SCAN_STATUS_QUEUED, types.ScanStatus_SCAN_STATUS_RUNNING)
@@ -456,7 +456,7 @@ func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("load scan SCO facts: %w", err)
 	}
-	next := proto.Clone(scan).(*types.Scan)
+	next := proto.CloneOf(scan)
 	next.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
 	next.Report = buildMarkdownReport(scan.Target, scan.Mode, nodes, defaultReportLang)
 	next.Error = ""
@@ -472,7 +472,7 @@ func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, err
 }
 
 func (s *Service) failScan(scan *types.Scan, errMsg string) (bool, error) {
-	next := proto.Clone(scan).(*types.Scan)
+	next := proto.CloneOf(scan)
 	next.Status = types.ScanStatus_SCAN_STATUS_FAILED
 	next.Error = errMsg
 	next.UpdatedAt = nowProto()
@@ -873,7 +873,7 @@ func (s *Service) publishUserMessage(sessionID, turnID string, message *aop.Mess
 	if message == nil || len(message.Content) == 0 {
 		return
 	}
-	userMessage := proto.Clone(message).(*aop.Message)
+	userMessage := proto.CloneOf(message)
 	if userMessage.Id == "" {
 		userMessage.Id = generateID()
 	}
@@ -957,7 +957,7 @@ func (s *Service) broadcastHubError(sessionID, code, message string, params map[
 	}
 	if len(params) > 0 {
 		if values, err := structpb.NewStruct(params); err == nil {
-			_ = types.SetWebMessage(event, types.WebMessageMetadata{Params: values})
+			_ = types.SetWebMessage(event, &types.WebMessageMetadata{Params: values})
 		}
 	}
 	s.BroadcastAOPEvent(sessionID, event)
@@ -1145,12 +1145,6 @@ func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) 
 	}()
 }
 
-func (s *Service) handleAgentCommand(sessionID, line string) {
-	if _, err := s.ExecuteSessionCommand(sessionID, line); err != nil {
-		s.broadcastHubError(sessionID, "", err.Error(), nil)
-	}
-}
-
 func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -1237,7 +1231,7 @@ func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, met
 		}},
 	}
 	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil) {
-		_ = types.SetWebMessage(event, *metadata)
+		_ = types.SetWebMessage(event, metadata)
 	}
 	s.BroadcastAOPEvent(sessionID, event)
 }

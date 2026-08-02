@@ -195,7 +195,7 @@ func (s *Sessions) OpenSession(ctx context.Context, requestID string, request *a
 			return nil, fmt.Errorf("link scan to session: %w", err)
 		}
 	}
-	forward := proto.Clone(request).(*aop.OpenSessionRequest)
+	forward := proto.CloneOf(request)
 	forward.SessionId = id
 	if err := s.runtime.OpenAgentSession(ctx, requestID, forward); err != nil {
 		cleanup()
@@ -260,7 +260,7 @@ func (s *Sessions) RunTurn(ctx context.Context, requestID string, request *aop.R
 	}
 	_ = s.store.UpdateSession(ctx, session)
 
-	forward := proto.Clone(request).(*aop.RunTurnRequest)
+	forward := proto.CloneOf(request)
 	if forward.Input == nil {
 		forward.Input = &aop.Message{Role: "user"}
 	}
@@ -363,7 +363,7 @@ func (s *Sessions) CloseSession(ctx context.Context, requestID string, request *
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	connected, err := s.runtime.CloseAgentSession(ctx, requestID, session.GetSession().GetNodeId(), proto.Clone(request).(*aop.CloseSessionRequest))
+	connected, err := s.runtime.CloseAgentSession(ctx, requestID, session.GetSession().GetNodeId(), proto.CloneOf(request))
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
@@ -604,7 +604,7 @@ func cloneCommandSpecs(values []*types.CommandSpec) []*types.CommandSpec {
 	result := make([]*types.CommandSpec, 0, len(values))
 	for _, value := range values {
 		if value != nil {
-			result = append(result, proto.Clone(value).(*types.CommandSpec))
+			result = append(result, proto.CloneOf(value))
 		}
 	}
 	return result
