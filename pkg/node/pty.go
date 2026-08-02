@@ -9,19 +9,16 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/utils/pty"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
 // their router directly from AgentRuntime and do not inspect the bash tool.
 func NewPTYRouter(reg *commands.CommandRegistry) *coreterminal.Router {
 	mgr := RegistryPTYManager(reg)
-	var baseMgr *pty.Manager
-	if mgr != nil {
-		baseMgr = mgr.Manager
+	if mgr == nil {
+		return coreterminal.NewRuntimeRouter(nil)
 	}
-	openers := pty.DefaultOpeners(baseMgr, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	return coreterminal.NewRouter(baseMgr, coreterminal.WithOpeners(openers))
+	return coreterminal.NewRuntimeRouter(mgr.Manager)
 }
 
 // RegistryPTYManager extracts the tmux Manager from the "bash" tool in the
@@ -72,11 +69,11 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *corete
 					continue
 				}
 				dirty = false
-				BroadcastPTYSessions(mgr, router, send)
+				BroadcastPTYSessions(router, send)
 			case <-ticker.C:
 				if dirty {
 					dirty = false
-					BroadcastPTYSessions(mgr, router, send)
+					BroadcastPTYSessions(router, send)
 				}
 			case <-ctx.Done():
 				return
@@ -95,13 +92,6 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *corete
 }
 
 // BroadcastPTYSessions sends the current PTY session list to all active streams.
-func BroadcastPTYSessions(mgr *tmux.Manager, router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) {
-	streamIDs := router.StreamIDs()
-	if len(streamIDs) == 0 {
-		return
-	}
-	sessions := mgr.List()
-	for _, streamID := range streamIDs {
-		send(coreterminal.NewSessions(streamID, sessions))
-	}
+func BroadcastPTYSessions(router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) {
+	router.BroadcastSessions(send)
 }

@@ -114,6 +114,64 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 	}
 }
 
+func TestPTYWireDoesNotUseLegacyUtilsProtocol(t *testing.T) {
+	root := repositoryRoot(t)
+	legacyImport := "github.com/chainreactors/utils/pty"
+	legacySelectors := map[string]bool{"Frame": true, "Router": true, "NewRouter": true}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != root && shouldSkipTree(root, path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		aliases := make(map[string]bool)
+		for _, spec := range file.Imports {
+			importPath, unquoteErr := strconv.Unquote(spec.Path.Value)
+			if unquoteErr != nil {
+				return unquoteErr
+			}
+			if importPath != legacyImport {
+				continue
+			}
+			alias := "pty"
+			if spec.Name != nil {
+				alias = spec.Name.Name
+			}
+			if alias == "." {
+				t.Errorf("legacy PTY runtime must not be dot-imported in %s", relative(root, path))
+				continue
+			}
+			aliases[alias] = true
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok || !legacySelectors[selector.Sel.Name] {
+				return true
+			}
+			pkg, ok := selector.X.(*ast.Ident)
+			if ok && aliases[pkg.Name] {
+				t.Errorf("legacy PTY wire symbol %s.%s in %s", pkg.Name, selector.Sel.Name, relative(root, path))
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {

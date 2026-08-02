@@ -105,6 +105,21 @@ func TestRouterListAndDetachUseAOPResponses(t *testing.T) {
 	}
 }
 
+func TestRouterBroadcastsRuntimeSessionsAsAOPMessages(t *testing.T) {
+	manager := &recordingManager{info: runtimepty.Info{ID: "session-1", State: runtimepty.StateRunning}}
+	router := NewRouter(manager)
+	defer router.Close()
+	router.touchStream("stream-1")
+
+	messages := make(chan *ptypb.ProtocolMessage, 1)
+	router.BroadcastSessions(func(message *ptypb.ProtocolMessage) { messages <- message })
+
+	sessions := readMessage(t, messages).GetSessions()
+	if sessions.GetStreamId() != "stream-1" || len(sessions.GetSessions()) != 1 || sessions.GetSessions()[0].GetId() != "session-1" {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+}
+
 func TestStreamAndNodeIdentityComeFromAOP(t *testing.T) {
 	message := &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Open{Open: &ptypb.Open{
 		StreamId: "stream-1", NodeId: "node-1",
