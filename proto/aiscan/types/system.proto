@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package aiscan.system;
+
+option go_package = "github.com/chainreactors/aiscan/pkg/types/system;system";
+
+message GetStatusRequest {}
+
+message Status {
+  string version = 1;
+  bool llm_available = 2;
+  string llm_provider = 3;
+  string llm_model = 4;
+  bool llm_api_key_configured = 5;
+  string config_path = 6;
+  bool config_loaded = 7;
+  uint32 agents = 8;
+  string server_url = 9;
+}
+
+message GetStatusResponse { Status status = 1; }

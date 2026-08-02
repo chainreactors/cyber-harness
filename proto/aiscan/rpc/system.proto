@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package aiscan.rpc.system;
+
+import "aiscan/types/system.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc/system;system";
+
+service SystemService {
+  rpc GetStatus(aiscan.system.GetStatusRequest) returns (aiscan.system.GetStatusResponse);
+}

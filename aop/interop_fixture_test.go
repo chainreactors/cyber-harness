@@ -1,4 +1,4 @@
-package aop
+package aop_test
 
 import (
 	"encoding/base64"
@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
 type interopFixture struct {
-	Event            json.RawMessage `json:"event"`
+	Envelope         json.RawMessage `json:"envelope"`
 	BinaryBase64     string          `json:"binaryBase64"`
 	ProviderPayloads struct {
 		OpenAIBase64    string `json:"openaiBase64"`
@@ -30,11 +32,32 @@ func TestInteropFixtureMatchesProtoBinaryAndProtoJSON(t *testing.T) {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	event := new(Event)
-	if err := protojson.Unmarshal(fixture.Event, event); err != nil {
+	envelope := new(aop.Envelope)
+	if err := protojson.Unmarshal(fixture.Envelope, envelope); err != nil {
 		t.Fatal(err)
 	}
-	binary, err := proto.MarshalOptions{Deterministic: true}.Marshal(event)
+	if got := envelope.GetPayload().GetTypeUrl(); got != "type.googleapis.com/aop.ProtocolMessage" {
+		t.Fatalf("payload type URL = %q", got)
+	}
+	core := new(aop.ProtocolMessage)
+	if err := envelope.GetPayload().UnmarshalTo(core); err != nil {
+		t.Fatal(err)
+	}
+	event := core.GetEvent()
+	if event == nil {
+		t.Fatal("fixture payload does not contain an event")
+	}
+	if len(event.Extensions) != 1 {
+		t.Fatalf("event extensions = %d", len(event.Extensions))
+	}
+	progress := new(toolpb.Progress)
+	if err := event.Extensions[0].UnmarshalTo(progress); err != nil {
+		t.Fatal(err)
+	}
+	if progress.Tool != "fixture-tool" || progress.Text != "fixture progress" {
+		t.Fatalf("typed extension = %#v", progress)
+	}
+	binary, err := proto.MarshalOptions{Deterministic: true}.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,12 +72,12 @@ func TestInteropFixtureMatchesProtoBinaryAndProtoJSON(t *testing.T) {
 	if _, err := base64.StdEncoding.DecodeString(fixture.ProviderPayloads.AnthropicBase64); err != nil {
 		t.Fatalf("Anthropic payload: %v", err)
 	}
-	jsonRoundTrip, err := protojson.Marshal(event)
+	jsonRoundTrip, err := protojson.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromJSON := new(Event)
-	if err := protojson.Unmarshal(jsonRoundTrip, fromJSON); err != nil || !proto.Equal(event, fromJSON) {
+	fromJSON := new(aop.Envelope)
+	if err := protojson.Unmarshal(jsonRoundTrip, fromJSON); err != nil || !proto.Equal(envelope, fromJSON) {
 		t.Fatalf("protobuf JSON round trip failed: %v", err)
 	}
 }
