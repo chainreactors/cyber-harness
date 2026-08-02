@@ -29,18 +29,18 @@ func (t *WebSearchTool) Description() string {
 	return "Search the web for CVEs, exploits, vulnerability details, and product documentation."
 }
 
-func (t *WebSearchTool) Definition() tool.Definition {
+func (t *WebSearchTool) Definition() *tool.Definition {
 	return tool.Def("web_search", t.Description(), webSearchArgs{})
 }
 
-func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (tool.Result, error) {
+func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
 	args, err := tool.ParseArgs[webSearchArgs](arguments)
 	if err != nil {
-		return tool.Result{}, err
+		return nil, err
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
-		return tool.Result{}, fmt.Errorf("query is required")
+		return nil, fmt.Errorf("query is required")
 	}
 
 	num := args.Num
@@ -65,5 +65,5 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (tool.Res
 		}
 	}
 
-	return tool.Result{}, fmt.Errorf("web_search: no search backend available. Configure Tavily API key via --tavily-key flag, env (TAVILY_API_KEY), or config file (search.tavily_keys). Do not retry until configured")
+	return nil, fmt.Errorf("web_search: no search backend available. Configure Tavily API key via --tavily-key flag, env (TAVILY_API_KEY), or config file (search.tavily_keys). Do not retry until configured")
 }

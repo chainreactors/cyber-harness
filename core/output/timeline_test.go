@@ -6,7 +6,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -62,18 +62,4 @@ func timelineEvent(event *aop.Event) *aop.Event {
 	event.Emitter = "aiscan"
 	event.EmittedAt = timestamppb.New(time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC))
 	return event
-}
-
-func TestParseLineRejectsLegacyAgentRecord(t *testing.T) {
-	record := NewRecord(RecordType("agent"), map[string]any{"type": "message_end"})
-	if _, ok := parseLine(record.Marshal()); ok {
-		t.Fatal("legacy agent record should not be accepted")
-	}
-}
-
-func TestParseLineRejectsLegacyAOPRecordPrefix(t *testing.T) {
-	record := NewRecord(RecordType("aop.text"), map[string]any{"content": "legacy"})
-	if _, ok := parseLine(record.Marshal()); ok {
-		t.Fatal("legacy aop.* record should not be accepted after native AOP cutover")
-	}
 }

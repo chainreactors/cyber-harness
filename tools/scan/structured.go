@@ -6,18 +6,18 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 )
 
-func (c *collector) StructuredResult() *output.Result {
+func (c *collector) StructuredResult() *output.ScanResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	stats := c.statsSnapshotLocked()
-	result := &output.Result{
+	result := &output.ScanResult{
 		Summary: output.Summary{
-			Targets:    stats.Inputs,
-			Services:   len(c.gogoResults),
-			Webs:       len(c.seenWeb),
-			Probes:     len(c.sprayResults),
-			Loots:      len(c.loots),
+			Inputs:     stats.Inputs,
+			Ports:      len(c.gogoResults),
+			Web:        len(c.seenWeb),
+			URLs:       len(c.sprayResults),
+			Findings:   len(c.loots),
 			Errors:     len(c.errors),
 			Tasks:      stats.Tasks,
 			Requests:   stats.Requests,
@@ -31,20 +31,18 @@ func (c *collector) StructuredResult() *output.Result {
 		if item == nil {
 			continue
 		}
-		result.Services = append(result.Services, item)
+		result.GOGO = append(result.GOGO, item)
 	}
 	for _, item := range c.sprayResults {
 		if item.Result == nil {
 			continue
 		}
-		result.WebProbes = append(result.WebProbes, item.Result)
+		result.Spray = append(result.Spray, item.Result)
 	}
 	result.Loots = append(result.Loots, c.loots...)
 	for _, message := range c.errors {
 		result.Errors = append(result.Errors, output.Error{Message: message})
 	}
 
-	result.Assets = AggregateStructuredResult(result)
-	result.Nodes = buildSCONodes(result)
 	return result
 }
