@@ -65,7 +65,7 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 		return fmt.Errorf("hello agent_id and authority are required")
 	}
 	node := protocols.NodeRef{ID: hello.AgentId, Authority: hello.Authority}
-	nodeURI := agentKey(hello.AgentId, hello.Authority)
+	nodeURI := canonicalNodeURI(hello.AgentId, hello.Authority)
 	if nodeURI == "" {
 		return fmt.Errorf("agent identity is required")
 	}

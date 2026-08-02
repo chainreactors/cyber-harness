@@ -128,7 +128,7 @@ type AgentPool struct {
 	config         func(context.Context) (*configpb.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan pty.Frame
-	ptyAgents      map[string]string
+	ptyNodeURIs    map[string]string
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
 	upgrader       websocket.Upgrader
@@ -139,7 +139,7 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
 		ptySubs:        make(map[string]chan pty.Frame),
-		ptyAgents:      make(map[string]string),
+		ptyNodeURIs:    make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
 	}
@@ -153,13 +153,13 @@ func (p *AgentPool) SetSCOStore(store SCOStore) {
 	p.sco = store
 }
 
-// agentKey is the pool key for a registering agent: its canonical Web identity, so
+// canonicalNodeURI is the pool key for a registering agent: its canonical Web identity, so
 // a reconnecting agent (WS flap, hub restart, config-driven bounce) re-registers
 // under the SAME key. The hub used to mint a throwaway id per connection, which
 // dangled every chat session bound to it — the session freezes the node URI at
 // creation, so on reconnect the stored URI resolved to nothing and the chat
 // rejected every message as "not connected" even with the agent right back.
-func agentKey(agentID, authority string) string {
+func canonicalNodeURI(agentID, authority string) string {
 	return (protocols.NodeRef{ID: agentID, Authority: authority}).URI()
 }
 
@@ -168,7 +168,7 @@ func (p *AgentPool) register(a *remoteAgent) {
 	old := p.agents[a.nodeURI]
 	p.agents[a.nodeURI] = a
 	p.mu.Unlock()
-	// The pool is keyed by stable identity (see agentKey), so a reconnecting agent
+	// The pool is keyed by stable identity (see canonicalNodeURI), so a reconnecting agent
 	// — or a second agent sharing the same node name — lands on an occupied slot.
 	// Tear the stale connection down: its read loop then exits and its
 	// identity-checked unregister no-ops, leaving `a` alone in the slot.
@@ -532,7 +532,7 @@ func (p *AgentPool) subscribePTY(nodeURI, terminalID string) (<-chan pty.Frame, 
 	p.mu.RLock()
 	p.ptyMu.Lock()
 	p.ptySubs[terminalID] = ch
-	p.ptyAgents[terminalID] = nodeURI
+	p.ptyNodeURIs[terminalID] = nodeURI
 	online := p.agents[nodeURI] != nil
 	p.ptyMu.Unlock()
 	p.mu.RUnlock()
@@ -540,7 +540,7 @@ func (p *AgentPool) subscribePTY(nodeURI, terminalID string) (<-chan pty.Frame, 
 		p.ptyMu.Lock()
 		if p.ptySubs[terminalID] == ch {
 			delete(p.ptySubs, terminalID)
-			delete(p.ptyAgents, terminalID)
+			delete(p.ptyNodeURIs, terminalID)
 			close(ch)
 		}
 		p.ptyMu.Unlock()
@@ -550,7 +550,7 @@ func (p *AgentPool) subscribePTY(nodeURI, terminalID string) (<-chan pty.Frame, 
 func (p *AgentPool) notifyPTY(nodeURI string, frame pty.Frame) {
 	p.ptyMu.RLock()
 	defer p.ptyMu.RUnlock()
-	for terminalID, boundNodeURI := range p.ptyAgents {
+	for terminalID, boundNodeURI := range p.ptyNodeURIs {
 		if boundNodeURI != nodeURI {
 			continue
 		}
@@ -572,7 +572,7 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	}
 	p.ptyMu.RLock()
 	terminalIDs := make([]string, 0)
-	for terminalID, nodeURI := range p.ptyAgents {
+	for terminalID, nodeURI := range p.ptyNodeURIs {
 		if nodeURI == agent.nodeURI {
 			terminalIDs = append(terminalIDs, terminalID)
 		}

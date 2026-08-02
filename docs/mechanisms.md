@@ -6,14 +6,14 @@
 
 ## 1. Agent 池稳定身份
 
-**问题**: hub 原来每次 WS 连接都 `generateID()` 生成随机 key。chat session 在创建时冻结 `agent_id`，agent 断连重连后 id 变化，session 绑定的旧 id 解析到空，消息被拒为 "not connected"。
+**问题**: hub 原来每次 WS 连接都 `generateID()` 生成随机 key。Chat Session 在创建时绑定 `node_uri`；如果连接 key 不稳定，节点重连后 Session 会解析到空并拒绝新消息。
 
 **机制**: `agentKey()` 从生成的 `aop.AgentHello` 中提取稳定标识，作为 pool 的唯一 key。重连的 agent 覆盖旧 slot 而非新建。
 
 **守卫**:
 - `register()` 检测旧连接并 Close，触发旧 read loop 退出
 - `unregister()` 只在 slot 仍属于当前实例时才删除，防止旧 defer 误删新连接
-- SQLite migration 将历史 session 的 `agent_id` 对齐到 `agent_name`
+- SQLite v2 migration 将历史 `chat_sessions.agent_id` 列原位重命名为 `node_uri`
 
 **文件**: `pkg/web/agents.go`
 
