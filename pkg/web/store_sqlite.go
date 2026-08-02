@@ -22,7 +22,7 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-const sqliteSchemaVersion = 1
+const sqliteSchemaVersion = 2
 
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
@@ -54,6 +54,22 @@ func migrate(db *sql.DB) error {
 	if version == sqliteSchemaVersion {
 		return nil
 	}
+	if version == 1 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.Exec(`
+			DROP INDEX idx_sessions_agent;
+			ALTER TABLE chat_sessions RENAME COLUMN agent_id TO node_uri;
+			CREATE INDEX idx_sessions_node_uri ON chat_sessions(node_uri);
+			PRAGMA user_version = 2;
+		`); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if version != 0 {
 		return fmt.Errorf("unsupported sqlite schema version %d; delete the database and restart", version)
 	}
@@ -82,7 +98,7 @@ func migrate(db *sql.DB) error {
 
 		CREATE TABLE chat_sessions (
 			id            TEXT PRIMARY KEY,
-			agent_id      TEXT NOT NULL,
+			node_uri      TEXT NOT NULL,
 			status        TEXT NOT NULL,
 			session_proto BLOB NOT NULL,
 			created_at    TEXT NOT NULL,
@@ -129,11 +145,11 @@ func migrate(db *sql.DB) error {
 
 		CREATE INDEX idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX idx_sessions_updated ON chat_sessions(updated_at DESC);
-		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
+		CREATE INDEX idx_sessions_node_uri ON chat_sessions(node_uri);
 		CREATE INDEX idx_aop_events_session ON chat_aop_events(session_id, cursor);
 		CREATE INDEX idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX idx_sco_observations_node ON sco_observations(cstx_id);
-		PRAGMA user_version = 1;
+		PRAGMA user_version = 2;
 	`); err != nil {
 		return err
 	}
@@ -338,8 +354,8 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, session *chatpb.Session
 		return err
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO chat_sessions (id, agent_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		session.GetSession().GetId(), session.GetSession().GetParticipant(), session.GetSession().GetState(),
+		`INSERT INTO chat_sessions (id, node_uri, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		session.GetSession().GetId(), session.GetSession().GetNodeUri(), session.GetSession().GetState(),
 		raw,
 		formatProtoTime(session.CreatedAt), formatProtoTime(session.UpdatedAt),
 	)

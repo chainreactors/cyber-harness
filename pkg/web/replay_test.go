@@ -64,7 +64,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
 	remote := &remoteAgent{
-		id: "agent-1", name: "worker", sendCh: make(chan *aop.Envelope, 8), done: make(chan struct{}),
+		nodeURI: "agent-1", name: "worker", sendCh: make(chan *aop.Envelope, 8), done: make(chan struct{}),
 		tasks: map[string]chan taskResult{}, turns: map[string]int{},
 	}
 	taskCh := make(chan taskResult, 1)

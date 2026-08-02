@@ -352,7 +352,7 @@ func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	resultCh, err := pool.DispatchChat(agent.id, "task-chat", "hello")
+	resultCh, err := pool.DispatchChat(agent.nodeURI, "task-chat", "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resultCh, err := pool.DispatchRun(agent.id, &aop.RunTurnRequest{
+	resultCh, err := pool.DispatchRun(agent.nodeURI, &aop.RunTurnRequest{
 		SessionId: "sess-1", TurnId: "task-goal",
 		Input:      &aop.Message{Id: "input-task-goal", Role: "user", Content: []*aop.Content{aop.Text("audit target")}},
 		Extensions: []*anypb.Any{options},
@@ -598,7 +598,7 @@ func TestWSTerminalRelay(t *testing.T) {
 	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID})
 
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	if open.StreamID != "term-1" {
@@ -638,7 +638,7 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	defer browserConn.Close()
 
 	// open
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 
@@ -682,7 +682,7 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	readAgentPTY(t, agentConn, pty.FrameDetach)
 
 	// attach rides a fresh stream routed via its list open.
-	writeBrowserPTYList(t, browserConn, &ptypb.List{StreamId: "term-2", AgentId: agentID})
+	writeBrowserPTYList(t, browserConn, &ptypb.List{StreamId: "term-2", NodeUri: agentID})
 	readAgentPTY(t, agentConn, pty.FrameList)
 	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, StreamID: "term-2", SessionID: "sess-1"})
 	att := readAgentPTY(t, agentConn, pty.FrameAttach)
@@ -708,7 +708,7 @@ func TestWSTerminalSingleton(t *testing.T) {
 	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID,
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID,
 		Kind: "shell", Name: "singleton-shell", Singleton: true, Cols: 80, Rows: 24})
 
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
@@ -726,7 +726,7 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID})
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 
@@ -761,7 +761,7 @@ func TestWSTerminalOfflineAgentDetached(t *testing.T) {
 	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID})
 	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
 	if detached.StreamID != "term-1" {
 		t.Fatalf("offline detached = %+v", detached)
@@ -778,7 +778,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeUri: agentID})
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, Session: &pty.Info{ID: "sess-1"}})
@@ -1099,7 +1099,7 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	pool := NewAgentPool(nil)
 	resultCh := make(chan taskResult, 1)
 	remote := &remoteAgent{
-		id:            "agent-1",
+		nodeURI:       "agent-1",
 		sendCh:        make(chan *aop.Envelope, 1),
 		tasks:         map[string]chan taskResult{"task-1": resultCh},
 		turns:         map[string]int{"task-1": 1},
@@ -1107,9 +1107,9 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 		childSessions: make(map[string]map[string]struct{}),
 		done:          make(chan struct{}),
 	}
-	pool.agents[remote.id] = remote
+	pool.agents[remote.nodeURI] = remote
 
-	pool.CancelTask(remote.id, "task-1", "session-1")
+	pool.CancelTask(remote.nodeURI, "task-1", "session-1")
 
 	select {
 	case envelope := <-remote.sendCh:

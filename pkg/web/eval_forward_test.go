@@ -22,7 +22,7 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	sink := &evalSink{sid: "sess-eval", found: true}
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
-	remote := &remoteAgent{id: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
+	remote := &remoteAgent{nodeURI: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
 
 	event := &aop.Event{
 		SessionId: "agent-session", TurnId: "turn-1", Emitter: "test-agent",

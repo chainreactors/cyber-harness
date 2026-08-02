@@ -9,9 +9,9 @@ import (
 	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
 )
 
-func newFakeAgent(id string, buffer int) *remoteAgent {
+func newFakeAgent(nodeURI string, buffer int) *remoteAgent {
 	return &remoteAgent{
-		id: id, name: id, sendCh: make(chan *aop.Envelope, buffer),
+		nodeURI: nodeURI, name: nodeURI, sendCh: make(chan *aop.Envelope, buffer),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), done: make(chan struct{}),
 	}
 }

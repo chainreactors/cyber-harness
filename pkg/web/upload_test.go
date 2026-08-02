@@ -22,13 +22,13 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.Session.Participant = "upload-agent"
+	session.Session.NodeUri = "upload-agent"
 	if err := store.UpdateSession(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 
 	pool := NewAgentPool(NewHub())
-	remote := newFakeAgent(session.GetSession().GetParticipant(), 1)
+	remote := newFakeAgent(session.GetSession().GetNodeUri(), 1)
 	pool.register(remote)
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
 
