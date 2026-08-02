@@ -179,6 +179,8 @@ github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320 h1:gkcY9Pr
 github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320/go.mod h1:4qC68vqWSuPTct3spuTrWBqCpm00mQ707JKLS1izVjI=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744 h1:5Bj73ddSftvWEgjo3dEOUis1CuwPaX8JsSAIZCujfxE=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744/go.mod h1:Em8DiV1Rh59FCd9zN4RQBi3RnUt9yPWD/oxPEPTyXIk=
+github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186 h1:oKM8D7wYAl8k9zEpFVb7TOyeHmVvvxhKZE7qxvGd39U=
+github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
 github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2 h1:pc7Vw1H4CyFnzOCxRmM1kdDwX0vJBTotIxOQjA78J/Q=
 github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2/go.mod h1:X0uOEyD6Q/d7QBQ/MMU+J9bN83Xc/+XN3M2KJDaQuNw=
 github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7 h1:DJxafZodSjffB7ilvNf2eZDEAcSkD5I2GzSWlJUlb3A=
