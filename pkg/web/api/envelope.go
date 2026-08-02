@@ -142,7 +142,10 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}()
 
 	handleCore := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value := message.(*aop.ProtocolMessage)
+		value, ok := message.(*aop.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected application core message %T", message)
+		}
 		sessions := backends.Sessions
 		switch payload := value.Message.(type) {
 		case *aop.ProtocolMessage_OpenSessionRequest:
@@ -216,7 +219,11 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}
 
 	handleCommand := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		request := message.(*types.CommandProtocolMessage).GetRequest()
+		value, ok := message.(*types.CommandProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected application command message %T", message)
+		}
+		request := value.GetRequest()
 		if request == nil || backends.Commands == nil {
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan command message"))
 			return nil
@@ -233,7 +240,11 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}
 
 	handleFile := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		request := message.(*filepb.ProtocolMessage).GetUploadRequest()
+		value, ok := message.(*filepb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected application file message %T", message)
+		}
+		request := value.GetUploadRequest()
 		if request == nil || backends.Files == nil {
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("only file upload is supported by the application endpoint"))
 			return nil
@@ -250,7 +261,11 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}
 
 	handleScan := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		request := message.(*types.ScanProtocolMessage).GetWatchEventsRequest()
+		value, ok := message.(*types.ScanProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected application scan message %T", message)
+		}
+		request := value.GetWatchEventsRequest()
 		if request == nil {
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan scan message"))
 			return nil
@@ -273,7 +288,10 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}
 
 	handlePTY := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value := message.(*ptypb.ProtocolMessage)
+		value, ok := message.(*ptypb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected application PTY message %T", message)
+		}
 		streamID := coreterminal.StreamID(value)
 		if streamID == "" {
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
