@@ -10,6 +10,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 type CheckpointData struct {
@@ -222,9 +223,9 @@ func sanitizeMessagesForSave(messages []*aop.Message) []*aop.Message {
 				filtered = append(filtered, part)
 			}
 		}
-		cp := *m
+		cp := proto.CloneOf(m)
 		cp.Content = filtered
-		out[i] = &cp
+		out[i] = cp
 	}
 	return out
 }

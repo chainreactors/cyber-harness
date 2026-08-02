@@ -321,13 +321,6 @@ func scanFromScanner(sc scanner) (*types.Scan, error) {
 	return scan, nil
 }
 
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
-}
-
 func formatProtoTime(ts *timestamppb.Timestamp) string {
 	if ts == nil {
 		return time.Now().UTC().Format(time.RFC3339Nano)

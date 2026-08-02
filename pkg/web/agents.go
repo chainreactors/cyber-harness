@@ -28,7 +28,7 @@ func cloneCommandSpecs(values []*types.CommandSpec) []*types.CommandSpec {
 	out := make([]*types.CommandSpec, 0, len(values))
 	for _, value := range values {
 		if value != nil {
-			out = append(out, protobuf.Clone(value).(*types.CommandSpec))
+			out = append(out, protobuf.CloneOf(value))
 		}
 	}
 	return out
@@ -187,7 +187,7 @@ func (a *remoteAgent) chatCapable() bool {
 }
 
 func (a *remoteAgent) reloadConfig(config *types.DistributeConfig) {
-	message := &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{Config: protobuf.Clone(config).(*types.DistributeConfig)}}}
+	message := &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{Config: protobuf.CloneOf(config)}}}
 	if envelope, err := aop.Wrap(generateID(), "", message); err == nil {
 		_ = a.enqueue(envelope)
 	}
@@ -202,14 +202,14 @@ func (a *remoteAgent) view() *types.AgentView {
 		Capabilities: append([]string(nil), a.capabilities...),
 	}
 	if a.runtime != nil {
-		hello.Runtime = protobuf.Clone(a.runtime).(*aop.AgentRuntimeInfo)
+		hello.Runtime = protobuf.CloneOf(a.runtime)
 	}
 	view := &types.AgentView{Hello: hello, ConnectedAt: timestamppb.New(a.connectAt), Commands: cloneCommandSpecs(a.commandsMenu), Busy: len(a.tasks) > 0}
 	if a.status != nil {
-		view.Status = protobuf.Clone(a.status).(*aop.AgentStatus)
+		view.Status = protobuf.CloneOf(a.status)
 	}
 	if a.stats != nil {
-		view.Stats = protobuf.Clone(a.stats).(*aop.AgentStats)
+		view.Stats = protobuf.CloneOf(a.stats)
 	}
 	return view
 }
@@ -488,7 +488,7 @@ func (p *AgentPool) DispatchCommand(nodeID, taskID string, command *types.Comman
 			return nil, err
 		}
 	}
-	return p.dispatchMessage(nodeID, taskID, &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: protobuf.Clone(command).(*types.CommandRequest)}})
+	return p.dispatchMessage(nodeID, taskID, &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: protobuf.CloneOf(command)}})
 }
 
 func (p *AgentPool) dispatchMessage(nodeID, taskID string, message protobuf.Message) (<-chan taskResult, error) {

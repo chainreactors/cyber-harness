@@ -128,7 +128,7 @@ func dialAOPWebSocket(t *testing.T, srv *httptest.Server) *websocket.Conn {
 }
 
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
-	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, aop.AgentStatus{Space: "case-test"})
+	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, &aop.AgentStatus{Space: "case-test"})
 }
 
 func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
@@ -172,7 +172,7 @@ func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.
 	return frame
 }
 
-func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status aop.AgentStatus) *websocket.Conn {
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status *aop.AgentStatus) *websocket.Conn {
 	t.Helper()
 	conn := dialAOPWebSocket(t, srv)
 	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: &aop.AgentHello{
@@ -333,7 +333,7 @@ func TestWSDispatchAndComplete(t *testing.T) {
 func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",
-		aop.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
+		&aop.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -386,7 +386,7 @@ func turnEndEnvelope(t *testing.T, turnID, sessionID, stop string) *aop.Envelope
 func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
-		aop.AgentStatus{Provider: "openai", Model: "test-model"})
+		&aop.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -424,8 +424,8 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	if inbound.SessionId != "sess-1" || len(inbound.Input.Content) != 1 || inbound.Input.Content[0].GetText().GetText() != "audit target" {
 		t.Errorf("run = %+v", inbound)
 	}
-	var gotOptions types.AgentRunOptions
-	if err := inbound.Extensions[0].UnmarshalTo(&gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
+	gotOptions := new(types.AgentRunOptions)
+	if err := inbound.Extensions[0].UnmarshalTo(gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
 		t.Errorf("goal options = %+v, err=%v", gotOptions, err)
 	}
 	writeAgentEnvelope(t, conn, turnEndEnvelope(t, "task-goal", "sess-1", "completed"))
@@ -451,7 +451,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
-		aop.AgentStatus{Provider: "openai", Model: "test-model"})
+		&aop.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)

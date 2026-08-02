@@ -130,7 +130,7 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 		Id: "event-1", EmittedAt: timestamppb.Now(), SessionId: "session-eval", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}},
 	}
-	_ = types.SetEvalDetail(event, types.EvalDetail{Round: 2, Reason: "needs verification"})
+	_ = types.SetEvalDetail(event, &types.EvalDetail{Round: 2, Reason: "needs verification"})
 	service.BroadcastAOPEvent("session-eval", event)
 	events, err := store.ListAOPEvents(context.Background(), "session-eval", 100)
 	if err != nil || len(events) != 1 {

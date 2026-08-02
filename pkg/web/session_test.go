@@ -10,10 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 )
@@ -259,43 +256,6 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	if err != nil || rejected.GetRejected().GetCode() != "ALREADY_EXISTS" {
 		t.Fatalf("durable conflict = %v, %v", rejected, err)
 	}
-}
-
-type lockedResponseRecorder struct {
-	*httptest.ResponseRecorder
-	mu sync.Mutex
-}
-
-func newLockedResponseRecorder() *lockedResponseRecorder {
-	return &lockedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
-}
-
-func (r *lockedResponseRecorder) Header() http.Header {
-	return r.ResponseRecorder.Header()
-}
-
-func (r *lockedResponseRecorder) WriteHeader(statusCode int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.WriteHeader(statusCode)
-}
-
-func (r *lockedResponseRecorder) Write(data []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ResponseRecorder.Write(data)
-}
-
-func (r *lockedResponseRecorder) Flush() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.Flush()
-}
-
-func (r *lockedResponseRecorder) BodyString() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.Body.String()
 }
 
 // ListEvents replay is a pure read: it must not dispatch frames, converge an

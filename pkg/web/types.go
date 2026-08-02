@@ -40,10 +40,6 @@ func scanStatusToDB(value types.ScanStatus) string {
 	}
 }
 
-func scanTerminal(value types.ScanStatus) bool {
-	return managementapi.ScanTerminal(value)
-}
-
 func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 // System message codes. A backend-generated system message carries a stable

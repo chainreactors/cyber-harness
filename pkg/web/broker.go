@@ -53,7 +53,7 @@ func (h *Hub) BroadcastAOP(sessionID string, delivery *aop.EventDelivery, reliab
 	}
 	h.mu.Lock()
 	for ch := range h.aopSubscribers[sessionID] {
-		value := protobuf.Clone(delivery).(*aop.EventDelivery)
+		value := protobuf.CloneOf(delivery)
 		broadcastBuffered(ch, value, reliable)
 	}
 	h.mu.Unlock()
@@ -99,7 +99,7 @@ func (h *Hub) BroadcastScan(event *types.ScanEvent, reliable bool) {
 		event.EmittedAt = timestamppb.Now()
 	}
 	for ch := range h.scanSubscribers[event.ScanId] {
-		broadcastBuffered(ch, protobuf.Clone(event).(*types.ScanEvent), reliable)
+		broadcastBuffered(ch, protobuf.CloneOf(event), reliable)
 	}
 	h.mu.Unlock()
 }

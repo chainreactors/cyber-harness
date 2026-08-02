@@ -77,7 +77,7 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 		ParentSessionId:  "parent-session",
 		ParentToolCallId: "spawn-1",
 	}}})
-	if err := types.SetDelegation(start, types.DelegationDetail{
+	if err := types.SetDelegation(start, &types.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
 		RunMode:   types.DelegationRunForeground,
@@ -139,7 +139,7 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
 		ParentSessionId: "parent-session", ParentToolCallId: "spawn-2",
 	}}})
-	if err := types.SetDelegation(start, types.DelegationDetail{
+	if err := types.SetDelegation(start, &types.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
 		RunMode:   types.DelegationRunBackground,

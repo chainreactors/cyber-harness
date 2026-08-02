@@ -232,7 +232,7 @@ func (r *ioaHandoffRecorder) resolveSpace(ctx context.Context) (string, error) {
 	return r.spaceID, nil
 }
 
-func handoffMode(detail types.DelegationDetail) string {
+func handoffMode(detail *types.DelegationDetail) string {
 	if detail.ContextMode == types.DelegationContextFork {
 		return "fork"
 	}

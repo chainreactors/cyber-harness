@@ -1618,10 +1618,6 @@ func lastEvent(events []*aop.Event) *aop.Event {
 	return events[len(events)-1]
 }
 
-func strPtr(s string) *string {
-	return &s
-}
-
 func messageContent(m *aop.Message) string {
 	return provider.MessageText(m)
 }

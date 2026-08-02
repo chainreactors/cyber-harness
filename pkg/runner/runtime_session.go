@@ -725,7 +725,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	if message == nil {
 		message = &aop.Message{Role: "user", Content: input.Content}
 	} else {
-		message = proto.Clone(message).(*aop.Message)
+		message = proto.CloneOf(message)
 	}
 	if message.Role == "" {
 		message.Role = "user"
@@ -837,7 +837,7 @@ func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
 		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
 	}}}
-	_ = types.SetCommandDetail(event, types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
+	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
 	s.runtime.sessionEvents.Emit(event)
 }
 

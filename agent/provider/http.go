@@ -282,13 +282,6 @@ func readAllWithCancelTimeout(r io.Reader, cancel context.CancelFunc, timeout ti
 	return body, timedOut.Load(), err
 }
 
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 func clampInt(v, min, max, fallback int) int {
 	if v <= 0 {
 		return fallback

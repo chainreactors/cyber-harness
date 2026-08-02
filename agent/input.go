@@ -6,6 +6,7 @@ import (
 	"os"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"google.golang.org/protobuf/proto"
 )
 
 // maxInputImageBytes caps a single input image (20 MiB), matching common
@@ -24,7 +25,7 @@ func resolveInputMessage(message *aop.Message) (*aop.Message, error) {
 	if message == nil {
 		return nil, fmt.Errorf("input message is required")
 	}
-	resolved := *message
+	resolved := proto.CloneOf(message)
 	resolved.Content = make([]*aop.Content, 0, len(message.Content))
 	for _, content := range message.Content {
 		media := content.GetMedia()
@@ -66,5 +67,5 @@ func resolveInputMessage(message *aop.Message) (*aop.Message, error) {
 			},
 		}}})
 	}
-	return &resolved, nil
+	return resolved, nil
 }

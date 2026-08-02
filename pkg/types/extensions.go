@@ -25,62 +25,62 @@ const (
 	DelegationRunForeground = "foreground"
 )
 
-func GetCommandDetail(event *aop.Event) (CommandDetail, bool, error) {
+func GetCommandDetail(event *aop.Event) (*CommandDetail, bool, error) {
 	value := new(CommandDetail)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetCommandDetail(event *aop.Event, value CommandDetail) error {
-	return aop.SetTypedExtension(event, &value)
+func SetCommandDetail(event *aop.Event, value *CommandDetail) error {
+	return aop.SetTypedExtension(event, value)
 }
 
-func GetCompactDetail(event *aop.Event) (CompactDetail, bool, error) {
+func GetCompactDetail(event *aop.Event) (*CompactDetail, bool, error) {
 	value := new(CompactDetail)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetCompactDetail(event *aop.Event, value CompactDetail) error {
-	return aop.SetTypedExtension(event, &value)
+func SetCompactDetail(event *aop.Event, value *CompactDetail) error {
+	return aop.SetTypedExtension(event, value)
 }
 
-func GetDelegation(event *aop.Event) (DelegationDetail, bool, error) {
+func GetDelegation(event *aop.Event) (*DelegationDetail, bool, error) {
 	value := new(DelegationDetail)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetDelegation(event *aop.Event, value DelegationDetail) error {
-	return aop.SetTypedExtension(event, &value)
+func SetDelegation(event *aop.Event, value *DelegationDetail) error {
+	return aop.SetTypedExtension(event, value)
 }
 
-func GetEvalControl(event *aop.Event) (EvalControl, bool, error) {
+func GetEvalControl(event *aop.Event) (*EvalControl, bool, error) {
 	value := new(EvalControl)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetEvalControl(event *aop.Event, value EvalControl) error {
-	return aop.SetTypedExtension(event, &value)
+func SetEvalControl(event *aop.Event, value *EvalControl) error {
+	return aop.SetTypedExtension(event, value)
 }
 
-func GetEvalDetail(event *aop.Event) (EvalDetail, bool, error) {
+func GetEvalDetail(event *aop.Event) (*EvalDetail, bool, error) {
 	value := new(EvalDetail)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetEvalDetail(event *aop.Event, value EvalDetail) error {
-	return aop.SetTypedExtension(event, &value)
+func SetEvalDetail(event *aop.Event, value *EvalDetail) error {
+	return aop.SetTypedExtension(event, value)
 }
 
-func GetWebMessage(event *aop.Event) (WebMessageMetadata, bool, error) {
+func GetWebMessage(event *aop.Event) (*WebMessageMetadata, bool, error) {
 	value := new(WebMessageMetadata)
 	ok, err := aop.FindTypedExtension(event, value)
-	return *value, ok, err
+	return value, ok, err
 }
 
-func SetWebMessage(event *aop.Event, value WebMessageMetadata) error {
-	return aop.SetTypedExtension(event, &value)
+func SetWebMessage(event *aop.Event, value *WebMessageMetadata) error {
+	return aop.SetTypedExtension(event, value)
 }

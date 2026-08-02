@@ -70,7 +70,7 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 	}
 	runtimeInfo := &aop.AgentRuntimeInfo{}
 	if hello.Runtime != nil {
-		runtimeInfo = protobuf.Clone(hello.Runtime).(*aop.AgentRuntimeInfo)
+		runtimeInfo = protobuf.CloneOf(hello.Runtime)
 	}
 
 	ctx, cancel := context.WithCancel(parent)

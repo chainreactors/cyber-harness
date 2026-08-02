@@ -56,7 +56,7 @@ func (rt *AgentRuntime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest)
 	}
 	var message *aop.Message
 	if req.Input != nil {
-		message = protobuf.Clone(req.Input).(*aop.Message)
+		message = protobuf.CloneOf(req.Input)
 	}
 	_, err := rt.RunSession(ctx, req.SessionId, RunInput{
 		TurnID: req.TurnId, Message: message, Continue: req.ContinueSession,
@@ -135,7 +135,10 @@ func newRuntimeNamespaceMux(rt *AgentRuntime) (*aop.NamespaceMux, error) {
 }
 
 func (rt *AgentRuntime) handleCoreNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
-	value := message.(*aop.ProtocolMessage)
+	value, ok := message.(*aop.ProtocolMessage)
+	if !ok {
+		return fmt.Errorf("unexpected core namespace message %T", message)
+	}
 	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
 	switch payload := value.Message.(type) {
 	case *aop.ProtocolMessage_OpenSessionRequest:
@@ -152,7 +155,10 @@ func (rt *AgentRuntime) handleCoreNamespace(ctx context.Context, envelope *aop.E
 }
 
 func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
-	value := message.(*types.CommandProtocolMessage)
+	value, ok := message.(*types.CommandProtocolMessage)
+	if !ok {
+		return fmt.Errorf("unexpected command namespace message %T", message)
+	}
 	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
 	request := value.GetRequest()
 	if request == nil || strings.TrimSpace(request.Line) == "" {

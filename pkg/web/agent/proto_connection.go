@@ -229,7 +229,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 					next := cc.Status()
 					if next != nil && !protobuf.Equal(next, last) {
 						send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: next}})
-						last = protobuf.Clone(next).(*aop.AgentStatus)
+						last = protobuf.CloneOf(next)
 					}
 				case <-connectionCtx.Done():
 					return
@@ -297,7 +297,7 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 	if value == nil {
 		return nil
 	}
-	return protobuf.Clone(value).(*aop.AgentStatus)
+	return protobuf.CloneOf(value)
 }
 
 func newAgentConnectionNamespaceMux(
@@ -310,7 +310,11 @@ func newAgentConnectionNamespaceMux(
 ) (*aop.NamespaceMux, error) {
 	mux := aop.NewNamespaceMux()
 	if err := mux.Register(&aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentCoreMessage(ctx, cc, envelope, message.(*aop.ProtocolMessage), send, sendEnvelope, operationsMu, operations)
+		value, ok := message.(*aop.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected core namespace message %T", message)
+		}
+		handleAgentCoreMessage(ctx, cc, envelope, value, send, sendEnvelope, operationsMu, operations)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -326,31 +330,51 @@ func newAgentConnectionNamespaceMux(
 		return nil, err
 	}
 	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentToolMessage(ctx, cc, envelope, message.(*toolpb.ProtocolMessage), send, operationsMu, operations)
+		value, ok := message.(*toolpb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected tool namespace message %T", message)
+		}
+		handleAgentToolMessage(ctx, cc, envelope, value, send, operationsMu, operations)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentFileMessage(cc, envelope, message.(*filepb.ProtocolMessage), send)
+		value, ok := message.(*filepb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected file namespace message %T", message)
+		}
+		handleAgentFileMessage(cc, envelope, value, send)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentExecMessage(ctx, cc, envelope, message.(*execpb.ProtocolMessage), send, operationsMu, operations)
+		value, ok := message.(*execpb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected exec namespace message %T", message)
+		}
+		handleAgentExecMessage(ctx, cc, envelope, value, send, operationsMu, operations)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentReloadMessage(cc, envelope, message.(*types.ReloadProtocolMessage), send)
+		value, ok := message.(*types.ReloadProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected reload namespace message %T", message)
+		}
+		handleAgentReloadMessage(cc, envelope, value, send)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if err := mux.Register(&ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentPTYMessage(ctx, router, envelope, message.(*ptypb.ProtocolMessage), send)
+		value, ok := message.(*ptypb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected PTY namespace message %T", message)
+		}
+		handleAgentPTYMessage(ctx, router, envelope, value, send)
 		return nil
 	}); err != nil {
 		return nil, err

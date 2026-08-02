@@ -29,7 +29,7 @@ func (s *Service) OpenAgentSession(ctx context.Context, requestID string, reques
 	if s.agents.SessionOpen(request.NodeId, request.SessionId) {
 		return nil
 	}
-	resultCh, err := s.agents.DispatchOpenSession(request.NodeId, requestID, proto.Clone(request).(*aop.OpenSessionRequest))
+	resultCh, err := s.agents.DispatchOpenSession(request.NodeId, requestID, proto.CloneOf(request))
 	if err != nil {
 		return managementapi.NewError(managementapi.CodeUnavailable, err)
 	}
@@ -59,7 +59,7 @@ func (s *Service) CloseAgentSession(ctx context.Context, requestID, nodeID strin
 	if _, connected := s.AgentInfo(nodeID); !connected {
 		return false, nil
 	}
-	resultCh, err := s.agents.DispatchCloseSession(nodeID, requestID, proto.Clone(request).(*aop.CloseSessionRequest))
+	resultCh, err := s.agents.DispatchCloseSession(nodeID, requestID, proto.CloneOf(request))
 	if err != nil {
 		return true, managementapi.NewError(managementapi.CodeUnavailable, err)
 	}
