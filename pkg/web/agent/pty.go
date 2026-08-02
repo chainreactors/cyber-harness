@@ -6,20 +6,22 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/tmux"
+	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/utils/pty"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
 // their router directly from AgentRuntime and do not inspect the bash tool.
-func NewPTYRouter(reg *commands.CommandRegistry) *pty.Router {
+func NewPTYRouter(reg *commands.CommandRegistry) *coreterminal.Router {
 	mgr := RegistryPTYManager(reg)
 	var baseMgr *pty.Manager
 	if mgr != nil {
 		baseMgr = mgr.Manager
 	}
 	openers := pty.DefaultOpeners(baseMgr, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	return pty.NewRouter(baseMgr, pty.WithOpeners(openers))
+	return coreterminal.NewRouter(baseMgr, coreterminal.WithOpeners(openers))
 }
 
 // RegistryPTYManager extracts the tmux Manager from the "bash" tool in the
@@ -43,7 +45,7 @@ func RegistryPTYManager(reg *commands.CommandRegistry) *tmux.Manager {
 
 // SubscribePTYSessions subscribes to PTY session changes and broadcasts
 // session state to all active PTY streams.
-func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Router, send func(pty.Frame)) func() {
+func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) func() {
 	if mgr == nil || router == nil || send == nil {
 		return func() {}
 	}
@@ -93,13 +95,13 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *pty.Ro
 }
 
 // BroadcastPTYSessions sends the current PTY session list to all active streams.
-func BroadcastPTYSessions(mgr *tmux.Manager, router *pty.Router, send func(pty.Frame)) {
+func BroadcastPTYSessions(mgr *tmux.Manager, router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) {
 	streamIDs := router.StreamIDs()
 	if len(streamIDs) == 0 {
 		return
 	}
 	sessions := mgr.List()
 	for _, streamID := range streamIDs {
-		send(pty.Frame{Type: pty.FrameSessions, StreamID: streamID, Sessions: sessions})
+		send(coreterminal.NewSessions(streamID, sessions))
 	}
 }

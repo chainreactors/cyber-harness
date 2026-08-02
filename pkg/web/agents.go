@@ -12,10 +12,10 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
-	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -247,7 +247,7 @@ type AgentPool struct {
 	sco            SCOStore
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
-	ptySubs        map[string]chan pty.Frame
+	ptySubs        map[string]chan *ptypb.ProtocolMessage
 	ptyNodeIDs     map[string]string
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
@@ -258,7 +258,7 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
-		ptySubs:        make(map[string]chan pty.Frame),
+		ptySubs:        make(map[string]chan *ptypb.ProtocolMessage),
 		ptyNodeIDs:     make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
@@ -299,7 +299,7 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 	}
 	p.mu.Unlock()
 	if removed {
-		p.notifyPTY(a.NodeID(), pty.Frame{Type: pty.FrameDetached})
+		p.notifyPTY(a.NodeID(), coreterminal.NewDetached)
 	}
 	a.state().closeAllTasks()
 }
@@ -591,15 +591,15 @@ func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error
 }
 
 func (p *AgentPool) CancelPTY(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameKill, StreamID: terminalID}))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", coreterminal.NewKill(terminalID))
 }
 
 func (p *AgentPool) CloseTerminal(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", coreterminal.NewDetach(terminalID))
 }
 
-func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan pty.Frame, bool, func()) {
-	ch := make(chan pty.Frame, 256)
+func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan *ptypb.ProtocolMessage, bool, func()) {
+	ch := make(chan *ptypb.ProtocolMessage, 256)
 	// Snapshot connectivity while registering the subscription under the pool
 	// lock. An unregister cannot otherwise be distinguished from an initially
 	// offline agent and can produce duplicate detached frames.
@@ -621,18 +621,16 @@ func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan pty.Frame, b
 	}
 }
 
-func (p *AgentPool) notifyPTY(nodeID string, frame pty.Frame) {
+func (p *AgentPool) notifyPTY(nodeID string, message func(string) *ptypb.ProtocolMessage) {
 	p.ptyMu.RLock()
 	defer p.ptyMu.RUnlock()
 	for terminalID, boundNodeID := range p.ptyNodeIDs {
 		if boundNodeID != nodeID {
 			continue
 		}
-		out := frame
-		out.StreamID = terminalID
 		if ch := p.ptySubs[terminalID]; ch != nil {
 			select {
-			case ch <- out:
+			case ch <- message(terminalID):
 			default:
 				p.ptyDrops.Add(1)
 			}
@@ -655,7 +653,7 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	for _, terminalID := range terminalIDs {
 		terminalID := terminalID
 		go func() {
-			_ = agent.enqueue(aop.MustWrap(generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameList, StreamID: terminalID})))
+			_ = agent.enqueue(aop.MustWrap(generateID(), "", coreterminal.NewList(terminalID, "")))
 		}()
 	}
 }

@@ -9,9 +9,7 @@ import (
 	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	webstatic "github.com/chainreactors/aiscan/web"
-	"github.com/chainreactors/utils/pty"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
@@ -70,18 +68,58 @@ func readHubEnvelope(t *testing.T, conn *websocket.Conn) *aop.Envelope {
 	return envelope
 }
 
-// ptyFrameFromEnvelope extracts a PTY frame from an AOP envelope; envelopes
-// carrying any other namespace decode to the zero frame.
-func ptyFrameFromEnvelope(envelope *aop.Envelope) pty.Frame {
+func ptyMessageFromEnvelope(envelope *aop.Envelope) *ptypb.ProtocolMessage {
 	message, err := aop.Unwrap(envelope)
 	if err != nil {
-		return pty.Frame{}
+		return nil
 	}
 	ptyMessage, ok := message.(*ptypb.ProtocolMessage)
 	if !ok {
-		return pty.Frame{}
+		return nil
 	}
-	return terminalcodec.FromProto(ptyMessage)
+	return ptyMessage
+}
+
+func ptyMessageKind(value *ptypb.ProtocolMessage) string {
+	if value == nil {
+		return ""
+	}
+	switch value.Message.(type) {
+	case *ptypb.ProtocolMessage_Open:
+		return "open"
+	case *ptypb.ProtocolMessage_Opened:
+		return "opened"
+	case *ptypb.ProtocolMessage_Input:
+		return "input"
+	case *ptypb.ProtocolMessage_Output:
+		return "output"
+	case *ptypb.ProtocolMessage_Resize:
+		return "resize"
+	case *ptypb.ProtocolMessage_List:
+		return "list"
+	case *ptypb.ProtocolMessage_Sessions:
+		return "sessions"
+	case *ptypb.ProtocolMessage_Attach:
+		return "attach"
+	case *ptypb.ProtocolMessage_Attached:
+		return "attached"
+	case *ptypb.ProtocolMessage_Detach:
+		return "detach"
+	case *ptypb.ProtocolMessage_Detached:
+		return "detached"
+	case *ptypb.ProtocolMessage_Kill:
+		return "kill"
+	case *ptypb.ProtocolMessage_Close:
+		return "close"
+	case *ptypb.ProtocolMessage_Closed:
+		return "closed"
+	case *ptypb.ProtocolMessage_State:
+		return "state"
+	case *ptypb.ProtocolMessage_Error:
+		return "error"
+	default:
+		return ""
+	}
 }
 
 type recordingSCOStore struct {
@@ -131,28 +169,25 @@ func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []strin
 	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, &aop.AgentStatus{Space: "case-test"})
 }
 
-func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+func writeAgentPTY(t *testing.T, conn *websocket.Conn, message *ptypb.ProtocolMessage) {
 	t.Helper()
-	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", message))
 }
 
-func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+func readAgentPTY(t *testing.T, conn *websocket.Conn, want string) *ptypb.ProtocolMessage {
 	t.Helper()
-	frame := ptyFrameFromEnvelope(readHubEnvelope(t, conn))
-	if frame.Type != want {
-		t.Fatalf("agent expected PTY %s, got %s", want, frame.Type)
+	message := ptyMessageFromEnvelope(readHubEnvelope(t, conn))
+	if got := ptyMessageKind(message); got != want {
+		t.Fatalf("agent expected PTY %s, got %s", want, got)
 	}
-	return frame
+	return message
 }
 
-func writeBrowserPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
+func writeBrowserPTY(t *testing.T, conn *websocket.Conn, message *ptypb.ProtocolMessage) {
 	t.Helper()
-	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", message))
 }
 
-// writeBrowserPTYOpen sends a browser pty.open; unlike every later frame it
-// must nominate the target agent, so it is built as a proto message rather
-// than through the transport-neutral pty.Frame codec.
 func writeBrowserPTYOpen(t *testing.T, conn *websocket.Conn, open *ptypb.Open) {
 	t.Helper()
 	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Open{Open: open}}))
@@ -163,13 +198,13 @@ func writeBrowserPTYList(t *testing.T, conn *websocket.Conn, list *ptypb.List) {
 	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_List{List: list}}))
 }
 
-func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
+func readBrowserPTY(t *testing.T, conn *websocket.Conn, want string) *ptypb.ProtocolMessage {
 	t.Helper()
-	frame := ptyFrameFromEnvelope(readHubEnvelope(t, conn))
-	if frame.Type != want {
-		t.Fatalf("browser expected PTY %s, got %s", want, frame.Type)
+	message := ptyMessageFromEnvelope(readHubEnvelope(t, conn))
+	if got := ptyMessageKind(message); got != want {
+		t.Fatalf("browser expected PTY %s, got %s", want, got)
 	}
-	return frame
+	return message
 }
 
 func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status *aop.AgentStatus) *websocket.Conn {
@@ -590,30 +625,52 @@ func TestWSTerminalRelay(t *testing.T) {
 
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
 
-	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	if open.StreamID != "term-1" {
+	open := readAgentPTY(t, agentConn, "open").GetOpen()
+	if open.GetStreamId() != "term-1" {
 		t.Fatalf("unexpected pty.open: %+v", open)
 	}
 
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, Session: &pty.Info{ID: "session-1"}})
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
+		StreamId: open.GetStreamId(), Session: &ptypb.Session{Id: "session-1"},
+	}}})
 
-	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
-	if opened.StreamID != open.StreamID || opened.Session == nil || opened.Session.ID != "session-1" {
+	opened := readBrowserPTY(t, browserConn, "opened").GetOpened()
+	if opened.GetStreamId() != open.GetStreamId() || opened.GetSession().GetId() != "session-1" {
 		t.Fatalf("unexpected pty.opened: %+v", opened)
 	}
 
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, StreamID: open.StreamID, Data: []byte("echo pty-ok\n")})
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Input{Input: &ptypb.Input{
+		StreamId: open.GetStreamId(), Data: []byte("echo pty-ok\n"),
+	}}})
 
-	input := readAgentPTY(t, agentConn, pty.FrameInput)
-	if input.StreamID != open.StreamID || string(input.Data) != "echo pty-ok\n" {
+	input := readAgentPTY(t, agentConn, "input").GetInput()
+	if input.GetStreamId() != open.GetStreamId() || string(input.GetData()) != "echo pty-ok\n" {
 		t.Fatalf("unexpected pty.input: %+v", input)
 	}
 
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: open.StreamID, Data: []byte("pty-ok\n")})
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
+		StreamId: open.GetStreamId(), Data: []byte("pty-ok\n"),
+	}}})
 
-	output := readBrowserPTY(t, browserConn, pty.FrameOutput)
-	if output.StreamID != open.StreamID || string(output.Data) != "pty-ok\n" {
+	output := readBrowserPTY(t, browserConn, "output").GetOutput()
+	if output.GetStreamId() != open.GetStreamId() || string(output.GetData()) != "pty-ok\n" {
 		t.Fatalf("unexpected pty.output: %+v", output)
+	}
+
+	writeAgentEnvelope(t, agentConn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_State{State: &ptypb.State{
+		StreamId: open.GetStreamId(), Session: &ptypb.Session{Id: "session-1", State: "running"},
+	}}}))
+	stateMessage, ok := unwrapEnvelope(t, readHubEnvelope(t, browserConn)).(*ptypb.ProtocolMessage)
+	if !ok || stateMessage.GetState().GetSession().GetState() != "running" {
+		t.Fatalf("PTY state was not relayed canonically: %+v", stateMessage)
+	}
+
+	writeAgentEnvelope(t, browserConn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Close{Close: &ptypb.Close{
+		StreamId: open.GetStreamId(),
+	}}}))
+	closeMessage, ok := unwrapEnvelope(t, readHubEnvelope(t, agentConn)).(*ptypb.ProtocolMessage)
+	if !ok || closeMessage.GetClose().GetStreamId() != open.GetStreamId() {
+		t.Fatalf("PTY close was not relayed canonically: %+v", closeMessage)
 	}
 }
 
@@ -629,61 +686,67 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 
 	// open
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
-	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	streamID := open.StreamID
+	open := readAgentPTY(t, agentConn, "open").GetOpen()
+	streamID := open.GetStreamId()
 
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, Session: &pty.Info{ID: "sess-1", Kind: "shell"}})
-	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
-	if opened.Session == nil || opened.Session.ID != "sess-1" {
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
+		StreamId: streamID, Session: &ptypb.Session{Id: "sess-1", Kind: "shell"},
+	}}})
+	opened := readBrowserPTY(t, browserConn, "opened").GetOpened()
+	if opened.GetSession().GetId() != "sess-1" {
 		t.Fatalf("opened missing session_id: %+v", opened)
 	}
 
 	// input → output
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, StreamID: streamID, Data: []byte("ls\n")})
-	inp := readAgentPTY(t, agentConn, pty.FrameInput)
-	if string(inp.Data) != "ls\n" {
-		t.Fatalf("input data lost: %q", inp.Data)
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Input{Input: &ptypb.Input{StreamId: streamID, Data: []byte("ls\n")}}})
+	inp := readAgentPTY(t, agentConn, "input").GetInput()
+	if string(inp.GetData()) != "ls\n" {
+		t.Fatalf("input data lost: %q", inp.GetData())
 	}
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte("file1 file2\n")})
-	out := readBrowserPTY(t, browserConn, pty.FrameOutput)
-	if string(out.Data) != "file1 file2\n" {
-		t.Fatalf("output: %q", out.Data)
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{StreamId: streamID, Data: []byte("file1 file2\n")}}})
+	out := readBrowserPTY(t, browserConn, "output").GetOutput()
+	if string(out.GetData()) != "file1 file2\n" {
+		t.Fatalf("output: %q", out.GetData())
 	}
 
 	// resize
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameResize, StreamID: streamID, Cols: 120, Rows: 40})
-	resize := readAgentPTY(t, agentConn, pty.FrameResize)
-	if resize.Cols != 120 || resize.Rows != 40 {
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Resize{Resize: &ptypb.Resize{StreamId: streamID, Cols: 120, Rows: 40}}})
+	resize := readAgentPTY(t, agentConn, "resize").GetResize()
+	if resize.GetCols() != 120 || resize.GetRows() != 40 {
 		t.Fatalf("resize lost: %+v", resize)
 	}
 
 	// list (on the already-routed stream)
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameList, StreamID: streamID})
-	list := readAgentPTY(t, agentConn, pty.FrameList)
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
-		Sessions: []pty.Info{{ID: "sess-1", Kind: "shell", State: pty.StateRunning}}})
-	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "sess-1" {
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_List{List: &ptypb.List{StreamId: streamID}}})
+	list := readAgentPTY(t, agentConn, "list").GetList()
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: &ptypb.Sessions{
+		StreamId: list.GetStreamId(), Sessions: []*ptypb.Session{{Id: "sess-1", Kind: "shell", State: "running"}},
+	}}})
+	sessions := readBrowserPTY(t, browserConn, "sessions").GetSessions()
+	if len(sessions.GetSessions()) != 1 || sessions.GetSessions()[0].GetId() != "sess-1" {
 		t.Fatalf("sessions missing: %+v", sessions)
 	}
 
 	// detach closes the browser route; the agent still receives the frame.
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameDetach, StreamID: streamID})
-	readAgentPTY(t, agentConn, pty.FrameDetach)
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Detach{Detach: &ptypb.Detach{StreamId: streamID}}})
+	readAgentPTY(t, agentConn, "detach")
 
 	// attach rides a fresh stream routed via its list open.
 	writeBrowserPTYList(t, browserConn, &ptypb.List{StreamId: "term-2", NodeId: nodeID})
-	readAgentPTY(t, agentConn, pty.FrameList)
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, StreamID: "term-2", SessionID: "sess-1"})
-	att := readAgentPTY(t, agentConn, pty.FrameAttach)
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: att.StreamID, Session: &pty.Info{ID: "sess-1"}})
-	readBrowserPTY(t, browserConn, pty.FrameAttached)
+	readAgentPTY(t, agentConn, "list")
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{StreamId: "term-2", SessionId: "sess-1"}}})
+	att := readAgentPTY(t, agentConn, "attach").GetAttach()
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
+		StreamId: att.GetStreamId(), Session: &ptypb.Session{Id: "sess-1"},
+	}}})
+	readBrowserPTY(t, browserConn, "attached")
 
 	// closed
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: "term-2",
-		Session: &pty.Info{ID: "sess-1", State: pty.StateCompleted}})
-	closed := readBrowserPTY(t, browserConn, pty.FrameClosed)
-	if closed.Session == nil || closed.Session.State != pty.StateCompleted {
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Closed{Closed: &ptypb.Closed{
+		StreamId: "term-2", Session: &ptypb.Session{Id: "sess-1", State: "completed"},
+	}}})
+	closed := readBrowserPTY(t, browserConn, "closed").GetClosed()
+	if closed.GetSession().GetState() != "completed" {
 		t.Fatalf("closed state lost: %+v", closed)
 	}
 }
@@ -701,8 +764,8 @@ func TestWSTerminalSingleton(t *testing.T) {
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID,
 		Kind: "shell", Name: "singleton-shell", Singleton: true, Cols: 80, Rows: 24})
 
-	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	if !open.Singleton || open.Kind != "shell" || open.Name != "singleton-shell" {
+	open := readAgentPTY(t, agentConn, "open").GetOpen()
+	if !open.GetSingleton() || open.GetKind() != "shell" || open.GetName() != "singleton-shell" {
 		t.Fatalf("singleton not preserved: %+v", open)
 	}
 }
@@ -717,27 +780,28 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	defer browserConn.Close()
 
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
-	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	streamID := open.StreamID
+	open := readAgentPTY(t, agentConn, "open").GetOpen()
+	streamID := open.GetStreamId()
 
 	if err := agentConn.Close(); err != nil {
 		t.Fatalf("close agent: %v", err)
 	}
-	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
-	if detached.StreamID != streamID {
+	detached := readBrowserPTY(t, browserConn, "detached").GetDetached()
+	if detached.GetStreamId() != streamID {
 		t.Fatalf("disconnect notification = %+v, want stream %s", detached, streamID)
 	}
 
 	reconnected := dialAgent(t, srv, "generation-agent", []string{"tmux"})
 	defer reconnected.Close()
-	list := readAgentPTY(t, reconnected, pty.FrameList)
-	if list.StreamID != streamID {
-		t.Fatalf("rebound stream = %s, want %s", list.StreamID, streamID)
+	list := readAgentPTY(t, reconnected, "list").GetList()
+	if list.GetStreamId() != streamID {
+		t.Fatalf("rebound stream = %s, want %s", list.GetStreamId(), streamID)
 	}
-	writeAgentPTY(t, reconnected, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
-		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
-	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
+	writeAgentPTY(t, reconnected, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: &ptypb.Sessions{
+		StreamId: list.GetStreamId(), Sessions: []*ptypb.Session{{Id: "resident-repl", Kind: "repl", Name: "main-repl", State: "running"}},
+	}}})
+	sessions := readBrowserPTY(t, browserConn, "sessions").GetSessions()
+	if len(sessions.GetSessions()) != 1 || sessions.GetSessions()[0].GetId() != "resident-repl" {
 		t.Fatalf("reconnected sessions not forwarded: %+v", sessions)
 	}
 }
@@ -752,8 +816,8 @@ func TestWSTerminalOfflineAgentDetached(t *testing.T) {
 	defer browserConn.Close()
 
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
-	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
-	if detached.StreamID != "term-1" {
+	detached := readBrowserPTY(t, browserConn, "detached").GetDetached()
+	if detached.GetStreamId() != "term-1" {
 		t.Fatalf("offline detached = %+v", detached)
 	}
 }
@@ -769,14 +833,18 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	defer browserConn.Close()
 
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
-	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	streamID := open.StreamID
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, Session: &pty.Info{ID: "sess-1"}})
-	readBrowserPTY(t, browserConn, pty.FrameOpened)
+	open := readAgentPTY(t, agentConn, "open").GetOpen()
+	streamID := open.GetStreamId()
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
+		StreamId: streamID, Session: &ptypb.Session{Id: "sess-1"},
+	}}})
+	readBrowserPTY(t, browserConn, "opened")
 
 	// Flood: agent sends 100 output messages without browser reading
 	for i := 0; i < 100; i++ {
-		writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: streamID, Data: []byte(strings.Repeat("x", 100))})
+		writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
+			StreamId: streamID, Data: []byte(strings.Repeat("x", 100)),
+		}}})
 	}
 	time.Sleep(100 * time.Millisecond)
 
@@ -792,7 +860,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 		if err := protobuf.Unmarshal(raw, envelope); err != nil {
 			break
 		}
-		if ptyFrameFromEnvelope(envelope).Type == pty.FrameOutput {
+		if ptyMessageKind(ptyMessageFromEnvelope(envelope)) == "output" {
 			received++
 		}
 	}
@@ -924,7 +992,7 @@ func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []*aop.E
 	}
 }
 
-func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType) pty.Frame { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want string) *ptypb.ProtocolMessage { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -934,9 +1002,9 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 			if !ok {
 				t.Fatalf("agent connection closed while waiting for %s", want)
 			}
-			frame := ptyFrameFromEnvelope(msg)
-			if frame.Type == want {
-				return frame
+			message := ptyMessageFromEnvelope(msg)
+			if ptyMessageKind(message) == want {
+				return message
 			}
 		case err := <-agent.errors:
 			t.Fatalf("agent read PTY %s: %v", want, err)
@@ -946,9 +1014,9 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 	}
 }
 
-func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, message *ptypb.ProtocolMessage) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	writeAgentEnvelope(t, agent.conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
+	writeAgentEnvelope(t, agent.conn, wrapMessage(t, generateID(), "", message))
 }
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
@@ -986,13 +1054,15 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 
 	// The terminal discovers the Runtime-owned REPL through pty.list; the browser
 	// never creates it.
-	listMsg := readMockAgentPTY(t, agentConn, pty.FrameList)
-	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: listMsg.StreamID,
-		Sessions: []pty.Info{{ID: "e2e-sess-1", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
-	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
-	replStreamID := attach.StreamID
-	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
-		Session: &pty.Info{ID: "e2e-sess-1", Kind: "repl"}})
+	listMsg := readMockAgentPTY(t, agentConn, "list").GetList()
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: &ptypb.Sessions{
+		StreamId: listMsg.GetStreamId(), Sessions: []*ptypb.Session{{Id: "e2e-sess-1", Kind: "repl", Name: "main-repl", State: "running"}},
+	}}})
+	attach := readMockAgentPTY(t, agentConn, "attach").GetAttach()
+	replStreamID := attach.GetStreamId()
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
+		StreamId: attach.GetStreamId(), Session: &ptypb.Session{Id: "e2e-sess-1", Kind: "repl"},
+	}}})
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -1012,8 +1082,8 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 	inputs := drainAgentMessages(agentConn, time.Second)
 	gotInput := false
 	for _, m := range inputs {
-		frame := ptyFrameFromEnvelope(m)
-		if frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
+		input := ptyMessageFromEnvelope(m).GetInput()
+		if input != nil && input.GetStreamId() == replStreamID {
 			gotInput = true
 			break
 		}
@@ -1024,14 +1094,17 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 	}
 
 	// Agent sends output back — verify the output path works
-	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOutput, StreamID: replStreamID, Data: []byte("hello\r\n")})
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
+		StreamId: replStreamID, Data: []byte("hello\r\n"),
+	}}})
 	time.Sleep(300 * time.Millisecond)
 
 	// Agent sends pty.closed
-	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
-		Session: &pty.Info{ID: "e2e-sess-1", State: pty.StateCompleted}})
-	refresh := readMockAgentPTY(t, agentConn, pty.FrameList)
-	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: refresh.StreamID})
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Closed{Closed: &ptypb.Closed{
+		StreamId: replStreamID, Session: &ptypb.Session{Id: "e2e-sess-1", State: "completed"},
+	}}})
+	refresh := readMockAgentPTY(t, agentConn, "list").GetList()
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: &ptypb.Sessions{StreamId: refresh.GetStreamId()}}})
 	if _, err := page.Timeout(5 * time.Second).Element(`[title='Console'], [title='控制台']`); err != nil {
 		t.Fatalf("terminal did not return to its idle console after close: %v", err)
 	}
@@ -1055,15 +1128,14 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 
 	openFirstAgentTerminal(t, page)
 
-	list := readMockAgentPTY(t, agentConn, pty.FrameList)
-	writeMockAgentPTY(t, agentConn, pty.Frame{
-		Type: pty.FrameSessions, StreamID: list.StreamID,
-		Sessions: []pty.Info{{ID: "resize-sess", Kind: "repl", Name: "resize-repl", State: pty.StateRunning}},
-	})
-	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
-	writeMockAgentPTY(t, agentConn, pty.Frame{
-		Type: pty.FrameAttached, StreamID: attach.StreamID, Session: &pty.Info{ID: "resize-sess", Kind: "repl"},
-	})
+	list := readMockAgentPTY(t, agentConn, "list").GetList()
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: &ptypb.Sessions{
+		StreamId: list.GetStreamId(), Sessions: []*ptypb.Session{{Id: "resize-sess", Kind: "repl", Name: "resize-repl", State: "running"}},
+	}}})
+	attach := readMockAgentPTY(t, agentConn, "attach").GetAttach()
+	writeMockAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
+		StreamId: attach.GetStreamId(), Session: &ptypb.Session{Id: "resize-sess", Kind: "repl"},
+	}}})
 	_ = drainAgentMessages(agentConn, 200*time.Millisecond)
 
 	// Trigger resize by changing viewport
@@ -1073,10 +1145,10 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 	msgs := drainAgentMessages(agentConn, time.Second)
 	resizeReceived := false
 	for _, m := range msgs {
-		frame := ptyFrameFromEnvelope(m)
-		if frame.Type == pty.FrameResize {
+		resize := ptyMessageFromEnvelope(m).GetResize()
+		if resize != nil {
 			resizeReceived = true
-			t.Logf("resize received: %+v", frame)
+			t.Logf("resize received: %+v", resize)
 			break
 		}
 	}

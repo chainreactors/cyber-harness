@@ -7,10 +7,10 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/utils/pty"
 )
 
 const DefaultWSPath = "/api/aop/ws"
@@ -30,13 +30,13 @@ type connectionConfig struct {
 	Chat           *chatAgentHandler
 	// AgentRuntime handles the AOP core/command namespaces directly via
 	// HandleEnvelope; nil on tool-only nodes, which reject chat messages.
-	AgentRuntime   *runner.AgentRuntime
-	NodeID         string
-	Runtime        *aop.AgentRuntimeInfo
-	Status         func() *aop.AgentStatus
-	Menu           func() []*types.CommandSpec
-	RunnerFileRPC  bool
-	PTYRouter      func() (*pty.Router, error)
+	AgentRuntime  *runner.AgentRuntime
+	NodeID        string
+	Runtime       *aop.AgentRuntimeInfo
+	Status        func() *aop.AgentStatus
+	Menu          func() []*types.CommandSpec
+	RunnerFileRPC bool
+	PTYRouter     func() (*coreterminal.Router, error)
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

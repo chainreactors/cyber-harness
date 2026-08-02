@@ -9,9 +9,8 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
-	"github.com/chainreactors/utils/pty"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -258,20 +257,14 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 			}(envelope.Id)
 
 		case *ptypb.ProtocolMessage:
-			frame := terminalcodec.FromProto(value)
-			if frame.StreamID == "" {
+			streamID := coreterminal.StreamID(value)
+			if streamID == "" {
 				fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 				return
 			}
-			nodeID := ""
-			switch payload := value.Message.(type) {
-			case *ptypb.ProtocolMessage_Open:
-				nodeID = payload.Open.NodeId
-			case *ptypb.ProtocolMessage_List:
-				nodeID = payload.List.NodeId
-			}
+			nodeID := coreterminal.NodeID(value)
 			stateMu.Lock()
-			route, routed := ptyRoutes[frame.StreamID]
+			route, routed := ptyRoutes[streamID]
 			stateMu.Unlock()
 			if nodeID == "" && routed {
 				nodeID = route.nodeID
@@ -281,34 +274,34 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				return
 			}
 			if !routed {
-				events, online, unsubscribe := s.agents.subscribePTY(nodeID, frame.StreamID)
+				events, online, unsubscribe := s.agents.subscribePTY(nodeID, streamID)
 				stateMu.Lock()
-				ptyRoutes[frame.StreamID] = browserPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
+				ptyRoutes[streamID] = browserPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
 				stateMu.Unlock()
-				go func(streamID string, values <-chan pty.Frame) {
+				go func(streamID string, values <-chan *ptypb.ProtocolMessage) {
 					for {
 						select {
 						case next, ok := <-values:
 							if !ok {
 								return
 							}
-							_ = send(streamID, "", terminalcodec.ToProto(next))
+							_ = send(streamID, "", next)
 						case <-ctx.Done():
 							return
 						}
 					}
-				}(frame.StreamID, events)
+				}(streamID, events)
 				if !online {
-					_ = send(frame.StreamID, "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetached, StreamID: frame.StreamID}))
+					_ = send(streamID, "", coreterminal.NewDetached(streamID))
 				}
 			}
 			if err := s.agents.sendAgentMessage(nodeID, generateID(), "", value); err != nil {
 				fail(envelope.Id, "PTY_FORWARD_FAILED", err)
-				removePTY(frame.StreamID, false)
+				removePTY(streamID, false)
 				return
 			}
-			if frame.Type == pty.FrameDetach || frame.Type == pty.FrameClosed {
-				removePTY(frame.StreamID, false)
+			if coreterminal.IsDetach(value) || coreterminal.IsClosed(value) {
+				removePTY(streamID, false)
 			}
 
 		default:

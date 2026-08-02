@@ -23,10 +23,9 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
-	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -238,7 +237,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}(cloneAgentStatus(initial))
 	}
 
-	var router *pty.Router
+	var router *coreterminal.Router
 	if cc.PTYRouter != nil {
 		router, err = cc.PTYRouter()
 	} else {
@@ -250,8 +249,8 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	defer router.Close()
 	if cc.PTYRouter == nil {
 		if manager := RegistryPTYManager(cc.Registry); manager != nil {
-			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(frame pty.Frame) {
-				send("", terminalcodec.ToProto(frame))
+			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(message *ptypb.ProtocolMessage) {
+				send("", message)
 			})
 			defer unsubscribe()
 		}
@@ -302,7 +301,7 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 
 func newAgentConnectionNamespaceMux(
 	cc connectionConfig,
-	router *pty.Router,
+	router *coreterminal.Router,
 	send func(string, protobuf.Message),
 	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
@@ -503,13 +502,13 @@ func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value
 	send(replyTo, &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: result}})
 }
 
-func handleAgentPTYMessage(ctx context.Context, router *pty.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
+func handleAgentPTYMessage(ctx context.Context, router *coreterminal.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
 	if router == nil {
 		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "PTY router is unavailable"))
 		return
 	}
-	router.Handle(ctx, terminalcodec.FromProto(value), func(out pty.Frame) {
-		send(envelope.GetId(), terminalcodec.ToProto(out))
+	router.Handle(ctx, value, func(out *ptypb.ProtocolMessage) {
+		send(envelope.GetId(), out)
 	})
 }
 
