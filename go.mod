@@ -3,6 +3,7 @@ module github.com/chainreactors/aiscan
 go 1.25.7
 
 require (
+	connectrpc.com/connect v1.20.0
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
@@ -47,15 +48,9 @@ require (
 	golang.org/x/image v0.42.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
-)
-
-require (
-	connectrpc.com/connect v1.20.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251222181119-0a764e51fe1b // indirect
-	google.golang.org/grpc v1.78.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 require (
@@ -104,7 +99,7 @@ require (
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
-	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
+	github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -243,7 +238,7 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect

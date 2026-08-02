@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const JSONMediaType = "application/json"
-const ProtoJSONMediaType = "application/protobuf+json"
 
 func JSONValue(value any) (*EncodedValue, error) {
 	data, err := json.Marshal(value)
@@ -30,84 +29,42 @@ func DecodeJSON[T any](value *EncodedValue) (T, error) {
 	return decoded, nil
 }
 
-func ProtoJSONValue(value proto.Message) (*EncodedValue, error) {
-	if value == nil {
-		return nil, fmt.Errorf("protobuf value is required")
-	}
-	data, err := protojson.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &EncodedValue{Data: data, MediaType: ProtoJSONMediaType}, nil
-}
-
-func DecodeProtoJSON(value *EncodedValue, target proto.Message) error {
-	if value == nil || target == nil {
-		return fmt.Errorf("encoded value and target are required")
-	}
-	return protojson.Unmarshal(value.Data, target)
-}
-
-func SetProtoExtension(event *Event, namespace string, value proto.Message) error {
+// SetTypedExtension packs value into Event.extensions and replaces an existing
+// extension with the same protobuf full name.
+func SetTypedExtension(event *Event, value proto.Message) error {
 	if event == nil {
 		return fmt.Errorf("event is required")
 	}
-	encoded, err := ProtoJSONValue(value)
+	encoded, err := anypb.New(value)
 	if err != nil {
 		return err
 	}
 	for _, extension := range event.Extensions {
-		if extension.Namespace == namespace {
-			extension.Value = encoded
+		if extension != nil && extension.MessageName() == encoded.MessageName() {
+			extension.TypeUrl = encoded.TypeUrl
+			extension.Value = encoded.Value
 			return nil
 		}
 	}
-	event.Extensions = append(event.Extensions, &Extension{Namespace: namespace, Value: encoded})
+	event.Extensions = append(event.Extensions, encoded)
 	return nil
 }
 
-func ProtoExtension(event *Event, namespace string, target proto.Message) (bool, error) {
+// FindTypedExtension unmarshals the extension matching target's protobuf full
+// name. Unknown extensions are ignored and remain preserved on the Event.
+func FindTypedExtension(event *Event, target proto.Message) (bool, error) {
+	if target == nil {
+		return false, fmt.Errorf("extension target is required")
+	}
 	if event == nil {
 		return false, nil
 	}
 	for _, extension := range event.Extensions {
-		if extension.Namespace == namespace {
-			return true, DecodeProtoJSON(extension.Value, target)
+		if extension != nil && extension.MessageIs(target) {
+			return true, extension.UnmarshalTo(target)
 		}
 	}
 	return false, nil
-}
-
-func SetJSONExtension(event *Event, namespace string, value any) error {
-	if event == nil {
-		return fmt.Errorf("event is required")
-	}
-	encoded, err := JSONValue(value)
-	if err != nil {
-		return err
-	}
-	for _, extension := range event.Extensions {
-		if extension.Namespace == namespace {
-			extension.Value = encoded
-			return nil
-		}
-	}
-	event.Extensions = append(event.Extensions, &Extension{Namespace: namespace, Value: encoded})
-	return nil
-}
-
-func GetJSONExtension[T any](event *Event, namespace string) (T, bool, error) {
-	var zero T
-	if event == nil {
-		return zero, false, nil
-	}
-	for _, extension := range event.Extensions {
-		if extension.Namespace == namespace {
-			value, err := DecodeJSON[T](extension.Value)
-			return value, true, err
-		}
-	}
-	return zero, false, nil
 }
 
 func Text(text string) *Content {
@@ -158,7 +115,10 @@ func Kind(event *Event) string {
 	case *Event_Status:
 		return "status"
 	case *Event_Extension:
-		return event.GetExtension().GetType()
+		if extension := event.GetExtension(); extension != nil {
+			return string(extension.MessageName())
+		}
+		return "extension"
 	case *Event_ProviderFrame:
 		return "provider.frame"
 	default:

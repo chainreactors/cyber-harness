@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package aiscan.reload;
+
+import "aiscan/types/config.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/types/reload;reload";
+
+message Request { aiscan.config.DistributeConfig config = 1; }
+
+message Result {
+  bool ok = 1;
+  string provider = 2;
+  string model = 3;
+  string error = 4;
+}
+
+message ProtocolMessage {
+  oneof message {
+    Request request = 10;
+    Result result = 11;
+  }
+}

@@ -18,15 +18,15 @@ func TestLayerImportsAreUnidirectional(t *testing.T) {
 	root := repositoryRoot(t)
 	assertNoFirstPartyImports(t, filepath.Join(root, "core"), map[string]bool{
 		"agent": true,
-		"pkg":   true,
 		"tools": true,
 		"cmd":   true,
 	})
 	assertNoFirstPartyImports(t, filepath.Join(root, "agent"), map[string]bool{
-		"pkg":   true,
 		"tools": true,
 		"cmd":   true,
 	})
+	assertNoPkgImportsExceptTypes(t, filepath.Join(root, "core"))
+	assertNoPkgImportsExceptTypes(t, filepath.Join(root, "agent"))
 }
 
 func TestAOPProtocolLayerHasNoRuntimeDependencies(t *testing.T) {
@@ -43,6 +43,7 @@ func TestAOPProtocolLayerHasNoRuntimeDependencies(t *testing.T) {
 func TestRunnerDoesNotDependOnWeb(t *testing.T) {
 	root := repositoryRoot(t)
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/web")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/rpc")
 }
 
 func TestLegacyPackagesCannotReturn(t *testing.T) {
@@ -67,6 +68,7 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 		{dir: filepath.Join("internal", "gen"), importPath: modulePath + "/internal/gen"},
 		{dir: "api", importPath: modulePath + "/api"},
 		{dir: filepath.Join("aop", "ext"), importPath: modulePath + "/aop/ext"},
+		{dir: filepath.Join("aop", "aiscan"), importPath: modulePath + "/aop/aiscan"},
 	}
 	for _, item := range legacy {
 		legacyDir := filepath.Join(root, item.dir)
@@ -106,7 +108,7 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 	}
 }
 
-func TestGeneratedProtobufLivesUnderAOP(t *testing.T) {
+func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -123,13 +125,21 @@ func TestGeneratedProtobufLivesUnderAOP(t *testing.T) {
 			return nil
 		}
 		rel := filepath.ToSlash(relative(root, path))
-		if !strings.HasPrefix(rel, "aop/") {
-			t.Errorf("generated protobuf file outside aop/: %s", rel)
+		if !strings.HasPrefix(rel, "aop/") && !strings.HasPrefix(rel, "pkg/types/") && !strings.HasPrefix(rel, "pkg/rpc/") {
+			t.Errorf("generated protobuf file outside owned protocol trees: %s", rel)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSharedTypesDoNotDependOnRPCOrConnect(t *testing.T) {
+	root := repositoryRoot(t)
+	tree := filepath.Join(root, "pkg", "types")
+	for _, forbidden := range []string{modulePath + "/pkg/rpc", modulePath + "/pkg/web", "connectrpc.com/connect"} {
+		assertNoImportPrefix(t, tree, forbidden)
 	}
 }
 
@@ -266,6 +276,34 @@ func assertNoImportPrefix(t *testing.T, tree, forbidden string) {
 		for _, importPath := range imports {
 			if importPath == forbidden || strings.HasPrefix(importPath, forbidden+"/") {
 				t.Errorf("forbidden dependency %q in %s", importPath, relative(root, path))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertNoPkgImportsExceptTypes(t *testing.T, tree string) {
+	t.Helper()
+	root := repositoryRoot(t)
+	prefix := modulePath + "/pkg/"
+	allowed := modulePath + "/pkg/types"
+	err := filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		imports, parseErr := importsInFile(path)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, importPath := range imports {
+			if strings.HasPrefix(importPath, prefix) && importPath != allowed && !strings.HasPrefix(importPath, allowed+"/") {
+				t.Errorf("forbidden pkg dependency %q in %s", importPath, relative(root, path))
 			}
 		}
 		return nil
