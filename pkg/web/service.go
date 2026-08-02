@@ -71,9 +71,9 @@ type Service struct {
 
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
-	scanAgents   map[string]string
+	scanNodeURIs map[string]string
 	taskSessions map[string]string // taskID → sessionID
-	taskAgents   map[string]string // taskID → agentID
+	taskNodeURIs map[string]string // taskID → nodeURI
 	taskCanceled map[string]bool
 
 	eventMu    sync.Mutex
@@ -107,9 +107,9 @@ func NewService(cfg ServiceConfig) *Service {
 		sem:          make(chan struct{}, maxConcurrent),
 		timeout:      timeout,
 		cancels:      make(map[string]context.CancelFunc),
-		scanAgents:   make(map[string]string),
+		scanNodeURIs: make(map[string]string),
 		taskSessions: make(map[string]string),
-		taskAgents:   make(map[string]string),
+		taskNodeURIs: make(map[string]string),
 		taskCanceled: make(map[string]bool),
 		sessionSeq:   make(map[string]uint64),
 		endedTurns:   make(map[string]bool),
@@ -377,14 +377,14 @@ func (s *Service) CancelScan(id string) error {
 
 	s.mu.Lock()
 	cancel := s.cancels[id]
-	agentID := s.scanAgents[id]
+	nodeURI := s.scanNodeURIs[id]
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	s.hub.BroadcastScan(scanFailedEvent(id, "scan canceled", true), true)
-	if agentID != "" && s.agents != nil {
-		_ = s.agents.CancelTask(agentID, id)
+	if nodeURI != "" && s.agents != nil {
+		_ = s.agents.CancelTask(nodeURI, id)
 	}
 	return nil
 }
@@ -404,7 +404,7 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.cancels, scanID)
-		delete(s.scanAgents, scanID)
+		delete(s.scanNodeURIs, scanID)
 		s.mu.Unlock()
 	}()
 	defer func() {
@@ -453,7 +453,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *scanpb.Scan) {
 		return
 	}
 	s.mu.Lock()
-	s.scanAgents[scan.Id] = agent.id
+	s.scanNodeURIs[scan.Id] = agent.nodeURI
 	s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		s.finishScanContext(scan, err)
@@ -462,7 +462,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *scanpb.Scan) {
 
 	cmd := "scan " + strings.Join(scanArgsForScan(scan), " ")
 	args, _ := aop.JSONValue(map[string]any{"command": cmd})
-	resultCh, err := s.agents.DispatchToolCall(agent.id, scan.Id, &aop.ToolCall{
+	resultCh, err := s.agents.DispatchToolCall(agent.nodeURI, scan.Id, &aop.ToolCall{
 		Id: scan.Id, Name: "bash", Kind: "function", Arguments: args,
 	})
 	if err != nil {
@@ -477,13 +477,13 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *scanpb.Scan) {
 	var ok bool
 	select {
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(agent.id, scan.Id)
+		_ = s.agents.CancelTask(agent.nodeURI, scan.Id)
 		s.finishScanContext(scan, ctx.Err())
 		return
 	case res, ok = <-resultCh:
 	}
 	if ctx.Err() != nil {
-		_ = s.agents.CancelTask(agent.id, scan.Id)
+		_ = s.agents.CancelTask(agent.nodeURI, scan.Id)
 		s.finishScanContext(scan, ctx.Err())
 		return
 	}
@@ -780,12 +780,12 @@ func (s *Service) TaskSession(taskID string) (string, bool) {
 	return sid, ok
 }
 
-func (s *Service) registerSessionTask(taskID, sessionID, agentID string) {
+func (s *Service) registerSessionTask(taskID, sessionID, nodeURI string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskSessions[taskID] = sessionID
-	if agentID != "" {
-		s.taskAgents[taskID] = agentID
+	if nodeURI != "" {
+		s.taskNodeURIs[taskID] = nodeURI
 	}
 	delete(s.taskCanceled, taskID)
 }
@@ -795,7 +795,7 @@ func (s *Service) finishSessionTask(taskID string) bool {
 	defer s.mu.Unlock()
 	canceled := s.taskCanceled[taskID]
 	delete(s.taskSessions, taskID)
-	delete(s.taskAgents, taskID)
+	delete(s.taskNodeURIs, taskID)
 	delete(s.taskCanceled, taskID)
 	return canceled
 }
@@ -807,7 +807,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 
 	type activeTask struct {
 		taskID  string
-		agentID string
+		nodeURI string
 	}
 	var tasks []activeTask
 	s.mu.Lock()
@@ -815,7 +815,7 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 		if sid != sessionID {
 			continue
 		}
-		tasks = append(tasks, activeTask{taskID: taskID, agentID: s.taskAgents[taskID]})
+		tasks = append(tasks, activeTask{taskID: taskID, nodeURI: s.taskNodeURIs[taskID]})
 		s.taskCanceled[taskID] = true
 	}
 	s.mu.Unlock()
@@ -826,8 +826,8 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
 	}
 	if s.agents != nil {
 		for _, task := range tasks {
-			if task.agentID != "" {
-				_ = s.agents.CancelTask(task.agentID, task.taskID, sessionID)
+			if task.nodeURI != "" {
+				_ = s.agents.CancelTask(task.nodeURI, task.taskID, sessionID)
 			}
 		}
 	}
@@ -845,7 +845,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	}
 	s.mu.Lock()
 	sid, pending := s.taskSessions[turnID]
-	agentID := s.taskAgents[turnID]
+	nodeURI := s.taskNodeURIs[turnID]
 	if pending && sid == sessionID {
 		s.taskCanceled[turnID] = true
 	} else {
@@ -855,8 +855,8 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	if !pending {
 		return ErrTurnNotFound
 	}
-	if s.agents != nil && agentID != "" {
-		if err := s.agents.CancelTask(agentID, turnID, sessionID); err != nil {
+	if s.agents != nil && nodeURI != "" {
+		if err := s.agents.CancelTask(nodeURI, turnID, sessionID); err != nil {
 			return err
 		}
 	}
@@ -878,13 +878,13 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 	if s.agents == nil {
 		return nil, fmt.Errorf("no agent pool available")
 	}
-	agentID := session.GetSession().GetParticipant()
-	if agentID == "" {
-		return nil, fmt.Errorf("session has no assigned agent")
+	nodeURI := session.GetSession().GetNodeUri()
+	if nodeURI == "" {
+		return nil, fmt.Errorf("session has no assigned node")
 	}
 
 	taskID := generateID()
-	resultCh, err := s.agents.dispatchMessage(agentID, taskID, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_UploadRequest{UploadRequest: &filepb.UploadRequest{
+	resultCh, err := s.agents.dispatchMessage(nodeURI, taskID, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_UploadRequest{UploadRequest: &filepb.UploadRequest{
 		SessionId: sessionID, Filename: filename, MediaType: http.DetectContentType(data), Data: data,
 	}}})
 	if err != nil {
@@ -905,21 +905,21 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 			map[string]any{"filename": filename, "path": result.Path})
 		return result, nil
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(agentID, taskID)
+		_ = s.agents.CancelTask(nodeURI, taskID)
 		return nil, ctx.Err()
 	}
 }
 
-func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*chatpb.SessionRecord, error) {
+func (s *Service) CreateSession(ctx context.Context, nodeURI, title string) (*chatpb.SessionRecord, error) {
 	var agentName string
 	if s.agents != nil {
-		if info := s.agents.get(agentID); info != nil {
+		if info := s.agents.get(nodeURI); info != nil {
 			agentName = info.name
 		}
 	}
 	now := nowProto()
 	session := &chatpb.SessionRecord{
-		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, Participant: agentID, Title: title},
+		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, NodeUri: nodeURI, Title: title},
 		AgentName: agentName,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1180,13 +1180,13 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 
 func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	session, err := s.store.GetSession(context.Background(), sessionID)
-	if err != nil || session.GetSession().GetParticipant() == "" {
+	if err != nil || session.GetSession().GetNodeUri() == "" {
 		return nil
 	}
 	if s.agents == nil {
 		return nil
 	}
-	return s.agents.get(session.GetSession().GetParticipant())
+	return s.agents.get(session.GetSession().GetNodeUri())
 }
 
 func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) {
@@ -1204,9 +1204,9 @@ func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) 
 	request.TurnId = taskID
 	request.SessionId = sessionID
 	s.resetTurnTerminal(sessionID, taskID)
-	s.registerSessionTask(taskID, sessionID, agent.id)
+	s.registerSessionTask(taskID, sessionID, agent.nodeURI)
 
-	resultCh, err := s.agents.DispatchRun(agent.id, request)
+	resultCh, err := s.agents.DispatchRun(agent.nodeURI, request)
 	if err != nil {
 		s.finishSessionTask(taskID)
 		s.broadcastHubTurnEnded(sessionID, taskID, "dispatch_failed", err.Error())
@@ -1270,8 +1270,8 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		return "", fmt.Errorf("agent is not connected")
 	}
 	taskID := generateID()
-	s.registerSessionTask(taskID, sessionID, agent.id)
-	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, &commandpb.Request{SessionId: sessionID, Line: line})
+	s.registerSessionTask(taskID, sessionID, agent.nodeURI)
+	resultCh, err := s.agents.DispatchCommand(agent.nodeURI, taskID, &commandpb.Request{SessionId: sessionID, Line: line})
 	if err != nil {
 		s.finishSessionTask(taskID)
 		return "", err
@@ -1291,11 +1291,11 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 
 func (s *Service) closeRemoteSession(sessionID string) {
 	session, err := s.store.GetSession(context.Background(), sessionID)
-	if err != nil || s.agents == nil || session.GetSession().GetParticipant() == "" {
+	if err != nil || s.agents == nil || session.GetSession().GetNodeUri() == "" {
 		return
 	}
 	requestID := "close:" + sessionID
-	_ = s.agents.sendAgentMessage(session.GetSession().GetParticipant(), requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: &aop.CloseSessionRequest{
+	_ = s.agents.sendAgentMessage(session.GetSession().GetNodeUri(), requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: &aop.CloseSessionRequest{
 		SessionId: sessionID, Reason: "completed",
 	}}})
 }

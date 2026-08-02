@@ -266,10 +266,10 @@ func TestCancelTaskQueuesBehindFullSendChannel(t *testing.T) {
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	remote.tasks["scan-1"] = make(chan taskResult, 1)
 	remote.sendCh <- aop.MustWrap("busy", "", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{}}}) // saturate the buffer
-	pool.agents[remote.id] = remote
+	pool.agents[remote.nodeURI] = remote
 
 	canceled := make(chan error, 1)
-	go func() { canceled <- pool.CancelTask(remote.id, "scan-1") }()
+	go func() { canceled <- pool.CancelTask(remote.nodeURI, "scan-1") }()
 	select {
 	case <-canceled:
 		t.Fatal("cancellation bypassed the full send channel")
@@ -302,10 +302,10 @@ func TestCancelTaskWaitsForSaturatedSendChannel(t *testing.T) {
 	resultCh := make(chan taskResult, 1)
 	remote.tasks["scan-1"] = resultCh
 	remote.sendCh <- aop.MustWrap("reload", "", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{}}})
-	pool.agents[remote.id] = remote
+	pool.agents[remote.nodeURI] = remote
 
 	canceled := make(chan error, 1)
-	go func() { canceled <- pool.CancelTask(remote.id, "scan-1") }()
+	go func() { canceled <- pool.CancelTask(remote.nodeURI, "scan-1") }()
 	select {
 	case _, ok := <-resultCh:
 		if ok {

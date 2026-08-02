@@ -22,10 +22,10 @@ func forwardEvent(t *testing.T, pool *AgentPool, remote *remoteAgent, taskID str
 
 func newChatTaskRemote() (*remoteAgent, chan taskResult) {
 	remote := &remoteAgent{
-		id:    "agent-1",
-		name:  "worker",
-		tasks: map[string]chan taskResult{},
-		turns: map[string]int{},
+		nodeURI: "agent-1",
+		name:    "worker",
+		tasks:   map[string]chan taskResult{},
+		turns:   map[string]int{},
 	}
 	ch := make(chan taskResult, 1)
 	remote.tasks["task-1"] = ch
@@ -162,17 +162,17 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	remote := &remoteAgent{
-		id: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 2),
+		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 2),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: make(map[string]struct{}),
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
-	pool.agents[remote.id] = remote
+	pool.agents[remote.nodeURI] = remote
 	session, _ := store.GetSession(context.Background(), "session-1")
 	if session != nil {
 		if session.Session == nil {
 			session.Session = &aop.Session{}
 		}
-		session.Session.Participant = remote.id
+		session.Session.NodeUri = remote.nodeURI
 		_ = store.UpdateSession(context.Background(), session)
 	}
 	service.handleAgentRun("session-1", &aop.RunTurnRequest{

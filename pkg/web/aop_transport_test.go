@@ -51,14 +51,14 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		id: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
-	pool.agents[fake.id] = fake
+	pool.agents[fake.nodeURI] = fake
 	server := NewAOPChatServer(service)
 	ctx := context.Background()
-	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", Participant: "agent-1"}); err != nil || opened.GetAccepted() == nil {
+	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: "agent-1"}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
 	}
 	request := &aop.RunTurnRequest{
@@ -106,17 +106,17 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		id: "node://agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		nodeURI: "node://agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
-	pool.agents[fake.id] = fake
+	pool.agents[fake.nodeURI] = fake
 	value, err := anypb.New(&scanpb.SessionBinding{ScanId: "scan-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	response, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-1", &aop.OpenSessionRequest{
-		SessionId: "session-1", Participant: fake.id,
+		SessionId: "session-1", NodeUri: fake.nodeURI,
 		Extensions: []*anypb.Any{value},
 	})
 	if err != nil || response.GetAccepted() == nil {
@@ -139,14 +139,14 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		id: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
-	pool.agents[fake.id] = fake
+	pool.agents[fake.nodeURI] = fake
 	server := NewAOPChatServer(service)
 	ctx := context.Background()
-	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", Participant: fake.id}); err != nil || opened.GetAccepted() == nil {
+	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: fake.nodeURI}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
 	}
 	for _, turnID := range []string{"turn-1", "turn-2"} {
@@ -221,11 +221,11 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	pool.agents["agent-1"] = &remoteAgent{
-		id: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
-	request := &aop.OpenSessionRequest{SessionId: "session-1", Participant: "agent-1", Title: "original"}
+	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: "agent-1", Title: "original"}
 	first, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-durable", request)
 	if err != nil || first.GetAccepted() == nil {
 		t.Fatalf("first open = %v, %v", first, err)

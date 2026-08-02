@@ -12,6 +12,7 @@ import (
 	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
 	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -60,6 +61,79 @@ func TestSQLiteStoreRejectsLegacySchema(t *testing.T) {
 
 	if _, err := NewSQLiteStore(path); err == nil {
 		t.Fatal("NewSQLiteStore() accepted a legacy schema")
+	}
+}
+
+func TestSQLiteStoreMigratesV1AgentIDToNodeURI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := &chatpb.SessionRecord{
+		Session:   &aop.Session{Id: "s1", State: SessionStateOpen, NodeUri: "https://web.example/nodes/local-1"},
+		CreatedAt: nowProto(), UpdatedAt: nowProto(),
+	}
+	raw, err := protobuf.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE chat_sessions (
+			id TEXT PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			session_proto BLOB NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
+		PRAGMA user_version = 1;
+	`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO chat_sessions (id, agent_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"s1", record.GetSession().GetNodeUri(), SessionStateOpen, raw,
+		formatProtoTime(record.CreatedAt), formatProtoTime(record.UpdatedAt)); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.GetSession(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetSession().GetNodeUri() != record.GetSession().GetNodeUri() {
+		t.Fatalf("node_uri = %q, want %q", got.GetSession().GetNodeUri(), record.GetSession().GetNodeUri())
+	}
+	var version int
+	if err := store.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != sqliteSchemaVersion {
+		t.Fatalf("schema version = %d, err = %v", version, err)
+	}
+	rows, err := store.db.Query(`PRAGMA table_info(chat_sessions)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if !columns["node_uri"] || columns["agent_id"] {
+		t.Fatalf("chat_sessions columns = %+v", columns)
 	}
 }
 
