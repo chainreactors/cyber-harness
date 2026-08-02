@@ -4,7 +4,7 @@ title: arsenal
 description: Security tool package manager. Search, install, update, remove CLI tools from chainreactors, projectdiscovery, and any GitHub repo.
 tags: [runtime, package-manager]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # arsenal
@@ -69,3 +69,11 @@ ffuf -u https://target.com/FUZZ -w wordlist.txt
 ```
 
 Common patterns: `{name}_{version}_{os}_{arch}.tar.gz` | `{name}_{version}_{os}_{arch}.zip` | `{name}_{os}_{arch}` (raw binary).
+
+## Related concepts
+
+- Arsenal manages companion security binaries; [gogo](/easm/gogo.md),
+  [spray](/easm/spray.md), and [zombie](/easm/zombie.md) are already available
+  as built-in AIScan pseudo-commands.
+- Use [tmux](tmux.md) to observe long-running commands installed through
+  Arsenal.

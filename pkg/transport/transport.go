@@ -7,7 +7,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
+	node "github.com/chainreactors/aiscan/pkg/node"
 )
 
 // Run selects exactly one Agent transport. Session, provider and PTY state stay
@@ -19,7 +19,7 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger, input
 	}
 	switch selected {
 	case cfg.AgentTransportWeb:
-		return webagent.RunWebSocket(ctx, option, logger)
+		return node.RunWebSocket(ctx, option, logger)
 	case cfg.AgentTransportStdio:
 		return runner.RunStdio(ctx, option, logger, input, output)
 	default:

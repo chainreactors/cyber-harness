@@ -1,4 +1,4 @@
-package agent
+package node
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -63,20 +64,31 @@ func newHubScript(t *testing.T) *hubScript {
 	}
 }
 
-func readAgentEnvelope(conn *websocket.Conn) (*aop.Envelope, protobuf.Message, error) {
+func readAgentEnvelope(conn *websocket.Conn, jsonMode bool) (*aop.Envelope, protobuf.Message, error) {
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		return nil, nil, err
 	}
 	envelope := new(aop.Envelope)
-	if err := protobuf.Unmarshal(data, envelope); err != nil {
+	if jsonMode {
+		if err := protojson.Unmarshal(data, envelope); err != nil {
+			return nil, nil, err
+		}
+	} else if err := protobuf.Unmarshal(data, envelope); err != nil {
 		return nil, nil, err
 	}
 	message, err := aop.Unwrap(envelope)
 	return envelope, message, err
 }
 
-func writeAgentEnvelope(conn *websocket.Conn, envelope *aop.Envelope) error {
+func writeAgentEnvelope(conn *websocket.Conn, jsonMode bool, envelope *aop.Envelope) error {
+	if jsonMode {
+		data, err := protojson.Marshal(envelope)
+		if err != nil {
+			return err
+		}
+		return conn.WriteMessage(websocket.TextMessage, data)
+	}
 	data, err := protobuf.Marshal(envelope)
 	if err != nil {
 		return err
@@ -96,19 +108,19 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	first, message, err := readAgentEnvelope(conn)
+	first, message, err := readAgentEnvelope(conn, false)
 	core, ok := message.(*aop.ProtocolMessage)
 	if err != nil || !ok || core.GetAgentHello() == nil {
 		h.t.Errorf("expected hello: %v %v", message, err)
 		return
 	}
 	h.registered <- core.GetAgentHello()
-	if err := writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})); err != nil {
+	if err := writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})); err != nil {
 		return
 	}
 	go h.drive(conn)
 	for {
-		_, message, err := readAgentEnvelope(conn)
+		_, message, err := readAgentEnvelope(conn, false)
 		if err != nil {
 			return
 		}
@@ -137,13 +149,13 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *hubScript) drive(conn *websocket.Conn) {
 	arguments, _ := aop.JSONValue(map[string]any{"command": "echo hello"})
-	_ = writeAgentEnvelope(conn, aop.MustWrap("exec-1", "", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{
+	_ = writeAgentEnvelope(conn, false, aop.MustWrap("exec-1", "", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{
 		SessionId: "exec-1", TurnId: "exec-1", Call: &aop.ToolCall{Id: "exec-1", Name: "bash", Arguments: arguments},
 	}}}))
 }
 
 func (h *hubScript) driveFileRead(conn *websocket.Conn, path string) {
-	_ = writeAgentEnvelope(conn, aop.MustWrap("read-1", "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_ReadRequest{ReadRequest: &filepb.ReadRequest{Path: path}}}))
+	_ = writeAgentEnvelope(conn, false, aop.MustWrap("read-1", "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_ReadRequest{ReadRequest: &filepb.ReadRequest{Path: path}}}))
 }
 
 func wait[T any](t *testing.T, ch <-chan T, what string) T {
@@ -232,18 +244,18 @@ func TestRunToolNodeFileRead(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		first, message, err := readAgentEnvelope(conn)
+		first, message, err := readAgentEnvelope(conn, false)
 		core, ok := message.(*aop.ProtocolMessage)
 		if err != nil || !ok || core.GetAgentHello() == nil {
 			return
 		}
 		hub.registered <- core.GetAgentHello()
-		if writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})) != nil {
+		if writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})) != nil {
 			return
 		}
 		hub.driveFileRead(conn, path)
 		for {
-			_, message, err := readAgentEnvelope(conn)
+			_, message, err := readAgentEnvelope(conn, false)
 			if err != nil {
 				return
 			}
@@ -262,5 +274,67 @@ func TestRunToolNodeFileRead(t *testing.T) {
 	wait(t, hub.registered, "hello")
 	if data := wait(t, hub.fileData, "file result"); string(data) != "file-body" {
 		t.Fatalf("file data = %q", data)
+	}
+}
+
+// TestRunToolNodeWireInteropProtoJSON verifies the same tool node speaks
+// standard ProtoJSON text frames when the hub expects JSON semantics.
+func TestRunToolNodeWireInteropProtoJSON(t *testing.T) {
+	registry := commands.NewRegistry()
+	registry.RegisterTool(&recordingBash{})
+	hub := newHubScript(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		first, message, err := readAgentEnvelope(conn, true)
+		core, ok := message.(*aop.ProtocolMessage)
+		if err != nil || !ok || core.GetAgentHello() == nil {
+			t.Errorf("expected hello over ProtoJSON: %v %v", message, err)
+			return
+		}
+		hub.registered <- core.GetAgentHello()
+		if writeAgentEnvelope(conn, true, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})) != nil {
+			return
+		}
+		arguments, _ := aop.JSONValue(map[string]any{"command": "echo hello"})
+		_ = writeAgentEnvelope(conn, true, aop.MustWrap("exec-1", "", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{
+			SessionId: "exec-1", TurnId: "exec-1", Call: &aop.ToolCall{Id: "exec-1", Name: "bash", Arguments: arguments},
+		}}}))
+		for {
+			_, message, err := readAgentEnvelope(conn, true)
+			if err != nil {
+				return
+			}
+			if value, ok := message.(*aop.ProtocolMessage); ok {
+				if result := value.GetEvent().GetToolResult(); result != nil {
+					hub.toolResult <- result
+					return
+				}
+			}
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunToolNode(ctx, ToolNodeConfig{ServerURL: server.URL, WSPath: "/ws/runner", ID: "runner-1", Token: "test-token", Registry: registry, JSONFrames: true})
+	}()
+	hello := wait(t, hub.registered, "hello over ProtoJSON")
+	if hello.NodeId != "runner-1" {
+		t.Fatalf("hello identity = %+v", hello)
+	}
+	result := wait(t, hub.toolResult, "tool result over ProtoJSON")
+	if result.IsError || result.CallId != "exec-1" {
+		t.Fatalf("tool result = %+v", result)
+	}
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool node did not stop")
 	}
 }

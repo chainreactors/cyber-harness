@@ -4,7 +4,7 @@ title: playwright
 description: Use this playbook to learn how to use the playwright pseudo-command for headless browsing, screenshots, network capture, and interactive vulnerability verification. Aligned with microsoft/playwright-cli conventions.
 tags: [easm, browser]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # playwright
@@ -453,3 +453,11 @@ Use browser automation when evidence depends on rendered DOM, user interaction, 
 - Sessions persist until explicitly closed — the agent is responsible for calling `playwright close`.
 - Chromium is automatically downloaded on first launch if not found.
 - Selectors may be CSS or `xpath:<xpath>` — interaction commands accept both.
+
+## Related concepts
+
+- Use Playwright after the [scan pipeline](scan.md), [spray](spray.md), or
+  [katana](katana.md) identifies a JavaScript-heavy or interactive surface.
+- Recorded headless templates can be reused by [neutron](neutron.md).
+- Combine Playwright with [mitm](/runtime/mitm.md) for HTTP evidence and
+  [proxy](/runtime/proxy.md) for routed browser execution.

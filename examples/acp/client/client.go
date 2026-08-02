@@ -46,7 +46,7 @@ func Dial(ctx context.Context, serverURL, wsPath, token string) (*Client, error)
 		u.Scheme = "ws"
 	}
 	if wsPath == "" {
-		wsPath = "/api/aop/ws"
+		wsPath = "/api/aop/application/ws"
 	}
 	u.Path = wsPath
 	header := http.Header{}

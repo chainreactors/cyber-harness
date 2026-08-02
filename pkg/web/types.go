@@ -9,6 +9,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ConfigStore and PreparedConfig are the host integration surface for config
+// persistence; the business semantics live in web/api.
+type ConfigStore = managementapi.ConfigStore
+type PreparedConfig = managementapi.PreparedConfig
+
 var (
 	ErrScanNotFound      = managementapi.ErrScanNotFound
 	ErrScanNotCancelable = managementapi.ErrScanNotCancelable

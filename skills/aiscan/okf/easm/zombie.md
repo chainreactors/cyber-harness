@@ -4,7 +4,7 @@ title: zombie
 description: Use this playbook when working with zombie for authorized weak credential checks and authentication result analysis.
 tags: [easm, weakpass]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Zombie
@@ -59,3 +59,11 @@ zombie -I targets.txt -s ssh --concurrency 8
 zombie -i 10.0.0.1:3306 -s mysql -t 50 --concurrency 8
 zombie -i 10.0.0.1:23 -s telnet -p admin --concurrency 8
 ```
+
+## Related concepts
+
+- Zombie checks services discovered by [gogo](gogo.md) or selected by the
+  [scan pipeline](scan.md).
+- Use [proxy](/runtime/proxy.md) for routed execution and
+  [mitm](/runtime/mitm.md) when an HTTP-backed authentication flow needs
+  request and response evidence.

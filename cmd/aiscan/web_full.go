@@ -21,7 +21,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
-	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
+	node "github.com/chainreactors/aiscan/pkg/node"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -155,7 +155,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			agentOption.IOANodeName = "local"
 		}
 		go func() {
-			if err := webagent.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		}()

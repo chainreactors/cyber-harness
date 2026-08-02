@@ -1,6 +1,6 @@
 # AIScan 协议与传输架构
 
-本文定义 AIScan 的目标协议职责，以及当前迁移边界。Runner 已使用统一 AOP WebSocket；ConnectRPC 承担产品管理与查询。浏览器单 AOP WebSocket 仍延期：当前保留 Chat/WatchEvents ConnectRPC 与独立 Terminal WebSocket，后续迁移不改变本文件定义的最终边界。
+本文定义 AIScan 的目标协议职责，以及当前迁移边界。ConnectRPC 承担产品管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
 
 ## 1. 唯一真相
 
@@ -12,7 +12,7 @@ libcstx 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulne
 
 | 平面 | 传输 | 职责 |
 | --- | --- | --- |
-| AOP 应用平面 | `AOPService.Connect` 双向 Envelope 流；浏览器兼容 WebSocket `/api/aop/ws` | Agent 会话、Turn、事件、工具、命令、file、exec、PTY、SCO 增量、取消和实时 scan 事件 |
+| AOP 应用平面 | Application WS `/api/aop/application/ws`、Node WS `/api/aop/node/ws`、Application `AOPService.Connect` | Agent 会话、Turn、事件、工具、命令、file、exec、PTY、SCO 增量、取消和实时 scan 事件 |
 | AIScan 管理平面 | ConnectRPC unary | 查询、配置、Agent 列表与本地进程生命周期、Session 历史、Scan CRUD、SCO 查询/导入、系统状态 |
 
 目标态不存在 JSON-RPC、AOP ChatService、独立 Agent socket、独立 terminal socket 或额外的 WebSocket wire。AOP 只定义一个 `Connect(stream Envelope)` 双向流；Connect/gRPC 与浏览器 WebSocket 适配到同一个 `EnvelopeStream` 服务核心。当前 Agent 默认仍使用 WebSocket，新增 gRPC 服务端不改变旧 Agent 或浏览器连接。管理 RPC 与 AOP 流由同一个 Connect handler 注册，但职责仍按 service 分离。
@@ -72,11 +72,11 @@ WebSocket 本身提供连续字节传输，但不提供业务 correlation、可�
 
 ## 5. 连接和并发
 
-每个浏览器应用实例和每个 Runner 各自使用一条 AOP 应用流。浏览器继续使用 WebSocket；原生客户端可以使用 `AOPService.Connect` 的 Connect/gRPC 双向流。连接只有一个 reader；所有输出通过一个 FIFO writer。协议不引入优先级队列。
+每个浏览器应用实例和每个 Runner 各自使用一条 AOP 应用流。浏览器使用 Application WebSocket；原生 Application 客户端可以使用 `AOPService.Connect` 的 Connect/gRPC 双向流；Runner 使用 Node WebSocket。连接只有一个 reader；所有输出通过一个 FIFO writer。协议不引入优先级队列。
 
 浏览器最终唯一连接所有者是 `@cyber/aop` 的 `AOPClient`。Terminal、Chat、Command、File 和 Scan watcher 将只提交 protobuf message，不创建 socket。该浏览器 cutover 当前延期，现有 Chat/WatchEvents ConnectRPC 与 Terminal WebSocket 暂时保留。
 
-服务端第一帧若是 `AgentHello`，进入 Agent peer loop；其他支持的 request 进入 browser peer loop。顶层 namespace 消息（名称以 `ProtocolMessage` 结尾）通过应用实例拥有的 `NamespaceMux` 注册；namespace 内部 oneof 继续使用显式 type switch。Mux 不拥有 Connection、PendingOperations、Session 或 Turn 生命周期。
+Application 与 Node 使用不同 endpoint，不再根据首帧猜测角色。Node 首帧必须是 `AgentHello`；Application 收到 `AgentHello` 返回 `WRONG_ENDPOINT`。endpoint 初始化完成后，两者都进入 `pkg/web.Connection → NamespaceMux`。顶层 namespace 消息（名称以 `ProtocolMessage` 结尾）通过实例级 `NamespaceMux` 注册；namespace 内部 oneof 继续使用显式 type switch。
 
 Go 传输边界只有：
 
@@ -88,6 +88,8 @@ type EnvelopeStream interface {
 ```
 
 Context 由调用者显式传入，Stream 不拥有 Session、Turn 或 operation 状态。
+
+`pkg/web.Connection` 是机制层抽象，不是 AOP wire contract。它只拥有单条 `EnvelopeStream` 的 reader、FIFO writer、context 与错误收敛；不拥有 Agent、Session、Turn、pending operation、subscription 或 Hub fanout。Application 与 Node 业务分别由 `pkg/web/api` 和 `AgentPool` 持有。
 
 ## 6. Framing
 
@@ -112,7 +114,7 @@ Context 由调用者显式传入，Stream 不拥有 Session、Turn 或 operation
 - `pkg/web/` 其余代码：AOP WebSocket、AgentPool、Runner 委派、Hub 与持久化基础设施；
 - `cmd/gen/`：唯一 protobuf/TypeScript 生成入口。
 
-非 `full` 构建不得依赖 `pkg/rpc` 或 `connectrpc.com/connect`。当前 Runner transport 对 `pkg/web/agent` 的依赖由独立迁移负责，不在本轮通过移动 RPC 类型解决。
+非 `full` 构建不得依赖 `pkg/rpc` 或 `connectrpc.com/connect`。Runner transport 已随节点端剥离收敛到 `pkg/node`，不依赖 `pkg/web`。
 
 Web 管理面暴露以下 unary 服务：
 
@@ -127,7 +129,7 @@ AOP 应用面只额外暴露一个双向流服务：
 
 - `aiscan.rpc.aop.AOPService/Connect`
 
-生成流程只生成 protobuf 与 Connect-Go 代码，不生成 grpc-go service/client。Go 插件由 `go.mod` 的 `tool` 指令固定，统一入口为 `go run ./cmd/gen`（或 `make proto-gen`）；CI 会重新生成并要求零 diff。Connect-Go 的同一 handler 原生支持 Connect、gRPC 与 gRPC-Web；浏览器因双向流限制继续使用薄 WebSocket 适配，不存在第二套业务实现。REST `/api/*` 仅保留认证和 `/api/aop/ws`；未知管理 REST 返回 404。`/health` 和原生 `/ioa/` 不属于 AIScan RPC。
+生成流程只生成 protobuf 与 Connect-Go 代码，不生成 grpc-go service/client。Go 插件由 `go.mod` 的 `tool` 指令固定，统一入口为 `go run ./cmd/gen`（或 `make proto-gen`）；CI 会重新生成并要求零 diff。Connect-Go 的同一 handler 原生支持 Connect、gRPC 与 gRPC-Web；浏览器因双向流限制使用薄 WebSocket 适配，不存在第二套业务实现。REST `/api/*` 仅保留认证、Application WS 与 Node WS；旧 `/api/aop/ws` 和未知管理 REST 返回 404。`/health` 和原生 `/ioa/` 不属于 AIScan RPC。
 
 ## 9. 持久化边界
 
@@ -140,17 +142,31 @@ AOP 应用面只额外暴露一个双向流服务：
 
 ## 10. 抽象预算
 
-允许的协议/传输抽象只有 Go `EnvelopeStream`、实例级 `NamespaceMux` 和浏览器 `AOPClient`。其余逻辑使用具体 owner；顶层 namespace 由 Mux 注册，namespace 内部 oneof 使用显式 switch：
+允许的抽象为 AOP `EnvelopeStream`、实例级 `NamespaceMux`、web 机制层 `Connection` 和浏览器 `AOPClient`。其余逻辑使用具体 owner；顶层 namespace 由 Mux 注册，namespace 内部 oneof 使用显式 switch：
 
 - Session/Turn 状态属于 Runtime/Service；
 - Agent pending task 属于具体 `remoteAgent`；
-- browser subscription 与 PTY route 属于该 browser peer loop；
+- Application subscription 与 PTY route 属于该 Application connection 的业务 dispatcher；
 - `pkg/web/api` 拥有 Web 原生管理语义；Agent/Session 执行通过能力接口委派给既有 AOP/AgentPool/Runner，不复制执行逻辑。
 - Connect handler 只做 request wrapper、服务注册与错误映射。
 
 新增抽象必须证明至少有两个真实 owner、不能由 protobuf message + 普通函数表达，并在本文补充职责和生命周期。允许的 namespace 注册抽象只做 full-name → handler 路由；不得扩展成全局 schema registry、通用 pending manager、link、wire 或兼容 adapter。
 
-## 11. 实现位置与验收
+## 11. 服务端 Go 分层与 client 世界
+
+第 2 节的线协议边界在 Go 代码上投影为三个服务端层和一个 client 世界。分层的判断标准是语义归属，不是文件大小或调用频次。
+
+- **rpc（定义投影层，`proto/rpc`、`pkg/rpc`）**：protobuf service contract、生成的 Go message/client/handler 接口，不实现业务语义。
+- **api（业务层，`pkg/web/api`）**：实现控制面（Sessions/Scans/Config/SCO/Agents/Status）与 Application envelope 业务路由（OpenSession/RunTurn/Watch/Command/File/PTY）。本层不得 import net/http、WebSocket、Connect 或 SQLite；机制通过 Store/Runtime/CommandExecutor/FileUploader/PTYRouter 和最小 ApplicationConnection 接口注入。
+- **web（机制与传输层，`pkg/web`）**：拥有 WS upgrade、EnvelopeStream adapter、Connection、认证、持久化、AgentPool、Hub 与装配。两个 endpoint 只做各自首帧初始化；Application 移交 api，Node 移交 AgentPool，之后复用 Connection。
+- **core（领域层，`core/`、`agent/`、`pkg/runner`、`aop/`）**：web 之前已存在的领域能力，不感知管理端。
+- **client 世界**：SPA、CLI、node 平级，都是 api 的消费者。node（`pkg/node`，原 `pkg/web/agent`）是 aiscan 的节点端 client：只依赖 aop 协议与 runner，不得依赖 `pkg/web`。
+
+session 只有一个概念、三种视图：协议视图 `aop.Session`（core）、定义视图 `api.Sessions`、机制视图 Service runtime + store。其他同名概念（如 auth cookie session）必须改名，不得共享 "session" 命名。
+
+当前收敛：节点端库剥离为 `pkg/node`；transport adapter 位于 `pkg/web/transport.go`；Application 业务路由位于 `pkg/web/api/envelope.go`（`ServeApplication`）；Node 连接由 `AgentPool.ServeNode` 拥有；两个 endpoint 通过 `pkg/web.Connection` 复用单 reader/FIFO writer/error convergence；Connect 服务直接投影到 Application Endpoint。
+
+## 12. 实现位置与验收
 
 - AOP schema：`web/frontend/cyber-ui/packages/aop/proto/aop`
 - AIScan message schema：`proto/types`
@@ -158,9 +174,11 @@ AOP 应用面只额外暴露一个双向流服务：
 - AIScan Go message：`pkg/types`
 - AIScan Go RPC：`pkg/rpc`
 - 生成入口：`cmd/gen`
-- WebSocket endpoint：`pkg/web/aop_endpoint.go`
-- browser peer：`pkg/web/aop_ws.go`
-- Agent peer：`pkg/web/agent_stream.go`
+- AOP endpoint 装配：`pkg/web/endpoints.go`
+- 统一连接机制：`pkg/web/connection.go`
+- EnvelopeStream transport 适配：`pkg/web/transport.go`
+- Application 业务语义（envelope 路由）：`pkg/web/api/envelope.go`
+- Agent 节点连接（AgentPool 拥有）：`pkg/web/agents_stream.go`
 - Runtime loop：`pkg/runner/runtime_protocol.go`
 - stdio framing：`pkg/runner/stdio.go`
 - Browser client：`web/frontend/cyber-ui/packages/aop/src/client.ts`

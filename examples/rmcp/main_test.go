@@ -11,7 +11,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
+	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -90,7 +90,7 @@ func TestToolNodeAgainstHub(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- webagent.RunToolNode(ctx, webagent.ToolNodeConfig{
+		errCh <- node.RunToolNode(ctx, node.ToolNodeConfig{
 			ServerURL: server.URL, WSPath: "/ws/runner", ID: "rmcp-1", Token: "test-token",
 			Registry: newRegistry(t.TempDir()), Version: "test",
 		})

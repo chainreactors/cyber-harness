@@ -4,7 +4,7 @@ title: proton
 description: Use this playbook when working with proton for sensitive information scanning — detecting API keys, tokens, credentials, and secrets in files or piped data.
 tags: [easm, secrets]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Proton
@@ -76,3 +76,11 @@ proton -l targets.txt --severity high -j
 - Templates use the same YAML format as neutron (proton template protocol).
 - Severity levels: critical, high, medium, low, info.
 - A finding is pattern evidence; user intent decides whether to triage, verify, or report it.
+
+## Related concepts
+
+- Proton can inspect content collected by [spray](spray.md) or
+  [fetch](/runtime/fetch.md), and can be used as a focused follow-up to the
+  [scan pipeline](scan.md).
+- Its template conventions are related to [neutron](neutron.md), while Proton
+  specializes in secrets and sensitive text rather than network POCs.

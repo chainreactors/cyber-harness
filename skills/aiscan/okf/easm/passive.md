@@ -4,7 +4,7 @@ title: passive
 description: Use passive to expand domains/ICPs into cyberspace assets like IPs, URLs, ports via uncover (FOFA, Hunter, Shodan, Censys, etc.). Run before active scanners (gogo, spray, katana).
 tags: [easm, recon]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Passive
@@ -89,3 +89,10 @@ Generic JSON array:
 
 - Hunter blocks overseas IPs; use `recon.proxy=socks5://...` for Hunter from abroad.
 - ICP data may lag reality; treat domain mapping as leads, not authoritative.
+
+## Related concepts
+
+- Passive discovery supplies targets to the [scan pipeline](scan.md),
+  [gogo](gogo.md), [spray](spray.md), and [katana](katana.md).
+- Use the [proxy runtime](/runtime/proxy.md) when a configured discovery source
+  requires routed access.

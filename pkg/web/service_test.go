@@ -3,15 +3,15 @@ package web
 import (
 	"connectrpc.com/connect"
 	"context"
-	"encoding/json"
 	aop "github.com/chainreactors/aiscan/aop"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"strings"
+	"sync"
 	"testing"
 )
 
@@ -84,35 +84,6 @@ func TestLegacyChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 		handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("%s %s status = %d, body = %s; want 404", test.method, test.path, recorder.Code, recorder.Body.String())
-		}
-	}
-}
-
-func TestBuildMarkdownReportUsesLibcstxFacts(t *testing.T) {
-	nodes := []json.RawMessage{
-		json.RawMessage(`{"cstx_type":"ip","cstx_id":"ip:111.63.65.103","ip":"111.63.65.103"}`),
-		json.RawMessage(`{"cstx_type":"port","cstx_id":"port:111.63.65.103:80:tcp","ip":"111.63.65.103","port":"80","protocol":"tcp"}`),
-		json.RawMessage(`{"cstx_type":"url","cstx_id":"url:http://111.63.65.103/","scheme":"http","host":"111.63.65.103","path":"/","status_code":200,"title":"BWS/1.1"}`),
-		json.RawMessage(`{"cstx_type":"framework","cstx_id":"framework:bws","name":"BWS","version":"1.1"}`),
-		json.RawMessage(`{"cstx_type":"vuln","cstx_id":"vuln:test","value":"CVE-TEST","name":"Example finding","severity":"high","url":"http://111.63.65.103/"}`),
-	}
-
-	zh := buildMarkdownReport("baidu.com", "quick", nodes, "zh")
-	for _, want := range []string{"# 扫描报告", "## 概览", "快速", "## 端口", "## WEB", "## 框架", "## 漏洞"} {
-		if !strings.Contains(zh, want) {
-			t.Fatalf("zh report missing %q:\n%s", want, zh)
-		}
-	}
-	for _, old := range []string{"Asset", "Service", "WebProbe", "Loot"} {
-		if strings.Contains(zh, old) {
-			t.Fatalf("report leaked removed AIScan taxonomy %q:\n%s", old, zh)
-		}
-	}
-
-	en := buildMarkdownReport("baidu.com", "quick", nodes, "en")
-	for _, want := range []string{"# Scan Report", "## Overview", "Quick", "## Ports", "## Web", "## Frameworks", "## Vulnerabilities"} {
-		if !strings.Contains(en, want) {
-			t.Fatalf("en report missing %q:\n%s", want, en)
 		}
 	}
 }
@@ -275,5 +246,42 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 
 	if len(sink.aopEvents) != 1 || sink.aopEvents[0].GetMessage().GetId() != "command-result" {
 		t.Fatalf("uncorrelated command event was not forwarded: %+v", sink.aopEvents)
+	}
+}
+
+type recordingCloser struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func newRecordingApp() (*runner.App, <-chan struct{}) {
+	closer := &recordingCloser{done: make(chan struct{})}
+	return &runner.App{Engines: closer}, closer.done
+}
+
+func (c *recordingCloser) Close() {
+	c.once.Do(func() { close(c.done) })
+}
+
+func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
+	oldApp, oldClosed := newRecordingApp()
+	nextApp, _ := newRecordingApp()
+	svc := NewService(ServiceConfig{App: oldApp})
+
+	leased, release := svc.acquireApp()
+	if leased != oldApp {
+		t.Fatal("acquireApp() returned the wrong app")
+	}
+	svc.swapApp(nextApp)
+	select {
+	case <-oldClosed:
+		t.Fatal("old app closed while a scan still held a lease")
+	default:
+	}
+	release()
+	select {
+	case <-oldClosed:
+	default:
+		t.Fatal("old app remained open after the final lease released")
 	}
 }

@@ -4,7 +4,7 @@ title: neutron
 description: Use this playbook when working with neutron for template-based POC execution, template filtering, and POC result analysis.
 tags: [easm, poc]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Neutron
@@ -50,3 +50,11 @@ neutron -u <target> -t ./pocs --restrict-templates
 
 - Severity is template metadata.
 - A match is scanner evidence; user intent decides whether to summarize, triage, verify, correlate, or report it.
+
+## Related concepts
+
+- Neutron consumes fingerprints from [gogo](gogo.md), [spray](spray.md), and
+  the [scan pipeline](scan.md), with associations resolved by
+  [cyberhub](/runtime/search.md).
+- Capture HTTP template execution with [mitm](/runtime/mitm.md); browser-based
+  templates can be recorded or replayed with [playwright](playwright.md).

@@ -1,32 +1,61 @@
-package web
+package api
 
 import (
-	"connectrpc.com/connect"
 	"context"
 	"encoding/json"
-	"github.com/chainreactors/aiscan/pkg/probe"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	configpkg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/pkg/probe"
+	"github.com/chainreactors/aiscan/pkg/runner"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-type cfgT = *types.DistributeConfig
+// fakeConfigStore is a minimal in-memory ConfigStore.
+type fakeConfigStore struct {
+	cfg *types.DistributeConfig
+}
+
+func (f *fakeConfigStore) current() *types.DistributeConfig {
+	if f.cfg == nil {
+		f.cfg = &types.DistributeConfig{}
+	}
+	return f.cfg
+}
+
+func (f *fakeConfigStore) GetDistributeConfig(context.Context) (string, bool, *types.DistributeConfig, error) {
+	return "config.yaml", true, f.current(), nil
+}
+
+func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg *types.DistributeConfig) (*PreparedConfig, error) {
+	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
+}
+
+func (f *fakeConfigStore) CommitDistributeConfig(_ context.Context, prepared *PreparedConfig) error {
+	f.cfg = prepared.Config
+	return nil
+}
+
+func (f *fakeConfigStore) DiscardDistributeConfig(*PreparedConfig) {}
+
+func newConfig(store ConfigStore) *Config {
+	return NewConfig(ConfigOptions{Store: store})
+}
 
 // configWith builds a DistributeConfig, letting each test set only the fields
 // it cares about. Pass nil for an empty config.
-func configWith(fn func(*types.DistributeConfig)) cfgT {
+func configWith(fn func(*types.DistributeConfig)) *types.DistributeConfig {
 	c := &types.DistributeConfig{}
 	if fn != nil {
 		fn(c)
 	}
 	return c
-}
-
-func newService(store ConfigStore) *Service {
-	return NewService(ServiceConfig{ConfigStore: store})
 }
 
 func findCheck(checks []*types.ConnectionCheck, name string) (*types.ConnectionCheck, bool) {
@@ -38,9 +67,308 @@ func findCheck(checks []*types.ConnectionCheck, name string) (*types.ConnectionC
 	return nil, false
 }
 
+func testConn(ctx context.Context, store ConfigStore, section string, config *types.DistributeConfig) ([]*types.ConnectionCheck, error) {
+	resp, err := newConfig(store).TestConnection(ctx, &types.TestConnectionRequest{Section: section, Config: config})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Checks, nil
+}
+
+func TestValidateLLMConfigRejectsUnsupportedProvider(t *testing.T) {
+	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
+		Provider: "bogus-vendor",
+		Model:    "some-model",
+	}}}
+	if err := ValidateLLMConfig(cfg); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("ValidateLLMConfig() error = %v", err)
+	}
+}
+
+func TestValidateLLMConfigAcceptsVendorAlias(t *testing.T) {
+	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
+		Provider: "deepseek",
+		Model:    "deepseek-chat",
+	}}}
+	if err := ValidateLLMConfig(cfg); err != nil {
+		t.Fatalf("ValidateLLMConfig() error = %v", err)
+	}
+}
+
+func TestActivateLLMProfileSelectsByID(t *testing.T) {
+	store := &fakeConfigStore{}
+	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
+		ActiveProfile: "primary",
+		Providers: []*types.LLMProviderConfig{
+			{Id: "primary", Name: "Primary", Provider: "openai", Model: "gpt-primary", ApiKey: "key-1"},
+			{Id: "fast", Name: "Fast", Provider: "openai", Model: "deepseek-fast", ApiKey: "key-2"},
+		},
+	}}
+
+	status, err := newConfig(store).Activate(context.Background(), "fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Selection is by id: the list order is untouched and Active() resolves
+	// the chosen profile.
+	if store.cfg.Llm.ActiveProfile != "fast" || store.cfg.Llm.Providers[0].Id != "primary" {
+		t.Fatalf("active profile not switched by id: %+v", store.cfg.Llm)
+	}
+	if active := configpkg.ActiveLLMProvider(store.cfg.Llm); active.Provider != "openai" || active.Model != "deepseek-fast" || active.ApiKey != "key-2" {
+		t.Fatalf("Active() did not resolve the selected profile: %+v", active)
+	}
+	if status.GetLlm().GetActiveProfile() != "fast" || status.GetLlm().GetActive().GetProvider() != "openai" || status.GetLlm().GetActive().GetModel() != "deepseek-fast" {
+		t.Fatalf("view not synchronized: %+v", status.GetLlm())
+	}
+}
+
+func TestConfigStatusIncludesModelLimits(t *testing.T) {
+	images := false
+	conf := &types.DistributeConfig{Llm: &types.LLMConfig{
+		ActiveProfile: "large",
+		Providers: []*types.LLMProviderConfig{{
+			Id: "large", Provider: "anthropic", Model: "glm-5.2[1m]",
+			MaxTokens: 32768, ContextWindow: 1000000, Timeout: 45, Images: &images,
+		}},
+	}}
+	view := ConfigView(conf, "aiscan.yaml", true)
+	if view.GetLlm().GetActive().GetMaxTokens() != 32768 || view.GetLlm().GetActive().GetContextWindow() != 1000000 {
+		t.Fatalf("active limits missing from view: %+v", view.GetLlm())
+	}
+	if len(view.GetLlm().GetProviders()) != 1 || view.GetLlm().GetProviders()[0].GetMaxTokens() != 32768 || view.GetLlm().GetProviders()[0].GetContextWindow() != 1000000 {
+		t.Fatalf("profile limits missing from view: %+v", view.GetLlm().GetProviders())
+	}
+	active := view.GetLlm().GetActive()
+	if active.GetTimeout() != 45 || active.Images == nil || active.GetImages() {
+		t.Fatalf("provider capabilities missing from view: %+v", active)
+	}
+}
+
+func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
+	store := &fakeConfigStore{}
+	for _, mutate := range []func(*types.LLMProviderConfig){
+		func(p *types.LLMProviderConfig) { p.MaxTokens = -1 },
+		func(p *types.LLMProviderConfig) { p.ContextWindow = -1 },
+		func(p *types.LLMProviderConfig) { p.Timeout = -1 },
+	} {
+		profile := &types.LLMProviderConfig{Id: "bad", Model: "test-model"}
+		mutate(profile)
+		conf := &types.DistributeConfig{Llm: &types.LLMConfig{
+			Providers: []*types.LLMProviderConfig{profile},
+		}}
+		if _, err := newConfig(store).Save(context.Background(), conf); err == nil {
+			t.Fatal("Save() accepted a negative model limit")
+		}
+		if store.cfg != nil && len(store.cfg.GetLlm().GetProviders()) != 0 {
+			t.Fatal("invalid config was persisted")
+		}
+	}
+}
+
+func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
+	store := &fakeConfigStore{}
+	conf := &types.DistributeConfig{Llm: &types.LLMConfig{
+		Providers: []*types.LLMProviderConfig{{Id: "empty", Name: "Empty", Model: "  "}},
+	}}
+
+	if _, err := newConfig(store).Save(context.Background(), conf); err == nil {
+		t.Fatal("Save() accepted an empty profile model")
+	}
+	if store.cfg != nil && len(store.cfg.GetLlm().GetProviders()) != 0 {
+		t.Fatal("invalid config was persisted")
+	}
+}
+
+func TestActivateLLMProfileRejectsEmptyModel(t *testing.T) {
+	store := &fakeConfigStore{}
+	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
+		ActiveProfile: "primary",
+		Providers: []*types.LLMProviderConfig{
+			{Id: "primary", Model: "gpt-primary"},
+			{Id: "empty", Model: ""},
+		},
+	}}
+
+	if _, err := newConfig(store).Activate(context.Background(), "empty"); err == nil {
+		t.Fatal("Activate() accepted an empty model")
+	}
+	if store.cfg.Llm.ActiveProfile != "primary" {
+		t.Fatalf("active profile = %q, want primary", store.cfg.Llm.ActiveProfile)
+	}
+}
+
+type transactionalConfigStore struct {
+	mu         sync.Mutex
+	cfg        *types.DistributeConfig
+	commitErr  error
+	discarded  int
+	prepareLog []string
+}
+
+func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, *types.DistributeConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return "config.yaml", true, s.cfg, nil
+}
+
+func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg *types.DistributeConfig) (*PreparedConfig, error) {
+	s.mu.Lock()
+	s.prepareLog = append(s.prepareLog, activeModel(cfg))
+	s.mu.Unlock()
+	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
+}
+
+func (s *transactionalConfigStore) CommitDistributeConfig(_ context.Context, prepared *PreparedConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commitErr != nil {
+		return s.commitErr
+	}
+	s.cfg = prepared.Config
+	return nil
+}
+
+func (s *transactionalConfigStore) DiscardDistributeConfig(*PreparedConfig) {
+	s.mu.Lock()
+	s.discarded++
+	s.mu.Unlock()
+}
+
+func activeModel(c *types.DistributeConfig) string {
+	if active := configpkg.ActiveLLMProvider(c.GetLlm()); active != nil {
+		return active.Model
+	}
+	return ""
+}
+
+type recordingCloser struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func newRecordingApp() (*runner.App, <-chan struct{}) {
+	closer := &recordingCloser{done: make(chan struct{})}
+	return &runner.App{Engines: closer}, closer.done
+}
+
+func (c *recordingCloser) Close() {
+	c.once.Do(func() { close(c.done) })
+}
+
+func configForModel(model string) *types.DistributeConfig {
+	return &types.DistributeConfig{Llm: &types.LLMConfig{
+		ActiveProfile: "primary",
+		Providers:     []*types.LLMProviderConfig{{Id: "primary", Provider: "openai", Model: model}},
+	}}
+}
+
+func TestSaveConfigBuildFailureKeepsCommittedConfigAndSkipsApply(t *testing.T) {
+	store := &transactionalConfigStore{cfg: configForModel("old-model")}
+	config := NewConfig(ConfigOptions{
+		Store: store,
+		Build: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
+			if got := activeModel(prepared.Config); got != "new-model" {
+				t.Fatalf("candidate model = %q", got)
+			}
+			return nil, errors.New("candidate build failed")
+		},
+		Apply: func(*runner.App) { t.Fatal("apply called after build failure") },
+	})
+
+	if _, err := config.Save(context.Background(), configForModel("new-model")); err == nil {
+		t.Fatal("Save() succeeded despite candidate build failure")
+	}
+	_, _, committed, err := store.GetDistributeConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := activeModel(committed); got != "old-model" {
+		t.Fatalf("committed model = %q, want old-model", got)
+	}
+	if store.discarded != 1 {
+		t.Fatalf("discarded candidates = %d, want 1", store.discarded)
+	}
+}
+
+func TestSaveConfigCommitFailureClosesCandidate(t *testing.T) {
+	store := &transactionalConfigStore{cfg: configForModel("old-model"), commitErr: errors.New("disk full")}
+	candidateApp, candidateClosed := newRecordingApp()
+	config := NewConfig(ConfigOptions{
+		Store: store,
+		Build: func(context.Context, *PreparedConfig) (*runner.App, error) {
+			return candidateApp, nil
+		},
+		Apply: func(*runner.App) { t.Fatal("apply called after commit failure") },
+	})
+
+	if _, err := config.Save(context.Background(), configForModel("new-model")); err == nil {
+		t.Fatal("Save() succeeded despite commit failure")
+	}
+	select {
+	case <-candidateClosed:
+	default:
+		t.Fatal("candidate app was not closed after commit failure")
+	}
+}
+
+func TestSaveConfigSerializesConcurrentCandidates(t *testing.T) {
+	store := &transactionalConfigStore{cfg: configForModel("old-model")}
+	entered := make(chan string, 2)
+	releaseFirst := make(chan struct{})
+	config := NewConfig(ConfigOptions{
+		Store: store,
+		Build: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
+			model := activeModel(prepared.Config)
+			entered <- model
+			if model == "first-model" {
+				<-releaseFirst
+			}
+			app, _ := newRecordingApp()
+			return app, nil
+		},
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := config.Save(context.Background(), configForModel("first-model"))
+		firstDone <- err
+	}()
+	if got := <-entered; got != "first-model" {
+		t.Fatalf("first candidate = %q", got)
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := config.Save(context.Background(), configForModel("second-model"))
+		secondDone <- err
+	}()
+	select {
+	case model := <-entered:
+		t.Fatalf("second candidate %q entered before first commit", model)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if got := <-entered; got != "second-model" {
+		t.Fatalf("second candidate = %q", got)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+	_, _, committed, err := store.GetDistributeConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := activeModel(committed); got != "second-model" {
+		t.Fatalf("final committed model = %q", got)
+	}
+}
+
 func TestTestConnUnknownSection(t *testing.T) {
-	svc := newService(&fakeConfigStore{})
-	if _, err := svc.TestConn(context.Background(), "agent", configWith(nil)); err == nil {
+	if _, err := testConn(context.Background(), &fakeConfigStore{}, "agent", configWith(nil)); err == nil {
 		t.Fatal("expected error for untestable section")
 	}
 }
@@ -62,11 +390,10 @@ func TestProbeCyberhubSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := newService(&fakeConfigStore{})
 	cfg := configWith(func(c *types.DistributeConfig) {
 		c.Cyberhub = &types.CyberhubConfig{Url: srv.URL, Key: "hub-key"}
 	})
-	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
+	resp, err := testConn(context.Background(), &fakeConfigStore{}, "cyberhub", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,11 +409,10 @@ func TestProbeCyberhubAuthError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := newService(&fakeConfigStore{})
 	cfg := configWith(func(c *types.DistributeConfig) {
 		c.Cyberhub = &types.CyberhubConfig{Url: srv.URL, Key: "nope"}
 	})
-	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
+	resp, err := testConn(context.Background(), &fakeConfigStore{}, "cyberhub", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,9 +437,8 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
 	store.cfg = &types.DistributeConfig{Recon: &types.ReconConfig{FofaKey: "stored-fofa"}}
-	svc := newService(store)
 
-	resp, err := svc.TestConn(context.Background(), "recon", configWith(nil))
+	resp, err := testConn(context.Background(), store, "recon", configWith(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -138,8 +463,7 @@ func TestProbeFofaError(t *testing.T) {
 	probe.FofaInfoEndpoint = srv.URL
 	defer func() { probe.FofaInfoEndpoint = orig }()
 
-	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{FofaKey: "bad"}
 	}))
 	c, ok := findCheck(resp, "fofa")
@@ -166,8 +490,7 @@ func TestProbeHunterSuccess(t *testing.T) {
 	probe.HunterSearchEndpoint = srv.URL
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
-	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "hk"}
 	}))
 	if c, ok := findCheck(resp, "hunter"); !ok || !c.Ok {
@@ -184,8 +507,7 @@ func TestProbeHunterError(t *testing.T) {
 	probe.HunterSearchEndpoint = srv.URL
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
-	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterToken: "bad"}
 	}))
 	c, ok := findCheck(resp, "hunter")
@@ -198,34 +520,9 @@ func TestProbeHunterError(t *testing.T) {
 }
 
 func TestReconNoCredentials(t *testing.T) {
-	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(nil))
+	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(nil))
 	if c, ok := findCheck(resp, "recon"); !ok || c.Ok || c.Error == "" {
 		t.Fatalf("expected a single failing recon check, got %+v", resp)
-	}
-}
-
-func TestHandlerTestConnRouting(t *testing.T) {
-	svc := newService(&fakeConfigStore{})
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
-	defer srv.Close()
-	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
-
-	response, err := client.TestConnection(context.Background(), connect.NewRequest(&types.TestConnectionRequest{
-		Section: "cyberhub", Config: &types.DistributeConfig{},
-	}))
-	if err != nil {
-		t.Fatalf("TestConnection: %v", err)
-	}
-	if len(response.Msg.Checks) != 1 || response.Msg.Checks[0].Name != "cyberhub" {
-		t.Fatalf("expected one cyberhub check, got %+v", response.Msg.Checks)
-	}
-
-	_, err = client.TestConnection(context.Background(), connect.NewRequest(&types.TestConnectionRequest{
-		Section: "agent", Config: &types.DistributeConfig{},
-	}))
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("expected invalid_argument for untestable section, got %v", err)
 	}
 }
 
@@ -239,8 +536,7 @@ func TestProbeIOASuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := newService(&fakeConfigStore{})
-	resp, err := svc.TestConn(context.Background(), "ioa", configWith(func(c *types.DistributeConfig) {
+	resp, err := testConn(context.Background(), &fakeConfigStore{}, "ioa", configWith(func(c *types.DistributeConfig) {
 		c.Ioa = &types.IOAConfig{Url: srv.URL, Token: "t"}
 	}))
 	if err != nil {
@@ -254,33 +550,6 @@ func TestProbeIOASuccess(t *testing.T) {
 		t.Fatalf("expected space count in detail, got %q", c.Detail)
 	}
 }
-
-// fakeConfigStore is a minimal in-memory ConfigStore for probe tests.
-type fakeConfigStore struct {
-	cfg *types.DistributeConfig
-}
-
-func (f *fakeConfigStore) current() *types.DistributeConfig {
-	if f.cfg == nil {
-		f.cfg = &types.DistributeConfig{}
-	}
-	return f.cfg
-}
-
-func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
-	return "config.yaml", true, f.current(), nil
-}
-
-func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg *types.DistributeConfig) (*PreparedConfig, error) {
-	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
-}
-
-func (f *fakeConfigStore) CommitDistributeConfig(_ context.Context, prepared *PreparedConfig) error {
-	f.cfg = prepared.Config
-	return nil
-}
-
-func (f *fakeConfigStore) DiscardDistributeConfig(*PreparedConfig) {}
 
 // stubLLMServer emulates an OpenAI-compatible /chat/completions endpoint and
 // records the Authorization header it received.
@@ -306,8 +575,7 @@ func TestTestLLMSuccess(t *testing.T) {
 	srv := stubLLMServer(t, "pong", nil)
 	defer srv.Close()
 
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  srv.URL + "/v1",
 		ApiKey:   "sk-test",
@@ -328,8 +596,7 @@ func TestTestLLMSuccess(t *testing.T) {
 }
 
 func TestTestLLMMissingModel(t *testing.T) {
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{Provider: "openai", ApiKey: "sk-test"})
+	res, err := newConfig(&fakeConfigStore{}).TestLLM(context.Background(), &types.LLMProbeRequest{Provider: "openai", ApiKey: "sk-test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -350,10 +617,9 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
 		Providers: []*types.LLMProviderConfig{{Id: "default", Provider: "openai", ApiKey: "sk-stored"}},
 	}}
-	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
-	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(store).TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  srv.URL + "/v1",
 		Model:    "gpt-test",
@@ -370,9 +636,8 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 }
 
 func TestTestLLMReportsTransportError(t *testing.T) {
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
 	// Unroutable port → connection refused, surfaced inside the result.
-	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  "http://127.0.0.1:1/v1",
 		ApiKey:   "sk-test",
@@ -413,8 +678,7 @@ func TestListLLMModelsSuccess(t *testing.T) {
 	srv := stubModelsServer(t, []string{"gpt-4.1", "deepseek-v4-pro"}, &gotAuth)
 	defer srv.Close()
 
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).ListModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  srv.URL + "/v1",
 		ApiKey:   "sk-test",
@@ -442,10 +706,9 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
 		Providers: []*types.LLMProviderConfig{{Id: "default", Provider: "openai", ApiKey: "sk-stored"}},
 	}}
-	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(store).ListModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  srv.URL + "/v1",
 	})
@@ -473,9 +736,8 @@ func TestListLLMModelsUsesSelectedProfileStoredKey(t *testing.T) {
 			{Id: "secondary", Provider: "openai", ApiKey: "sk-secondary"},
 		},
 	}}
-	svc := NewService(ServiceConfig{ConfigStore: store})
 
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(store).ListModels(context.Background(), &types.LLMProbeRequest{
 		ProfileId: "secondary",
 		Provider:  "openai",
 		BaseUrl:   srv.URL + "/v1",
@@ -495,8 +757,7 @@ func TestListLLMModelsTreatsNotFoundAsUnsupported(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).ListModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  srv.URL + "/v1",
 		ApiKey:   "sk-test",
@@ -510,8 +771,7 @@ func TestListLLMModelsTreatsNotFoundAsUnsupported(t *testing.T) {
 }
 
 func TestListLLMModelsReportsTransportError(t *testing.T) {
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).ListModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
 		BaseUrl:  "http://127.0.0.1:1/v1",
 		ApiKey:   "sk-test",
@@ -549,8 +809,7 @@ func TestListLLMModelsAnthropic(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+	res, err := newConfig(&fakeConfigStore{}).ListModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "anthropic",
 		BaseUrl:  srv.URL + "/v1",
 		ApiKey:   "sk-test",

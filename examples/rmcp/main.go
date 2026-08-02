@@ -10,7 +10,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
+	node "github.com/chainreactors/aiscan/pkg/node"
 )
 
 func newRegistry(workDir string) *commands.CommandRegistry {
@@ -32,7 +32,7 @@ func main() {
 	flag.StringVar(&serverURL, "server", "", "AOP hub URL, e.g. http://host:8080")
 	flag.StringVar(&token, "token", "", "hub access token")
 	flag.StringVar(&nodeID, "id", "", "stable node ID (default: hostname)")
-	flag.StringVar(&wsPath, "ws-path", webagent.DefaultWSPath, "AOP WebSocket path")
+	flag.StringVar(&wsPath, "ws-path", node.DefaultWSPath, "AOP WebSocket path")
 	flag.Parse()
 	if serverURL == "" {
 		fmt.Fprintln(os.Stderr, "usage: rmcp --server <url> [--token <token>] [--id <node-id>]")
@@ -48,7 +48,7 @@ func main() {
 	registry.SetLogger(logger)
 
 	logger.Infof("rmcp tools ready: bash (workdir %s)", workDir)
-	if err := webagent.RunToolNode(ctx, webagent.ToolNodeConfig{
+	if err := node.RunToolNode(ctx, node.ToolNodeConfig{
 		ServerURL: serverURL,
 		WSPath:    wsPath,
 		ID:        nodeID,

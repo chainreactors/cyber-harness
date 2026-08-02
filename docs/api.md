@@ -2,7 +2,7 @@
 
 本文档只讲一件事：**外部程序如何给 aiscan 的 agent 发自然语言、并流式拿到回答**。
 
-- 通道：`/api/aop/ws` 上的二进制 protobuf WebSocket（无 gRPC，纯消息帧）
+- 通道：`/api/aop/application/ws` 上的二进制 protobuf WebSocket，或 `AOPService.Connect`
 - 输入：`RunTurnRequest`（自然语言文本）
 - 输出：`WatchEvents` 推送的 `Event` 流（流式增量 + 完整消息 + 结束信号）
 - 以 Android（Kotlin）为完整示例，同样适用于 iOS / 桌面 / 其他后端
@@ -55,18 +55,18 @@ dependencies { implementation("com.google.protobuf:protobuf-javalite:4.31.0") }
 ## 2. 连接
 
 ```http
-GET /api/aop/ws HTTP/1.1
+GET /api/aop/application/ws HTTP/1.1
 Authorization: Bearer <access-key>     # 服务端 --token；空则免鉴权
 Upgrade: websocket
 ```
 
 - 每条 **BinaryMessage** = 一个序列化的 `aop.Envelope`
-- 首条 envelope 不要发 `AgentHello`（那是节点角色）；直接发下面的业务请求即可
-- Android 模拟器访问宿主机：`ws://10.0.2.2:<port>/api/aop/ws`
+- `AgentHello` 只允许发送到 `/api/aop/node/ws`；Application 直接发送业务请求
+- Android 模拟器访问宿主机：`ws://10.0.2.2:<port>/api/aop/application/ws`
 
 ```kotlin
 val request = Request.Builder()
-    .url("ws://10.0.2.2:8080/api/aop/ws")
+    .url("ws://10.0.2.2:8080/api/aop/application/ws")
     .header("Authorization", "Bearer $accessKey")
     .build()
 val ws = okHttpClient.newWebSocket(request, listener)

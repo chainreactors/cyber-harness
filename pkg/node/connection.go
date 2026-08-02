@@ -1,4 +1,4 @@
-package agent
+package node
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-const DefaultWSPath = "/api/aop/ws"
+const DefaultWSPath = "/api/aop/node/ws"
 
 type connectionConfig struct {
 	ServerURL    string
@@ -22,6 +22,9 @@ type connectionConfig struct {
 	Token        string
 	Capabilities []string
 
+	// JSONFrames switches the wire codec from binary protobuf to standard
+	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
+	JSONFrames     bool
 	Registry       *commands.CommandRegistry
 	AgentSubscribe func(func(*aop.Event)) func()
 	DataBus        *eventbus.Bus[output.ToolDataEvent]

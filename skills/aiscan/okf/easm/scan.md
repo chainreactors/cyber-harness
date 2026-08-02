@@ -4,7 +4,7 @@ title: scan
 description: Use this playbook when working with scan for the multi-stage aiscan pipeline across discovery, web probing, weak credentials, POC checks, and verification.
 tags: [easm, pipeline]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Scan
@@ -74,3 +74,14 @@ The scan AI sub-skills are independent references:
 - `aiscan://skills/scan/sniper.md` — Vulnerability intelligence: searches for known CVEs based on discovered fingerprints
 - `aiscan://skills/scan/deep.md` — Deep testing for discovered web endpoints and fingerprinted assets
 - `aiscan://skills/scan/fuzz.md` — Internal parameter-review standard for high-value inputs; not a `scan` flag or standalone mode
+
+## Related concepts
+
+- Scan orchestrates [gogo](gogo.md), [spray](spray.md), [katana](katana.md),
+  [zombie](zombie.md), and [neutron](neutron.md).
+- [Passive discovery](passive.md) can seed targets before a scan, while
+  [proton](proton.md) and [playwright](playwright.md) provide focused follow-up.
+- Runtime support comes from [cyberhub](/runtime/search.md) for fingerprint-to-POC
+  lookup, [proxy](/runtime/proxy.md) for routed execution,
+  [mitm](/runtime/mitm.md) for traffic evidence, and
+  [tmux](/runtime/tmux.md) for long-running sessions.

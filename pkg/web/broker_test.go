@@ -9,6 +9,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -50,11 +51,11 @@ func TestHubBroadcastScanReliableSurvivesBackpressure(t *testing.T) {
 	defer unsubscribe()
 
 	for i := 0; i < 64; i++ {
-		hub.BroadcastScan(scanProgressEvent("scan-1", "progress"), false)
+		hub.BroadcastScan(managementapi.ScanProgressEvent("scan-1", "progress"), false)
 	}
-	overflow := scanProgressEvent("scan-1", "overflow")
+	overflow := managementapi.ScanProgressEvent("scan-1", "overflow")
 	hub.BroadcastScan(overflow, false)
-	terminal := scanFailedEvent("scan-1", "failed", false)
+	terminal := managementapi.ScanFailedEvent("scan-1", "failed", false)
 	hub.BroadcastScan(terminal, true)
 
 	var sawTerminal, sawOverflow bool
@@ -73,17 +74,17 @@ func TestHubBroadcastScanReliableSurvivesBackpressure(t *testing.T) {
 
 func TestScanSubscriptionReturnsSnapshotSequenceBoundary(t *testing.T) {
 	hub := NewHub()
-	hub.BroadcastScan(scanProgressEvent("scan-1", "before-subscribe"), false)
+	hub.BroadcastScan(managementapi.ScanProgressEvent("scan-1", "before-subscribe"), false)
 	events, sequence, unsubscribe := hub.SubscribeScan("scan-1")
 	defer unsubscribe()
 	if sequence != 1 {
 		t.Fatalf("subscription sequence = %d, want 1", sequence)
 	}
-	snapshot := scanSnapshot(&types.Scan{Id: "scan-1"}, sequence)
+	snapshot := managementapi.ScanSnapshot(&types.Scan{Id: "scan-1"}, sequence)
 	if snapshot.Sequence != sequence {
 		t.Fatalf("snapshot sequence = %d, want %d", snapshot.Sequence, sequence)
 	}
-	hub.BroadcastScan(scanProgressEvent("scan-1", "after-subscribe"), false)
+	hub.BroadcastScan(managementapi.ScanProgressEvent("scan-1", "after-subscribe"), false)
 	select {
 	case event := <-events:
 		if event.Sequence <= snapshot.Sequence {

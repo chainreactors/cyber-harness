@@ -1,31 +1,8 @@
 package web
 
 import (
-	"strings"
 	"testing"
-
-	types "github.com/chainreactors/aiscan/pkg/types"
 )
-
-func TestValidateLLMConfigRejectsUnsupportedProvider(t *testing.T) {
-	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
-		Provider: "bogus-vendor",
-		Model:    "some-model",
-	}}}
-	if err := ValidateLLMConfig(cfg); err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("ValidateLLMConfig() error = %v", err)
-	}
-}
-
-func TestValidateLLMConfigAcceptsVendorAlias(t *testing.T) {
-	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
-		Provider: "deepseek",
-		Model:    "deepseek-chat",
-	}}}
-	if err := ValidateLLMConfig(cfg); err != nil {
-		t.Fatalf("ValidateLLMConfig() error = %v", err)
-	}
-}
 
 func TestValidateTarget(t *testing.T) {
 	tests := []struct {

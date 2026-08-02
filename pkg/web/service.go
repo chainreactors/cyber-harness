@@ -134,7 +134,7 @@ func (s *Service) SetAgentPool(pool *AgentPool) {
 		return
 	}
 	pool.SetSessionLookup(s)
-	pool.config = s.GetDistributeConfig
+	pool.config = s.api.Config.Distribute
 }
 
 func (s *Service) Close() {
@@ -287,7 +287,7 @@ func (s *Service) CancelScan(id string) error {
 	if cancel != nil {
 		cancel()
 	}
-	s.hub.BroadcastScan(scanFailedEvent(id, "scan canceled", true), true)
+	s.hub.BroadcastScan(managementapi.ScanFailedEvent(id, "scan canceled", true), true)
 	if nodeID != "" && s.agents != nil {
 		_ = s.agents.CancelTask(nodeID, id)
 	}
@@ -341,7 +341,7 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 		return
 	}
 
-	s.hub.BroadcastScan(scanStatusEvent(scanID, types.ScanStatus_SCAN_STATUS_RUNNING), false)
+	s.hub.BroadcastScan(managementapi.ScanStatusEvent(scanID, types.ScanStatus_SCAN_STATUS_RUNNING), false)
 
 	// Try agent dispatch first, fall back to local execution.
 	if s.agents != nil && s.agents.Count() > 0 {
@@ -458,7 +458,7 @@ func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, err
 	}
 	next := proto.CloneOf(scan)
 	next.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
-	next.Report = buildMarkdownReport(scan.Target, scan.Mode, nodes, defaultReportLang)
+	next.Report = managementapi.BuildMarkdownReport(scan.Target, scan.Mode, nodes, managementapi.DefaultReportLang)
 	next.Error = ""
 	next.UpdatedAt = nowProto()
 	changed, err := s.store.TransitionScan(ctx, next, types.ScanStatus_SCAN_STATUS_RUNNING)
@@ -466,7 +466,7 @@ func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, err
 		return changed, err
 	}
 	proto.Merge(scan, next)
-	s.hub.BroadcastScan(scanCompletedEvent(scan.Id), true)
+	s.hub.BroadcastScan(managementapi.ScanCompletedEvent(scan.Id), true)
 	s.broadcastScanComplete(scan.Id)
 	return true, nil
 }
@@ -481,7 +481,7 @@ func (s *Service) failScan(scan *types.Scan, errMsg string) (bool, error) {
 		return changed, err
 	}
 	proto.Merge(scan, next)
-	s.hub.BroadcastScan(scanFailedEvent(scan.Id, errMsg, false), true)
+	s.hub.BroadcastScan(managementapi.ScanFailedEvent(scan.Id, errMsg, false), true)
 	return true, nil
 }
 
@@ -654,7 +654,7 @@ func (w *scanStreamWriter) Write(p []byte) (int, error) {
 		}
 		w.scan = current
 
-		w.hub.BroadcastScan(scanProgressEvent(w.scanID, line), false)
+		w.hub.BroadcastScan(managementapi.ScanProgressEvent(w.scanID, line), false)
 	}
 	return len(p), nil
 }
@@ -705,41 +705,6 @@ func (s *Service) finishSessionTask(taskID string) bool {
 	return canceled
 }
 
-func (s *Service) CancelSession(ctx context.Context, sessionID string) error {
-	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
-		return err
-	}
-
-	type activeTask struct {
-		taskID string
-		nodeID string
-	}
-	var tasks []activeTask
-	s.mu.Lock()
-	for taskID, sid := range s.taskSessions {
-		if sid != sessionID {
-			continue
-		}
-		tasks = append(tasks, activeTask{taskID: taskID, nodeID: s.taskNodeIDs[taskID]})
-		s.taskCanceled[taskID] = true
-	}
-	s.mu.Unlock()
-
-	if len(tasks) == 0 {
-		s.broadcastSystemMessage(sessionID, SysNoRunningTask, "No running task.", nil)
-		return nil
-	}
-	if s.agents != nil {
-		for _, task := range tasks {
-			if task.nodeID != "" {
-				_ = s.agents.CancelTask(task.nodeID, task.taskID, sessionID)
-			}
-		}
-	}
-	s.broadcastSystemMessage(sessionID, SysPaused, "Paused.", nil)
-	return nil
-}
-
 func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) error {
 	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
 		return err
@@ -772,7 +737,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	return nil
 }
 
-func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*filepb.Result, error) {
+func (s *Service) Upload(ctx context.Context, sessionID, filename string, data []byte) (*filepb.Result, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -813,34 +778,6 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 		_ = s.agents.CancelTask(nodeID, taskID)
 		return nil, ctx.Err()
 	}
-}
-
-func (s *Service) CreateSession(ctx context.Context, nodeID, title string) (*types.SessionRecord, error) {
-	var agentName string
-	if s.agents != nil {
-		if info := s.agents.get(nodeID); info != nil {
-			agentName = info.Name()
-		}
-	}
-	now := nowProto()
-	session := &types.SessionRecord{
-		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, NodeId: nodeID, Title: title},
-		AgentName: agentName,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if err := s.store.CreateSession(ctx, session); err != nil {
-		return nil, fmt.Errorf("create session: %w", err)
-	}
-	return session, nil
-}
-
-func (s *Service) GetSession(ctx context.Context, id string) (*types.SessionRecord, error) {
-	return s.store.GetSession(ctx, id)
-}
-
-func (s *Service) ListSessions(ctx context.Context) ([]*types.SessionRecord, error) {
-	return s.store.ListSessions(ctx, 100)
 }
 
 func (s *Service) DeleteSession(ctx context.Context, id string) error {

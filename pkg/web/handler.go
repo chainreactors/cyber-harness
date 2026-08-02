@@ -11,10 +11,10 @@ type Handler struct{ handler http.Handler }
 func NewHandler(service *Service, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, accessKey)
-	connectHandler := NewConnectHandler(accessKey, service)
-	mountConnectHandlers(mux, connectHandler)
+	RegisterConnectServices(mux, accessKey, service)
 	if service != nil && service.agents != nil {
-		mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) { HandleAOPWebSocket(service, w, r) })
+		mux.HandleFunc(ApplicationWebSocketPath, service.HandleApplicationWebSocket)
+		mux.HandleFunc(NodeWebSocketPath, service.agents.HandleNodeWebSocket)
 	}
 	if ioaHandler != nil {
 		mux.Handle("/ioa/", http.StripPrefix("/ioa", ioaHandler))

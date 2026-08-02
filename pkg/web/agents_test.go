@@ -150,11 +150,23 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 	}
 }
 
-// dialAOPWebSocket opens the unified application WebSocket both peers
-// (agents and browsers) use.
+// dialAOPWebSocket opens the Application Endpoint.
 func dialAOPWebSocket(t *testing.T, srv *httptest.Server) *websocket.Conn {
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/aop/ws"
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + ApplicationWebSocketPath
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	return conn
+}
+
+func dialNodeWebSocket(t *testing.T, srv *httptest.Server) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + NodeWebSocketPath
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -209,7 +221,7 @@ func readBrowserPTY(t *testing.T, conn *websocket.Conn, want string) *ptypb.Prot
 
 func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status *aop.AgentStatus) *websocket.Conn {
 	t.Helper()
-	conn := dialAOPWebSocket(t, srv)
+	conn := dialNodeWebSocket(t, srv)
 	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: &aop.AgentHello{
 		NodeId: nodeID, Name: name,
 	}}}))
@@ -235,9 +247,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) {
-		HandleAOPWebSocket(svc, w, r)
-	})
+	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
+	mux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, pool
@@ -372,12 +383,15 @@ func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agent := pool.PickChat()
+	agent := pool.get("node-chat-worker")
 	if agent == nil {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	resultCh, err := pool.DispatchChat(agent.NodeID(), "task-chat", "hello")
+	resultCh, err := pool.DispatchRun(agent.NodeID(), &aop.RunTurnRequest{
+		TurnId: "task-chat",
+		Input:  &aop.Message{Role: "user", Content: []*aop.Content{aop.Text("hello")}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +439,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agent := pool.PickChat()
+	agent := pool.get("node-goal-worker")
 	if agent == nil {
 		t.Fatal("expected chat-capable agent")
 	}
@@ -496,10 +510,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	session, err := svc.CreateSession(ctx, agents[0].GetHello().GetNodeId(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := createTestSession(t, svc, agents[0].GetHello().GetNodeId(), "")
 
 	done := make(chan struct{})
 	go func() {
@@ -536,7 +547,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 		}
 	}()
 
-	result, err := svc.HandleFileUpload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
+	result, err := svc.Upload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,17 +582,6 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	params := webExtension.GetParams().AsMap()
 	if webExtension.GetCode() != SysFileUploaded || params["filename"] != "note.txt" || params["path"] != result.Path {
 		t.Fatalf("unexpected system message metadata: %+v", webExtension)
-	}
-}
-
-func TestWSPickChatIgnoresAgentsWithoutProvider(t *testing.T) {
-	srv, pool := setupTestServer(t)
-	conn := dialAgent(t, srv, "command-worker", []string{"scan"})
-	defer conn.Close()
-
-	time.Sleep(50 * time.Millisecond)
-	if got := pool.PickChat(); got != nil {
-		t.Fatalf("PickChat() = %#v, want nil", got)
 	}
 }
 
@@ -1391,4 +1391,341 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("disconnect terminal event was not persisted")
+}
+
+func newFakeAgent(nodeID string, buffer int) *remoteAgent {
+	return &remoteAgent{
+		nodeState: newNodeState(),
+		nodeID:    nodeID, name: nodeID, sendCh: make(chan *aop.Envelope, buffer),
+		done: make(chan struct{}),
+	}
+}
+
+func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("agent", 1)
+	pool.register(agent)
+	config := &types.DistributeConfig{Llm: &types.LLMConfig{ActiveProfile: "primary"}}
+
+	if n := pool.BroadcastConfigReload(config); n != 1 {
+		t.Fatalf("notified = %d, want 1", n)
+	}
+	envelope := <-agent.sendCh
+	message, err := aop.Unwrap(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reload, ok := message.(*types.ReloadProtocolMessage)
+	if !ok || reload.GetRequest().GetConfig().GetLlm().GetActiveProfile() != "primary" {
+		t.Fatalf("reload = %T %+v", message, message)
+	}
+}
+
+func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("busy", 1)
+	cancel := aop.MustWrap("cancel", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "task-1"}}})
+	agent.sendCh <- cancel
+	pool.register(agent)
+
+	done := make(chan int, 1)
+	go func() { done <- pool.BroadcastConfigReload(&types.DistributeConfig{}) }()
+	select {
+	case <-done:
+		t.Fatal("reload bypassed the full FIFO")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if first := <-agent.sendCh; first.Id != "cancel" {
+		t.Fatalf("first envelope = %+v", first)
+	}
+	if notified := <-done; notified != 1 {
+		t.Fatalf("notified = %d", notified)
+	}
+	message, _ := aop.Unwrap(<-agent.sendCh)
+	if reload, ok := message.(*types.ReloadProtocolMessage); !ok || reload.GetRequest() == nil {
+		t.Fatalf("second message = %T", message)
+	}
+}
+
+func TestHandleAgentStatusUpdate(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("n1", 1)
+	agent.runtime = &aop.AgentRuntimeInfo{Pid: 4242, Hostname: "local-1"}
+	agent.status = &aop.AgentStatus{Provider: "anthropic", Model: "old-model"}
+	pool.register(agent)
+
+	pool.handleAgentEnvelope(agent, aop.MustWrap("status", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: &aop.AgentStatus{
+		Provider: "anthropic", Model: "glm-5.2", Bound: true,
+	}}}))
+
+	view := agent.view()
+	if view.GetStatus().GetModel() != "glm-5.2" || view.GetStatus().GetProvider() != "anthropic" {
+		t.Fatalf("status = %+v", view.GetStatus())
+	}
+	if runtime := view.GetHello().GetRuntime(); runtime.GetHostname() != "local-1" || runtime.GetPid() != 4242 {
+		t.Fatalf("runtime clobbered: %+v", runtime)
+	}
+}
+
+func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("n1", 1)
+	agent.status = &aop.AgentStatus{Provider: "openai", Model: "old-model"}
+	pool.register(agent)
+
+	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-result", "reload", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: &types.ReloadResult{
+		Ok: true, Provider: "openai", Model: "deepseek-v4-pro",
+	}}}))
+	if got := agent.view().GetStatus(); got.GetProvider() != "openai" || got.GetModel() != "deepseek-v4-pro" || got.GetConfigError() != "" {
+		t.Fatalf("unexpected config result status: %+v", got)
+	}
+
+	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-error", "reload", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: &types.ReloadResult{
+		Ok: false, Error: "invalid API key",
+	}}}))
+	if got := agent.view().GetStatus(); got.GetConfigError() != "invalid API key" {
+		t.Fatalf("config error = %q", got.GetConfigError())
+	}
+}
+
+// A3: interleaved operations on one browser connection must each correlate
+// their replies to their own request identity — uploads by envelope id, PTY
+// stream frames by stream id.
+func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "mixed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
+	mux := http.NewServeMux()
+	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
+	mux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	conn := dialAOPWebSocket(t, srv)
+	defer conn.Close()
+	upload := func(id string) *aop.Envelope {
+		return wrapMessage(t, id, "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_UploadRequest{UploadRequest: &filepb.UploadRequest{
+			SessionId: "missing-session", Filename: id + ".txt", Data: []byte("x"),
+		}}})
+	}
+	writeAgentEnvelope(t, conn, upload("up-1"))
+	writeAgentEnvelope(t, conn, wrapMessage(t, "pty-1", "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Open{Open: &ptypb.Open{StreamId: "term-x", NodeId: "node-offline"}}}))
+	writeAgentEnvelope(t, conn, upload("up-2"))
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	replies := map[string]*aop.Envelope{}
+	for i := 0; i < 4; i++ {
+		envelope := readHubEnvelope(t, conn)
+		replies[envelope.GetReplyTo()] = envelope
+	}
+	if len(replies) != 4 {
+		t.Fatalf("replies = %d, want 4 distinct correlation ids", len(replies))
+	}
+	for _, id := range []string{"up-1", "up-2"} {
+		message := unwrapEnvelope(t, replies[id])
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetProtocolError().GetCode() != "FILE_UPLOAD_FAILED" {
+			t.Fatalf("reply %s = %+v, want FILE_UPLOAD_FAILED", id, message)
+		}
+	}
+	if message := ptyMessageFromEnvelope(replies["term-x"]); message.GetDetached().GetStreamId() != "term-x" {
+		t.Fatalf("pty stream reply = %+v, want detached term-x", message)
+	}
+	// The open targets an offline node: after the detached notice the failed
+	// forward is reported against the open's own envelope id.
+	message := unwrapEnvelope(t, replies["pty-1"])
+	core, ok := message.(*aop.ProtocolMessage)
+	if !ok || core.GetProtocolError().GetCode() != "PTY_FORWARD_FAILED" {
+		t.Fatalf("pty-1 reply = %+v, want PTY_FORWARD_FAILED", message)
+	}
+}
+
+// A4: CancelTask must converge only the targeted task; a sibling dispatch on
+// the same node stays pending.
+func TestCancelTaskIsolatesSiblingDispatch(t *testing.T) {
+	pool := NewAgentPool(nil)
+	agent := newFakeAgent("agent-1", 4)
+	pool.register(agent)
+
+	arguments, _ := aop.JSONValue(map[string]any{"command": "scan"})
+	first, err := pool.DispatchToolCall("agent-1", "task-1", &aop.ToolCall{Name: "bash", Arguments: arguments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := pool.DispatchToolCall("agent-1", "task-2", &aop.ToolCall{Name: "bash", Arguments: arguments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-agent.sendCh // the two tool.call dispatches
+	<-agent.sendCh
+
+	if err := pool.CancelTask("agent-1", "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-first:
+		if ok {
+			t.Fatal("canceled task delivered a result")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled task did not converge")
+	}
+	select {
+	case res, ok := <-second:
+		t.Fatalf("sibling task converged: res=%+v ok=%v", res, ok)
+	default:
+	}
+	agent.mu.Lock()
+	_, firstPending := agent.tasks["task-1"]
+	_, secondPending := agent.tasks["task-2"]
+	agent.mu.Unlock()
+	if firstPending || !secondPending {
+		t.Fatalf("pending after cancel: task-1=%v task-2=%v", firstPending, secondPending)
+	}
+	select {
+	case envelope := <-agent.sendCh:
+		message := unwrapEnvelope(t, envelope)
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetCancelOperation().GetTargetId() != "task-1" {
+			t.Fatalf("cancel envelope = %+v", message)
+		}
+	default:
+		t.Fatal("cancel frame was not sent")
+	}
+}
+
+// A5: two PTY streams on one browser connection route independently, and
+// closing the connection tears both routes out of the pool registry.
+func TestWSMultiStreamPTYRouteCleanup(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	agentConn := dialAgent(t, srv, "multi-pty-agent", []string{"tmux"})
+	defer agentConn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	nodeID := pool.List()[0].GetHello().GetNodeId()
+	browserConn := dialAOPWebSocket(t, srv)
+
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-2", NodeId: nodeID})
+	if open := readAgentPTY(t, agentConn, "open"); open.GetOpen().GetStreamId() != "term-1" {
+		t.Fatalf("first open = %+v", open)
+	}
+	if open := readAgentPTY(t, agentConn, "open"); open.GetOpen().GetStreamId() != "term-2" {
+		t.Fatalf("second open = %+v", open)
+	}
+	writeBrowserPTY(t, browserConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Input{Input: &ptypb.Input{StreamId: "term-2", Data: []byte("two\n")}}})
+	if input := readAgentPTY(t, agentConn, "input"); input.GetInput().GetStreamId() != "term-2" {
+		t.Fatalf("input routed = %+v, want term-2", input)
+	}
+
+	browserConn.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pool.ptyMu.RLock()
+		_, sub1 := pool.ptySubs["term-1"]
+		_, sub2 := pool.ptySubs["term-2"]
+		_, node1 := pool.ptyNodeIDs["term-1"]
+		_, node2 := pool.ptyNodeIDs["term-2"]
+		pool.ptyMu.RUnlock()
+		if !sub1 && !sub2 && !node1 && !node2 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("pty routes survived the browser connection close")
+}
+
+// A6: a registered AOP namespace the client surface does not serve is
+// rejected with UNSUPPORTED_NAMESPACE on the same connection.
+func TestWSUnknownNamespaceRejected(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	conn := dialAOPWebSocket(t, srv)
+	defer conn.Close()
+
+	writeAgentEnvelope(t, conn, wrapMessage(t, "bad-1", "", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{Config: &types.DistributeConfig{}}}}))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	envelope := readHubEnvelope(t, conn)
+	if envelope.GetReplyTo() != "bad-1" {
+		t.Fatalf("reply_to = %q, want bad-1", envelope.GetReplyTo())
+	}
+	message := unwrapEnvelope(t, envelope)
+	core, ok := message.(*aop.ProtocolMessage)
+	if !ok || core.GetProtocolError().GetCode() != "UNSUPPORTED_NAMESPACE" {
+		t.Fatalf("reply = %+v, want UNSUPPORTED_NAMESPACE", message)
+	}
+}
+
+// A7: a reconnect under the same node_id replaces the stale connection; the
+// pool closes the replaced socket.
+func TestWSReconnectClosesReplacedConnection(t *testing.T) {
+	srv, pool := setupTestServer(t)
+	conn1 := dialAgent(t, srv, "dup-agent", []string{"scan"})
+	defer conn1.Close()
+	waitAgents(t, pool, 1)
+
+	conn2 := dialAgent(t, srv, "dup-agent", []string{"scan"})
+	defer conn2.Close()
+	waitAgents(t, pool, 1)
+
+	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn1.ReadMessage(); err == nil {
+		t.Fatal("replaced connection still readable")
+	}
+}
+
+// A8: a session's node binding still resolves after the node reconnects —
+// dispatch to the session's node lands on the replacement connection.
+func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
+	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
+	defer srv.Close()
+
+	conn1 := dialAgent(t, srv, "bind-agent", []string{"scan"})
+	waitAgents(t, pool, 1)
+	nodeID := pool.List()[0].GetHello().GetNodeId()
+	session := createTestSession(t, svc, nodeID, "bound")
+
+	conn1.Close()
+	waitAgents(t, pool, 0)
+	conn2 := dialAgent(t, srv, "bind-agent", []string{"scan"})
+	defer conn2.Close()
+	waitAgents(t, pool, 1)
+
+	resultCh, err := pool.DispatchRun(nodeID, &aop.RunTurnRequest{
+		SessionId: session.GetSession().GetId(), TurnId: "turn-after-reconnect",
+		Input: &aop.Message{Role: "user", Content: []*aop.Content{aop.Text("ping")}},
+	})
+	if err != nil {
+		t.Fatalf("dispatch to rebound node: %v", err)
+	}
+	opened := unwrapEnvelope(t, readHubEnvelope(t, conn2))
+	if core, ok := opened.(*aop.ProtocolMessage); !ok || core.GetOpenSessionRequest().GetSessionId() != session.GetSession().GetId() {
+		t.Fatalf("first frame = %+v, want session.open for the bound session", opened)
+	}
+	run := unwrapEnvelope(t, readHubEnvelope(t, conn2))
+	core, ok := run.(*aop.ProtocolMessage)
+	if !ok || core.GetRunTurnRequest().GetTurnId() != "turn-after-reconnect" {
+		t.Fatalf("dispatch = %+v, want the run", run)
+	}
+	writeAgentEnvelope(t, conn2, turnEndEnvelope(t, "turn-after-reconnect", session.GetSession().GetId(), "completed"))
+	select {
+	case res := <-resultCh:
+		if res.Err != "" {
+			t.Fatalf("run result = %+v", res)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("run did not converge on the reconnected agent")
+	}
 }
