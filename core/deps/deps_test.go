@@ -841,7 +841,7 @@ func shouldSkipQualityTree(root, path string) bool {
 	parts := strings.Split(rel, "/")
 	for _, part := range parts {
 		switch part {
-		case "node_modules", "dist", "coverage", "playwright-report", "test-results", ".cache":
+		case "node_modules", "dist", "coverage", "playwright-report", "test-results", ".cache", ".tmp":
 			return true
 		}
 	}

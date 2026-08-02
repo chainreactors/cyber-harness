@@ -41,6 +41,9 @@ type ToolNodeConfig struct {
 	// JSONFrames switches the hub wire to standard ProtoJSON text frames;
 	// hubs expecting binary protobuf (AIScan) leave it false.
 	JSONFrames bool
+	// DisableCommandCatalog prevents the AIScan-specific command namespace from
+	// being sent to generic AOP hubs. Tool definitions remain in AgentHello.
+	DisableCommandCatalog bool
 }
 
 // RunToolNode connects to the hub as a tool-only node and serves until ctx is
@@ -70,7 +73,11 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		"arch":    runtime.GOARCH,
 		"cores":   runtime.NumCPU(),
 	})
-	skillStore, _ := skills.LoadEmbeddedStore()
+	var menu func() []*types.CommandSpec
+	if !cfg.DisableCommandCatalog {
+		skillStore, _ := skills.LoadEmbeddedStore()
+		menu = func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) }
+	}
 	return connect(ctx, connectionConfig{
 		ServerURL:     cfg.ServerURL,
 		WSPath:        cfg.WSPath,
@@ -83,7 +90,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		NodeID:        runnerID,
 		Runtime:       runnerRuntime,
 		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
-		Menu:          func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) },
+		Menu:          menu,
 		RunnerFileRPC: true,
 		JSONFrames:    cfg.JSONFrames,
 	})
