@@ -244,8 +244,7 @@ func lastUserText(messages []*aop.Message) string {
 func newStdioTestSession(t *testing.T, h *stdioHost, output *bytes.Buffer, id string, prov agent.Provider) {
 	t.Helper()
 	if h.rt == nil || h.rt.ctx == nil {
-		initialized := newRuntimeStdioHost(t, output, prov)
-		h.rt = initialized.rt
+		initRuntimeStdioHost(t, h, prov)
 	}
 	h.accept(openSessionLine(t, id))
 }
@@ -253,13 +252,18 @@ func newStdioTestSession(t *testing.T, h *stdioHost, output *bytes.Buffer, id st
 func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider) *stdioHost {
 	t.Helper()
 	h := newStdioHost(context.Background(), nil, nil, output)
+	initRuntimeStdioHost(t, h, prov)
+	return h
+}
+
+func initRuntimeStdioHost(t *testing.T, h *stdioHost, prov agent.Provider) {
+	t.Helper()
 	h.rt = newBareRuntime(t, nil, prov)
 	h.rt.config.Model = "test"
 	h.rt.config.MaxTurns = 4
 	h.rt.Subscribe(func(event *aop.Event) {
 		_ = h.emit(aop.MustWrap(runtimeEnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
 	})
-	return h
 }
 
 func waitForCalls(t *testing.T, prov *stdioGateProvider, n int, what string) {
