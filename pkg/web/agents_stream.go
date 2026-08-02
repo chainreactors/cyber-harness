@@ -65,12 +65,6 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 	if err != nil {
 		return fmt.Errorf("register node namespaces: %w", err)
 	}
-	p.register(agent)
-	defer func() {
-		p.unregister(agent)
-		close(agent.done)
-	}()
-
 	accepted, err := aop.Wrap(generateID(), first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{
 		AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId, Capabilities: append([]string(nil), hello.Capabilities...)},
 	}})
@@ -91,6 +85,11 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 			}
 		}
 	}
+	p.register(agent)
+	defer func() {
+		p.unregister(agent)
+		close(agent.done)
+	}()
 
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, send aop.SendFunc) error {
 		handled, dispatchErr := namespaceMux.Dispatch(dispatchCtx, envelope, send)

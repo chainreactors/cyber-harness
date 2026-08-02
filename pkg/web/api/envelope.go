@@ -9,6 +9,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -273,7 +274,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 
 	handlePTY := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value := message.(*ptypb.ProtocolMessage)
-		streamID := ptyStreamID(value)
+		streamID := coreterminal.StreamID(value)
 		if streamID == "" {
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 			return nil
@@ -282,7 +283,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("PTY is unavailable"))
 			return nil
 		}
-		nodeID := ptyNodeID(value)
+		nodeID := coreterminal.NodeID(value)
 		stateMu.Lock()
 		route, routed := ptyRoutes[streamID]
 		stateMu.Unlock()
@@ -312,7 +313,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				}
 			}(streamID, messages)
 			if !online {
-				_ = send(streamID, "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Detached{Detached: &ptypb.Detached{StreamId: streamID}}})
+				_ = send(streamID, "", coreterminal.NewDetached(streamID))
 			}
 		}
 		if forwardErr := backends.PTY.Forward(nodeID, value); forwardErr != nil {
@@ -320,7 +321,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			removePTY(streamID, false)
 			return nil
 		}
-		if _, detach := value.Message.(*ptypb.ProtocolMessage_Detach); detach {
+		if coreterminal.IsDetach(value) {
 			removePTY(streamID, false)
 		}
 		return nil
@@ -354,58 +355,4 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		return nil
 	}
 	return connection.Run(first, dispatch)
-}
-
-// ptyStreamID extracts the multiplexing stream identity from any PTY message
-// variant without depending on the mechanism layer's frame codec.
-func ptyStreamID(message *ptypb.ProtocolMessage) string {
-	switch payload := message.Message.(type) {
-	case *ptypb.ProtocolMessage_Open:
-		return payload.Open.GetStreamId()
-	case *ptypb.ProtocolMessage_Opened:
-		return payload.Opened.GetStreamId()
-	case *ptypb.ProtocolMessage_Input:
-		return payload.Input.GetStreamId()
-	case *ptypb.ProtocolMessage_Output:
-		return payload.Output.GetStreamId()
-	case *ptypb.ProtocolMessage_Resize:
-		return payload.Resize.GetStreamId()
-	case *ptypb.ProtocolMessage_List:
-		return payload.List.GetStreamId()
-	case *ptypb.ProtocolMessage_Sessions:
-		return payload.Sessions.GetStreamId()
-	case *ptypb.ProtocolMessage_Attach:
-		return payload.Attach.GetStreamId()
-	case *ptypb.ProtocolMessage_Attached:
-		return payload.Attached.GetStreamId()
-	case *ptypb.ProtocolMessage_Detach:
-		return payload.Detach.GetStreamId()
-	case *ptypb.ProtocolMessage_Detached:
-		return payload.Detached.GetStreamId()
-	case *ptypb.ProtocolMessage_Kill:
-		return payload.Kill.GetStreamId()
-	case *ptypb.ProtocolMessage_Close:
-		return payload.Close.GetStreamId()
-	case *ptypb.ProtocolMessage_Closed:
-		return payload.Closed.GetStreamId()
-	case *ptypb.ProtocolMessage_State:
-		return payload.State.GetStreamId()
-	case *ptypb.ProtocolMessage_Error:
-		return payload.Error.GetStreamId()
-	default:
-		return ""
-	}
-}
-
-// ptyNodeID extracts the target agent identity carried by stream-opening
-// messages; all other variants route through the established stream route.
-func ptyNodeID(message *ptypb.ProtocolMessage) string {
-	switch payload := message.Message.(type) {
-	case *ptypb.ProtocolMessage_Open:
-		return payload.Open.GetNodeId()
-	case *ptypb.ProtocolMessage_List:
-		return payload.List.GetNodeId()
-	default:
-		return ""
-	}
 }
