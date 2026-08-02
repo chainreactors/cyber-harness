@@ -13,9 +13,8 @@ import (
 	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
-	"github.com/chainreactors/utils/pty"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -85,7 +84,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 		if err != nil {
 			return err
 		}
-		p.forwardPTYFrame(terminalcodec.FromProto(value))
+		p.forwardPTYMessage(value)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -356,15 +355,16 @@ func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progres
 	}
 }
 
-func (p *AgentPool) forwardPTYFrame(frame pty.Frame) {
-	if frame.StreamID == "" {
+func (p *AgentPool) forwardPTYMessage(message *ptypb.ProtocolMessage) {
+	streamID := coreterminal.StreamID(message)
+	if streamID == "" {
 		return
 	}
 	p.ptyMu.RLock()
-	ch := p.ptySubs[frame.StreamID]
+	ch := p.ptySubs[streamID]
 	if ch != nil {
 		select {
-		case ch <- frame:
+		case ch <- message:
 		default:
 			p.ptyDrops.Add(1)
 			select {
@@ -372,7 +372,7 @@ func (p *AgentPool) forwardPTYFrame(frame pty.Frame) {
 			default:
 			}
 			select {
-			case ch <- frame:
+			case ch <- message:
 			default:
 				p.ptyDrops.Add(1)
 			}

@@ -69,6 +69,7 @@ func TestLegacyPackagesCannotReturn(t *testing.T) {
 		{dir: filepath.Join("pkg", "webproto"), importPath: modulePath + "/pkg/webproto"},
 		{dir: filepath.Join("pkg", "webagent"), importPath: modulePath + "/pkg/webagent"},
 		{dir: filepath.Join("pkg", "web", "proto"), importPath: modulePath + "/pkg/web/proto"},
+		{dir: filepath.Join("pkg", "web", "terminal"), importPath: modulePath + "/pkg/web/terminal"},
 		{dir: filepath.Join("internal", "aoputil"), importPath: modulePath + "/internal/aoputil"},
 		{dir: filepath.Join("internal", "gen"), importPath: modulePath + "/internal/gen"},
 		{dir: "api", importPath: modulePath + "/api"},
