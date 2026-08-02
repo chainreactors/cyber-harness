@@ -1,6 +1,6 @@
 module github.com/chainreactors/aiscan
 
-go 1.25.7
+go 1.26
 
 tool (
 	connectrpc.com/connect/cmd/protoc-gen-connect-go
@@ -101,6 +101,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
+	github.com/chainreactors/aiscan/aop v0.0.0
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
@@ -319,3 +320,5 @@ require (
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320
+
+replace github.com/chainreactors/aiscan/aop => ./aop

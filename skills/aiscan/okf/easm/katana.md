@@ -4,7 +4,7 @@ title: katana
 description: Use katana for deep web crawling with full parameter discovery. Produces URLs with query strings, form targets, and JS endpoints that spray crawl strips.
 tags: [easm, web, crawling]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Katana — Parameter-Aware Web Crawler
@@ -48,3 +48,11 @@ katana -list urls.txt -d 2 -jc -timeout 60
 ## Output
 
 Default output is one URL per line. Use `-jsonl` for structured JSON with request/response details. Agent should pick the format that fits the task — plain URLs for quick review, JSON for parameter extraction.
+
+## Related concepts
+
+- Run Katana after the [scan pipeline](scan.md), [spray](spray.md), or
+  [passive discovery](passive.md) identifies web targets.
+- Katana complements Spray by preserving parameters; use
+  [playwright](playwright.md) when discovered routes require JavaScript or
+  interactive validation.

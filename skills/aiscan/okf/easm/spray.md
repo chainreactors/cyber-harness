@@ -4,7 +4,7 @@ title: spray
 description: Use this playbook when working with spray for web probing, HTTP fingerprints, exposed paths, and application analysis.
 tags: [easm, web]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Spray
@@ -31,3 +31,13 @@ Notes:
 
 - Use spray when the task is about web identity, exposed resources, or HTTP evidence.
 - Fingerprints and paths describe observed web behavior; user intent decides whether to summarize, analyze, review, or plan follow-up checks.
+
+## Related concepts
+
+- Spray probes web services discovered by [gogo](gogo.md), [passive](passive.md),
+  or the [scan pipeline](scan.md).
+- Use [katana](katana.md) for deeper parameter-aware crawling and
+  [playwright](playwright.md) for rendered, interactive application behavior.
+- Resolve fingerprints with [cyberhub](/runtime/search.md), execute matching
+  POCs with [neutron](neutron.md), and inspect exposed text with
+  [proton](proton.md).

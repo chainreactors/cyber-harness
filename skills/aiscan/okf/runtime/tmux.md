@@ -4,7 +4,7 @@ title: tmux
 description: PTY session manager built into aiscan. All bash commands run inside tmux sessions; long commands auto-background with inbox delivery.
 tags: [runtime, session]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # tmux - Session Manager
@@ -89,3 +89,10 @@ bash: tmux capture-pane -t <id> -n 20
 ```
 bash: tmux capture-pane -t <id> -c 2048
 ```
+
+## Related concepts
+
+- Tmux manages long-running [scan](/easm/scan.md) and
+  [gogo](/easm/gogo.md) command sessions.
+- Recurring [loop](loop.md) tasks may launch commands whose progress is exposed
+  through tmux sessions.

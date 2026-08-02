@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -351,7 +352,7 @@ func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progres
 	}
 	line = output.StripANSI(line)
 	if line != "" {
-		p.hub.BroadcastScan(scanProgressEvent(event.CallID, line), false)
+		p.hub.BroadcastScan(managementapi.ScanProgressEvent(event.CallID, line), false)
 	}
 }
 

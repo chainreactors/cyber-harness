@@ -15,6 +15,29 @@ import (
 	"time"
 )
 
+// createTestSession inserts a session record directly through the store,
+// mirroring what the agent-facing open flow would persist.
+func createTestSession(t *testing.T, svc *Service, nodeID, title string) *types.SessionRecord {
+	t.Helper()
+	var agentName string
+	if svc.agents != nil {
+		if info := svc.agents.get(nodeID); info != nil {
+			agentName = info.Name()
+		}
+	}
+	now := nowProto()
+	session := &types.SessionRecord{
+		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, NodeId: nodeID, Title: title},
+		AgentName: agentName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := svc.store.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
 func TestAOPEnvelopeBinaryAndJSONAreEquivalent(t *testing.T) {
 	original := aop.MustWrap("frame-1", "turn-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
 		Id: "event-1", SessionId: "session-1", TurnId: "turn-1", Emitter: "agent-1", Seq: 7,
@@ -278,10 +301,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	pool.register(remote)
 
 	ctx := context.Background()
-	session, err := svc.CreateSession(ctx, "agent-1", "replay me")
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := createTestSession(t, svc, "agent-1", "replay me")
 	arguments, _ := aop.JSONValue(map[string]string{"command": "ls"})
 	stored := []*aop.Event{
 		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
@@ -338,10 +358,7 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	session, err := svc.CreateSession(context.Background(), "", "resume")
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := createTestSession(t, svc, "", "resume")
 	for seq := 1; seq <= 3; seq++ {
 		if err := store.AddAOPEvent(context.Background(), session.GetSession().GetId(), &aop.Event{
 			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
@@ -365,6 +382,48 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 	}
 	if len(deliveries) != 1 || deliveries[0].Cursor != "3" || deliveries[0].Event.Id != "3" {
 		t.Fatalf("resumed deliveries = %v, want only cursor 3", deliveries)
+	}
+}
+
+// A2: an explicit CloseSession flips the stored session to closed and records
+// a SessionEnded event on the durable AOP timeline. The agent disconnects
+// before the close, so no close dispatch is attempted; the hub persists the
+// terminal session event itself.
+func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "close.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := NewService(ServiceConfig{Store: store})
+	defer service.Close()
+	pool := NewAgentPool(service.Hub())
+	service.SetAgentPool(pool)
+	fake := &remoteAgent{
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		done: make(chan struct{}),
+	}
+	pool.agents[fake.nodeID] = fake
+
+	ctx := context.Background()
+	opened, err := service.api.Sessions.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: fake.nodeID})
+	if err != nil || opened.GetAccepted() == nil {
+		t.Fatalf("open = %v, %v", opened, err)
+	}
+	delete(pool.agents, fake.nodeID)
+
+	closed, err := service.api.Sessions.CloseSession(ctx, "close-1", &aop.CloseSessionRequest{SessionId: "session-1", Reason: "done"})
+	if err != nil || closed.GetAccepted().GetState() != SessionStateClosed {
+		t.Fatalf("close = %v, %v", closed, err)
+	}
+	record, err := store.GetSession(ctx, "session-1")
+	if err != nil || record.GetSession().GetState() != SessionStateClosed {
+		t.Fatalf("stored session = %+v, %v", record, err)
+	}
+	events, err := store.ListAOPEvents(ctx, "session-1", 10)
+	if err != nil || len(events) != 1 || events[0].GetSessionEnded().GetReason() != "done" {
+		t.Fatalf("close events = %+v, %v", events, err)
 	}
 }
 
@@ -392,7 +451,7 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := svc.HandleFileUpload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
+		_, err := svc.Upload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
 		done <- err
 	}()
 

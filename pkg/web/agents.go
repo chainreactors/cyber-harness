@@ -167,11 +167,14 @@ type remoteAgent struct {
 	capabilities []string
 	commandsMenu []*types.CommandSpec
 	close        func()
-	sendCh       chan *aop.Envelope
-	connectAt    time.Time
-	runtime      *aop.AgentRuntimeInfo
-	status       *aop.AgentStatus
-	stats        *aop.AgentStats
+	send         aop.SendFunc
+	// sendCh is retained for isolated AgentPool tests; live nodes bind send to
+	// the shared Connection mechanism instead of running a second write pump.
+	sendCh    chan *aop.Envelope
+	connectAt time.Time
+	runtime   *aop.AgentRuntimeInfo
+	status    *aop.AgentStatus
+	stats     *aop.AgentStats
 
 	done chan struct{}
 }
@@ -179,11 +182,10 @@ type remoteAgent struct {
 func (a *remoteAgent) NodeID() string    { return a.nodeID }
 func (a *remoteAgent) Name() string      { return a.name }
 func (a *remoteAgent) state() *nodeState { return a.nodeState }
-func (a *remoteAgent) shutdown()         { a.close() }
-func (a *remoteAgent) chatCapable() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.status != nil && a.status.Provider != ""
+func (a *remoteAgent) shutdown() {
+	if a != nil && a.close != nil {
+		a.close()
+	}
 }
 
 func (a *remoteAgent) reloadConfig(config *types.DistributeConfig) {
@@ -342,26 +344,6 @@ func (p *AgentPool) Pick() *remoteAgent {
 	return fallback
 }
 
-// PickChat selects an idle LLM-capable agent, or any LLM-capable agent if all
-// are busy.
-func (p *AgentPool) PickChat() *remoteAgent {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	var fallback *remoteAgent
-	for _, a := range p.agents {
-		if !a.chatCapable() {
-			continue
-		}
-		if !a.state().busy() {
-			return a
-		}
-		if fallback == nil {
-			fallback = a
-		}
-	}
-	return fallback
-}
-
 // DispatchToolCall sends a canonical AOP tool.call to a tool-capable node.
 // The task completes only on the matching AOP tool.result.
 func (p *AgentPool) DispatchToolCall(nodeID, taskID string, call *aop.ToolCall) (<-chan taskResult, error) {
@@ -401,14 +383,6 @@ func (p *AgentPool) DispatchToolCall(nodeID, taskID string, call *aop.ToolCall) 
 		p.sessions.BroadcastAOPEvent(sessionID, event)
 	}
 	return ch, nil
-}
-
-// DispatchChat sends a natural-language prompt to an LLM-capable agent.
-func (p *AgentPool) DispatchChat(nodeID, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchRun(nodeID, &aop.RunTurnRequest{
-		TurnId: taskID,
-		Input:  &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: prompt}}}}},
-	})
 }
 
 func (p *AgentPool) DispatchOpenSession(nodeID, requestID string, request *aop.OpenSessionRequest) (<-chan taskResult, error) {
@@ -549,7 +523,13 @@ func (p *AgentPool) sendAgentMessage(nodeID, id, replyTo string, message protobu
 }
 
 func (a *remoteAgent) enqueue(envelope *aop.Envelope) error {
-	if a == nil || a.sendCh == nil {
+	if a == nil {
+		return fmt.Errorf("agent connection is unavailable")
+	}
+	if a.send != nil {
+		return a.send(envelope)
+	}
+	if a.sendCh == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
 	select {

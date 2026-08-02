@@ -62,7 +62,7 @@ func TestHeadlessHealthAndAuth(t *testing.T) {
 		t.Fatalf("expected no UI at /, got 200")
 	}
 
-	_, unauthResp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/aop/ws", nil)
+	_, unauthResp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/aop/application/ws", nil)
 	if err == nil {
 		t.Fatal("expected dial without token to fail")
 	}
@@ -76,7 +76,7 @@ func TestHeadlessOpenSessionRejected(t *testing.T) {
 	defer server.Close()
 
 	header := http.Header{"Authorization": []string{"Bearer test-token"}}
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/aop/ws"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/aop/application/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -131,9 +131,13 @@ func TestHeadlessOpenSessionRejected(t *testing.T) {
 }
 
 func dialPeer(t *testing.T, baseURL string) *wsPeer {
+	return dialPeerAt(t, baseURL, "/api/aop/application/ws")
+}
+
+func dialPeerAt(t *testing.T, baseURL, path string) *wsPeer {
 	t.Helper()
 	header := http.Header{"Authorization": []string{"Bearer test-token"}}
-	conn, _, err := websocket.DefaultDialer.Dial(baseURL+"/api/aop/ws", header)
+	conn, _, err := websocket.DefaultDialer.Dial(baseURL+path, header)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -177,7 +181,7 @@ func (p *wsPeer) recv() (*aop.Envelope, protobuf.Message) {
 // scriptedAgent accepts every session and answers each RunTurn with a message
 // delta and turn_end — the same frames a real agent runtime emits.
 func scriptedAgent(t *testing.T, baseURL, nodeID string, ready chan<- struct{}) {
-	agent := dialPeer(t, baseURL)
+	agent := dialPeerAt(t, baseURL, "/api/aop/node/ws")
 	agent.send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{
 		AgentHello: &aop.AgentHello{NodeId: nodeID, Name: "scripted", Capabilities: []string{"tool"}},
 	}})

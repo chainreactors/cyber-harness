@@ -4,7 +4,7 @@ title: gogo
 description: Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery.
 tags: [easm, discovery]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # Gogo
@@ -34,3 +34,11 @@ Notes:
 - `-l` reads a target file (one IP/CIDR per line).
 - `-p` is gogo ports (`top100`, `top1000`, `all`, `-` for all 65535, or `80,443,8080`).
 - Fingerprints and vuln hints are evidence leads; user intent decides whether to summarize, analyze, verify, compare, or plan follow-up work.
+
+## Related concepts
+
+- The [scan pipeline](scan.md) orchestrates gogo during target discovery.
+- Discovered services feed [spray](spray.md) for HTTP probing and
+  [zombie](zombie.md) for authorized credential checks.
+- Fingerprints can be resolved through [cyberhub](/runtime/search.md) and
+  validated with [neutron](neutron.md) templates.

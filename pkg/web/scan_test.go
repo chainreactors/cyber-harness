@@ -250,9 +250,8 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 func setupTestServerWithPool(t *testing.T, svc *Service, pool *AgentPool) (*httptest.Server, *AgentPool) {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) {
-		HandleAOPWebSocket(svc, w, r)
-	})
+	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
+	mux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, pool

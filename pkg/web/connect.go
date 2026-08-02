@@ -18,17 +18,29 @@ import (
 // needs roughly 67 MiB on the management wire.
 const connectMaxMessageBytes = 72 << 20
 
+// connectEnvelopeStream is the generated-RPC transport projection. Keeping it
+// here preserves pkg/web/connect.go as the only Connect dependency boundary.
+type connectEnvelopeStream struct {
+	stream *connect.BidiStream[aop.Envelope, aop.Envelope]
+}
+
+func (s connectEnvelopeStream) Recv() (*aop.Envelope, error) { return s.stream.Receive() }
+func (s connectEnvelopeStream) Send(envelope *aop.Envelope) error {
+	return s.stream.Send(envelope)
+}
+
 // connectServer is the single adapter for all generated RPC services.
-// Management calls enter pkg/web/api; the AOP bidi stream enters the same
-// Envelope service core used by the browser WebSocket.
+// Management calls enter pkg/web/api; AOPService.Connect is the Application
+// Endpoint projection for Connect, gRPC, and gRPC-Web clients.
 type connectServer struct {
 	api     *managementapi.API
 	service *Service
 }
 
-// NewConnectHandler exposes management RPCs and the AOP bidirectional stream
-// over Connect and gRPC. The browser keeps its compatible WebSocket transport.
-func NewConnectHandler(accessKey string, service *Service) http.Handler {
+// RegisterConnectServices mounts management RPCs and the AOP bidirectional
+// stream directly onto mux. The generated handler negotiates Connect, gRPC
+// and gRPC-Web on the same paths.
+func RegisterConnectServices(mux *http.ServeMux, accessKey string, service *Service) {
 	interceptor := connectAuthInterceptor{accessKey: accessKey}
 	opts := []connect.HandlerOption{
 		connect.WithInterceptors(interceptor),
@@ -36,7 +48,6 @@ func NewConnectHandler(accessKey string, service *Service) http.Handler {
 		connect.WithSendMaxBytes(connectMaxMessageBytes),
 	}
 	server := &connectServer{api: service.api, service: service}
-	mux := http.NewServeMux()
 	register := func(path string, handler http.Handler) { mux.Handle(path, handler) }
 	path, handler := rpc.NewAOPServiceHandler(server, opts...)
 	register(path, handler)
@@ -52,34 +63,10 @@ func NewConnectHandler(accessKey string, service *Service) http.Handler {
 	register(path, handler)
 	path, handler = rpc.NewSCOServiceHandler(server, opts...)
 	register(path, handler)
-	return mux
-}
-
-func mountConnectHandlers(mux *http.ServeMux, handler http.Handler) {
-	for _, service := range []string{
-		rpc.AOPServiceName,
-		rpc.SessionServiceName,
-		rpc.ScanServiceName,
-		rpc.ConfigServiceName,
-		rpc.AgentServiceName,
-		rpc.SystemServiceName,
-		rpc.SCOServiceName,
-	} {
-		mux.Handle("/"+service+"/", handler)
-	}
-}
-
-type connectEnvelopeStream struct {
-	stream *connect.BidiStream[aop.Envelope, aop.Envelope]
-}
-
-func (s connectEnvelopeStream) Recv() (*aop.Envelope, error) { return s.stream.Receive() }
-func (s connectEnvelopeStream) Send(envelope *aop.Envelope) error {
-	return s.stream.Send(envelope)
 }
 
 func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[aop.Envelope, aop.Envelope]) error {
-	err := s.service.serveAOPStream(ctx, connectEnvelopeStream{stream: stream})
+	err := s.service.ServeApplication(ctx, connectEnvelopeStream{stream: stream})
 	if errors.Is(err, io.EOF) {
 		return nil
 	}
@@ -251,17 +238,7 @@ func (i connectAuthInterceptor) WrapStreamingHandler(next connect.StreamingHandl
 }
 
 func connectAuthenticated(header http.Header, accessKey string) bool {
-	if accessKey == "" {
-		return true
-	}
-	if token, ok := auth.BearerToken(header.Get("Authorization")); ok {
-		return auth.AccessKeyMatches(accessKey, token)
-	}
-	request := &http.Request{Header: header}
-	if cookie, err := request.Cookie(auth.CookieName); err == nil {
-		return auth.SessionMatches(accessKey, cookie.Value)
-	}
-	return false
+	return auth.AuthenticateRequest(&http.Request{Header: header}, accessKey)
 }
 
 var (

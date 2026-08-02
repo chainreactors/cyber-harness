@@ -1,4 +1,4 @@
-package agent
+package node
 
 import (
 	"bytes"
@@ -28,11 +28,13 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type webSocketEnvelopeStream struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
+	json bool
 }
 
 func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
@@ -42,6 +44,12 @@ func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 		return nil, err
 	}
 	envelope := new(aop.Envelope)
+	if s.json {
+		if err := protojson.Unmarshal(data, envelope); err != nil {
+			return nil, fmt.Errorf("decode AOP envelope: %w", err)
+		}
+		return envelope, nil
+	}
 	if err := protobuf.Unmarshal(data, envelope); err != nil {
 		return nil, fmt.Errorf("decode AOP envelope: %w", err)
 	}
@@ -49,13 +57,21 @@ func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 }
 
 func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
-	data, err := protobuf.Marshal(envelope)
+	var data []byte
+	var err error
+	frame := websocket.BinaryMessage
+	if s.json {
+		data, err = protojson.Marshal(envelope)
+		frame = websocket.TextMessage
+	} else {
+		data, err = protobuf.Marshal(envelope)
+	}
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.conn.WriteMessage(websocket.BinaryMessage, data)
+	return s.conn.WriteMessage(frame, data)
 }
 
 func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnvelopeStream, error) {
@@ -78,7 +94,7 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 	if err != nil {
 		return nil, err
 	}
-	return &webSocketEnvelopeStream{conn: conn}, nil
+	return &webSocketEnvelopeStream{conn: conn, json: cc.JSONFrames}, nil
 }
 
 func connectGenerated(ctx context.Context, cc connectionConfig) error {

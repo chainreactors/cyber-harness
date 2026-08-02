@@ -110,7 +110,7 @@ func TestClientChatFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := Dial(ctx, server.URL, "/api/aop/ws", "test-token")
+	client, err := Dial(ctx, server.URL, "/api/aop/application/ws", "test-token")
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

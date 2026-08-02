@@ -1,7 +1,3 @@
----
-okf_version: "0.2"
----
-
 # EASM Tool Knowledge Bundle
 
 This bundle organizes aiscan's external attack surface scanning tool documentation as concept files, borrowing mechanisms from [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (concept files + YAML frontmatter + index listing + provenance fields). aiscan references OKF's mechanisms to structure externally produced markdown; it does not claim full OKF spec compliance.

@@ -4,7 +4,7 @@ title: cyberhub
 description: Search and list loaded fingerprints and POC templates with association-aware fingerprint-to-POC mapping. Available as cyberhub or search cyberhub.
 tags: [runtime, search]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # cyberhub (also: search cyberhub)
@@ -82,3 +82,10 @@ cyberhub search poc struts --tag rce
 ```
 
 **Note**: `cyberhub` is a pseudo-command — do NOT append `2>/dev/null`, pipe to `head`/`grep`, or use shell redirections. Output is returned directly in the tool result.
+
+## Related concepts
+
+- Cyberhub resolves fingerprints produced by [gogo](/easm/gogo.md),
+  [spray](/easm/spray.md), and the [scan pipeline](/easm/scan.md).
+- Matching POC templates are executed with [neutron](/easm/neutron.md), while
+  [fetch](fetch.md) can retrieve external advisories and documentation.

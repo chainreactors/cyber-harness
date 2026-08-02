@@ -9,7 +9,7 @@
 | **应用集成方（client）** | 外部程序 → aiscan | 自然语言输入，流式事件输出 | `examples/acp/client` |
 | **工具提供方（tool node）** | 外部程序 → aiscan | 把自有工具注册给 agent 远程调用 | `examples/rmcp` |
 
-两种角色走**同一条通道**：`/api/aop/ws` 上的二进制 protobuf WebSocket，语义全部由 `aop/*.proto` 定义（唯一真相，见 [protocol-architecture.md](protocol-architecture.md)）。
+两种角色使用同一套 `aop.Envelope` 与 namespace protobuf，但通过两个明确入口接入：应用使用 `/api/aop/application/ws`，节点使用 `/api/aop/node/ws`。endpoint 初始化后都进入相同的 Connection 与 NamespaceMux 处理链。
 
 服务端形态可以是完整的 `aiscan web`（含 UI），也可以是 headless 部署（只有 RPC + AOP WebSocket，见 `examples/acp/server`）。
 
@@ -20,8 +20,8 @@
 ```
                 ┌──────────────────────────────┐
                 │      aiscan server (hub)     │
-   browser UI ──▶│  /api/aop/ws   ConnectRPC    │◀── tool node（注册工具，rmcp）
-   acp client ──▶│  AgentPool · SQLite store    │◀── agent node（执行 Loop + LLM）
+   browser UI ──▶│ application/ws  ConnectRPC    │◀── tool node（node/ws）
+   acp client ──▶│ AgentPool · Hub · SQLite      │◀── agent node（node/ws）
                 └──────────────────────────────┘
 ```
 
@@ -31,14 +31,16 @@
 ## 2. 连接与鉴权
 
 ```
-GET /api/aop/ws
+GET /api/aop/application/ws   # SPA、ACP、CLI/TUI
+GET /api/aop/node/ws          # agent/tool node
 Authorization: Bearer <access-key>
 Upgrade: websocket
 ```
 
 - access key 即服务端启动时的 `--token`；空 token 表示 dev 模式（不鉴权）
 - 鉴权失败返回 401；`/health` 与登录端点不需要凭证
-- 连接后的**首条 envelope 决定角色**：`AgentHello` → 节点（agent/tool）；其余 → browser 对端（client）
+- Node Endpoint 首条 envelope 必须是 `AgentHello`。
+- Application Endpoint 直接发送业务请求；发送 `AgentHello` 会得到 `WRONG_ENDPOINT`。
 
 ## 3. Envelope 规则
 
@@ -92,7 +94,7 @@ client                                hub                       agent
 
 ## 5. Tool node 接入时序（远程工具注册）
 
-参考实现：`examples/rmcp/main.go`，核心是对 `pkg/web/agent.RunToolNode` 的薄封装。自实现时序：
+参考实现：`examples/rmcp/main.go`，核心是对 `pkg/node.RunToolNode` 的薄封装。自实现时序：
 
 ```
 tool node                             hub

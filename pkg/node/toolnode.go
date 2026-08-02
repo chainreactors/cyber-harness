@@ -1,4 +1,4 @@
-package agent
+package node
 
 import (
 	"context"
@@ -38,6 +38,9 @@ type ToolNodeConfig struct {
 	SCO      *output.SCOSidecar
 	Logger   telemetry.Logger
 	Version  string
+	// JSONFrames switches the hub wire to standard ProtoJSON text frames;
+	// hubs expecting binary protobuf (AIScan) leave it false.
+	JSONFrames bool
 }
 
 // RunToolNode connects to the hub as a tool-only node and serves until ctx is
@@ -82,6 +85,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
 		Menu:          func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) },
 		RunnerFileRPC: true,
+		JSONFrames:    cfg.JSONFrames,
 	})
 }
 

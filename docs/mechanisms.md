@@ -29,7 +29,7 @@
 
 持久化重放由 `chat_aop_events` 和 Scan snapshot 负责，live protobuf 不经过 JSON envelope。
 
-**文件**: `pkg/web/broker.go`, `pkg/web/aop_ws.go`, `pkg/web/scan_rpc.go`
+**文件**: `pkg/web/broker.go`, `pkg/web/api/envelope.go`, `pkg/web/service.go`
 
 ---
 
@@ -60,7 +60,7 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/web/agent/agent.go`, `pkg/runner/runner.go`, `agent/agent.go`
+**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/node/agent.go`, `pkg/runner/runner.go`, `agent/agent.go`
 
 ---
 
@@ -145,7 +145,7 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 `aiscan web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `aiscan agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`aiscan web --no-agent` 只启动 web 控制台。
 
-**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/web/agent/agent.go`（node 侧入口）
+**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
 
 ---
 
@@ -206,7 +206,7 @@ AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
 2. 下次该 session 的自然语言消息到达时，`takePendingUploads` 一次性 drain 所有 note，拼接到 prompt 前面
 3. REPL 命令（`/` 或 `!` 开头）不触发 drain，防止污染命令语法，note 保留到下一条自然语言消息
 
-**文件**: `pkg/web/agent/agent.go`
+**文件**: `pkg/node/agent.go`
 
 ---
 

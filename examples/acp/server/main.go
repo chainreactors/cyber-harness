@@ -13,13 +13,13 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
-	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
-// static is nil, so only the connect-RPC services, /api/aop/ws and /health
+// static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
 func newHeadlessHandler(store *web.SQLiteStore, app *runner.App, token string) (*web.Service, *web.AgentPool, http.Handler) {
 	service := web.NewService(web.ServiceConfig{Store: store, App: app})
@@ -107,7 +107,7 @@ func main() {
 			agentOption.IOANodeName = "local"
 		}
 		go func() {
-			if err := webagent.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %v", err)
 			}
 		}()

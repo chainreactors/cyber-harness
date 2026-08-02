@@ -4,7 +4,7 @@ title: proxy
 description: Pseudo-command for managing proxy nodes and proxied command execution. Supports direct proxy URLs, Clash subscription feeds, and adaptive load balancing.
 tags: [runtime, proxy]
 status: stable
-generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
+generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
 # proxy - Proxy Node Management
@@ -54,3 +54,10 @@ Options:
 Direct URLs: `socks5://`, `http://`, `trojan://`, `vless://`, `anytls://`, `hysteria2://`, `ss://`
 
 Subscription: Clash YAML format with proxy node definitions.
+
+## Related concepts
+
+- Proxy can route the [scan pipeline](/easm/scan.md), [gogo](/easm/gogo.md),
+  [zombie](/easm/zombie.md), [passive discovery](/easm/passive.md), and
+  [playwright](/easm/playwright.md).
+- Add [mitm](mitm.md) when routed HTTP traffic also needs evidence capture.

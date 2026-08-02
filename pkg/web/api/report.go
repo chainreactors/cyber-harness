@@ -1,4 +1,4 @@
-package web
+package api
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/libcstx/go"
 )
 
-const defaultReportLang = "zh"
+const DefaultReportLang = "zh"
 
 type scoReportFacts struct {
 	ips        []*cstx.Ip
@@ -21,7 +21,7 @@ type scoReportFacts struct {
 	other      map[string]int
 }
 
-func buildMarkdownReport(target, mode string, rawNodes []json.RawMessage, lang string) string {
+func BuildMarkdownReport(target, mode string, rawNodes []json.RawMessage, lang string) string {
 	facts := collectSCOReportFacts(rawNodes)
 	if strings.EqualFold(lang, "en") {
 		return renderSCOReportEN(target, mode, facts)
