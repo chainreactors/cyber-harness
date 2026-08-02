@@ -176,6 +176,8 @@ type LLMProviderConfig struct {
 	Proxy         string                 `protobuf:"bytes,7,opt,name=proxy,proto3" json:"proxy,omitempty"`
 	MaxTokens     int32                  `protobuf:"varint,8,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	ContextWindow int32                  `protobuf:"varint,9,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
+	Timeout       int32                  `protobuf:"varint,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Images        *bool                  `protobuf:"varint,11,opt,name=images,proto3,oneof" json:"images,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -271,6 +273,20 @@ func (x *LLMProviderConfig) GetContextWindow() int32 {
 		return x.ContextWindow
 	}
 	return 0
+}
+
+func (x *LLMProviderConfig) GetTimeout() int32 {
+	if x != nil {
+		return x.Timeout
+	}
+	return 0
+}
+
+func (x *LLMProviderConfig) GetImages() bool {
+	if x != nil && x.Images != nil {
+		return *x.Images
+	}
+	return false
 }
 
 type CyberhubConfig struct {
@@ -652,6 +668,8 @@ type LLMProviderView struct {
 	Proxy            string                 `protobuf:"bytes,7,opt,name=proxy,proto3" json:"proxy,omitempty"`
 	MaxTokens        int32                  `protobuf:"varint,8,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	ContextWindow    int32                  `protobuf:"varint,9,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
+	Timeout          int32                  `protobuf:"varint,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Images           *bool                  `protobuf:"varint,11,opt,name=images,proto3,oneof" json:"images,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -747,6 +765,20 @@ func (x *LLMProviderView) GetContextWindow() int32 {
 		return x.ContextWindow
 	}
 	return 0
+}
+
+func (x *LLMProviderView) GetTimeout() int32 {
+	if x != nil {
+		return x.Timeout
+	}
+	return 0
+}
+
+func (x *LLMProviderView) GetImages() bool {
+	if x != nil && x.Images != nil {
+		return *x.Images
+	}
+	return false
 }
 
 type LLMView struct {
@@ -1181,6 +1213,42 @@ func (x *ConfigView) GetAgent() *AgentConfig {
 	return nil
 }
 
+type GetConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetConfigRequest) Reset() {
+	*x = GetConfigRequest{}
+	mi := &file_types_config_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetConfigRequest) ProtoMessage() {}
+
+func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_types_config_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetConfigRequest.ProtoReflect.Descriptor instead.
+func (*GetConfigRequest) Descriptor() ([]byte, []int) {
+	return file_types_config_proto_rawDescGZIP(), []int{16}
+}
+
 type GetConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Config        *ConfigView            `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
@@ -1190,7 +1258,7 @@ type GetConfigResponse struct {
 
 func (x *GetConfigResponse) Reset() {
 	*x = GetConfigResponse{}
-	mi := &file_types_config_proto_msgTypes[16]
+	mi := &file_types_config_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1202,7 +1270,7 @@ func (x *GetConfigResponse) String() string {
 func (*GetConfigResponse) ProtoMessage() {}
 
 func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[16]
+	mi := &file_types_config_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1215,7 +1283,7 @@ func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetConfigResponse) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{16}
+	return file_types_config_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetConfigResponse) GetConfig() *ConfigView {
@@ -1234,7 +1302,7 @@ type UpdateConfigRequest struct {
 
 func (x *UpdateConfigRequest) Reset() {
 	*x = UpdateConfigRequest{}
-	mi := &file_types_config_proto_msgTypes[17]
+	mi := &file_types_config_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1246,7 +1314,7 @@ func (x *UpdateConfigRequest) String() string {
 func (*UpdateConfigRequest) ProtoMessage() {}
 
 func (x *UpdateConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[17]
+	mi := &file_types_config_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1259,7 +1327,7 @@ func (x *UpdateConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigRequest.ProtoReflect.Descriptor instead.
 func (*UpdateConfigRequest) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{17}
+	return file_types_config_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UpdateConfigRequest) GetConfig() *DistributeConfig {
@@ -1278,7 +1346,7 @@ type UpdateConfigResponse struct {
 
 func (x *UpdateConfigResponse) Reset() {
 	*x = UpdateConfigResponse{}
-	mi := &file_types_config_proto_msgTypes[18]
+	mi := &file_types_config_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1290,7 +1358,7 @@ func (x *UpdateConfigResponse) String() string {
 func (*UpdateConfigResponse) ProtoMessage() {}
 
 func (x *UpdateConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[18]
+	mi := &file_types_config_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1303,7 +1371,7 @@ func (x *UpdateConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigResponse.ProtoReflect.Descriptor instead.
 func (*UpdateConfigResponse) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{18}
+	return file_types_config_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UpdateConfigResponse) GetConfig() *ConfigView {
@@ -1322,7 +1390,7 @@ type ActivateProfileRequest struct {
 
 func (x *ActivateProfileRequest) Reset() {
 	*x = ActivateProfileRequest{}
-	mi := &file_types_config_proto_msgTypes[19]
+	mi := &file_types_config_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1334,7 +1402,7 @@ func (x *ActivateProfileRequest) String() string {
 func (*ActivateProfileRequest) ProtoMessage() {}
 
 func (x *ActivateProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[19]
+	mi := &file_types_config_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1347,7 +1415,7 @@ func (x *ActivateProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateProfileRequest.ProtoReflect.Descriptor instead.
 func (*ActivateProfileRequest) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{19}
+	return file_types_config_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ActivateProfileRequest) GetProfileId() string {
@@ -1366,7 +1434,7 @@ type ActivateProfileResponse struct {
 
 func (x *ActivateProfileResponse) Reset() {
 	*x = ActivateProfileResponse{}
-	mi := &file_types_config_proto_msgTypes[20]
+	mi := &file_types_config_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1378,7 +1446,7 @@ func (x *ActivateProfileResponse) String() string {
 func (*ActivateProfileResponse) ProtoMessage() {}
 
 func (x *ActivateProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[20]
+	mi := &file_types_config_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1391,7 +1459,7 @@ func (x *ActivateProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateProfileResponse.ProtoReflect.Descriptor instead.
 func (*ActivateProfileResponse) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{20}
+	return file_types_config_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ActivateProfileResponse) GetConfig() *ConfigView {
@@ -1415,7 +1483,7 @@ type LLMProbeRequest struct {
 
 func (x *LLMProbeRequest) Reset() {
 	*x = LLMProbeRequest{}
-	mi := &file_types_config_proto_msgTypes[21]
+	mi := &file_types_config_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1427,7 +1495,7 @@ func (x *LLMProbeRequest) String() string {
 func (*LLMProbeRequest) ProtoMessage() {}
 
 func (x *LLMProbeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[21]
+	mi := &file_types_config_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1440,7 +1508,7 @@ func (x *LLMProbeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LLMProbeRequest.ProtoReflect.Descriptor instead.
 func (*LLMProbeRequest) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{21}
+	return file_types_config_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *LLMProbeRequest) GetProfileId() string {
@@ -1499,7 +1567,7 @@ type LLMProbeResult struct {
 
 func (x *LLMProbeResult) Reset() {
 	*x = LLMProbeResult{}
-	mi := &file_types_config_proto_msgTypes[22]
+	mi := &file_types_config_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1511,7 +1579,7 @@ func (x *LLMProbeResult) String() string {
 func (*LLMProbeResult) ProtoMessage() {}
 
 func (x *LLMProbeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[22]
+	mi := &file_types_config_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1524,7 +1592,7 @@ func (x *LLMProbeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LLMProbeResult.ProtoReflect.Descriptor instead.
 func (*LLMProbeResult) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{22}
+	return file_types_config_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *LLMProbeResult) GetOk() bool {
@@ -1581,7 +1649,7 @@ type ListModelsResult struct {
 
 func (x *ListModelsResult) Reset() {
 	*x = ListModelsResult{}
-	mi := &file_types_config_proto_msgTypes[23]
+	mi := &file_types_config_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1593,7 +1661,7 @@ func (x *ListModelsResult) String() string {
 func (*ListModelsResult) ProtoMessage() {}
 
 func (x *ListModelsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[23]
+	mi := &file_types_config_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1606,7 +1674,7 @@ func (x *ListModelsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelsResult.ProtoReflect.Descriptor instead.
 func (*ListModelsResult) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{23}
+	return file_types_config_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListModelsResult) GetOk() bool {
@@ -1647,7 +1715,7 @@ type TestConnectionRequest struct {
 
 func (x *TestConnectionRequest) Reset() {
 	*x = TestConnectionRequest{}
-	mi := &file_types_config_proto_msgTypes[24]
+	mi := &file_types_config_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1659,7 +1727,7 @@ func (x *TestConnectionRequest) String() string {
 func (*TestConnectionRequest) ProtoMessage() {}
 
 func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[24]
+	mi := &file_types_config_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1672,7 +1740,7 @@ func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionRequest.ProtoReflect.Descriptor instead.
 func (*TestConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{24}
+	return file_types_config_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *TestConnectionRequest) GetSection() string {
@@ -1702,7 +1770,7 @@ type ConnectionCheck struct {
 
 func (x *ConnectionCheck) Reset() {
 	*x = ConnectionCheck{}
-	mi := &file_types_config_proto_msgTypes[25]
+	mi := &file_types_config_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1714,7 +1782,7 @@ func (x *ConnectionCheck) String() string {
 func (*ConnectionCheck) ProtoMessage() {}
 
 func (x *ConnectionCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[25]
+	mi := &file_types_config_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1727,7 +1795,7 @@ func (x *ConnectionCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionCheck.ProtoReflect.Descriptor instead.
 func (*ConnectionCheck) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{25}
+	return file_types_config_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ConnectionCheck) GetName() string {
@@ -1774,7 +1842,7 @@ type TestConnectionResponse struct {
 
 func (x *TestConnectionResponse) Reset() {
 	*x = TestConnectionResponse{}
-	mi := &file_types_config_proto_msgTypes[26]
+	mi := &file_types_config_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1786,7 +1854,7 @@ func (x *TestConnectionResponse) String() string {
 func (*TestConnectionResponse) ProtoMessage() {}
 
 func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_config_proto_msgTypes[26]
+	mi := &file_types_config_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1799,7 +1867,7 @@ func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionResponse.ProtoReflect.Descriptor instead.
 func (*TestConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_types_config_proto_rawDescGZIP(), []int{26}
+	return file_types_config_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TestConnectionResponse) GetChecks() []*ConnectionCheck {
@@ -1824,7 +1892,7 @@ const file_types_config_proto_rawDesc = "" +
 	"\x05agent\x18\a \x01(\v2\x1a.aiscan.config.AgentConfigR\x05agent\"r\n" +
 	"\tLLMConfig\x12%\n" +
 	"\x0eactive_profile\x18\x01 \x01(\tR\ractiveProfile\x12>\n" +
-	"\tproviders\x18\x02 \x03(\v2 .aiscan.config.LLMProviderConfigR\tproviders\"\xf9\x01\n" +
+	"\tproviders\x18\x02 \x03(\v2 .aiscan.config.LLMProviderConfigR\tproviders\"\xbb\x02\n" +
 	"\x11LLMProviderConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1835,7 +1903,11 @@ const file_types_config_proto_rawDesc = "" +
 	"\x05proxy\x18\a \x01(\tR\x05proxy\x12\x1d\n" +
 	"\n" +
 	"max_tokens\x18\b \x01(\x05R\tmaxTokens\x12%\n" +
-	"\x0econtext_window\x18\t \x01(\x05R\rcontextWindow\"^\n" +
+	"\x0econtext_window\x18\t \x01(\x05R\rcontextWindow\x12\x18\n" +
+	"\atimeout\x18\n" +
+	" \x01(\x05R\atimeout\x12\x1b\n" +
+	"\x06images\x18\v \x01(\bH\x00R\x06images\x88\x01\x01B\t\n" +
+	"\a_images\"^\n" +
 	"\x0eCyberhubConfig\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x12\n" +
@@ -1863,7 +1935,7 @@ const file_types_config_proto_rawDesc = "" +
 	"\vAgentConfig\x12\x14\n" +
 	"\x05tools\x18\x01 \x03(\tR\x05tools\x12\x18\n" +
 	"\atimeout\x18\x02 \x01(\x05R\atimeout\x12!\n" +
-	"\fsave_session\x18\x03 \x01(\bR\vsaveSession\"\x8c\x02\n" +
+	"\fsave_session\x18\x03 \x01(\bR\vsaveSession\"\xce\x02\n" +
 	"\x0fLLMProviderView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1874,7 +1946,11 @@ const file_types_config_proto_rawDesc = "" +
 	"\x05proxy\x18\a \x01(\tR\x05proxy\x12\x1d\n" +
 	"\n" +
 	"max_tokens\x18\b \x01(\x05R\tmaxTokens\x12%\n" +
-	"\x0econtext_window\x18\t \x01(\x05R\rcontextWindow\"\xa6\x01\n" +
+	"\x0econtext_window\x18\t \x01(\x05R\rcontextWindow\x12\x18\n" +
+	"\atimeout\x18\n" +
+	" \x01(\x05R\atimeout\x12\x1b\n" +
+	"\x06images\x18\v \x01(\bH\x00R\x06images\x88\x01\x01B\t\n" +
+	"\a_images\"\xa6\x01\n" +
 	"\aLLMView\x12%\n" +
 	"\x0eactive_profile\x18\x01 \x01(\tR\ractiveProfile\x126\n" +
 	"\x06active\x18\x02 \x01(\v2\x1e.aiscan.config.LLMProviderViewR\x06active\x12<\n" +
@@ -1910,7 +1986,8 @@ const file_types_config_proto_rawDesc = "" +
 	"\x04scan\x18\x06 \x01(\v2\x19.aiscan.config.ScanConfigR\x04scan\x121\n" +
 	"\x06search\x18\a \x01(\v2\x19.aiscan.config.SearchViewR\x06search\x12(\n" +
 	"\x03ioa\x18\b \x01(\v2\x16.aiscan.config.IOAViewR\x03ioa\x120\n" +
-	"\x05agent\x18\t \x01(\v2\x1a.aiscan.config.AgentConfigR\x05agent\"F\n" +
+	"\x05agent\x18\t \x01(\v2\x1a.aiscan.config.AgentConfigR\x05agent\"\x12\n" +
+	"\x10GetConfigRequest\"F\n" +
 	"\x11GetConfigResponse\x121\n" +
 	"\x06config\x18\x01 \x01(\v2\x19.aiscan.config.ConfigViewR\x06config\"N\n" +
 	"\x13UpdateConfigRequest\x127\n" +
@@ -1968,7 +2045,7 @@ func file_types_config_proto_rawDescGZIP() []byte {
 	return file_types_config_proto_rawDescData
 }
 
-var file_types_config_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_types_config_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_types_config_proto_goTypes = []any{
 	(*DistributeConfig)(nil),        // 0: aiscan.config.DistributeConfig
 	(*LLMConfig)(nil),               // 1: aiscan.config.LLMConfig
@@ -1986,17 +2063,18 @@ var file_types_config_proto_goTypes = []any{
 	(*SearchView)(nil),              // 13: aiscan.config.SearchView
 	(*IOAView)(nil),                 // 14: aiscan.config.IOAView
 	(*ConfigView)(nil),              // 15: aiscan.config.ConfigView
-	(*GetConfigResponse)(nil),       // 16: aiscan.config.GetConfigResponse
-	(*UpdateConfigRequest)(nil),     // 17: aiscan.config.UpdateConfigRequest
-	(*UpdateConfigResponse)(nil),    // 18: aiscan.config.UpdateConfigResponse
-	(*ActivateProfileRequest)(nil),  // 19: aiscan.config.ActivateProfileRequest
-	(*ActivateProfileResponse)(nil), // 20: aiscan.config.ActivateProfileResponse
-	(*LLMProbeRequest)(nil),         // 21: aiscan.config.LLMProbeRequest
-	(*LLMProbeResult)(nil),          // 22: aiscan.config.LLMProbeResult
-	(*ListModelsResult)(nil),        // 23: aiscan.config.ListModelsResult
-	(*TestConnectionRequest)(nil),   // 24: aiscan.config.TestConnectionRequest
-	(*ConnectionCheck)(nil),         // 25: aiscan.config.ConnectionCheck
-	(*TestConnectionResponse)(nil),  // 26: aiscan.config.TestConnectionResponse
+	(*GetConfigRequest)(nil),        // 16: aiscan.config.GetConfigRequest
+	(*GetConfigResponse)(nil),       // 17: aiscan.config.GetConfigResponse
+	(*UpdateConfigRequest)(nil),     // 18: aiscan.config.UpdateConfigRequest
+	(*UpdateConfigResponse)(nil),    // 19: aiscan.config.UpdateConfigResponse
+	(*ActivateProfileRequest)(nil),  // 20: aiscan.config.ActivateProfileRequest
+	(*ActivateProfileResponse)(nil), // 21: aiscan.config.ActivateProfileResponse
+	(*LLMProbeRequest)(nil),         // 22: aiscan.config.LLMProbeRequest
+	(*LLMProbeResult)(nil),          // 23: aiscan.config.LLMProbeResult
+	(*ListModelsResult)(nil),        // 24: aiscan.config.ListModelsResult
+	(*TestConnectionRequest)(nil),   // 25: aiscan.config.TestConnectionRequest
+	(*ConnectionCheck)(nil),         // 26: aiscan.config.ConnectionCheck
+	(*TestConnectionResponse)(nil),  // 27: aiscan.config.TestConnectionResponse
 }
 var file_types_config_proto_depIdxs = []int32{
 	1,  // 0: aiscan.config.DistributeConfig.llm:type_name -> aiscan.config.LLMConfig
@@ -2021,7 +2099,7 @@ var file_types_config_proto_depIdxs = []int32{
 	15, // 19: aiscan.config.UpdateConfigResponse.config:type_name -> aiscan.config.ConfigView
 	15, // 20: aiscan.config.ActivateProfileResponse.config:type_name -> aiscan.config.ConfigView
 	0,  // 21: aiscan.config.TestConnectionRequest.config:type_name -> aiscan.config.DistributeConfig
-	25, // 22: aiscan.config.TestConnectionResponse.checks:type_name -> aiscan.config.ConnectionCheck
+	26, // 22: aiscan.config.TestConnectionResponse.checks:type_name -> aiscan.config.ConnectionCheck
 	23, // [23:23] is the sub-list for method output_type
 	23, // [23:23] is the sub-list for method input_type
 	23, // [23:23] is the sub-list for extension type_name
@@ -2034,13 +2112,15 @@ func file_types_config_proto_init() {
 	if File_types_config_proto != nil {
 		return
 	}
+	file_types_config_proto_msgTypes[2].OneofWrappers = []any{}
+	file_types_config_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_config_proto_rawDesc), len(file_types_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

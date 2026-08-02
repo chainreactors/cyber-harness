@@ -52,7 +52,7 @@ function safeUUID(): string {
 function aopExtension(event: AOPEvent): Record<string, unknown> | undefined {
   for (const extension of event.extensions) {
     const value = anyUnpack(extension, WebMessageMetadataSchema)
-    if (value) return { nodeId: value.nodeId, code: value.code, params: value.params }
+    if (value) return { nodeId: value.nodeId, code: value.code, params: value.params, agentList: value.agentList }
   }
   return undefined
 }
@@ -97,7 +97,7 @@ function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
     const decoded = anyUnpack(extension, WebMessageMetadataSchema)
     if (decoded) {
       nodeID = decoded.nodeId || undefined
-      metadata = { code: decoded.code, params: decoded.params }
+      metadata = { code: decoded.code, params: decoded.params, agentList: decoded.agentList }
       break
     }
   }
@@ -223,7 +223,7 @@ export function useChatSession() {
     refreshSessions()
   }, [refreshAgents, refreshSessions])
   // Roster poll — paused while the tab is hidden (this runs for the whole app
-  // lifetime, so a backgrounded tab would otherwise keep hitting /api/agents
+  // lifetime, so a backgrounded tab would otherwise keep issuing AgentService queries
   // every 5s forever).
   usePolling(refreshAgents, 5000)
 
@@ -304,9 +304,18 @@ export function useChatSession() {
         setIsThinking(true)
         break
       case 'messageDelta':
+        setPendingResponse(true)
+        setIsThinking(event.payload.value.value.case === 'reasoning')
+        break
       case 'toolCall':
         setPendingResponse(true)
         setIsThinking(false)
+        break
+      case 'message':
+        if (event.payload.value.role === 'assistant') {
+          setPendingResponse(true)
+          setIsThinking(false)
+        }
         break
       case 'turnEnded':
         finalizeRun()

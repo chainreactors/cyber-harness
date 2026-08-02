@@ -13,7 +13,11 @@ func init() {
 		Capability: "browser",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			impl := New(deps.WorkDir).WithDefaultSession(deps.PlaywrightSession)
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run, Close: impl.Close}, "browser")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/playwright.md",
+				Run:             impl.Run, Close: impl.Close,
+			}, "browser")
 		},
 	})
 }

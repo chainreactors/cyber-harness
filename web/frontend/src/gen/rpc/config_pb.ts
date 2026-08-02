@@ -4,16 +4,14 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ActivateProfileRequestSchema, ActivateProfileResponseSchema, GetConfigResponseSchema, ListModelsResultSchema, LLMProbeRequestSchema, LLMProbeResultSchema, TestConnectionRequestSchema, TestConnectionResponseSchema, UpdateConfigRequestSchema, UpdateConfigResponseSchema } from "../types/config_pb.js";
+import type { ActivateProfileRequestSchema, ActivateProfileResponseSchema, GetConfigRequestSchema, GetConfigResponseSchema, ListModelsResultSchema, LLMProbeRequestSchema, LLMProbeResultSchema, TestConnectionRequestSchema, TestConnectionResponseSchema, UpdateConfigRequestSchema, UpdateConfigResponseSchema } from "../types/config_pb.js";
 import { file_types_config } from "../types/config_pb.js";
-import type { EmptySchema } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_empty } from "@bufbuild/protobuf/wkt";
 
 /**
  * Describes the file rpc/config.proto.
  */
 export const file_rpc_config: GenFile = /*@__PURE__*/
-  fileDesc("ChBycGMvY29uZmlnLnByb3RvEhFhaXNjYW4ucnBjLmNvbmZpZzKJBAoNQ29uZmlnU2VydmljZRJFCglHZXRDb25maWcSFi5nb29nbGUucHJvdG9idWYuRW1wdHkaIC5haXNjYW4uY29uZmlnLkdldENvbmZpZ1Jlc3BvbnNlElcKDFVwZGF0ZUNvbmZpZxIiLmFpc2Nhbi5jb25maWcuVXBkYXRlQ29uZmlnUmVxdWVzdBojLmFpc2Nhbi5jb25maWcuVXBkYXRlQ29uZmlnUmVzcG9uc2USYAoPQWN0aXZhdGVQcm9maWxlEiUuYWlzY2FuLmNvbmZpZy5BY3RpdmF0ZVByb2ZpbGVSZXF1ZXN0GiYuYWlzY2FuLmNvbmZpZy5BY3RpdmF0ZVByb2ZpbGVSZXNwb25zZRJICgdUZXN0TExNEh4uYWlzY2FuLmNvbmZpZy5MTE1Qcm9iZVJlcXVlc3QaHS5haXNjYW4uY29uZmlnLkxMTVByb2JlUmVzdWx0Ek0KCkxpc3RNb2RlbHMSHi5haXNjYW4uY29uZmlnLkxMTVByb2JlUmVxdWVzdBofLmFpc2Nhbi5jb25maWcuTGlzdE1vZGVsc1Jlc3VsdBJdCg5UZXN0Q29ubmVjdGlvbhIkLmFpc2Nhbi5jb25maWcuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GiUuYWlzY2FuLmNvbmZpZy5UZXN0Q29ubmVjdGlvblJlc3BvbnNlQi1aK2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3JwYztycGNiBnByb3RvMw", [file_types_config, file_google_protobuf_empty]);
+  fileDesc("ChBycGMvY29uZmlnLnByb3RvEhFhaXNjYW4ucnBjLmNvbmZpZzKSBAoNQ29uZmlnU2VydmljZRJOCglHZXRDb25maWcSHy5haXNjYW4uY29uZmlnLkdldENvbmZpZ1JlcXVlc3QaIC5haXNjYW4uY29uZmlnLkdldENvbmZpZ1Jlc3BvbnNlElcKDFVwZGF0ZUNvbmZpZxIiLmFpc2Nhbi5jb25maWcuVXBkYXRlQ29uZmlnUmVxdWVzdBojLmFpc2Nhbi5jb25maWcuVXBkYXRlQ29uZmlnUmVzcG9uc2USYAoPQWN0aXZhdGVQcm9maWxlEiUuYWlzY2FuLmNvbmZpZy5BY3RpdmF0ZVByb2ZpbGVSZXF1ZXN0GiYuYWlzY2FuLmNvbmZpZy5BY3RpdmF0ZVByb2ZpbGVSZXNwb25zZRJICgdUZXN0TExNEh4uYWlzY2FuLmNvbmZpZy5MTE1Qcm9iZVJlcXVlc3QaHS5haXNjYW4uY29uZmlnLkxMTVByb2JlUmVzdWx0Ek0KCkxpc3RNb2RlbHMSHi5haXNjYW4uY29uZmlnLkxMTVByb2JlUmVxdWVzdBofLmFpc2Nhbi5jb25maWcuTGlzdE1vZGVsc1Jlc3VsdBJdCg5UZXN0Q29ubmVjdGlvbhIkLmFpc2Nhbi5jb25maWcuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GiUuYWlzY2FuLmNvbmZpZy5UZXN0Q29ubmVjdGlvblJlc3BvbnNlQi1aK2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3JwYztycGNiBnByb3RvMw", [file_types_config]);
 
 /**
  * @generated from service aiscan.rpc.config.ConfigService
@@ -24,7 +22,7 @@ export const ConfigService: GenService<{
    */
   getConfig: {
     methodKind: "unary";
-    input: typeof EmptySchema;
+    input: typeof GetConfigRequestSchema;
     output: typeof GetConfigResponseSchema;
   },
   /**

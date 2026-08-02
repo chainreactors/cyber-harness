@@ -73,8 +73,21 @@ message LLMRequestDetail {
   bool stream = 4;
 }
 
+message AgentListEntry {
+  string name = 1;
+  string node_id = 2;
+  bool busy = 3;
+  string provider = 4;
+  string model = 5;
+}
+
+message AgentListMetadata {
+  repeated AgentListEntry agents = 1;
+}
+
 message WebMessageMetadata {
   string node_id = 1;
   string code = 2;
   google.protobuf.Struct params = 3;
+  AgentListMetadata agent_list = 4;
 }

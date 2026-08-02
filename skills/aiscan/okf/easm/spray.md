@@ -4,9 +4,7 @@ title: spray
 description: Use this playbook when working with spray for web probing, HTTP fingerprints, exposed paths, and application analysis.
 tags: [easm, web]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # Spray

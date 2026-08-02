@@ -22,7 +22,11 @@ func init() {
 				return
 			}
 			impl := New(es.Zombie).WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithDataBus(d.DataBus)
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/zombie.md",
+				Run:             impl.Run,
+			}, "scanner")
 		},
 	})
 }

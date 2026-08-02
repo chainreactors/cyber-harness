@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -48,6 +49,7 @@ func (b *recordingBash) RunForegroundTool(_ context.Context, command string, opt
 type hubScript struct {
 	t          *testing.T
 	registered chan *aop.AgentHello
+	catalog    chan *types.CommandCatalog
 	toolResult chan *aop.ToolResult
 	progress   chan string
 	fileData   chan []byte
@@ -56,7 +58,7 @@ type hubScript struct {
 
 func newHubScript(t *testing.T) *hubScript {
 	return &hubScript{
-		t: t, registered: make(chan *aop.AgentHello, 1), toolResult: make(chan *aop.ToolResult, 1),
+		t: t, registered: make(chan *aop.AgentHello, 1), catalog: make(chan *types.CommandCatalog, 1), toolResult: make(chan *aop.ToolResult, 1),
 		progress: make(chan string, 16), fileData: make(chan []byte, 1), toolData: make(chan *toolpb.Progress, 4),
 	}
 }
@@ -125,6 +127,10 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			if result := value.GetResult(); result != nil {
 				h.fileData <- result.Data
 			}
+		case *types.CommandProtocolMessage:
+			if catalog := value.GetCatalog(); catalog != nil {
+				h.catalog <- catalog
+			}
 		}
 	}
 }
@@ -155,6 +161,10 @@ func wait[T any](t *testing.T, ch <-chan T, what string) T {
 func TestRunToolNodeWireInterop(t *testing.T) {
 	registry := commands.NewRegistry()
 	registry.RegisterTool(&recordingBash{})
+	registry.Register(commands.Command{
+		Name: "gogo", Usage: "gogo [OPTIONS]",
+		DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
+	}, "scanner")
 	dataBus := eventbus.New[output.ToolDataEvent]()
 	hub := newHubScript(t)
 	server := httptest.NewServer(http.HandlerFunc(hub.serveHTTP))
@@ -185,6 +195,13 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	}
 	if len(hello.Tools) != 1 || hello.Tools[0].Name != "bash" {
 		t.Fatalf("tools = %+v", hello.Tools)
+	}
+	catalog := wait(t, hub.catalog, "command catalog")
+	if len(catalog.Commands) != 1 || catalog.Commands[0].GetName() != "!gogo" {
+		t.Fatalf("command catalog = %+v", catalog.Commands)
+	}
+	if got := catalog.Commands[0].GetDescription(); got != "Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery." {
+		t.Fatalf("gogo description = %q", got)
 	}
 	if line := wait(t, hub.progress, "tool progress"); line != "streamed" {
 		t.Fatalf("progress = %q", line)

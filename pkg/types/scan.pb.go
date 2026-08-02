@@ -813,50 +813,6 @@ func (x *ScanProgress) GetData() string {
 	return ""
 }
 
-type ScanStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Values        map[string]uint64      `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ScanStats) Reset() {
-	*x = ScanStats{}
-	mi := &file_types_scan_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ScanStats) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ScanStats) ProtoMessage() {}
-
-func (x *ScanStats) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ScanStats.ProtoReflect.Descriptor instead.
-func (*ScanStats) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *ScanStats) GetValues() map[string]uint64 {
-	if x != nil {
-		return x.Values
-	}
-	return nil
-}
-
 type ScanCompleted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -865,7 +821,7 @@ type ScanCompleted struct {
 
 func (x *ScanCompleted) Reset() {
 	*x = ScanCompleted{}
-	mi := &file_types_scan_proto_msgTypes[13]
+	mi := &file_types_scan_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +833,7 @@ func (x *ScanCompleted) String() string {
 func (*ScanCompleted) ProtoMessage() {}
 
 func (x *ScanCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[13]
+	mi := &file_types_scan_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +846,7 @@ func (x *ScanCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanCompleted.ProtoReflect.Descriptor instead.
 func (*ScanCompleted) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{13}
+	return file_types_scan_proto_rawDescGZIP(), []int{12}
 }
 
 type ScanFailed struct {
@@ -903,7 +859,7 @@ type ScanFailed struct {
 
 func (x *ScanFailed) Reset() {
 	*x = ScanFailed{}
-	mi := &file_types_scan_proto_msgTypes[14]
+	mi := &file_types_scan_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -915,7 +871,7 @@ func (x *ScanFailed) String() string {
 func (*ScanFailed) ProtoMessage() {}
 
 func (x *ScanFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[14]
+	mi := &file_types_scan_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -928,7 +884,7 @@ func (x *ScanFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanFailed.ProtoReflect.Descriptor instead.
 func (*ScanFailed) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{14}
+	return file_types_scan_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ScanFailed) GetMessage() string {
@@ -955,7 +911,7 @@ type SessionBinding struct {
 
 func (x *SessionBinding) Reset() {
 	*x = SessionBinding{}
-	mi := &file_types_scan_proto_msgTypes[15]
+	mi := &file_types_scan_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +923,7 @@ func (x *SessionBinding) String() string {
 func (*SessionBinding) ProtoMessage() {}
 
 func (x *SessionBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[15]
+	mi := &file_types_scan_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +936,7 @@ func (x *SessionBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionBinding.ProtoReflect.Descriptor instead.
 func (*SessionBinding) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{15}
+	return file_types_scan_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SessionBinding) GetScanId() string {
@@ -1002,7 +958,7 @@ type SessionScanEvent struct {
 
 func (x *SessionScanEvent) Reset() {
 	*x = SessionScanEvent{}
-	mi := &file_types_scan_proto_msgTypes[16]
+	mi := &file_types_scan_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1014,7 +970,7 @@ func (x *SessionScanEvent) String() string {
 func (*SessionScanEvent) ProtoMessage() {}
 
 func (x *SessionScanEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[16]
+	mi := &file_types_scan_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1027,7 +983,7 @@ func (x *SessionScanEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionScanEvent.ProtoReflect.Descriptor instead.
 func (*SessionScanEvent) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{16}
+	return file_types_scan_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SessionScanEvent) GetScanId() string {
@@ -1054,7 +1010,6 @@ type ScanEvent struct {
 	//	*ScanEvent_Snapshot
 	//	*ScanEvent_Status
 	//	*ScanEvent_Progress
-	//	*ScanEvent_Stats
 	//	*ScanEvent_Completed
 	//	*ScanEvent_Failed
 	Payload       isScanEvent_Payload `protobuf_oneof:"payload"`
@@ -1064,7 +1019,7 @@ type ScanEvent struct {
 
 func (x *ScanEvent) Reset() {
 	*x = ScanEvent{}
-	mi := &file_types_scan_proto_msgTypes[17]
+	mi := &file_types_scan_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1076,7 +1031,7 @@ func (x *ScanEvent) String() string {
 func (*ScanEvent) ProtoMessage() {}
 
 func (x *ScanEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[17]
+	mi := &file_types_scan_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1089,7 +1044,7 @@ func (x *ScanEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanEvent.ProtoReflect.Descriptor instead.
 func (*ScanEvent) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{17}
+	return file_types_scan_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ScanEvent) GetScanId() string {
@@ -1147,15 +1102,6 @@ func (x *ScanEvent) GetProgress() *ScanProgress {
 	return nil
 }
 
-func (x *ScanEvent) GetStats() *ScanStats {
-	if x != nil {
-		if x, ok := x.Payload.(*ScanEvent_Stats); ok {
-			return x.Stats
-		}
-	}
-	return nil
-}
-
 func (x *ScanEvent) GetCompleted() *ScanCompleted {
 	if x != nil {
 		if x, ok := x.Payload.(*ScanEvent_Completed); ok {
@@ -1190,10 +1136,6 @@ type ScanEvent_Progress struct {
 	Progress *ScanProgress `protobuf:"bytes,12,opt,name=progress,proto3,oneof"`
 }
 
-type ScanEvent_Stats struct {
-	Stats *ScanStats `protobuf:"bytes,13,opt,name=stats,proto3,oneof"`
-}
-
 type ScanEvent_Completed struct {
 	Completed *ScanCompleted `protobuf:"bytes,14,opt,name=completed,proto3,oneof"`
 }
@@ -1207,8 +1149,6 @@ func (*ScanEvent_Snapshot) isScanEvent_Payload() {}
 func (*ScanEvent_Status) isScanEvent_Payload() {}
 
 func (*ScanEvent_Progress) isScanEvent_Payload() {}
-
-func (*ScanEvent_Stats) isScanEvent_Payload() {}
 
 func (*ScanEvent_Completed) isScanEvent_Payload() {}
 
@@ -1229,7 +1169,7 @@ type ScanProtocolMessage struct {
 
 func (x *ScanProtocolMessage) Reset() {
 	*x = ScanProtocolMessage{}
-	mi := &file_types_scan_proto_msgTypes[18]
+	mi := &file_types_scan_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1241,7 +1181,7 @@ func (x *ScanProtocolMessage) String() string {
 func (*ScanProtocolMessage) ProtoMessage() {}
 
 func (x *ScanProtocolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[18]
+	mi := &file_types_scan_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1254,7 +1194,7 @@ func (x *ScanProtocolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanProtocolMessage.ProtoReflect.Descriptor instead.
 func (*ScanProtocolMessage) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{18}
+	return file_types_scan_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ScanProtocolMessage) GetMessage() isScanProtocolMessage_Message {
@@ -1308,7 +1248,7 @@ type GetScanReportRequest struct {
 
 func (x *GetScanReportRequest) Reset() {
 	*x = GetScanReportRequest{}
-	mi := &file_types_scan_proto_msgTypes[19]
+	mi := &file_types_scan_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1320,7 +1260,7 @@ func (x *GetScanReportRequest) String() string {
 func (*GetScanReportRequest) ProtoMessage() {}
 
 func (x *GetScanReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[19]
+	mi := &file_types_scan_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1333,7 +1273,7 @@ func (x *GetScanReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetScanReportRequest.ProtoReflect.Descriptor instead.
 func (*GetScanReportRequest) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{19}
+	return file_types_scan_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetScanReportRequest) GetScanId() string {
@@ -1360,7 +1300,7 @@ type GetScanReportResponse struct {
 
 func (x *GetScanReportResponse) Reset() {
 	*x = GetScanReportResponse{}
-	mi := &file_types_scan_proto_msgTypes[20]
+	mi := &file_types_scan_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1372,7 +1312,7 @@ func (x *GetScanReportResponse) String() string {
 func (*GetScanReportResponse) ProtoMessage() {}
 
 func (x *GetScanReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[20]
+	mi := &file_types_scan_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1385,7 +1325,7 @@ func (x *GetScanReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetScanReportResponse.ProtoReflect.Descriptor instead.
 func (*GetScanReportResponse) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{20}
+	return file_types_scan_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetScanReportResponse) GetMarkdown() string {
@@ -1457,12 +1397,7 @@ const file_types_scan_proto_rawDesc = "" +
 	"\x16WatchScanEventsRequest\x12\x17\n" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"\"\n" +
 	"\fScanProgress\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\tR\x04data\"\x82\x01\n" +
-	"\tScanStats\x12:\n" +
-	"\x06values\x18\x01 \x03(\v2\".aiscan.scan.ScanStats.ValuesEntryR\x06values\x1a9\n" +
-	"\vValuesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\x0f\n" +
+	"\x04data\x18\x01 \x01(\tR\x04data\"\x0f\n" +
 	"\rScanCompleted\"B\n" +
 	"\n" +
 	"ScanFailed\x12\x18\n" +
@@ -1472,7 +1407,7 @@ const file_types_scan_proto_rawDesc = "" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"\\\n" +
 	"\x10SessionScanEvent\x12\x17\n" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12/\n" +
-	"\x06status\x18\x02 \x01(\x0e2\x17.aiscan.scan.ScanStatusR\x06status\"\xc2\x03\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x17.aiscan.scan.ScanStatusR\x06status\"\x98\x03\n" +
 	"\tScanEvent\x12\x17\n" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x129\n" +
@@ -1481,11 +1416,10 @@ const file_types_scan_proto_rawDesc = "" +
 	"\bsnapshot\x18\n" +
 	" \x01(\v2\x11.aiscan.scan.ScanH\x00R\bsnapshot\x121\n" +
 	"\x06status\x18\v \x01(\x0e2\x17.aiscan.scan.ScanStatusH\x00R\x06status\x127\n" +
-	"\bprogress\x18\f \x01(\v2\x19.aiscan.scan.ScanProgressH\x00R\bprogress\x12.\n" +
-	"\x05stats\x18\r \x01(\v2\x16.aiscan.scan.ScanStatsH\x00R\x05stats\x12:\n" +
+	"\bprogress\x18\f \x01(\v2\x19.aiscan.scan.ScanProgressH\x00R\bprogress\x12:\n" +
 	"\tcompleted\x18\x0e \x01(\v2\x1a.aiscan.scan.ScanCompletedH\x00R\tcompleted\x121\n" +
 	"\x06failed\x18\x0f \x01(\v2\x17.aiscan.scan.ScanFailedH\x00R\x06failedB\t\n" +
-	"\apayload\"\xa9\x01\n" +
+	"\apayloadJ\x04\b\r\x10\x0e\"\xa9\x01\n" +
 	"\x13ScanProtocolMessage\x12W\n" +
 	"\x14watch_events_request\x18\n" +
 	" \x01(\v2#.aiscan.scan.WatchScanEventsRequestH\x00R\x12watchEventsRequest\x12.\n" +
@@ -1520,7 +1454,7 @@ func file_types_scan_proto_rawDescGZIP() []byte {
 }
 
 var file_types_scan_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_types_scan_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_types_scan_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_types_scan_proto_goTypes = []any{
 	(ScanStatus)(0),                // 0: aiscan.scan.ScanStatus
 	(*ScanOptions)(nil),            // 1: aiscan.scan.ScanOptions
@@ -1535,47 +1469,43 @@ var file_types_scan_proto_goTypes = []any{
 	(*CancelScanResponse)(nil),     // 10: aiscan.scan.CancelScanResponse
 	(*WatchScanEventsRequest)(nil), // 11: aiscan.scan.WatchScanEventsRequest
 	(*ScanProgress)(nil),           // 12: aiscan.scan.ScanProgress
-	(*ScanStats)(nil),              // 13: aiscan.scan.ScanStats
-	(*ScanCompleted)(nil),          // 14: aiscan.scan.ScanCompleted
-	(*ScanFailed)(nil),             // 15: aiscan.scan.ScanFailed
-	(*SessionBinding)(nil),         // 16: aiscan.scan.SessionBinding
-	(*SessionScanEvent)(nil),       // 17: aiscan.scan.SessionScanEvent
-	(*ScanEvent)(nil),              // 18: aiscan.scan.ScanEvent
-	(*ScanProtocolMessage)(nil),    // 19: aiscan.scan.ScanProtocolMessage
-	(*GetScanReportRequest)(nil),   // 20: aiscan.scan.GetScanReportRequest
-	(*GetScanReportResponse)(nil),  // 21: aiscan.scan.GetScanReportResponse
-	nil,                            // 22: aiscan.scan.ScanStats.ValuesEntry
-	(*timestamppb.Timestamp)(nil),  // 23: google.protobuf.Timestamp
-	(*aop.Rejection)(nil),          // 24: aop.Rejection
+	(*ScanCompleted)(nil),          // 13: aiscan.scan.ScanCompleted
+	(*ScanFailed)(nil),             // 14: aiscan.scan.ScanFailed
+	(*SessionBinding)(nil),         // 15: aiscan.scan.SessionBinding
+	(*SessionScanEvent)(nil),       // 16: aiscan.scan.SessionScanEvent
+	(*ScanEvent)(nil),              // 17: aiscan.scan.ScanEvent
+	(*ScanProtocolMessage)(nil),    // 18: aiscan.scan.ScanProtocolMessage
+	(*GetScanReportRequest)(nil),   // 19: aiscan.scan.GetScanReportRequest
+	(*GetScanReportResponse)(nil),  // 20: aiscan.scan.GetScanReportResponse
+	(*timestamppb.Timestamp)(nil),  // 21: google.protobuf.Timestamp
+	(*aop.Rejection)(nil),          // 22: aop.Rejection
 }
 var file_types_scan_proto_depIdxs = []int32{
 	1,  // 0: aiscan.scan.Scan.options:type_name -> aiscan.scan.ScanOptions
 	0,  // 1: aiscan.scan.Scan.status:type_name -> aiscan.scan.ScanStatus
-	23, // 2: aiscan.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
-	23, // 3: aiscan.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
+	21, // 2: aiscan.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
+	21, // 3: aiscan.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 4: aiscan.scan.SubmitScanRequest.options:type_name -> aiscan.scan.ScanOptions
 	2,  // 5: aiscan.scan.SubmitScanResponse.accepted:type_name -> aiscan.scan.Scan
-	24, // 6: aiscan.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
+	22, // 6: aiscan.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
 	2,  // 7: aiscan.scan.GetScanResponse.scan:type_name -> aiscan.scan.Scan
 	2,  // 8: aiscan.scan.ListScansResponse.scans:type_name -> aiscan.scan.Scan
 	2,  // 9: aiscan.scan.CancelScanResponse.accepted:type_name -> aiscan.scan.Scan
-	24, // 10: aiscan.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
-	22, // 11: aiscan.scan.ScanStats.values:type_name -> aiscan.scan.ScanStats.ValuesEntry
-	0,  // 12: aiscan.scan.SessionScanEvent.status:type_name -> aiscan.scan.ScanStatus
-	23, // 13: aiscan.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
-	2,  // 14: aiscan.scan.ScanEvent.snapshot:type_name -> aiscan.scan.Scan
-	0,  // 15: aiscan.scan.ScanEvent.status:type_name -> aiscan.scan.ScanStatus
-	12, // 16: aiscan.scan.ScanEvent.progress:type_name -> aiscan.scan.ScanProgress
-	13, // 17: aiscan.scan.ScanEvent.stats:type_name -> aiscan.scan.ScanStats
-	14, // 18: aiscan.scan.ScanEvent.completed:type_name -> aiscan.scan.ScanCompleted
-	15, // 19: aiscan.scan.ScanEvent.failed:type_name -> aiscan.scan.ScanFailed
-	11, // 20: aiscan.scan.ScanProtocolMessage.watch_events_request:type_name -> aiscan.scan.WatchScanEventsRequest
-	18, // 21: aiscan.scan.ScanProtocolMessage.event:type_name -> aiscan.scan.ScanEvent
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	22, // 10: aiscan.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
+	0,  // 11: aiscan.scan.SessionScanEvent.status:type_name -> aiscan.scan.ScanStatus
+	21, // 12: aiscan.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
+	2,  // 13: aiscan.scan.ScanEvent.snapshot:type_name -> aiscan.scan.Scan
+	0,  // 14: aiscan.scan.ScanEvent.status:type_name -> aiscan.scan.ScanStatus
+	12, // 15: aiscan.scan.ScanEvent.progress:type_name -> aiscan.scan.ScanProgress
+	13, // 16: aiscan.scan.ScanEvent.completed:type_name -> aiscan.scan.ScanCompleted
+	14, // 17: aiscan.scan.ScanEvent.failed:type_name -> aiscan.scan.ScanFailed
+	11, // 18: aiscan.scan.ScanProtocolMessage.watch_events_request:type_name -> aiscan.scan.WatchScanEventsRequest
+	17, // 19: aiscan.scan.ScanProtocolMessage.event:type_name -> aiscan.scan.ScanEvent
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_types_scan_proto_init() }
@@ -1591,15 +1521,14 @@ func file_types_scan_proto_init() {
 		(*CancelScanResponse_Accepted)(nil),
 		(*CancelScanResponse_Rejected)(nil),
 	}
-	file_types_scan_proto_msgTypes[17].OneofWrappers = []any{
+	file_types_scan_proto_msgTypes[16].OneofWrappers = []any{
 		(*ScanEvent_Snapshot)(nil),
 		(*ScanEvent_Status)(nil),
 		(*ScanEvent_Progress)(nil),
-		(*ScanEvent_Stats)(nil),
 		(*ScanEvent_Completed)(nil),
 		(*ScanEvent_Failed)(nil),
 	}
-	file_types_scan_proto_msgTypes[18].OneofWrappers = []any{
+	file_types_scan_proto_msgTypes[17].OneofWrappers = []any{
 		(*ScanProtocolMessage_WatchEventsRequest)(nil),
 		(*ScanProtocolMessage_Event)(nil),
 	}
@@ -1609,7 +1538,7 @@ func file_types_scan_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_scan_proto_rawDesc), len(file_types_scan_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   22,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

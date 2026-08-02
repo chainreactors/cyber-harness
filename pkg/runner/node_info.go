@@ -11,7 +11,9 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/aiscan/skills"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -36,12 +38,15 @@ func DefaultRuntimeInfo() *aop.AgentRuntimeInfo {
 	return runtimeInfo
 }
 
-// CommandCatalog is a node's user-facing "/verb" catalog: the static
-// agent-scope menu commands plus one per loaded (and non-internal) skill. The
-// hub merges it with its hub-scope commands to build the web "/" menu and
-// /help, so the menu reflects what this node can run.
+// CommandCatalog is a node's user-facing composer catalog: "/verb" runtime and
+// skill commands plus every "!verb" registered in the node's command registry.
+// The web splits the two prefixes into their respective popups, while both stay
+// sourced from the same node-level catalog used by the TUI.
 func CommandCatalog(app *App) []*types.CommandSpec {
 	specs := RuntimeCommandSpecs()
+	if app != nil {
+		specs = append(specs, RegistryCommandCatalog(app.Commands, app.Skills)...)
+	}
 	if app == nil || app.Skills == nil {
 		return specs
 	}
@@ -55,6 +60,79 @@ func CommandCatalog(app *App) []*types.CommandSpec {
 		})
 	}
 	return specs
+}
+
+// RegistryCommandCatalog projects the Bash-internal command registry without
+// adding chat runtime or skill commands. Tool-only nodes use this catalog too.
+func RegistryCommandCatalog(registry *commands.CommandRegistry, store *skills.Store) []*types.CommandSpec {
+	if registry == nil {
+		return nil
+	}
+	all := registry.All()
+	specs := make([]*types.CommandSpec, 0, len(all))
+	for _, command := range all {
+		if spec := registryCommandSpec(store, command); spec != nil {
+			specs = append(specs, spec)
+		}
+	}
+	return specs
+}
+
+func registryCommandSpec(store *skills.Store, command commands.Command) *types.CommandSpec {
+	name := strings.TrimSpace(command.Name)
+	if name == "" {
+		return nil
+	}
+	return &types.CommandSpec{
+		Name:        "!" + name,
+		Usage:       commandUsage(command.Usage, name),
+		Description: commandDescription(store, command.DescriptionPath),
+	}
+}
+
+func commandUsage(raw, name string) string {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	for index, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(line), "usage:") {
+			continue
+		}
+		if value := strings.TrimSpace(line[len("usage:"):]); value != "" {
+			return commandUsageLine(value, name)
+		}
+		for _, next := range lines[index+1:] {
+			if next = strings.TrimSpace(next); next != "" {
+				return commandUsageLine(next, name)
+			}
+		}
+	}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == name || strings.HasPrefix(line, name+" ") || strings.HasPrefix(line, name+" -") || strings.HasPrefix(line, name+" —") {
+			return commandUsageLine(line, name)
+		}
+	}
+	return "!" + name
+}
+
+func commandUsageLine(line, name string) string {
+	if strings.HasPrefix(line, name) {
+		return "!" + line
+	}
+	return "!" + name
+}
+
+func commandDescription(store *skills.Store, location string) string {
+	location = strings.TrimSpace(location)
+	if store == nil || location == "" {
+		return ""
+	}
+	raw, handled, err := store.ReadVirtual(location)
+	if err != nil || !handled {
+		return ""
+	}
+	frontmatter, _ := skills.ParseFrontmatter(raw)
+	return strings.TrimSpace(frontmatter.Description)
 }
 
 // AgentStatus reports the node's provider/model/IOA binding for pool views.

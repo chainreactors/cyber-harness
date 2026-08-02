@@ -4,9 +4,7 @@ title: tmux
 description: PTY session manager built into aiscan. All bash commands run inside tmux sessions; long commands auto-background with inbox delivery.
 tags: [runtime, session]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # tmux - Session Manager

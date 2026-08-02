@@ -23,8 +23,7 @@ title: Shiro rememberMe deserialization RCE
 severity: critical
 status: confirmed            # confirmed | unverified | dismissed
 verified:
-  - actor: aiscan/<version>  # or human:<id> for human review
-    at: 2026-08-02
+  - { by: aiscan/<version>, at: 2026-08-02T00:00:00Z }   # or human:<id> for human review
 sources:
   - resource: mitm://flows/17        # captured verification traffic
     title: shiro-key-bounce request/response

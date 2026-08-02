@@ -251,7 +251,7 @@ func setupTestServerWithPool(t *testing.T, svc *Service, pool *AgentPool) (*http
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) {
-		HandleAOPWebSocket(svc, pool, w, r)
+		HandleAOPWebSocket(svc, w, r)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -378,7 +378,8 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &types.CancelScanRequest{
+	service := NewService(ServiceConfig{Store: store})
+	response, err := service.api.Scans.CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-completed", ScanId: scan.Id,
 	})
 	if err != nil {
@@ -403,7 +404,8 @@ func TestCancelMissingScanReturnsNotFound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &types.CancelScanRequest{
+	service := NewService(ServiceConfig{Store: store})
+	response, err := service.api.Scans.CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-missing", ScanId: "missing",
 	})
 	if err != nil {

@@ -61,12 +61,6 @@ type RunResult struct {
 	ContextTokens int
 }
 
-type CommandResult struct {
-	Command      string         `json:"command"`
-	Presentation string         `json:"presentation,omitempty"`
-	Content      []*aop.Content `json:"-"`
-}
-
 const (
 	CommandPresentationPlain        = "plain"
 	CommandPresentationPreformatted = "preformatted"
@@ -118,7 +112,7 @@ type sessionOperation struct {
 }
 
 type commandOutcome struct {
-	result CommandResult
+	result *types.CommandResult
 	err    error
 }
 
@@ -285,7 +279,7 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 }
 
 func commandText(line, presentation, text string) commandOutcome {
-	result := CommandResult{Command: line, Presentation: presentation}
+	result := &types.CommandResult{Command: line, Presentation: presentation}
 	if text != "" {
 		result.Content = []*aop.Content{aop.Text(text)}
 	}
@@ -553,10 +547,10 @@ func (rt *AgentRuntime) RunSession(ctx context.Context, sessionID string, input 
 	return session.Run(ctx, input)
 }
 
-func (rt *AgentRuntime) CommandSession(ctx context.Context, sessionID, line string) (CommandResult, error) {
+func (rt *AgentRuntime) CommandSession(ctx context.Context, sessionID, line string) (*types.CommandResult, error) {
 	session, err := rt.session(sessionID)
 	if err != nil {
-		return CommandResult{}, err
+		return nil, err
 	}
 	return session.Command(ctx, line)
 }
@@ -607,15 +601,15 @@ func (s *Session) Run(ctx context.Context, input RunInput) (*Run, error) {
 	return s.state.startRun(ctx, input)
 }
 
-func (s *Session) Command(ctx context.Context, line string) (CommandResult, error) {
+func (s *Session) Command(ctx context.Context, line string) (*types.CommandResult, error) {
 	if s == nil || s.state == nil {
-		return CommandResult{}, fmt.Errorf("session is not configured")
+		return nil, fmt.Errorf("session is not configured")
 	}
 	done := make(chan commandOutcome, 1)
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
 			outcome := s.state.commands.execute(runCtx, line)
-			if outcome.err == nil && len(outcome.result.Content) > 0 {
+			if outcome.err == nil && len(outcome.result.GetContent()) > 0 {
 				s.state.emitCommandResult(outcome.result)
 			}
 			done <- outcome
@@ -623,7 +617,7 @@ func (s *Session) Command(ctx context.Context, line string) (CommandResult, erro
 		reject: func(err error) { done <- commandOutcome{err: err} },
 	}
 	if err := s.state.admit(ctx, op); err != nil {
-		return CommandResult{}, err
+		return nil, err
 	}
 	outcome := <-done
 	return outcome.result, outcome.err
@@ -839,11 +833,11 @@ func (rt *AgentRuntime) runSession(session *sessionState) {
 	}
 }
 
-func (s *sessionState) emitCommandResult(result CommandResult) {
+func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
-		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.Content,
+		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
 	}}}
-	_ = types.SetCommandDetail(event, types.CommandDetail{Line: result.Command, Presentation: result.Presentation})
+	_ = types.SetCommandDetail(event, types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
 	s.runtime.sessionEvents.Emit(event)
 }
 

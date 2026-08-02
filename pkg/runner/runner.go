@@ -281,7 +281,11 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	handoffCancel = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
 	rt.app.Commands.RegisterTool(subAgentTool)
 	loop := newLoopCommand()
-	rt.app.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
+	rt.app.Commands.Register(cmdpkg.Command{
+		Name: loop.Name(), Usage: loop.Usage(),
+		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
+		Run:             loop.Run,
+	}, "loop")
 
 	if option.Resume != "" {
 		path := option.Resume

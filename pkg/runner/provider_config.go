@@ -154,20 +154,28 @@ func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []agent.ProviderConf
 
 func providerConfigFromProto(profile *types.LLMProviderConfig) agent.ProviderConfig {
 	profile = cfg.NormalizeLLMProvider(profile)
+	if profile == nil {
+		return defaultProviderConfig()
+	}
 	providerName := strings.TrimSpace(profile.Provider)
 	if providerName == "" {
 		providerName = agent.InferProviderFromBaseURL(profile.BaseUrl)
 	} else {
 		providerName = agent.NormalizeProvider(providerName)
 	}
-	return agent.ProviderConfig{
+	result := agent.ProviderConfig{
 		Provider:      providerName,
 		BaseURL:       profile.BaseUrl,
 		APIKey:        profile.ApiKey,
 		Model:         profile.Model,
 		Proxy:         profile.Proxy,
-		Timeout:       120,
+		Timeout:       int(profile.Timeout),
+		Images:        profile.Images,
 		MaxTokens:     int(profile.MaxTokens),
 		ContextWindow: int(profile.ContextWindow),
 	}
+	if result.Timeout <= 0 {
+		result.Timeout = 120
+	}
+	return result
 }

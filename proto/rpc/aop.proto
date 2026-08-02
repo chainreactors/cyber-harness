@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package aiscan.rpc.aop;
+
+import "aop/envelope.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+
+// AOPService exposes the application protocol as one bidirectional Envelope
+// stream. Native clients may use Connect or gRPC; browser clients keep using
+// the WebSocket compatibility transport over the same service core.
+service AOPService {
+  rpc Connect(stream .aop.Envelope) returns (stream .aop.Envelope);
+}

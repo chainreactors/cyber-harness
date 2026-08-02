@@ -40,6 +40,8 @@ export default {
   contextWindowLow: 'Below 8192 tokens, requests may not have enough room for both input and output',
   contextWindowAuto: 'Leave empty to infer from the model',
   maxTokens: 'Maximum output',
+  llmTimeout: 'Provider timeout (seconds)',
+  imageInput: 'Enable image input for this provider',
   proxy: 'Proxy',
   apiKey: 'API Key',
   cyberhubUrl: 'Cyberhub URL',

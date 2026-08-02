@@ -149,7 +149,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 		Id: "e-user", EmittedAt: timestamppb.New(created), SessionId: "s1", Emitter: "operator",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}},
 	}
-	_ = types.SetWebMessage(user, types.WebMessageExtension{Code: "x"})
+	_ = types.SetWebMessage(user, types.WebMessageMetadata{Code: "x"})
 	if err := store.AddAOPEvent(ctx, "s1", user); err != nil {
 		t.Fatal(err)
 	}

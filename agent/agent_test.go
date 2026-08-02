@@ -391,7 +391,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		},
 	}
 	systemPrompt := buildTestSystemPrompt(registry, store.Skills)
-	task := skills.ExpandCommand("/skill:scan scan 127.0.0.1", store)
+	task := skills.ExpandCommand("/skill:aiscan scan 127.0.0.1", store)
 
 	result, err := (NewAgent(Config{
 		Provider:     llm,
@@ -414,7 +414,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		t.Fatalf("system prompt missing skills")
 	}
 	user := requests[0].Messages[1]
-	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="scan"`) {
+	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="aiscan"`) {
 		t.Fatalf("user prompt missing expanded skill")
 	}
 }
@@ -1728,4 +1728,15 @@ func truncateOutput(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func TestRootAgentPublicImport(t *testing.T) {
+	config := Config{}.
+		WithModel("example-model").
+		WithMaxTokens(256).
+		WithContextWindow(4096)
+	if config.Model != "example-model" || config.MaxTokens != 256 || config.ContextWindow != 4096 {
+		t.Fatalf("root agent config aliases/builders are not externally usable: %#v", config)
+	}
+	_ = ProviderConfig{Model: "example-model"}
 }

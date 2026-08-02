@@ -42,11 +42,19 @@ func init() {
 				}
 			})
 			cmd.SetCommandExecutor(reg.Run)
-			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "proxy")
+			reg.Register(commands.Command{
+				Name: cmd.Name(), Usage: cmd.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/proxy.md",
+				Run:             cmd.Run,
+			}, "proxy")
 
 			mitmCmd := NewMitmCommand(reg)
 			mitmCmd.SetCommandExecutor(reg.Run)
-			reg.Register(commands.Command{Name: mitmCmd.Name(), Usage: mitmCmd.Usage(), Run: mitmCmd.Run}, "proxy")
+			reg.Register(commands.Command{
+				Name: mitmCmd.Name(), Usage: mitmCmd.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/mitm.md",
+				Run:             mitmCmd.Run,
+			}, "proxy")
 
 			// If --proxy / config proxy is a clash:// URL, auto-activate
 			if strings.HasPrefix(strings.ToUpper(deps.ScannerProxy), "CLASH://") {

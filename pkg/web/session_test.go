@@ -62,7 +62,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
-	server := NewAOPChatServer(service)
+	server := service.api.Sessions
 	ctx := context.Background()
 	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1"}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
@@ -121,7 +121,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-1", &aop.OpenSessionRequest{
+	response, err := service.api.Sessions.OpenSession(context.Background(), "open-1", &aop.OpenSessionRequest{
 		SessionId: "session-1", NodeId: fake.nodeID,
 		Extensions: []*anypb.Any{value},
 	})
@@ -150,7 +150,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
-	server := NewAOPChatServer(service)
+	server := service.api.Sessions
 	ctx := context.Background()
 	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: fake.nodeID}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
@@ -232,7 +232,7 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 		done: make(chan struct{}),
 	}
 	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1", Title: "original"}
-	first, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-durable", request)
+	first, err := service.api.Sessions.OpenSession(context.Background(), "open-durable", request)
 	if err != nil || first.GetAccepted() == nil {
 		t.Fatalf("first open = %v, %v", first, err)
 	}
@@ -248,7 +248,7 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	defer store.Close()
 	service = NewService(ServiceConfig{Store: store})
 	defer service.Close()
-	server := NewAOPChatServer(service)
+	server := service.api.Sessions
 	replayed, err := server.OpenSession(context.Background(), "open-durable", proto.Clone(request).(*aop.OpenSessionRequest))
 	if err != nil || !proto.Equal(first, replayed) {
 		t.Fatalf("durable replay = %v, %v; want %v", replayed, err, first)
@@ -337,7 +337,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 		}
 	}
 
-	response, err := NewAOPChatServer(svc).ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.GetSession().GetId(), Limit: 100})
+	response, err := svc.api.Sessions.ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.GetSession().GetId(), Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,9 +393,9 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var deliveries []*aop.EventDelivery
-	err = NewAOPChatServer(svc).watchEvents(&aop.WatchEventsRequest{
+	err = svc.api.Sessions.WatchEvents(ctx, &aop.WatchEventsRequest{
 		SessionId: session.GetSession().GetId(), AfterCursor: "2",
-	}, ctx, func(delivery *aop.EventDelivery) error {
+	}, func(delivery *aop.EventDelivery) error {
 		deliveries = append(deliveries, delivery)
 		cancel()
 		return nil

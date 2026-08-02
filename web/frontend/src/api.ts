@@ -21,7 +21,7 @@ import {
   ConfigService,
   LLMProbeRequestSchema,
   ReloadProtocolMessageSchema,
-  RunOptionsSchema,
+  AgentRunOptionsSchema,
   SCOService,
   ScanProtocolMessageSchema,
   ScanService,
@@ -30,6 +30,7 @@ import {
   SessionService,
   SystemService,
   type AgentView,
+  type AgentListMetadata,
   type CommandProtocolMessage,
   type CommandSpec,
   type ConfigView,
@@ -51,7 +52,7 @@ export type { AOPEvent };
 
 // Generated proto types are the single source of truth for the API surface.
 // Re-exported here so views keep a single import site for API types.
-export type { AgentView, CommandSpec, ConfigView, DistributeConfig, EventDelivery, LLMProviderView, LLMProbeRequest, LLMProbeResult, ListModelsResult, TestConnectionResponse, ConnectionCheck, Scan, ScanOptions, SessionRecord, ServerStatus, TurnReceipt };
+export type { AgentListMetadata, AgentView, CommandSpec, ConfigView, DistributeConfig, EventDelivery, LLMProviderView, LLMProbeRequest, LLMProbeResult, ListModelsResult, TestConnectionResponse, ConnectionCheck, Scan, ScanOptions, SessionRecord, ServerStatus, TurnReceipt };
 export type { Session as AOPSession } from '@cyber/aop';
 export { ScanStatus };
 
@@ -356,8 +357,8 @@ export async function sendChatMessage(
   const extensions = []
   const criteria = opts?.persist ? opts.evalCriteria?.trim() : ''
   if (criteria) {
-    const value = create(RunOptionsSchema, { evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
-    extensions.push(anyPack(RunOptionsSchema, value))
+    const value = create(AgentRunOptionsSchema, { evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
+    extensions.push(anyPack(AgentRunOptionsSchema, value))
   }
   try {
 	const request = create(AOPProtocolMessageSchema, { message: { case: 'runTurnRequest', value: {

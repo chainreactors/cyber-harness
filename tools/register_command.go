@@ -34,7 +34,11 @@ func init() {
 			}
 
 			impl := scan.New(es, scanOpts...)
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/scan.md",
+				Run:             impl.Run,
+			}, "scanner")
 		},
 	})
 }

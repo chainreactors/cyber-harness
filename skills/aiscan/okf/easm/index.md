@@ -1,7 +1,5 @@
 ---
-type: Index
-title: aiscan EASM tool knowledge bundle
-description: Tool playbooks for aiscan's external attack surface scanning pseudo-commands.
+okf_version: "0.2"
 ---
 
 # EASM Tool Knowledge Bundle

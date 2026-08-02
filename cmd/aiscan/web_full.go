@@ -128,7 +128,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler := web.NewHandler(service, pool, ioaHandler, newSPAFileServer(staticSub), accessKey)
+	httpHandler := web.NewHandler(service, ioaHandler, newSPAFileServer(staticSub), accessKey)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,

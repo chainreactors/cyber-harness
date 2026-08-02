@@ -4,24 +4,23 @@ import (
 	"errors"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	config "github.com/chainreactors/aiscan/core/config"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
-	ErrScanNotFound      = errors.New("scan not found")
-	ErrScanNotCancelable = errors.New("scan cannot be canceled")
+	ErrScanNotFound      = managementapi.ErrScanNotFound
+	ErrScanNotCancelable = managementapi.ErrScanNotCancelable
 	ErrSessionNotFound   = errors.New("session not found")
-	ErrTurnNotFound      = errors.New("turn not found")
+	ErrTurnNotFound      = managementapi.ErrTurnNotFound
 )
 
 // Session states stored in aop.Session.State. The SQLite status column uses
 // the same values; migrate() rewrites the legacy active/archived rows.
 const (
-	SessionStateOpen   = "open"
-	SessionStateClosed = "closed"
+	SessionStateOpen   = managementapi.SessionStateOpen
+	SessionStateClosed = managementapi.SessionStateClosed
 )
 
 // scanStatusToDB maps the proto enum to the string stored in the scans.status
@@ -42,70 +41,10 @@ func scanStatusToDB(value types.ScanStatus) string {
 }
 
 func scanTerminal(value types.ScanStatus) bool {
-	return value == types.ScanStatus_SCAN_STATUS_COMPLETED ||
-		value == types.ScanStatus_SCAN_STATUS_FAILED ||
-		value == types.ScanStatus_SCAN_STATUS_CANCELED
+	return managementapi.ScanTerminal(value)
 }
 
 func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
-
-// ConfigViewFromDistribute builds the secret-masked product view directly in
-// the schema owned by aiscan.config.
-func ConfigViewFromDistribute(d *types.DistributeConfig, path string, loaded bool) *types.ConfigView {
-	view := &types.ConfigView{Path: path, Loaded: loaded}
-	if d == nil {
-		return view
-	}
-	view.Llm = &types.LLMView{ActiveProfile: d.GetLlm().GetActiveProfile()}
-	for _, raw := range d.GetLlm().GetProviders() {
-		profile := config.NormalizeLLMProvider(raw)
-		if profile == nil {
-			continue
-		}
-		item := &types.LLMProviderView{
-			Id: profile.Id, Name: profile.Name, Provider: profile.Provider,
-			BaseUrl: profile.BaseUrl, ApiKeyConfigured: profile.ApiKey != "",
-			Model: profile.Model, Proxy: profile.Proxy,
-			MaxTokens: profile.MaxTokens, ContextWindow: profile.ContextWindow,
-		}
-		view.Llm.Providers = append(view.Llm.Providers, item)
-		if profile.Id == view.Llm.ActiveProfile {
-			view.Llm.Active = item
-		}
-	}
-	if view.Llm.Active == nil && len(view.Llm.Providers) > 0 {
-		view.Llm.Active = view.Llm.Providers[0]
-		view.Llm.ActiveProfile = view.Llm.Active.Id
-	}
-	view.Cyberhub = &types.CyberhubView{
-		Url: d.GetCyberhub().GetUrl(), KeyConfigured: d.GetCyberhub().GetKey() != "",
-		Mode: d.GetCyberhub().GetMode(), Proxy: d.GetCyberhub().GetProxy(),
-	}
-	view.Recon = &types.ReconView{
-		FofaEmail: d.GetRecon().GetFofaEmail(), FofaKeyConfigured: d.GetRecon().GetFofaKey() != "",
-		HunterTokenConfigured:  d.GetRecon().GetHunterToken() != "",
-		HunterApiKeyConfigured: d.GetRecon().GetHunterApiKey() != "",
-		Proxy:                  d.GetRecon().GetProxy(), Limit: d.GetRecon().GetLimit(),
-	}
-	view.Scan = &types.ScanConfig{Verify: d.GetScan().GetVerify()}
-	view.Search = &types.SearchView{TavilyKeysConfigured: d.GetSearch().GetTavilyKeys() != ""}
-	view.Ioa = &types.IOAView{
-		Url: d.GetIoa().GetUrl(), TokenConfigured: d.GetIoa().GetToken() != "",
-		NodeName: d.GetIoa().GetNodeName(), Space: d.GetIoa().GetSpace(),
-	}
-	view.Agent = &types.AgentConfig{
-		Tools:   append([]string(nil), d.GetAgent().GetTools()...),
-		Timeout: d.GetAgent().GetTimeout(), SaveSession: d.GetAgent().GetSaveSession(),
-	}
-	return view
-}
-
-// --- Chat types ---
-
-type persistedAOPEvent struct {
-	Cursor int64
-	Event  *aop.Event
-}
 
 // System message codes. A backend-generated system message carries a stable
 // Code (+ optional Params) so the client can localize it via i18n; Content

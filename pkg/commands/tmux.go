@@ -39,7 +39,11 @@ const tmuxUsage = `tmux - PTY session manager
 
 func NewTmuxCommand(bash *BashTool) Command {
 	runner := &tmuxCommand{manager: bash.Manager(), start: bash.Start}
-	return Command{Name: "tmux", Usage: tmuxUsage, Run: runner.run}
+	return Command{
+		Name: "tmux", Usage: tmuxUsage,
+		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/tmux.md",
+		Run:             runner.run,
+	}
 }
 
 func (t *tmuxCommand) run(ctx context.Context, execution *Execution) (any, error) {

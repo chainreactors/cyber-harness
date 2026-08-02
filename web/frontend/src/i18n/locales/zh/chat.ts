@@ -87,6 +87,8 @@ export default {
     chooseFile: '选择文件…',
     fileHint: '为本条消息附加文件 —— 作为上下文内联,或上传给 agent。',
     empty: '无匹配',
+    switchCategory: '切换分类',
+    navigate: '移动',
   },
   // 后端系统消息(按 code 本地化;英文原文仅作兜底)。与 pkg/web 的 Sys* 常量一一对应。
   sys: {

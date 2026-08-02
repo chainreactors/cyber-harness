@@ -4,13 +4,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Content } from "../../../cyber-ui/packages/aop/src/gen/aop/content_pb.js";
+import { file_aop_content } from "../../../cyber-ui/packages/aop/src/gen/aop/content_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file types/command.proto.
  */
 export const file_types_command: GenFile = /*@__PURE__*/
-  fileDesc("ChN0eXBlcy9jb21tYW5kLnByb3RvEg5haXNjYW4uY29tbWFuZCJQCgtDb21tYW5kU3BlYxIMCgRuYW1lGAEgASgJEg8KB2FsaWFzZXMYAiADKAkSDQoFdXNhZ2UYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkiPwoOQ29tbWFuZENhdGFsb2cSLQoIY29tbWFuZHMYASADKAsyGy5haXNjYW4uY29tbWFuZC5Db21tYW5kU3BlYyIyCg5Db21tYW5kUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEgwKBGxpbmUYAiABKAkiMQoNQ29tbWFuZFJlc3VsdBIMCgRkYXRhGAEgASgMEhIKCm1lZGlhX3R5cGUYAiABKAkiSQoOQ29tbWFuZFJlY2VpcHQSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFc3RhdGUYAyABKAki7QEKFkNvbW1hbmRQcm90b2NvbE1lc3NhZ2USMQoHcmVxdWVzdBgKIAEoCzIeLmFpc2Nhbi5jb21tYW5kLkNvbW1hbmRSZXF1ZXN0SAASLwoGcmVzdWx0GAsgASgLMh0uYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFJlc3VsdEgAEjEKB2NhdGFsb2cYDCABKAsyHi5haXNjYW4uY29tbWFuZC5Db21tYW5kQ2F0YWxvZ0gAEjEKB3JlY2VpcHQYDSABKAsyHi5haXNjYW4uY29tbWFuZC5Db21tYW5kUmVjZWlwdEgAQgkKB21lc3NhZ2VCMVovZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2Fpc2Nhbi9wa2cvdHlwZXM7dHlwZXNiBnByb3RvMw");
+  fileDesc("ChN0eXBlcy9jb21tYW5kLnByb3RvEg5haXNjYW4uY29tbWFuZCJQCgtDb21tYW5kU3BlYxIMCgRuYW1lGAEgASgJEg8KB2FsaWFzZXMYAiADKAkSDQoFdXNhZ2UYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkiPwoOQ29tbWFuZENhdGFsb2cSLQoIY29tbWFuZHMYASADKAsyGy5haXNjYW4uY29tbWFuZC5Db21tYW5kU3BlYyIyCg5Db21tYW5kUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEgwKBGxpbmUYAiABKAkiYQoNQ29tbWFuZFJlc3VsdBIPCgdjb21tYW5kGAMgASgJEhQKDHByZXNlbnRhdGlvbhgEIAEoCRIdCgdjb250ZW50GAUgAygLMgwuYW9wLkNvbnRlbnRKBAgBEAJKBAgCEAMiSQoOQ29tbWFuZFJlY2VpcHQSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFc3RhdGUYAyABKAki7QEKFkNvbW1hbmRQcm90b2NvbE1lc3NhZ2USMQoHcmVxdWVzdBgKIAEoCzIeLmFpc2Nhbi5jb21tYW5kLkNvbW1hbmRSZXF1ZXN0SAASLwoGcmVzdWx0GAsgASgLMh0uYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFJlc3VsdEgAEjEKB2NhdGFsb2cYDCABKAsyHi5haXNjYW4uY29tbWFuZC5Db21tYW5kQ2F0YWxvZ0gAEjEKB3JlY2VpcHQYDSABKAsyHi5haXNjYW4uY29tbWFuZC5Db21tYW5kUmVjZWlwdEgAQgkKB21lc3NhZ2VCMVovZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2Fpc2Nhbi9wa2cvdHlwZXM7dHlwZXNiBnByb3RvMw", [file_aop_content]);
 
 /**
  * @generated from message aiscan.command.CommandSpec
@@ -88,14 +90,19 @@ export const CommandRequestSchema: GenMessage<CommandRequest> = /*@__PURE__*/
  */
 export type CommandResult = Message<"aiscan.command.CommandResult"> & {
   /**
-   * @generated from field: bytes data = 1;
+   * @generated from field: string command = 3;
    */
-  data: Uint8Array;
+  command: string;
 
   /**
-   * @generated from field: string media_type = 2;
+   * @generated from field: string presentation = 4;
    */
-  mediaType: string;
+  presentation: string;
+
+  /**
+   * @generated from field: repeated aop.Content content = 5;
+   */
+  content: Content[];
 };
 
 /**

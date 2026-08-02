@@ -16,7 +16,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file types/agent.proto.
  */
 export const file_types_agent: GenFile = /*@__PURE__*/
-  fileDesc("ChF0eXBlcy9hZ2VudC5wcm90bxIMYWlzY2FuLmFnZW50IuIBCglBZ2VudFZpZXcSHgoFaGVsbG8YASABKAsyDy5hb3AuQWdlbnRIZWxsbxIgCgZzdGF0dXMYAiABKAsyEC5hb3AuQWdlbnRTdGF0dXMSHgoFc3RhdHMYAyABKAsyDy5hb3AuQWdlbnRTdGF0cxIwCgxjb25uZWN0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCGNvbW1hbmRzGAYgAygLMhsuYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFNwZWMSDAoEYnVzeRgHIAEoCEoECAQQBSITChFMaXN0QWdlbnRzUmVxdWVzdCI9ChJMaXN0QWdlbnRzUmVzcG9uc2USJwoGYWdlbnRzGAEgAygLMhcuYWlzY2FuLmFnZW50LkFnZW50VmlldyJBCg9BZ2VudFJ1bk9wdGlvbnMSFQoNZXZhbF9jcml0ZXJpYRgBIAEoCRIXCg9ldmFsX21heF9yb3VuZHMYAiABKA0iMwoNQ29tbWFuZERldGFpbBIMCgRsaW5lGAEgASgJEhQKDHByZXNlbnRhdGlvbhgCIAEoCSJiCg1Db21wYWN0RGV0YWlsEg0KBWVycm9yGAEgASgJEhUKDWtlcHRfbWVzc2FnZXMYAiABKAQSFAoMdG9rZW5zX2FmdGVyGAMgASgEEhUKDXRva2Vuc19iZWZvcmUYBCABKAQiggEKEERlbGVnYXRpb25EZXRhaWwSEAoIYWdlbnRfaWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRISCgphZ2VudF90eXBlGAMgASgJEhQKDGNvbnRleHRfbW9kZRgEIAEoCRIQCghydW5fbW9kZRgFIAEoCRIMCgR0YXNrGAYgASgJIjMKC0V2YWxDb250cm9sEhAKCGNyaXRlcmlhGAEgASgJEhIKCm1heF9yb3VuZHMYAiABKA0iXAoKRXZhbERldGFpbBINCgVlcnJvchgBIAEoCRISCgptYXhfcm91bmRzGAIgASgNEgwKBHBhc3MYAyABKAgSDgoGcmVhc29uGAQgASgJEg0KBXJvdW5kGAUgASgNIj0KDUJ1ZGdldFdhcm5pbmcSFgoOY29udGV4dF90b2tlbnMYASABKAQSFAoMdG9rZW5fYnVkZ2V0GAIgASgEIlcKEExMTVJlcXVlc3REZXRhaWwSDQoFbW9kZWwYASABKAkSEAoIbWVzc2FnZXMYAiABKA0SEgoKbWF4X3Rva2VucxgDIAEoDRIOCgZzdHJlYW0YBCABKAgiXAoSV2ViTWVzc2FnZU1ldGFkYXRhEg8KB25vZGVfaWQYASABKAkSDAoEY29kZRgCIAEoCRInCgZwYXJhbXMYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0QjFaL2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3R5cGVzO3R5cGVzYgZwcm90bzM", [file_aop_protocol, file_types_command, file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("ChF0eXBlcy9hZ2VudC5wcm90bxIMYWlzY2FuLmFnZW50IuIBCglBZ2VudFZpZXcSHgoFaGVsbG8YASABKAsyDy5hb3AuQWdlbnRIZWxsbxIgCgZzdGF0dXMYAiABKAsyEC5hb3AuQWdlbnRTdGF0dXMSHgoFc3RhdHMYAyABKAsyDy5hb3AuQWdlbnRTdGF0cxIwCgxjb25uZWN0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCGNvbW1hbmRzGAYgAygLMhsuYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFNwZWMSDAoEYnVzeRgHIAEoCEoECAQQBSITChFMaXN0QWdlbnRzUmVxdWVzdCI9ChJMaXN0QWdlbnRzUmVzcG9uc2USJwoGYWdlbnRzGAEgAygLMhcuYWlzY2FuLmFnZW50LkFnZW50VmlldyJBCg9BZ2VudFJ1bk9wdGlvbnMSFQoNZXZhbF9jcml0ZXJpYRgBIAEoCRIXCg9ldmFsX21heF9yb3VuZHMYAiABKA0iMwoNQ29tbWFuZERldGFpbBIMCgRsaW5lGAEgASgJEhQKDHByZXNlbnRhdGlvbhgCIAEoCSJiCg1Db21wYWN0RGV0YWlsEg0KBWVycm9yGAEgASgJEhUKDWtlcHRfbWVzc2FnZXMYAiABKAQSFAoMdG9rZW5zX2FmdGVyGAMgASgEEhUKDXRva2Vuc19iZWZvcmUYBCABKAQiggEKEERlbGVnYXRpb25EZXRhaWwSEAoIYWdlbnRfaWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRISCgphZ2VudF90eXBlGAMgASgJEhQKDGNvbnRleHRfbW9kZRgEIAEoCRIQCghydW5fbW9kZRgFIAEoCRIMCgR0YXNrGAYgASgJIjMKC0V2YWxDb250cm9sEhAKCGNyaXRlcmlhGAEgASgJEhIKCm1heF9yb3VuZHMYAiABKA0iXAoKRXZhbERldGFpbBINCgVlcnJvchgBIAEoCRISCgptYXhfcm91bmRzGAIgASgNEgwKBHBhc3MYAyABKAgSDgoGcmVhc29uGAQgASgJEg0KBXJvdW5kGAUgASgNIj0KDUJ1ZGdldFdhcm5pbmcSFgoOY29udGV4dF90b2tlbnMYASABKAQSFAoMdG9rZW5fYnVkZ2V0GAIgASgEIlcKEExMTVJlcXVlc3REZXRhaWwSDQoFbW9kZWwYASABKAkSEAoIbWVzc2FnZXMYAiABKA0SEgoKbWF4X3Rva2VucxgDIAEoDRIOCgZzdHJlYW0YBCABKAgiXgoOQWdlbnRMaXN0RW50cnkSDAoEbmFtZRgBIAEoCRIPCgdub2RlX2lkGAIgASgJEgwKBGJ1c3kYAyABKAgSEAoIcHJvdmlkZXIYBCABKAkSDQoFbW9kZWwYBSABKAkiQQoRQWdlbnRMaXN0TWV0YWRhdGESLAoGYWdlbnRzGAEgAygLMhwuYWlzY2FuLmFnZW50LkFnZW50TGlzdEVudHJ5IpEBChJXZWJNZXNzYWdlTWV0YWRhdGESDwoHbm9kZV9pZBgBIAEoCRIMCgRjb2RlGAIgASgJEicKBnBhcmFtcxgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSMwoKYWdlbnRfbGlzdBgEIAEoCzIfLmFpc2Nhbi5hZ2VudC5BZ2VudExpc3RNZXRhZGF0YUIxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy90eXBlczt0eXBlc2IGcHJvdG8z", [file_aop_protocol, file_types_command, file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message aiscan.agent.AgentView
@@ -322,6 +322,60 @@ export const LLMRequestDetailSchema: GenMessage<LLMRequestDetail> = /*@__PURE__*
   messageDesc(file_types_agent, 10);
 
 /**
+ * @generated from message aiscan.agent.AgentListEntry
+ */
+export type AgentListEntry = Message<"aiscan.agent.AgentListEntry"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string node_id = 2;
+   */
+  nodeId: string;
+
+  /**
+   * @generated from field: bool busy = 3;
+   */
+  busy: boolean;
+
+  /**
+   * @generated from field: string provider = 4;
+   */
+  provider: string;
+
+  /**
+   * @generated from field: string model = 5;
+   */
+  model: string;
+};
+
+/**
+ * Describes the message aiscan.agent.AgentListEntry.
+ * Use `create(AgentListEntrySchema)` to create a new message.
+ */
+export const AgentListEntrySchema: GenMessage<AgentListEntry> = /*@__PURE__*/
+  messageDesc(file_types_agent, 11);
+
+/**
+ * @generated from message aiscan.agent.AgentListMetadata
+ */
+export type AgentListMetadata = Message<"aiscan.agent.AgentListMetadata"> & {
+  /**
+   * @generated from field: repeated aiscan.agent.AgentListEntry agents = 1;
+   */
+  agents: AgentListEntry[];
+};
+
+/**
+ * Describes the message aiscan.agent.AgentListMetadata.
+ * Use `create(AgentListMetadataSchema)` to create a new message.
+ */
+export const AgentListMetadataSchema: GenMessage<AgentListMetadata> = /*@__PURE__*/
+  messageDesc(file_types_agent, 12);
+
+/**
  * @generated from message aiscan.agent.WebMessageMetadata
  */
 export type WebMessageMetadata = Message<"aiscan.agent.WebMessageMetadata"> & {
@@ -339,6 +393,11 @@ export type WebMessageMetadata = Message<"aiscan.agent.WebMessageMetadata"> & {
    * @generated from field: google.protobuf.Struct params = 3;
    */
   params?: JsonObject | undefined;
+
+  /**
+   * @generated from field: aiscan.agent.AgentListMetadata agent_list = 4;
+   */
+  agentList?: AgentListMetadata | undefined;
 };
 
 /**
@@ -346,4 +405,4 @@ export type WebMessageMetadata = Message<"aiscan.agent.WebMessageMetadata"> & {
  * Use `create(WebMessageMetadataSchema)` to create a new message.
  */
 export const WebMessageMetadataSchema: GenMessage<WebMessageMetadata> = /*@__PURE__*/
-  messageDesc(file_types_agent, 11);
+  messageDesc(file_types_agent, 13);

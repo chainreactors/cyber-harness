@@ -24,7 +24,11 @@ func init() {
 
 			reg.RegisterTool(NewWebSearchTool(d.Provider, tavily))
 			fetch := NewFetchCommand()
-			reg.Register(commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run}, "search")
+			reg.Register(commands.Command{
+				Name: fetch.Name(), Usage: fetch.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/fetch.md",
+				Run:             fetch.Run,
+			}, "search")
 
 			var idx *association.Index
 			if es, ok := deps.Get(d.Bag, engine.SetKey); ok && es != nil {
@@ -42,7 +46,11 @@ func init() {
 				d.Skip("cyberhub.index", deps.Name(engine.SetKey)+"/"+deps.Name(resources.SetKey))
 			}
 			cyberhub := NewCyberhubSearch(idx)
-			reg.Register(commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run}, "search")
+			reg.Register(commands.Command{
+				Name: cyberhub.Name(), Usage: cyberhub.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/search.md",
+				Run:             cyberhub.Run,
+			}, "search")
 		},
 	})
 }

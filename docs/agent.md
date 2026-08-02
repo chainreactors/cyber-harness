@@ -376,9 +376,9 @@ subagent 工具创建独立子 agent 处理子任务。
 
 | 命令 | 说明 |
 | --- | --- |
-| `ioa_send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
-| `ioa_read` | 读取 Space 中的消息 |
-| `ioa_space` | 获取或创建 Space |
+| `ioa send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
+| `ioa read` | 读取 Space 中的消息 |
+| `ioa space` | 获取或创建 Space |
 
 ### web_search 详情
 

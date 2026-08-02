@@ -5,42 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
-
-	agentprovider "github.com/chainreactors/aiscan/agent/provider"
-	config "github.com/chainreactors/aiscan/core/config"
-	types "github.com/chainreactors/aiscan/pkg/types"
 )
-
-// ValidateLLMConfig accepts zero limits as "use the model default" and rejects
-// incomplete profiles before an invalid configuration can be persisted.
-func ValidateLLMConfig(cfg *types.LLMConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	for i, profile := range cfg.Providers {
-		profile = config.NormalizeLLMProvider(profile)
-		if !agentprovider.IsSupportedProvider(profile.Provider) {
-			return fmt.Errorf("LLM provider %q is unsupported: use openai/anthropic or a known OpenAI-compatible vendor", profile.Provider)
-		}
-		if strings.TrimSpace(profile.Model) == "" {
-			name := strings.TrimSpace(profile.Name)
-			if name == "" {
-				name = strings.TrimSpace(profile.Id)
-			}
-			if name == "" {
-				name = fmt.Sprintf("#%d", i+1)
-			}
-			return fmt.Errorf("LLM profile %q model is required", name)
-		}
-		if profile.MaxTokens < 0 {
-			return fmt.Errorf("LLM max_tokens must be zero or positive")
-		}
-		if profile.ContextWindow < 0 {
-			return fmt.Errorf("LLM context_window must be zero or positive")
-		}
-	}
-	return nil
-}
 
 func ValidateTarget(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)

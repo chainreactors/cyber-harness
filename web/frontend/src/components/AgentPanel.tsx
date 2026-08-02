@@ -29,7 +29,7 @@ import {
   ListRow,
   StatusDot,
 } from '@cyber/ui'
-import { ConsoleDrawer } from './layout/ConsoleDrawer'
+import { ToolDrawer } from './layout/ToolDrawer'
 
 interface AgentPanelProps {
   open: boolean
@@ -46,7 +46,7 @@ export default function AgentPanel({ open, agents: rosterAgents, focusNodeID, on
   const showAgentList = agents.length > 1
 
   return (
-    <ConsoleDrawer
+    <ToolDrawer
       open={open}
       onClose={onClose}
       icon={Monitor}
@@ -85,7 +85,7 @@ export default function AgentPanel({ open, agents: rosterAgents, focusNodeID, on
           </section>
         </div>
       )}
-    </ConsoleDrawer>
+    </ToolDrawer>
   )
 }
 

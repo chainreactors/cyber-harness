@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,22 +19,22 @@ func TestHubBroadcastAOPReliableSurvivesBackpressure(t *testing.T) {
 	defer unsubscribe()
 
 	for i := int64(1); i <= 64; i++ {
-		hub.BroadcastAOP("session-1", AOPDelivery{Cursor: i, Event: &aop.Event{
+		hub.BroadcastAOP("session-1", &aop.EventDelivery{Cursor: strconv.FormatInt(i, 10), Event: &aop.Event{
 			SessionId: "session-1", Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{}},
 		}}, false)
 	}
-	hub.BroadcastAOP("session-1", AOPDelivery{Cursor: 999, Event: &aop.Event{
+	hub.BroadcastAOP("session-1", &aop.EventDelivery{Cursor: "999", Event: &aop.Event{
 		SessionId: "session-1", Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{}},
 	}}, false)
-	hub.BroadcastAOP("session-1", AOPDelivery{Cursor: 1000, Event: &aop.Event{
+	hub.BroadcastAOP("session-1", &aop.EventDelivery{Cursor: "1000", Event: &aop.Event{
 		SessionId: "session-1", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}},
 	}}, true)
 
 	var sawTerminal, sawOverflow bool
 	for len(deliveries) > 0 {
 		delivery := <-deliveries
-		sawTerminal = sawTerminal || delivery.Cursor == 1000
-		sawOverflow = sawOverflow || delivery.Cursor == 999
+		sawTerminal = sawTerminal || delivery.Cursor == "1000"
+		sawOverflow = sawOverflow || delivery.Cursor == "999"
 	}
 	if !sawTerminal {
 		t.Fatal("reliable terminal AOP event was dropped")
@@ -214,7 +215,7 @@ func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
 			}
 			service := NewService(ServiceConfig{Store: store})
 			var responses []*types.ScanEvent
-			err = newScanServiceCore(service).WatchScanEvents(
+			err = service.api.Scans.WatchScanEvents(
 				&types.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),
 				func(event *types.ScanEvent) error {
 					responses = append(responses, event)

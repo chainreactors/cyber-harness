@@ -26,7 +26,7 @@ func newHeadlessHandler(store *web.SQLiteStore, app *runner.App, token string) (
 	pool := web.NewAgentPool(service.Hub())
 	pool.SetSCOStore(store)
 	service.SetAgentPool(pool)
-	return service, pool, web.NewHandler(service, pool, nil, nil, token)
+	return service, pool, web.NewHandler(service, nil, nil, token)
 }
 
 // acp server: aiscan headless node — no UI, RPC + AOP WebSocket only, with an

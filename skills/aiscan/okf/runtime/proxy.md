@@ -4,9 +4,7 @@ title: proxy
 description: Pseudo-command for managing proxy nodes and proxied command execution. Supports direct proxy URLs, Clash subscription feeds, and adaptive load balancing.
 tags: [runtime, proxy]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # proxy - Proxy Node Management

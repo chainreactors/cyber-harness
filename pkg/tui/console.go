@@ -23,6 +23,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -1365,10 +1366,10 @@ func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error)
 	if strings.TrimSpace(pc.Provider) == "" && strings.TrimSpace(pc.BaseURL) == "" {
 		return nil, fmt.Errorf("provider not configured")
 	}
-	req := probe.LLMProbeRequest{
+	req := &types.LLMProbeRequest{
 		Provider: pc.Provider,
-		BaseURL:  pc.BaseURL,
-		APIKey:   pc.APIKey,
+		BaseUrl:  pc.BaseURL,
+		ApiKey:   pc.APIKey,
 		Proxy:    pc.Proxy,
 	}
 	listCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
@@ -1377,7 +1378,7 @@ func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	if !result.OK {
+	if !result.Ok {
 		if strings.TrimSpace(result.Error) == "" {
 			return nil, fmt.Errorf("list models failed")
 		}

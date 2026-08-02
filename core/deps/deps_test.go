@@ -142,7 +142,10 @@ func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
 
 func TestAIScanProtocolPackagesStayFlat(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, rel := range []string{filepath.Join("pkg", "types"), filepath.Join("pkg", "rpc")} {
+	for _, rel := range []string{
+		filepath.Join("proto", "types"), filepath.Join("proto", "rpc"),
+		filepath.Join("pkg", "types"), filepath.Join("pkg", "rpc"),
+	} {
 		dir := filepath.Join(root, rel)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -154,17 +157,77 @@ func TestAIScanProtocolPackagesStayFlat(t *testing.T) {
 			}
 		}
 	}
+	rpcDir := filepath.Join(root, "pkg", "rpc")
+	entries, err := os.ReadDir(rpcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".pb.go") && !strings.HasSuffix(entry.Name(), ".connect.go") {
+			t.Errorf("pkg/rpc must contain generated bindings only: %s", entry.Name())
+		}
+	}
 	legacy := filepath.Join(root, "proto", "aiscan")
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Errorf("legacy nested proto root still exists: %s", relative(root, legacy))
 	}
 }
 
+func TestWebManagementAPIBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	apiTree := filepath.Join(root, "pkg", "web", "api")
+	for _, forbidden := range []string{
+		"connectrpc.com/connect",
+		modulePath + "/pkg/rpc",
+		modulePath + "/pkg/web",
+	} {
+		assertNoImportPrefix(t, apiTree, forbidden)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, "pkg", "web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		if strings.Contains(entry.Name(), "_connect") {
+			t.Errorf("Connect exposure must stay consolidated in pkg/web/connect.go: %s", entry.Name())
+		}
+		if filepath.Ext(entry.Name()) != ".go" || entry.Name() == "connect.go" {
+			continue
+		}
+		path := filepath.Join(root, "pkg", "web", entry.Name())
+		imports, parseErr := importsInFile(path)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, importPath := range imports {
+			if importPath == "connectrpc.com/connect" || importPath == modulePath+"/pkg/rpc" {
+				t.Errorf("generated RPC exposure escaped pkg/web/connect.go: %s imports %q", entry.Name(), importPath)
+			}
+		}
+	}
+
+	aopService, err := os.ReadFile(filepath.Join(root, "proto", "rpc", "aop.proto"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"service AOPService", "rpc Connect(stream .aop.Envelope) returns (stream .aop.Envelope)"} {
+		if !strings.Contains(string(aopService), required) {
+			t.Errorf("proto/rpc/aop.proto is missing %q", required)
+		}
+	}
+}
+
 func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	root := repositoryRoot(t)
 	allowedSuffixes := map[string]bool{
-		"cache": true, "default": true, "e2e": true, "external": true,
-		"full": true, "integration": true, "internal": true,
+		"default": true, "e2e": true, "full": true, "integration": true,
 		"native": true, "unix": true, "windows": true,
 	}
 	sources := make(map[string][]string)
@@ -220,6 +283,13 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 				}
 			}
 			if valid {
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					return readErr
+				}
+				if !strings.HasPrefix(string(content), "//go:build ") {
+					t.Errorf("additional test file must be isolated by a build tag: %s", relative(root, path))
+				}
 				return nil
 			}
 		}

@@ -7,6 +7,7 @@
 package types
 
 import (
+	aop "github.com/chainreactors/aiscan/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -187,8 +188,9 @@ func (x *CommandRequest) GetLine() string {
 
 type CommandResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	MediaType     string                 `protobuf:"bytes,2,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	Command       string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
+	Presentation  string                 `protobuf:"bytes,4,opt,name=presentation,proto3" json:"presentation,omitempty"`
+	Content       []*aop.Content         `protobuf:"bytes,5,rep,name=content,proto3" json:"content,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -223,18 +225,25 @@ func (*CommandResult) Descriptor() ([]byte, []int) {
 	return file_types_command_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CommandResult) GetData() []byte {
+func (x *CommandResult) GetCommand() string {
 	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *CommandResult) GetMediaType() string {
-	if x != nil {
-		return x.MediaType
+		return x.Command
 	}
 	return ""
+}
+
+func (x *CommandResult) GetPresentation() string {
+	if x != nil {
+		return x.Presentation
+	}
+	return ""
+}
+
+func (x *CommandResult) GetContent() []*aop.Content {
+	if x != nil {
+		return x.Content
+	}
+	return nil
 }
 
 type CommandReceipt struct {
@@ -415,7 +424,7 @@ var File_types_command_proto protoreflect.FileDescriptor
 
 const file_types_command_proto_rawDesc = "" +
 	"\n" +
-	"\x13types/command.proto\x12\x0eaiscan.command\"s\n" +
+	"\x13types/command.proto\x12\x0eaiscan.command\x1a\x11aop/content.proto\"s\n" +
 	"\vCommandSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x14\n" +
@@ -426,11 +435,11 @@ const file_types_command_proto_rawDesc = "" +
 	"\x0eCommandRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04line\x18\x02 \x01(\tR\x04line\"B\n" +
-	"\rCommandResult\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1d\n" +
-	"\n" +
-	"media_type\x18\x02 \x01(\tR\tmediaType\"h\n" +
+	"\x04line\x18\x02 \x01(\tR\x04line\"\x81\x01\n" +
+	"\rCommandResult\x12\x18\n" +
+	"\acommand\x18\x03 \x01(\tR\acommand\x12\"\n" +
+	"\fpresentation\x18\x04 \x01(\tR\fpresentation\x12&\n" +
+	"\acontent\x18\x05 \x03(\v2\f.aop.ContentR\acontentJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03\"h\n" +
 	"\x0eCommandReceipt\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1d\n" +
 	"\n" +
@@ -464,18 +473,20 @@ var file_types_command_proto_goTypes = []any{
 	(*CommandResult)(nil),          // 3: aiscan.command.CommandResult
 	(*CommandReceipt)(nil),         // 4: aiscan.command.CommandReceipt
 	(*CommandProtocolMessage)(nil), // 5: aiscan.command.CommandProtocolMessage
+	(*aop.Content)(nil),            // 6: aop.Content
 }
 var file_types_command_proto_depIdxs = []int32{
 	0, // 0: aiscan.command.CommandCatalog.commands:type_name -> aiscan.command.CommandSpec
-	2, // 1: aiscan.command.CommandProtocolMessage.request:type_name -> aiscan.command.CommandRequest
-	3, // 2: aiscan.command.CommandProtocolMessage.result:type_name -> aiscan.command.CommandResult
-	1, // 3: aiscan.command.CommandProtocolMessage.catalog:type_name -> aiscan.command.CommandCatalog
-	4, // 4: aiscan.command.CommandProtocolMessage.receipt:type_name -> aiscan.command.CommandReceipt
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	6, // 1: aiscan.command.CommandResult.content:type_name -> aop.Content
+	2, // 2: aiscan.command.CommandProtocolMessage.request:type_name -> aiscan.command.CommandRequest
+	3, // 3: aiscan.command.CommandProtocolMessage.result:type_name -> aiscan.command.CommandResult
+	1, // 4: aiscan.command.CommandProtocolMessage.catalog:type_name -> aiscan.command.CommandCatalog
+	4, // 5: aiscan.command.CommandProtocolMessage.receipt:type_name -> aiscan.command.CommandReceipt
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_types_command_proto_init() }

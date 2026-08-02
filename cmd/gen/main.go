@@ -13,6 +13,13 @@ import (
 
 const modulePath = "github.com/chainreactors/aiscan"
 
+const (
+	protocVersion           = "35.1"
+	protocGenGoVersion      = "v1.36.11"
+	protocGenConnectVersion = "1.20.0"
+	protocGenESVersion      = "v2.13.0"
+)
+
 var aopProtos = []string{
 	"aop/value.proto",
 	"aop/content.proto",
@@ -39,6 +46,7 @@ var typeProtos = []string{
 }
 
 var rpcProtos = []string{
+	"rpc/aop.proto",
 	"rpc/agent.proto",
 	"rpc/chat.proto",
 	"rpc/config.proto",
@@ -52,14 +60,26 @@ func main() {
 	if err != nil {
 		fatal("locate repository root", err)
 	}
-	protoc, err := exec.LookPath("protoc")
+	protoc, err := findTool(root, "PROTOC", "protoc", filepath.Join("bin", "protoc", "bin"))
 	if err != nil {
 		fatal("find protoc", err)
+	}
+	goPlugin, err := findGoTool(root, "PROTOC_GEN_GO", "protoc-gen-go")
+	if err != nil {
+		fatal("find protoc-gen-go", err)
+	}
+	connectPlugin, err := findGoTool(root, "PROTOC_GEN_CONNECT_GO", "protoc-gen-connect-go")
+	if err != nil {
+		fatal("find protoc-gen-connect-go", err)
 	}
 	esPlugin, err := findESPlugin(root)
 	if err != nil {
 		fatal("find protoc-gen-es (run npm install in web/frontend)", err)
 	}
+	checkVersion(protoc, "protoc", protocVersion)
+	checkVersion(goPlugin, "protoc-gen-go", protocGenGoVersion)
+	checkVersion(connectPlugin, "protoc-gen-connect-go", protocGenConnectVersion)
+	checkVersion(esPlugin, "protoc-gen-es", protocGenESVersion)
 
 	cyberProto := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "proto")
 	productProto := filepath.Join(root, "proto")
@@ -87,6 +107,7 @@ func main() {
 	goArgs := []string{
 		"-I", cyberProto,
 		"-I", productProto,
+		"--plugin=protoc-gen-go=" + goPlugin,
 		"--go_out=" + root,
 		"--go_opt=module=" + modulePath,
 	}
@@ -96,6 +117,7 @@ func main() {
 	connectArgs := []string{
 		"-I", cyberProto,
 		"-I", productProto,
+		"--plugin=protoc-gen-connect-go=" + connectPlugin,
 		"--connect-go_out=" + root,
 		"--connect-go_opt=module=" + modulePath,
 		"--connect-go_opt=package_suffix",
@@ -189,6 +211,9 @@ func absoluteInputs(cyberProto, productProto string, inputs []string) []string {
 }
 
 func findESPlugin(root string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv("PROTOC_GEN_ES")); value != "" {
+		return filepath.Abs(value)
+	}
 	name := "protoc-gen-es"
 	if runtime.GOOS == "windows" {
 		name += ".cmd"
@@ -198,6 +223,52 @@ func findESPlugin(root string) (string, error) {
 		return local, nil
 	}
 	return exec.LookPath("protoc-gen-es")
+}
+
+func findTool(root, envName, name, localDir string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		return filepath.Abs(value)
+	}
+	executable := name
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
+	if localDir != "" {
+		local := filepath.Join(root, localDir, executable)
+		if _, err := os.Stat(local); err == nil {
+			return local, nil
+		}
+	}
+	return exec.LookPath(name)
+}
+
+func findGoTool(root, envName, name string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		return filepath.Abs(value)
+	}
+	cmd := exec.Command("go", "tool", "-n", name)
+	cmd.Dir = root
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("go tool -n %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	path := strings.Trim(strings.TrimSpace(string(output)), `"`)
+	if path == "" {
+		return "", fmt.Errorf("go tool -n %s returned no executable", name)
+	}
+	return path, nil
+}
+
+func checkVersion(path, name, expected string) {
+	cmd := exec.Command(path, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fatal("check "+name+" version", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output))))
+	}
+	actual := strings.TrimSpace(string(output))
+	if !strings.Contains(actual, expected) {
+		fatal("check "+name+" version", fmt.Errorf("got %q, want %s", actual, expected))
+	}
 }
 
 func repositoryRoot() (string, error) {

@@ -44,7 +44,7 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
-import type { CommandSpec, SCONode } from '../api'
+import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
@@ -384,30 +384,38 @@ export default function ChatPanel({
     setEvalMaxRounds(3)
   }
 
-  // The "/" command menu comes from SessionService/ListCommands: hub-scope
-  // commands merged with the bound agent's reported commands (skills included),
-  // so it always mirrors the real command set instead of a hardcoded list.
+  // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
+  // commands merged with the bound node's reported runtime, skill, and registry
+  // commands, so both menus mirror what that AIScan node can actually run.
   // Descriptions prefer the local i18n string (keyed cmd<Name>) and fall back to
   // the server's (used for dynamic skill commands that have no i18n key).
   const [chatCommands, setChatCommands] = useState<CommandHint[]>([])
+  const [toolCommands, setToolCommands] = useState<CommandHint[]>([])
   useEffect(() => {
     if (!activeSessionID) {
       setChatCommands([])
+      setToolCommands([])
       return
     }
     let cancelled = false
     const toHint = (spec: CommandSpec): CommandHint => {
-      const base = spec.name.replace(/^\//, '')
+      const base = spec.name.startsWith('/') ? spec.name.slice(1) : ''
       const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
       const localized = key ? t(key, { defaultValue: '' }) : ''
       return { cmd: spec.name, desc: localized || spec.description || '', usage: spec.usage }
     }
     fetchSessionCommands(activeSessionID)
       .then((specs) => {
-        if (!cancelled) setChatCommands(specs.map(toHint))
+        if (cancelled) return
+        const hints = specs.map(toHint)
+        setChatCommands(hints.filter((hint) => hint.cmd.startsWith('/')))
+        setToolCommands(hints.filter((hint) => hint.cmd.startsWith('!')))
       })
       .catch(() => {
-        if (!cancelled) setChatCommands([])
+        if (!cancelled) {
+          setChatCommands([])
+          setToolCommands([])
+        }
       })
     return () => {
       cancelled = true
@@ -444,6 +452,11 @@ export default function ChatPanel({
     wasActiveRef.current = active
   }, [isBusy, isThinking, t])
 
+  const activeThinkingResponseID = useMemo(
+    () => isThinking ? latestStreamingResponseID(viewerTimeline) : null,
+    [isThinking, viewerTimeline],
+  )
+
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
     const opts = sendOpts()
     const hadGoal = persist
@@ -471,8 +484,8 @@ export default function ChatPanel({
   }
 
   const renderViewerItem = useCallback(
-    (item: ViewerTimelineItem) => timelineContent(item, scanResults),
-    [scanResults],
+    (item: ViewerTimelineItem) => timelineContent(item, scanResults, activeThinkingResponseID),
+    [activeThinkingResponseID, scanResults],
   )
   const renderViewerMark = useCallback(
     (item: ViewerTimelineItem) => <TimelineMark item={item} />,
@@ -685,6 +698,7 @@ export default function ChatPanel({
                   onPause={onPause}
                   busy={isBusy}
                   commands={chatCommands}
+                  toolCommands={toolCommands}
                   mentionables={mentionables}
                   renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
@@ -702,6 +716,7 @@ export default function ChatPanel({
 function timelineContent(
   item: ViewerTimelineItem,
   scanResults: Map<string, SCONode[]>,
+  activeThinkingResponseID: string | null,
 ): ReactNode {
   switch (item.kind) {
     case 'message': {
@@ -730,7 +745,7 @@ function timelineContent(
     }
 
     case 'assistant_response':
-      return <AssistantResponseEntry response={item} />
+      return <AssistantResponseEntry response={item} activeThinking={item.id === activeThinkingResponseID} />
 
     case 'tool_call':
       return (
@@ -748,7 +763,7 @@ function timelineContent(
       return (
         <SubagentRunCard run={item}>
           {item.items.map((child) => (
-            <div key={child.id}>{timelineContent(child, scanResults)}</div>
+            <div key={child.id}>{timelineContent(child, scanResults, activeThinkingResponseID)}</div>
           ))}
         </SubagentRunCard>
       )
@@ -822,22 +837,19 @@ function SystemMessageContent({ metadata, fallback }: { metadata: Record<string,
   const { t } = useTranslation('chat')
   const code = systemCode(metadata)
   const params = systemParams(metadata)
-  if (code === 'agents_list') return <AgentsListContent params={params} fallback={fallback} />
+  if (code === 'agents_list') return <AgentsListContent agentList={metadata.agentList as AgentListMetadata | undefined} fallback={fallback} />
   const text = t(`sys.${code}`, { ...params, defaultValue: fallback })
   return <MarkdownContent content={trimDisplayContent(text)} />
 }
 
-type AgentListEntry = { name?: string; id?: string; busy?: boolean; provider?: string; model?: string }
-
-function AgentsListContent({ params, fallback }: { params: Record<string, unknown>; fallback: string }) {
+function AgentsListContent({ agentList, fallback }: { agentList?: AgentListMetadata; fallback: string }) {
   const { t } = useTranslation('chat')
-  const agents = Array.isArray(params.agents) ? (params.agents as AgentListEntry[]) : null
+  const agents = agentList?.agents
   if (!agents) return <MarkdownContent content={trimDisplayContent(fallback)} />
-  const count = typeof params.count === 'number' ? params.count : agents.length
-  const lines = [t('sys.agents_connected', { n: count })]
+  const lines = [t('sys.agents_connected', { n: agents.length })]
   for (const a of agents) {
     const status = a.busy ? t('sys.agent_status_busy') : t('sys.agent_status_idle')
-    let line = `- **${a.name}** (${a.id}) — ${status}`
+    let line = `- **${a.name}** (${a.nodeId}) — ${status}`
     if (a.model) line += ` — ${a.provider}/${a.model}`
     lines.push(line)
   }
@@ -890,13 +902,22 @@ function TokenBudgetNote({ context, budget }: { context?: number; budget?: numbe
 
 function AssistantResponseEntry({
   response,
+  activeThinking,
 }: {
   response: Extract<ViewerTimelineItem, { kind: 'assistant_response' }>
+  activeThinking: boolean
 }) {
   const { t } = useTranslation('chat')
   const message = response.response
   const hasThinking = !!response.thinking?.trim()
   const hasResponse = !!message?.content.trim()
+  const [thinkingExpanded, setThinkingExpanded] = useState(activeThinking && hasThinking)
+  const wasThinkingRef = useRef(activeThinking)
+  useEffect(() => {
+    if (activeThinking && hasThinking) setThinkingExpanded(true)
+    else if (wasThinkingRef.current && !activeThinking) setThinkingExpanded(false)
+    wasThinkingRef.current = activeThinking
+  }, [activeThinking, hasThinking])
   // Fold the whole turn's tool calls under one disclosure so a long scan run
   // doesn't sprawl the transcript. The header keeps a collapsed group legible:
   // the tool count, plus a spinner while any call is still running.
@@ -915,6 +936,8 @@ function AssistantResponseEntry({
       timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
       thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
+      thinkingExpanded={thinkingExpanded}
+      onThinkingToggle={setThinkingExpanded}
       tools={toolCount > 0 ? (
         <div className="space-y-2">
           {response.tools.map((tool) => (
@@ -937,6 +960,23 @@ function AssistantResponseEntry({
       showResponseLabel={false}
     />
   )
+}
+
+function latestStreamingResponseID(items: ViewerTimelineItem[]): string | null {
+  let latestID: string | null = null
+  let latestTimestamp = Number.NEGATIVE_INFINITY
+  const visit = (item: ViewerTimelineItem) => {
+    if (item.kind === 'assistant_response' && item.streaming && item.thinking?.trim()) {
+      if (item.timestamp >= latestTimestamp) {
+        latestID = item.id
+        latestTimestamp = item.timestamp
+      }
+      return
+    }
+    if (item.kind === 'subagent_run') item.items.forEach(visit)
+  }
+  items.forEach(visit)
+  return latestID
 }
 
 function TimelineMark({ item }: { item: ViewerTimelineItem }) {

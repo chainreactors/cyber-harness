@@ -4,9 +4,7 @@ title: cyberhub
 description: Search and list loaded fingerprints and POC templates with association-aware fingerprint-to-POC mapping. Available as cyberhub or search cyberhub.
 tags: [runtime, search]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # cyberhub (also: search cyberhub)

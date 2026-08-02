@@ -12,10 +12,10 @@ libcstx 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulne
 
 | 平面 | 传输 | 职责 |
 | --- | --- | --- |
-| AOP 应用平面 | binary protobuf WebSocket `/api/aop/ws` | Agent 会话、Turn、事件、工具、命令、file、exec、PTY、SCO 增量、取消和实时 scan 事件；Runner 已接入，浏览器统一接入延期 |
+| AOP 应用平面 | `AOPService.Connect` 双向 Envelope 流；浏览器兼容 WebSocket `/api/aop/ws` | Agent 会话、Turn、事件、工具、命令、file、exec、PTY、SCO 增量、取消和实时 scan 事件 |
 | AIScan 管理平面 | ConnectRPC unary | 查询、配置、Agent 列表与本地进程生命周期、Session 历史、Scan CRUD、SCO 查询/导入、系统状态 |
 
-目标态不存在 JSON-RPC、AOP ChatService、独立 Agent socket、独立 terminal socket、Connect streaming RPC 或额外的 WebSocket wire。当前浏览器 live adapter 是迁移期明确保留项，不扩展其语义。Connect handler 是管理 HTTP 边界；Runner 的 Agent 核心交互不经过 Connect。
+目标态不存在 JSON-RPC、AOP ChatService、独立 Agent socket、独立 terminal socket 或额外的 WebSocket wire。AOP 只定义一个 `Connect(stream Envelope)` 双向流；Connect/gRPC 与浏览器 WebSocket 适配到同一个 `EnvelopeStream` 服务核心。当前 Agent 默认仍使用 WebSocket，新增 gRPC 服务端不改变旧 Agent 或浏览器连接。管理 RPC 与 AOP 流由同一个 Connect handler 注册，但职责仍按 service 分离。
 
 该边界按“语义”而不是按“调用者”划分：Runner 只通过 WebSocket 接入 Web；浏览器的管理/历史查询走 ConnectRPC，但浏览器的实时 Session/Turn、命令、文件与 PTY 也走 WebSocket。Web 服务拥有 Agent Pool、调度、持久化和管理 RPC，节点只拥有自身 Runtime、工具与执行状态。
 
@@ -72,7 +72,7 @@ WebSocket 本身提供连续字节传输，但不提供业务 correlation、可�
 
 ## 5. 连接和并发
 
-目标态中，每个浏览器应用实例和每个 Runner 各自使用一条应用层 WebSocket。连接只有一个 reader；所有输出通过一个 FIFO writer。协议不引入优先级队列。
+每个浏览器应用实例和每个 Runner 各自使用一条 AOP 应用流。浏览器继续使用 WebSocket；原生客户端可以使用 `AOPService.Connect` 的 Connect/gRPC 双向流。连接只有一个 reader；所有输出通过一个 FIFO writer。协议不引入优先级队列。
 
 浏览器最终唯一连接所有者是 `@cyber/aop` 的 `AOPClient`。Terminal、Chat、Command、File 和 Scan watcher 将只提交 protobuf message，不创建 socket。该浏览器 cutover 当前延期，现有 Chat/WatchEvents ConnectRPC 与 Terminal WebSocket 暂时保留。
 
@@ -107,12 +107,14 @@ Context 由调用者显式传入，Stream 不拥有 Session、Turn 或 operation
 - `aop/`：AOP core 与官方 `aop.*` 生成类型；
 - `pkg/types/`：Agent、Runner、TUI、Web 共用的 AIScan protobuf message 与 typed extension helper，单一 Go 包且不依赖 Connect；
 - `pkg/rpc/`：AIScan ConnectRPC service descriptor、client 和 handler，`.pb.go` 与 `.connect.go` 位于同一 Go 包；
-- `pkg/web/`：管理 RPC 的 Hub 实现；
+- `pkg/web/api/`：协议无关的管理 API；直接接收/返回 protobuf message，不依赖 Connect、HTTP 或 WebSocket；
+- `pkg/web/connect.go`：唯一生成 RPC 暴露适配器，注册管理服务与 `AOPService`，并映射认证和传输错误；
+- `pkg/web/` 其余代码：AOP WebSocket、AgentPool、Runner 委派、Hub 与持久化基础设施；
 - `cmd/gen/`：唯一 protobuf/TypeScript 生成入口。
 
 非 `full` 构建不得依赖 `pkg/rpc` 或 `connectrpc.com/connect`。当前 Runner transport 对 `pkg/web/agent` 的依赖由独立迁移负责，不在本轮通过移动 RPC 类型解决。
 
-ConnectRPC 只暴露以下 unary 服务：
+Web 管理面暴露以下 unary 服务：
 
 - `aiscan.rpc.system.SystemService`
 - `aiscan.rpc.config.ConfigService`
@@ -121,7 +123,11 @@ ConnectRPC 只暴露以下 unary 服务：
 - `aiscan.rpc.scan.ScanService`
 - `aiscan.rpc.sco.SCOService`
 
-生成流程只生成 protobuf 与 Connect-Go 代码，不生成 grpc-go service/client。REST `/api/*` 仅保留认证和 `/api/aop/ws`；未知管理 REST 返回 404。`/health` 和原生 `/ioa/` 不属于 AIScan RPC。
+AOP 应用面只额外暴露一个双向流服务：
+
+- `aiscan.rpc.aop.AOPService/Connect`
+
+生成流程只生成 protobuf 与 Connect-Go 代码，不生成 grpc-go service/client。Go 插件由 `go.mod` 的 `tool` 指令固定，统一入口为 `go run ./cmd/gen`（或 `make proto-gen`）；CI 会重新生成并要求零 diff。Connect-Go 的同一 handler 原生支持 Connect、gRPC 与 gRPC-Web；浏览器因双向流限制继续使用薄 WebSocket 适配，不存在第二套业务实现。REST `/api/*` 仅保留认证和 `/api/aop/ws`；未知管理 REST 返回 404。`/health` 和原生 `/ioa/` 不属于 AIScan RPC。
 
 ## 9. 持久化边界
 
@@ -139,7 +145,8 @@ ConnectRPC 只暴露以下 unary 服务：
 - Session/Turn 状态属于 Runtime/Service；
 - Agent pending task 属于具体 `remoteAgent`；
 - browser subscription 与 PTY route 属于该 browser peer loop；
-- Connect handler 只做 request wrapper 与错误映射。
+- `pkg/web/api` 拥有 Web 原生管理语义；Agent/Session 执行通过能力接口委派给既有 AOP/AgentPool/Runner，不复制执行逻辑。
+- Connect handler 只做 request wrapper、服务注册与错误映射。
 
 新增抽象必须证明至少有两个真实 owner、不能由 protobuf message + 普通函数表达，并在本文补充职责和生命周期。允许的 namespace 注册抽象只做 full-name → handler 路由；不得扩展成全局 schema registry、通用 pending manager、link、wire 或兼容 adapter。
 

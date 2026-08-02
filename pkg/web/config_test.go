@@ -41,11 +41,12 @@ func TestActivateLLMProfileSelectsByID(t *testing.T) {
 }
 
 func TestConfigStatusIncludesModelLimits(t *testing.T) {
+	images := false
 	conf := &types.DistributeConfig{Llm: &types.LLMConfig{
 		ActiveProfile: "large",
 		Providers: []*types.LLMProviderConfig{{
 			Id: "large", Provider: "anthropic", Model: "glm-5.2[1m]",
-			MaxTokens: 32768, ContextWindow: 1000000,
+			MaxTokens: 32768, ContextWindow: 1000000, Timeout: 45, Images: &images,
 		}},
 	}}
 	view := ConfigViewFromDistribute(conf, "aiscan.yaml", true)
@@ -55,6 +56,10 @@ func TestConfigStatusIncludesModelLimits(t *testing.T) {
 	if len(view.GetLlm().GetProviders()) != 1 || view.GetLlm().GetProviders()[0].GetMaxTokens() != 32768 || view.GetLlm().GetProviders()[0].GetContextWindow() != 1000000 {
 		t.Fatalf("profile limits missing from view: %+v", view.GetLlm().GetProviders())
 	}
+	active := view.GetLlm().GetActive()
+	if active.GetTimeout() != 45 || active.Images == nil || active.GetImages() {
+		t.Fatalf("provider capabilities missing from view: %+v", active)
+	}
 }
 
 func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
@@ -63,6 +68,7 @@ func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 	for _, mutate := range []func(*types.LLMProviderConfig){
 		func(p *types.LLMProviderConfig) { p.MaxTokens = -1 },
 		func(p *types.LLMProviderConfig) { p.ContextWindow = -1 },
+		func(p *types.LLMProviderConfig) { p.Timeout = -1 },
 	} {
 		profile := &types.LLMProviderConfig{Id: "bad", Model: "test-model"}
 		mutate(profile)

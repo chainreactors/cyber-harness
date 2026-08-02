@@ -29,6 +29,8 @@ message LLMProviderConfig {
   string proxy = 7;
   int32 max_tokens = 8;
   int32 context_window = 9;
+  int32 timeout = 10;
+  optional bool images = 11;
 }
 
 message CyberhubConfig {
@@ -78,6 +80,8 @@ message LLMProviderView {
   string proxy = 7;
   int32 max_tokens = 8;
   int32 context_window = 9;
+  int32 timeout = 10;
+  optional bool images = 11;
 }
 
 message LLMView {
@@ -123,6 +127,7 @@ message ConfigView {
   AgentConfig agent = 9;
 }
 
+message GetConfigRequest {}
 message GetConfigResponse { ConfigView config = 1; }
 message UpdateConfigRequest { DistributeConfig config = 1; }
 message UpdateConfigResponse { ConfigView config = 1; }

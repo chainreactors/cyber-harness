@@ -40,6 +40,8 @@ export default {
   contextWindowLow: '低于 8192 Token，实际请求可能没有足够的输入和输出空间',
   contextWindowAuto: '留空则根据模型自动推断',
   maxTokens: '最大输出',
+  llmTimeout: 'Provider 超时（秒）',
+  imageInput: '为此 Provider 启用图片输入',
   proxy: '代理',
   apiKey: 'API Key',
   cyberhubUrl: 'Cyberhub URL',
