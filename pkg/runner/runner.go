@@ -36,7 +36,6 @@ type AgentRuntime struct {
 	option         *cfg.Option
 	config         agent.Config
 	bus            *eventbus.Bus[*aop.Event]
-	kernelBus      *eventbus.Bus[*aop.Event]
 	sessionEvents  *sessionEmitter
 	output         *tui.AgentOutput
 	configFile     string
@@ -204,9 +203,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		publicBus.Subscribe(rt.output.HandleEvent)
 	}
 	rt.bus = publicBus
-	rt.kernelBus = eventbus.New[*aop.Event]()
 	rt.sessionEvents = newSessionEmitter(publicBus)
-	rt.kernelBus.Subscribe(rt.sessionEvents.emit)
 
 	var ioaCancel func()
 	var handoffCancel func()
@@ -233,7 +230,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		ContextWindow:         rt.app.ProviderConfig.ContextWindow,
 		Logger:                logger,
 		CacheRetention:        agent.CacheShort,
-		Bus:                   rt.kernelBus,
+		Bus:                   rt.sessionEvents,
 		Hooks:                 rt.app.Hooks,
 		CaptureProviderFrames: option.CaptureProviderFrames,
 	}

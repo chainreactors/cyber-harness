@@ -37,7 +37,7 @@ export function TerminalDetails({
     <DetailPanel title={t('tdDetails')} onClose={onClose}>
       <DetailGroup title={t('tdAgent')}>
         <DetailRow label={t('tdName')} value={agent.hello?.name} />
-        <DetailRow label="ID" value={agent.hello?.agentId} mono />
+        <DetailRow label="ID" value={agent.hello?.nodeId} mono />
         <DetailRow label={t('tdState')} value={agent.busy ? t('busy') : t('idle')} />
         <DetailRow label={t('tdConnected')} value={formatDateTime(agent.connectedAt)} />
         <DetailRow label={t('tdHost')} value={runtime?.hostname} />

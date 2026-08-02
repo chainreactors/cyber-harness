@@ -11,11 +11,10 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want scanpb.ScanStatus) *scanpb.Scan {
+func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want types.ScanStatus) *types.Scan {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -58,7 +57,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	if message := unwrapEnvelope(t, callEnvelope); message.(*toolpb.ProtocolMessage).GetCall() == nil {
 		t.Fatalf("scan dispatch = %+v", message)
 	}
-	waitScanStatus(t, store, scan.Id, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
+	waitScanStatus(t, store, scan.Id, types.ScanStatus_SCAN_STATUS_RUNNING)
 
 	if err := svc.CancelScan(scan.Id); err != nil {
 		t.Fatal(err)
@@ -69,7 +68,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 		t.Fatalf("cancel envelope = %+v", cancel)
 	}
 
-	waitScanStatus(t, store, scan.Id, scanpb.ScanStatus_SCAN_STATUS_CANCELED)
+	waitScanStatus(t, store, scan.Id, types.ScanStatus_SCAN_STATUS_CANCELED)
 	deadline := time.Now().Add(time.Second)
 	for len(svc.sem) != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -79,11 +78,11 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	}
 
 	// A result that races with cancellation must not resurrect the scan.
-	pool.handleAgentEnvelope(pool.Pick(), wrapMessage(t, generateID(), scan.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
+	pool.handleAgentEnvelope(pool.Pick().(*remoteAgent), wrapMessage(t, generateID(), scan.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
 		SessionId: scan.Id, TurnId: scan.Id, Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: scan.Id}},
 	}}}))
 	time.Sleep(20 * time.Millisecond)
-	if got, err := store.Get(context.Background(), scan.Id); err != nil || got.Status != scanpb.ScanStatus_SCAN_STATUS_CANCELED {
+	if got, err := store.Get(context.Background(), scan.Id); err != nil || got.Status != types.ScanStatus_SCAN_STATUS_CANCELED {
 		t.Fatalf("late result changed canceled scan: scan=%+v err=%v", got, err)
 	}
 }
@@ -108,24 +107,24 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = readHubEnvelope(t, conn)
-	waitScanStatus(t, store, running.Id, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
+	waitScanStatus(t, store, running.Id, types.ScanStatus_SCAN_STATUS_RUNNING)
 
 	queued, err := svc.SubmitScan(context.Background(), "127.0.0.2", "quick", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitScanStatus(t, store, queued.Id, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
+	waitScanStatus(t, store, queued.Id, types.ScanStatus_SCAN_STATUS_QUEUED)
 	if err := svc.CancelScan(queued.Id); err != nil {
 		t.Fatal(err)
 	}
-	waitScanStatus(t, store, queued.Id, scanpb.ScanStatus_SCAN_STATUS_CANCELED)
+	waitScanStatus(t, store, queued.Id, types.ScanStatus_SCAN_STATUS_CANCELED)
 
 	if err := svc.CancelScan(running.Id); err != nil {
 		t.Fatal(err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 	_ = readHubEnvelope(t, conn)
-	waitScanStatus(t, store, running.Id, scanpb.ScanStatus_SCAN_STATUS_CANCELED)
+	waitScanStatus(t, store, running.Id, types.ScanStatus_SCAN_STATUS_CANCELED)
 }
 
 type controlledDeadlineContext struct {
@@ -163,9 +162,9 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	agent := newFakeAgent("timeout-agent", 1)
 	pool.register(agent)
 
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Id: "timeout-scan", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: types.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
@@ -208,7 +207,7 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed-out remote scan did not return")
 	}
-	failed := waitScanStatus(t, store, scanID, scanpb.ScanStatus_SCAN_STATUS_FAILED)
+	failed := waitScanStatus(t, store, scanID, types.ScanStatus_SCAN_STATUS_FAILED)
 	if failed.Error != "scan timed out" {
 		t.Fatalf("timeout error = %q", failed.Error)
 	}
@@ -227,9 +226,9 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 	agent := newFakeAgent("timeout-agent", 1)
 	pool.register(agent)
 
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Id: "expired-scan", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: types.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
@@ -238,7 +237,7 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 	ctx.expire()
 	svc.runScanViaAgent(ctx, scan)
 
-	failed := waitScanStatus(t, store, scan.Id, scanpb.ScanStatus_SCAN_STATUS_FAILED)
+	failed := waitScanStatus(t, store, scan.Id, types.ScanStatus_SCAN_STATUS_FAILED)
 	if failed.Error != "scan timed out" {
 		t.Fatalf("timeout error = %q", failed.Error)
 	}
@@ -265,11 +264,11 @@ func TestCancelTaskQueuesBehindFullSendChannel(t *testing.T) {
 	remote := newFakeAgent("agent-1", 1)
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	remote.tasks["scan-1"] = make(chan taskResult, 1)
-	remote.sendCh <- aop.MustWrap("busy", "", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{}}}) // saturate the buffer
-	pool.agents[remote.nodeURI] = remote
+	remote.sendCh <- aop.MustWrap("busy", "", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{}}}) // saturate the buffer
+	pool.agents[remote.nodeID] = remote
 
 	canceled := make(chan error, 1)
-	go func() { canceled <- pool.CancelTask(remote.nodeURI, "scan-1") }()
+	go func() { canceled <- pool.CancelTask(remote.nodeID, "scan-1") }()
 	select {
 	case <-canceled:
 		t.Fatal("cancellation bypassed the full send channel")
@@ -301,11 +300,11 @@ func TestCancelTaskWaitsForSaturatedSendChannel(t *testing.T) {
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	resultCh := make(chan taskResult, 1)
 	remote.tasks["scan-1"] = resultCh
-	remote.sendCh <- aop.MustWrap("reload", "", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{}}})
-	pool.agents[remote.nodeURI] = remote
+	remote.sendCh <- aop.MustWrap("reload", "", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{}}})
+	pool.agents[remote.nodeID] = remote
 
 	canceled := make(chan error, 1)
-	go func() { canceled <- pool.CancelTask(remote.nodeURI, "scan-1") }()
+	go func() { canceled <- pool.CancelTask(remote.nodeID, "scan-1") }()
 	select {
 	case _, ok := <-resultCh:
 		if ok {
@@ -339,7 +338,7 @@ func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	scan := &scanpb.Scan{Id: "scan-canceled", Target: "127.0.0.1", Mode: "quick", Status: scanpb.ScanStatus_SCAN_STATUS_CANCELED, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+	scan := &types.Scan{Id: "scan-canceled", Target: "127.0.0.1", Mode: "quick", Status: types.ScanStatus_SCAN_STATUS_CANCELED, CreatedAt: nowProto(), UpdatedAt: nowProto()}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +355,7 @@ func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != scanpb.ScanStatus_SCAN_STATUS_CANCELED || strings.TrimSpace(stored.Report) != "" {
+	if stored.Status != types.ScanStatus_SCAN_STATUS_CANCELED || strings.TrimSpace(stored.Report) != "" {
 		t.Fatalf("canceled scan was mutated: %+v", stored)
 	}
 }
@@ -368,11 +367,11 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Id:        "scan-completed",
 		Target:    "127.0.0.1",
 		Mode:      "quick",
-		Status:    scanpb.ScanStatus_SCAN_STATUS_COMPLETED,
+		Status:    types.ScanStatus_SCAN_STATUS_COMPLETED,
 		CreatedAt: nowProto(),
 		UpdatedAt: nowProto(),
 	}
@@ -380,7 +379,7 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &scanpb.CancelScanRequest{
+	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-completed", ScanId: scan.Id,
 	})
 	if err != nil {
@@ -393,7 +392,7 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != scanpb.ScanStatus_SCAN_STATUS_COMPLETED {
+	if stored.Status != types.ScanStatus_SCAN_STATUS_COMPLETED {
 		t.Fatalf("completed scan status = %s; want COMPLETED", stored.Status)
 	}
 }
@@ -405,7 +404,7 @@ func TestCancelMissingScanReturnsNotFound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &scanpb.CancelScanRequest{
+	response, err := newScanServiceCore(NewService(ServiceConfig{Store: store})).CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-missing", ScanId: "missing",
 	})
 	if err != nil {

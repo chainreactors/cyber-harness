@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package aiscan.rpc.config;
+
+import "types/config.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+
+service ConfigService {
+  rpc GetConfig(google.protobuf.Empty) returns (aiscan.config.GetConfigResponse);
+  rpc UpdateConfig(aiscan.config.UpdateConfigRequest) returns (aiscan.config.UpdateConfigResponse);
+  rpc ActivateProfile(aiscan.config.ActivateProfileRequest) returns (aiscan.config.ActivateProfileResponse);
+  rpc TestLLM(aiscan.config.LLMProbeRequest) returns (aiscan.config.LLMProbeResult);
+  rpc ListModels(aiscan.config.LLMProbeRequest) returns (aiscan.config.ListModelsResult);
+  rpc TestConnection(aiscan.config.TestConnectionRequest) returns (aiscan.config.TestConnectionResponse);
+}

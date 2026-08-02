@@ -2,23 +2,18 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
-	"github.com/chainreactors/ioa/protocols"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -27,10 +22,7 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 }
 
 func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	if strings.TrimSpace(option.IOAURL) == "" {
-		return fmt.Errorf("ioa.url is required for web node identity")
-	}
-	identityRef, err := webNodeRef(option)
+	nodeID, err := webNodeID(option)
 	if err != nil {
 		return err
 	}
@@ -38,7 +30,7 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	appConfig := runner.AppConfig(option, runner.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
 	}, logger)
-	appConfig.IOA = remoteIOAConfig(option, identityRef)
+	appConfig.IOA = remoteIOAConfig(option)
 	application, err := runner.NewApp(ctx, appConfig)
 	if err != nil {
 		return err
@@ -77,10 +69,11 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 			SCO:            application.SCOSidecar,
 			Logger:         logger,
 			Chat:           chatHandler,
-			Node:           identityRef,
-			Runtime:        DefaultRuntime(),
-			Status:         func() *aop.AgentStatus { return agentStatus(option, application) },
-			Menu:           func() []*commandpb.Spec { return agentCommandCatalog(application) },
+			AgentRuntime:   rt,
+			NodeID:         nodeID,
+			Runtime:        runner.DefaultRuntimeInfo(),
+			Status:         func() *aop.AgentStatus { return runner.AgentStatus(option, application) },
+			Menu:           func() []*types.CommandSpec { return runner.CommandCatalog(application) },
 			PTYRouter:      func() (*pty.Router, error) { return NewPTYRouter(application.Commands), nil },
 		}
 		_ = connect(ctx, connection)
@@ -127,7 +120,8 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 }
 
 // ---------------------------------------------------------------------------
-// chatAgentHandler implements the private connection chat handler.
+// chatAgentHandler implements the connection's upload and config-reload hooks.
+// AOP core/command messages are dispatched by rt.HandleEnvelope directly.
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
@@ -137,37 +131,6 @@ type chatAgentHandler struct {
 	logger    telemetry.Logger
 	ready     chan struct{}
 	readyOnce sync.Once
-}
-
-func (h *chatAgentHandler) OpenSession(ctx context.Context, req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
-	return h.rt.OpenAOPSession(req)
-}
-
-func (h *chatAgentHandler) RunTurn(ctx context.Context, req *aop.RunTurnRequest) *aop.RunTurnResponse {
-	return h.rt.RunAOPTurn(ctx, req)
-}
-
-func (h *chatAgentHandler) CancelTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResponse {
-	return h.rt.CancelAOPTurn(req)
-}
-
-func (h *chatAgentHandler) CloseSession(ctx context.Context, req *aop.CloseSessionRequest) *aop.CloseSessionResponse {
-	return h.rt.CloseAOPSession(ctx, req)
-}
-
-func (h *chatAgentHandler) Command(ctx context.Context, req *commandpb.Request) (*commandpb.Result, error) {
-	if h.rt == nil || req == nil || strings.TrimSpace(req.Line) == "" {
-		return nil, fmt.Errorf("command line is required")
-	}
-	result, err := h.rt.CommandSession(ctx, req.SessionId, req.Line)
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return nil, err
-	}
-	return &commandpb.Result{Data: encoded, MediaType: "application/json"}, nil
 }
 
 func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, error) {
@@ -189,103 +152,20 @@ func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, er
 	return &filepb.Result{Filename: filename, Path: dest, Size: int64(len(req.Data))}, nil
 }
 
-func (h *chatAgentHandler) ReloadConfig(config *configpb.DistributeConfig) (*reloadpb.Result, *aop.AgentStatus) {
+func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
 	defer h.readyOnce.Do(func() {
 		if h.ready != nil {
 			close(h.ready)
 		}
 	})
-	provider, model, err := reloadAgentConfig(config, h.rt, h.app, h.option, h.logger)
-	result := &reloadpb.Result{Ok: err == nil, Model: model}
+	provider, model, err := runner.ReloadRuntimeConfig(config, h.rt, h.app, h.option, h.logger)
+	result := &types.ReloadResult{Ok: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}
 	result.Provider = provider.Name()
-	return result, agentStatus(h.option, h.app)
-}
-
-// ---------------------------------------------------------------------------
-// reloadAgentConfig hot-swaps the LLM provider from the protobuf config carried
-// by the application WebSocket. A build failure leaves the current provider in
-// place and is reported through the reload result and AgentStatus.
-// ---------------------------------------------------------------------------
-
-func reloadAgentConfig(distribute *configpb.DistributeConfig, rt *runner.AgentRuntime, app *runner.App, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
-	if rt == nil {
-		return nil, "", fmt.Errorf("agent runtime is not configured")
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	if distribute == nil {
-		return nil, "", fmt.Errorf("remote config is required")
-	}
-	providerConfig := runner.ProviderConfigFromProto(distribute.GetLlm())
-	resolved, err := agent.ResolveProvider(&providerConfig)
-	if err != nil {
-		logger.Warnf("config reload: resolve provider: %s", err)
-		return nil, "", err
-	}
-	provider, err := agent.NewProviderFromResolved(resolved)
-	if err != nil {
-		logger.Warnf("config reload: rebuild provider: %s", err)
-		return nil, "", err
-	}
-	model := resolved.Model
-	app.Provider = provider
-	app.ProviderConfig = *resolved
-	rt.SetProvider(provider, *resolved)
-	if option != nil {
-		runner.ApplyResolvedProviderOptions(option, *resolved)
-	}
-	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
-	return provider, model, nil
-}
-
-// ---------------------------------------------------------------------------
-// Identity and command catalog (agent-specific, needs runner.AgentRuntime)
-// ---------------------------------------------------------------------------
-
-// agentCommandCatalog is the agent's user-facing "/verb" catalog reported to the
-// hub on register: the static agent-scope menu commands plus one per loaded (and
-// non-internal) skill. The hub merges it with its hub-scope commands to build
-// the web "/" menu and /help, so the menu reflects what this agent can run.
-func agentCommandCatalog(app *runner.App) []*commandpb.Spec {
-	specs := runner.RuntimeCommandSpecs()
-	if app == nil || app.Skills == nil {
-		return specs
-	}
-	for _, sk := range app.Skills.Skills {
-		if strings.TrimSpace(sk.Name) == "" || sk.Internal {
-			continue
-		}
-		specs = append(specs, &commandpb.Spec{
-			Name:        "/skill:" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
-			Description: sk.Description,
-		})
-	}
-	return specs
-}
-
-func agentStatus(option *cfg.Option, app *runner.App) *aop.AgentStatus {
-	status := new(aop.AgentStatus)
-	if option != nil {
-		status.Space = option.Space
-	}
-	if app != nil {
-		status.Provider = app.ProviderConfig.Provider
-		status.Model = app.ProviderConfig.Model
-		status.Bound = ioaBound(app)
-	}
-	return status
-}
-
-func ioaBound(app *runner.App) bool {
-	if app == nil || app.IOAClient == nil {
-		return false
-	}
-	return app.IOAClient.Bound()
+	return result, runner.AgentStatus(h.option, h.app)
 }
 
 // ---------------------------------------------------------------------------
@@ -302,31 +182,20 @@ func webAgentTask(option *cfg.Option) (string, error) {
 	return cfg.ResolveTask(option)
 }
 
-type webIdentity struct{ ref protocols.NodeRef }
-
-func (i webIdentity) IOABinding() protocols.IdentityBinding {
-	return protocols.IdentityBinding{
-		Namespace: "aiscan.web",
-		Subject:   i.ref.URI(),
-	}
-}
-
-func webNodeRef(option *cfg.Option) (protocols.NodeRef, error) {
+func webNodeID(option *cfg.Option) (string, error) {
 	if option == nil {
-		return protocols.NodeRef{}, fmt.Errorf("web node configuration is required")
+		return "", fmt.Errorf("web node configuration is required")
 	}
-	authority, err := protocols.CanonicalAuthority(option.ServerURL)
-	if err != nil {
-		return protocols.NodeRef{}, fmt.Errorf("web node authority: %w", err)
+	if nodeID := strings.TrimSpace(option.IOANodeID); nodeID != "" {
+		return nodeID, nil
 	}
-	name := strings.TrimSpace(option.IOANodeName)
-	if name == "" {
-		return protocols.NodeRef{}, fmt.Errorf("ioa.node_name is required for web node identity")
+	if nodeID := strings.TrimSpace(option.IOANodeName); nodeID != "" {
+		return nodeID, nil
 	}
-	return protocols.NodeRef{ID: name, Authority: authority}, nil
+	return "", fmt.Errorf("node_id is required; set --node-id or --node-name")
 }
 
-func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *runner.IOAConfig {
+func remoteIOAConfig(option *cfg.Option) *runner.IOAConfig {
 	if option == nil || option.IOAURL == "" {
 		return nil
 	}
@@ -338,6 +207,5 @@ func remoteIOAConfig(option *cfg.Option, ref protocols.NodeRef) *runner.IOAConfi
 		RegisterTools: true,
 		AutoRegister:  true,
 		NodeMeta:      map[string]any{"client": "aiscan", "transport": "websocket"},
-		Identity:      webIdentity{ref: ref},
 	}
 }

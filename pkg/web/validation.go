@@ -8,12 +8,12 @@ import (
 
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	config "github.com/chainreactors/aiscan/core/config"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 // ValidateLLMConfig accepts zero limits as "use the model default" and rejects
 // incomplete profiles before an invalid configuration can be persisted.
-func ValidateLLMConfig(cfg *configpb.LLMConfig) error {
+func ValidateLLMConfig(cfg *types.LLMConfig) error {
 	if cfg == nil {
 		return nil
 	}

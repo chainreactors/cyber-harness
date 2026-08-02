@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 // localProc is the process handle for one launched `aiscan agent` child.
@@ -64,7 +64,7 @@ func webURLWithToken(hubURL, token string) string {
 // Launch spawns an `aiscan agent` on the hub host wired to the hub's loopback
 // web + IOA endpoints, and tracks it. The LLM provider/model/key arrive via the
 // hub's config push on registration, so nothing about the model is passed here.
-func (l *LocalAgents) Launch(ctx context.Context) (*agentpb.LocalAgent, error) {
+func (l *LocalAgents) Launch(ctx context.Context) (*types.LocalAgent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -113,13 +113,13 @@ func (l *LocalAgents) Launch(ctx context.Context) (*agentpb.LocalAgent, error) {
 
 // List returns the tracked local agents (launch order), cross-referenced with
 // the pool for connection state.
-func (l *LocalAgents) List() []*agentpb.LocalAgent {
+func (l *LocalAgents) List() []*types.LocalAgent {
 	l.mu.Lock()
 	all := make([]*localProc, len(l.procs))
 	copy(all, l.procs)
 	l.mu.Unlock()
 
-	views := make([]*agentpb.LocalAgent, 0, len(all))
+	views := make([]*types.LocalAgent, 0, len(all))
 	for _, p := range all {
 		views = append(views, l.view(p))
 	}
@@ -170,8 +170,8 @@ func (l *LocalAgents) remove(p *localProc) {
 }
 
 // view cross-references a child against the live pool by its display name.
-func (l *LocalAgents) view(p *localProc) *agentpb.LocalAgent {
-	v := &agentpb.LocalAgent{Name: p.name, Pid: int32(p.pid)}
+func (l *LocalAgents) view(p *localProc) *types.LocalAgent {
+	v := &types.LocalAgent{Name: p.name, Pid: int32(p.pid)}
 	if l.pool == nil {
 		return v
 	}

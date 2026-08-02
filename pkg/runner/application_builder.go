@@ -5,7 +5,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type RuntimeFeatures struct {
@@ -21,7 +21,7 @@ type RuntimeFeatures struct {
 // canonical config proto. Fields that have no proto representation (playwright
 // session, uncover credentials, CLI skill paths) stay at their defaults; the
 // startup path layers them from cfg.Option via MergeOptionExtras.
-func AppConfigFromDistribute(dc *configpb.DistributeConfig, features RuntimeFeatures, logger telemetry.Logger) ApplicationConfig {
+func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeatures, logger telemetry.Logger) ApplicationConfig {
 	return ApplicationConfig{
 		Provider: ApplicationProviderConfig{
 			Enabled:   features.ProviderEnabled,

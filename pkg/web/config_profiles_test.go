@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestActivateLLMProfileSelectsByID(t *testing.T) {
 	store := &fakeConfigStore{}
-	store.cfg = &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
 		ActiveProfile: "primary",
-		Providers: []*configpb.LLMProviderConfig{
+		Providers: []*types.LLMProviderConfig{
 			{Id: "primary", Name: "Primary", Provider: "openai", Model: "gpt-primary", ApiKey: "key-1"},
 			{Id: "fast", Name: "Fast", Provider: "openai", Model: "deepseek-fast", ApiKey: "key-2"},
 		},
@@ -37,9 +37,9 @@ func TestActivateLLMProfileSelectsByID(t *testing.T) {
 }
 
 func TestConfigStatusIncludesModelLimits(t *testing.T) {
-	conf := &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+	conf := &types.DistributeConfig{Llm: &types.LLMConfig{
 		ActiveProfile: "large",
-		Providers: []*configpb.LLMProviderConfig{{
+		Providers: []*types.LLMProviderConfig{{
 			Id: "large", Provider: "anthropic", Model: "glm-5.2[1m]",
 			MaxTokens: 32768, ContextWindow: 1000000,
 		}},
@@ -56,14 +56,14 @@ func TestConfigStatusIncludesModelLimits(t *testing.T) {
 func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 	store := &fakeConfigStore{}
 	service := NewService(ServiceConfig{ConfigStore: store})
-	for _, mutate := range []func(*configpb.LLMProviderConfig){
-		func(p *configpb.LLMProviderConfig) { p.MaxTokens = -1 },
-		func(p *configpb.LLMProviderConfig) { p.ContextWindow = -1 },
+	for _, mutate := range []func(*types.LLMProviderConfig){
+		func(p *types.LLMProviderConfig) { p.MaxTokens = -1 },
+		func(p *types.LLMProviderConfig) { p.ContextWindow = -1 },
 	} {
-		profile := &configpb.LLMProviderConfig{Id: "bad", Model: "test-model"}
+		profile := &types.LLMProviderConfig{Id: "bad", Model: "test-model"}
 		mutate(profile)
-		conf := &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
-			Providers: []*configpb.LLMProviderConfig{profile},
+		conf := &types.DistributeConfig{Llm: &types.LLMConfig{
+			Providers: []*types.LLMProviderConfig{profile},
 		}}
 		if _, err := service.SaveConfig(context.Background(), conf); err == nil {
 			t.Fatal("SaveConfig() accepted a negative model limit")
@@ -77,8 +77,8 @@ func TestSaveConfigRejectsNegativeModelLimits(t *testing.T) {
 func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
 	store := &fakeConfigStore{}
 	service := NewService(ServiceConfig{ConfigStore: store})
-	conf := &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
-		Providers: []*configpb.LLMProviderConfig{{Id: "empty", Name: "Empty", Model: "  "}},
+	conf := &types.DistributeConfig{Llm: &types.LLMConfig{
+		Providers: []*types.LLMProviderConfig{{Id: "empty", Name: "Empty", Model: "  "}},
 	}}
 
 	if _, err := service.SaveConfig(context.Background(), conf); err == nil {
@@ -91,9 +91,9 @@ func TestSaveConfigRejectsEmptyProfileModel(t *testing.T) {
 
 func TestActivateLLMProfileRejectsEmptyModel(t *testing.T) {
 	store := &fakeConfigStore{}
-	store.cfg = &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+	store.cfg = &types.DistributeConfig{Llm: &types.LLMConfig{
 		ActiveProfile: "primary",
-		Providers: []*configpb.LLMProviderConfig{
+		Providers: []*types.LLMProviderConfig{
 			{Id: "primary", Model: "gpt-primary"},
 			{Id: "empty", Model: ""},
 		},

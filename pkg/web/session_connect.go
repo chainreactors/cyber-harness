@@ -12,13 +12,13 @@ import (
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/rpc/chat/chatconnect"
-	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 
 type connectSessionServer struct {
-	chatconnect.UnimplementedSessionServiceHandler
+	rpc.UnimplementedSessionServiceHandler
 	service *Service
 	chat    *aopChatServer
 	mu      sync.Mutex
@@ -28,7 +28,7 @@ func newConnectSessionServer(service *Service, chat *aopChatServer) *connectSess
 	return &connectSessionServer{service: service, chat: chat}
 }
 
-func (s *connectSessionServer) ListSessions(ctx context.Context, req *connect.Request[chatpb.ListSessionsRequest]) (*connect.Response[chatpb.ListSessionsResponse], error) {
+func (s *connectSessionServer) ListSessions(ctx context.Context, req *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error) {
 	if s.service == nil || s.service.store == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("chat service is unavailable"))
 	}
@@ -48,14 +48,14 @@ func (s *connectSessionServer) ListSessions(ctx context.Context, req *connect.Re
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	response := &chatpb.ListSessionsResponse{Sessions: sessions}
+	response := &types.ListSessionsResponse{Sessions: sessions}
 	if more {
 		response.NextCursor = strconv.Itoa(offset + len(sessions))
 	}
 	return connect.NewResponse(response), nil
 }
 
-func (s *connectSessionServer) GetSession(ctx context.Context, req *connect.Request[chatpb.GetSessionRequest]) (*connect.Response[chatpb.GetSessionResponse], error) {
+func (s *connectSessionServer) GetSession(ctx context.Context, req *connect.Request[types.GetSessionRequest]) (*connect.Response[types.GetSessionResponse], error) {
 	if req.Msg == nil || strings.TrimSpace(req.Msg.SessionId) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
 	}
@@ -66,17 +66,17 @@ func (s *connectSessionServer) GetSession(ctx context.Context, req *connect.Requ
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return connect.NewResponse(&chatpb.GetSessionResponse{Session: session}), nil
+	return connect.NewResponse(&types.GetSessionResponse{Session: session}), nil
 }
 
-func (s *connectSessionServer) ResetSession(ctx context.Context, req *connect.Request[chatpb.ResetSessionRequest]) (*connect.Response[chatpb.ResetSessionResponse], error) {
+func (s *connectSessionServer) ResetSession(ctx context.Context, req *connect.Request[types.ResetSessionRequest]) (*connect.Response[types.ResetSessionResponse], error) {
 	request := req.Msg
 	if request == nil || strings.TrimSpace(request.RequestId) == "" {
 		return connect.NewResponse(rejectedReset(request, "INVALID_ARGUMENT", "request_id is required")), nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	replayed := new(chatpb.ResetSessionResponse)
+	replayed := new(types.ResetSessionResponse)
 	hash, found, conflict, err := s.beginRequest(ctx, "ResetSession", request.RequestId, request, replayed)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -87,7 +87,7 @@ func (s *connectSessionServer) ResetSession(ctx context.Context, req *connect.Re
 	if conflict {
 		return connect.NewResponse(rejectedReset(request, "ALREADY_EXISTS", "request_id conflicts with another request")), nil
 	}
-	finish := func(response *chatpb.ResetSessionResponse) (*connect.Response[chatpb.ResetSessionResponse], error) {
+	finish := func(response *types.ResetSessionResponse) (*connect.Response[types.ResetSessionResponse], error) {
 		if err := s.finishRequest(ctx, "ResetSession", request.RequestId, hash, response); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
@@ -105,13 +105,13 @@ func (s *connectSessionServer) ResetSession(ctx context.Context, req *connect.Re
 		newID = generateID()
 	}
 	openResponse, err := s.chat.OpenSession(ctx, request.RequestId+":open", &aop.OpenSessionRequest{
-		SessionId: newID, NodeUri: old.GetSession().GetNodeUri(), Title: request.Title,
+		SessionId: newID, NodeId: old.GetSession().GetNodeId(), Title: request.Title,
 	})
 	if err != nil {
 		return nil, asConnectError(err)
 	}
 	if rejected := openResponse.GetRejected(); rejected != nil {
-		return finish(&chatpb.ResetSessionResponse{RequestId: request.RequestId, Outcome: &chatpb.ResetSessionResponse_Rejected{Rejected: rejected}})
+		return finish(&types.ResetSessionResponse{RequestId: request.RequestId, Outcome: &types.ResetSessionResponse_Rejected{Rejected: rejected}})
 	}
 	closeResponse, err := s.chat.CloseSession(ctx, request.RequestId+":close", &aop.CloseSessionRequest{
 		SessionId: old.GetSession().GetId(), Reason: "reset",
@@ -122,25 +122,25 @@ func (s *connectSessionServer) ResetSession(ctx context.Context, req *connect.Re
 	}
 	if rejected := closeResponse.GetRejected(); rejected != nil {
 		_ = s.service.DeleteSession(context.Background(), newID)
-		return finish(&chatpb.ResetSessionResponse{RequestId: request.RequestId, Outcome: &chatpb.ResetSessionResponse_Rejected{Rejected: rejected}})
+		return finish(&types.ResetSessionResponse{RequestId: request.RequestId, Outcome: &types.ResetSessionResponse_Rejected{Rejected: rejected}})
 	}
 	current, err := s.service.store.GetSession(ctx, newID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return finish(&chatpb.ResetSessionResponse{RequestId: request.RequestId, Outcome: &chatpb.ResetSessionResponse_Accepted{Accepted: &chatpb.ResetSessionReceipt{
+	return finish(&types.ResetSessionResponse{RequestId: request.RequestId, Outcome: &types.ResetSessionResponse_Accepted{Accepted: &types.ResetSessionReceipt{
 		Previous: closeResponse.GetAccepted(), Current: current,
 	}}})
 }
 
-func (s *connectSessionServer) DeleteSession(ctx context.Context, req *connect.Request[chatpb.DeleteSessionRequest]) (*connect.Response[chatpb.DeleteSessionResponse], error) {
+func (s *connectSessionServer) DeleteSession(ctx context.Context, req *connect.Request[types.DeleteSessionRequest]) (*connect.Response[types.DeleteSessionResponse], error) {
 	request := req.Msg
 	if request == nil || strings.TrimSpace(request.RequestId) == "" {
 		return connect.NewResponse(rejectedDelete(request, "INVALID_ARGUMENT", "request_id is required")), nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	replayed := new(chatpb.DeleteSessionResponse)
+	replayed := new(types.DeleteSessionResponse)
 	hash, found, conflict, err := s.beginRequest(ctx, "DeleteSession", request.RequestId, request, replayed)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -151,7 +151,7 @@ func (s *connectSessionServer) DeleteSession(ctx context.Context, req *connect.R
 	if conflict {
 		return connect.NewResponse(rejectedDelete(request, "ALREADY_EXISTS", "request_id conflicts with another request")), nil
 	}
-	finish := func(response *chatpb.DeleteSessionResponse) (*connect.Response[chatpb.DeleteSessionResponse], error) {
+	finish := func(response *types.DeleteSessionResponse) (*connect.Response[types.DeleteSessionResponse], error) {
 		if err := s.finishRequest(ctx, "DeleteSession", request.RequestId, hash, response); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
@@ -167,17 +167,17 @@ func (s *connectSessionServer) DeleteSession(ctx context.Context, req *connect.R
 	if err := s.service.DeleteSession(ctx, request.SessionId); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return finish(&chatpb.DeleteSessionResponse{RequestId: request.RequestId, Outcome: &chatpb.DeleteSessionResponse_Accepted{Accepted: &aop.Session{
-		Id: session.GetSession().GetId(), State: "deleted", NodeUri: session.GetSession().GetNodeUri(), Title: session.GetSession().GetTitle(),
+	return finish(&types.DeleteSessionResponse{RequestId: request.RequestId, Outcome: &types.DeleteSessionResponse_Accepted{Accepted: &aop.Session{
+		Id: session.GetSession().GetId(), State: "deleted", NodeId: session.GetSession().GetNodeId(), Title: session.GetSession().GetTitle(),
 	}}})
 }
 
-func (s *connectSessionServer) ListCommands(_ context.Context, req *connect.Request[chatpb.ListCommandsRequest]) (*connect.Response[chatpb.ListCommandsResponse], error) {
+func (s *connectSessionServer) ListCommands(_ context.Context, req *connect.Request[types.ListCommandsRequest]) (*connect.Response[types.ListCommandsResponse], error) {
 	if req.Msg == nil || strings.TrimSpace(req.Msg.SessionId) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
 	}
 	specs := s.service.SessionMenu(req.Msg.SessionId)
-	return connect.NewResponse(&chatpb.ListCommandsResponse{Commands: cloneCommandSpecs(specs)}), nil
+	return connect.NewResponse(&types.ListCommandsResponse{Commands: cloneCommandSpecs(specs)}), nil
 }
 
 func (s *connectSessionServer) ListEvents(ctx context.Context, req *connect.Request[aop.ListEventsRequest]) (*connect.Response[aop.ListEventsResponse], error) {
@@ -199,16 +199,16 @@ func (s *connectSessionServer) finishRequest(ctx context.Context, method, reques
 	return s.service.store.SaveAOPRequest(ctx, requestID, method, hash, response)
 }
 
-func rejectedReset(req *chatpb.ResetSessionRequest, code, message string) *chatpb.ResetSessionResponse {
-	response := &chatpb.ResetSessionResponse{Outcome: &chatpb.ResetSessionResponse_Rejected{Rejected: rejection(code, message)}}
+func rejectedReset(req *types.ResetSessionRequest, code, message string) *types.ResetSessionResponse {
+	response := &types.ResetSessionResponse{Outcome: &types.ResetSessionResponse_Rejected{Rejected: rejection(code, message)}}
 	if req != nil {
 		response.RequestId = req.RequestId
 	}
 	return response
 }
 
-func rejectedDelete(req *chatpb.DeleteSessionRequest, code, message string) *chatpb.DeleteSessionResponse {
-	response := &chatpb.DeleteSessionResponse{Outcome: &chatpb.DeleteSessionResponse_Rejected{Rejected: rejection(code, message)}}
+func rejectedDelete(req *types.DeleteSessionRequest, code, message string) *types.DeleteSessionResponse {
+	response := &types.DeleteSessionResponse{Outcome: &types.DeleteSessionResponse_Rejected{Rejected: rejection(code, message)}}
 	if req != nil {
 		response.RequestId = req.RequestId
 	}

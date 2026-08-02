@@ -9,24 +9,24 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type transactionalConfigStore struct {
 	mu         sync.Mutex
-	cfg        *configpb.DistributeConfig
+	cfg        *types.DistributeConfig
 	commitErr  error
 	discarded  int
 	prepareLog []string
 }
 
-func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, *configpb.DistributeConfig, error) {
+func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, *types.DistributeConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return "config.yaml", true, s.cfg, nil
 }
 
-func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg *configpb.DistributeConfig) (*PreparedConfig, error) {
+func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg *types.DistributeConfig) (*PreparedConfig, error) {
 	s.mu.Lock()
 	s.prepareLog = append(s.prepareLog, activeModel(cfg))
 	s.mu.Unlock()
@@ -49,7 +49,7 @@ func (s *transactionalConfigStore) DiscardDistributeConfig(*PreparedConfig) {
 	s.mu.Unlock()
 }
 
-func activeModel(c *configpb.DistributeConfig) string {
+func activeModel(c *types.DistributeConfig) string {
 	if active := cfg.ActiveLLMProvider(c.GetLlm()); active != nil {
 		return active.Model
 	}
@@ -70,10 +70,10 @@ func (c *recordingCloser) Close() {
 	c.once.Do(func() { close(c.done) })
 }
 
-func configForModel(model string) *configpb.DistributeConfig {
-	return &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+func configForModel(model string) *types.DistributeConfig {
+	return &types.DistributeConfig{Llm: &types.LLMConfig{
 		ActiveProfile: "primary",
-		Providers:     []*configpb.LLMProviderConfig{{Id: "primary", Provider: "openai", Model: model}},
+		Providers:     []*types.LLMProviderConfig{{Id: "primary", Provider: "openai", Model: model}},
 	}}
 }
 

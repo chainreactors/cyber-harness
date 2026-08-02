@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	"github.com/chainreactors/aiscan/pkg/rpc/system/systemconnect"
-	systempb "github.com/chainreactors/aiscan/pkg/types/system"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
@@ -29,8 +29,8 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			client := systemconnect.NewSystemServiceClient(server.Client(), server.URL, test.opts...)
-			response, err := client.GetStatus(context.Background(), connect.NewRequest(&systempb.GetStatusRequest{}))
+			client := rpc.NewSystemServiceClient(server.Client(), server.URL, test.opts...)
+			response, err := client.GetStatus(context.Background(), connect.NewRequest(&types.GetStatusRequest{}))
 			if err != nil {
 				t.Fatal(err)
 			}

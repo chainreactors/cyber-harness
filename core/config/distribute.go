@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
 
 // LoadDistributeConfigYAML parses an aiscan.yaml file into the canonical proto
 // representation. It bridges YAML's snake-case keys with the proto message.
-func LoadDistributeConfigYAML(data []byte) (*configpb.DistributeConfig, error) {
+func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("unmarshal yaml: %w", err)
@@ -21,7 +21,7 @@ func LoadDistributeConfigYAML(data []byte) (*configpb.DistributeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("convert yaml to json: %w", err)
 	}
-	pb := new(configpb.DistributeConfig)
+	pb := new(types.DistributeConfig)
 	if err := protojson.Unmarshal(jsonData, pb); err != nil {
 		return nil, fmt.Errorf("unmarshal proto json: %w", err)
 	}
@@ -29,7 +29,7 @@ func LoadDistributeConfigYAML(data []byte) (*configpb.DistributeConfig, error) {
 }
 
 // MarshalDistributeConfigYAML serializes the canonical proto config to YAML.
-func MarshalDistributeConfigYAML(pb *configpb.DistributeConfig) ([]byte, error) {
+func MarshalDistributeConfigYAML(pb *types.DistributeConfig) ([]byte, error) {
 	if pb == nil {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func MarshalDistributeConfigYAML(pb *configpb.DistributeConfig) ([]byte, error) 
 
 // ActiveLLMProvider returns the selected LLM profile, or the first when the
 // active id is missing/unknown, or nil when no profiles exist.
-func ActiveLLMProvider(llm *configpb.LLMConfig) *configpb.LLMProviderConfig {
+func ActiveLLMProvider(llm *types.LLMConfig) *types.LLMProviderConfig {
 	if llm == nil || len(llm.Providers) == 0 {
 		return nil
 	}
@@ -60,7 +60,7 @@ func ActiveLLMProvider(llm *configpb.LLMConfig) *configpb.LLMProviderConfig {
 
 // NormalizeLLMConfig canonicalizes the final profile-list representation. Old
 // flat LLM configuration is intentionally not accepted.
-func NormalizeLLMConfig(llm *configpb.LLMConfig) {
+func NormalizeLLMConfig(llm *types.LLMConfig) {
 	if llm == nil {
 		return
 	}
@@ -87,7 +87,7 @@ func NormalizeLLMConfig(llm *configpb.LLMConfig) {
 
 // NormalizeLLMProvider trims and canonicalizes the provider protocol, inferring
 // it from the base URL when blank.
-func NormalizeLLMProvider(profile *configpb.LLMProviderConfig) *configpb.LLMProviderConfig {
+func NormalizeLLMProvider(profile *types.LLMProviderConfig) *types.LLMProviderConfig {
 	if profile == nil {
 		return nil
 	}

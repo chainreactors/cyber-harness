@@ -22,14 +22,12 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 		reg = commands.NewRegistry()
 	}
 	publicBus := eventbus.New[*aop.Event]()
-	kernelBus := eventbus.New[*aop.Event]()
 	events := newSessionEmitter(publicBus)
-	kernelBus.Subscribe(events.emit)
 	rt := &AgentRuntime{
 		app: &App{Commands: reg}, option: &cfg.Option{}, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		bus: publicBus, kernelBus: kernelBus, sessionEvents: events,
-		config: agent.Config{Provider: provider, Tools: reg, Bus: kernelBus, Logger: telemetry.NopLogger()},
+		bus: publicBus, sessionEvents: events,
+		config: agent.Config{Provider: provider, Tools: reg, Bus: events, Logger: telemetry.NopLogger()},
 	}
 	mux, err := newRuntimeNamespaceMux(rt)
 	if err != nil {

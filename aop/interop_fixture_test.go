@@ -82,15 +82,15 @@ func TestInteropFixtureMatchesProtoBinaryAndProtoJSON(t *testing.T) {
 	}
 }
 
-func TestSessionNodeURIPreservesFieldThreeBinaryCompatibility(t *testing.T) {
+func TestSessionNodeIDPreservesFieldThreeBinaryCompatibility(t *testing.T) {
 	// The node identity remains field 3, so persisted sessions decode without
-	// rewriting even though the public field name is now node_uri.
-	legacy := []byte{0x1a, 0x0c, 'n', 'o', 'd', 'e', ':', '/', '/', 'l', 'o', 'c', 'a', 'l'}
+	// rewriting after the public field name changes to node_id.
+	legacy := []byte{0x1a, 0x07, 'l', 'o', 'c', 'a', 'l', '-', '1'}
 	session := new(aop.Session)
 	if err := proto.Unmarshal(legacy, session); err != nil {
 		t.Fatal(err)
 	}
-	if session.GetNodeUri() != "node://local" {
-		t.Fatalf("node_uri = %q", session.GetNodeUri())
+	if session.GetNodeId() != "local-1" {
+		t.Fatalf("node_id = %q", session.GetNodeId())
 	}
 }

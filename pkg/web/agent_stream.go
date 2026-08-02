@@ -7,8 +7,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
-	"github.com/chainreactors/ioa/protocols"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -61,14 +60,10 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 		return fmt.Errorf("first AOP envelope must contain agent_hello")
 	}
 	hello := core.GetAgentHello()
-	if hello.AgentId == "" || hello.Authority == "" {
-		return fmt.Errorf("hello agent_id and authority are required")
+	if hello.NodeId == "" {
+		return fmt.Errorf("hello node_id is required")
 	}
-	node := protocols.NodeRef{ID: hello.AgentId, Authority: hello.Authority}
-	nodeURI := canonicalNodeURI(hello.AgentId, hello.Authority)
-	if nodeURI == "" {
-		return fmt.Errorf("agent identity is required")
-	}
+	nodeID := hello.NodeId
 	name := hello.Name
 	if name == "" {
 		name = "agent"
@@ -80,12 +75,12 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 
 	ctx, cancel := context.WithCancel(parent)
 	agent := &remoteAgent{
-		nodeURI: nodeURI, name: name, capabilities: append([]string(nil), hello.Capabilities...),
+		nodeState: newNodeState(),
+		nodeID: nodeID, name: name, capabilities: append([]string(nil), hello.Capabilities...),
 		close: cancel, sendCh: make(chan *aop.Envelope, 64),
-		connectAt: time.Now(), node: node, runtime: runtimeInfo,
+		connectAt: time.Now(), runtime: runtimeInfo,
 		status: &aop.AgentStatus{}, stats: &aop.AgentStats{},
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: make(map[string]struct{}),
-		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+		done: make(chan struct{}),
 	}
 	namespaceMux, err := p.newAgentNamespaceMux(agent)
 	if err != nil {
@@ -99,7 +94,7 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 	}()
 
 	accepted, err := aop.Wrap(generateID(), first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{
-		AgentAccepted: &aop.AgentAccepted{AgentId: hello.AgentId, Capabilities: append([]string(nil), hello.Capabilities...)},
+		AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId, Capabilities: append([]string(nil), hello.Capabilities...)},
 	}})
 	if err != nil {
 		return err
@@ -109,7 +104,7 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 	}
 	if p.config != nil {
 		if config, configErr := p.config(ctx); configErr == nil && config != nil {
-			reload, wrapErr := aop.Wrap(generateID(), "", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{Config: config}}})
+			reload, wrapErr := aop.Wrap(generateID(), "", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{Config: config}}})
 			if wrapErr != nil {
 				return wrapErr
 			}

@@ -28,23 +28,23 @@ var aopProtos = []string{
 }
 
 var typeProtos = []string{
-	"aiscan/types/agent.proto",
-	"aiscan/types/chat.proto",
-	"aiscan/types/command.proto",
-	"aiscan/types/config.proto",
-	"aiscan/types/reload.proto",
-	"aiscan/types/scan.proto",
-	"aiscan/types/sco.proto",
-	"aiscan/types/system.proto",
+	"types/agent.proto",
+	"types/chat.proto",
+	"types/command.proto",
+	"types/config.proto",
+	"types/reload.proto",
+	"types/scan.proto",
+	"types/sco.proto",
+	"types/system.proto",
 }
 
 var rpcProtos = []string{
-	"aiscan/rpc/agent.proto",
-	"aiscan/rpc/chat.proto",
-	"aiscan/rpc/config.proto",
-	"aiscan/rpc/scan.proto",
-	"aiscan/rpc/sco.proto",
-	"aiscan/rpc/system.proto",
+	"rpc/agent.proto",
+	"rpc/chat.proto",
+	"rpc/config.proto",
+	"rpc/scan.proto",
+	"rpc/sco.proto",
+	"rpc/system.proto",
 }
 
 func main() {
@@ -64,25 +64,21 @@ func main() {
 	cyberProto := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "proto")
 	productProto := filepath.Join(root, "proto")
 	aopTS := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "src", "gen", "aop")
-	productTS := filepath.Join(root, "web", "frontend", "src", "gen", "aiscan")
+	productTS := filepath.Join(root, "web", "frontend", "src", "gen")
+	typesDir := filepath.Join(root, "pkg", "types")
 
 	for _, path := range []string{
-		filepath.Join(root, "pkg", "types", "agent"),
-		filepath.Join(root, "pkg", "types", "chat"),
-		filepath.Join(root, "pkg", "types", "command"),
-		filepath.Join(root, "pkg", "types", "config"),
-		filepath.Join(root, "pkg", "types", "reload"),
-		filepath.Join(root, "pkg", "types", "scan"),
-		filepath.Join(root, "pkg", "types", "sco"),
-		filepath.Join(root, "pkg", "types", "system"),
 		filepath.Join(root, "pkg", "rpc"),
-		filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "src", "gen", "aiscan"),
+		filepath.Join(root, "web", "frontend", "src", "gen", "rpc"),
+		filepath.Join(root, "web", "frontend", "src", "gen", "types"),
 		aopTS,
-		productTS,
 	} {
 		if err := os.RemoveAll(path); err != nil {
 			fatal("clear generated output "+path, err)
 		}
+	}
+	if err := removeGeneratedFiles(typesDir, ".pb.go"); err != nil {
+		fatal("clear generated AIScan types", err)
 	}
 
 	goInputs := append(append([]string{}, aopProtos...), typeProtos...)
@@ -102,6 +98,7 @@ func main() {
 		"-I", productProto,
 		"--connect-go_out=" + root,
 		"--connect-go_opt=module=" + modulePath,
+		"--connect-go_opt=package_suffix",
 	}
 	connectArgs = append(connectArgs, absoluteInputs(cyberProto, productProto, rpcProtos)...)
 	run(root, protoc, connectArgs...)
@@ -119,7 +116,7 @@ func main() {
 	aopArgs = append(aopArgs, absoluteInputs(cyberProto, productProto, aopProtos)...)
 	run(root, protoc, aopArgs...)
 
-	if err := os.MkdirAll(filepath.Dir(productTS), 0o755); err != nil {
+	if err := os.MkdirAll(productTS, 0o755); err != nil {
 		fatal("create AIScan TypeScript output", err)
 	}
 	productInputs := append(append([]string{}, typeProtos...), rpcProtos...)
@@ -128,7 +125,7 @@ func main() {
 		"-I", cyberProto,
 		"-I", productProto,
 		"--plugin=protoc-gen-es=" + esPlugin,
-		"--es_out=" + filepath.Join(root, "web", "frontend", "src", "gen"),
+		"--es_out=" + productTS,
 		"--es_opt=target=ts,import_extension=js",
 	}
 	productArgs = append(productArgs, absoluteInputs(cyberProto, productProto, productInputs)...)
@@ -151,12 +148,32 @@ func rewriteProductAOPImports(root string) error {
 			return err
 		}
 		value := string(data)
-		next := strings.ReplaceAll(value, `"../../aop/`, `"../../../../cyber-ui/packages/aop/src/gen/aop/`)
+		next := strings.ReplaceAll(value, `"../aop/`, `"../../../cyber-ui/packages/aop/src/gen/aop/`)
+		next = strings.TrimRight(next, "\r\n") + "\n"
 		if next == value {
 			return nil
 		}
 		return os.WriteFile(path, []byte(next), 0o644)
 	})
+}
+
+func removeGeneratedFiles(dir, suffix string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffix) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func absoluteInputs(cyberProto, productProto string, inputs []string) []string {

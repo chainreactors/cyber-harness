@@ -135,6 +135,26 @@ func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
 	}
 }
 
+func TestAIScanProtocolPackagesStayFlat(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, rel := range []string{filepath.Join("pkg", "types"), filepath.Join("pkg", "rpc")} {
+		dir := filepath.Join(root, rel)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", relative(root, dir), err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				t.Errorf("AIScan protocol package must stay flat: %s", filepath.ToSlash(filepath.Join(rel, entry.Name())))
+			}
+		}
+	}
+	legacy := filepath.Join(root, "proto", "aiscan")
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy nested proto root still exists: %s", relative(root, legacy))
+	}
+}
+
 func TestSharedTypesDoNotDependOnRPCOrConnect(t *testing.T) {
 	root := repositoryRoot(t)
 	tree := filepath.Join(root, "pkg", "types")

@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type imageDisabler interface {
@@ -229,7 +229,7 @@ func requestAssistantMessageWithUsage(ctx context.Context, cfg Config, em *aopEm
 		return nil, nil, fmt.Errorf("cannot create LLM request at turn %d: %w", turn, err)
 	}
 	req.MaxTokens = maxTokens
-	em.status(statusLLMRequest, &agentpb.LLMRequestDetail{
+	em.status(statusLLMRequest, &types.LLMRequestDetail{
 		Model: req.Model, Messages: uint32(len(req.Messages)), MaxTokens: uint32(max(req.MaxTokens, 0)), Stream: cfg.Stream,
 	})
 	if cfg.Stream {

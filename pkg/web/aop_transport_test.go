@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -51,14 +51,14 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
-		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		done: make(chan struct{}),
 	}
-	pool.agents[fake.nodeURI] = fake
+	pool.agents[fake.nodeID] = fake
 	server := NewAOPChatServer(service)
 	ctx := context.Background()
-	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: "agent-1"}); err != nil || opened.GetAccepted() == nil {
+	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1"}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
 	}
 	request := &aop.RunTurnRequest{
@@ -97,7 +97,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.Create(context.Background(), &scanpb.Scan{
+	if err := store.Create(context.Background(), &types.Scan{
 		Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
@@ -106,17 +106,17 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		nodeURI: "node://agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
-		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		done: make(chan struct{}),
 	}
-	pool.agents[fake.nodeURI] = fake
-	value, err := anypb.New(&scanpb.SessionBinding{ScanId: "scan-1"})
+	pool.agents[fake.nodeID] = fake
+	value, err := anypb.New(&types.SessionBinding{ScanId: "scan-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	response, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-1", &aop.OpenSessionRequest{
-		SessionId: "session-1", NodeUri: fake.nodeURI,
+		SessionId: "session-1", NodeId: fake.nodeID,
 		Extensions: []*anypb.Any{value},
 	})
 	if err != nil || response.GetAccepted() == nil {
@@ -139,14 +139,14 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
-		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
-		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		done: make(chan struct{}),
 	}
-	pool.agents[fake.nodeURI] = fake
+	pool.agents[fake.nodeID] = fake
 	server := NewAOPChatServer(service)
 	ctx := context.Background()
-	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: fake.nodeURI}); err != nil || opened.GetAccepted() == nil {
+	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: fake.nodeID}); err != nil || opened.GetAccepted() == nil {
 		t.Fatalf("open = %v, %v", opened, err)
 	}
 	for _, turnID := range []string{"turn-1", "turn-2"} {
@@ -221,11 +221,11 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	pool.agents["agent-1"] = &remoteAgent{
-		nodeURI: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}},
-		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		done: make(chan struct{}),
 	}
-	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeUri: "agent-1", Title: "original"}
+	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1", Title: "original"}
 	first, err := NewAOPChatServer(service).OpenSession(context.Background(), "open-durable", request)
 	if err != nil || first.GetAccepted() == nil {
 		t.Fatalf("first open = %v, %v", first, err)

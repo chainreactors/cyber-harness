@@ -16,7 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"golang.org/x/term"
 )
 
@@ -614,26 +614,26 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 	case *aop.Event_Status:
 		data := payload.Status
 		switch data.State {
-		case ext.EvalStateStart:
-			detail, _, _ := ext.GetEvalDetail(event)
+		case types.EvalStateStart:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
 			o.evalStart(int(detail.Round))
-		case ext.EvalStateEnd:
-			detail, _, _ := ext.GetEvalDetail(event)
+		case types.EvalStateEnd:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
 			o.evalEnd(int(detail.Round), detail.Pass, detail.Reason)
-		case ext.EvalStateError:
-			detail, _, _ := ext.GetEvalDetail(event)
+		case types.EvalStateError:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
 			o.evalError(int(detail.Round), detail.Error)
-		case ext.CompactStateStart:
+		case types.CompactStateStart:
 			o.stopLive()
 			o.compactStart()
-		case ext.CompactStateEnd:
-			detail, _, _ := ext.GetCompactDetail(event)
+		case types.CompactStateEnd:
+			detail, _, _ := types.GetCompactDetail(event)
 			o.stopLive()
 			o.compactEnd(int(detail.TokensBefore), int(detail.TokensAfter), int(detail.KeptMessages))
-		case ext.CompactStateError:
+		case types.CompactStateError:
 			o.stopLive()
 			o.compactError()
 		}

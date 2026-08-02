@@ -7,7 +7,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -30,7 +30,7 @@ func TestEnvelopeErrorsKeepDistinctReplyIDs(t *testing.T) {
 		t.Fatalf("run response = %+v", runResponse)
 	}
 
-	commandResponse := handleRuntimeMessage(t, rt, "command-correlation", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Request{Request: &commandpb.Request{}}})
+	commandResponse := handleRuntimeMessage(t, rt, "command-correlation", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: &types.CommandRequest{}}})
 	commandMessage, _ := aop.Unwrap(commandResponse)
 	if commandResponse.ReplyTo != "command-correlation" || commandMessage.(*aop.ProtocolMessage).GetProtocolError() == nil {
 		t.Fatalf("command response = %+v", commandResponse)

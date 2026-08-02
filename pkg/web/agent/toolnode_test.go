@@ -77,7 +77,7 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.registered <- core.GetAgentHello()
-	if err := writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{AgentId: "runner-1"}}})); err != nil {
+	if err := writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})); err != nil {
 		return
 	}
 	go h.drive(conn)
@@ -142,7 +142,7 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 		errCh <- RunToolNode(ctx, ToolNodeConfig{ServerURL: server.URL, WSPath: "/ws/runner", ID: "runner-1", Token: "test-token", Registry: registry, DataBus: dataBus, Version: "test"})
 	}()
 	hello := wait(t, hub.registered, "hello")
-	if hello.Name != "runner-1" || hello.AgentId != "runner-1" {
+	if hello.Name != "runner-1" || hello.NodeId != "runner-1" {
 		t.Fatalf("hello identity = %+v", hello)
 	}
 	if hello.Runtime.Os == "" {
@@ -197,7 +197,7 @@ func TestRunToolNodeFileRead(t *testing.T) {
 			return
 		}
 		hub.registered <- core.GetAgentHello()
-		if writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{AgentId: "runner-1"}}})) != nil {
+		if writeAgentEnvelope(conn, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}})) != nil {
 			return
 		}
 		hub.driveFileRead(conn, path)

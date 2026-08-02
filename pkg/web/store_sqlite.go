@@ -11,8 +11,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite"
@@ -62,8 +61,8 @@ func migrate(db *sql.DB) error {
 		defer func() { _ = tx.Rollback() }()
 		if _, err := tx.Exec(`
 			DROP INDEX idx_sessions_agent;
-			ALTER TABLE chat_sessions RENAME COLUMN agent_id TO node_uri;
-			CREATE INDEX idx_sessions_node_uri ON chat_sessions(node_uri);
+			ALTER TABLE chat_sessions RENAME COLUMN agent_id TO node_id;
+			CREATE INDEX idx_sessions_node_id ON chat_sessions(node_id);
 			PRAGMA user_version = 2;
 		`); err != nil {
 			return err
@@ -98,7 +97,7 @@ func migrate(db *sql.DB) error {
 
 		CREATE TABLE chat_sessions (
 			id            TEXT PRIMARY KEY,
-			node_uri      TEXT NOT NULL,
+			node_id       TEXT NOT NULL,
 			status        TEXT NOT NULL,
 			session_proto BLOB NOT NULL,
 			created_at    TEXT NOT NULL,
@@ -145,7 +144,7 @@ func migrate(db *sql.DB) error {
 
 		CREATE INDEX idx_scans_created ON scans(created_at DESC);
 		CREATE INDEX idx_sessions_updated ON chat_sessions(updated_at DESC);
-		CREATE INDEX idx_sessions_node_uri ON chat_sessions(node_uri);
+		CREATE INDEX idx_sessions_node_id ON chat_sessions(node_id);
 		CREATE INDEX idx_aop_events_session ON chat_aop_events(session_id, cursor);
 		CREATE INDEX idx_sco_nodes_type ON sco_nodes(cstx_type);
 		CREATE INDEX idx_sco_observations_node ON sco_observations(cstx_id);
@@ -205,7 +204,7 @@ func (s *SQLiteStore) Close() error {
 // scan_proto is the canonical payload. Flat columns exist only for filtering
 // and ordering; they never reconstruct the protobuf message.
 
-func (s *SQLiteStore) Create(ctx context.Context, scan *scanpb.Scan) error {
+func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
 	raw, err := protobuf.Marshal(scan)
 	if err != nil {
 		return err
@@ -219,14 +218,14 @@ func (s *SQLiteStore) Create(ctx context.Context, scan *scanpb.Scan) error {
 	return err
 }
 
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*scanpb.Scan, error) {
+func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT scan_proto
 		 FROM scans WHERE id = ?`, id)
 	return scanRow(row)
 }
 
-func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, error) {
+func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -238,7 +237,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, erro
 	}
 	defer rows.Close()
 
-	var scans []*scanpb.Scan
+	var scans []*types.Scan
 	for rows.Next() {
 		scan, err := scanRows(rows)
 		if err != nil {
@@ -249,7 +248,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, erro
 	return scans, rows.Err()
 }
 
-func (s *SQLiteStore) Update(ctx context.Context, scan *scanpb.Scan) error {
+func (s *SQLiteStore) Update(ctx context.Context, scan *types.Scan) error {
 	raw, err := protobuf.Marshal(scan)
 	if err != nil {
 		return err
@@ -265,7 +264,7 @@ func (s *SQLiteStore) Update(ctx context.Context, scan *scanpb.Scan) error {
 // TransitionScan updates a scan only while it is in one of the expected
 // states. Callers use the affected-row result to make terminal states
 // immutable when cancellation and completion race.
-func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *scanpb.Scan, expected ...scanpb.ScanStatus) (bool, error) {
+func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *types.Scan, expected ...types.ScanStatus) (bool, error) {
 	if scan == nil {
 		return false, fmt.Errorf("scan is required")
 	}
@@ -309,12 +308,12 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanFromScanner(sc scanner) (*scanpb.Scan, error) {
+func scanFromScanner(sc scanner) (*types.Scan, error) {
 	var raw []byte
 	if err := sc.Scan(&raw); err != nil {
 		return nil, err
 	}
-	scan := new(scanpb.Scan)
+	scan := new(types.Scan)
 	if err := protobuf.Unmarshal(raw, scan); err != nil {
 		return nil, fmt.Errorf("decode scan protobuf: %w", err)
 	}
@@ -335,11 +334,11 @@ func formatProtoTime(ts *timestamppb.Timestamp) string {
 	return ts.AsTime().UTC().Format(time.RFC3339Nano)
 }
 
-func scanRow(row *sql.Row) (*scanpb.Scan, error) {
+func scanRow(row *sql.Row) (*types.Scan, error) {
 	return scanFromScanner(row)
 }
 
-func scanRows(rows *sql.Rows) (*scanpb.Scan, error) {
+func scanRows(rows *sql.Rows) (*types.Scan, error) {
 	return scanFromScanner(rows)
 }
 
@@ -348,28 +347,28 @@ func scanRows(rows *sql.Rows) (*scanpb.Scan, error) {
 // session_proto is the canonical payload. Flat columns exist only for
 // filtering and ordering.
 
-func (s *SQLiteStore) CreateSession(ctx context.Context, session *chatpb.SessionRecord) error {
+func (s *SQLiteStore) CreateSession(ctx context.Context, session *types.SessionRecord) error {
 	raw, err := protobuf.Marshal(session)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO chat_sessions (id, node_uri, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		session.GetSession().GetId(), session.GetSession().GetNodeUri(), session.GetSession().GetState(),
+		`INSERT INTO chat_sessions (id, node_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		session.GetSession().GetId(), session.GetSession().GetNodeId(), session.GetSession().GetState(),
 		raw,
 		formatProtoTime(session.CreatedAt), formatProtoTime(session.UpdatedAt),
 	)
 	return err
 }
 
-func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*chatpb.SessionRecord, error) {
+func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*types.SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT session_proto FROM chat_sessions WHERE id = ?`, id)
 	var raw []byte
 	if err := row.Scan(&raw); err != nil {
 		return nil, err
 	}
-	session := new(chatpb.SessionRecord)
+	session := new(types.SessionRecord)
 	if err := protobuf.Unmarshal(raw, session); err != nil {
 		return nil, fmt.Errorf("decode session protobuf: %w", err)
 	}
@@ -377,7 +376,7 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*chatpb.Sessio
 	return session, nil
 }
 
-func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*chatpb.SessionRecord, error) {
+func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*types.SessionRecord, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -387,7 +386,7 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*chatpb.Se
 		return nil, err
 	}
 	defer rows.Close()
-	var sessions []*chatpb.SessionRecord
+	var sessions []*types.SessionRecord
 	for rows.Next() {
 		session, err := sessionFromRow(rows)
 		if err != nil {
@@ -398,7 +397,7 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*chatpb.Se
 	return sessions, rows.Err()
 }
 
-func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*chatpb.SessionRecord, bool, error) {
+func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*types.SessionRecord, bool, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -420,7 +419,7 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	if err != nil {
 		return nil, false, err
 	}
-	sessions := make([]*chatpb.SessionRecord, 0, limit+1)
+	sessions := make([]*types.SessionRecord, 0, limit+1)
 	for rows.Next() {
 		session, err := sessionFromRow(rows)
 		if err != nil {
@@ -450,19 +449,19 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	return sessions, hasMore, nil
 }
 
-func sessionFromRow(rows *sql.Rows) (*chatpb.SessionRecord, error) {
+func sessionFromRow(rows *sql.Rows) (*types.SessionRecord, error) {
 	var raw []byte
 	if err := rows.Scan(&raw); err != nil {
 		return nil, err
 	}
-	session := new(chatpb.SessionRecord)
+	session := new(types.SessionRecord)
 	if err := protobuf.Unmarshal(raw, session); err != nil {
 		return nil, fmt.Errorf("decode session protobuf: %w", err)
 	}
 	return session, nil
 }
 
-func (s *SQLiteStore) UpdateSession(ctx context.Context, session *chatpb.SessionRecord) error {
+func (s *SQLiteStore) UpdateSession(ctx context.Context, session *types.SessionRecord) error {
 	scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
 	if len(scanIDs) > 0 {
 		session.ScanIds = scanIDs

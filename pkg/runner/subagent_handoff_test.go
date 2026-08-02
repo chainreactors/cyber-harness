@@ -8,7 +8,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -77,10 +77,10 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 		ParentSessionId:  "parent-session",
 		ParentToolCallId: "spawn-1",
 	}}})
-	if err := ext.SetDelegation(start, ext.DelegationDetail{
+	if err := types.SetDelegation(start, types.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
-		RunMode:   ext.DelegationRunForeground,
+		RunMode:   types.DelegationRunForeground,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -139,10 +139,10 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
 		ParentSessionId: "parent-session", ParentToolCallId: "spawn-2",
 	}}})
-	if err := ext.SetDelegation(start, ext.DelegationDetail{
+	if err := types.SetDelegation(start, types.DelegationDetail{
 		Task:      "inspect target",
 		AgentName: "worker",
-		RunMode:   ext.DelegationRunBackground,
+		RunMode:   types.DelegationRunBackground,
 	}); err != nil {
 		t.Fatal(err)
 	}

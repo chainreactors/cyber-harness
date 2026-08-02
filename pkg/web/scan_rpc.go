@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -26,7 +26,7 @@ func newScanServiceCore(service *Service) *scanServiceCore {
 	return &scanServiceCore{service: service}
 }
 
-func (s *scanServiceCore) SubmitScan(ctx context.Context, request *scanpb.SubmitScanRequest) (*scanpb.SubmitScanResponse, error) {
+func (s *scanServiceCore) SubmitScan(ctx context.Context, request *types.SubmitScanRequest) (*types.SubmitScanResponse, error) {
 	if s.service == nil || request == nil || strings.TrimSpace(request.RequestId) == "" {
 		return rejectedSubmitScan(request, "INVALID_ARGUMENT", "request_id is required"), nil
 	}
@@ -35,10 +35,10 @@ func (s *scanServiceCore) SubmitScan(ctx context.Context, request *scanpb.Submit
 	if err != nil {
 		return rejectedSubmitScan(request, "INVALID_ARGUMENT", err.Error()), nil
 	}
-	return &scanpb.SubmitScanResponse{RequestId: request.RequestId, Outcome: &scanpb.SubmitScanResponse_Accepted{Accepted: scan}}, nil
+	return &types.SubmitScanResponse{RequestId: request.RequestId, Outcome: &types.SubmitScanResponse_Accepted{Accepted: scan}}, nil
 }
 
-func (s *scanServiceCore) GetScan(ctx context.Context, request *scanpb.GetScanRequest) (*scanpb.GetScanResponse, error) {
+func (s *scanServiceCore) GetScan(ctx context.Context, request *types.GetScanRequest) (*types.GetScanResponse, error) {
 	if s.service == nil || request == nil || strings.TrimSpace(request.ScanId) == "" {
 		return nil, fmt.Errorf("%w: scan_id is required", errInvalidScanRequest)
 	}
@@ -46,10 +46,10 @@ func (s *scanServiceCore) GetScan(ctx context.Context, request *scanpb.GetScanRe
 	if err != nil {
 		return nil, scanRPCError(err)
 	}
-	return &scanpb.GetScanResponse{Scan: scan}, nil
+	return &types.GetScanResponse{Scan: scan}, nil
 }
 
-func (s *scanServiceCore) ListScans(ctx context.Context, _ *scanpb.ListScansRequest) (*scanpb.ListScansResponse, error) {
+func (s *scanServiceCore) ListScans(ctx context.Context, _ *types.ListScansRequest) (*types.ListScansResponse, error) {
 	if s.service == nil {
 		return nil, errScanServiceUnavailable
 	}
@@ -57,10 +57,10 @@ func (s *scanServiceCore) ListScans(ctx context.Context, _ *scanpb.ListScansRequ
 	if err != nil {
 		return nil, fmt.Errorf("list scans: %w", err)
 	}
-	return &scanpb.ListScansResponse{Scans: scans}, nil
+	return &types.ListScansResponse{Scans: scans}, nil
 }
 
-func (s *scanServiceCore) CancelScan(ctx context.Context, request *scanpb.CancelScanRequest) (*scanpb.CancelScanResponse, error) {
+func (s *scanServiceCore) CancelScan(ctx context.Context, request *types.CancelScanRequest) (*types.CancelScanResponse, error) {
 	if s.service == nil || request == nil || strings.TrimSpace(request.RequestId) == "" || strings.TrimSpace(request.ScanId) == "" {
 		return rejectedCancelScan(request, "INVALID_ARGUMENT", "request_id and scan_id are required"), nil
 	}
@@ -75,10 +75,10 @@ func (s *scanServiceCore) CancelScan(ctx context.Context, request *scanpb.Cancel
 	if err != nil {
 		return nil, scanRPCError(err)
 	}
-	return &scanpb.CancelScanResponse{RequestId: request.RequestId, Outcome: &scanpb.CancelScanResponse_Accepted{Accepted: scan}}, nil
+	return &types.CancelScanResponse{RequestId: request.RequestId, Outcome: &types.CancelScanResponse_Accepted{Accepted: scan}}, nil
 }
 
-func (s *scanServiceCore) WatchScanEvents(request *scanpb.WatchScanEventsRequest, ctx context.Context, send func(*scanpb.ScanEvent) error) error {
+func (s *scanServiceCore) WatchScanEvents(request *types.WatchScanEventsRequest, ctx context.Context, send func(*types.ScanEvent) error) error {
 	if s.service == nil || request == nil || strings.TrimSpace(request.ScanId) == "" {
 		return fmt.Errorf("%w: scan_id is required", errInvalidScanRequest)
 	}
@@ -121,7 +121,7 @@ func (s *scanServiceCore) WatchScanEvents(request *scanpb.WatchScanEventsRequest
 	}
 }
 
-func (s *scanServiceCore) GetScanReport(ctx context.Context, request *scanpb.GetScanReportRequest) (*scanpb.GetScanReportResponse, error) {
+func (s *scanServiceCore) GetScanReport(ctx context.Context, request *types.GetScanReportRequest) (*types.GetScanReportResponse, error) {
 	if s.service == nil || request == nil || strings.TrimSpace(request.ScanId) == "" {
 		return nil, fmt.Errorf("%w: scan_id is required", errInvalidScanRequest)
 	}
@@ -132,39 +132,39 @@ func (s *scanServiceCore) GetScanReport(ctx context.Context, request *scanpb.Get
 	if markdown == "" {
 		return nil, errScanReportNotReady
 	}
-	return &scanpb.GetScanReportResponse{Markdown: markdown, MediaType: "text/markdown; charset=utf-8"}, nil
+	return &types.GetScanReportResponse{Markdown: markdown, MediaType: "text/markdown; charset=utf-8"}, nil
 }
 
-func scanSnapshot(scan *scanpb.Scan, sequence uint64) *scanpb.ScanEvent {
-	return &scanpb.ScanEvent{ScanId: scan.Id, Sequence: sequence, EmittedAt: timestamppb.Now(), Payload: &scanpb.ScanEvent_Snapshot{Snapshot: scan}}
+func scanSnapshot(scan *types.Scan, sequence uint64) *types.ScanEvent {
+	return &types.ScanEvent{ScanId: scan.Id, Sequence: sequence, EmittedAt: timestamppb.Now(), Payload: &types.ScanEvent_Snapshot{Snapshot: scan}}
 }
 
-func scanStatusEvent(scanID string, value scanpb.ScanStatus) *scanpb.ScanEvent {
-	return &scanpb.ScanEvent{ScanId: scanID, Payload: &scanpb.ScanEvent_Status{Status: value}}
+func scanStatusEvent(scanID string, value types.ScanStatus) *types.ScanEvent {
+	return &types.ScanEvent{ScanId: scanID, Payload: &types.ScanEvent_Status{Status: value}}
 }
 
-func scanProgressEvent(scanID, data string) *scanpb.ScanEvent {
-	return &scanpb.ScanEvent{ScanId: scanID, Payload: &scanpb.ScanEvent_Progress{Progress: &scanpb.ScanProgress{Data: data}}}
+func scanProgressEvent(scanID, data string) *types.ScanEvent {
+	return &types.ScanEvent{ScanId: scanID, Payload: &types.ScanEvent_Progress{Progress: &types.ScanProgress{Data: data}}}
 }
 
-func scanCompletedEvent(scanID string) *scanpb.ScanEvent {
-	return &scanpb.ScanEvent{ScanId: scanID, Payload: &scanpb.ScanEvent_Completed{Completed: &scanpb.ScanCompleted{}}}
+func scanCompletedEvent(scanID string) *types.ScanEvent {
+	return &types.ScanEvent{ScanId: scanID, Payload: &types.ScanEvent_Completed{Completed: &types.ScanCompleted{}}}
 }
 
-func scanFailedEvent(scanID, message string, canceled bool) *scanpb.ScanEvent {
-	return &scanpb.ScanEvent{ScanId: scanID, Payload: &scanpb.ScanEvent_Failed{Failed: &scanpb.ScanFailed{Message: message, Canceled: canceled}}}
+func scanFailedEvent(scanID, message string, canceled bool) *types.ScanEvent {
+	return &types.ScanEvent{ScanId: scanID, Payload: &types.ScanEvent_Failed{Failed: &types.ScanFailed{Message: message, Canceled: canceled}}}
 }
 
-func rejectedSubmitScan(request *scanpb.SubmitScanRequest, code, message string) *scanpb.SubmitScanResponse {
-	response := &scanpb.SubmitScanResponse{Outcome: &scanpb.SubmitScanResponse_Rejected{Rejected: rejection(code, message)}}
+func rejectedSubmitScan(request *types.SubmitScanRequest, code, message string) *types.SubmitScanResponse {
+	response := &types.SubmitScanResponse{Outcome: &types.SubmitScanResponse_Rejected{Rejected: rejection(code, message)}}
 	if request != nil {
 		response.RequestId = request.RequestId
 	}
 	return response
 }
 
-func rejectedCancelScan(request *scanpb.CancelScanRequest, code, message string) *scanpb.CancelScanResponse {
-	response := &scanpb.CancelScanResponse{Outcome: &scanpb.CancelScanResponse_Rejected{Rejected: rejection(code, message)}}
+func rejectedCancelScan(request *types.CancelScanRequest, code, message string) *types.CancelScanResponse {
+	response := &types.CancelScanResponse{Outcome: &types.CancelScanResponse_Rejected{Rejected: rejection(code, message)}}
 	if request != nil {
 		response.RequestId = request.RequestId
 	}

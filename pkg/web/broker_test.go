@@ -7,8 +7,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -79,7 +78,7 @@ func TestScanSubscriptionReturnsSnapshotSequenceBoundary(t *testing.T) {
 	if sequence != 1 {
 		t.Fatalf("subscription sequence = %d, want 1", sequence)
 	}
-	snapshot := scanSnapshot(&scanpb.Scan{Id: "scan-1"}, sequence)
+	snapshot := scanSnapshot(&types.Scan{Id: "scan-1"}, sequence)
 	if snapshot.Sequence != sequence {
 		t.Fatalf("snapshot sequence = %d, want %d", snapshot.Sequence, sequence)
 	}
@@ -130,13 +129,13 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 		Id: "event-1", EmittedAt: timestamppb.Now(), SessionId: "session-eval", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}},
 	}
-	_ = ext.SetEvalDetail(event, ext.EvalDetail{Round: 2, Reason: "needs verification"})
+	_ = types.SetEvalDetail(event, types.EvalDetail{Round: 2, Reason: "needs verification"})
 	service.BroadcastAOPEvent("session-eval", event)
 	events, err := store.ListAOPEvents(context.Background(), "session-eval", 100)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events = %+v, err = %v", events, err)
 	}
-	detail, ok, err := ext.GetEvalDetail(events[0])
+	detail, ok, err := types.GetEvalDetail(events[0])
 	if err != nil || !ok || detail.Round != 2 || detail.Reason != "needs verification" {
 		t.Fatalf("eval detail = %+v, ok = %v, err = %v", detail, ok, err)
 	}
@@ -170,9 +169,9 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	}
 	defer store.Close()
 	createStoredSession(t, store, "session-scan")
-	if err := store.Create(context.Background(), &scanpb.Scan{
+	if err := store.Create(context.Background(), &types.Scan{
 		Id: "scan-123", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,14 +184,14 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 		t.Fatalf("events = %+v, err = %v", events, err)
 	}
 	extension := events[0].GetExtension()
-	value := new(scanpb.SessionScanEvent)
+	value := new(types.SessionScanEvent)
 	if extension == nil || !extension.MessageIs(value) {
 		t.Fatalf("extension = %+v", extension)
 	}
 	if err := extension.UnmarshalTo(value); err != nil {
 		t.Fatal(err)
 	}
-	if value.ScanId != "scan-123" || value.Status != scanpb.ScanStatus_SCAN_STATUS_COMPLETED {
+	if value.ScanId != "scan-123" || value.Status != types.ScanStatus_SCAN_STATUS_COMPLETED {
 		t.Fatalf("scan extension = %+v", value)
 	}
 	ids, err := store.SessionScanIDs(context.Background(), "session-scan")
@@ -202,22 +201,22 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 }
 
 func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
-	for _, status := range []scanpb.ScanStatus{scanpb.ScanStatus_SCAN_STATUS_COMPLETED, scanpb.ScanStatus_SCAN_STATUS_FAILED, scanpb.ScanStatus_SCAN_STATUS_CANCELED} {
+	for _, status := range []types.ScanStatus{types.ScanStatus_SCAN_STATUS_COMPLETED, types.ScanStatus_SCAN_STATUS_FAILED, types.ScanStatus_SCAN_STATUS_CANCELED} {
 		t.Run(scanStatusToDB(status), func(t *testing.T) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			scan := &scanpb.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+			scan := &types.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: nowProto(), UpdatedAt: nowProto()}
 			if err := store.Create(context.Background(), scan); err != nil {
 				t.Fatal(err)
 			}
 			service := NewService(ServiceConfig{Store: store})
-			var responses []*scanpb.ScanEvent
+			var responses []*types.ScanEvent
 			err = newScanServiceCore(service).WatchScanEvents(
-				&scanpb.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),
-				func(event *scanpb.ScanEvent) error {
+				&types.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),
+				func(event *types.ScanEvent) error {
 					responses = append(responses, event)
 					return nil
 				},

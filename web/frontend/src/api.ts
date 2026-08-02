@@ -29,7 +29,7 @@ import {
   SessionBindingSchema,
   SessionService,
   SystemService,
-  type View as AgentView,
+  type AgentView,
   type LocalAgent,
   type CommandProtocolMessage,
   type CommandSpec,
@@ -289,12 +289,12 @@ export async function deleteScan(id: string): Promise<void> {
 
 // --- Chat session API ---
 
-export async function createChatSession(nodeURI: string, title?: string, scanID?: string): Promise<Session> {
+export async function createChatSession(nodeID: string, title?: string, scanID?: string): Promise<Session> {
   try {
 	const extensions = scanID
 		? [anyPack(SessionBindingSchema, create(SessionBindingSchema, { scanId: scanID }))]
 		: []
-	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'openSessionRequest', value: { sessionId: newRPCID(), nodeUri: nodeURI, title: title || '', extensions } } }), 'openSessionResponse')
+	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'openSessionRequest', value: { sessionId: newRPCID(), nodeId: nodeID, title: title || '', extensions } } }), 'openSessionResponse')
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to create session')
     return response.outcome.value
   } catch (error) {

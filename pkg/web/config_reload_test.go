@@ -5,14 +5,14 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-func newFakeAgent(nodeURI string, buffer int) *remoteAgent {
+func newFakeAgent(nodeID string, buffer int) *remoteAgent {
 	return &remoteAgent{
-		nodeURI: nodeURI, name: nodeURI, sendCh: make(chan *aop.Envelope, buffer),
-		tasks: make(map[string]chan taskResult), turns: make(map[string]int), done: make(chan struct{}),
+		nodeState: newNodeState(),
+		nodeID: nodeID, name: nodeID, sendCh: make(chan *aop.Envelope, buffer),
+		done: make(chan struct{}),
 	}
 }
 
@@ -20,7 +20,7 @@ func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
 	pool := NewAgentPool(nil)
 	agent := newFakeAgent("agent", 1)
 	pool.register(agent)
-	config := &configpb.DistributeConfig{Llm: &configpb.LLMConfig{ActiveProfile: "primary"}}
+	config := &types.DistributeConfig{Llm: &types.LLMConfig{ActiveProfile: "primary"}}
 
 	if n := pool.BroadcastConfigReload(config); n != 1 {
 		t.Fatalf("notified = %d, want 1", n)
@@ -30,7 +30,7 @@ func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reload, ok := message.(*reloadpb.ProtocolMessage)
+	reload, ok := message.(*types.ReloadProtocolMessage)
 	if !ok || reload.GetRequest().GetConfig().GetLlm().GetActiveProfile() != "primary" {
 		t.Fatalf("reload = %T %+v", message, message)
 	}
@@ -44,7 +44,7 @@ func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 	pool.register(agent)
 
 	done := make(chan int, 1)
-	go func() { done <- pool.BroadcastConfigReload(&configpb.DistributeConfig{}) }()
+	go func() { done <- pool.BroadcastConfigReload(&types.DistributeConfig{}) }()
 	select {
 	case <-done:
 		t.Fatal("reload bypassed the full FIFO")
@@ -57,7 +57,7 @@ func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 		t.Fatalf("notified = %d", notified)
 	}
 	message, _ := aop.Unwrap(<-agent.sendCh)
-	if reload, ok := message.(*reloadpb.ProtocolMessage); !ok || reload.GetRequest() == nil {
+	if reload, ok := message.(*types.ReloadProtocolMessage); !ok || reload.GetRequest() == nil {
 		t.Fatalf("second message = %T", message)
 	}
 }
@@ -88,14 +88,14 @@ func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
 	agent.status = &aop.AgentStatus{Provider: "openai", Model: "old-model"}
 	pool.register(agent)
 
-	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-result", "reload", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Result{Result: &reloadpb.Result{
+	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-result", "reload", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: &types.ReloadResult{
 		Ok: true, Provider: "openai", Model: "deepseek-v4-pro",
 	}}}))
 	if got := agent.view().GetStatus(); got.GetProvider() != "openai" || got.GetModel() != "deepseek-v4-pro" || got.GetConfigError() != "" {
 		t.Fatalf("unexpected config result status: %+v", got)
 	}
 
-	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-error", "reload", &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Result{Result: &reloadpb.Result{
+	pool.handleAgentEnvelope(agent, aop.MustWrap("reload-error", "reload", &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: &types.ReloadResult{
 		Ok: false, Error: "invalid API key",
 	}}}))
 	if got := agent.view().GetStatus(); got.GetConfigError() != "invalid API key" {

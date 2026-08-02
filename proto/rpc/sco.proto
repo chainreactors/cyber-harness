@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package aiscan.rpc.sco;
+
+import "types/sco.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+
+service SCOService {
+  rpc ListNodes(aiscan.sco.ListNodesRequest) returns (aiscan.sco.ListNodesResponse);
+  rpc GetNode(aiscan.sco.GetNodeRequest) returns (aiscan.sco.GetNodeResponse);
+  rpc GetStats(aiscan.sco.GetStatsRequest) returns (aiscan.sco.GetStatsResponse);
+  rpc DeleteNodes(aiscan.sco.DeleteNodesRequest) returns (aiscan.sco.DeleteNodesResponse);
+  rpc ImportNodes(aiscan.sco.ImportNodesRequest) returns (aiscan.sco.ImportNodesResponse);
+  rpc ListArtifacts(aiscan.sco.ListArtifactsRequest) returns (aiscan.sco.ListArtifactsResponse);
+}

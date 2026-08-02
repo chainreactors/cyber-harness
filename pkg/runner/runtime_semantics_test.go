@@ -14,7 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -218,7 +218,7 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	if commandEvent == nil || commandEvent.GetMessage() == nil || commandEvent.TurnId != "" {
 		t.Fatalf("command AOP event = %+v", commandEvent)
 	}
-	detail, ok, err := ext.GetCommandDetail(commandEvent)
+	detail, ok, err := types.GetCommandDetail(commandEvent)
 	if err != nil || !ok || detail.Line != "!printf COMMAND_OK" || detail.Presentation != CommandPresentationPreformatted {
 		t.Fatalf("command extension = %+v ok=%v err=%v", detail, ok, err)
 	}

@@ -6,8 +6,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	config "github.com/chainreactors/aiscan/core/config"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -27,43 +26,43 @@ const (
 
 // scanStatusToDB maps the proto enum to the string stored in the scans.status
 // column. UNSPECIFIED and unknown values round-trip as "queued".
-func scanStatusToDB(value scanpb.ScanStatus) string {
+func scanStatusToDB(value types.ScanStatus) string {
 	switch value {
-	case scanpb.ScanStatus_SCAN_STATUS_RUNNING:
+	case types.ScanStatus_SCAN_STATUS_RUNNING:
 		return "running"
-	case scanpb.ScanStatus_SCAN_STATUS_COMPLETED:
+	case types.ScanStatus_SCAN_STATUS_COMPLETED:
 		return "completed"
-	case scanpb.ScanStatus_SCAN_STATUS_FAILED:
+	case types.ScanStatus_SCAN_STATUS_FAILED:
 		return "failed"
-	case scanpb.ScanStatus_SCAN_STATUS_CANCELED:
+	case types.ScanStatus_SCAN_STATUS_CANCELED:
 		return "canceled"
 	default:
 		return "queued"
 	}
 }
 
-func scanTerminal(value scanpb.ScanStatus) bool {
-	return value == scanpb.ScanStatus_SCAN_STATUS_COMPLETED ||
-		value == scanpb.ScanStatus_SCAN_STATUS_FAILED ||
-		value == scanpb.ScanStatus_SCAN_STATUS_CANCELED
+func scanTerminal(value types.ScanStatus) bool {
+	return value == types.ScanStatus_SCAN_STATUS_COMPLETED ||
+		value == types.ScanStatus_SCAN_STATUS_FAILED ||
+		value == types.ScanStatus_SCAN_STATUS_CANCELED
 }
 
 func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 // ConfigViewFromDistribute builds the secret-masked product view directly in
 // the schema owned by aiscan.config.
-func ConfigViewFromDistribute(d *configpb.DistributeConfig, path string, loaded bool) *configpb.ConfigView {
-	view := &configpb.ConfigView{Path: path, Loaded: loaded}
+func ConfigViewFromDistribute(d *types.DistributeConfig, path string, loaded bool) *types.ConfigView {
+	view := &types.ConfigView{Path: path, Loaded: loaded}
 	if d == nil {
 		return view
 	}
-	view.Llm = &configpb.LLMView{ActiveProfile: d.GetLlm().GetActiveProfile()}
+	view.Llm = &types.LLMView{ActiveProfile: d.GetLlm().GetActiveProfile()}
 	for _, raw := range d.GetLlm().GetProviders() {
 		profile := config.NormalizeLLMProvider(raw)
 		if profile == nil {
 			continue
 		}
-		item := &configpb.LLMProviderView{
+		item := &types.LLMProviderView{
 			Id: profile.Id, Name: profile.Name, Provider: profile.Provider,
 			BaseUrl: profile.BaseUrl, ApiKeyConfigured: profile.ApiKey != "",
 			Model: profile.Model, Proxy: profile.Proxy,
@@ -78,23 +77,23 @@ func ConfigViewFromDistribute(d *configpb.DistributeConfig, path string, loaded 
 		view.Llm.Active = view.Llm.Providers[0]
 		view.Llm.ActiveProfile = view.Llm.Active.Id
 	}
-	view.Cyberhub = &configpb.CyberhubView{
+	view.Cyberhub = &types.CyberhubView{
 		Url: d.GetCyberhub().GetUrl(), KeyConfigured: d.GetCyberhub().GetKey() != "",
 		Mode: d.GetCyberhub().GetMode(), Proxy: d.GetCyberhub().GetProxy(),
 	}
-	view.Recon = &configpb.ReconView{
+	view.Recon = &types.ReconView{
 		FofaEmail: d.GetRecon().GetFofaEmail(), FofaKeyConfigured: d.GetRecon().GetFofaKey() != "",
 		HunterTokenConfigured:  d.GetRecon().GetHunterToken() != "",
 		HunterApiKeyConfigured: d.GetRecon().GetHunterApiKey() != "",
 		Proxy:                  d.GetRecon().GetProxy(), Limit: d.GetRecon().GetLimit(),
 	}
-	view.Scan = &configpb.ScanConfig{Verify: d.GetScan().GetVerify()}
-	view.Search = &configpb.SearchView{TavilyKeysConfigured: d.GetSearch().GetTavilyKeys() != ""}
-	view.Ioa = &configpb.IOAView{
+	view.Scan = &types.ScanConfig{Verify: d.GetScan().GetVerify()}
+	view.Search = &types.SearchView{TavilyKeysConfigured: d.GetSearch().GetTavilyKeys() != ""}
+	view.Ioa = &types.IOAView{
 		Url: d.GetIoa().GetUrl(), TokenConfigured: d.GetIoa().GetToken() != "",
 		NodeName: d.GetIoa().GetNodeName(), Space: d.GetIoa().GetSpace(),
 	}
-	view.Agent = &configpb.AgentConfig{
+	view.Agent = &types.AgentConfig{
 		Tools:   append([]string(nil), d.GetAgent().GetTools()...),
 		Timeout: d.GetAgent().GetTimeout(), SaveSession: d.GetAgent().GetSaveSession(),
 	}

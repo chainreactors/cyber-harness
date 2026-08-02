@@ -26,8 +26,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
@@ -134,7 +133,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
-	hello, err := BuildHello(cc.Name, cc.Registry, cc.Node, cc.Runtime)
+	hello, err := BuildHello(cc.Name, cc.Registry, cc.NodeID, cc.Runtime)
 	if err != nil {
 		return err
 	}
@@ -200,7 +199,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	}()
 
 	if cc.Menu != nil {
-		send("", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Catalog{Catalog: &commandpb.Catalog{Commands: cc.Menu()}}})
+		send("", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Catalog{Catalog: &types.CommandCatalog{Commands: cc.Menu()}}})
 	}
 	stats := NewAgentStatsTracker()
 	if cc.AgentSubscribe != nil {
@@ -263,7 +262,16 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 
 	var operationsMu sync.Mutex
 	operations := make(map[string]context.CancelFunc)
-	namespaceMux, err := newAgentConnectionNamespaceMux(cc, router, send, &operationsMu, operations)
+	sendEnvelope := func(envelope *aop.Envelope) {
+		if envelope == nil {
+			return
+		}
+		select {
+		case sendCh <- envelope:
+		case <-connectionCtx.Done():
+		}
+	}
+	namespaceMux, err := newAgentConnectionNamespaceMux(cc, router, send, sendEnvelope, &operationsMu, operations)
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
@@ -299,18 +307,23 @@ func newAgentConnectionNamespaceMux(
 	cc connectionConfig,
 	router *pty.Router,
 	send func(string, protobuf.Message),
+	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 ) (*aop.NamespaceMux, error) {
 	mux := aop.NewNamespaceMux()
 	if err := mux.Register(&aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentCoreMessage(ctx, cc, envelope, message.(*aop.ProtocolMessage), send, operationsMu, operations)
+		handleAgentCoreMessage(ctx, cc, envelope, message.(*aop.ProtocolMessage), send, sendEnvelope, operationsMu, operations)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&commandpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentCommandMessage(ctx, cc, envelope, message.(*commandpb.ProtocolMessage), send)
+	if err := mux.Register(&types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, _ protobuf.Message, _ aop.SendFunc) error {
+		if cc.AgentRuntime != nil {
+			cc.AgentRuntime.HandleEnvelope(ctx, envelope, sendEnvelope)
+			return nil
+		}
+		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "command handler is unavailable"))
 		return nil
 	}); err != nil {
 		return nil, err
@@ -333,8 +346,8 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&reloadpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		handleAgentReloadMessage(cc, envelope, message.(*reloadpb.ProtocolMessage), send)
+	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentReloadMessage(cc, envelope, message.(*types.ReloadProtocolMessage), send)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -348,74 +361,33 @@ func newAgentConnectionNamespaceMux(
 	return mux, nil
 }
 
+// handleAgentCoreMessage intercepts the connection-local CancelOperation
+// payload, then delegates everything else to the shared runtime control loop
+// (rt.HandleEnvelope) — the same dispatch the stdio transport uses.
 func handleAgentCoreMessage(
 	ctx context.Context,
 	cc connectionConfig,
 	envelope *aop.Envelope,
 	value *aop.ProtocolMessage,
 	send func(string, protobuf.Message),
+	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 ) {
-	replyTo := envelope.GetId()
-	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
-	switch payload := value.Message.(type) {
-	case *aop.ProtocolMessage_OpenSessionRequest:
-		if cc.Chat == nil {
-			fail("chat handler is unavailable")
-			return
-		}
-		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: cc.Chat.OpenSession(ctx, payload.OpenSessionRequest)}})
-	case *aop.ProtocolMessage_RunTurnRequest:
-		if cc.Chat == nil {
-			fail("chat handler is unavailable")
-			return
-		}
-		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: cc.Chat.RunTurn(ctx, payload.RunTurnRequest)}})
-	case *aop.ProtocolMessage_CancelTurnRequest:
-		if cc.Chat == nil {
-			fail("chat handler is unavailable")
-			return
-		}
-		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: cc.Chat.CancelTurn(payload.CancelTurnRequest)}})
-	case *aop.ProtocolMessage_CloseSessionRequest:
-		if cc.Chat == nil {
-			fail("chat handler is unavailable")
-			return
-		}
-		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: cc.Chat.CloseSession(ctx, payload.CloseSessionRequest)}})
-	case *aop.ProtocolMessage_CancelOperation:
+	if payload, ok := value.Message.(*aop.ProtocolMessage_CancelOperation); ok {
 		operationsMu.Lock()
 		cancel := operations[payload.CancelOperation.GetTargetId()]
 		operationsMu.Unlock()
 		if cancel != nil {
 			cancel()
 		}
-	default:
-		fail("unsupported AOP core message")
-	}
-}
-
-func handleAgentCommandMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *commandpb.ProtocolMessage, send func(string, protobuf.Message)) {
-	replyTo := envelope.GetId()
-	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
-	request := value.GetRequest()
-	if request == nil {
-		fail("unsupported AIScan command message")
 		return
 	}
-	go func() {
-		if cc.Chat == nil {
-			fail("command handler is unavailable")
-			return
-		}
-		result, err := cc.Chat.Command(ctx, request)
-		if err != nil {
-			fail(err.Error())
-			return
-		}
-		send(replyTo, &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Result{Result: result}})
-	}()
+	if cc.AgentRuntime != nil {
+		cc.AgentRuntime.HandleEnvelope(ctx, envelope, sendEnvelope)
+		return
+	}
+	send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "chat handler is unavailable"))
 }
 
 func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *toolpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc) {
@@ -495,7 +467,7 @@ func handleAgentExecMessage(ctx context.Context, cc connectionConfig, envelope *
 	}()
 }
 
-func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value *reloadpb.ProtocolMessage, send func(string, protobuf.Message)) {
+func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value *types.ReloadProtocolMessage, send func(string, protobuf.Message)) {
 	replyTo := envelope.GetId()
 	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
 	request := value.GetRequest()
@@ -507,7 +479,7 @@ func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value
 	if status != nil {
 		send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: status}})
 	}
-	send(replyTo, &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Result{Result: result}})
+	send(replyTo, &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: result}})
 }
 
 func handleAgentPTYMessage(ctx context.Context, router *pty.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {

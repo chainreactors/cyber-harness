@@ -9,15 +9,14 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/utils/pty"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
 type browserPTYRoute struct {
-	nodeURI     string
+	nodeID      string
 	unsubscribe func()
 }
 
@@ -105,7 +104,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 		}
 		route.unsubscribe()
 		if detach {
-			s.agents.CloseTerminal(route.nodeURI, streamID)
+			s.agents.CloseTerminal(route.nodeID, streamID)
 		}
 	}
 	defer func() {
@@ -124,7 +123,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 		}
 		for streamID, route := range routes {
 			route.unsubscribe()
-			s.agents.CloseTerminal(route.nodeURI, streamID)
+			s.agents.CloseTerminal(route.nodeID, streamID)
 		}
 	}()
 
@@ -207,7 +206,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AOP core message"))
 			}
 
-		case *commandpb.ProtocolMessage:
+		case *types.CommandProtocolMessage:
 			request := value.GetRequest()
 			if request == nil {
 				fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan command message"))
@@ -219,7 +218,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 					fail(envelope.Id, "COMMAND_FAILED", err)
 					return
 				}
-				_ = send(envelope.Id, "", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Receipt{Receipt: &commandpb.Receipt{OperationId: operationID, SessionId: request.SessionId, State: "running"}}})
+				_ = send(envelope.Id, "", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Receipt{Receipt: &types.CommandReceipt{OperationId: operationID, SessionId: request.SessionId, State: "running"}}})
 			}()
 
 		case *filepb.ProtocolMessage:
@@ -237,7 +236,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				_ = send(envelope.Id, "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Result{Result: result}})
 			}()
 
-		case *scanpb.ProtocolMessage:
+		case *types.ScanProtocolMessage:
 			request := value.GetWatchEventsRequest()
 			if request == nil {
 				fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan scan message"))
@@ -247,11 +246,11 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 			setSubscription(envelope.Id, subscriptionCancel)
 			go func(subscriptionID string) {
 				defer cancelSubscription(subscriptionID)
-				err := scans.WatchScanEvents(request, subscriptionCtx, func(event *scanpb.ScanEvent) error {
+				err := scans.WatchScanEvents(request, subscriptionCtx, func(event *types.ScanEvent) error {
 					if event == nil {
 						return nil
 					}
-					return send(subscriptionID, strconv.FormatUint(event.Sequence, 10), &scanpb.ProtocolMessage{Message: &scanpb.ProtocolMessage_Event{Event: event}})
+					return send(subscriptionID, strconv.FormatUint(event.Sequence, 10), &types.ScanProtocolMessage{Message: &types.ScanProtocolMessage_Event{Event: event}})
 				})
 				if err != nil && subscriptionCtx.Err() == nil {
 					fail(subscriptionID, "WATCH_SCAN_FAILED", err)
@@ -264,27 +263,27 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 				return
 			}
-			nodeURI := ""
+			nodeID := ""
 			switch payload := value.Message.(type) {
 			case *ptypb.ProtocolMessage_Open:
-				nodeURI = payload.Open.NodeUri
+				nodeID = payload.Open.NodeId
 			case *ptypb.ProtocolMessage_List:
-				nodeURI = payload.List.NodeUri
+				nodeID = payload.List.NodeId
 			}
 			stateMu.Lock()
 			route, routed := ptyRoutes[frame.StreamID]
 			stateMu.Unlock()
-			if nodeURI == "" && routed {
-				nodeURI = route.nodeURI
+			if nodeID == "" && routed {
+				nodeID = route.nodeID
 			}
-			if nodeURI == "" {
-				fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY node_uri is required when opening a stream"))
+			if nodeID == "" {
+				fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY node_id is required when opening a stream"))
 				return
 			}
 			if !routed {
-				events, online, unsubscribe := s.agents.subscribePTY(nodeURI, frame.StreamID)
+				events, online, unsubscribe := s.agents.subscribePTY(nodeID, frame.StreamID)
 				stateMu.Lock()
-				ptyRoutes[frame.StreamID] = browserPTYRoute{nodeURI: nodeURI, unsubscribe: unsubscribe}
+				ptyRoutes[frame.StreamID] = browserPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
 				stateMu.Unlock()
 				go func(streamID string, values <-chan pty.Frame) {
 					for {
@@ -303,7 +302,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 					_ = send(frame.StreamID, "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetached, StreamID: frame.StreamID}))
 				}
 			}
-			if err := s.agents.sendAgentMessage(nodeURI, generateID(), "", value); err != nil {
+			if err := s.agents.sendAgentMessage(nodeID, generateID(), "", value); err != nil {
 				fail(envelope.Id, "PTY_FORWARD_FAILED", err)
 				removePTY(frame.StreamID, false)
 				return

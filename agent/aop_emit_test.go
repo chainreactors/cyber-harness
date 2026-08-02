@@ -9,7 +9,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/tool"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 // streamEventCollector records message/message.delta events from the bus.
@@ -188,16 +188,16 @@ func TestStatusPreservesTypedExtension(t *testing.T) {
 	var emitted *aop.Event
 	bus.Subscribe(func(event *aop.Event) { emitted = event })
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0)
-	emitter.status(ext.CompactStateEnd, &ext.CompactDetail{
+	emitter.status(types.CompactStateEnd, &types.CompactDetail{
 		TokensBefore: 1000,
 		TokensAfter:  400,
 		KeptMessages: 8,
 	})
 
-	if emitted == nil || emitted.GetStatus().GetState() != ext.CompactStateEnd {
+	if emitted == nil || emitted.GetStatus().GetState() != types.CompactStateEnd {
 		t.Fatalf("status event = %+v", emitted)
 	}
-	detail, ok, err := ext.GetCompactDetail(emitted)
+	detail, ok, err := types.GetCompactDetail(emitted)
 	if err != nil || !ok || detail.TokensBefore != 1000 || detail.TokensAfter != 400 || detail.KeptMessages != 8 {
 		t.Fatalf("compact detail = %+v, ok=%v, err=%v", detail, ok, err)
 	}

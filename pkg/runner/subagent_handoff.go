@@ -12,7 +12,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -97,7 +97,7 @@ func (r *ioaHandoffRecorder) onSessionStart(event *aop.Event) {
 	if data.ParentToolCallId == "" {
 		return
 	}
-	detail, ok, err := ext.GetDelegation(event)
+	detail, ok, err := types.GetDelegation(event)
 	if err != nil || !ok {
 		return
 	}
@@ -232,11 +232,11 @@ func (r *ioaHandoffRecorder) resolveSpace(ctx context.Context) (string, error) {
 	return r.spaceID, nil
 }
 
-func handoffMode(detail ext.DelegationDetail) string {
-	if detail.ContextMode == ext.DelegationContextFork {
+func handoffMode(detail types.DelegationDetail) string {
+	if detail.ContextMode == types.DelegationContextFork {
 		return "fork"
 	}
-	if detail.RunMode == ext.DelegationRunForeground {
+	if detail.RunMode == types.DelegationRunForeground {
 		return "sync"
 	}
 	return "async"

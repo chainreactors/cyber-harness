@@ -67,8 +67,8 @@ export default function AgentTerminal({ agent }: { agent: AgentView }) {
   const sendList = useCallback(() => {
     const streamId = streamIDRef.current
     if (!streamId) return
-    sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId, nodeUri: agent.nodeUri } } }))
-  }, [agent.nodeUri, sendFrame])
+    sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId, nodeId: agent.hello?.nodeId || '' } } }))
+  }, [agent.hello?.nodeId, sendFrame])
 
   useEffect(() => {
     if (!terminalReadySeq || !termRef.current || !fitRef.current) return
@@ -80,7 +80,7 @@ export default function AgentTerminal({ agent }: { agent: AgentView }) {
     setActiveID('')
     const streamID = globalThis.crypto?.randomUUID?.() ?? `pty-${Date.now().toString(36)}`
     streamIDRef.current = streamID
-    const list = create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId: streamID, nodeUri: agent.nodeUri } } })
+    const list = create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId: streamID, nodeId: agent.hello?.nodeId || '' } } })
     const unsubscribe = aopClient.subscribe(PtyProtocolMessageSchema, list, (payload) => {
       if (payload.$typeName !== 'aop.pty.ProtocolMessage') return
       const frame = payload as PtyProtocolMessage
@@ -128,7 +128,7 @@ export default function AgentTerminal({ agent }: { agent: AgentView }) {
       if (streamIDRef.current === streamID) streamIDRef.current = ''
     }
     return () => { cleanupRef.current?.(); cleanupRef.current = null }
-  }, [agent.nodeUri, sendFrame, sendList, terminalReadySeq])
+  }, [agent.hello?.nodeId, sendFrame, sendList, terminalReadySeq])
 
   function applySessions(next: PTYSession[]) {
     sessionsRef.current = next
@@ -152,7 +152,7 @@ export default function AgentTerminal({ agent }: { agent: AgentView }) {
   function terminalSize() { const term = termRef.current; return term ? { cols: term.cols, rows: term.rows } : { cols: 80, rows: 24 } }
   function attachSession(session: PTYSession) { const streamId = streamIDRef.current; if (!streamId || !session.id) return; termRef.current?.reset(); activeRef.current = session.id; setActiveID(session.id); markSessionRead(session.id, session); sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'attach', value: { streamId, sessionId: session.id, ...terminalSize() } } })) }
   function attachRepl() { if (replSession) attachSession(replSession); else sendList() }
-  function openShell() { const streamId = streamIDRef.current; if (!streamId) return; termRef.current?.reset(); sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'open', value: { streamId, nodeUri: agent.nodeUri, kind: 'shell', name: `shell-${agent.hello?.name || 'agent'}`, ...terminalSize() } } })) }
+  function openShell() { const streamId = streamIDRef.current; if (!streamId) return; termRef.current?.reset(); sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'open', value: { streamId, nodeId: agent.hello?.nodeId || '', kind: 'shell', name: `shell-${agent.hello?.name || 'agent'}`, ...terminalSize() } } })) }
   function stopActiveSession() { const streamId = streamIDRef.current; if (!streamId || !activeID || activeSession?.kind === 'repl') return; sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'kill', value: { streamId } } })) }
 
   const activeTitle = activeSession ? sessionTitle(activeSession) : activeID

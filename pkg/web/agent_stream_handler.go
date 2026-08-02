@@ -12,8 +12,7 @@ import (
 	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/utils/pty"
 	protobuf "google.golang.org/protobuf/proto"
@@ -27,8 +26,8 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&commandpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentCommandMessage(agent, envelope, message.(*commandpb.ProtocolMessage))
+	if err := mux.Register(&types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		p.handleAgentCommandMessage(agent, envelope, message.(*types.CommandProtocolMessage))
 		return nil
 	}); err != nil {
 		return nil, err
@@ -45,8 +44,8 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&reloadpb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		p.handleAgentReloadMessage(agent, message.(*reloadpb.ProtocolMessage))
+	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		p.handleAgentReloadMessage(agent, message.(*types.ReloadProtocolMessage))
 		return nil
 	}); err != nil {
 		return nil, err
@@ -170,7 +169,7 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 	}
 }
 
-func (p *AgentPool) handleAgentCommandMessage(agent *remoteAgent, envelope *aop.Envelope, value *commandpb.ProtocolMessage) {
+func (p *AgentPool) handleAgentCommandMessage(agent *remoteAgent, envelope *aop.Envelope, value *types.CommandProtocolMessage) {
 	if agent == nil || envelope == nil || value == nil {
 		return
 	}
@@ -205,7 +204,7 @@ func (p *AgentPool) handleAgentExecMessage(agent *remoteAgent, envelope *aop.Env
 	// Output is intentionally streaming-only and does not complete the task.
 }
 
-func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *reloadpb.ProtocolMessage) {
+func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *types.ReloadProtocolMessage) {
 	if agent == nil || value == nil {
 		return
 	}
@@ -247,26 +246,13 @@ func (p *AgentPool) handleAgentSCOMessage(ctx context.Context, envelope *aop.Env
 }
 
 func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result taskResult) {
-	if agent == nil || taskID == "" {
+	if agent == nil {
 		return
 	}
-	agent.mu.Lock()
-	ch, ok := agent.tasks[taskID]
-	result.Turn = agent.turns[taskID]
-	if ok {
-		delete(agent.tasks, taskID)
-		delete(agent.turns, taskID)
-		delete(agent.toolCalls, taskID)
-		delete(agent.childSessions, taskID)
-	}
-	agent.mu.Unlock()
-	if ok && ch != nil {
-		ch <- result
-		close(ch)
-	}
+	agent.finishTask(taskID, result)
 }
 
-func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, event *aop.Event) {
+func (p *AgentPool) forwardAOPFrame(agent Node, correlationID string, event *aop.Event) {
 	if event == nil || event.SessionId == "" || event.Payload == nil {
 		return
 	}
@@ -287,10 +273,7 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 				// task correlation cannot resolve them. Accept the event only
 				// when this exact agent has the Runtime session open; this keeps
 				// standalone scan telemetry from leaking into chat history.
-				agent.mu.Lock()
-				_, opened := agent.openSessions[event.SessionId]
-				agent.mu.Unlock()
-				if opened {
+				if agent.state().sessionOpen(event.SessionId) {
 					sessionID = event.SessionId
 				} else {
 					sessionID = ""
@@ -303,9 +286,9 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:
-		p.convergeTaskOnTurnEnd(agent, event.TurnId, event)
+		agent.state().convergeOnTurnEnd(event.TurnId, event)
 	case *aop.Event_ToolResult:
-		p.convergeTaskOnToolResult(agent, correlationID, event)
+		agent.state().convergeOnToolResult(correlationID, event)
 	}
 }
 

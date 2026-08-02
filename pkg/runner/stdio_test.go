@@ -11,7 +11,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -109,13 +109,13 @@ func TestStdioCommandUsesIndependentCorrelationID(t *testing.T) {
 	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
 	h.accept(openSessionLine(t, "s1"))
-	h.accept(protocolLine(t, "command-correlation", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Request{Request: &commandpb.Request{
+	h.accept(protocolLine(t, "command-correlation", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: &types.CommandRequest{
 		SessionId: "s1", Line: "/help",
 	}}}))
 	h.drain()
 	for _, envelope := range decodeEnvelopes(t, &output) {
 		message, err := aop.Unwrap(envelope)
-		command, ok := message.(*commandpb.ProtocolMessage)
+		command, ok := message.(*types.CommandProtocolMessage)
 		if err != nil || !ok || command.GetResult() == nil {
 			continue
 		}

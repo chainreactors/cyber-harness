@@ -16,7 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -51,16 +51,11 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	if runnerID == "" {
 		runnerID, _ = os.Hostname()
 	}
-	baseURL, _ := SplitAccessKey(cfg.ServerURL)
-	authority, err := protocols.CanonicalAuthority(baseURL)
-	if err != nil {
-		return fmt.Errorf("tool node authority: %w", err)
-	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	runnerRuntime := DefaultRuntime()
+	runnerRuntime := runner.DefaultRuntimeInfo()
 	home, _ := os.UserHomeDir()
 	runnerRuntime.Metadata, _ = structpb.NewStruct(map[string]any{
 		"version": cfg.Version,
@@ -79,7 +74,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		DataBus:       cfg.DataBus,
 		SCO:           cfg.SCO,
 		Logger:        logger,
-		Node:          protocols.NodeRef{ID: runnerID, Authority: authority},
+		NodeID:        runnerID,
 		Runtime:       runnerRuntime,
 		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
 		RunnerFileRPC: true,
