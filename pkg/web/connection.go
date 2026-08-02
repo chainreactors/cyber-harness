@@ -26,8 +26,9 @@ type Connection struct {
 	cancel context.CancelFunc
 	stream aop.EnvelopeStream
 
-	outbound chan writeRequest
-	done     chan struct{}
+	outbound   chan writeRequest
+	done       chan struct{}
+	writerDone chan struct{}
 
 	runMu sync.Mutex
 	ran   bool
@@ -46,11 +47,12 @@ func NewConnection(parent context.Context, stream aop.EnvelopeStream) (*Connecti
 	}
 	ctx, cancel := context.WithCancel(parent)
 	c := &Connection{
-		ctx:      ctx,
-		cancel:   cancel,
-		stream:   stream,
-		outbound: make(chan writeRequest, connectionOutboundBuffer),
-		done:     make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
+		stream:     stream,
+		outbound:   make(chan writeRequest, connectionOutboundBuffer),
+		done:       make(chan struct{}),
+		writerDone: make(chan struct{}),
 	}
 	go c.writeLoop()
 	return c, nil
@@ -154,10 +156,12 @@ func (c *Connection) Run(first *aop.Envelope, handler func(context.Context, *aop
 func (c *Connection) Close() {
 	if c != nil {
 		c.stop(ErrConnectionClosed)
+		<-c.writerDone
 	}
 }
 
 func (c *Connection) writeLoop() {
+	defer close(c.writerDone)
 	for {
 		select {
 		case request := <-c.outbound:
