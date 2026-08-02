@@ -1,38 +1,60 @@
-export interface ScanJob {
-  id: string;
-  target: string;
-  mode: string;
-  verify?: boolean;
-  sniper?: boolean;
-  ai?: boolean;
-  deep?: boolean;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
-  progress?: string;
-  report?: string;
-  result?: ScanResult;
-  error?: string;
-  project?: string;
-  /** Batch targets dropped by validation on submit (transient, create only). */
-  skipped?: { target: string; reason: string }[];
-  created_at: string;
-  updated_at: string;
-}
-
 import type { SCONode } from '@cyber/cstx-easm';
 import { Code, ConnectError, createClient } from '@connectrpc/connect'
 import { createConnectTransport } from '@connectrpc/connect-web'
+import { create, type MessageInitShape } from '@bufbuild/protobuf'
+import { anyPack } from '@bufbuild/protobuf/wkt'
 import {
-  ChatService,
-  ScanService,
-  ScanStatus,
-  SessionService,
+  AOPClient,
+  AOPProtocolMessageSchema,
+  FileProtocolMessageSchema,
+  type AOPPayload,
+  type AOPProtocolMessage,
   type Event as AOPEvent,
   type EventDelivery,
-  type Scan as ProtoScan,
-  type SessionRecord,
+  type FileResult,
+  type Session,
+  type TurnReceipt,
 } from '@cyber/aop';
+import {
+  AgentService,
+  CommandProtocolMessageSchema,
+  ConfigService,
+  LLMProbeRequestSchema,
+  ReloadProtocolMessageSchema,
+  RunOptionsSchema,
+  SCOService,
+  ScanProtocolMessageSchema,
+  ScanService,
+  ScanStatus,
+  SessionBindingSchema,
+  SessionService,
+  SystemService,
+  type View as AgentView,
+  type LocalAgent,
+  type CommandProtocolMessage,
+  type CommandSpec,
+  type ConfigView,
+  type DistributeConfig,
+  type LLMProbeRequest,
+  type LLMProbeResult,
+  type ListModelsResult,
+  type TestConnectionResponse,
+  type ConnectionCheck,
+  type LLMProviderView,
+  type Scan,
+  type ScanOptions,
+  type SessionRecord,
+  type SystemStatus as ServerStatus,
+} from './aiscan-proto'
+
 export type { SCONode };
 export type { AOPEvent };
+
+// Generated proto types are the single source of truth for the API surface.
+// Re-exported here so views keep a single import site for API types.
+export type { AgentView, LocalAgent, CommandSpec, ConfigView, DistributeConfig, EventDelivery, LLMProviderView, LLMProbeRequest, LLMProbeResult, ListModelsResult, TestConnectionResponse, ConnectionCheck, Scan, ScanOptions, SessionRecord, ServerStatus, TurnReceipt };
+export type { Session as AOPSession } from '@cyber/aop';
+export { ScanStatus };
 
 const connectTransport = createConnectTransport({
   baseUrl: window.location.origin,
@@ -42,117 +64,17 @@ const connectTransport = createConnectTransport({
 // One AIScan facade is initialized for the application. The generated service
 // clients are lightweight API groups and all share this single transport.
 const aiscanRPC = {
-  chat: createClient(ChatService, connectTransport),
   sessions: createClient(SessionService, connectTransport),
   scans: createClient(ScanService, connectTransport),
+  config: createClient(ConfigService, connectTransport),
+  agents: createClient(AgentService, connectTransport),
+  system: createClient(SystemService, connectTransport),
+  sco: createClient(SCOService, connectTransport),
 }
-
-export interface ScanResult {
-  summary: ScanResultSummary;
-  assets?: Asset[];
-  nodes?: SCONode[];
-  services?: unknown[];
-  web_probes?: unknown[];
-  loots?: Loot[];
-  errors?: ResultError[];
-}
-
-export interface ScanResultSummary {
-  targets: number;
-  services: number;
-  webs: number;
-  probes: number;
-  loots: number;
-  errors: number;
-  tasks: number;
-  requests: number;
-  duration: string;
-  started_at?: string;
-  finished_at?: string;
-}
-
-export interface Asset {
-  id: string;
-  key: string;
-  target: string;
-  title?: string;
-  status?: string;
-  items?: AssetItem[];
-}
-
-export type AssetItemKind = 'service' | 'path' | 'fingerprint' | 'loot' | 'note' | 'response' | 'error';
-
-export interface AssetItem {
-  kind: AssetItemKind;
-  source?: string;
-  target?: string;
-  status?: string;
-  title?: string;
-  summary?: string;
-  detail?: string;
-  tags?: string[];
-  data?: Record<string, unknown>;
-  raw?: string;
-}
-
-export interface Loot {
-  kind: string;
-  target: string;
-  priority?: string;
-  description?: string;
-  tags?: string[];
-  data?: Record<string, unknown>;
-}
-
-export interface ResultError {
-  source?: string;
-  message: string;
-}
-
-// One entry in the shared asset pool (deduplicated by target). Source is
-// 'scan' | 'agent' | 'manual'.
-export interface PoolAsset {
-  id: string;
-  project_id?: string;
-  target: string;
-  label?: string;
-  source?: string;
-  status?: string;
-  note?: string;
-  services?: number;
-  webs?: number;
-  loots?: number;
-  last_scan_id?: string;
-  first_seen: string;
-  last_seen: string;
-}
-
-export interface ScanEvent {
-  type: 'progress' | 'status' | 'stats' | 'complete' | 'error';
-  scan_id: string;
-  data?: string;
-  status?: string;
-  error?: string;
-  result?: ScanResult;
-}
-
-export interface ScanOptions {
-  verify: boolean;
-  sniper: boolean;
-  deep: boolean;
-}
-
-export interface ServerStatus {
-  version: string;
-  llm_available: boolean;
-  llm_provider?: string;
-  llm_model?: string;
-  llm_api_key_configured?: boolean;
-  config_path?: string;
-  config_loaded: boolean;
-  agents: number;
-  ioa_url?: string;
-}
+const aopClient = new AOPClient()
+  .register(CommandProtocolMessageSchema)
+  .register(ScanProtocolMessageSchema)
+  .register(ReloadProtocolMessageSchema)
 
 export const AUTH_REQUIRED_EVENT = 'aiscan:auth-required'
 
@@ -187,57 +109,6 @@ export async function logout(): Promise<void> {
   } finally {
     notifyAuthRequired()
   }
-}
-
-export interface AgentInfo {
-  id: string;
-  name: string;
-  commands?: string[];
-  busy: boolean;
-  connected_at: string;
-  node: NodeRef;
-  runtime?: AgentRuntime;
-  status?: AgentStatus;
-  stats?: AgentStats;
-}
-
-export interface NodeRef {
-  id: string;
-  authority: string;
-}
-
-export interface AgentRuntime {
-  hostname?: string;
-  username?: string;
-  working_dir?: string;
-  os?: string;
-  arch?: string;
-  pid?: number;
-  capabilities?: string[];
-  meta?: Record<string, unknown>;
-}
-
-export interface AgentStatus {
-  provider?: string;
-  model?: string;
-  space?: string;
-  bound: boolean;
-}
-
-export interface AgentStats {
-  turns?: number;
-  tool_calls?: number;
-  running_tools?: number;
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  cache_read_tokens?: number;
-  cache_write_tokens?: number;
-  assets?: number;
-  loots?: number;
-  last_event?: string;
-  current_tool?: string;
-  current_detail?: string;
 }
 
 export interface IOAIdentityBinding {
@@ -285,309 +156,123 @@ export interface IOAOverview {
   messages: IOAMessage[]
 }
 
-export interface LLMProfileStatus {
-  id: string
-  name: string
-  provider: string
-  base_url: string
-  api_key_configured: boolean
-  model: string
-  proxy: string
-  context_window?: number
-  max_tokens?: number
-}
-
-export interface LLMProviderProfile {
-  id: string
-  name: string
-  provider: string
-  base_url: string
-  api_key: string
-  model: string
-  proxy: string
-  context_window?: number
-  max_tokens?: number
-}
-
-// ConfigStatus — GET /api/config response (secrets masked, *_configured flags)
-export interface ConfigStatus {
-  config_path?: string;
-  config_loaded: boolean;
-  llm: {
-    provider: string
-    base_url: string
-    api_key_configured: boolean
-    model: string
-    proxy: string
-    context_window?: number
-    max_tokens?: number
-    active_profile?: string
-    profiles?: LLMProfileStatus[]
-  };
-  cyberhub: { url: string; key_configured: boolean; mode: string; proxy: string };
-  recon: { fofa_email: string; fofa_key_configured: boolean; hunter_token_configured: boolean; hunter_api_key_configured: boolean; proxy: string; limit?: number };
-  scan: { verify: string; verify_timeout: number };
-  search: { tavily_keys_configured: boolean };
-  ioa: { url: string; token_configured: boolean; node_name: string; space: string };
-  agent: { tools: string[]; timeout: number; save_session: boolean };
-}
-
-// DistributeConfig — PUT /api/config request body (with secret values)
-export interface DistributeConfig {
-  llm: {
-    active_profile: string
-    providers: LLMProviderProfile[]
-  };
-  cyberhub: { url: string; key: string; mode: string; proxy: string };
-  recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number };
-  scan: { verify: string; verify_timeout: number };
-  search: { tavily_keys: string };
-  ioa: { url: string; token: string; node_name: string; space: string };
-  agent: { tools: string[]; timeout: number; save_session: boolean };
-}
-
 export async function getStatus(): Promise<ServerStatus> {
-  return apiJSON('/api/status', 'Failed to load status');
+  try {
+    const response = await aiscanRPC.system.getStatus({})
+    if (!response.status) throw new Error('Status is unavailable')
+    return response.status
+  } catch (error) {
+    throw connectFailure(error, 'Failed to load status')
+  }
 }
 
-export async function listAgents(): Promise<AgentInfo[]> {
-  return apiJSON('/api/agents', 'Failed to list agents');
+export async function listAgents(): Promise<AgentView[]> {
+  try {
+    const response = await aiscanRPC.agents.listAgents({})
+    return response.agents
+  } catch (error) {
+    throw connectFailure(error, 'Failed to list agents')
+  }
 }
 
-export async function getConfigStatus(): Promise<ConfigStatus> {
-  return apiJSON('/api/config', 'Failed to load config');
+export async function getConfigStatus(): Promise<ConfigView> {
+  try {
+    const response = await aiscanRPC.config.getConfig({})
+    if (!response.config) throw new Error('Config is unavailable')
+    return response.config
+  } catch (error) {
+    throw connectFailure(error, 'Failed to load config')
+  }
 }
 
-export async function saveConfig(config: DistributeConfig): Promise<ConfigStatus> {
-  return apiJSON('/api/config', 'Failed to save config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
+export async function saveConfig(config: DistributeConfig): Promise<ConfigView> {
+  try {
+    const response = await aiscanRPC.config.updateConfig({ config })
+    if (!response.config) throw new Error('Config update returned no view')
+    return response.config
+  } catch (error) {
+    throw connectFailure(error, 'Failed to save config')
+  }
 }
 
-export async function activateLLMProfile(id: string): Promise<ConfigStatus> {
-  return apiJSON('/api/config/llm/active', 'Failed to switch LLM profile', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  })
+export async function activateLLMProfile(id: string): Promise<ConfigView> {
+  try {
+    const response = await aiscanRPC.config.activateProfile({ profileId: id })
+    if (!response.config) throw new Error('Profile activation returned no view')
+    return response.config
+  } catch (error) {
+    throw connectFailure(error, 'Failed to switch LLM profile')
+  }
 }
 
-// LLMTestRequest — POST /api/config/llm/test body. Leave api_key blank to
-// reuse the key already stored on the server.
-export interface LLMTestRequest {
-  profile_id?: string;
-  provider: string;
-  base_url: string;
-  api_key: string;
-  model: string;
-  proxy: string;
+// Blank api_key asks the server to reuse the stored secret.
+export async function testLLM(req: MessageInitShape<typeof LLMProbeRequestSchema>): Promise<LLMProbeResult> {
+  return aiscanRPC.config.testLLM(req)
 }
 
-// LLMTestResult — outcome of a connectivity probe. ok=false carries the
-// failure reason in `error`; transport/HTTP errors never reject the promise.
-export interface LLMTestResult {
-  ok: boolean;
-  provider: string;
-  model: string;
-  latency_ms: number;
-  reply?: string;
-  error?: string;
-}
-
-export async function testLLM(req: LLMTestRequest): Promise<LLMTestResult> {
-  return apiJSON('/api/config/llm/test', 'Failed to test LLM', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-}
-
-// LLMModelsRequest — POST /api/config/llm/models body. Like LLMTestRequest but
-// without a model (listing is what fills the model field). Leave api_key blank
-// to reuse the key already stored on the server.
-export interface LLMModelsRequest {
-  profile_id?: string;
-  provider: string;
-  base_url: string;
-  api_key: string;
-  proxy: string;
-}
-
-// LLMModelsResult — models the endpoint advertises via the OpenAI-compatible
-// GET /models route. ok=false carries the reason in `error`.
-export interface LLMModelsResult {
-  ok: boolean;
-  supported: boolean;
-  models?: string[];
-  error?: string;
-}
-
-export async function listLLMModels(req: LLMModelsRequest): Promise<LLMModelsResult> {
-  return apiJSON('/api/config/llm/models', 'Failed to list models', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-}
-
-// ConnCheck — outcome of probing one external dependency within a settings
-// section. A section may return several checks (Recon probes FOFA and Hunter
-// independently). ok=false carries the reason in `error`.
-export interface ConnCheck {
-  name: string; // fofa | hunter | cyberhub | tavily | ioa | recon
-  ok: boolean;
-  latency_ms: number;
-  detail?: string;
-  error?: string;
-}
-
-export interface ConnTestResponse {
-  checks: ConnCheck[];
+export async function listLLMModels(req: MessageInitShape<typeof LLMProbeRequestSchema>): Promise<ListModelsResult> {
+  return aiscanRPC.config.listModels(req)
 }
 
 // testConn probes the external dependencies of a settings section
 // (cyberhub | recon | search | ioa). The current (possibly unsaved) form is
 // sent so edits are tested; blank secrets fall back to stored values server-side.
-export async function testConn(section: string, config: DistributeConfig): Promise<ConnTestResponse> {
-  return apiJSON(`/api/config/${section}/test`, 'Failed to test connection', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
+export async function testConn(section: string, config: DistributeConfig): Promise<TestConnectionResponse> {
+  return aiscanRPC.config.testConnection({ section, config })
 }
 
 // --- Local agents (hub-hosted nodes: one-click launch + delete) ---
 
-export interface LocalAgentView {
-  name: string
-  pid: number
-  registered: boolean
-  busy?: boolean
+export type LocalAgentView = LocalAgent
+
+export async function launchLocalAgent(): Promise<LocalAgent> {
+  const response = await aiscanRPC.agents.launchLocalAgent({})
+  if (!response.agent) throw new Error('Failed to launch local agent')
+  return response.agent
 }
 
-export async function launchLocalAgent(): Promise<LocalAgentView> {
-  return apiJSON('/api/deploy/local', 'Failed to launch local agent', {
-    method: 'POST',
-  })
-}
-
-export async function listLocalAgents(): Promise<LocalAgentView[]> {
-  return apiJSON('/api/deploy/local', 'Failed to list local agents')
+export async function listLocalAgents(): Promise<LocalAgent[]> {
+  return (await aiscanRPC.agents.listLocalAgents({})).agents
 }
 
 export async function getIOAOverview(): Promise<IOAOverview> {
-  // Polled every 3s while the IOA console is open. A stalled hub must surface
-  // as an error the console can show, not a forever-pending request.
-  return apiJSON('/api/ioa/overview', 'Failed to load IOA console', {
-    signal: AbortSignal.timeout(10_000),
-  })
+  const signal = AbortSignal.timeout(10_000)
+  const [nodes, spaces, messages] = await Promise.all([
+    apiJSON<IOANode[]>('/ioa/nodes', 'Failed to load IOA nodes', { signal }),
+    apiJSON<IOASpace[]>('/ioa/spaces', 'Failed to load IOA spaces', { signal }),
+    apiJSON<IOAMessage[]>('/ioa/messages', 'Failed to load IOA messages', { signal }),
+  ])
+  return { nodes, spaces, messages }
 }
 
 export async function stopLocalAgent(name: string): Promise<void> {
-  await apiJSON(`/api/deploy/local/${encodeURIComponent(name)}`, 'Failed to delete local agent', {
-    method: 'DELETE',
-  })
+  await aiscanRPC.agents.stopLocalAgent({ name })
 }
 
-export async function submitScan(target: string, mode: string, options: ScanOptions, project?: string): Promise<ScanJob> {
-	void project
+export async function submitScan(target: string, mode: string, options: ScanOptions): Promise<Scan> {
 	try {
 		const response = await aiscanRPC.scans.submitScan({ requestId: newRPCID(), target, mode, options })
 		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to submit scan')
-		return scanToView(response.outcome.value)
+		return response.outcome.value
 	} catch (error) {
 		throw connectFailure(error, 'Failed to submit scan')
 	}
 }
 
-export async function getAssets(project?: string): Promise<PoolAsset[]> {
-  const q = project ? `?project=${encodeURIComponent(project)}` : '';
-  return apiJSON(`/api/assets${q}`, 'Failed to load assets');
-}
-
-export async function addAssets(targets: string[], source?: string, label?: string, project?: string): Promise<PoolAsset[]> {
-  return apiJSON('/api/assets', 'Failed to add assets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targets, source, label, project }),
-  });
-}
-
-export async function deleteAsset(id: string, project?: string): Promise<void> {
-  const q = project ? `?project=${encodeURIComponent(project)}` : '';
-  await apiJSON(`/api/assets/${encodeURIComponent(id)}${q}`, 'Failed to delete asset', { method: 'DELETE' });
-}
-
-// One passive-recon hit, normalized to an importable pool target + display bits.
-export interface ReconHit {
-  target: string;
-  ip?: string;
-  port?: string;
-  host?: string;
-  url?: string;
-  title?: string;
-  icp?: string;
-}
-
-export interface ReconSearchResult {
-  source: string;
-  sources: string[]; // every source the hub has credentials for (UI selector)
-  hits: ReconHit[];
-}
-
-// Run a passive-recon query (FOFA / Hunter / …) via the hub. Errors — no
-// credentials, bad query, upstream failure — reject with the server's message.
-export async function reconSearch(source: string, query: string, limit?: number): Promise<ReconSearchResult> {
-  return apiJSON('/api/recon/search', 'Recon search failed', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, query, limit }),
-  });
-}
-
-// --- Projects (asset-pool scope) ---
-
-export interface Project {
-  id: string
-  name: string
-  assets: number
-  created_at: string
-}
-
-export async function getProjects(): Promise<Project[]> {
-  return apiJSON('/api/projects', 'Failed to load projects');
-}
-
-export async function createProject(name: string, id?: string): Promise<Project> {
-  return apiJSON('/api/projects', 'Failed to create project', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, id }),
-  });
-}
-
-// Cascades on the server: the project and its entire asset pool are removed.
-export async function deleteProject(id: string): Promise<void> {
-  await apiJSON(`/api/projects/${encodeURIComponent(id)}`, 'Failed to delete project', { method: 'DELETE' });
-}
-
-export async function getScan(id: string): Promise<ScanJob> {
+export async function getScan(id: string): Promise<Scan> {
 	try {
 		const response = await aiscanRPC.scans.getScan({ scanId: id })
 		if (!response.scan) throw new Error('Scan not found')
-		return scanToView(response.scan)
+		return response.scan
 	} catch (error) {
 		throw connectFailure(error, 'Scan not found')
 	}
 }
 
-export async function listScans(project?: string): Promise<ScanJob[]> {
-	void project
+export async function listScans(): Promise<Scan[]> {
 	try {
 		const response = await aiscanRPC.scans.listScans({})
-		return response.scans.map(scanToView)
+		return response.scans
 	} catch (error) {
 		throw connectFailure(error, 'Failed to list scans')
 	}
@@ -602,112 +287,35 @@ export async function deleteScan(id: string): Promise<void> {
 	}
 }
 
-export function subscribeScanEvents(
-  id: string,
-  onEvent: (event: ScanEvent) => void,
-): () => void {
-	const controller = new AbortController()
-	void (async () => {
-		try {
-			for await (const response of aiscanRPC.scans.watchScanEvents({ scanId: id }, { signal: controller.signal })) {
-				const value = response.event
-				if (!value) continue
-				switch (value.payload.case) {
-					case 'snapshot': {
-						const scan = scanToView(value.payload.value)
-						onEvent({ type: scan.status === 'completed' ? 'complete' : scan.status === 'failed' || scan.status === 'canceled' ? 'error' : 'status', scan_id: id, status: scan.status, error: scan.error, result: scan.result })
-						break
-					}
-					case 'status':
-						onEvent({ type: 'status', scan_id: id, status: scanStatusName(value.payload.value) })
-						break
-					case 'progress':
-						onEvent({ type: 'progress', scan_id: id, data: value.payload.value.data })
-						break
-					case 'stats':
-						onEvent({ type: 'stats', scan_id: id })
-						break
-					case 'completed':
-						onEvent({ type: 'complete', scan_id: id, status: 'completed', result: decodeEncoded<ScanResult>(value.payload.value.result) })
-						break
-					case 'failed':
-						onEvent({ type: 'error', scan_id: id, status: value.payload.value.canceled ? 'canceled' : 'failed', error: value.payload.value.message })
-						break
-				}
-			}
-		} catch (error) {
-			if (!controller.signal.aborted) connectFailure(error, 'Scan event stream disconnected')
-		}
-	})()
-	return () => controller.abort()
-}
-
-// --- Chat session types ---
-
-export interface ChatSession {
-  id: string
-  agent_id: string
-  agent_name?: string
-  title: string
-  status: 'active' | 'archived'
-  scan_ids?: string[]
-  created_at: string
-  updated_at: string
-}
-
-export interface ChatMessage {
-  id: string
-  session_id: string
-  role: 'user' | 'assistant' | 'system'
-  agent_id?: string
-  agent_name?: string
-  content: string
-  metadata?: Record<string, unknown>
-  created_at: string
-  cursor?: number
-  turn_id?: string
-}
-
 // --- Chat session API ---
 
-export async function createChatSession(agentID: string, title?: string, scanID?: string): Promise<ChatSession> {
-  void scanID
+export async function createChatSession(nodeURI: string, title?: string, scanID?: string): Promise<Session> {
   try {
-    const response = await aiscanRPC.chat.openSession({
-      requestId: newRPCID(),
-      sessionId: newRPCID(),
-      participant: agentID,
-      title: title || '',
-    })
+	const extensions = scanID
+		? [anyPack(SessionBindingSchema, create(SessionBindingSchema, { scanId: scanID }))]
+		: []
+	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'openSessionRequest', value: { sessionId: newRPCID(), nodeUri: nodeURI, title: title || '', extensions } } }), 'openSessionResponse')
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to create session')
-    const now = new Date().toISOString()
-    return {
-      id: response.outcome.value.id,
-      agent_id: response.outcome.value.participant,
-      title: response.outcome.value.title,
-      status: response.outcome.value.state === 'closed' ? 'archived' : 'active',
-      created_at: now,
-      updated_at: now,
-    }
+    return response.outcome.value
   } catch (error) {
     throw connectFailure(error, 'Failed to create session')
   }
 }
 
-export async function listChatSessions(): Promise<ChatSession[]> {
+export async function listChatSessions(): Promise<SessionRecord[]> {
   try {
     const response = await aiscanRPC.sessions.listSessions({ limit: 100, includeClosed: true })
-    return response.sessions.map(sessionRecordToView)
+    return response.sessions
   } catch (error) {
     throw connectFailure(error, 'Failed to list sessions')
   }
 }
 
-export async function getChatSession(id: string): Promise<ChatSession> {
+export async function getChatSession(id: string): Promise<SessionRecord> {
   try {
     const response = await aiscanRPC.sessions.getSession({ sessionId: id })
     if (!response.session) throw new Error('Session not found')
-    return sessionRecordToView(response.session)
+    return response.session
   } catch (error) {
     throw connectFailure(error, 'Session not found')
   }
@@ -722,40 +330,26 @@ export async function deleteChatSession(id: string): Promise<void> {
   }
 }
 
-export async function resetChatSession(id: string): Promise<ChatSession> {
+export async function resetChatSession(id: string): Promise<SessionRecord> {
   try {
     const response = await aiscanRPC.sessions.resetSession({ requestId: newRPCID(), sessionId: id })
     if (response.outcome.case !== 'accepted' || !response.outcome.value.current) {
       throw rejectionError(response.outcome.case === 'rejected' ? response.outcome.value : undefined, 'Failed to reset session')
     }
-    return sessionRecordToView(response.outcome.value.current)
+    return response.outcome.value.current
   } catch (error) {
     throw connectFailure(error, 'Failed to reset session')
   }
 }
 
-// SlashCommandSpec mirrors pkg/slashcmd.Spec — the server's canonical view of a
-// "/verb" command. The web "/" menu is built from these so it always reflects
-// the hub's + bound agent's real command set instead of a hardcoded list.
-export interface SlashCommandSpec {
-  name: string
-  aliases?: string[]
-  usage?: string
-  description?: string
-  scope: number
-  web_menu?: boolean
-}
-
-export async function fetchSessionCommands(sessionID: string): Promise<SlashCommandSpec[]> {
+// The web "/" menu is built from the aiscan.chat.CommandSpec list returned by
+// SessionService/ListCommands (hub-scope commands merged with the bound
+// agent's reported commands), so it always reflects the real command set
+// instead of a hardcoded list.
+export async function fetchSessionCommands(sessionID: string): Promise<CommandSpec[]> {
   try {
     const response = await aiscanRPC.sessions.listCommands({ sessionId: sessionID })
-    return response.commands.map((command) => ({
-      name: command.name,
-      aliases: command.aliases,
-      usage: command.usage,
-      description: command.description,
-      scope: 0,
-    }))
+    return response.commands
   } catch (error) {
     throw connectFailure(error, 'Failed to load commands')
   }
@@ -773,40 +367,23 @@ export async function sendChatMessage(
     requestID?: string
     continueSession?: boolean
   },
-): Promise<ChatMessage> {
+): Promise<TurnReceipt> {
   const messageID = opts?.messageID || newRPCID()
   const turnID = opts?.turnID || newRPCID()
   const extensions = []
   const criteria = opts?.persist ? opts.evalCriteria?.trim() : ''
   if (criteria) {
-    const value = JSON.stringify({ evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
-    extensions.push({
-      namespace: 'io.chainreactors.aiscan.run',
-      value: { data: new TextEncoder().encode(value), mediaType: 'application/protobuf+json' },
-    })
+    const value = create(RunOptionsSchema, { evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
+    extensions.push(anyPack(RunOptionsSchema, value))
   }
   try {
-    const response = await aiscanRPC.chat.runTurn({
-      requestId: opts?.requestID || newRPCID(),
-      sessionId: sessionID,
-      turnId: turnID,
-      continueSession: opts?.continueSession === true,
-      input: {
-        id: messageID,
-        role: 'user',
-        content: opts?.continueSession ? [] : [{ value: { case: 'text', value: { text: content } } }],
-      },
-      extensions,
-    })
+	const request = create(AOPProtocolMessageSchema, { message: { case: 'runTurnRequest', value: {
+	  sessionId: sessionID, turnId: turnID, continueSession: opts?.continueSession === true,
+	  input: { id: messageID, role: 'user', content: opts?.continueSession ? [] : [{ value: { case: 'text', value: { text: content } } }] }, extensions,
+	} } })
+	const response = await requestCore(request, 'runTurnResponse', opts?.requestID)
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to send message')
-    return {
-      id: messageID,
-      session_id: sessionID,
-      role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-      turn_id: response.outcome.value.turnId,
-    }
+    return response.outcome.value
   } catch (error) {
     throw connectFailure(error, 'Failed to send message')
   }
@@ -814,19 +391,21 @@ export async function sendChatMessage(
 
 export async function executeChatCommand(sessionID: string, line: string): Promise<void> {
   try {
-    const response = await aiscanRPC.sessions.executeCommand({ requestId: newRPCID(), sessionId: sessionID, line })
-    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to execute command')
+	const request = create(CommandProtocolMessageSchema, { message: { case: 'request', value: { sessionId: sessionID, line } } })
+	const response = await aopClient.request(CommandProtocolMessageSchema, request)
+	if (response.$typeName === 'aop.ProtocolMessage') {
+		const core = response as AOPProtocolMessage
+		if (core.message.case === 'protocolError') throw new Error(core.message.value.message)
+	}
   } catch (error) {
-    throw connectFailure(error, 'Failed to execute command')
+	throw error instanceof Error ? error : new Error('Failed to execute command')
   }
 }
 
 export async function cancelChatSession(sessionID: string, turnID: string): Promise<void> {
   if (!turnID) throw new Error('No active turn')
   try {
-    const response = await aiscanRPC.chat.cancelTurn({
-      requestId: newRPCID(), sessionId: sessionID, turnId: turnID, reason: 'user_requested',
-    })
+	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'cancelTurnRequest', value: { sessionId: sessionID, turnId: turnID, reason: 'user_requested' } } }), 'cancelTurnResponse')
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to pause response')
   } catch (error) {
     throw connectFailure(error, 'Failed to pause response')
@@ -835,46 +414,39 @@ export async function cancelChatSession(sessionID: string, turnID: string): Prom
 
 export async function closeChatSession(sessionID: string): Promise<void> {
   try {
-    const response = await aiscanRPC.chat.closeSession({
-      requestId: newRPCID(), sessionId: sessionID, reason: 'completed',
-    })
+	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'closeSessionRequest', value: { sessionId: sessionID, reason: 'completed' } } }), 'closeSessionResponse')
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to close session')
   } catch (error) {
     throw connectFailure(error, 'Failed to close session')
   }
 }
 
-export interface FileUploadResult {
-  filename: string
-  path: string
-  size: number
-  error?: string
-}
+export type FileUploadResult = FileResult
 
 export async function uploadChatFile(sessionID: string, file: File): Promise<FileUploadResult> {
   try {
-    const response = await aiscanRPC.sessions.uploadSessionFile({
-      requestId: newRPCID(),
-      sessionId: sessionID,
-      filename: file.name,
-      mediaType: file.type || 'application/octet-stream',
-      data: new Uint8Array(await file.arrayBuffer()),
-    })
-    if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Upload failed')
-    return {
-      filename: response.outcome.value.filename,
-      path: response.outcome.value.path,
-      size: Number(response.outcome.value.size),
-    }
+	const request = create(FileProtocolMessageSchema, { message: { case: 'uploadRequest', value: { sessionId: sessionID, filename: file.name, mediaType: file.type || 'application/octet-stream', data: new Uint8Array(await file.arrayBuffer()) } } })
+	const payload = await aopClient.request(FileProtocolMessageSchema, request)
+	if (payload.$typeName === 'aop.file.ProtocolMessage') {
+		const filePayload = payload as import('@cyber/aop').FileProtocolMessage
+		if (filePayload.message.case === 'result') return filePayload.message.value
+	}
+	if (payload.$typeName === 'aop.ProtocolMessage') {
+		const core = payload as AOPProtocolMessage
+		if (core.message.case === 'protocolError') throw new Error(core.message.value.message)
+	}
+	throw new Error('Upload returned an unexpected response')
   } catch (error) {
     throw connectFailure(error, 'Upload failed')
   }
 }
 
-export async function listChatMessages(sessionID: string): Promise<ChatMessage[]> {
+// Chat history is the raw AOP event log; views project EventDelivery records
+// into their own render models (see useChatSession.deliveryToChatMessage).
+export async function listChatMessages(sessionID: string): Promise<EventDelivery[]> {
   try {
-    const response = await aiscanRPC.chat.listEvents({ sessionId: sessionID, limit: 500 })
-    return response.events.flatMap((delivery) => deliveryToChatMessage(delivery) || [])
+	const response = await aiscanRPC.sessions.listEvents({ sessionId: sessionID, limit: 500 })
+    return response.events
   } catch (error) {
     throw connectFailure(error, 'Failed to list messages')
   }
@@ -897,123 +469,12 @@ export function subscribeAOPEvents(
   onEvent: (event: AOPEvent) => void,
   onReconnect?: () => void,
 ): () => void {
-  const controller = new AbortController()
-  let cursor = ''
-  void (async () => {
-    let retry = 250
-    while (!controller.signal.aborted) {
-      try {
-        for await (const response of aiscanRPC.chat.watchEvents(
-          { sessionId: sessionID, afterCursor: cursor },
-          { signal: controller.signal },
-        )) {
-          const delivery = response.delivery
-          if (!delivery?.event) continue
-          cursor = delivery.cursor
-          onEvent(delivery.event)
-          retry = 250
-        }
-      } catch (error) {
-        if (controller.signal.aborted) return
-        connectFailure(error, 'Event stream disconnected')
-        onReconnect?.()
-        await new Promise((resolve) => window.setTimeout(resolve, retry))
-        retry = Math.min(retry * 2, 5000)
-      }
-    }
-  })()
-  return () => controller.abort()
-}
-
-function sessionRecordToView(record: SessionRecord): ChatSession {
-  const session = record.session
-  if (!session) throw new Error('Session record is missing its AOP session')
-  return {
-    id: session.id,
-    agent_id: session.participant,
-    agent_name: record.agentName || undefined,
-    title: session.title,
-    status: session.state === 'closed' ? 'archived' : 'active',
-    scan_ids: record.scanIds,
-    created_at: timestampToISOString(record.createdAt),
-    updated_at: timestampToISOString(record.updatedAt),
-  }
-}
-
-function timestampToISOString(value?: { seconds: bigint; nanos: number }): string {
-  if (!value) return new Date(0).toISOString()
-  return new Date(Number(value.seconds) * 1000 + Math.floor(value.nanos / 1_000_000)).toISOString()
-}
-
-function scanStatusName(value: ScanStatus): ScanJob['status'] {
-	switch (value) {
-		case ScanStatus.QUEUED: return 'queued'
-		case ScanStatus.RUNNING: return 'running'
-		case ScanStatus.COMPLETED: return 'completed'
-		case ScanStatus.FAILED: return 'failed'
-		case ScanStatus.CANCELED: return 'canceled'
-		default: return 'queued'
-	}
-}
-
-function decodeEncoded<T>(value?: { data: Uint8Array }): T | undefined {
-	if (!value?.data?.length) return undefined
-	try {
-		return JSON.parse(new TextDecoder().decode(value.data)) as T
-	} catch {
-		return undefined
-	}
-}
-
-function scanToView(scan: ProtoScan): ScanJob {
-	return {
-		id: scan.id,
-		target: scan.target,
-		mode: scan.mode,
-		verify: scan.options?.verify,
-		sniper: scan.options?.sniper,
-		deep: scan.options?.deep,
-		status: scanStatusName(scan.status),
-		progress: scan.progress || undefined,
-		report: scan.report || undefined,
-		result: decodeEncoded<ScanResult>(scan.result),
-		error: scan.error || undefined,
-		created_at: timestampToISOString(scan.createdAt),
-		updated_at: timestampToISOString(scan.updatedAt),
-	}
-}
-
-function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
-  const event = delivery.event
-  if (!event || event.payload.case !== 'message') return null
-  const message = event.payload.value
-  const text = message.content
-    .filter((part) => part.value.case === 'text')
-    .map((part) => part.value.case === 'text' ? part.value.value.text : '')
-    .join('\n')
-  const webExtension = event.extensions.find((extension) => extension.namespace === 'io.chainreactors.aiscan.web')
-  let metadata: Record<string, unknown> | undefined
-  let agentID: string | undefined
-  if (webExtension?.value?.data?.length) {
-    try {
-      const decoded = JSON.parse(new TextDecoder().decode(webExtension.value.data)) as Record<string, unknown>
-      agentID = typeof decoded.agentId === 'string' ? decoded.agentId : undefined
-      metadata = decoded.metadata && typeof decoded.metadata === 'object' ? decoded.metadata as Record<string, unknown> : undefined
-    } catch {}
-  }
-  const role = message.role === 'assistant' || message.role === 'system' ? message.role : 'user'
-  return {
-    id: message.id,
-    session_id: event.sessionId,
-    role,
-    agent_id: agentID,
-    agent_name: event.emitter,
-    content: text,
-    metadata,
-    created_at: timestampToISOString(event.emittedAt),
-    cursor: delivery.cursor ? Number(delivery.cursor) : undefined,
-    turn_id: event.turnId || undefined,
-  }
+	const watch = (cursor: string) => create(AOPProtocolMessageSchema, { message: { case: 'watchEventsRequest', value: { sessionId: sessionID, afterCursor: cursor } } })
+	return aopClient.subscribe(AOPProtocolMessageSchema, watch(''), (payload) => {
+		if (payload.$typeName !== 'aop.ProtocolMessage') return
+		const core = payload as AOPProtocolMessage
+		if (core.message.case === 'event') onEvent(core.message.value)
+	}, { durable: true, resume: (cursor) => { onReconnect?.(); return watch(cursor) } })
 }
 
 function rejectionError(value: { code?: string; message?: string } | undefined, fallback: string): Error {
@@ -1024,6 +485,19 @@ function connectFailure(error: unknown, fallback: string): Error {
   const failure = ConnectError.from(error)
   if (failure.code === Code.Unauthenticated) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
   return new Error(failure.rawMessage || failure.message || fallback)
+}
+
+type CoreMessage = AOPProtocolMessage['message']
+type CoreCase = Exclude<CoreMessage['case'], undefined>
+type CoreValue<C extends CoreCase> = Extract<CoreMessage, { case: C }>['value']
+
+async function requestCore<C extends CoreCase>(request: AOPProtocolMessage, expected: C, id?: string): Promise<CoreValue<C>> {
+	const payload = await aopClient.request(AOPProtocolMessageSchema, request, { id })
+	if (payload.$typeName !== 'aop.ProtocolMessage') throw new Error(`Unexpected AOP response ${payload.$typeName}`)
+	const core = payload as AOPProtocolMessage
+	if (core.message.case === 'protocolError') throw new Error(core.message.value.message)
+	if (core.message.case !== expected) throw new Error(`Expected ${expected}, received ${core.message.case || 'empty'}`)
+	return core.message.value as CoreValue<C>
 }
 
 function newRPCID(): string {
@@ -1042,32 +516,26 @@ function newRPCID(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-export function agentTerminalWebSocketURL(agentID: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/agents/${encodeURIComponent(agentID)}/terminal/ws`;
-}
+export { aopClient }
 
 // ── SCO Nodes ──
 
 export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
-  const params = new URLSearchParams();
-  if (opts?.type) params.set('type', opts.type);
-  if (opts?.scanId) params.set('scan_id', opts.scanId);
-  if (opts?.limit) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return apiJSON(`/api/sco/nodes${qs ? '?' + qs : ''}`, 'Failed to load SCO nodes');
+  const response = await aiscanRPC.sco.listNodes({ type: opts?.type || '', operationId: opts?.scanId || '', limit: opts?.limit || 0 })
+  return (response.nodes?.nodes || []).map(decodeSCONode)
 }
 
 export async function getSCONode(id: string): Promise<SCONode> {
-  return apiJSON(`/api/sco/nodes/${encodeURIComponent(id)}`, 'SCO node not found');
+  return decodeSCONode((await aiscanRPC.sco.getNode({ id })).node)
 }
 
 export async function getSCOStats(): Promise<Record<string, number>> {
-  return apiJSON('/api/sco/stats', 'Failed to load SCO stats');
+  const values = (await aiscanRPC.sco.getStats({})).values
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number(value)]))
 }
 
 export async function getSupportedArtifacts(): Promise<string[]> {
-  return apiJSON('/api/sco/artifacts', 'Failed to load artifacts');
+  return (await aiscanRPC.sco.listArtifacts({})).artifacts
 }
 
 export async function importSCOData(
@@ -1075,16 +543,12 @@ export async function importSCOData(
   artifact: string,
   scanId = 'import',
 ): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('artifact', artifact);
-  form.append('scan_id', scanId);
-  const resp = await authenticatedFetch('/api/sco/import', { method: 'POST', body: form });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(err.error || `Import failed: ${resp.status}`);
-  }
-  return resp.json();
+  const response = await aiscanRPC.sco.importNodes({ data: new Uint8Array(await file.arrayBuffer()), artifact, operationId: scanId })
+  return { status: 'ok', nodes: Number(response.nodes), artifact: response.artifact, duplicates: Number(response.duplicates) }
+}
+
+function decodeSCONode(data: Uint8Array): SCONode {
+  return JSON.parse(new TextDecoder().decode(data)) as SCONode
 }
 
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {

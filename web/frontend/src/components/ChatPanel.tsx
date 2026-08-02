@@ -44,8 +44,8 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
-import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
-import type { TimelineItem } from '../hooks/useChatSession'
+import type { CommandSpec, SCONode } from '../api'
+import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
@@ -70,7 +70,7 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
         kind: 'extension',
         timestamp: item.timestamp,
         extensionType: 'scan_complete',
-        data: { scanID: item.scanID || '', result: item.scanResult },
+        data: { scanID: item.scanID || '', nodes: item.scanNodes },
       }
     default:
       return null
@@ -82,13 +82,6 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
 // already renders them as scan cards. Drop them from the stream handed to the
 // AOP reducer so they don't also appear as bare "scan complete" bubbles.
 function isPlatformMarkerEvent(event: AOPEvent): boolean {
-  if (event.payload.case !== 'message' || event.payload.value.role !== 'system') return false
-  for (const extension of event.extensions) {
-    const value = decodeExtension(extension.value?.data)
-    if (!value || typeof value !== 'object') continue
-    const meta = (value as Record<string, unknown>).metadata
-    if (meta && typeof meta === 'object' && (meta as Record<string, unknown>).event_type) return true
-  }
   return false
 }
 
@@ -114,17 +107,7 @@ function presentAOPEvent(event: AOPEvent): AOPEvent {
 }
 
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
-  for (const extension of event.extensions) {
-    const value = decodeExtension(extension.value?.data)
-    if (value && typeof value === 'object') return value as Record<string, unknown>
-  }
-  return {}
-}
-
-function decodeExtension(data?: Uint8Array): unknown {
-  if (!data?.length) return undefined
-  try { return JSON.parse(new TextDecoder().decode(data)) }
-  catch { return undefined }
+  return Object.fromEntries(event.extensions.map((extension) => [extension.typeUrl, extension.typeUrl]))
 }
 
 function eventTimestamp(event: AOPEvent): number {
@@ -211,7 +194,7 @@ function isUserMessageItem(
 
 function toViewerTimelineItem(
   item: TimelineItem,
-  scanResults: Map<string, ScanResult>,
+  scanResults: Map<string, SCONode[]>,
 ): ViewerTimelineItem | null {
   switch (item.kind) {
     case 'message': {
@@ -259,7 +242,7 @@ const threadOffsetClass = 'lg:mr-[10.75rem] xl:mr-[11.75rem] 2xl:mr-[14.75rem]'
 interface Props {
   timeline: TimelineItem[]
   aopEvents?: AOPEvent[]
-  scanResults: Map<string, ScanResult>
+  scanResults: Map<string, SCONode[]>
   isThinking: boolean
   isBusy: boolean
   error: string
@@ -413,7 +396,7 @@ export default function ChatPanel({
       return
     }
     let cancelled = false
-    const toHint = (spec: SlashCommandSpec): CommandHint => {
+    const toHint = (spec: CommandSpec): CommandHint => {
       const base = spec.name.replace(/^\//, '')
       const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
       const localized = key ? t(key, { defaultValue: '' }) : ''
@@ -718,7 +701,7 @@ export default function ChatPanel({
 
 function timelineContent(
   item: ViewerTimelineItem,
-  scanResults: Map<string, ScanResult>,
+  scanResults: Map<string, SCONode[]>,
 ): ReactNode {
   switch (item.kind) {
     case 'message': {

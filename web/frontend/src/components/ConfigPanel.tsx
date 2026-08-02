@@ -1,11 +1,71 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Plus, Settings, Trash2, Zap } from 'lucide-react'
+import { create } from '@bufbuild/protobuf'
+import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../aiscan-proto'
 import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
-import type { ConfigStatus, ConnCheck, DistributeConfig, LLMProviderProfile, LLMTestResult, ServerStatus } from '../api'
+import type { ConfigView, ConnectionCheck, DistributeConfig, LLMProbeResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, ResultLine } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ModelCombobox } from './ModelCombobox'
+
+// ConfigFormState is the panel's editable form model (secrets as typed, blank =
+// keep the stored value). It converts to the proto DistributeConfig at the API
+// boundary — see formToDistributeConfig. Note the proto ScanConfig carries only
+// `verify`; there is no verify_timeout on the wire anymore.
+interface LLMProfileForm {
+  id: string
+  name: string
+  provider: string
+  base_url: string
+  api_key: string
+  model: string
+  proxy: string
+  context_window?: number
+  max_tokens?: number
+}
+
+interface ConfigFormState {
+  llm: { active_profile: string; providers: LLMProfileForm[] }
+  cyberhub: { url: string; key: string; mode: string; proxy: string }
+  recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number }
+  scan: { verify: string }
+  search: { tavily_keys: string }
+  ioa: { url: string; token: string; node_name: string; space: string }
+  agent: { tools: string[]; timeout: number; save_session: boolean }
+}
+
+function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
+  return create(DistributeConfigSchema, {
+    llm: {
+      activeProfile: form.llm.active_profile,
+      providers: form.llm.providers.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        provider: profile.provider,
+        baseUrl: profile.base_url,
+        apiKey: profile.api_key,
+        model: profile.model,
+        proxy: profile.proxy,
+        maxTokens: profile.max_tokens ?? 0,
+        contextWindow: profile.context_window ?? 0,
+      })),
+    },
+    cyberhub: { ...form.cyberhub },
+    recon: {
+      fofaEmail: form.recon.fofa_email,
+      fofaKey: form.recon.fofa_key,
+      hunterToken: form.recon.hunter_token,
+      hunterApiKey: form.recon.hunter_api_key,
+      proxy: form.recon.proxy,
+      limit: form.recon.limit ?? 0,
+    },
+    scan: { verify: form.scan.verify },
+    search: { tavilyKeys: form.search.tavily_keys },
+    ioa: { url: form.ioa.url, token: form.ioa.token, nodeName: form.ioa.node_name, space: form.ioa.space },
+    agent: { tools: form.agent.tools, timeout: form.agent.timeout, saveSession: form.agent.save_session },
+  })
+}
 
 interface ConfigPanelProps {
   open: boolean
@@ -41,57 +101,63 @@ const LLM_PROVIDER_PRESETS: { value: string; label: string; protocol: LLMProtoco
   { value: 'custom-anthropic', label: '', protocol: 'anthropic', baseUrl: '' },
 ]
 
-function emptyForm(): DistributeConfig {
+function emptyForm(): ConfigFormState {
   const profile = blankLLMProfile('default')
   return {
     llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
     recon: { fofa_email: '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: '' },
-    scan: { verify: '', verify_timeout: 0 },
+    scan: { verify: '' },
     search: { tavily_keys: '' },
     ioa: { url: '', token: '', node_name: '', space: '' },
     agent: { tools: [], timeout: 0, save_session: false },
   }
 }
 
-function statusToForm(cs: ConfigStatus): DistributeConfig {
-  const profiles: LLMProviderProfile[] = cs.llm.profiles?.length
-    ? cs.llm.profiles.map(profile => ({
-        ...profile,
+function statusToForm(cs: ConfigView): ConfigFormState {
+  const active = cs.llm?.active
+  const profiles: LLMProfileForm[] = cs.llm?.providers.length
+    ? cs.llm.providers.map(profile => ({
+        id: profile.id,
+        name: profile.name,
+        provider: profile.provider,
+        base_url: profile.baseUrl,
         api_key: '',
-        context_window: positiveInteger(profile.context_window),
-        max_tokens: positiveInteger(profile.max_tokens),
+        model: profile.model,
+        proxy: profile.proxy,
+        context_window: positiveInteger(profile.contextWindow),
+        max_tokens: positiveInteger(profile.maxTokens),
       }))
     : [{
-        id: cs.llm.active_profile || 'default',
-        name: cs.llm.model || cs.llm.provider || 'Default',
-        provider: cs.llm.provider,
-        base_url: cs.llm.base_url,
+        id: cs.llm?.activeProfile || 'default',
+        name: active?.name || active?.model || active?.provider || 'Default',
+        provider: active?.provider || '',
+        base_url: active?.baseUrl || '',
         api_key: '',
-        model: cs.llm.model,
-        proxy: cs.llm.proxy,
-        context_window: positiveInteger(cs.llm.context_window),
-        max_tokens: positiveInteger(cs.llm.max_tokens),
+        model: active?.model || '',
+        proxy: active?.proxy || '',
+        context_window: positiveInteger(active?.contextWindow),
+        max_tokens: positiveInteger(active?.maxTokens),
       }]
   return {
     llm: {
-      active_profile: cs.llm.active_profile || profiles[0].id,
+      active_profile: cs.llm?.activeProfile || profiles[0].id,
       providers: profiles,
     },
-    cyberhub: { url: cs.cyberhub.url, key: '', mode: cs.cyberhub.mode, proxy: cs.cyberhub.proxy },
-    recon: { fofa_email: cs.recon.fofa_email, fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: cs.recon.proxy, limit: cs.recon.limit },
-    scan: { ...cs.scan },
+    cyberhub: { url: cs.cyberhub?.url || '', key: '', mode: cs.cyberhub?.mode || '', proxy: cs.cyberhub?.proxy || '' },
+    recon: { fofa_email: cs.recon?.fofaEmail || '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
+    scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
-    ioa: { url: cs.ioa.url, token: '', node_name: cs.ioa.node_name, space: cs.ioa.space },
-    agent: { ...cs.agent },
+    ioa: { url: cs.ioa?.url || '', token: '', node_name: cs.ioa?.nodeName || '', space: cs.ioa?.space || '' },
+    agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0, save_session: cs.agent?.saveSession || false },
   }
 }
 
-function blankLLMProfile(id = `llm-${Date.now()}`): LLMProviderProfile {
+function blankLLMProfile(id = `llm-${Date.now()}`): LLMProfileForm {
   return { id, name: 'New LLM', provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
 }
 
-function providerPresetValue(profile: LLMProviderProfile): string {
+function providerPresetValue(profile: LLMProfileForm): string {
   const baseURL = profile.base_url.trim().replace(/\/+$/, '')
   if (!baseURL) return `custom-${profile.provider}`
   return LLM_PROVIDER_PRESETS.find(preset =>
@@ -115,29 +181,29 @@ function positiveIntegerFromInput(value: string): number | undefined {
 // and only the global "config loaded" badge shows.
 function sectionStatus(
   tab: TabKey,
-  cs: ConfigStatus | null,
+  cs: ConfigView | null,
   status: ServerStatus | null,
   t: (key: string) => string,
 ): { key: string; label: string; ok: boolean }[] {
   const tag = (name: string, ok: boolean) => ({ key: name, label: `${name} ${ok ? t('configured') : t('notConfigured')}`, ok })
   switch (tab) {
     case 'llm':
-      const configured = !!(status?.llm_available && status.llm_model?.trim())
+      const configured = !!(status?.llmAvailable && status.llmModel?.trim())
       return [{ key: 'llm', label: configured ? t('llmConfigured') : t('llmNotConfigured'), ok: configured }]
     case 'cyberhub':
-      return [tag('Cyberhub', !!(cs?.cyberhub.url && cs?.cyberhub.key_configured))]
+      return [tag('Cyberhub', !!(cs?.cyberhub?.url && cs?.cyberhub?.keyConfigured))]
     case 'recon':
       return [
         // FOFA's 2023 simplified auth needs only the API key — the email never
         // enters the request URL (see engine/uncover.go). Gate readiness on the
         // key alone so a valid key-only setup doesn't read as "not configured".
-        tag('FOFA', !!cs?.recon.fofa_key_configured),
-        tag('Hunter', !!(cs?.recon.hunter_api_key_configured || cs?.recon.hunter_token_configured)),
+        tag('FOFA', !!cs?.recon?.fofaKeyConfigured),
+        tag('Hunter', !!(cs?.recon?.hunterApiKeyConfigured || cs?.recon?.hunterTokenConfigured)),
       ]
     case 'search':
-      return [tag('Tavily', !!cs?.search.tavily_keys_configured)]
+      return [tag('Tavily', !!cs?.search?.tavilyKeysConfigured)]
     case 'ioa':
-      return [tag('Server', !!(cs?.ioa.url && cs?.ioa.token_configured))]
+      return [tag('Server', !!(cs?.ioa?.url && cs?.ioa?.tokenConfigured))]
     default:
       return [] // scan, agent — local only
   }
@@ -145,8 +211,8 @@ function sectionStatus(
 
 export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPanelProps) {
   const { t } = useTranslation('config')
-  const [cs, setCs] = useState<ConfigStatus | null>(null)
-  const [form, setForm] = useState<DistributeConfig>(emptyForm)
+  const [cs, setCs] = useState<ConfigView | null>(null)
+  const [form, setForm] = useState<ConfigFormState>(emptyForm)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -185,7 +251,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
     setSaving(true)
     setError('')
     try {
-      await saveConfig(form)
+      await saveConfig(formToDistributeConfig(form))
       onSaved()
       onClose()
     } catch (err: unknown) {
@@ -208,7 +274,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
             <Settings className="h-4 w-4 text-primary" />
             <div>
               <DialogTitle className="text-sm font-medium text-foreground">{t('settings')}</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">{cs?.config_path || status?.config_path || 'config.yaml'}</DialogDescription>
+              <DialogDescription className="text-xs text-muted-foreground">{cs?.path || status?.configPath || 'config.yaml'}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -235,7 +301,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
                 {sectionStatus(activeTab, cs, status, t).map((b) => (
                   <Badge key={b.key} variant={b.ok ? 'success' : 'warning'} className="text-xs">{b.label}</Badge>
                 ))}
-                <Badge variant={cs?.config_loaded ? 'success' : 'warning'} className="text-xs">{cs?.config_loaded ? t('configLoaded') : t('configMissing')}</Badge>
+                <Badge variant={cs?.loaded ? 'success' : 'warning'} className="text-xs">{cs?.loaded ? t('configLoaded') : t('configMissing')}</Badge>
               </div>
               <div className="min-h-[12rem]">
                 {activeTab === 'llm' && (
@@ -281,7 +347,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
   )
 }
 
-type TabProps = { form: DistributeConfig; setForm: React.Dispatch<React.SetStateAction<DistributeConfig>>; cs?: ConfigStatus | null }
+type TabProps = { form: ConfigFormState; setForm: React.Dispatch<React.SetStateAction<ConfigFormState>>; cs?: ConfigView | null }
 
 function LLMTab({
   form,
@@ -296,12 +362,12 @@ function LLMTab({
   selectedProfileID: string
   onSelectProfile: (id: string) => void
   invalidModelProfileID: string
-  onInvalidModel: (profile: LLMProviderProfile) => void
+  onInvalidModel: (profile: LLMProfileForm) => void
   onModelChange: (profileID: string) => void
 }) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<LLMTestResult | null>(null)
+  const [result, setResult] = useState<LLMProbeResult | null>(null)
   const [models, setModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
@@ -309,9 +375,9 @@ function LLMTab({
 
   const profiles = form.llm.providers
   const profile = profiles.find(item => item.id === selectedProfileID) || profiles[0]
-  const configuredProfile = cs?.llm.profiles?.find(item => item.id === profile?.id)
+  const configuredProfile = cs?.llm?.providers.find(item => item.id === profile?.id)
 
-  const patchProfile = (patch: Partial<LLMProviderProfile>) => {
+  const patchProfile = (patch: Partial<LLMProfileForm>) => {
     if (!profile) return
     setForm(current => ({
       ...current,
@@ -322,8 +388,8 @@ function LLMTab({
     }))
   }
 
-  const updateProfile = <K extends keyof LLMProviderProfile,>(key: K, value: LLMProviderProfile[K]) => {
-    patchProfile({ [key]: value } as Partial<LLMProviderProfile>)
+  const updateProfile = <K extends keyof LLMProfileForm,>(key: K, value: LLMProfileForm[K]) => {
+    patchProfile({ [key]: value } as Partial<LLMProfileForm>)
   }
 
   const resetProviderState = () => {
@@ -381,10 +447,10 @@ function LLMTab({
     setModelsNotice(null)
     try {
       const res = await listLLMModels({
-        profile_id: profile.id,
+        profileId: profile.id,
         provider: profile.provider,
-        base_url: profile.base_url,
-        api_key: profile.api_key,
+        baseUrl: profile.base_url,
+        apiKey: profile.api_key,
         proxy: profile.proxy,
       })
       if (res.ok) {
@@ -408,17 +474,17 @@ function LLMTab({
     setResult(null)
     try {
       const res = await testLLM({
-        profile_id: profile.id,
+        profileId: profile.id,
         provider: profile.provider,
-        base_url: profile.base_url,
-        api_key: profile.api_key,
+        baseUrl: profile.base_url,
+        apiKey: profile.api_key,
         model: profile.model,
         proxy: profile.proxy,
       })
       setResult(res)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      setResult({ ok: false, provider: profile.provider, model: profile.model, latency_ms: 0, error: message || t('testFailed') })
+      setResult(create(LLMProbeResultSchema, { ok: false, provider: profile.provider, model: profile.model, error: message || t('testFailed') }))
     } finally {
       setTesting(false)
     }
@@ -512,7 +578,7 @@ function LLMTab({
       <div className="sm:col-span-2">
         <Field label={t('apiKey')}>
           <Input type="password" value={profile.api_key} onChange={(e) => updateProfile('api_key', e.target.value)}
-            placeholder={configuredProfile?.api_key_configured ? t('configuredKeep') : t('apiKeyRequired')} />
+            placeholder={configuredProfile?.apiKeyConfigured ? t('configuredKeep') : t('apiKeyRequired')} />
         </Field>
       </div>
       <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
@@ -535,7 +601,7 @@ function LLMTab({
         {result && (
           <ResultLine ok={result.ok} title={result.ok ? undefined : result.error}>
             {result.ok
-              ? <>{t('testOk')} · {t('testLatency')} {result.latency_ms}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
+              ? <>{t('testOk')} · {t('testLatency')} {result.latencyMs}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
               : <>{t('testFailed')}: {result.error}</>}
           </ResultLine>
         )}
@@ -559,7 +625,7 @@ function CyberhubTab({ form, setForm, cs }: TabProps) {
       <Field label={t('proxy')}><Input value={form.cyberhub.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://127.0.0.1:1080" /></Field>
       <Field label={t('apiKey')}>
         <Input type="password" value={form.cyberhub.key} onChange={(e) => u('key', e.target.value)}
-          placeholder={cs?.cyberhub.key_configured ? t('configuredKeep') : t('cyberhubApiKey')} />
+		  placeholder={cs?.cyberhub?.keyConfigured ? t('configuredKeep') : t('cyberhubApiKey')} />
       </Field>
       <ConnTest section="cyberhub" form={form} />
     </div>
@@ -572,9 +638,9 @@ function ReconTab({ form, setForm, cs }: TabProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('fofaEmail')}><Input value={form.recon.fofa_email} onChange={(e) => u('fofa_email', e.target.value)} placeholder="account@example.com" /></Field>
-      <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.recon.fofa_key_configured ? t('configuredKeep') : t('fofaApiKey')} /></Field>
-      <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.recon.hunter_api_key_configured ? t('configuredKeep') : t('hex64')} /></Field>
-      <Field label={t('hunterToken')}><Input type="password" value={form.recon.hunter_token} onChange={(e) => u('hunter_token', e.target.value)} placeholder={cs?.recon.hunter_token_configured ? t('configuredKeep') : t('webTokenRare')} /></Field>
+      <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.recon?.fofaKeyConfigured ? t('configuredKeep') : t('fofaApiKey')} /></Field>
+      <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.recon?.hunterApiKeyConfigured ? t('configuredKeep') : t('hex64')} /></Field>
+      <Field label={t('hunterToken')}><Input type="password" value={form.recon.hunter_token} onChange={(e) => u('hunter_token', e.target.value)} placeholder={cs?.recon?.hunterTokenConfigured ? t('configuredKeep') : t('webTokenRare')} /></Field>
       <Field label={t('reconProxy')}><Input value={form.recon.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://host:port" /></Field>
       <Field label={t('perQueryLimit')}>
         <Input type="number" value={form.recon.limit ?? ''} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, recon: { ...f.recon, limit: v === '' ? undefined : parseInt(v, 10) } })) }} placeholder={t('unlimited')} />
@@ -594,9 +660,6 @@ function ScanTab({ form, setForm }: Omit<TabProps, 'cs'>) {
           <SelectContent>{['auto','off','low','high'].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
         </Select>
       </Field>
-      <Field label={t('verifyTimeout')}>
-        <Input type="number" value={form.scan.verify_timeout || ''} onChange={(e) => setForm((f) => ({ ...f, scan: { ...f.scan, verify_timeout: parseInt(e.target.value, 10) || 0 } }))} placeholder="120" />
-      </Field>
       <p className="sm:col-span-2 text-xs text-muted-foreground">{t('localOnlyNote')}</p>
     </div>
   )
@@ -608,7 +671,7 @@ function SearchTab({ form, setForm, cs }: TabProps) {
     <div className="grid gap-3">
       <Field label={t('tavilyKeys')}>
         <Input type="password" value={form.search.tavily_keys} onChange={(e) => setForm((f) => ({ ...f, search: { tavily_keys: e.target.value } }))}
-          placeholder={cs?.search.tavily_keys_configured ? t('configuredKeep') : t('tavilyHint')} />
+          placeholder={cs?.search?.tavilyKeysConfigured ? t('configuredKeep') : t('tavilyHint')} />
       </Field>
       <ConnTest section="search" form={form} />
     </div>
@@ -621,7 +684,7 @@ function IOATab({ form, setForm, cs }: TabProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('ioaServerUrl')}><Input value={form.ioa.url} onChange={(e) => u('url', e.target.value)} placeholder="http://host:port" /></Field>
-      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.ioa.token_configured ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
+      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.ioa?.tokenConfigured ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
       <Field label={t('nodeName')}><Input value={form.ioa.node_name} onChange={(e) => u('node_name', e.target.value)} placeholder={t('autoRegisterNode')} /></Field>
       <Field label={t('space')}><Input value={form.ioa.space} onChange={(e) => u('space', e.target.value)} placeholder="default" /></Field>
       <ConnTest section="ioa" form={form} />
@@ -673,20 +736,20 @@ function ProbePulse({ className }: { className?: string }) {
 // one result row per external dependency probed (Recon returns FOFA + Hunter).
 // The whole form is sent so unsaved edits are tested; blank secrets fall back to
 // the stored values on the server.
-function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa'; form: DistributeConfig }) {
+function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa'; form: ConfigFormState }) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
-  const [checks, setChecks] = useState<ConnCheck[] | null>(null)
+  const [checks, setChecks] = useState<ConnectionCheck[] | null>(null)
 
   const handleTest = async () => {
     setTesting(true)
     setChecks(null)
     try {
-      const res = await testConn(section, form)
+      const res = await testConn(section, formToDistributeConfig(form))
       setChecks(res.checks)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      setChecks([{ name: section, ok: false, latency_ms: 0, error: message || t('testFailed') }])
+      setChecks([create(ConnectionCheckSchema, { name: section, ok: false, error: message || t('testFailed') })])
     } finally {
       setTesting(false)
     }
@@ -711,13 +774,13 @@ const CHECK_LABELS: Record<string, string> = {
   fofa: 'FOFA', hunter: 'Hunter', cyberhub: 'Cyberhub', tavily: 'Tavily', ioa: 'Server',
 }
 
-function ConnCheckRow({ check }: { check: ConnCheck }) {
+function ConnCheckRow({ check }: { check: ConnectionCheck }) {
   const { t } = useTranslation('config')
   const label = CHECK_LABELS[check.name] ?? check.name
   return (
     <ResultLine ok={check.ok} title={check.ok ? undefined : check.error}>
       {check.ok
-        ? <>{label} · {t('testOk')} · {t('testLatency')} {check.latency_ms}ms{check.detail ? ` · ${check.detail}` : ''}</>
+        ? <>{label} · {t('testOk')} · {t('testLatency')} {check.latencyMs}ms{check.detail ? ` · ${check.detail}` : ''}</>
         : <>{label} · {t('testFailed')}: {check.error}</>}
     </ResultLine>
   )

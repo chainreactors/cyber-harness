@@ -28,7 +28,7 @@ export default {
   quickConnectOnly: 'Connect Only',
   quickConnectGlobal: 'Global',
   quickConnectChina: 'China',
-  quickConnectHint: 'Run this command on a remote machine to connect an agent to this server.',
+  quickConnectHint: 'Replace ACCESS_TOKEN and NODE_NAME before running; one server-url derives both the WebSocket connection and co-hosted IOA space.',
   // Header LLM health indicator
   llmUnconfigured: 'LLM not configured',
   llmChecking: 'Checking…',

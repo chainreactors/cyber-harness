@@ -24,9 +24,11 @@ const ARCH_OPTIONS: { value: Arch; label: string; osFilter?: OS[] }[] = [
 ]
 
 const CHINA_MIRROR = 'https://ghfast.top/'
+const ACCESS_TOKEN_PLACEHOLDER = 'ACCESS_TOKEN'
+const NODE_NAME_PLACEHOLDER = 'NODE_NAME'
 
 interface Props {
-  ioaURL: string | undefined
+  serverURL: string | undefined
   version: string | undefined
 }
 
@@ -57,25 +59,38 @@ function releaseURL(os: OS, arch: Arch, version?: string, mirror?: string): stri
   return mirror ? mirror + url : url
 }
 
-function connectCmd(os: OS, ioaURL: string): string {
-  if (os === 'windows') {
-    return `.\\aiscan-full.exe agent --server-url '${ioaURL}'`
-  }
-  return `./aiscan-full agent --server-url '${ioaURL}'`
+function authenticatedURL(rawURL: string): string {
+  const url = new URL(rawURL, window.location.origin)
+  url.username = ACCESS_TOKEN_PLACEHOLDER
+  url.password = ''
+  return url.toString().replace(/\/$/, '')
 }
 
-function installCmd(os: OS, arch: Arch, ioaURL: string, version?: string, mirror?: string): string {
-  const dlURL = releaseURL(os, arch, version, mirror)
+function agentArgs(serverURL: string): string {
+  return `--server-url '${authenticatedURL(serverURL)}' --space default --node-name '${NODE_NAME_PLACEHOLDER}'`
+}
+
+function connectCmd(os: OS, serverURL: string): string {
+  const args = agentArgs(serverURL)
   if (os === 'windows') {
-    return `powershell -c "Invoke-WebRequest '${dlURL}' -OutFile aiscan.zip; Expand-Archive aiscan.zip -DestinationPath .; .\\aiscan-full.exe agent --server-url '${ioaURL}'"`
+    return `.\\aiscan-full.exe agent ${args}`
+  }
+  return `./aiscan-full agent ${args}`
+}
+
+function installCmd(os: OS, arch: Arch, serverURL: string, version?: string, mirror?: string): string {
+  const dlURL = releaseURL(os, arch, version, mirror)
+  const args = agentArgs(serverURL)
+  if (os === 'windows') {
+    return `powershell -c "Invoke-WebRequest '${dlURL}' -OutFile aiscan.zip; Expand-Archive aiscan.zip -DestinationPath .; .\\aiscan-full.exe agent ${args}"`
   }
   const bin = 'aiscan-full'
-  return `curl -sL '${dlURL}' -o aiscan.zip && unzip -o aiscan.zip ${bin} && chmod +x ${bin} && ./${bin} agent --server-url '${ioaURL}'`
+  return `curl -sL '${dlURL}' -o aiscan.zip && unzip -o aiscan.zip ${bin} && chmod +x ${bin} && ./${bin} agent ${args}`
 }
 
 type CopiedKey = string | null
 
-export default function QuickConnect({ ioaURL, version }: Props) {
+export default function QuickConnect({ serverURL, version }: Props) {
   const { t } = useTranslation('app')
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>(detectPlatform)
@@ -113,14 +128,14 @@ export default function QuickConnect({ ioaURL, version }: Props) {
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [open])
 
-  if (!ioaURL) return null
+  if (!serverURL) return null
 
   const { os, arch } = platform
   const availableArches = archOptionsForOS(os)
 
-  const installGlobal = installCmd(os, arch, ioaURL, version)
-  const installChina = installCmd(os, arch, ioaURL, version, CHINA_MIRROR)
-  const connect = connectCmd(os, ioaURL)
+  const installGlobal = installCmd(os, arch, serverURL, version)
+  const installChina = installCmd(os, arch, serverURL, version, CHINA_MIRROR)
+  const connect = connectCmd(os, serverURL)
 
   return (
     <div className="relative" ref={panelRef}>

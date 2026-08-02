@@ -13,17 +13,22 @@ import {
 import { cn, useTheme } from '@cyber/theme'
 import LanguageToggle from './LanguageToggle'
 import { launchLocalAgent, listLocalAgents, stopLocalAgent } from '../api'
-import type { AgentInfo, ChatSession, LocalAgentView } from '../api'
+import type { AgentView, SessionRecord, LocalAgentView } from '../api'
+import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { agentActivity } from '../lib/agentActivity'
 import { agentMatchesSession } from '../lib/session-agent'
 import { usePolling } from '../hooks/usePolling'
 import i18n from '../i18n'
 
+function recordID(record: SessionRecord): string {
+  return record.session?.id || ''
+}
+
 interface Props {
   open: boolean
   onToggle: () => void
-  agents?: AgentInfo[]
-  sessions?: ChatSession[]
+  agents?: AgentView[]
+  sessions?: SessionRecord[]
   activeSessionID: string | null
   selectedAgentID: string | null
   terminalAgentID: string | null
@@ -67,14 +72,14 @@ export default function SessionList({
   const { groups, orphanGroups } = useMemo(() => {
     const claimed = new Set<string>()
     const groups = agents.map((agent) => {
-      const own = sessions.filter((s) => !claimed.has(s.id) && agentMatchesSession(agent, s))
-      own.forEach((s) => claimed.add(s.id))
+      const own = sessions.filter((s) => !claimed.has(recordID(s)) && agentMatchesSession(agent, s))
+      own.forEach((s) => claimed.add(recordID(s)))
       return { agent, sessions: own }
     })
-    const orphanMap = new Map<string, ChatSession[]>()
+    const orphanMap = new Map<string, SessionRecord[]>()
     for (const s of sessions) {
-      if (claimed.has(s.id)) continue
-      const key = s.agent_name || s.agent_id || 'unknown'
+      if (claimed.has(recordID(s))) continue
+      const key = s.agentName || s.session?.nodeUri || 'unknown'
       const list = orphanMap.get(key) || []
       list.push(s)
       orphanMap.set(key, list)
@@ -155,17 +160,17 @@ export default function SessionList({
                 )}
                 {groups.map(({ agent, sessions: own }) => (
                   <AgentGroup
-                    key={agent.id}
+                    key={agent.nodeUri}
                     agent={agent}
                     sessions={own}
-                    isSelected={agent.id === selectedAgentID}
+                    isSelected={agent.nodeUri === selectedAgentID}
                     activeSessionID={activeSessionID}
-                    terminalActive={agent.id === terminalAgentID}
-                    onSelectAgent={() => onSelectAgent(agent.id)}
+                    terminalActive={agent.nodeUri === terminalAgentID}
+                    onSelectAgent={() => onSelectAgent(agent.nodeUri)}
                     onSelectSession={onSelectSession}
-                    onCreateSession={() => onCreateSession(agent.id)}
+                    onCreateSession={() => onCreateSession(agent.nodeUri)}
                     onDeleteSession={onDeleteSession}
-                    onOpenTerminal={() => onOpenTerminal(agent.id)}
+                    onOpenTerminal={() => onOpenTerminal(agent.nodeUri)}
                   />
                 ))}
                 {orphanGroups.length > 0 && (
@@ -180,7 +185,7 @@ export default function SessionList({
                         name={g.name}
                         sessions={g.sessions}
                         activeSessionID={activeSessionID}
-                        defaultOpen={agents.length === 0 || g.sessions.some((s) => s.id === activeSessionID)}
+                        defaultOpen={agents.length === 0 || g.sessions.some((s) => recordID(s) === activeSessionID)}
                         onSelectSession={onSelectSession}
                         onDeleteSession={onDeleteSession}
                       />
@@ -193,13 +198,13 @@ export default function SessionList({
         ) : (
           <div className="flex flex-col items-center gap-2 pt-3">
             {agents.map((agent) => (
-              <Tooltip key={agent.id}>
+              <Tooltip key={agent.nodeUri}>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    active={agent.id === selectedAgentID}
-                    onClick={() => { onSelectAgent(agent.id); onToggle() }}
+                    active={agent.nodeUri === selectedAgentID}
+                    onClick={() => { onSelectAgent(agent.nodeUri); onToggle() }}
                     className="relative"
                   >
                     <Monitor className="w-4 h-4 text-muted-foreground" />
@@ -209,7 +214,7 @@ export default function SessionList({
                     />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="right">{agent.name}</TooltipContent>
+                <TooltipContent side="right">{agent.hello?.name}</TooltipContent>
               </Tooltip>
             ))}
           </div>
@@ -243,8 +248,8 @@ function AgentGroup({
   agent, sessions, isSelected, activeSessionID, terminalActive,
   onSelectAgent, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: {
-  agent: AgentInfo
-  sessions: ChatSession[]
+  agent: AgentView
+  sessions: SessionRecord[]
   isSelected: boolean
   activeSessionID: string | null
   terminalActive: boolean
@@ -255,9 +260,9 @@ function AgentGroup({
   onOpenTerminal: () => void
 }) {
   const { t } = useTranslation('sidebar')
-  const [expanded, setExpanded] = useState(isSelected || sessions.some((s) => s.id === activeSessionID))
-  const status = agent.status || { bound: false }
-  const llm = [status.provider, status.model].filter(Boolean).join('/')
+  const [expanded, setExpanded] = useState(isSelected || sessions.some((s) => recordID(s) === activeSessionID))
+  const status = agent.status
+  const llm = [status?.provider, status?.model].filter(Boolean).join('/')
   const act = agentActivity(agent)
 
   function handleToggle() {
@@ -282,7 +287,7 @@ function AgentGroup({
           <StatusDot status={agent.busy ? 'warning' : 'online'} className="h-2.5 w-2.5" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className="min-w-0 truncate text-xs font-semibold text-foreground">{agent.name}</span>
+              <span className="min-w-0 truncate text-xs font-semibold text-foreground">{agent.hello?.name}</span>
               <span className="shrink-0 whitespace-nowrap text-[9px] text-muted-foreground">{agent.busy ? t('busy') : t('idle')}</span>
             </div>
             {act?.kind === 'tool' ? (
@@ -335,11 +340,11 @@ function AgentGroup({
         <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2 animate-in fade-in slide-in-from-top-1 duration-150">
           {sessions.map((session) => (
             <SessionItem
-              key={session.id}
+              key={recordID(session)}
               session={session}
-              active={session.id === activeSessionID}
-              onSelect={() => onSelectSession(session.id)}
-              onDelete={() => onDeleteSession(session.id)}
+              active={recordID(session) === activeSessionID}
+              onSelect={() => onSelectSession(recordID(session))}
+              onDelete={() => onDeleteSession(recordID(session))}
             />
           ))}
         </div>
@@ -351,14 +356,15 @@ function AgentGroup({
 function SessionItem({
   session, active, onSelect, onDelete,
 }: {
-  session: ChatSession
+  session: SessionRecord
   active: boolean
   onSelect: () => void
   onDelete: () => void
 }) {
   const { t } = useTranslation('sidebar')
-  const title = session.title || t('newSession')
-  const time = new Date(session.updated_at).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })
+  const title = session.session?.title || t('newSession')
+  const updatedAt = session.updatedAt ? timestampDate(session.updatedAt) : null
+  const time = (updatedAt || new Date(0)).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })
 
   return (
     <div
@@ -403,7 +409,7 @@ function OfflineAgentGroup({
   name, sessions, activeSessionID, defaultOpen, onSelectSession, onDeleteSession,
 }: {
   name: string
-  sessions: ChatSession[]
+  sessions: SessionRecord[]
   activeSessionID: string | null
   defaultOpen: boolean
   onSelectSession: (id: string) => void
@@ -440,11 +446,11 @@ function OfflineAgentGroup({
         <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2 animate-in fade-in slide-in-from-top-1 duration-150">
           {sessions.map((session) => (
             <SessionItem
-              key={session.id}
+              key={recordID(session)}
               session={session}
-              active={session.id === activeSessionID}
-              onSelect={() => onSelectSession(session.id)}
-              onDelete={() => onDeleteSession(session.id)}
+              active={recordID(session) === activeSessionID}
+              onSelect={() => onSelectSession(recordID(session))}
+              onDelete={() => onDeleteSession(recordID(session))}
             />
           ))}
         </div>
