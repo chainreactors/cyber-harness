@@ -10,7 +10,6 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -62,17 +61,9 @@ func TestSQLiteStoreRejectsLegacySchema(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreMigratesV1AgentIDToNodeID(t *testing.T) {
+func TestSQLiteStoreRejectsV1Schema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.db")
 	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record := &types.SessionRecord{
-		Session:   &aop.Session{Id: "s1", State: SessionStateOpen, NodeId: "local-1"},
-		CreatedAt: nowProto(), UpdatedAt: nowProto(),
-	}
-	raw, err := protobuf.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,47 +82,10 @@ func TestSQLiteStoreMigratesV1AgentIDToNodeID(t *testing.T) {
 		_ = db.Close()
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO chat_sessions (id, agent_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		"s1", record.GetSession().GetNodeId(), SessionStateOpen, raw,
-		formatProtoTime(record.CreatedAt), formatProtoTime(record.UpdatedAt)); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
 	_ = db.Close()
 
-	store, err := NewSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	got, err := store.GetSession(context.Background(), "s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.GetSession().GetNodeId() != record.GetSession().GetNodeId() {
-		t.Fatalf("node_id = %q, want %q", got.GetSession().GetNodeId(), record.GetSession().GetNodeId())
-	}
-	var version int
-	if err := store.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != sqliteSchemaVersion {
-		t.Fatalf("schema version = %d, err = %v", version, err)
-	}
-	rows, err := store.db.Query(`PRAGMA table_info(chat_sessions)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	columns := map[string]bool{}
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, dataType string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			t.Fatal(err)
-		}
-		columns[name] = true
-	}
-	if !columns["node_id"] || columns["agent_id"] {
-		t.Fatalf("chat_sessions columns = %+v", columns)
+	if _, err := NewSQLiteStore(path); err == nil {
+		t.Fatal("NewSQLiteStore() accepted the incompatible v1 schema")
 	}
 }
 
@@ -227,6 +181,49 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 	options := got.GetOptions()
 	if !options.GetVerify() || options.GetSniper() || !options.GetDeep() {
 		t.Fatalf("stored options = verify:%v sniper:%v deep:%v", options.GetVerify(), options.GetSniper(), options.GetDeep())
+	}
+}
+
+func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "protojson.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	scan := &types.Scan{
+		Id: "scan-json", Target: "example.com", Mode: "deep",
+		Options: &types.ScanOptions{Verify: true, Sniper: true},
+		Status:  types.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
+		Report: "# report", Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
+	}
+	if err := store.Create(context.Background(), scan); err != nil {
+		t.Fatal(err)
+	}
+
+	var raw, target, mode, status, progress, report string
+	var verify, sniper, deep bool
+	if err := store.db.QueryRow(`
+		SELECT scan_json, target, mode, verify, sniper, deep, status, progress, report
+		FROM scans WHERE id = ?`, scan.Id,
+	).Scan(&raw, &target, &mode, &verify, &sniper, &deep, &status, &progress, &report); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid([]byte(raw)) {
+		t.Fatalf("scan_json is not JSON: %q", raw)
+	}
+	if target != scan.Target || mode != scan.Mode || status != scanStatusToDB(scan.Status) || progress != scan.Progress || report != scan.Report {
+		t.Fatalf("relational projection = target:%q mode:%q status:%q progress:%q report:%q", target, mode, status, progress, report)
+	}
+	if !verify || !sniper || deep {
+		t.Fatalf("relational options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
+	}
+	var legacyColumns int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('scans') WHERE name = 'scan_proto'`).Scan(&legacyColumns); err != nil {
+		t.Fatal(err)
+	}
+	if legacyColumns != 0 {
+		t.Fatal("legacy scan_proto BLOB column still exists")
 	}
 }
 
