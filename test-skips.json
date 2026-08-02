@@ -98,7 +98,7 @@
     "reason": "Two mixed HTTP/headless templates reference variables unavailable to the headless-only compile fixture."
   },
   {
-    "path": "pkg/web/agents_test.go",
+    "path": "pkg/web/service/agents_test.go",
     "format": "chromium not found, skipping browser e2e test",
     "count": 1,
     "category": "external_runtime",

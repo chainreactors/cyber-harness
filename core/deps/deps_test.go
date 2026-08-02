@@ -416,7 +416,7 @@ func TestWebProtocolDoesNotDefineGenericJSONEnvelope(t *testing.T) {
 
 func TestLiveBrokerDoesNotUseJSON(t *testing.T) {
 	root := repositoryRoot(t)
-	path := filepath.Join(root, "pkg", "web", "broker.go")
+	path := filepath.Join(root, "pkg", "web", "service", "broker.go")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

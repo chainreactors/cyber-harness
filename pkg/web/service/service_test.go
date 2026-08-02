@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"connectrpc.com/connect"
@@ -67,7 +67,7 @@ func TestLegacyChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	handler := NewHandler(svc, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := newHandler(svc, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}), "")
 	for _, test := range []struct {
@@ -153,7 +153,7 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 // frontend "/" menu uses and proves it returns the protobuf command catalog.
 func TestSessionCommandsConnectRPC(t *testing.T) {
 	svc := newMenuTestService(t)
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()
 
 	client := rpc.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())

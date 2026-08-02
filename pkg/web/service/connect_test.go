@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"connectrpc.com/connect"
@@ -20,7 +20,7 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	defer service.Close()
 
 	mux := http.NewServeMux()
-	RegisterConnectServices(mux, "", service)
+	registerConnectServices(mux, "", service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -50,7 +50,7 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 
 func TestHandlerTestConnRouting(t *testing.T) {
 	svc := NewService(ServiceConfig{})
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()
 	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
 
@@ -90,7 +90,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterConnectServices(mux, "", service)
+	registerConnectServices(mux, "", service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -149,7 +149,7 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 	defer service.Close()
 
 	mux := http.NewServeMux()
-	RegisterConnectServices(mux, "", service)
+	registerConnectServices(mux, "", service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

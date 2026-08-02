@@ -1,4 +1,4 @@
-package web
+package service
 
 import (
 	"context"
@@ -496,7 +496,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
 
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
@@ -902,7 +902,7 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 		}
 	})
 
-	srv := httptest.NewServer(NewHandler(svc, nil, static, ""))
+	srv := httptest.NewServer(newHandler(svc, nil, static, ""))
 	t.Cleanup(srv.Close)
 	resp, err := http.Get(srv.URL + "/api/auth/session") //nolint:gosec // test-only local server
 	if err != nil {
@@ -1689,7 +1689,7 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 	svc := NewService(ServiceConfig{Store: store})
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()
 
 	conn1 := dialAgent(t, srv, "bind-agent", []string{"scan"})

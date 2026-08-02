@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
+	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
@@ -71,7 +72,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 }
 
 func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
-	store, err := web.NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := webservice.NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

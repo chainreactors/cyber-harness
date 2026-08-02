@@ -18,9 +18,9 @@ type writeRequest struct {
 	result   chan error
 }
 
-// Connection is the web mechanism runtime for one duplex EnvelopeStream. It
-// owns exactly one reader and one FIFO writer. Protocol and business state
-// remain in NamespaceMux, api, AgentPool, Service, and Hub.
+// Connection is the root Web mechanism for one duplex EnvelopeStream. It owns
+// exactly one reader and one FIFO writer; protocol and business state remain
+// behind the Service abstraction.
 type Connection struct {
 	ctx    context.Context
 	cancel context.CancelFunc
