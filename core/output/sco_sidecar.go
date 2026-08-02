@@ -48,10 +48,13 @@ func (s *SCOSidecar) handle(ev ToolDataEvent) {
 		if json.Unmarshal(raw, &header) != nil || header.ID == "" {
 			continue
 		}
-		if _, dup := s.seen[header.ID]; dup {
+		// A libcstx node may be observed by many operations. Deduplicate only
+		// inside one operation so every operation keeps its own provenance edge.
+		key := ev.CallID + "\x00" + header.ID
+		if _, dup := s.seen[key]; dup {
 			continue
 		}
-		s.seen[header.ID] = struct{}{}
+		s.seen[key] = struct{}{}
 		s.nodes = append(s.nodes, raw)
 		fresh = append(fresh, raw)
 	}

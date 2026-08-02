@@ -167,17 +167,6 @@ func (c *collector) TerminalString(color bool) string {
 	return formatSummary(c, color)
 }
 
-func (c *collector) ReportMarkdown() string {
-	return output.RenderReport(c.StructuredResult(), output.ReportOptions{
-		Style:        output.StyleMarkdown,
-		Title:        "Scan Report",
-		Sitemap:      true,
-		CollapseBare: true,
-		Metrics:      true,
-		Inventory:    true,
-	})
-}
-
 func (c *collector) JSONLines() (string, error) {
 	return formatJSONLines(c)
 }
@@ -187,10 +176,6 @@ func (c *collector) PlainText() string {
 	lines := append([]string(nil), c.fileLines...)
 	c.mu.Unlock()
 	return formatPlainText(c, lines)
-}
-
-func (c *collector) AssetReport() string {
-	return output.FormatAssetReport(c.StructuredResult(), false)
 }
 
 type statsSnapshot struct {

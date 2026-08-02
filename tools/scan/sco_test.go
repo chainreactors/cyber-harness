@@ -43,15 +43,16 @@ func TestStructuredResultContainsSCONodes(t *testing.T) {
 
 	coll.Finish()
 	result := coll.StructuredResult()
+	nodes := buildSCONodes(result)
 
 	// Verify nodes exist
-	if len(result.Nodes) == 0 {
-		t.Fatal("StructuredResult().Nodes is empty — SCO conversion did not run")
+	if len(nodes) == 0 {
+		t.Fatal("buildSCONodes() returned no libcstx facts")
 	}
 
 	// Parse nodes back and check types
 	types := make(map[string]int)
-	for _, raw := range result.Nodes {
+	for _, raw := range nodes {
 		var header struct {
 			Type string `json:"cstx_type"`
 			ID   string `json:"cstx_id"`
@@ -71,15 +72,5 @@ func TestStructuredResultContainsSCONodes(t *testing.T) {
 		}
 	}
 
-	t.Logf("total SCO nodes: %d, types: %v", len(result.Nodes), types)
-
-	// Verify JSON serialization round-trip
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("failed to marshal result: %v", err)
-	}
-	if len(resultJSON) == 0 {
-		t.Fatal("empty result JSON")
-	}
-	t.Logf("Result JSON size: %d bytes", len(resultJSON))
+	t.Logf("total SCO nodes: %d, types: %v", len(nodes), types)
 }

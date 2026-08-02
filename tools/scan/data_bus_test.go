@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-func TestEmitStructuredDataPublishesScanAssets(t *testing.T) {
+func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 	bus := eventbus.New[output.ToolDataEvent]()
 	cmd := New(&engine.Set{}, WithDataBus(bus))
 
@@ -21,9 +21,9 @@ func TestEmitStructuredDataPublishesScanAssets(t *testing.T) {
 	defer unsub()
 
 	ctx := output.ContextWithCallID(context.Background(), "scan-call-1")
-	cmd.emitStructuredData(ctx, &output.Result{
-		Services: []*parsers.GOGOResult{{Ip: "127.0.0.1", Port: "8080", Protocol: "http"}},
-		WebProbes: []*parsers.SprayResult{{
+	cmd.emitStructuredData(ctx, &output.ScanResult{
+		GOGO: []*parsers.GOGOResult{{Ip: "127.0.0.1", Port: "8080", Protocol: "http"}},
+		Spray: []*parsers.SprayResult{{
 			UrlString: "http://127.0.0.1:8080/", Status: 200,
 		}},
 	})

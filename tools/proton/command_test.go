@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/resources"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protoncmd "github.com/chainreactors/aiscan/tools/proton"
 )
@@ -42,7 +43,7 @@ func run(t *testing.T, bash *commands.BashTool, cmd string) string {
 	if err != nil {
 		t.Fatalf("execute %q: %v", cmd, err)
 	}
-	return res.Text()
+	return tool.ResultText(res)
 }
 
 func writeFile(t *testing.T, dir, name, content string) string {

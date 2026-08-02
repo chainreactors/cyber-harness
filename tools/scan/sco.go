@@ -1,5 +1,3 @@
-//go:build cstx_native
-
 package scan
 
 import (
@@ -9,16 +7,16 @@ import (
 	"github.com/chainreactors/libcstx/go"
 )
 
-func buildSCONodes(result *output.Result) []json.RawMessage {
+func buildSCONodes(result *output.ScanResult) []json.RawMessage {
 	var allNodes []cstx.SCONode
 
-	if len(result.Services) > 0 {
-		if nodes, err := cstx.Parse("gogo", result.Services); err == nil {
+	if len(result.GOGO) > 0 {
+		if nodes, err := cstx.Parse("gogo", result.GOGO); err == nil {
 			allNodes = append(allNodes, nodes...)
 		}
 	}
-	if len(result.WebProbes) > 0 {
-		if nodes, err := cstx.Parse("spray", result.WebProbes); err == nil {
+	if len(result.Spray) > 0 {
+		if nodes, err := cstx.Parse("spray", result.Spray); err == nil {
 			allNodes = append(allNodes, nodes...)
 		}
 	}

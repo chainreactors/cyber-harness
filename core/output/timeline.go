@@ -11,8 +11,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
-	"github.com/chainreactors/utils/parsers"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -63,39 +62,7 @@ func parseLine(line []byte) (TimelineEntry, bool) {
 		}
 		return TimelineEntry{Timestamp: timestamp, Type: aop.Kind(event), Data: event}, true
 	}
-	rec, err := ParseRecord(line)
-	if err != nil || rec.Type == "" {
-		return TimelineEntry{}, false
-	}
-	if item := parseRecordData(rec); item != nil {
-		return TimelineEntry{Timestamp: rec.Timestamp, Type: string(rec.Type), Data: item}, true
-	}
 	return TimelineEntry{}, false
-}
-
-func parseRecordData(rec Record) any {
-	if rec.Loot {
-		return unmarshalItem[parsers.Loot](rec.Data)
-	}
-	switch rec.Type {
-	case TypeScanStart:
-		return unmarshalItem[ScanStart](rec.Data)
-	case TypeGogo:
-		return unmarshalItem[parsers.GOGOResult](rec.Data)
-	case TypeSpray:
-		return unmarshalItem[parsers.SprayResult](rec.Data)
-	case TypeScanEnd:
-		return unmarshalItem[ScanEnd](rec.Data)
-	}
-	return nil
-}
-
-func unmarshalItem[T any](data json.RawMessage) *T {
-	var v T
-	if json.Unmarshal(data, &v) != nil {
-		return nil
-	}
-	return &v
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +79,28 @@ func RenderTimelineMarkdown(w io.Writer, entries []TimelineEntry) error {
 	return err
 }
 
+// RenderFile renders an AOP Event ProtoJSONL file. Scanner fact files are
+// libcstx SCO JSONL and are intentionally not accepted as agent timelines.
+func RenderFile(path, format, outputPath string) error {
+	var writer io.Writer = os.Stdout
+	if outputPath != "" {
+		file, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer file.Close()
+		writer = file
+	}
+	entries, err := ParseTimelineFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(format, "markdown") || strings.EqualFold(format, "md") {
+		return RenderTimelineMarkdown(writer, entries)
+	}
+	return RenderTimeline(writer, entries)
+}
+
 func BuildTimelineMarkdown(entries []TimelineEntry) string {
 	var sb strings.Builder
 	sess := collectSessionMeta(entries)
@@ -119,18 +108,8 @@ func BuildTimelineMarkdown(entries []TimelineEntry) string {
 
 	for _, e := range entries {
 		switch d := e.Data.(type) {
-		case *ScanStart:
-			d.writeMarkdown(&sb)
-		case *parsers.GOGOResult:
-			writeGogoMarkdown(&sb, d)
-		case *parsers.SprayResult:
-			writeSprayMarkdown(&sb, d)
-		case *parsers.Loot:
-			writeLootMarkdown(&sb, d)
 		case *aop.Event:
 			writeAOPMarkdown(&sb, d)
-		case *ScanEnd:
-			d.writeMarkdown(&sb)
 		}
 	}
 	return sb.String()
@@ -163,19 +142,6 @@ func writeHeader(sb *strings.Builder, sess *sessionMeta) {
 	if len(meta) > 0 {
 		sb.WriteString("> " + strings.Join(meta, " · ") + "\n\n")
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Scan types
-// ---------------------------------------------------------------------------
-
-func (d *ScanStart) writeMarkdown(sb *strings.Builder) {
-	sb.WriteString(fmt.Sprintf("- **scan** targets=%s mode=%s\n", strings.Join(d.Targets, ", "), d.Mode))
-}
-
-func (d *ScanEnd) writeMarkdown(sb *strings.Builder) {
-	sb.WriteString(fmt.Sprintf("\n> **scan done** %.1fs — %d services, %d webs, %d loots\n\n",
-		d.Duration, d.Services, d.Webs, d.Loots))
 }
 
 // ---------------------------------------------------------------------------
@@ -429,8 +395,6 @@ func aopContentText(content []*aop.Content) string {
 	for _, item := range content {
 		if text := item.GetText().GetText(); text != "" {
 			parts = append(parts, text)
-		} else if opaque := item.GetOpaque(); opaque != nil {
-			parts = append(parts, string(opaque.Value.GetData()))
 		}
 	}
 	return strings.Join(parts, "\n")
