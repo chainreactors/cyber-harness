@@ -105,9 +105,9 @@ func (*sessionTestRuntime) CloseAgentSession(context.Context, string, string, *a
 func (r *sessionTestRuntime) StartAgentTurn(_ string, request *aop.RunTurnRequest) {
 	r.started = proto.Clone(request).(*aop.RunTurnRequest)
 }
-func (*sessionTestRuntime) CancelAgentTurn(context.Context, string, string) error { return nil }
-func (r *sessionTestRuntime) PublishUserMessage(string, string, *aop.Message)     { r.published++ }
-func (*sessionTestRuntime) PublishSessionEvent(string, *aop.Event)                {}
+func (*sessionTestRuntime) CancelTurn(context.Context, string, string) error  { return nil }
+func (r *sessionTestRuntime) PublishUserMessage(string, string, *aop.Message) { r.published++ }
+func (*sessionTestRuntime) BroadcastAOPEvent(string, *aop.Event)              {}
 func (*sessionTestRuntime) SubscribeSessionEvents(string) (<-chan *aop.EventDelivery, func()) {
 	ch := make(chan *aop.EventDelivery)
 	return ch, func() { close(ch) }

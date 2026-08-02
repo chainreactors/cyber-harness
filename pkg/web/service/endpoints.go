@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	web "github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"github.com/gorilla/websocket"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 const (
@@ -59,43 +60,31 @@ func (p *AgentPool) HandleNodeWebSocket(w http.ResponseWriter, r *http.Request) 
 	serveEnvelopeWebSocket(p.upgrader, p.ServeNode, w, r)
 }
 
-// ServeApplication performs the Application Endpoint initialization and then
-// hands the unified Connection to the api business dispatcher.
-func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStream) error {
-	if s == nil || s.api == nil || stream == nil {
-		return fmt.Errorf("application AOP stream is unavailable")
+// webSocketEnvelopeStream adapts a gorilla WebSocket to the transport-neutral
+// aop.EnvelopeStream; writes are serialized.
+type webSocketEnvelopeStream struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
+	_, data, err := s.conn.ReadMessage()
+	if err != nil {
+		return nil, err
 	}
-	first, err := stream.Recv()
+	envelope := new(aop.Envelope)
+	if err := protobuf.Unmarshal(data, envelope); err != nil {
+		return nil, fmt.Errorf("decode AOP envelope: %w", err)
+	}
+	return envelope, nil
+}
+
+func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
+	data, err := protobuf.Marshal(envelope)
 	if err != nil {
 		return err
 	}
-	connection, err := web.NewConnection(ctx, stream)
-	if err != nil {
-		return err
-	}
-	defer connection.Close()
-
-	if message, unwrapErr := aop.Unwrap(first); unwrapErr == nil {
-		if core, ok := message.(*aop.ProtocolMessage); ok && core.GetAgentHello() != nil {
-			protocolErr, wrapErr := aop.Wrap(generateID(), first.GetId(), &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{
-				Code: "WRONG_ENDPOINT", Message: "AgentHello is only accepted by the node endpoint",
-			}}})
-			if wrapErr == nil {
-				_ = connection.Send(protocolErr)
-			}
-			return fmt.Errorf("AgentHello sent to application endpoint")
-		}
-	}
-
-	backends := &managementapi.ApplicationBackends{
-		Sessions: s.api.Sessions,
-		Scans:    s.api.Scans,
-		Commands: s,
-		Files:    s,
-		NewID:    generateID,
-	}
-	if s.agents != nil {
-		backends.PTY = ptyRouter{pool: s.agents}
-	}
-	return managementapi.ServeApplication(connection, first, backends)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.WriteMessage(websocket.BinaryMessage, data)
 }

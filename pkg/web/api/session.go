@@ -48,9 +48,9 @@ type SessionRuntime interface {
 	OpenAgentSession(context.Context, string, *aop.OpenSessionRequest) error
 	CloseAgentSession(context.Context, string, string, *aop.CloseSessionRequest) (bool, error)
 	StartAgentTurn(string, *aop.RunTurnRequest)
-	CancelAgentTurn(context.Context, string, string) error
+	CancelTurn(context.Context, string, string) error
 	PublishUserMessage(string, string, *aop.Message)
-	PublishSessionEvent(string, *aop.Event)
+	BroadcastAOPEvent(string, *aop.Event)
 	SubscribeSessionEvents(string) (<-chan *aop.EventDelivery, func())
 	DeleteSession(context.Context, string) error
 	SessionMenu(string) []*types.CommandSpec
@@ -310,7 +310,7 @@ func (s *Sessions) CancelTurn(ctx context.Context, requestID string, request *ao
 	if strings.TrimSpace(request.SessionId) == "" || strings.TrimSpace(request.TurnId) == "" {
 		return finish(rejectedCancel("INVALID_ARGUMENT", "session_id and turn_id are required"))
 	}
-	if err := s.runtime.CancelAgentTurn(ctx, request.SessionId, request.TurnId); err != nil {
+	if err := s.runtime.CancelTurn(ctx, request.SessionId, request.TurnId); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return finish(rejectedCancel("NOT_FOUND", "session not found"))
 		}
@@ -379,7 +379,7 @@ func (s *Sessions) CloseSession(ctx context.Context, requestID string, request *
 		return nil, fmt.Errorf("close session: %w", err)
 	}
 	if !connected {
-		s.runtime.PublishSessionEvent(request.SessionId, &aop.Event{
+		s.runtime.BroadcastAOPEvent(request.SessionId, &aop.Event{
 			SessionId: request.SessionId,
 			Emitter:   "aiscan.web",
 			Payload:   &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: request.Reason}},

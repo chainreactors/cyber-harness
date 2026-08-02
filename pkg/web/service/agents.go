@@ -574,11 +574,11 @@ func (p *AgentPool) CancelPTY(nodeID, terminalID string) {
 	_ = p.sendAgentMessage(nodeID, generateID(), "", coreterminal.NewKill(terminalID))
 }
 
-func (p *AgentPool) CloseTerminal(nodeID, terminalID string) {
+func (p *AgentPool) ClosePTY(nodeID, terminalID string) {
 	_ = p.sendAgentMessage(nodeID, generateID(), "", coreterminal.NewDetach(terminalID))
 }
 
-func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan *ptypb.ProtocolMessage, bool, func()) {
+func (p *AgentPool) SubscribePTY(nodeID, terminalID string) (<-chan *ptypb.ProtocolMessage, bool, func()) {
 	ch := make(chan *ptypb.ProtocolMessage, 256)
 	// Snapshot connectivity while registering the subscription under the pool
 	// lock. An unregister cannot otherwise be distinguished from an initially
@@ -599,6 +599,10 @@ func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan *ptypb.Proto
 		}
 		p.ptyMu.Unlock()
 	}
+}
+
+func (p *AgentPool) ForwardPTY(nodeID string, message *ptypb.ProtocolMessage) error {
+	return p.sendAgentMessage(nodeID, generateID(), "", message)
 }
 
 func (p *AgentPool) notifyPTY(nodeID string, message func(string) *ptypb.ProtocolMessage) {
