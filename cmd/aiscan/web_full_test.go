@@ -14,7 +14,6 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/pkg/web"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 )
 

@@ -20,6 +20,22 @@ type connectionTestStream struct {
 	sendErr error
 }
 
+type blockingConnectionTestStream struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingConnectionTestStream) Recv() (*aop.Envelope, error) {
+	return nil, io.EOF
+}
+
+func (s *blockingConnectionTestStream) Send(*aop.Envelope) error {
+	s.once.Do(func() { close(s.started) })
+	<-s.release
+	return nil
+}
+
 func newConnectionTestStream() *connectionTestStream {
 	return &connectionTestStream{recvCh: make(chan *aop.Envelope), recvErr: make(chan error, 1)}
 }
@@ -175,5 +191,39 @@ func TestConnectionContextCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("connection did not stop after cancellation")
+	}
+}
+
+func TestConnectionCloseWaitsForActiveWriter(t *testing.T) {
+	stream := &blockingConnectionTestStream{started: make(chan struct{}), release: make(chan struct{})}
+	connection, err := NewConnection(context.Background(), stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- connection.Send(&aop.Envelope{Id: "one"}) }()
+	select {
+	case <-stream.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start")
+	}
+	closeDone := make(chan struct{})
+	go func() {
+		connection.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+		t.Fatal("Close returned while the stream writer was active")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(stream.release)
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not return after the stream writer stopped")
+	}
+	if err := <-sendDone; err != nil && !errors.Is(err, ErrConnectionClosed) {
+		t.Fatalf("Send() error = %v", err)
 	}
 }

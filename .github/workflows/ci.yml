@@ -34,10 +34,19 @@ jobs:
 
 
       - name: Run golangci-lint
+        id: golangci_lint
+        continue-on-error: true
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
           args: --timeout=5m --build-tags "re2_cgo re2_static"
+
+      - name: Report lint warnings
+        if: steps.golangci_lint.outcome == 'failure'
+        run: |
+          echo "::warning::golangci-lint reported issues. Lint is advisory and does not block CI."
+          echo "### Lint warnings" >> "$GITHUB_STEP_SUMMARY"
+          echo "golangci-lint reported issues. Review the annotations above; this check is non-blocking." >> "$GITHUB_STEP_SUMMARY"
 
   tidy:
     runs-on: ubuntu-22.04

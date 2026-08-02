@@ -244,7 +244,7 @@ func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *types.Scan, expe
 	}
 	result, err := s.orm.NewUpdate().Model(model).
 		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "report", "error", "scan_json", "updated_at").
-		Where("id = ?", model.ID).Where("status IN (?)", bun.In(statuses)).Exec(ctx)
+		Where("id = ?", model.ID).Where("status IN (?)", bun.List(statuses)).Exec(ctx)
 	if err != nil {
 		return false, err
 	}
