@@ -59,6 +59,5 @@ func (rt *AgentRuntime) newPTYRouter() (*coreterminal.Router, error) {
 	if rt == nil || rt.ptyManager == nil || rt.ptyManager.Manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
-	openers := pty.DefaultOpeners(rt.ptyManager.Manager, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	return coreterminal.NewRouter(rt.ptyManager.Manager, coreterminal.WithOpeners(openers)), nil
+	return coreterminal.NewRuntimeRouter(rt.ptyManager.Manager), nil
 }

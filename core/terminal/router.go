@@ -84,6 +84,14 @@ func NewRouter(mgr runtimepty.SessionManager, opts ...Option) *Router {
 	return r
 }
 
+// NewRuntimeRouter wraps the utils/pty runtime with the canonical AOP PTY
+// protocol. Callers above this boundary only exchange ProtocolMessage values;
+// runtime opener and session details remain private to this package.
+func NewRuntimeRouter(mgr *runtimepty.Manager, opts ...Option) *Router {
+	defaults := []Option{WithOpeners(runtimepty.DefaultOpeners(mgr, runtimepty.DefaultSessionTimeout, runtimepty.DefaultEnv()))}
+	return NewRouter(mgr, append(defaults, opts...)...)
+}
+
 func (r *Router) Handle(ctx context.Context, message *ptypb.ProtocolMessage, send SendFunc) {
 	if send == nil {
 		send = func(*ptypb.ProtocolMessage) {}
@@ -167,7 +175,7 @@ func (r *Router) open(ctx context.Context, request *ptypb.Open, send SendFunc) {
 		r.mu.Unlock()
 	}
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
-		StreamId: streamID, Session: SessionToProto(&info),
+		StreamId: streamID, Session: sessionToProto(&info),
 	}}})
 	r.monitor(ctx, streamID, info.ID, 0, send)
 	r.resizeSession(streamID, info.ID, int(request.GetCols()), int(request.GetRows()), send)
@@ -207,7 +215,7 @@ func (r *Router) attachExisting(ctx context.Context, streamID string, info runti
 	}
 	r.releaseStream(streamID)
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
-		StreamId: streamID, Session: SessionToProto(&info),
+		StreamId: streamID, Session: sessionToProto(&info),
 	}}})
 	if len(output) > 0 {
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
@@ -229,7 +237,7 @@ func (r *Router) list(streamID string, send SendFunc) {
 		r.sendError(send, streamID, "pty manager unavailable")
 		return
 	}
-	send(NewSessions(streamID, r.mgr.List()))
+	send(newSessions(streamID, r.mgr.List()))
 }
 
 func (r *Router) input(request *ptypb.Input, send SendFunc) {
@@ -348,7 +356,7 @@ func (r *Router) monitor(ctx context.Context, streamID, sessionID string, offset
 		delete(r.resizers, sessionID)
 		r.mu.Unlock()
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Closed{Closed: &ptypb.Closed{
-			StreamId: streamID, Session: SessionToProto(&final),
+			StreamId: streamID, Session: sessionToProto(&final),
 		}}})
 	}()
 }
@@ -383,6 +391,18 @@ func (r *Router) StreamIDs() []string {
 		streamIDs = append(streamIDs, streamID)
 	}
 	return streamIDs
+}
+
+// BroadcastSessions emits the current runtime session state as canonical AOP
+// PTY messages for every active stream.
+func (r *Router) BroadcastSessions(send SendFunc) {
+	if r == nil || r.mgr == nil || send == nil {
+		return
+	}
+	sessions := r.mgr.List()
+	for _, streamID := range r.StreamIDs() {
+		send(newSessions(streamID, sessions))
+	}
 }
 
 func (r *Router) touchStream(streamID string) {
@@ -512,15 +532,15 @@ func NewDetached(streamID string) *ptypb.ProtocolMessage {
 	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Detached{Detached: &ptypb.Detached{StreamId: streamID}}}
 }
 
-func NewSessions(streamID string, sessions []runtimepty.Info) *ptypb.ProtocolMessage {
+func newSessions(streamID string, sessions []runtimepty.Info) *ptypb.ProtocolMessage {
 	value := &ptypb.Sessions{StreamId: streamID, Sessions: make([]*ptypb.Session, 0, len(sessions))}
 	for index := range sessions {
-		value.Sessions = append(value.Sessions, SessionToProto(&sessions[index]))
+		value.Sessions = append(value.Sessions, sessionToProto(&sessions[index]))
 	}
 	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: value}}
 }
 
-func SessionToProto(value *runtimepty.Info) *ptypb.Session {
+func sessionToProto(value *runtimepty.Info) *ptypb.Session {
 	if value == nil {
 		return nil
 	}
