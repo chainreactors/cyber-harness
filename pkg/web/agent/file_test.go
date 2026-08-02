@@ -5,11 +5,17 @@ import (
 	"path/filepath"
 	"testing"
 
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	filepb "github.com/chainreactors/aiscan/aop/file"
+	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/ioa/protocols"
 )
 
 func TestDefaultAgentRuntimeDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
-	for _, capability := range DefaultRuntime().Capabilities {
+	hello, err := BuildHello("agent", commands.NewRegistry(), protocols.NodeRef{ID: "agent", Authority: "local"}, DefaultRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range hello.Capabilities {
 		if capability == "file.list" || capability == "file.mkdir" {
 			t.Fatalf("regular agent advertised runner-only capability %q", capability)
 		}
@@ -24,14 +30,14 @@ func TestFileListReturnsStructuredEntries(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(base, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	value := fileList(&transport.FileListRequest{TaskId: "list-1", Path: "."}, base)
+	value := fileList(&filepb.ListRequest{Path: "."}, base)
 	if value.err != nil {
 		t.Fatal(value.err)
 	}
 	if value.result.Path != "." || len(value.result.Entries) != 2 {
 		t.Fatalf("result = %+v", value.result)
 	}
-	byName := map[string]*transport.FileEntry{}
+	byName := map[string]*filepb.Entry{}
 	for _, entry := range value.result.Entries {
 		byName[entry.Name] = entry
 	}
@@ -45,14 +51,14 @@ func TestFileListReturnsStructuredEntries(t *testing.T) {
 
 func TestNativeFileRPCsResolveRelativeToRuntimeWorkdir(t *testing.T) {
 	base := t.TempDir()
-	if value := fileMkdir(&transport.FileMkdirRequest{TaskId: "mkdir-1", Path: "nested"}, base); value.err != nil {
+	if value := fileMkdir(&filepb.MkdirRequest{Path: "nested"}, base); value.err != nil {
 		t.Fatal(value.err)
 	}
 	path := filepath.Join("nested", "proof.txt")
-	if value := fileWrite(&transport.FileWriteRequest{TaskId: "write-1", Path: path, Data: []byte("hello")}, base); value.err != nil {
+	if value := fileWrite(&filepb.WriteRequest{Path: path, Data: []byte("hello")}, base); value.err != nil {
 		t.Fatal(value.err)
 	}
-	value := fileRead(&transport.FileReadRequest{TaskId: "read-1", Path: path}, base)
+	value := fileRead(&filepb.ReadRequest{Path: path}, base)
 	if value.err != nil || string(value.result.Data) != "hello" {
 		t.Fatalf("read data = %q, err = %v", value.result.Data, value.err)
 	}

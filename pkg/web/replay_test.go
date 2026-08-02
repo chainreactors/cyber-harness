@@ -11,7 +11,6 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -65,7 +64,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
 	remote := &remoteAgent{
-		id: "agent-1", name: "worker", sendCh: make(chan *transport.ServerFrame, 8),
+		id: "agent-1", name: "worker", sendCh: make(chan *aop.Envelope, 8), done: make(chan struct{}),
 		tasks: map[string]chan taskResult{}, turns: map[string]int{},
 	}
 	taskCh := make(chan taskResult, 1)
@@ -79,20 +78,20 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	}
 	arguments, _ := aop.JSONValue(map[string]string{"command": "ls"})
 	stored := []*aop.Event{
-		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.ID, Emitter: "aiscan",
+		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
 			Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hi")}}}},
-		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.ID, Emitter: "aiscan",
+		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
 			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "tc-1", Name: "bash", Arguments: arguments}}},
-		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.ID, TurnId: "turn-1", Emitter: "aiscan",
+		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.GetSession().GetId(), TurnId: "turn-1", Emitter: "aiscan",
 			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}},
 	}
 	for _, event := range stored {
-		if err := store.AddAOPEvent(ctx, session.ID, event); err != nil {
+		if err := store.AddAOPEvent(ctx, session.GetSession().GetId(), event); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	response, err := NewAOPChatServer(svc).ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.ID, Limit: 100})
+	response, err := NewAOPChatServer(svc).ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.GetSession().GetId(), Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +119,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 		t.Fatalf("replay wrote to task channel: result=%+v ok=%v", result, ok)
 	default:
 	}
-	after, err := store.ListAOPEvents(ctx, session.ID, 100)
+	after, err := store.ListAOPEvents(ctx, session.GetSession().GetId(), 100)
 	if err != nil || len(after) != len(stored) {
 		t.Fatalf("stored events after replay = %d, %v", len(after), err)
 	}
@@ -138,10 +137,9 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for seq := 1; seq <= 3; seq++ {
-		detail, _ := aop.JSONValue(map[string]int{"seq": seq})
-		if err := store.AddAOPEvent(context.Background(), session.ID, &aop.Event{
-			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.ID, Emitter: "aiscan",
-			Payload: &aop.Event_Status{Status: &aop.Status{State: "running", Detail: detail}},
+		if err := store.AddAOPEvent(context.Background(), session.GetSession().GetId(), &aop.Event{
+			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+			Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -149,10 +147,10 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var deliveries []*aop.EventDelivery
-	err = NewAOPChatServer(svc).(*aopChatServer).watchEvents(&aop.WatchEventsRequest{
-		SessionId: session.ID, AfterCursor: "2",
-	}, ctx, func(response *aop.WatchEventsResponse) error {
-		deliveries = append(deliveries, response.Delivery)
+	err = NewAOPChatServer(svc).watchEvents(&aop.WatchEventsRequest{
+		SessionId: session.GetSession().GetId(), AfterCursor: "2",
+	}, ctx, func(delivery *aop.EventDelivery) error {
+		deliveries = append(deliveries, delivery)
 		cancel()
 		return nil
 	})

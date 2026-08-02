@@ -3,87 +3,67 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	execpb "github.com/chainreactors/aiscan/aop/exec"
+	filepb "github.com/chainreactors/aiscan/aop/file"
+	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type AgentServerStream interface {
-	Context() context.Context
-	Recv() (*transport.ServerFrame, error)
-	Send(*transport.AgentFrame) error
-}
-
-type closeableAgentServerStream interface {
-	AgentServerStream
-	Close() error
-}
-
-type webSocketServerStream struct {
-	ctx  context.Context
+type webSocketEnvelopeStream struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 }
 
-func (s *webSocketServerStream) Context() context.Context { return s.ctx }
-func (s *webSocketServerStream) Close() error             { return s.conn.Close() }
-func (s *webSocketServerStream) Recv() (*transport.ServerFrame, error) {
+func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
+func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 	_, data, err := s.conn.ReadMessage()
 	if err != nil {
 		return nil, err
 	}
-	frame := new(transport.ServerFrame)
-	if err := protojson.Unmarshal(data, frame); err != nil {
-		return nil, fmt.Errorf("decode server frame: %w", err)
+	envelope := new(aop.Envelope)
+	if err := protobuf.Unmarshal(data, envelope); err != nil {
+		return nil, fmt.Errorf("decode AOP envelope: %w", err)
 	}
-	return frame, nil
+	return envelope, nil
 }
-func (s *webSocketServerStream) Send(frame *transport.AgentFrame) error {
-	data, err := protojson.Marshal(frame)
+
+func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
+	data, err := protobuf.Marshal(envelope)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.conn.WriteMessage(websocket.TextMessage, data)
+	return s.conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
-type grpcServerStream struct {
-	transport.AgentTransportService_ConnectClient
-	conn *grpc.ClientConn
-}
-
-func (s *grpcServerStream) Close() error { return s.conn.Close() }
-
-func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (closeableAgentServerStream, error) {
+func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnvelopeStream, error) {
 	dialURL, accessKey := SplitAccessKey(cc.ServerURL)
 	if cc.Token != "" {
 		accessKey = cc.Token
@@ -103,41 +83,10 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (closeableAgen
 	if err != nil {
 		return nil, err
 	}
-	return &webSocketServerStream{ctx: ctx, conn: conn}, nil
+	return &webSocketEnvelopeStream{conn: conn}, nil
 }
 
-func dialProtoGRPC(ctx context.Context, cc connectionConfig) (closeableAgentServerStream, error) {
-	rawURL, accessKey := SplitAccessKey(cc.ServerURL)
-	if cc.Token != "" {
-		accessKey = cc.Token
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
-		return nil, fmt.Errorf("invalid gRPC server URL %q", rawURL)
-	}
-	var creds credentials.TransportCredentials
-	if strings.EqualFold(u.Scheme, "https") {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: u.Hostname()})
-	} else {
-		creds = insecure.NewCredentials()
-	}
-	conn, err := grpc.NewClient(u.Host, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		return nil, err
-	}
-	streamCtx := ctx
-	if accessKey != "" {
-		streamCtx = metadata.AppendToOutgoingContext(streamCtx, "authorization", "Bearer "+accessKey)
-	}
-	stream, err := transport.NewAgentTransportServiceClient(conn).Connect(streamCtx)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &grpcServerStream{AgentTransportService_ConnectClient: stream, conn: conn}, nil
-}
-
-func connectGenerated(ctx context.Context, cc connectionConfig, grpcTransport bool) error {
+func connectGenerated(ctx context.Context, cc connectionConfig) error {
 	logger := cc.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
@@ -147,13 +96,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig, grpcTransport bo
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		var stream closeableAgentServerStream
-		var err error
-		if grpcTransport {
-			stream, err = dialProtoGRPC(ctx, cc)
-		} else {
-			stream, err = dialProtoWebSocket(ctx, cc)
-		}
+		stream, err := dialProtoWebSocket(ctx, cc)
 		if err == nil {
 			done := make(chan struct{})
 			go func() {
@@ -181,40 +124,68 @@ func connectGenerated(ctx context.Context, cc connectionConfig, grpcTransport bo
 	}
 }
 
-func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream AgentServerStream) error {
+var envelopeSequence atomic.Uint64
+
+func nextEnvelopeID(prefix string) string {
+	return prefix + ":" + strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + strconv.FormatUint(envelopeSequence.Add(1), 36)
+}
+
+func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream) error {
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
-	hello, err := BuildHello(cc.Name, cc.Registry, cc.Node, cc.Runtime, cc.Status, cc.Menu, &transport.AgentStats{})
+	hello, err := BuildHello(cc.Name, cc.Registry, cc.Node, cc.Runtime)
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(&transport.AgentFrame{Payload: &transport.AgentFrame_Hello{Hello: hello}}); err != nil {
-		return err
+	if len(cc.Capabilities) > 0 {
+		hello.Capabilities = append([]string(nil), cc.Capabilities...)
+	} else if cc.Chat == nil {
+		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
 	}
-	accepted, err := stream.Recv()
+	helloEnvelope, err := aop.Wrap(nextEnvelopeID("hello"), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
 	if err != nil {
 		return err
 	}
-	if accepted.GetAccepted() == nil {
-		return fmt.Errorf("expected connection acceptance")
+	if err := stream.Send(helloEnvelope); err != nil {
+		return err
+	}
+	acceptedEnvelope, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	acceptedMessage, err := aop.Unwrap(acceptedEnvelope)
+	if err != nil {
+		return err
+	}
+	coreAccepted, ok := acceptedMessage.(*aop.ProtocolMessage)
+	if !ok || coreAccepted.GetAgentAccepted() == nil || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
+		return fmt.Errorf("expected AOP agent acceptance")
 	}
 
 	connectionCtx, cancelConnection := context.WithCancel(ctx)
 	defer cancelConnection()
-	sendCh := make(chan *transport.AgentFrame, 64)
+	sendCh := make(chan *aop.Envelope, 64)
 	writeErr := make(chan error, 1)
-	send := func(frame *transport.AgentFrame) {
+	send := func(replyTo string, message protobuf.Message) {
+		envelope, wrapErr := aop.Wrap(nextEnvelopeID("agent"), replyTo, message)
+		if wrapErr != nil {
+			logger.Warnf("encode AOP message: %v", wrapErr)
+			return
+		}
 		select {
-		case sendCh <- frame:
+		case sendCh <- envelope:
 		case <-connectionCtx.Done():
 		}
 	}
 	go func() {
 		for {
 			select {
-			case frame := <-sendCh:
-				if err := stream.Send(frame); err != nil {
+			case envelope := <-sendCh:
+				if envelope == nil {
+					continue
+				}
+				if err := stream.Send(envelope); err != nil {
 					select {
 					case writeErr <- err:
 					default:
@@ -228,13 +199,20 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}
 	}()
 
+	if cc.Menu != nil {
+		send("", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Catalog{Catalog: &commandpb.Catalog{Commands: cc.Menu()}}})
+	}
 	stats := NewAgentStatsTracker()
 	if cc.AgentSubscribe != nil {
 		unsubscribe := cc.AgentSubscribe(func(event *aop.Event) {
 			if next, changed := stats.Observe(event); changed {
-				send(&transport.AgentFrame{Payload: &transport.AgentFrame_Stats{Stats: next}})
+				send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
 			}
-			send(&transport.AgentFrame{CorrelationId: event.TurnId, Payload: &transport.AgentFrame_Event{Event: event}})
+			replyTo := ""
+			if event.GetToolResult() != nil {
+				replyTo = event.GetToolResult().GetCallId()
+			}
+			send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
 		})
 		defer unsubscribe()
 	}
@@ -242,22 +220,26 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		defer detach()
 	}
 	if cc.Status != nil {
-		go func(last *transport.AgentStatus) {
+		initial := cc.Status()
+		if initial != nil {
+			send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: initial}})
+		}
+		go func(last *aop.AgentStatus) {
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
 					next := cc.Status()
-					if !protobuf.Equal(next, last) {
-						send(&transport.AgentFrame{Payload: &transport.AgentFrame_Status{Status: next}})
-						last = protobuf.Clone(next).(*transport.AgentStatus)
+					if next != nil && !protobuf.Equal(next, last) {
+						send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: next}})
+						last = protobuf.Clone(next).(*aop.AgentStatus)
 					}
 				case <-connectionCtx.Done():
 					return
 				}
 			}
-		}(protobuf.Clone(hello.GetStatus()).(*transport.AgentStatus))
+		}(cloneAgentStatus(initial))
 	}
 
 	var router *pty.Router
@@ -273,7 +255,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if cc.PTYRouter == nil {
 		if manager := RegistryPTYManager(cc.Registry); manager != nil {
 			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(frame pty.Frame) {
-				send(&transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}})
+				send("", terminalcodec.ToProto(frame))
 			})
 			defer unsubscribe()
 		}
@@ -281,8 +263,12 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 
 	var operationsMu sync.Mutex
 	operations := make(map[string]context.CancelFunc)
+	namespaceMux, err := newAgentConnectionNamespaceMux(cc, router, send, &operationsMu, operations)
+	if err != nil {
+		return fmt.Errorf("register connection namespaces: %w", err)
+	}
 	for {
-		frame, err := stream.Recv()
+		envelope, err := stream.Recv()
 		if err != nil {
 			select {
 			case writerErr := <-writeErr:
@@ -291,113 +277,266 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			}
 			return err
 		}
-		switch payload := frame.Payload.(type) {
-		case *transport.ServerFrame_OpenSession:
-			if cc.Chat != nil {
-				send(&transport.AgentFrame{CorrelationId: frame.CorrelationId, Payload: &transport.AgentFrame_OpenSession{OpenSession: cc.Chat.OpenSession(connectionCtx, payload.OpenSession)}})
-			}
-		case *transport.ServerFrame_RunTurn:
-			if cc.Chat != nil {
-				send(&transport.AgentFrame{CorrelationId: frame.CorrelationId, Payload: &transport.AgentFrame_RunTurn{RunTurn: cc.Chat.RunTurn(connectionCtx, payload.RunTurn)}})
-			}
-		case *transport.ServerFrame_CancelTurn:
-			if cc.Chat != nil {
-				send(&transport.AgentFrame{CorrelationId: frame.CorrelationId, Payload: &transport.AgentFrame_CancelTurn{CancelTurn: cc.Chat.CancelTurn(payload.CancelTurn)}})
-			}
-		case *transport.ServerFrame_CloseSession:
-			if cc.Chat != nil {
-				send(&transport.AgentFrame{CorrelationId: frame.CorrelationId, Payload: &transport.AgentFrame_CloseSession{CloseSession: cc.Chat.CloseSession(connectionCtx, payload.CloseSession)}})
-			}
-		case *transport.ServerFrame_Command:
-			go func(request *transport.CommandRequest, correlation string) {
-				if cc.Chat == nil {
-					send(operationFailure(request.GetTaskId(), "command handler is unavailable"))
-					return
-				}
-				result, err := cc.Chat.Command(connectionCtx, request)
-				if err != nil {
-					send(operationFailure(request.GetTaskId(), err.Error()))
-					return
-				}
-				send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_CommandResult{CommandResult: result}})
-			}(payload.Command, frame.CorrelationId)
-		case *transport.ServerFrame_ToolCall:
-			request := payload.ToolCall
-			taskCtx, taskCancel := context.WithCancel(connectionCtx)
-			trackOperation(&operationsMu, operations, request.GetTaskId(), taskCancel)
-			go func() {
-				defer finishOperation(&operationsMu, operations, request.GetTaskId(), taskCancel)
-				event, err := executeToolRequest(taskCtx, request, cc.Registry, cc.DataBus)
-				if err != nil {
-					send(operationFailure(request.GetTaskId(), err.Error()))
-					return
-				}
-				send(&transport.AgentFrame{CorrelationId: request.GetTaskId(), Payload: &transport.AgentFrame_Event{Event: event}})
-			}()
-		case *transport.ServerFrame_FileRead:
-			go sendFileResult(frame.CorrelationId, fileRead(payload.FileRead, cc.Runtime.GetWorkingDir()), send)
-		case *transport.ServerFrame_FileWrite:
-			go sendFileResult(frame.CorrelationId, fileWrite(payload.FileWrite, cc.Runtime.GetWorkingDir()), send)
-		case *transport.ServerFrame_FileList:
-			if cc.RunnerFileRPC {
-				go sendFileResult(frame.CorrelationId, fileList(payload.FileList, cc.Runtime.GetWorkingDir()), send)
-			}
-		case *transport.ServerFrame_FileMkdir:
-			if cc.RunnerFileRPC {
-				go sendFileResult(frame.CorrelationId, fileMkdir(payload.FileMkdir, cc.Runtime.GetWorkingDir()), send)
-			}
-		case *transport.ServerFrame_FileUpload:
-			go func(request *transport.FileUploadRequest, correlation string) {
-				if cc.Chat == nil {
-					send(operationFailure(request.GetTaskId(), "upload handler is unavailable"))
-					return
-				}
-				result, err := cc.Chat.Upload(request)
-				if err != nil {
-					send(operationFailure(request.GetTaskId(), err.Error()))
-					return
-				}
-				send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_FileResult{FileResult: result}})
-			}(payload.FileUpload, frame.CorrelationId)
-		case *transport.ServerFrame_Exec:
-			request := payload.Exec
-			taskCtx, taskCancel := context.WithCancel(connectionCtx)
-			trackOperation(&operationsMu, operations, request.GetTaskId(), taskCancel)
-			go func() {
-				defer finishOperation(&operationsMu, operations, request.GetTaskId(), taskCancel)
-				handleExecRequest(taskCtx, request, cc.Runtime.GetWorkingDir(), send)
-			}()
-		case *transport.ServerFrame_CancelOperation:
-			operationsMu.Lock()
-			operationCancel := operations[payload.CancelOperation.GetTaskId()]
-			operationsMu.Unlock()
-			if operationCancel != nil {
-				operationCancel()
-			}
-		case *transport.ServerFrame_ReloadConfig:
-			if cc.Chat != nil {
-				result, statusValue := cc.Chat.ReloadConfig(cc.ServerURL)
-				if statusValue != nil {
-					send(&transport.AgentFrame{Payload: &transport.AgentFrame_Status{Status: statusValue}})
-				}
-				send(&transport.AgentFrame{CorrelationId: frame.CorrelationId, Payload: &transport.AgentFrame_ConfigReload{ConfigReload: result}})
-			}
-		case *transport.ServerFrame_Terminal:
-			router.Handle(connectionCtx, terminalcodec.FromProto(payload.Terminal), func(out pty.Frame) {
-				send(&transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(out)}})
-			})
+		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, func(*aop.Envelope) error { return nil })
+		if err != nil {
+			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
+			continue
+		}
+		if !handled {
+			send(envelope.GetId(), protocolFailure("UNSUPPORTED_NAMESPACE", "unsupported AOP namespace"))
 		}
 	}
 }
 
-func operationFailure(taskID, message string) *transport.AgentFrame {
-	return &transport.AgentFrame{CorrelationId: taskID, Payload: &transport.AgentFrame_OperationError{OperationError: &transport.OperationError{TaskId: taskID, Message: message}}}
+func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
+	if value == nil {
+		return nil
+	}
+	return protobuf.Clone(value).(*aop.AgentStatus)
 }
+
+func newAgentConnectionNamespaceMux(
+	cc connectionConfig,
+	router *pty.Router,
+	send func(string, protobuf.Message),
+	operationsMu *sync.Mutex,
+	operations map[string]context.CancelFunc,
+) (*aop.NamespaceMux, error) {
+	mux := aop.NewNamespaceMux()
+	if err := mux.Register(&aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentCoreMessage(ctx, cc, envelope, message.(*aop.ProtocolMessage), send, operationsMu, operations)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&commandpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentCommandMessage(ctx, cc, envelope, message.(*commandpb.ProtocolMessage), send)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentToolMessage(ctx, cc, envelope, message.(*toolpb.ProtocolMessage), send, operationsMu, operations)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentFileMessage(cc, envelope, message.(*filepb.ProtocolMessage), send)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentExecMessage(ctx, cc, envelope, message.(*execpb.ProtocolMessage), send, operationsMu, operations)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&reloadpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentReloadMessage(cc, envelope, message.(*reloadpb.ProtocolMessage), send)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+		handleAgentPTYMessage(ctx, router, envelope, message.(*ptypb.ProtocolMessage), send)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return mux, nil
+}
+
+func handleAgentCoreMessage(
+	ctx context.Context,
+	cc connectionConfig,
+	envelope *aop.Envelope,
+	value *aop.ProtocolMessage,
+	send func(string, protobuf.Message),
+	operationsMu *sync.Mutex,
+	operations map[string]context.CancelFunc,
+) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	switch payload := value.Message.(type) {
+	case *aop.ProtocolMessage_OpenSessionRequest:
+		if cc.Chat == nil {
+			fail("chat handler is unavailable")
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: cc.Chat.OpenSession(ctx, payload.OpenSessionRequest)}})
+	case *aop.ProtocolMessage_RunTurnRequest:
+		if cc.Chat == nil {
+			fail("chat handler is unavailable")
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: cc.Chat.RunTurn(ctx, payload.RunTurnRequest)}})
+	case *aop.ProtocolMessage_CancelTurnRequest:
+		if cc.Chat == nil {
+			fail("chat handler is unavailable")
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: cc.Chat.CancelTurn(payload.CancelTurnRequest)}})
+	case *aop.ProtocolMessage_CloseSessionRequest:
+		if cc.Chat == nil {
+			fail("chat handler is unavailable")
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: cc.Chat.CloseSession(ctx, payload.CloseSessionRequest)}})
+	case *aop.ProtocolMessage_CancelOperation:
+		operationsMu.Lock()
+		cancel := operations[payload.CancelOperation.GetTargetId()]
+		operationsMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+	default:
+		fail("unsupported AOP core message")
+	}
+}
+
+func handleAgentCommandMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *commandpb.ProtocolMessage, send func(string, protobuf.Message)) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	request := value.GetRequest()
+	if request == nil {
+		fail("unsupported AIScan command message")
+		return
+	}
+	go func() {
+		if cc.Chat == nil {
+			fail("command handler is unavailable")
+			return
+		}
+		result, err := cc.Chat.Command(ctx, request)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		send(replyTo, &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Result{Result: result}})
+	}()
+}
+
+func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *toolpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	request := value.GetCall()
+	if request == nil || request.Call == nil {
+		fail("unsupported AOP tool message")
+		return
+	}
+	operationID := envelope.GetId()
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	trackOperation(operationsMu, operations, operationID, taskCancel)
+	go func() {
+		defer finishOperation(operationsMu, operations, operationID, taskCancel)
+		event, err := executeToolRequest(taskCtx, operationID, request, cc.Registry, cc.DataBus)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
+	}()
+}
+
+func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *filepb.ProtocolMessage, send func(string, protobuf.Message)) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	switch payload := value.Message.(type) {
+	case *filepb.ProtocolMessage_ReadRequest:
+		go sendFileResult(replyTo, fileRead(payload.ReadRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_WriteRequest:
+		go sendFileResult(replyTo, fileWrite(payload.WriteRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_ListRequest:
+		if !cc.RunnerFileRPC {
+			fail("file list is unavailable")
+			return
+		}
+		go sendFileResult(replyTo, fileList(payload.ListRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_MkdirRequest:
+		if !cc.RunnerFileRPC {
+			fail("file mkdir is unavailable")
+			return
+		}
+		go sendFileResult(replyTo, fileMkdir(payload.MkdirRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_UploadRequest:
+		go func() {
+			if cc.Chat == nil {
+				fail("upload handler is unavailable")
+				return
+			}
+			result, err := cc.Chat.Upload(payload.UploadRequest)
+			if err != nil {
+				fail(err.Error())
+				return
+			}
+			send(replyTo, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Result{Result: result}})
+		}()
+	default:
+		fail("unsupported AOP file message")
+	}
+}
+
+func handleAgentExecMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *execpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	request := value.GetRequest()
+	if request == nil {
+		fail("unsupported AOP exec message")
+		return
+	}
+	operationID := envelope.GetId()
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	trackOperation(operationsMu, operations, operationID, taskCancel)
+	go func() {
+		defer finishOperation(operationsMu, operations, operationID, taskCancel)
+		handleExecRequest(taskCtx, request, workingDir(cc.Runtime), replyTo, send)
+	}()
+}
+
+func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value *reloadpb.ProtocolMessage, send func(string, protobuf.Message)) {
+	replyTo := envelope.GetId()
+	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
+	request := value.GetRequest()
+	if request == nil || request.Config == nil || cc.Chat == nil {
+		fail("config reload request is unavailable")
+		return
+	}
+	result, status := cc.Chat.ReloadConfig(request.Config)
+	if status != nil {
+		send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: status}})
+	}
+	send(replyTo, &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Result{Result: result}})
+}
+
+func handleAgentPTYMessage(ctx context.Context, router *pty.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
+	if router == nil {
+		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "PTY router is unavailable"))
+		return
+	}
+	router.Handle(ctx, terminalcodec.FromProto(value), func(out pty.Frame) {
+		send(envelope.GetId(), terminalcodec.ToProto(out))
+	})
+}
+
+func workingDir(runtimeInfo *aop.AgentRuntimeInfo) string {
+	if runtimeInfo == nil {
+		return ""
+	}
+	return runtimeInfo.WorkingDir
+}
+
+func protocolFailure(code, message string) *aop.ProtocolMessage {
+	return &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{Code: code, Message: message}}}
+}
+
 func trackOperation(mu *sync.Mutex, operations map[string]context.CancelFunc, id string, cancel context.CancelFunc) {
 	mu.Lock()
 	operations[id] = cancel
 	mu.Unlock()
 }
+
 func finishOperation(mu *sync.Mutex, operations map[string]context.CancelFunc, id string, cancel context.CancelFunc) {
 	cancel()
 	mu.Lock()
@@ -405,41 +544,44 @@ func finishOperation(mu *sync.Mutex, operations map[string]context.CancelFunc, i
 	mu.Unlock()
 }
 
-func executeToolRequest(ctx context.Context, request *transport.ToolCallRequest, executor aopToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent]) (*aop.Event, error) {
-	if request == nil || request.Call == nil || request.TaskId == "" || request.Call.Id != request.TaskId {
+func executeToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor aopToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent]) (*aop.Event, error) {
+	if request == nil || request.Call == nil || operationID == "" {
 		return nil, fmt.Errorf("tool call correlation is invalid")
 	}
 	call := request.Call
+	if call.Id == "" {
+		call.Id = operationID
+	}
+	if call.Id != operationID {
+		return nil, fmt.Errorf("tool call id must match envelope id")
+	}
 	if strings.TrimSpace(call.Name) == "" {
 		return nil, fmt.Errorf("tool name is required")
 	}
 	if call.WorkingDirectory != "" {
 		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkingDirectory})
 	}
-	ctx = output.ContextWithCallID(ctx, request.TaskId)
+	ctx = output.ContextWithCallID(ctx, operationID)
 	started := time.Now()
-	result, execErr := executeCall(ctx, executor, call, dataBus, request.TaskId)
-	text := result.Text()
+	result, execErr := executeCall(ctx, executor, call, dataBus, operationID)
+	if result == nil {
+		result = &aop.ToolResult{}
+	}
 	if execErr != nil {
-		text = execErr.Error()
+		result.IsError = true
+		result.Output = []*aop.Content{aop.Text(execErr.Error())}
 	}
-	content := []*aop.Content{aop.Text(text)}
-	for _, block := range result.Content {
-		if block.Type != "image" {
-			continue
-		}
-		data, err := base64.StdEncoding.DecodeString(block.Base64Data)
-		if err == nil {
-			content = append(content, aop.Image(block.MimeType, data))
-		}
-	}
-	detail, _ := aop.JSONValue(result.Details)
-	event := &aop.Event{Id: request.TaskId, EmittedAt: timestamppb.Now(), SessionId: request.SessionId, TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: call.Id, Name: call.Name, Output: content, Detail: detail, Terminate: result.Terminate, IsError: execErr != nil || result.IsError, DurationMs: uint64(time.Since(started).Milliseconds())}}}
-	return event, nil
+	result.CallId = call.Id
+	result.Name = call.Name
+	result.DurationMs = uint64(time.Since(started).Milliseconds())
+	return &aop.Event{
+		Id: nextEnvelopeID("event"), EmittedAt: timestamppb.Now(), SessionId: request.SessionId,
+		TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: result},
+	}, nil
 }
 
 type fileResultValue struct {
-	result *transport.FileResult
+	result *filepb.Result
 	err    error
 }
 
@@ -450,21 +592,17 @@ func resolveFileRPCPath(baseDir, path string) string {
 	return filepath.Clean(filepath.Join(baseDir, path))
 }
 
-func sendFileResult(correlation string, value fileResultValue, send func(*transport.AgentFrame)) {
+func sendFileResult(replyTo string, value fileResultValue, send func(string, protobuf.Message)) {
 	if value.err != nil {
-		taskID := ""
-		if value.result != nil {
-			taskID = value.result.TaskId
-		}
-		send(operationFailure(taskID, value.err.Error()))
+		send(replyTo, protocolFailure("FILE_OPERATION_FAILED", value.err.Error()))
 		return
 	}
-	send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_FileResult{FileResult: value.result}})
+	send(replyTo, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Result{Result: value.result}})
 }
-func fileRead(req *transport.FileReadRequest, base string) fileResultValue {
-	result := &transport.FileResult{}
+
+func fileRead(req *filepb.ReadRequest, base string) fileResultValue {
+	result := &filepb.Result{}
 	if req != nil {
-		result.TaskId = req.TaskId
 		result.Path = req.Path
 	}
 	if req == nil || req.Path == "" {
@@ -475,10 +613,10 @@ func fileRead(req *transport.FileReadRequest, base string) fileResultValue {
 	result.Size = int64(len(data))
 	return fileResultValue{result: result, err: err}
 }
-func fileWrite(req *transport.FileWriteRequest, base string) fileResultValue {
-	result := &transport.FileResult{}
+
+func fileWrite(req *filepb.WriteRequest, base string) fileResultValue {
+	result := &filepb.Result{}
 	if req != nil {
-		result.TaskId = req.TaskId
 		result.Path = req.Path
 		result.Size = int64(len(req.Data))
 	}
@@ -491,10 +629,10 @@ func fileWrite(req *transport.FileWriteRequest, base string) fileResultValue {
 	}
 	return fileResultValue{result: result, err: os.WriteFile(path, req.Data, 0o644)}
 }
-func fileList(req *transport.FileListRequest, base string) fileResultValue {
-	result := &transport.FileResult{}
+
+func fileList(req *filepb.ListRequest, base string) fileResultValue {
+	result := &filepb.Result{}
 	if req != nil {
-		result.TaskId = req.TaskId
 		result.Path = req.Path
 	}
 	if result.Path == "" {
@@ -509,14 +647,14 @@ func fileList(req *transport.FileListRequest, base string) fileResultValue {
 		if err != nil {
 			return fileResultValue{result: result, err: err}
 		}
-		result.Entries = append(result.Entries, &transport.FileEntry{Name: entry.Name(), IsDirectory: entry.IsDir(), Size: info.Size()})
+		result.Entries = append(result.Entries, &filepb.Entry{Name: entry.Name(), IsDirectory: entry.IsDir(), Size: info.Size()})
 	}
 	return fileResultValue{result: result}
 }
-func fileMkdir(req *transport.FileMkdirRequest, base string) fileResultValue {
-	result := &transport.FileResult{}
+
+func fileMkdir(req *filepb.MkdirRequest, base string) fileResultValue {
+	result := &filepb.Result{}
 	if req != nil {
-		result.TaskId = req.TaskId
 		result.Path = req.Path
 	}
 	if req == nil || req.Path == "" {
@@ -525,9 +663,9 @@ func fileMkdir(req *transport.FileMkdirRequest, base string) fileResultValue {
 	return fileResultValue{result: result, err: os.MkdirAll(resolveFileRPCPath(base, req.Path), 0o755)}
 }
 
-func handleExecRequest(ctx context.Context, req *transport.ExecRequest, base string, send func(*transport.AgentFrame)) {
+func handleExecRequest(ctx context.Context, req *execpb.Request, base, replyTo string, send func(string, protobuf.Message)) {
 	if req == nil || strings.TrimSpace(req.Command) == "" {
-		send(operationFailure(req.GetTaskId(), "command is required"))
+		send(replyTo, protocolFailure("INVALID_ARGUMENT", "command is required"))
 		return
 	}
 	runCtx := ctx
@@ -556,12 +694,12 @@ func handleExecRequest(ctx context.Context, req *transport.ExecRequest, base str
 	command.Stderr = &stderr
 	err := command.Run()
 	if stdout.Len() > 0 {
-		send(&transport.AgentFrame{CorrelationId: req.TaskId, Payload: &transport.AgentFrame_ExecOutput{ExecOutput: &transport.ExecOutput{TaskId: req.TaskId, Stream: transport.ExecStream_EXEC_STREAM_STDOUT, Data: stdout.Bytes()}}})
+		send(replyTo, &execpb.ProtocolMessage{Message: &execpb.ProtocolMessage_Output{Output: &execpb.Output{Stream: execpb.Stream_STREAM_STDOUT, Data: stdout.Bytes()}}})
 	}
 	if stderr.Len() > 0 {
-		send(&transport.AgentFrame{CorrelationId: req.TaskId, Payload: &transport.AgentFrame_ExecOutput{ExecOutput: &transport.ExecOutput{TaskId: req.TaskId, Stream: transport.ExecStream_EXEC_STREAM_STDERR, Data: stderr.Bytes()}}})
+		send(replyTo, &execpb.ProtocolMessage{Message: &execpb.ProtocolMessage_Output{Output: &execpb.Output{Stream: execpb.Stream_STREAM_STDERR, Data: stderr.Bytes()}}})
 	}
-	result := &transport.ExecResult{TaskId: req.TaskId, State: "completed"}
+	result := &execpb.Result{State: "completed"}
 	if err != nil {
 		var exitErr *exec.ExitError
 		switch {
@@ -576,9 +714,9 @@ func handleExecRequest(ctx context.Context, req *transport.ExecRequest, base str
 		case errors.As(err, &exitErr):
 			result.ExitCode = int32(exitErr.ExitCode())
 		default:
-			send(operationFailure(req.TaskId, err.Error()))
+			send(replyTo, protocolFailure("EXEC_FAILED", err.Error()))
 			return
 		}
 	}
-	send(&transport.AgentFrame{CorrelationId: req.TaskId, Payload: &transport.AgentFrame_ExecResult{ExecResult: result}})
+	send(replyTo, &execpb.ProtocolMessage{Message: &execpb.ProtocolMessage_Result{Result: result}})
 }

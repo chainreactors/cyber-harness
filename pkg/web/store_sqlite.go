@@ -11,15 +11,18 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/output"
-	"google.golang.org/protobuf/encoding/protojson"
+	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
+	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite"
 )
 
 type SQLiteStore struct {
 	db *sql.DB
 }
+
+const sqliteSchemaVersion = 1
 
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
@@ -44,157 +47,97 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 }
 
 func migrate(db *sql.DB) error {
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS scans (
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version == sqliteSchemaVersion {
+		return nil
+	}
+	if version != 0 {
+		return fmt.Errorf("unsupported sqlite schema version %d; delete the database and restart", version)
+	}
+	var tables int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).Scan(&tables); err != nil {
+		return err
+	}
+	if tables != 0 {
+		return fmt.Errorf("legacy sqlite schema is not supported; delete the database and restart")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`
+		CREATE TABLE scans (
 			id         TEXT PRIMARY KEY,
 			target     TEXT NOT NULL,
-			mode       TEXT NOT NULL DEFAULT 'quick',
-			ai         INTEGER NOT NULL DEFAULT 0,
-			verify     INTEGER NOT NULL DEFAULT 0,
-			sniper     INTEGER NOT NULL DEFAULT 0,
-			deep       INTEGER NOT NULL DEFAULT 0,
-			status     TEXT NOT NULL DEFAULT 'queued',
-			progress   TEXT NOT NULL DEFAULT '',
-			report     TEXT NOT NULL DEFAULT '',
-			result     TEXT NOT NULL DEFAULT '',
-			error      TEXT NOT NULL DEFAULT '',
+			status     TEXT NOT NULL,
+			scan_proto BLOB NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
 
-		CREATE TABLE IF NOT EXISTS chat_sessions (
-			id         TEXT PRIMARY KEY,
-			agent_id   TEXT NOT NULL DEFAULT '',
-			agent_name TEXT NOT NULL DEFAULT '',
-			title      TEXT NOT NULL DEFAULT '',
-			status     TEXT NOT NULL DEFAULT 'active',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+		CREATE TABLE chat_sessions (
+			id            TEXT PRIMARY KEY,
+			agent_id      TEXT NOT NULL,
+			status        TEXT NOT NULL,
+			session_proto BLOB NOT NULL,
+			created_at    TEXT NOT NULL,
+			updated_at    TEXT NOT NULL
 		);
 
-		CREATE TABLE IF NOT EXISTS chat_aop_events (
-			id         TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			cursor     INTEGER NOT NULL DEFAULT 0,
-			event_json TEXT NOT NULL,
-			created_at TEXT NOT NULL
+		CREATE TABLE chat_aop_events (
+			id          TEXT PRIMARY KEY,
+			session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+			cursor      INTEGER NOT NULL,
+			event_proto BLOB NOT NULL,
+			created_at  TEXT NOT NULL,
+			UNIQUE (session_id, cursor)
 		);
 
-		CREATE TABLE IF NOT EXISTS session_scans (
+		CREATE TABLE session_scans (
 			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			scan_id    TEXT NOT NULL,
+			scan_id    TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
 			PRIMARY KEY (session_id, scan_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS aop_request_journal (
-			request_id    TEXT PRIMARY KEY,
-			method        TEXT NOT NULL,
-			request_hash  BLOB NOT NULL,
-			response_json TEXT NOT NULL,
-			created_at    TEXT NOT NULL
+		CREATE TABLE aop_request_journal (
+			request_id     TEXT PRIMARY KEY,
+			method         TEXT NOT NULL,
+			request_hash   BLOB NOT NULL,
+			response_proto BLOB NOT NULL,
+			created_at     TEXT NOT NULL
 		);
-	`); err != nil {
-		return err
-	}
 
-	if err := renameAOPCursorColumn(db); err != nil {
-		return err
-	}
-	for _, column := range []sqliteColumnMigration{
-		{table: "scans", name: "mode", definition: "TEXT NOT NULL DEFAULT 'quick'"},
-		{table: "scans", name: "ai", definition: "INTEGER NOT NULL DEFAULT 0"},
-		{table: "scans", name: "verify", definition: "INTEGER NOT NULL DEFAULT 0"},
-		{table: "scans", name: "sniper", definition: "INTEGER NOT NULL DEFAULT 0"},
-		{table: "scans", name: "deep", definition: "INTEGER NOT NULL DEFAULT 0"},
-		{table: "scans", name: "progress", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "scans", name: "report", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "scans", name: "result", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "scans", name: "error", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_sessions", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_sessions", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_sessions", name: "title", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_sessions", name: "status", definition: "TEXT NOT NULL DEFAULT 'active'"},
-		{table: "chat_sessions", name: "topic_id", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_messages", name: "agent_id", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_messages", name: "agent_name", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_messages", name: "metadata", definition: "TEXT NOT NULL DEFAULT ''"},
-		{table: "chat_aop_events", name: "cursor", definition: "INTEGER NOT NULL DEFAULT 0"},
-	} {
-		if err := ensureSQLiteColumn(db, column); err != nil {
-			return err
-		}
-	}
-	if _, err := db.Exec(`
-		DROP TABLE IF EXISTS temp.aop_cursor_backfill;
-		CREATE TEMP TABLE aop_cursor_backfill (row_id INTEGER PRIMARY KEY, cursor INTEGER NOT NULL);
-		INSERT INTO aop_cursor_backfill (row_id, cursor)
-		SELECT target.rowid,
-			COALESCE((
-				SELECT MAX(existing.cursor)
-				FROM chat_aop_events AS existing
-				WHERE existing.session_id = target.session_id AND existing.cursor > 0
-			), 0) + ROW_NUMBER() OVER (
-				PARTITION BY target.session_id ORDER BY target.created_at, target.rowid
-			)
-		FROM chat_aop_events AS target
-		WHERE target.cursor = 0;
-		UPDATE chat_aop_events
-		SET cursor = (SELECT backfill.cursor FROM aop_cursor_backfill AS backfill WHERE backfill.row_id = chat_aop_events.rowid)
-		WHERE rowid IN (SELECT row_id FROM aop_cursor_backfill);
-		DROP TABLE aop_cursor_backfill;
-	`); err != nil {
-		return err
-	}
-
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS records (
-			id         TEXT PRIMARY KEY,
-			type       TEXT NOT NULL,
-			scan_id    TEXT NOT NULL DEFAULT '',
-			session_id TEXT NOT NULL DEFAULT '',
-			agent_id   TEXT NOT NULL DEFAULT '',
-			source     TEXT NOT NULL DEFAULT '',
-			target     TEXT NOT NULL DEFAULT '',
-			turn       INTEGER NOT NULL DEFAULT 0,
-			priority   TEXT NOT NULL DEFAULT '',
-			summary    TEXT NOT NULL DEFAULT '',
-			loot       INTEGER NOT NULL DEFAULT 0,
-			tags       TEXT NOT NULL DEFAULT '',
-			data       TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL
-		);
-	`); err != nil {
-		return err
-	}
-
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS sco_nodes (
+		CREATE TABLE sco_nodes (
 			cstx_id    TEXT PRIMARY KEY,
 			cstx_type  TEXT NOT NULL,
 			data       TEXT NOT NULL,
-			scan_id    TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
-	`); err != nil {
-		return err
-	}
-	if err := ensureSessionForeignKeys(db); err != nil {
-		return err
-	}
 
-	if _, err := db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at DESC);
-		CREATE INDEX IF NOT EXISTS idx_sessions_updated ON chat_sessions(updated_at DESC);
-		CREATE INDEX IF NOT EXISTS idx_sessions_agent ON chat_sessions(agent_id);
-		CREATE INDEX IF NOT EXISTS idx_aop_events_session ON chat_aop_events(session_id, created_at, id);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_aop_events_session_cursor ON chat_aop_events(session_id, cursor);
-		CREATE INDEX IF NOT EXISTS idx_sco_nodes_type ON sco_nodes(cstx_type);
-		CREATE INDEX IF NOT EXISTS idx_sco_nodes_scan ON sco_nodes(scan_id);
+		CREATE TABLE sco_observations (
+			operation_id TEXT NOT NULL,
+			cstx_id      TEXT NOT NULL REFERENCES sco_nodes(cstx_id) ON DELETE CASCADE,
+			observed_at  TEXT NOT NULL,
+			PRIMARY KEY (operation_id, cstx_id)
+		);
+
+		CREATE INDEX idx_scans_created ON scans(created_at DESC);
+		CREATE INDEX idx_sessions_updated ON chat_sessions(updated_at DESC);
+		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
+		CREATE INDEX idx_aop_events_session ON chat_aop_events(session_id, cursor);
+		CREATE INDEX idx_sco_nodes_type ON sco_nodes(cstx_type);
+		CREATE INDEX idx_sco_observations_node ON sco_observations(cstx_id);
+		PRAGMA user_version = 1;
 	`); err != nil {
 		return err
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) LoadAOPRequest(ctx context.Context, requestID, method string, requestHash []byte, response protobuf.Message) (found, conflict bool, err error) {
@@ -203,9 +146,9 @@ func (s *SQLiteStore) LoadAOPRequest(ctx context.Context, requestID, method stri
 	}
 	var storedMethod string
 	var storedHash []byte
-	var raw string
+	var raw []byte
 	err = s.db.QueryRowContext(ctx,
-		`SELECT method, request_hash, response_json FROM aop_request_journal WHERE request_id = ?`, requestID,
+		`SELECT method, request_hash, response_proto FROM aop_request_journal WHERE request_id = ?`, requestID,
 	).Scan(&storedMethod, &storedHash, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, nil
@@ -216,7 +159,7 @@ func (s *SQLiteStore) LoadAOPRequest(ctx context.Context, requestID, method stri
 	if storedMethod != method || !bytes.Equal(storedHash, requestHash) {
 		return false, true, nil
 	}
-	if err := protojson.Unmarshal([]byte(raw), response); err != nil {
+	if err := protobuf.Unmarshal(raw, response); err != nil {
 		return false, false, err
 	}
 	return true, false, nil
@@ -226,276 +169,79 @@ func (s *SQLiteStore) SaveAOPRequest(ctx context.Context, requestID, method stri
 	if s == nil || strings.TrimSpace(requestID) == "" || response == nil {
 		return nil
 	}
-	raw, err := protojson.Marshal(response)
+	raw, err := protobuf.Marshal(response)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO aop_request_journal (request_id, method, request_hash, response_json, created_at)
+		INSERT INTO aop_request_journal (request_id, method, request_hash, response_proto, created_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, requestID, method, requestHash, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	`, requestID, method, requestHash, raw, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
-}
-
-func ensureSessionForeignKeys(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	aopConstrained, err := hasCascadeForeignKey(tx, "chat_aop_events", "session_id", "chat_sessions", "id")
-	if err != nil {
-		return err
-	}
-	if aopConstrained {
-		if _, err := tx.Exec(`
-			DELETE FROM chat_aop_events
-			WHERE NOT EXISTS (
-				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_aop_events.session_id
-			)
-		`); err != nil {
-			return err
-		}
-	} else if err := rebuildAOPEventsWithForeignKey(tx); err != nil {
-		return err
-	}
-
-	scansConstrained, err := hasCascadeForeignKey(tx, "session_scans", "session_id", "chat_sessions", "id")
-	if err != nil {
-		return err
-	}
-	if scansConstrained {
-		if _, err := tx.Exec(`
-			DELETE FROM session_scans
-			WHERE NOT EXISTS (
-				SELECT 1 FROM chat_sessions WHERE chat_sessions.id = session_scans.session_id
-			)
-		`); err != nil {
-			return err
-		}
-	} else if err := rebuildSessionScansWithForeignKey(tx); err != nil {
-		return err
-	}
-
-	rows, err := tx.Query(`PRAGMA foreign_key_check`)
-	if err != nil {
-		return err
-	}
-	violated := rows.Next()
-	rowsErr := rows.Err()
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if rowsErr != nil {
-		return rowsErr
-	}
-	if violated {
-		return fmt.Errorf("sqlite foreign key check failed after migration")
-	}
-	return tx.Commit()
-}
-
-func hasCascadeForeignKey(tx *sql.Tx, table, from, parent, to string) (bool, error) {
-	rows, err := tx.Query(`PRAGMA foreign_key_list(` + quoteSQLiteIdent(table) + `)`)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			id, seq                           int
-			parentTable, fromColumn, toColumn string
-			onUpdate, onDelete, match         string
-		)
-		if err := rows.Scan(&id, &seq, &parentTable, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
-			return false, err
-		}
-		if parentTable == parent && fromColumn == from && toColumn == to && strings.EqualFold(onDelete, "CASCADE") {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func rebuildAOPEventsWithForeignKey(tx *sql.Tx) error {
-	_, err := tx.Exec(`
-		DROP TABLE IF EXISTS chat_aop_events_fk_migration;
-		CREATE TABLE chat_aop_events_fk_migration (
-			id         TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			cursor     INTEGER NOT NULL,
-			event_json TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		);
-		INSERT INTO chat_aop_events_fk_migration (rowid, id, session_id, cursor, event_json, created_at)
-		SELECT events.rowid, events.id, events.session_id, events.cursor, events.event_json, events.created_at
-		FROM chat_aop_events AS events
-		WHERE EXISTS (
-			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = events.session_id
-		)
-		ORDER BY events.rowid;
-		DROP TABLE chat_aop_events;
-		ALTER TABLE chat_aop_events_fk_migration RENAME TO chat_aop_events;
-	`)
-	return err
-}
-
-func rebuildSessionScansWithForeignKey(tx *sql.Tx) error {
-	_, err := tx.Exec(`
-		DROP TABLE IF EXISTS session_scans_fk_migration;
-		CREATE TABLE session_scans_fk_migration (
-			session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-			scan_id    TEXT NOT NULL,
-			PRIMARY KEY (session_id, scan_id)
-		);
-		INSERT INTO session_scans_fk_migration (session_id, scan_id)
-		SELECT links.session_id, links.scan_id
-		FROM session_scans AS links
-		WHERE EXISTS (
-			SELECT 1 FROM chat_sessions WHERE chat_sessions.id = links.session_id
-		);
-		DROP TABLE session_scans;
-		ALTER TABLE session_scans_fk_migration RENAME TO session_scans;
-	`)
-	return err
-}
-
-type sqliteColumnMigration struct {
-	table      string
-	name       string
-	definition string
-}
-
-func renameAOPCursorColumn(db *sql.DB) error {
-	hasOld, err := sqliteColumnExists(db, "chat_aop_events", "hub_seq")
-	if err != nil || !hasOld {
-		return err
-	}
-	hasCursor, err := sqliteColumnExists(db, "chat_aop_events", "cursor")
-	if err != nil {
-		return err
-	}
-	if hasCursor {
-		return fmt.Errorf("chat_aop_events contains both hub_seq and cursor")
-	}
-	_, err = db.Exec(`
-		DROP INDEX IF EXISTS idx_aop_events_session_seq;
-		ALTER TABLE chat_aop_events RENAME COLUMN hub_seq TO cursor;
-	`)
-	return err
-}
-
-func ensureSQLiteColumn(db *sql.DB, column sqliteColumnMigration) error {
-	tableExists, err := sqliteTableExists(db, column.table)
-	if err != nil || !tableExists {
-		return err
-	}
-	exists, err := sqliteColumnExists(db, column.table, column.name)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = db.Exec(fmt.Sprintf(
-		"ALTER TABLE %s ADD COLUMN %s %s",
-		quoteSQLiteIdent(column.table),
-		quoteSQLiteIdent(column.name),
-		column.definition,
-	))
-	return err
-}
-
-func sqliteTableExists(db *sql.DB, table string) (bool, error) {
-	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count)
-	return count > 0, err
-}
-
-func sqliteColumnExists(db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", quoteSQLiteIdent(table)))
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var (
-			cid          int
-			name         string
-			columnType   string
-			notNull      int
-			defaultValue sql.NullString
-			pk           int
-		)
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func quoteSQLiteIdent(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLiteStore) Create(ctx context.Context, job *ScanJob) error {
-	resultJSON := marshalResult(job)
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, target, mode, ai, verify, sniper, deep, status, progress, report, result, error, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.Target, job.Mode, boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
-		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
-		job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano),
+// ── Scans ──
+//
+// scan_proto is the canonical payload. Flat columns exist only for filtering
+// and ordering; they never reconstruct the protobuf message.
+
+func (s *SQLiteStore) Create(ctx context.Context, scan *scanpb.Scan) error {
+	raw, err := protobuf.Marshal(scan)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO scans (id, target, status, scan_proto, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		scan.Id, scan.Target, scanStatusToDB(scan.Status), raw,
+		formatProtoTime(scan.CreatedAt), formatProtoTime(scan.UpdatedAt),
 	)
 	return err
 }
 
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*ScanJob, error) {
+func (s *SQLiteStore) Get(ctx context.Context, id string) (*scanpb.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, target, mode, ai, verify, sniper, deep, status, progress, report, result, error, created_at, updated_at
+		`SELECT scan_proto
 		 FROM scans WHERE id = ?`, id)
 	return scanRow(row)
 }
 
-func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*ScanJob, error) {
+func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, target, mode, ai, verify, sniper, deep, status, progress, report, result, error, created_at, updated_at
+		`SELECT scan_proto
 		 FROM scans ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var jobs []*ScanJob
+	var scans []*scanpb.Scan
 	for rows.Next() {
-		job, err := scanRows(rows)
+		scan, err := scanRows(rows)
 		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, job)
+		scans = append(scans, scan)
 	}
-	return jobs, rows.Err()
+	return scans, rows.Err()
 }
 
-func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
-	resultJSON := marshalResult(job)
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=? WHERE id=?`,
-		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
-		string(job.Status), job.Progress, job.Report, resultJSON, job.Error,
-		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
+func (s *SQLiteStore) Update(ctx context.Context, scan *scanpb.Scan) error {
+	raw, err := protobuf.Marshal(scan)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE scans SET status=?, scan_proto=?, updated_at=? WHERE id=?`,
+		scanStatusToDB(scan.Status), raw,
+		formatProtoTime(scan.UpdatedAt), scan.Id,
 	)
 	return err
 }
@@ -503,26 +249,29 @@ func (s *SQLiteStore) Update(ctx context.Context, job *ScanJob) error {
 // TransitionScan updates a scan only while it is in one of the expected
 // states. Callers use the affected-row result to make terminal states
 // immutable when cancellation and completion race.
-func (s *SQLiteStore) TransitionScan(ctx context.Context, job *ScanJob, expected ...ScanStatus) (bool, error) {
-	if job == nil {
-		return false, fmt.Errorf("scan job is required")
+func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *scanpb.Scan, expected ...scanpb.ScanStatus) (bool, error) {
+	if scan == nil {
+		return false, fmt.Errorf("scan is required")
 	}
 	if len(expected) == 0 {
 		return false, fmt.Errorf("at least one expected scan status is required")
 	}
 
+	raw, err := protobuf.Marshal(scan)
+	if err != nil {
+		return false, err
+	}
 	placeholders := make([]string, len(expected))
 	args := []any{
-		boolToInt(job.Verify || job.Sniper), boolToInt(job.Verify), boolToInt(job.Sniper), boolToInt(job.Deep),
-		string(job.Status), job.Progress, job.Report, marshalResult(job), job.Error,
-		job.UpdatedAt.Format(time.RFC3339Nano), job.ID,
+		scanStatusToDB(scan.Status), raw,
+		formatProtoTime(scan.UpdatedAt), scan.Id,
 	}
 	for i, status := range expected {
 		placeholders[i] = "?"
-		args = append(args, string(status))
+		args = append(args, scanStatusToDB(status))
 	}
 	//nolint:gosec // only fixed "?" placeholders are concatenated; statuses remain bound arguments
-	query := `UPDATE scans SET ai=?, verify=?, sniper=?, deep=?, status=?, progress=?, report=?, result=?, error=?, updated_at=?
+	query := `UPDATE scans SET status=?, scan_proto=?, updated_at=?
 		 WHERE id=? AND status IN (` + strings.Join(placeholders, ",") + `)`
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -544,26 +293,16 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanFromScanner(sc scanner) (*ScanJob, error) {
-	var job ScanJob
-	var status, resultJSON, createdAt, updatedAt string
-	var ai, verify, sniper, deep int
-	err := sc.Scan(&job.ID, &job.Target, &job.Mode, &ai, &verify, &sniper, &deep, &status,
-		&job.Progress, &job.Report, &resultJSON, &job.Error, &createdAt, &updatedAt)
-	if err != nil {
+func scanFromScanner(sc scanner) (*scanpb.Scan, error) {
+	var raw []byte
+	if err := sc.Scan(&raw); err != nil {
 		return nil, err
 	}
-	_ = ai
-	job.Verify = verify != 0
-	job.Sniper = sniper != 0
-	job.Deep = deep != 0
-	job.Status = ScanStatus(status)
-	if resultJSON != "" {
-		_ = json.Unmarshal([]byte(resultJSON), &job.Result)
+	scan := new(scanpb.Scan)
+	if err := protobuf.Unmarshal(raw, scan); err != nil {
+		return nil, fmt.Errorf("decode scan protobuf: %w", err)
 	}
-	job.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-	return &job, nil
+	return scan, nil
 }
 
 func boolToInt(value bool) int {
@@ -573,76 +312,77 @@ func boolToInt(value bool) int {
 	return 0
 }
 
-func marshalResult(job *ScanJob) string {
-	if job == nil || job.Result == nil {
-		return ""
+func formatProtoTime(ts *timestamppb.Timestamp) string {
+	if ts == nil {
+		return time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	data, err := json.Marshal(job.Result)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	return ts.AsTime().UTC().Format(time.RFC3339Nano)
 }
 
-func scanRow(row *sql.Row) (*ScanJob, error) {
+func scanRow(row *sql.Row) (*scanpb.Scan, error) {
 	return scanFromScanner(row)
 }
 
-func scanRows(rows *sql.Rows) (*ScanJob, error) {
+func scanRows(rows *sql.Rows) (*scanpb.Scan, error) {
 	return scanFromScanner(rows)
 }
 
 // --- Chat session CRUD ---
+//
+// session_proto is the canonical payload. Flat columns exist only for
+// filtering and ordering.
 
-func (s *SQLiteStore) CreateSession(ctx context.Context, session *ChatSession) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO chat_sessions (id, agent_id, agent_name, title, status, topic_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.AgentID, session.AgentName, session.Title, session.Status, session.TopicID,
-		session.CreatedAt.Format(time.RFC3339Nano), session.UpdatedAt.Format(time.RFC3339Nano),
+func (s *SQLiteStore) CreateSession(ctx context.Context, session *chatpb.SessionRecord) error {
+	raw, err := protobuf.Marshal(session)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO chat_sessions (id, agent_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		session.GetSession().GetId(), session.GetSession().GetParticipant(), session.GetSession().GetState(),
+		raw,
+		formatProtoTime(session.CreatedAt), formatProtoTime(session.UpdatedAt),
 	)
 	return err
 }
 
-func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*ChatSession, error) {
+func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*chatpb.SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at FROM chat_sessions WHERE id = ?`, id)
-	var cs ChatSession
-	var createdAt, updatedAt string
-	if err := row.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &cs.TopicID, &createdAt, &updatedAt); err != nil {
+		`SELECT session_proto FROM chat_sessions WHERE id = ?`, id)
+	var raw []byte
+	if err := row.Scan(&raw); err != nil {
 		return nil, err
 	}
-	cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-	scanIDs, _ := s.SessionScanIDs(ctx, id)
-	cs.ScanIDs = scanIDs
-	return &cs, nil
+	session := new(chatpb.SessionRecord)
+	if err := protobuf.Unmarshal(raw, session); err != nil {
+		return nil, fmt.Errorf("decode session protobuf: %w", err)
+	}
+	session.ScanIds, _ = s.SessionScanIDs(ctx, id)
+	return session, nil
 }
 
-func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*ChatSession, error) {
+func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*chatpb.SessionRecord, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
+		`SELECT session_proto FROM chat_sessions ORDER BY updated_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var sessions []*ChatSession
+	var sessions []*chatpb.SessionRecord
 	for rows.Next() {
-		var cs ChatSession
-		var createdAt, updatedAt string
-		if err := rows.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &cs.TopicID, &createdAt, &updatedAt); err != nil {
+		session, err := sessionFromRow(rows)
+		if err != nil {
 			return nil, err
 		}
-		cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-		sessions = append(sessions, &cs)
+		sessions = append(sessions, session)
 	}
 	return sessions, rows.Err()
 }
 
-func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*ChatSession, bool, error) {
+func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*chatpb.SessionRecord, bool, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -652,29 +392,26 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at
+	query := `SELECT session_proto
 		FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?`
 	args := []any{limit + 1, offset}
 	if !includeClosed {
-		query = `SELECT id, agent_id, agent_name, title, status, topic_id, created_at, updated_at
+		query = `SELECT session_proto
 			FROM chat_sessions WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`
-		args = []any{SessionActive, limit + 1, offset}
+		args = []any{SessionStateOpen, limit + 1, offset}
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, false, err
 	}
-	sessions := make([]*ChatSession, 0, limit+1)
+	sessions := make([]*chatpb.SessionRecord, 0, limit+1)
 	for rows.Next() {
-		var cs ChatSession
-		var createdAt, updatedAt string
-		if err := rows.Scan(&cs.ID, &cs.AgentID, &cs.AgentName, &cs.Title, &cs.Status, &cs.TopicID, &createdAt, &updatedAt); err != nil {
+		session, err := sessionFromRow(rows)
+		if err != nil {
 			_ = rows.Close()
 			return nil, false, err
 		}
-		cs.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		cs.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-		sessions = append(sessions, &cs)
+		sessions = append(sessions, session)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -687,7 +424,8 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	// the session row set; querying SessionScanIDs inside rows.Next would wait on
 	// the connection held by the outer query and deadlock every non-empty page.
 	for _, session := range sessions {
-		session.ScanIDs, _ = s.SessionScanIDs(ctx, session.ID)
+		scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
+		session.ScanIds = scanIDs
 	}
 	hasMore := len(sessions) > limit
 	if hasMore {
@@ -696,10 +434,31 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	return sessions, hasMore, nil
 }
 
-func (s *SQLiteStore) UpdateSession(ctx context.Context, session *ChatSession) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE chat_sessions SET title=?, status=?, topic_id=?, updated_at=? WHERE id=?`,
-		session.Title, session.Status, session.TopicID, session.UpdatedAt.Format(time.RFC3339Nano), session.ID,
+func sessionFromRow(rows *sql.Rows) (*chatpb.SessionRecord, error) {
+	var raw []byte
+	if err := rows.Scan(&raw); err != nil {
+		return nil, err
+	}
+	session := new(chatpb.SessionRecord)
+	if err := protobuf.Unmarshal(raw, session); err != nil {
+		return nil, fmt.Errorf("decode session protobuf: %w", err)
+	}
+	return session, nil
+}
+
+func (s *SQLiteStore) UpdateSession(ctx context.Context, session *chatpb.SessionRecord) error {
+	scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
+	if len(scanIDs) > 0 {
+		session.ScanIds = scanIDs
+	}
+	raw, err := protobuf.Marshal(session)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE chat_sessions SET status=?, session_proto=?, updated_at=? WHERE id=?`,
+		session.GetSession().GetState(), raw,
+		formatProtoTime(session.UpdatedAt), session.GetSession().GetId(),
 	)
 	return err
 }
@@ -723,7 +482,7 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if event == nil || event.GetMessageDelta() != nil || event.GetToolCallDelta() != nil {
 		return 0, false, nil
 	}
-	raw, err := protojson.Marshal(event)
+	raw, err := protobuf.Marshal(event)
 	if err != nil {
 		return 0, false, err
 	}
@@ -742,8 +501,8 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 		return 0, false, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO chat_aop_events (id, session_id, cursor, event_json, created_at) VALUES (?, ?, ?, ?, ?)`,
-		generateID(), sessionID, cursor, string(raw), createdAt,
+		`INSERT INTO chat_aop_events (id, session_id, cursor, event_proto, created_at) VALUES (?, ?, ?, ?, ?)`,
+		generateID(), sessionID, cursor, raw, createdAt,
 	); err != nil {
 		return 0, false, err
 	}
@@ -766,19 +525,19 @@ func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit
 }
 
 func (s *SQLiteStore) MaxAOPEventSeq(ctx context.Context, sessionID string) (uint64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT event_json FROM chat_aop_events WHERE session_id = ?`, sessionID)
+	rows, err := s.db.QueryContext(ctx, `SELECT event_proto FROM chat_aop_events WHERE session_id = ?`, sessionID)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 	var maximum uint64
 	for rows.Next() {
-		var raw string
+		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			return 0, err
 		}
 		event := new(aop.Event)
-		if protojson.Unmarshal([]byte(raw), event) == nil && event.Seq > maximum {
+		if protobuf.Unmarshal(raw, event) == nil && event.Seq > maximum {
 			maximum = event.Seq
 		}
 	}
@@ -792,14 +551,14 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 	if limit > 10000 {
 		limit = 10000
 	}
-	query := `SELECT cursor, event_json FROM (
-		SELECT cursor, event_json FROM chat_aop_events
+	query := `SELECT cursor, event_proto FROM (
+		SELECT cursor, event_proto FROM chat_aop_events
 		WHERE session_id = ? ORDER BY cursor DESC LIMIT ?
 	) ORDER BY cursor ASC`
 	args := []any{sessionID, limit + 1}
 	if before > 0 {
-		query = `SELECT cursor, event_json FROM (
-			SELECT cursor, event_json FROM chat_aop_events
+		query = `SELECT cursor, event_proto FROM (
+			SELECT cursor, event_proto FROM chat_aop_events
 			WHERE session_id = ? AND cursor < ? ORDER BY cursor DESC LIMIT ?
 		) ORDER BY cursor ASC`
 		args = []any{sessionID, before, limit + 1}
@@ -811,13 +570,13 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 	defer rows.Close()
 	events := make([]persistedAOPEvent, 0, limit+1)
 	for rows.Next() {
-		var raw string
+		var raw []byte
 		var cursor int64
 		if err := rows.Scan(&cursor, &raw); err != nil {
 			return nil, 0, err
 		}
 		event := new(aop.Event)
-		if protojson.Unmarshal([]byte(raw), event) == nil && event.SessionId != "" && event.Payload != nil {
+		if protobuf.Unmarshal(raw, event) == nil && event.SessionId != "" && event.Payload != nil {
 			events = append(events, persistedAOPEvent{Cursor: cursor, Event: event})
 		}
 	}
@@ -839,7 +598,7 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 		events, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
 		return events, err
 	}
-	query := `SELECT cursor, event_json FROM chat_aop_events WHERE session_id = ? AND cursor > ? ORDER BY cursor ASC`
+	query := `SELECT cursor, event_proto FROM chat_aop_events WHERE session_id = ? AND cursor > ? ORDER BY cursor ASC`
 	args := []any{sessionID, after}
 	if limit > 0 {
 		if limit > 10000 {
@@ -856,12 +615,12 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 	var events []persistedAOPEvent
 	for rows.Next() {
 		var stored persistedAOPEvent
-		var raw string
+		var raw []byte
 		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
 			return nil, err
 		}
 		stored.Event = new(aop.Event)
-		if protojson.Unmarshal([]byte(raw), stored.Event) == nil && stored.Event.SessionId != "" && stored.Event.Payload != nil {
+		if protobuf.Unmarshal(raw, stored.Event) == nil && stored.Event.SessionId != "" && stored.Event.Payload != nil {
 			events = append(events, stored)
 		}
 	}
@@ -896,58 +655,32 @@ func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]s
 	return ids, rows.Err()
 }
 
-// --- Records ---
-
-func (s *SQLiteStore) InsertRecord(ctx context.Context, rec *output.Record) error {
-	return s.InsertRecords(ctx, []*output.Record{rec})
-}
-
-func (s *SQLiteStore) InsertRecords(ctx context.Context, recs []*output.Record) error {
-	if len(recs) == 0 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT OR IGNORE INTO records (id, type, scan_id, session_id, agent_id, source, target, turn, priority, summary, loot, tags, data, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	defer stmt.Close()
-	for _, rec := range recs {
-		tagsJSON, _ := json.Marshal(rec.Tags)
-		if _, err := stmt.ExecContext(ctx,
-			rec.ID, string(rec.Type), rec.ScanID, rec.SessionID, rec.AgentID,
-			rec.Source, rec.Target, rec.Turn, rec.Priority, rec.Summary,
-			boolToInt(rec.Loot), string(tagsJSON), string(rec.Data),
-			rec.Timestamp.Format(time.RFC3339Nano),
-		); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
 // ── SCO Nodes ──
 
-func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, scanID string, nodes []json.RawMessage) error {
+func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT OR REPLACE INTO sco_nodes (cstx_id, cstx_type, data, scan_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM sco_nodes WHERE cstx_id = ?), ?), ?)`)
+	nodeStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO sco_nodes (cstx_id, cstx_type, data, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(cstx_id) DO UPDATE SET
+			cstx_type = excluded.cstx_type,
+			data = excluded.data,
+			updated_at = excluded.updated_at`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	defer stmt.Close()
+	defer nodeStmt.Close()
+	observationStmt, err := tx.PrepareContext(ctx,
+		`INSERT OR IGNORE INTO sco_observations (operation_id, cstx_id, observed_at) VALUES (?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer observationStmt.Close()
 	now := time.Now().Format(time.RFC3339Nano)
 	for _, raw := range nodes {
 		var header struct {
@@ -957,11 +690,15 @@ func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, scanID string, nodes [
 		if json.Unmarshal(raw, &header) != nil || header.ID == "" {
 			continue
 		}
-		if _, err := stmt.ExecContext(ctx,
-			header.ID, header.Type, string(raw), scanID, header.ID, now, now,
-		); err != nil {
+		if _, err := nodeStmt.ExecContext(ctx, header.ID, header.Type, string(raw), now, now); err != nil {
 			_ = tx.Rollback()
 			return err
+		}
+		if operationID != "" {
+			if _, err := observationStmt.ExecContext(ctx, operationID, header.ID, now); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -974,21 +711,24 @@ func (s *SQLiteStore) ListSCONodes(ctx context.Context, nodeType string, limit i
 func (s *SQLiteStore) ListSCONodesByScanID(ctx context.Context, scanID, nodeType string, limit int) ([]json.RawMessage, error) {
 	var where []string
 	var args []any
+	from := "sco_nodes AS nodes"
 	if scanID != "" {
-		where = append(where, "scan_id = ?")
+		from += " JOIN sco_observations AS observations ON observations.cstx_id = nodes.cstx_id"
+		where = append(where, "observations.operation_id = ?")
 		args = append(args, scanID)
 	}
 	if nodeType != "" {
-		where = append(where, "cstx_type = ?")
+		where = append(where, "nodes.cstx_type = ?")
 		args = append(args, nodeType)
 	}
 	var qb strings.Builder
-	qb.WriteString("SELECT data FROM sco_nodes")
+	qb.WriteString("SELECT nodes.data FROM ")
+	qb.WriteString(from)
 	if len(where) > 0 {
 		qb.WriteString(" WHERE ")
 		qb.WriteString(strings.Join(where, " AND "))
 	}
-	qb.WriteString(" ORDER BY updated_at DESC LIMIT ?")
+	qb.WriteString(" ORDER BY nodes.updated_at DESC LIMIT ?")
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, qb.String(), args...)
 	if err != nil {
@@ -1016,7 +756,7 @@ func (s *SQLiteStore) GetSCONode(ctx context.Context, cstxID string) (json.RawMe
 }
 
 func (s *SQLiteStore) DeleteSCONodesByScan(ctx context.Context, scanID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sco_nodes WHERE scan_id = ?`, scanID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sco_observations WHERE operation_id = ?`, scanID)
 	return err
 }
 

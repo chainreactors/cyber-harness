@@ -222,7 +222,7 @@ func ioaServe(ctx context.Context, option *cfg.Option, logger telemetry.Logger) 
 		listenURL = "http://127.0.0.1:8765"
 	}
 	if u, err := url.Parse(listenURL); err == nil {
-		logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s", accessKey, u.Host)
+		logger.Infof("  agent IOA connect: aiscan agent --transport local --ioa-url http://%s@%s", accessKey, u.Host)
 	}
 
 	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{

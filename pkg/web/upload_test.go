@@ -3,34 +3,13 @@ package web
 import (
 	"context"
 	"errors"
-	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
-	chatpb "github.com/chainreactors/aiscan/aop/aiscan/chat"
-	"github.com/chainreactors/aiscan/aop/aiscan/chat/chatconnect"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	aop "github.com/chainreactors/aiscan/aop"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 )
-
-func TestUploadConnectRPCRejectsMissingSession(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	server := httptest.NewServer(NewHandler(NewService(ServiceConfig{Store: store}), nil, nil, nil, nil, ""))
-	defer server.Close()
-	client := chatconnect.NewSessionServiceClient(server.Client(), server.URL, connect.WithProtoJSON())
-	response, err := client.UploadSessionFile(context.Background(), connect.NewRequest(&chatpb.UploadSessionFileRequest{
-		RequestId: "upload-1", SessionId: "missing", Filename: "note.txt", Data: []byte("hello"),
-	}))
-	if err != nil || response.Msg.GetRejected().GetCode() != "NOT_FOUND" {
-		t.Fatalf("UploadSessionFile = %v, %v", response, err)
-	}
-}
 
 func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"))
@@ -43,24 +22,24 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.AgentID = "upload-agent"
-	if _, err := store.db.Exec(`UPDATE chat_sessions SET agent_id = ? WHERE id = ?`, session.AgentID, session.ID); err != nil {
+	session.Session.Participant = "upload-agent"
+	if err := store.UpdateSession(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 
 	pool := NewAgentPool(NewHub())
-	remote := newFakeAgent(session.AgentID, 1)
+	remote := newFakeAgent(session.GetSession().GetParticipant(), 1)
 	pool.register(remote)
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := svc.HandleFileUpload(ctx, session.ID, "note.txt", []byte("hello"))
+		_, err := svc.HandleFileUpload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
 		done <- err
 	}()
 
-	var upload *transport.ServerFrame
+	var upload *aop.Envelope
 	select {
 	case upload = <-remote.sendCh:
 	case <-time.After(time.Second):
@@ -76,17 +55,29 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 		t.Fatal("upload did not return after request cancellation")
 	}
 
+	message, err := aop.Unwrap(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := message.(*filepb.ProtocolMessage); !ok {
+		t.Fatalf("upload dispatch = %T, want file protocol message", message)
+	}
+	taskID := upload.GetId()
 	remote.mu.Lock()
-	taskID := upload.GetFileUpload().GetTaskId()
 	_, pending := remote.tasks[taskID]
 	remote.mu.Unlock()
 	if pending {
 		t.Fatal("canceled upload remained in the agent task map")
 	}
 	select {
-	case msg := <-remote.controlCh:
-		if msg.GetCancelTurn().GetTurnId() != taskID {
-			t.Fatalf("upload cancel frame = %+v", msg)
+	case envelope := <-remote.sendCh:
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetCancelTurnRequest().GetTurnId() != taskID {
+			t.Fatalf("upload cancel envelope = %+v", message)
 		}
 	default:
 		t.Fatal("upload cancellation was not sent to the agent")

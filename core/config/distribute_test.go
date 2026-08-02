@@ -1,22 +1,26 @@
 package config
 
-import "testing"
+import (
+	"testing"
 
-func TestMigrateLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
-	config := LLMConfig{Providers: []LLMProviderConfig{
-		{ID: "openai", Provider: " OPENAI ", BaseURL: "https://api.deepseek.com/v1"},
-		{ID: "claude", Provider: "ANTHROPIC"},
-		{ID: "invalid", Provider: "deepseek"},
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+)
+
+func TestNormalizeLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
+	llm := &configpb.LLMConfig{Providers: []*configpb.LLMProviderConfig{
+		{Id: "openai", Provider: " OPENAI ", BaseUrl: "https://api.deepseek.com/v1"},
+		{Id: "claude", Provider: "ANTHROPIC"},
+		{Id: "invalid", Provider: "deepseek"},
 	}}
-	MigrateLLMConfig(&config, LLMProviderConfig{})
+	NormalizeLLMConfig(llm)
 
-	if config.Providers[0].Provider != "openai" {
-		t.Fatalf("OpenAI-compatible provider = %q", config.Providers[0].Provider)
+	if llm.Providers[0].Provider != "openai" {
+		t.Fatalf("OpenAI-compatible provider = %q", llm.Providers[0].Provider)
 	}
-	if config.Providers[1].Provider != "anthropic" {
-		t.Fatalf("Anthropic provider = %q", config.Providers[1].Provider)
+	if llm.Providers[1].Provider != "anthropic" {
+		t.Fatalf("Anthropic provider = %q", llm.Providers[1].Provider)
 	}
-	if config.Providers[2].Provider != "deepseek" {
-		t.Fatalf("unsupported provider must not be rewritten, got %q", config.Providers[2].Provider)
+	if llm.Providers[2].Provider != "deepseek" {
+		t.Fatalf("unsupported provider must not be rewritten, got %q", llm.Providers[2].Provider)
 	}
 }

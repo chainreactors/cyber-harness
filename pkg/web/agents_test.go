@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,41 +15,78 @@ import (
 	webstatic "github.com/chainreactors/aiscan/web"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
-	"github.com/chainreactors/aiscan/core/output"
+	filepb "github.com/chainreactors/aiscan/aop/file"
+	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	scopb "github.com/chainreactors/aiscan/aop/sco"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
-	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func writeAgentFrame(t *testing.T, conn *websocket.Conn, frame *transport.AgentFrame) {
+func wrapMessage(t *testing.T, id, replyTo string, message protobuf.Message) *aop.Envelope {
 	t.Helper()
-	raw, err := protojson.Marshal(frame)
+	envelope, err := aop.Wrap(id, replyTo, message)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+	return envelope
+}
+
+func unwrapEnvelope(t *testing.T, envelope *aop.Envelope) protobuf.Message {
+	t.Helper()
+	message, err := aop.Unwrap(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
+
+func writeAgentEnvelope(t *testing.T, conn *websocket.Conn, envelope *aop.Envelope) {
+	t.Helper()
+	raw, err := protobuf.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, raw); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func readServerFrame(t *testing.T, conn *websocket.Conn) *transport.ServerFrame {
+func readHubEnvelope(t *testing.T, conn *websocket.Conn) *aop.Envelope {
 	t.Helper()
 	_, raw, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame := new(transport.ServerFrame)
-	if err := protojson.Unmarshal(raw, frame); err != nil {
+	envelope := new(aop.Envelope)
+	if err := protobuf.Unmarshal(raw, envelope); err != nil {
 		t.Fatal(err)
 	}
-	return frame
+	return envelope
+}
+
+// ptyFrameFromEnvelope extracts a PTY frame from an AOP envelope; envelopes
+// carrying any other namespace decode to the zero frame.
+func ptyFrameFromEnvelope(envelope *aop.Envelope) pty.Frame {
+	message, err := aop.Unwrap(envelope)
+	if err != nil {
+		return pty.Frame{}
+	}
+	ptyMessage, ok := message.(*ptypb.ProtocolMessage)
+	if !ok {
+		return pty.Frame{}
+	}
+	return terminalcodec.FromProto(ptyMessage)
 }
 
 type recordingSCOStore struct {
@@ -69,9 +105,9 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSCOStore(store)
 	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","value":"127.0.0.1"}`)
-	pool.handleAgentFrame(&remoteAgent{}, &transport.AgentFrame{Payload: &transport.AgentFrame_ScoNodes{ScoNodes: &transport.ScoNodes{
-		CallId: "call-gogo-1", Nodes: [][]byte{node},
-	}}})
+	pool.handleAgentEnvelope(&remoteAgent{}, wrapMessage(t, generateID(), "call-gogo-1", &scopb.ProtocolMessage{Message: &scopb.ProtocolMessage_Nodes{Nodes: &scopb.Nodes{
+		Nodes: [][]byte{node},
+	}}}))
 
 	if store.scanID != "call-gogo-1" {
 		t.Fatalf("scan id = %q, want tool call id", store.scanID)
@@ -81,18 +117,33 @@ func TestAgentPoolPersistsToolSCO(t *testing.T) {
 	}
 }
 
+// dialAOPWebSocket opens the unified application WebSocket both peers
+// (agents and browsers) use.
+func dialAOPWebSocket(t *testing.T, srv *httptest.Server) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/aop/ws"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	return conn
+}
+
 func dialAgent(t *testing.T, srv *httptest.Server, name string, commands []string) *websocket.Conn {
-	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, transport.AgentStatus{Space: "case-test"})
+	return dialAgentWithIdentity(t, srv, name, commands, "node-"+name, aop.AgentStatus{Space: "case-test"})
 }
 
 func writeAgentPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
 	t.Helper()
-	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}})
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
 }
 
 func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
 	t.Helper()
-	frame := terminalcodec.FromProto(readServerFrame(t, conn).GetTerminal())
+	frame := ptyFrameFromEnvelope(readHubEnvelope(t, conn))
 	if frame.Type != want {
 		t.Fatalf("agent expected PTY %s, got %s", want, frame.Type)
 	}
@@ -101,61 +152,61 @@ func readAgentPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Fr
 
 func writeBrowserPTY(t *testing.T, conn *websocket.Conn, frame pty.Frame) {
 	t.Helper()
-	raw, err := terminalcodec.Marshal(frame)
-	if err != nil {
-		t.Fatalf("marshal browser PTY %s: %v", frame.Type, err)
-	}
-	if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
-		t.Fatalf("browser write PTY %s: %v", frame.Type, err)
-	}
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
+}
+
+// writeBrowserPTYOpen sends a browser pty.open; unlike every later frame it
+// must nominate the target agent, so it is built as a proto message rather
+// than through the transport-neutral pty.Frame codec.
+func writeBrowserPTYOpen(t *testing.T, conn *websocket.Conn, open *ptypb.Open) {
+	t.Helper()
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Open{Open: open}}))
+}
+
+func writeBrowserPTYList(t *testing.T, conn *websocket.Conn, list *ptypb.List) {
+	t.Helper()
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_List{List: list}}))
 }
 
 func readBrowserPTY(t *testing.T, conn *websocket.Conn, want pty.FrameType) pty.Frame {
 	t.Helper()
-	_, raw, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("browser read PTY %s: %v", want, err)
-	}
-	frame, err := terminalcodec.Unmarshal(raw)
-	if err != nil {
-		t.Fatalf("decode browser PTY %s: %v", want, err)
-	}
+	frame := ptyFrameFromEnvelope(readHubEnvelope(t, conn))
 	if frame.Type != want {
 		t.Fatalf("browser expected PTY %s, got %s", want, frame.Type)
 	}
 	return frame
 }
 
-func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status transport.AgentStatus) *websocket.Conn {
+func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, commands []string, nodeID string, status aop.AgentStatus) *websocket.Conn {
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Hello{Hello: &transport.AgentHello{
-		AgentId: nodeID, Name: name, Authority: srv.URL, Commands: commands,
-		Status: &transport.AgentStatus{Space: status.Space, Provider: status.Provider, Model: status.Model, Bound: status.Bound, ConfigError: status.ConfigError},
-		Stats:  &transport.AgentStats{TotalTokens: 42},
-	}}})
-	ack := readServerFrame(t, conn)
-	if ack.GetAccepted() == nil {
+	conn := dialAOPWebSocket(t, srv)
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: &aop.AgentHello{
+		AgentId: nodeID, Name: name, Authority: srv.URL,
+	}}}))
+	ack := unwrapEnvelope(t, readHubEnvelope(t, conn))
+	if accepted, ok := ack.(*aop.ProtocolMessage); !ok || accepted.GetAgentAccepted() == nil {
 		t.Fatalf("expected accepted, got %+v", ack)
 	}
+	commandSpecs := make([]*commandpb.Spec, 0, len(commands))
+	for _, command := range commands {
+		commandSpecs = append(commandSpecs, &commandpb.Spec{Name: command})
+	}
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Catalog{Catalog: &commandpb.Catalog{Commands: commandSpecs}}}))
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: &aop.AgentStatus{
+		Space: status.Space, Provider: status.Provider, Model: status.Model, Bound: status.Bound, ConfigError: status.ConfigError,
+	}}}))
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: &aop.AgentStats{TotalTokens: 42}}}))
 	return conn
 }
 
 func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	t.Helper()
-	hub := NewHub()
-	pool := NewAgentPool(hub)
+	svc := NewService(ServiceConfig{})
+	pool := NewAgentPool(svc.Hub())
+	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/agent/ws", pool.HandleWS)
-	mux.HandleFunc("GET /api/agents/{id}/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
-		pool.HandleTerminalWS(r.PathValue("id"), w, r)
+	mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) {
+		HandleAOPWebSocket(svc, pool, w, r)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -169,13 +220,13 @@ func TestWSRegisterAndList(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	agents := pool.List()
-	if len(agents) != 1 || agents[0].Name != "test-agent" {
+	if len(agents) != 1 || agents[0].GetHello().GetName() != "test-agent" {
 		t.Fatalf("expected 1 agent named test-agent, got %+v", agents)
 	}
-	if agents[0].Node.ID != "node-test-agent" || agents[0].Status.Space != "case-test" {
+	if !strings.Contains(agents[0].NodeUri, "node-test-agent") || agents[0].GetStatus().GetSpace() != "case-test" {
 		t.Fatalf("agent descriptor not retained: %+v", agents[0])
 	}
-	if agents[0].Stats.TotalTokens != 42 {
+	if agents[0].GetStats().GetTotalTokens() != 42 {
 		t.Fatalf("agent stats not retained: %+v", agents[0].Stats)
 	}
 }
@@ -207,7 +258,7 @@ func TestReconnectKeepsStableID(t *testing.T) {
 
 	conn1 := dialAgent(t, srv, "stable-agent", []string{"scan"})
 	waitAgents(t, pool, 1)
-	id1 := pool.List()[0].ID
+	id1 := pool.List()[0].NodeUri
 
 	// Drop the connection and let the hub observe the disconnect.
 	conn1.Close()
@@ -217,7 +268,7 @@ func TestReconnectKeepsStableID(t *testing.T) {
 	conn2 := dialAgent(t, srv, "stable-agent", []string{"scan"})
 	defer conn2.Close()
 	waitAgents(t, pool, 1)
-	id2 := pool.List()[0].ID
+	id2 := pool.List()[0].NodeUri
 
 	if id1 != id2 {
 		t.Fatalf("agent id changed across reconnect: %q -> %q (session binding would dangle)", id1, id2)
@@ -233,7 +284,7 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agentID := pool.List()[0].ID
+	agentID := pool.List()[0].NodeUri
 
 	progressCh, _, unsub := pool.hub.SubscribeScan("task-1")
 	defer unsub()
@@ -246,20 +297,24 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := readServerFrame(t, conn)
-	if cmd.GetToolCall().GetTaskId() != "task-1" {
-		t.Fatalf("unexpected: %+v", cmd)
+	cmdEnvelope := readHubEnvelope(t, conn)
+	if cmdEnvelope.GetId() != "task-1" {
+		t.Fatalf("unexpected: %+v", cmdEnvelope)
 	}
-	call := cmd.GetToolCall().GetCall()
+	cmd := unwrapEnvelope(t, cmdEnvelope)
+	toolCall, ok := cmd.(*toolpb.ProtocolMessage)
+	if !ok || toolCall.GetCall() == nil {
+		t.Fatalf("unexpected dispatch: %+v", cmd)
+	}
+	call := toolCall.GetCall().GetCall()
 	args, _ := aop.DecodeJSON[map[string]any](call.Arguments)
 	if call.Name != "bash" || args["command"] != "scan -i 1.2.3.4" {
 		t.Fatalf("unexpected tool.call data: %+v", call)
 	}
 
-	progress, _ := aop.JSONValue("port 80 open")
-	writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: "task-1", Payload: &transport.AgentFrame_ToolTelemetry{ToolTelemetry: &transport.ToolTelemetry{
-		Tool: "bash", Kind: output.ToolDataProgress, CallId: "task-1", Data: progress,
-	}}})
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "task-1", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: &toolpb.Progress{
+		Tool: "bash", Text: "port 80 open",
+	}}}))
 	select {
 	case evt := <-progressCh:
 		if !strings.Contains(evt.GetProgress().GetData(), "port 80 open") {
@@ -269,20 +324,16 @@ func TestWSDispatchAndComplete(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	detail, _ := aop.JSONValue(map[string]int{"ports": 3})
-	writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: "task-1", Payload: &transport.AgentFrame_Event{Event: &aop.Event{
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "task-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
 		Id: "result-1", EmittedAt: timestamppb.Now(), SessionId: "task-1", TurnId: "task-1", Emitter: "worker",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{
-			CallId: "task-1", Name: "bash", Output: []*aop.Content{aop.Text("done")}, Detail: detail,
+			CallId: "task-1", Name: "bash", Output: []*aop.Content{aop.Text("done")},
 		}},
-	}}})
+	}}}))
 	select {
 	case res := <-resultCh:
 		if res.Err != "" || res.Output != "done" {
 			t.Fatalf("unexpected result: %+v", res)
-		}
-		if !strings.Contains(string(res.Result), `"ports":3`) {
-			t.Fatalf("result details not propagated: %s", res.Result)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
@@ -292,7 +343,7 @@ func TestWSDispatchAndComplete(t *testing.T) {
 func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",
-		transport.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
+		aop.AgentStatus{Space: "case-test", Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -306,16 +357,17 @@ func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := readServerFrame(t, conn)
-	if cmd.GetRunTurn().GetTurnId() != "task-chat" {
+	cmd := unwrapEnvelope(t, readHubEnvelope(t, conn))
+	core, ok := cmd.(*aop.ProtocolMessage)
+	if !ok || core.GetRunTurnRequest().GetTurnId() != "task-chat" {
 		t.Fatalf("unexpected: %+v", cmd)
 	}
-	run := cmd.GetRunTurn()
+	run := core.GetRunTurnRequest()
 	if len(run.Input.Content) != 1 || run.Input.Content[0].GetText().GetText() != "hello" {
 		t.Fatalf("unexpected run input: %+v", run)
 	}
 
-	writeAgentFrame(t, conn, turnEndMessage("task-chat", "sess-chat", "completed"))
+	writeAgentEnvelope(t, conn, turnEndEnvelope(t, "task-chat", "sess-chat", "completed"))
 	select {
 	case res := <-resultCh:
 		if res.Err != "" {
@@ -326,13 +378,14 @@ func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	}
 }
 
-// turnEndMessage builds the agent→hub AOP turn.end frame that converges
+// turnEndEnvelope builds the agent→hub AOP turn.end envelope that converges
 // a chat task.
-func turnEndMessage(turnID, sessionID, stop string) *transport.AgentFrame {
-	return &transport.AgentFrame{CorrelationId: turnID, Payload: &transport.AgentFrame_Event{Event: &aop.Event{
+func turnEndEnvelope(t *testing.T, turnID, sessionID, stop string) *aop.Envelope {
+	t.Helper()
+	return wrapMessage(t, generateID(), turnID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
 		Id: "end-" + turnID, EmittedAt: timestamppb.Now(), SessionId: sessionID, TurnId: turnID, Emitter: "agent",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stop}},
-	}}}
+	}}})
 }
 
 // TestDispatchRunCarriesGoalOptions guards the Goal-mode wiring: the
@@ -343,7 +396,7 @@ func turnEndMessage(turnID, sessionID, stop string) *transport.AgentFrame {
 func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "goal-worker", []string{"scan"}, "node-goal-worker",
-		transport.AgentStatus{Provider: "openai", Model: "test-model"})
+		aop.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -352,33 +405,40 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	options, _ := aop.ProtoJSONValue(&transport.RunOptions{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	options, err := anypb.New(&agentpb.RunOptions{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
 	resultCh, err := pool.DispatchRun(agent.id, &aop.RunTurnRequest{
-		RequestId: "task-goal", SessionId: "sess-1", TurnId: "task-goal",
+		SessionId: "sess-1", TurnId: "task-goal",
 		Input:      &aop.Message{Id: "input-task-goal", Role: "user", Content: []*aop.Content{aop.Text("audit target")}},
-		Extensions: []*aop.Extension{{Namespace: "io.chainreactors.aiscan.run", Value: options}},
+		Extensions: []*anypb.Any{options},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	opened := readServerFrame(t, conn)
-	if opened.GetOpenSession() == nil {
+	opened := unwrapEnvelope(t, readHubEnvelope(t, conn))
+	if openedCore, ok := opened.(*aop.ProtocolMessage); !ok || openedCore.GetOpenSessionRequest() == nil {
 		t.Fatalf("first frame = %+v, want session.open", opened)
 	}
-	cmd := readServerFrame(t, conn)
-	inbound := cmd.GetRunTurn()
+	cmd := unwrapEnvelope(t, readHubEnvelope(t, conn))
+	cmdCore, ok := cmd.(*aop.ProtocolMessage)
+	if !ok {
+		t.Fatalf("dispatch did not carry a Run: %+v", cmd)
+	}
+	inbound := cmdCore.GetRunTurnRequest()
 	if inbound == nil {
 		t.Fatalf("dispatch did not carry a Run: %+v", cmd)
 	}
 	if inbound.SessionId != "sess-1" || len(inbound.Input.Content) != 1 || inbound.Input.Content[0].GetText().GetText() != "audit target" {
 		t.Errorf("run = %+v", inbound)
 	}
-	var gotOptions transport.RunOptions
-	if err := aop.DecodeProtoJSON(inbound.Extensions[0].Value, &gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
+	var gotOptions agentpb.RunOptions
+	if err := inbound.Extensions[0].UnmarshalTo(&gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
 		t.Errorf("goal options = %+v, err=%v", gotOptions, err)
 	}
-	writeAgentFrame(t, conn, turnEndMessage("task-goal", "sess-1", "completed"))
+	writeAgentEnvelope(t, conn, turnEndEnvelope(t, "task-goal", "sess-1", "completed"))
 	select {
 	case <-resultCh:
 	case <-time.After(time.Second):
@@ -401,7 +461,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
-		transport.AgentStatus{Provider: "openai", Model: "test-model"})
+		aop.AgentStatus{Provider: "openai", Model: "test-model"})
 	defer conn.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -411,7 +471,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	session, err := svc.CreateSession(ctx, agents[0].ID, "")
+	session, err := svc.CreateSession(ctx, agents[0].NodeUri, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,18 +479,39 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		msg := readServerFrame(t, conn)
-		upload := msg.GetFileUpload()
-		if upload == nil || upload.TaskId == "" || len(upload.Data) == 0 {
+		msg := readHubEnvelope(t, conn)
+		if msg.GetId() == "" {
+			t.Errorf("upload envelope missing correlation id: %+v", msg)
+			return
+		}
+		payload, err := aop.Unwrap(msg)
+		if err != nil {
+			t.Errorf("unwrap upload: %v", err)
+			return
+		}
+		fileMessage, ok := payload.(*filepb.ProtocolMessage)
+		if !ok || fileMessage.GetUploadRequest() == nil {
 			t.Errorf("unexpected upload message: %+v", msg)
 			return
 		}
-		writeAgentFrame(t, conn, &transport.AgentFrame{CorrelationId: msg.CorrelationId, Payload: &transport.AgentFrame_FileResult{FileResult: &transport.FileResult{
-			TaskId: upload.TaskId, Filename: upload.Filename, Path: `C:\tmp\note.txt`, Size: int64(len(upload.Data)),
-		}}})
+		upload := fileMessage.GetUploadRequest()
+		if len(upload.Data) == 0 {
+			t.Errorf("unexpected upload message: %+v", msg)
+			return
+		}
+		raw, err := protobuf.Marshal(aop.MustWrap(generateID(), msg.GetId(), &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Result{Result: &filepb.Result{
+			Filename: upload.Filename, Path: `C:\tmp\note.txt`, Size: int64(len(upload.Data)),
+		}}}))
+		if err != nil {
+			t.Errorf("marshal upload result: %v", err)
+			return
+		}
+		if err := conn.WriteMessage(websocket.BinaryMessage, raw); err != nil {
+			t.Errorf("write upload result: %v", err)
+		}
 	}()
 
-	result, err := svc.HandleFileUpload(ctx, session.ID, "note.txt", []byte("hello"))
+	result, err := svc.HandleFileUpload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +525,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 		t.Fatal("timeout waiting for agent upload reply")
 	}
 
-	events, err := store.ListAOPEvents(ctx, session.ID, 10)
+	events, err := store.ListAOPEvents(ctx, session.GetSession().GetId(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,20 +537,15 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 		t.Fatalf("unexpected persisted upload event: %+v", events[0])
 	}
 	// The English Content is only a fallback; the localizable contract lives in
-	// Metadata as {code, params} so the message stays translatable after reload.
-	var meta struct {
-		Code   string            `json:"code"`
-		Params map[string]string `json:"params"`
-	}
+	// Typed metadata carries {code, params} so the message stays translatable
+	// after reload without a second JSON DTO.
 	webExtension, ok, err := ext.GetWebMessage(events[0])
 	if err != nil || !ok {
 		t.Fatalf("web extension = %+v, ok = %v, err = %v", webExtension, ok, err)
 	}
-	if err := json.Unmarshal(webExtension.Metadata, &meta); err != nil {
-		t.Fatalf("decode system message metadata: %v", err)
-	}
-	if meta.Code != SysFileUploaded || meta.Params["filename"] != "note.txt" || meta.Params["path"] != result.Path {
-		t.Fatalf("unexpected system message metadata: %+v", meta)
+	params := webExtension.GetParams().AsMap()
+	if webExtension.GetCode() != SysFileUploaded || params["filename"] != "note.txt" || params["path"] != result.Path {
+		t.Fatalf("unexpected system message metadata: %+v", webExtension)
 	}
 }
 
@@ -501,9 +577,9 @@ func TestWSUnrecognizedExtensionIsNotProjected(t *testing.T) {
 	progressCh, _, unsub := pool.hub.SubscribeScan("task-2")
 	defer unsub()
 
-	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_OperationError{OperationError: &transport.OperationError{
-		TaskId: "unknown-task", Code: "IGNORED", Message: "not progress telemetry",
-	}}})
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "unknown-task", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{
+		Code: "IGNORED", Message: "not progress telemetry",
+	}}}))
 
 	select {
 	case evt := <-progressCh:
@@ -518,35 +594,28 @@ func TestWSTerminalRelay(t *testing.T) {
 	defer agentConn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("terminal dial: %v", err)
-	}
+	agentID := pool.List()[0].NodeUri
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
 
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
-	if open.StreamID == "" {
+	if open.StreamID != "term-1" {
 		t.Fatalf("unexpected pty.open: %+v", open)
 	}
 
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, SessionID: "session-1"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: open.StreamID, Session: &pty.Info{ID: "session-1"}})
 
 	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
-	if opened.StreamID != open.StreamID || opened.SessionID != "session-1" {
+	if opened.StreamID != open.StreamID || opened.Session == nil || opened.Session.ID != "session-1" {
 		t.Fatalf("unexpected pty.opened: %+v", opened)
 	}
 
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, SessionID: "session-1", Data: []byte("echo pty-ok\n")})
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, StreamID: open.StreamID, Data: []byte("echo pty-ok\n")})
 
 	input := readAgentPTY(t, agentConn, pty.FrameInput)
-	if input.StreamID != open.StreamID || input.SessionID != "session-1" || string(input.Data) != "echo pty-ok\n" {
+	if input.StreamID != open.StreamID || string(input.Data) != "echo pty-ok\n" {
 		t.Fatalf("unexpected pty.input: %+v", input)
 	}
 
@@ -564,30 +633,23 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	defer agentConn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	agentID := pool.List()[0].NodeUri
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
 	// open
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID, Kind: "shell", Name: "test-shell", Cols: 80, Rows: 24})
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
 
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1", Kind: "shell"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, Session: &pty.Info{ID: "sess-1", Kind: "shell"}})
 	opened := readBrowserPTY(t, browserConn, pty.FrameOpened)
-	if opened.SessionID != "sess-1" {
+	if opened.Session == nil || opened.Session.ID != "sess-1" {
 		t.Fatalf("opened missing session_id: %+v", opened)
 	}
 
 	// input → output
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, Data: []byte("ls\n")})
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameInput, StreamID: streamID, Data: []byte("ls\n")})
 	inp := readAgentPTY(t, agentConn, pty.FrameInput)
 	if string(inp.Data) != "ls\n" {
 		t.Fatalf("input data lost: %q", inp.Data)
@@ -599,14 +661,14 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 	}
 
 	// resize
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameResize, Cols: 120, Rows: 40})
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameResize, StreamID: streamID, Cols: 120, Rows: 40})
 	resize := readAgentPTY(t, agentConn, pty.FrameResize)
 	if resize.Cols != 120 || resize.Rows != 40 {
 		t.Fatalf("resize lost: %+v", resize)
 	}
 
-	// list
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameList})
+	// list (on the already-routed stream)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameList, StreamID: streamID})
 	list := readAgentPTY(t, agentConn, pty.FrameList)
 	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
 		Sessions: []pty.Info{{ID: "sess-1", Kind: "shell", State: pty.StateRunning}}})
@@ -615,23 +677,23 @@ func TestWSTerminalSessionLifecycle(t *testing.T) {
 		t.Fatalf("sessions missing: %+v", sessions)
 	}
 
-	// detach
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameDetach})
-	det := readAgentPTY(t, agentConn, pty.FrameDetach)
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameDetached, StreamID: det.StreamID, SessionID: "sess-1"})
-	readBrowserPTY(t, browserConn, pty.FrameDetached)
+	// detach closes the browser route; the agent still receives the frame.
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameDetach, StreamID: streamID})
+	readAgentPTY(t, agentConn, pty.FrameDetach)
 
-	// attach
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, SessionID: "sess-1"})
+	// attach rides a fresh stream routed via its list open.
+	writeBrowserPTYList(t, browserConn, &ptypb.List{StreamId: "term-2", AgentId: agentID})
+	readAgentPTY(t, agentConn, pty.FrameList)
+	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameAttach, StreamID: "term-2", SessionID: "sess-1"})
 	att := readAgentPTY(t, agentConn, pty.FrameAttach)
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: att.StreamID, SessionID: "sess-1"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: att.StreamID, Session: &pty.Info{ID: "sess-1"}})
 	readBrowserPTY(t, browserConn, pty.FrameAttached)
 
 	// closed
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: streamID,
-		SessionID: "sess-1", State: pty.StateCompleted})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: "term-2",
+		Session: &pty.Info{ID: "sess-1", State: pty.StateCompleted}})
 	closed := readBrowserPTY(t, browserConn, pty.FrameClosed)
-	if closed.State != pty.StateCompleted {
+	if closed.Session == nil || closed.Session.State != pty.StateCompleted {
 		t.Fatalf("closed state lost: %+v", closed)
 	}
 }
@@ -642,18 +704,11 @@ func TestWSTerminalSingleton(t *testing.T) {
 	defer agentConn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	agentID := pool.List()[0].NodeUri
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen,
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID,
 		Kind: "shell", Name: "singleton-shell", Singleton: true, Cols: 80, Rows: 24})
 
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
@@ -667,30 +722,27 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	agentConn := dialAgent(t, srv, "generation-agent", []string{"tmux"})
 
 	waitAgents(t, pool, 1)
-	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial terminal: %v", err)
-	}
+	agentID := pool.List()[0].NodeUri
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
+
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	open := readAgentPTY(t, agentConn, pty.FrameOpen)
+	streamID := open.StreamID
 
 	if err := agentConn.Close(); err != nil {
 		t.Fatalf("close agent: %v", err)
 	}
 	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
-	if detached.StreamID == "" {
-		t.Fatalf("disconnect notification missing stream id: %+v", detached)
+	if detached.StreamID != streamID {
+		t.Fatalf("disconnect notification = %+v, want stream %s", detached, streamID)
 	}
 
 	reconnected := dialAgent(t, srv, "generation-agent", []string{"tmux"})
 	defer reconnected.Close()
 	list := readAgentPTY(t, reconnected, pty.FrameList)
-	if list.StreamID != detached.StreamID {
-		t.Fatalf("rebound stream = %s, want %s", list.StreamID, detached.StreamID)
+	if list.StreamID != streamID {
+		t.Fatalf("rebound stream = %s, want %s", list.StreamID, streamID)
 	}
 	writeAgentPTY(t, reconnected, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
 		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
@@ -700,28 +752,19 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	}
 }
 
-func TestWSTerminalCanWaitForOfflineAgent(t *testing.T) {
+// TestWSTerminalOfflineAgentDetached pins the contract for opening a terminal
+// against an offline agent: the browser immediately learns the agent is
+// detached instead of the open hanging until a reconnect.
+func TestWSTerminalOfflineAgentDetached(t *testing.T) {
 	srv, _ := setupTestServer(t)
 	agentID := protocols.NodeRef{ID: "node-offline-agent", Authority: srv.URL}.URI()
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial offline terminal: %v", err)
-	}
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
-	readBrowserPTY(t, browserConn, pty.FrameDetached)
 
-	agentConn := dialAgent(t, srv, "offline-agent", []string{"tmux"})
-	defer agentConn.Close()
-	list := readAgentPTY(t, agentConn, pty.FrameList)
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: list.StreamID,
-		Sessions: []pty.Info{{ID: "resident-repl", Kind: "repl", Name: "main-repl", State: pty.StateRunning}}})
-	sessions := readBrowserPTY(t, browserConn, pty.FrameSessions)
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != "resident-repl" {
-		t.Fatalf("offline subscription did not rebind: %+v", sessions)
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
+	detached := readBrowserPTY(t, browserConn, pty.FrameDetached)
+	if detached.StreamID != "term-1" {
+		t.Fatalf("offline detached = %+v", detached)
 	}
 }
 
@@ -731,21 +774,14 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	defer agentConn.Close()
 
 	time.Sleep(50 * time.Millisecond)
-	agentID := pool.List()[0].ID
-	terminalURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agents/" + url.PathEscape(agentID) + "/terminal/ws"
-	browserConn, resp, err := websocket.DefaultDialer.Dial(terminalURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	agentID := pool.List()[0].NodeUri
+	browserConn := dialAOPWebSocket(t, srv)
 	defer browserConn.Close()
 
-	writeBrowserPTY(t, browserConn, pty.Frame{Type: pty.FrameOpen})
+	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", AgentId: agentID})
 	open := readAgentPTY(t, agentConn, pty.FrameOpen)
 	streamID := open.StreamID
-	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, SessionID: "sess-1"})
+	writeAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameOpened, StreamID: streamID, Session: &pty.Info{ID: "sess-1"}})
 	readBrowserPTY(t, browserConn, pty.FrameOpened)
 
 	// Flood: agent sends 100 output messages without browser reading
@@ -758,11 +794,15 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 	browserConn.SetReadDeadline(time.Now().Add(time.Second))
 	received := 0
 	for {
-		var m pty.Frame
-		if err := browserConn.ReadJSON(&m); err != nil {
+		_, raw, err := browserConn.ReadMessage()
+		if err != nil {
 			break
 		}
-		if m.Type == pty.FrameOutput {
+		envelope := new(aop.Envelope)
+		if err := protobuf.Unmarshal(raw, envelope); err != nil {
+			break
+		}
+		if ptyFrameFromEnvelope(envelope).Type == pty.FrameOutput {
 			received++
 		}
 	}
@@ -819,29 +859,23 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 
 type mockBrowserAgent struct { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	conn     *websocket.Conn
-	messages chan *transport.ServerFrame
+	messages chan *aop.Envelope
 	errors   chan error
 }
 
 func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowserAgent { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/agent/ws"
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial agent: %v", err)
-	}
-	writeAgentFrame(t, conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Hello{Hello: &transport.AgentHello{
-		AgentId: "node-" + name, Name: name, Authority: srv.URL, Commands: []string{"tmux"},
-	}}})
-	ack := readServerFrame(t, conn)
-	if ack.GetAccepted() == nil {
+	conn := dialAOPWebSocket(t, srv)
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: &aop.AgentHello{
+		AgentId: "node-" + name, Name: name, Authority: srv.URL,
+	}}}))
+	ack := unwrapEnvelope(t, readHubEnvelope(t, conn))
+	if accepted, ok := ack.(*aop.ProtocolMessage); !ok || accepted.GetAgentAccepted() == nil {
 		t.Fatalf("expected accepted, got %+v", ack)
 	}
+	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Catalog{Catalog: &commandpb.Catalog{Commands: []*commandpb.Spec{{Name: "tmux"}}}}}))
 	agent := &mockBrowserAgent{
-		conn: conn, messages: make(chan *transport.ServerFrame, 64), errors: make(chan error, 1),
+		conn: conn, messages: make(chan *aop.Envelope, 64), errors: make(chan error, 1),
 	}
 	go func() {
 		defer close(agent.messages)
@@ -851,12 +885,12 @@ func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowser
 				agent.errors <- err
 				return
 			}
-			msg := new(transport.ServerFrame)
-			if err := protojson.Unmarshal(raw, msg); err != nil {
+			envelope := new(aop.Envelope)
+			if err := protobuf.Unmarshal(raw, envelope); err != nil {
 				agent.errors <- err
 				return
 			}
-			agent.messages <- msg
+			agent.messages <- envelope
 		}
 	}()
 	return agent
@@ -883,8 +917,8 @@ func launchBrowser(t *testing.T) *rod.Browser { //nolint:unused // referenced by
 	return browser
 }
 
-func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []*transport.ServerFrame { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
-	var msgs []*transport.ServerFrame
+func drainAgentMessages(agent *mockBrowserAgent, timeout time.Duration) []*aop.Envelope { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
+	var msgs []*aop.Envelope
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
@@ -910,7 +944,7 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 			if !ok {
 				t.Fatalf("agent connection closed while waiting for %s", want)
 			}
-			frame := terminalcodec.FromProto(msg.GetTerminal())
+			frame := ptyFrameFromEnvelope(msg)
 			if frame.Type == want {
 				return frame
 			}
@@ -924,7 +958,7 @@ func readMockAgentPTY(t *testing.T, agent *mockBrowserAgent, want pty.FrameType)
 
 func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, frame pty.Frame) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	writeAgentFrame(t, agent.conn, &transport.AgentFrame{Payload: &transport.AgentFrame_Terminal{Terminal: terminalcodec.ToProto(frame)}})
+	writeAgentEnvelope(t, agent.conn, wrapMessage(t, generateID(), "", terminalcodec.ToProto(frame)))
 }
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
@@ -968,7 +1002,7 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
 	replStreamID := attach.StreamID
 	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameAttached, StreamID: attach.StreamID,
-		SessionID: "e2e-sess-1", Kind: "repl"})
+		Session: &pty.Info{ID: "e2e-sess-1", Kind: "repl"}})
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -988,7 +1022,7 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 	inputs := drainAgentMessages(agentConn, time.Second)
 	gotInput := false
 	for _, m := range inputs {
-		frame := terminalcodec.FromProto(m.GetTerminal())
+		frame := ptyFrameFromEnvelope(m)
 		if frame.Type == pty.FrameInput && frame.StreamID == replStreamID {
 			gotInput = true
 			break
@@ -1005,7 +1039,7 @@ func runE2ETerminalOpenAndType(t *testing.T) { //nolint:unused // referenced by 
 
 	// Agent sends pty.closed
 	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameClosed, StreamID: replStreamID,
-		SessionID: "e2e-sess-1", State: pty.StateCompleted})
+		Session: &pty.Info{ID: "e2e-sess-1", State: pty.StateCompleted}})
 	refresh := readMockAgentPTY(t, agentConn, pty.FrameList)
 	writeMockAgentPTY(t, agentConn, pty.Frame{Type: pty.FrameSessions, StreamID: refresh.StreamID})
 	if _, err := page.Timeout(5 * time.Second).Element(`[title='Console'], [title='控制台']`); err != nil {
@@ -1038,7 +1072,7 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 	})
 	attach := readMockAgentPTY(t, agentConn, pty.FrameAttach)
 	writeMockAgentPTY(t, agentConn, pty.Frame{
-		Type: pty.FrameAttached, StreamID: attach.StreamID, SessionID: "resize-sess", Kind: "repl",
+		Type: pty.FrameAttached, StreamID: attach.StreamID, Session: &pty.Info{ID: "resize-sess", Kind: "repl"},
 	})
 	_ = drainAgentMessages(agentConn, 200*time.Millisecond)
 
@@ -1049,7 +1083,7 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 	msgs := drainAgentMessages(agentConn, time.Second)
 	resizeReceived := false
 	for _, m := range msgs {
-		frame := terminalcodec.FromProto(m.GetTerminal())
+		frame := ptyFrameFromEnvelope(m)
 		if frame.Type == pty.FrameResize {
 			resizeReceived = true
 			t.Logf("resize received: %+v", frame)
@@ -1066,21 +1100,26 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 	resultCh := make(chan taskResult, 1)
 	remote := &remoteAgent{
 		id:            "agent-1",
-		sendCh:        make(chan *transport.ServerFrame, 1),
-		controlCh:     make(chan *transport.ServerFrame, 1),
+		sendCh:        make(chan *aop.Envelope, 1),
 		tasks:         map[string]chan taskResult{"task-1": resultCh},
 		turns:         map[string]int{"task-1": 1},
 		toolCalls:     make(map[string]struct{}),
 		childSessions: make(map[string]map[string]struct{}),
+		done:          make(chan struct{}),
 	}
 	pool.agents[remote.id] = remote
 
 	pool.CancelTask(remote.id, "task-1", "session-1")
 
 	select {
-	case frame := <-remote.controlCh:
-		if frame.GetCancelTurn().GetSessionId() != "session-1" || frame.GetCancelTurn().GetTurnId() != "task-1" {
-			t.Fatalf("cancel frame = %+v", frame)
+	case envelope := <-remote.sendCh:
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetCancelTurnRequest().GetSessionId() != "session-1" || core.GetCancelTurnRequest().GetTurnId() != "task-1" {
+			t.Fatalf("cancel envelope = %+v", message)
 		}
 	default:
 		t.Fatal("cancel frame was not sent")

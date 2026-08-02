@@ -5,27 +5,31 @@ import (
 	"strings"
 
 	agentprobe "github.com/chainreactors/aiscan/agent/probe"
-	config "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/probe"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 // TestConn probes one settings section's external dependencies, resolving blank
 // secrets against the stored config, then delegates to pkg/probe. Probe failures
 // live inside the response; a returned error only signals an untestable section.
-func (s *Service) TestConn(ctx context.Context, section string, in config.DistributeConfig) ([]probe.ConnCheck, error) {
+func (s *Service) TestConn(ctx context.Context, section string, in *configpb.DistributeConfig) ([]probe.ConnCheck, error) {
 	stored, _ := s.storedConfig(ctx)
 	return probe.TestConn(ctx, section, toProbeConfig(in), toProbeConfig(stored))
 }
 
-func toProbeConfig(dc config.DistributeConfig) probe.ProbeConfig {
+func toProbeConfig(dc *configpb.DistributeConfig) probe.ProbeConfig {
+	if dc == nil {
+		return probe.ProbeConfig{}
+	}
 	return probe.ProbeConfig{
-		Cyberhub: probe.CyberhubProbe{URL: dc.Cyberhub.URL, Key: dc.Cyberhub.Key},
+		Cyberhub: probe.CyberhubProbe{URL: dc.GetCyberhub().GetUrl(), Key: dc.GetCyberhub().GetKey()},
 		Recon: probe.ReconProbe{
-			FofaKey: dc.Recon.FofaKey, HunterToken: dc.Recon.HunterToken,
-			HunterAPIKey: dc.Recon.HunterAPIKey, Proxy: dc.Recon.Proxy,
+			FofaKey: dc.GetRecon().GetFofaKey(), HunterToken: dc.GetRecon().GetHunterToken(),
+			HunterAPIKey: dc.GetRecon().GetHunterApiKey(), Proxy: dc.GetRecon().GetProxy(),
 		},
-		Search: probe.SearchProbe{TavilyKeys: dc.Search.TavilyKeys},
-		IOA:    probe.IOAProbe{URL: dc.IOA.URL, Token: dc.IOA.Token},
+		Search: probe.SearchProbe{TavilyKeys: dc.GetSearch().GetTavilyKeys()},
+		IOA:    probe.IOAProbe{URL: dc.GetIoa().GetUrl(), Token: dc.GetIoa().GetToken()},
 	}
 }
 
@@ -51,27 +55,29 @@ func (s *Service) storedLLMAPIKey(ctx context.Context, profileID string) string 
 	if dc, err := s.GetDistributeConfig(ctx); err == nil {
 		profileID = strings.TrimSpace(profileID)
 		if profileID != "" {
-			for _, profile := range dc.LLM.Providers {
-				if profile.ID == profileID {
-					return strings.TrimSpace(profile.APIKey)
+			for _, profile := range dc.GetLlm().GetProviders() {
+				if profile.Id == profileID {
+					return strings.TrimSpace(profile.ApiKey)
 				}
 			}
 			return ""
 		}
-		return strings.TrimSpace(dc.LLM.Active().APIKey)
+		if active := config.ActiveLLMProvider(dc.GetLlm()); active != nil {
+			return strings.TrimSpace(active.ApiKey)
+		}
 	}
 	return ""
 }
 
 // storedConfig returns the config persisted on the server, or ok=false when no
 // config store is wired or it cannot be read.
-func (s *Service) storedConfig(ctx context.Context) (config.DistributeConfig, bool) {
+func (s *Service) storedConfig(ctx context.Context) (*configpb.DistributeConfig, bool) {
 	if s.config == nil {
-		return config.DistributeConfig{}, false
+		return nil, false
 	}
 	dc, err := s.GetDistributeConfig(ctx)
 	if err != nil {
-		return config.DistributeConfig{}, false
+		return nil, false
 	}
 	return dc, true
 }

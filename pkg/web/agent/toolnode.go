@@ -10,12 +10,15 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	scopb "github.com/chainreactors/aiscan/aop/sco"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/ioa/protocols"
+	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -58,9 +61,8 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		logger = telemetry.NopLogger()
 	}
 	runnerRuntime := DefaultRuntime()
-	runnerRuntime.Capabilities = append(runnerRuntime.Capabilities, "file.read", "file.write", "file.list", "file.mkdir")
 	home, _ := os.UserHomeDir()
-	runnerRuntime.Metadata, _ = aop.JSONValue(map[string]any{
+	runnerRuntime.Metadata, _ = structpb.NewStruct(map[string]any{
 		"version": cfg.Version,
 		"mode":    "tool",
 		"home":    home,
@@ -79,6 +81,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		Logger:        logger,
 		Node:          protocols.NodeRef{ID: runnerID, Authority: authority},
 		Runtime:       runnerRuntime,
+		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
 		RunnerFileRPC: true,
 	})
 }
@@ -86,20 +89,26 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 // attachToolEvents forwards scanner telemetry (tool.data) and normalized SCO
 // nodes (tool.sco) onto the hub connection, correlated by call ID. Returns an
 // idempotent detach func, or nil when both sources are absent.
-func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.SCOSidecar, send func(*transport.AgentFrame)) func() {
+func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.SCOSidecar, send func(string, protobuf.Message)) func() {
 	if dataBus == nil && sco == nil {
 		return nil
 	}
 	var unsub func()
 	if dataBus != nil {
 		unsub = dataBus.Subscribe(func(event output.ToolDataEvent) {
-			data, _ := aop.JSONValue(event.Data)
+			if event.Kind != output.ToolDataProgress {
+				return
+			}
+			text, ok := event.Data.(string)
+			if !ok || text == "" {
+				return
+			}
 			timestamp := event.Timestamp
 			if timestamp.IsZero() {
 				timestamp = time.Now()
 			}
-			send(&transport.AgentFrame{CorrelationId: event.CallID, Payload: &transport.AgentFrame_ToolTelemetry{ToolTelemetry: &transport.ToolTelemetry{
-				Tool: event.Tool, Kind: event.Kind, Target: event.Target, Data: data, CallId: event.CallID, Timestamp: timestamppb.New(timestamp),
+			send(event.CallID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: &toolpb.Progress{
+				Tool: event.Tool, Target: event.Target, Text: text, Timestamp: timestamppb.New(timestamp),
 			}}})
 		})
 	}
@@ -109,7 +118,7 @@ func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.S
 			for _, node := range nodes {
 				encoded = append(encoded, append([]byte(nil), node...))
 			}
-			send(&transport.AgentFrame{CorrelationId: callID, Payload: &transport.AgentFrame_ScoNodes{ScoNodes: &transport.ScoNodes{CallId: callID, Nodes: encoded}}})
+			send(callID, &scopb.ProtocolMessage{Message: &scopb.ProtocolMessage_Nodes{Nodes: &scopb.Nodes{Nodes: encoded, MediaType: aop.JSONMediaType}}})
 		}
 	}
 	var once bool

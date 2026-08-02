@@ -8,11 +8,15 @@ import (
 
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	config "github.com/chainreactors/aiscan/core/config"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 // ValidateLLMConfig accepts zero limits as "use the model default" and rejects
 // incomplete profiles before an invalid configuration can be persisted.
-func ValidateLLMConfig(cfg config.LLMConfig) error {
+func ValidateLLMConfig(cfg *configpb.LLMConfig) error {
+	if cfg == nil {
+		return nil
+	}
 	for i, profile := range cfg.Providers {
 		profile = config.NormalizeLLMProvider(profile)
 		if !agentprovider.IsSupportedProvider(profile.Provider) {
@@ -21,7 +25,7 @@ func ValidateLLMConfig(cfg config.LLMConfig) error {
 		if strings.TrimSpace(profile.Model) == "" {
 			name := strings.TrimSpace(profile.Name)
 			if name == "" {
-				name = strings.TrimSpace(profile.ID)
+				name = strings.TrimSpace(profile.Id)
 			}
 			if name == "" {
 				name = fmt.Sprintf("#%d", i+1)

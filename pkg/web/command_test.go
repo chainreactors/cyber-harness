@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	chatpb "github.com/chainreactors/aiscan/aop/aiscan/chat"
-	"github.com/chainreactors/aiscan/aop/aiscan/chat/chatconnect"
+	"github.com/chainreactors/aiscan/pkg/rpc/chat/chatconnect"
+	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
 )
 
 func TestParseCommand(t *testing.T) {

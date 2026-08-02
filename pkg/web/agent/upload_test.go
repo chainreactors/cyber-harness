@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 )
 
 func TestUploadWritesAbsolutePath(t *testing.T) {
@@ -13,7 +13,7 @@ func TestUploadWritesAbsolutePath(t *testing.T) {
 	const body = "codex public proof\nkey=appImage/probe"
 	dest := filepath.Join(os.TempDir(), "aiscan-uploads", filename)
 	t.Cleanup(func() { _ = os.Remove(dest) })
-	result, err := (&chatAgentHandler{}).Upload(&transport.FileUploadRequest{TaskId: "task-1", SessionId: "sess-1", Filename: filename, Data: []byte(body)})
+	result, err := (&chatAgentHandler{}).Upload(&filepb.UploadRequest{SessionId: "sess-1", Filename: filename, Data: []byte(body)})
 	if err != nil {
 		t.Fatal(err)
 	}

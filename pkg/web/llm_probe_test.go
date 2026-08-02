@@ -9,19 +9,26 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent/probe"
-	proto "github.com/chainreactors/aiscan/core/config"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 // fakeConfigStore is a minimal in-memory ConfigStore for probe tests.
 type fakeConfigStore struct {
-	cfg proto.DistributeConfig
+	cfg *configpb.DistributeConfig
 }
 
-func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, proto.DistributeConfig, error) {
-	return "config.yaml", true, f.cfg, nil
+func (f *fakeConfigStore) current() *configpb.DistributeConfig {
+	if f.cfg == nil {
+		f.cfg = &configpb.DistributeConfig{}
+	}
+	return f.cfg
 }
 
-func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg proto.DistributeConfig) (*PreparedConfig, error) {
+func (f *fakeConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *configpb.DistributeConfig, error) {
+	return "config.yaml", true, f.current(), nil
+}
+
+func (f *fakeConfigStore) PrepareDistributeConfig(_ context.Context, cfg *configpb.DistributeConfig) (*PreparedConfig, error) {
 	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
 }
 
@@ -97,7 +104,9 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
+	store.cfg = &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+		Providers: []*configpb.LLMProviderConfig{{Id: "default", Provider: "openai", ApiKey: "sk-stored"}},
+	}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
@@ -187,7 +196,9 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "default", Provider: "openai", APIKey: "sk-stored"}}
+	store.cfg = &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+		Providers: []*configpb.LLMProviderConfig{{Id: "default", Provider: "openai", ApiKey: "sk-stored"}},
+	}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
@@ -212,11 +223,13 @@ func TestListLLMModelsUsesSelectedProfileStoredKey(t *testing.T) {
 	defer srv.Close()
 
 	store := &fakeConfigStore{}
-	store.cfg.LLM.ActiveProfile = "primary"
-	store.cfg.LLM.Providers = []proto.LLMProviderConfig{
-		{ID: "primary", Provider: "openai", APIKey: "sk-primary"},
-		{ID: "secondary", Provider: "openai", APIKey: "sk-secondary"},
-	}
+	store.cfg = &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+		ActiveProfile: "primary",
+		Providers: []*configpb.LLMProviderConfig{
+			{Id: "primary", Provider: "openai", ApiKey: "sk-primary"},
+			{Id: "secondary", Provider: "openai", ApiKey: "sk-secondary"},
+		},
+	}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	res, err := svc.ListLLMModels(context.Background(), probe.LLMProbeRequest{
