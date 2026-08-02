@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
@@ -161,7 +161,7 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 	if err != nil {
 		return err
 	}
-	run, err := session.Run(ctx, runner.RunInput{Parts: []aop.MessagePart{{Type: aop.PartText, Text: prompt}}})
+	run, err := session.Run(ctx, runner.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
 	if err != nil {
 		return err
 	}
@@ -175,10 +175,9 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {
 	var sections []string
-	skillName := scan.ScannerSkillName(command)
-	if skillName != "" && cfg.ScannerCommandAvailable(command) {
-		if skill, ok := store.ByName(skillName); ok {
-			sections = append(sections, store.FormatInvocation(skill, ""))
+	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && cfg.ScannerCommandAvailable(command) {
+		if body, ok, err := store.ReadVirtualBody(conceptURI); err == nil && ok && body != "" {
+			sections = append(sections, skills.FormatVirtualInvocation(command, conceptURI, body))
 		}
 	}
 
@@ -222,7 +221,7 @@ func ioaServe(ctx context.Context, option *cfg.Option, logger telemetry.Logger) 
 		listenURL = "http://127.0.0.1:8765"
 	}
 	if u, err := url.Parse(listenURL); err == nil {
-		logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s", accessKey, u.Host)
+		logger.Infof("  agent IOA connect: aiscan agent --transport local --ioa-url http://%s@%s", accessKey, u.Host)
 	}
 
 	return ioaserver.RunServer(ctx, ioaserver.ServerOptions{

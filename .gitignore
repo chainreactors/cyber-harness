@@ -29,6 +29,8 @@ pw_driver_bin
 node_modules/
 web/frontend/playwright-report/
 web/frontend/test-results/
+/web/frontend/.playwright-cli/
+/tmp/
 community.yaml
 
 # Local runtime state / operator artifacts

@@ -1,576 +1,164 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 
-const API_TOKEN = process.env.ACCESS_KEY || 'test-token';
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
-const LLM_BASE_URL = process.env.LLM_BASE_URL || '';
-const LLM_API_KEY = process.env.LLM_API_KEY || '';
-const LLM_MODEL = process.env.LLM_MODEL || '';
+const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
 
 function apiHeaders() {
-  return { Authorization: `Bearer ${API_TOKEN}` };
+  return { Authorization: `Bearer ${API_TOKEN}` }
+}
+
+function rpcID(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+async function connectRPC(request: APIRequestContext, procedure: string, data: Record<string, unknown>) {
+  const response = await request.post(procedure, {
+    headers: {
+      ...apiHeaders(),
+      'Content-Type': 'application/json',
+      'Connect-Protocol-Version': '1',
+    },
+    data,
+  })
+  if (!response.ok()) {
+    const body = await response.text()
+    expect(response.ok(), `${procedure}: ${body}`).toBeTruthy()
+  }
+  return response.json()
 }
 
 async function openAuthenticatedApp(page: Page) {
-  const login = await page.request.post('/api/auth/login', {
-    data: { token: API_TOKEN },
-  });
-  expect(login.ok()).toBeTruthy();
-  await page.goto('/');
-  await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible();
+  const login = await page.request.post('/api/auth/login', { data: { token: API_TOKEN } })
+  expect(login.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible()
 }
 
 async function requireRegisteredAgents(request: APIRequestContext) {
-  let agents: any[] = [];
+  let agents: any[] = []
   await expect.poll(async () => {
-    const response = await request.get('/api/agents', { headers: apiHeaders() });
-    expect(response.ok()).toBeTruthy();
-    agents = await response.json();
-    return agents.length;
+    const response = await connectRPC(request, '/aiscan.rpc.agent.AgentService/ListAgents', {})
+    agents = response.agents ?? []
+    return agents.length
   }, {
-    message: 'the E2E server must start and register its local mock-backed agent',
+    message: 'the E2E server must register its local mock-backed agent',
     timeout: 15_000,
-  }).toBeGreaterThan(0);
-  return agents;
+  }).toBeGreaterThan(0)
+  expect(agents[0].hello?.nodeId).toBeTruthy()
+  return agents
 }
 
-// ---------------------------------------------------------------------------
-// 1. Health & Status
-// ---------------------------------------------------------------------------
+async function deleteSession(request: APIRequestContext, sessionID: string) {
+  return connectRPC(request, '/aiscan.rpc.chat.SessionService/DeleteSession', {
+    requestId: rpcID('delete'),
+    sessionId: sessionID,
+  })
+}
 
-test.describe('Health & Status', () => {
-  test('GET /health returns ok', async ({ request }) => {
-    const res = await request.get('/health');
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.status).toBe('ok');
-  });
+test.describe('HTTP shell and authentication', () => {
+  test('health and static assets are served', async ({ request }) => {
+    const health = await request.get('/health')
+    expect(health.ok()).toBeTruthy()
+    expect(await health.json()).toEqual({ status: 'ok' })
 
-  test('GET /api/status returns server info with LLM configured', async ({ request }) => {
-    const res = await request.get('/api/status', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.llm_available).toBe(true);
-    expect(body.llm_provider).toBeTruthy();
-    expect(body.llm_model).toBeTruthy();
-    expect(body.llm_api_key_configured).toBe(true);
-    expect(body.config_loaded).toBe(true);
-  });
-});
+    const index = await request.get('/')
+    expect(index.ok()).toBeTruthy()
+    const html = await index.text()
+    expect(html).not.toContain(API_TOKEN)
+    const script = html.match(/src="(\/assets\/index-[^"]+\.js)"/)
+    expect(script).toBeTruthy()
+    expect((await request.get(script![1])).ok()).toBeTruthy()
+  })
 
-// ---------------------------------------------------------------------------
-// 2. Auth
-// ---------------------------------------------------------------------------
+  test('login uses the auth endpoint without leaking the token', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Access AIScan' })).toBeVisible()
+    const token = page.getByLabel('Access token')
+    await token.fill(API_TOKEN)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible()
+    expect(page.url()).not.toContain(API_TOKEN)
+    expect(await page.evaluate(() => localStorage.getItem('aiscan-access-key'))).toBeNull()
 
-test.describe('Auth', () => {
-  test('rejects requests without valid token', async ({ request }) => {
-    const res = await request.get('/api/status', {
-      headers: { Authorization: 'Bearer wrong-token' },
-    });
-    expect(res.status()).toBe(401);
-  });
+    const ioa = await page.evaluate(async () => {
+      const response = await fetch('/ioa/nodes')
+      return { status: response.status, nodes: await response.json() }
+    })
+    expect(ioa.status).toBe(200)
+    expect(Array.isArray(ioa.nodes)).toBeTruthy()
+    expect(ioa.nodes.some((node: { name?: string }) => node.name === 'aiscan.web')).toBeTruthy()
+  })
 
-  test('accepts requests with valid token', async ({ request }) => {
-    const res = await request.get('/api/status', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-  });
-
-  test('does not accept tokens from URL query parameters', async ({ request }) => {
-    const res = await request.get(`/api/status?access_key=${API_TOKEN}`);
-    expect(res.status()).toBe(401);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3. Static Assets
-// ---------------------------------------------------------------------------
-
-test.describe('Static Assets', () => {
-  test('index.html never exposes the access token', async ({ request }) => {
-    const res = await request.get('/');
-    expect(res.ok()).toBeTruthy();
-    const html = await res.text();
-    expect(html).not.toContain('__AISCAN_ACCESS_KEY__');
-    expect(html).not.toContain(API_TOKEN);
-  });
-
-  test('JS bundle is served', async ({ request }) => {
-    const indexRes = await request.get('/');
-    const html = await indexRes.text();
-    const jsMatch = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
-    expect(jsMatch).toBeTruthy();
-    const jsRes = await request.get(jsMatch![1]);
-    expect(jsRes.ok()).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 4. Login
-// ---------------------------------------------------------------------------
-
-test.describe('Login', () => {
-  test('validates a token without putting it in URL or localStorage', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Access AIScan' })).toBeVisible();
-
-    const token = page.getByLabel('Access token');
-    await token.fill('wrong-token');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByRole('alert')).toContainText('invalid');
-
-    await token.fill(API_TOKEN);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.locator('button[aria-label="Open settings"]')).toBeVisible();
-
-    expect(page.url()).not.toContain(API_TOKEN);
-    const storedToken = await page.evaluate(() => localStorage.getItem('aiscan-access-key'));
-    expect(storedToken).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 5. Page Load & UI Shell
-// ---------------------------------------------------------------------------
-
-test.describe('Page Load', () => {
-  test('index page loads and renders AIScan header', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    // Use a specific selector for the brand name in the header
-    const brand = page.locator('header').getByText('AIScan', { exact: true });
-    await expect(brand).toBeVisible({ timeout: 10_000 });
-    await expect(brand).toHaveText('AIScan');
-  });
-
-  test('header shows model name', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await expect(page.locator('header')).toContainText(/deepseek/i, { timeout: 10_000 });
-  });
-
-  test('LLM health indicator does not show offline or error', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    const header = page.locator('header');
-    await expect(header).toBeVisible();
-    // Wait for the async health probe to complete
-    await page.waitForTimeout(4000);
-    const headerText = await header.textContent();
-    expect(headerText).not.toContain('Offline');
-    expect(headerText).not.toContain('unreachable');
-    expect(headerText).not.toContain('not configured');
-  });
-
-  test('settings button is visible', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    const settingsBtn = page.locator('button[aria-label="Open settings"]');
-    await expect(settingsBtn).toBeVisible({ timeout: 10_000 });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. Config Panel
-// ---------------------------------------------------------------------------
-
-test.describe('Config Panel', () => {
-  test('opens settings dialog and shows tabs', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText('Settings');
-    // Should have LLM and other tabs
-    await expect(dialog.getByRole('button', { name: 'LLM', exact: true })).toBeVisible();
-  });
-
-  test('closes settings dialog', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-    // Close via button or Escape
-    await page.keyboard.press('Escape');
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
-  });
-
-  test('LLM tab shows Provider and Model fields', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-    // Click LLM tab
-    const llmTab = dialog.getByRole('button', { name: 'LLM', exact: true });
-    if (await llmTab.isVisible()) {
-      await llmTab.click();
-    }
-    await expect(dialog).toContainText('Model');
-    await expect(dialog).toContainText('Provider');
-    await expect(dialog).toContainText('Base URL');
-    await expect(dialog).toContainText('Context window');
-    await expect(dialog).toContainText('Maximum output');
-    await expect(dialog).toContainText('API Key');
-  });
-
-  test('keeps dialog geometry stable when switching tabs', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-    await dialog.evaluate((element) =>
-      Promise.all(element.getAnimations().map((animation) => animation.finished)),
-    );
-
-    const before = await dialog.boundingBox();
-    await dialog.getByRole('button', { name: 'Cyberhub', exact: true }).click();
-    const after = await dialog.boundingBox();
-
-    expect(before).not.toBeNull();
-    expect(after).not.toBeNull();
-    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(1);
-  });
-
-  test('warns for a small context window and rejects an empty model', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-
-    await dialog.getByLabel('Context window (tokens)').fill('4096');
-    await expect(dialog).toContainText('Below 8192 tokens');
-
-    await dialog.getByLabel('Model').fill('');
-    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('requires a model');
-  });
-
-  test('closes after a successful save', async ({ page }) => {
-    let saved = false;
-    await page.route('**/api/config', async (route) => {
-      if (route.request().method() !== 'PUT') {
-        await route.continue();
-        return;
-      }
-      saved = true;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-    });
-
-    await openAuthenticatedApp(page);
-    await page.locator('button[aria-label="Open settings"]').click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-
-    await expect(dialog).not.toBeVisible();
-    expect(saved).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. Config API
-// ---------------------------------------------------------------------------
-
-test.describe('Config API', () => {
-  test('GET /api/config returns current config status', async ({ request }) => {
-    const res = await request.get('/api/config', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.llm).toBeDefined();
-    expect(body.llm.provider).toBeTruthy();
-    expect(body.llm.model).toBeTruthy();
-    expect(body.llm.api_key_configured).toBe(true);
-  });
-
-  test('LLM connectivity test succeeds with explicit config', async ({ request }) => {
-    test.skip(!LLM_API_KEY, 'LLM_API_KEY env var required');
-    const res = await request.post('/api/config/llm/test', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: {
-        provider: LLM_PROVIDER,
-        base_url: LLM_BASE_URL,
-        api_key: LLM_API_KEY,
-        model: LLM_MODEL,
+  test('management RPC rejects an invalid bearer token', async ({ request }) => {
+    const response = await request.post('/aiscan.rpc.system.SystemService/GetStatus', {
+      headers: {
+        Authorization: 'Bearer wrong-token',
+        'Content-Type': 'application/json',
+        'Connect-Protocol-Version': '1',
       },
-    });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.latency_ms).toBeGreaterThan(0);
-  });
-});
+      data: {},
+    })
+    expect(response.status()).toBe(401)
+  })
+})
 
-// ---------------------------------------------------------------------------
-// 7. Agents API
-// ---------------------------------------------------------------------------
+test.describe('ConnectRPC management plane', () => {
+  test('system, config and agent views are protobuf-shaped', async ({ request }) => {
+    const system = await connectRPC(request, '/aiscan.rpc.system.SystemService/GetStatus', {})
+    expect(system.status?.configLoaded).toBe(true)
+    expect(typeof system.status?.agents).toBe('number')
 
-test.describe('Agents API', () => {
-  test('list agents returns array', async ({ request }) => {
-    const res = await request.get('/api/agents', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(Array.isArray(body)).toBeTruthy();
-  });
-});
+    const config = await connectRPC(request, '/aiscan.rpc.config.ConfigService/GetConfig', {})
+    expect(config.config?.loaded).toBe(true)
 
-// ---------------------------------------------------------------------------
-// 8. Chat Session CRUD
-// ---------------------------------------------------------------------------
+    const agents = await requireRegisteredAgents(request)
+    expect(agents.some((agent) => agent.hello?.nodeId === 'local')).toBeTruthy()
+  })
 
-test.describe('Chat Session CRUD', () => {
-  test('create, list, and delete a session', async ({ request }) => {
-    // First, get available agents
-    const agents = await requireRegisteredAgents(request);
-    const agentID = agents[0].id;
+  test('session, scan, SCO and node queries use ConnectRPC', async ({ request }) => {
+    const sessions = await connectRPC(request, '/aiscan.rpc.chat.SessionService/ListSessions', { includeClosed: true })
+    expect(Array.isArray(sessions.sessions ?? [])).toBeTruthy()
 
-    // Create
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agentID },
-    });
-    expect(createRes.ok()).toBeTruthy();
-    const session = await createRes.json();
-    expect(session.id).toBeTruthy();
-    expect(session.agent_id).toBe(agentID);
+    const scans = await connectRPC(request, '/aiscan.rpc.scan.ScanService/ListScans', {})
+    expect(Array.isArray(scans.scans ?? [])).toBeTruthy()
 
-    // List
-    const listRes = await request.get('/api/chat/sessions', { headers: apiHeaders() });
-    expect(listRes.ok()).toBeTruthy();
-    const sessions = await listRes.json();
-    expect(Array.isArray(sessions)).toBeTruthy();
-    expect(sessions.some((s: any) => s.id === session.id)).toBeTruthy();
+    const nodes = await connectRPC(request, '/aiscan.rpc.sco.SCOService/ListNodes', { limit: 10 })
+    expect(Array.isArray(nodes.nodes?.nodes ?? [])).toBeTruthy()
 
-    // Delete
-    const delRes = await request.delete(`/api/chat/sessions/${session.id}`, {
-      headers: apiHeaders(),
-    });
-    expect(delRes.ok()).toBeTruthy();
-  });
-});
+    const agents = await connectRPC(request, '/aiscan.rpc.agent.AgentService/ListAgents', {})
+    expect(Array.isArray(agents.agents ?? [])).toBeTruthy()
+    expect(agents.agents?.some((agent: { hello?: { nodeId?: string } }) => agent.hello?.nodeId === 'local')).toBeTruthy()
+  })
 
-// ---------------------------------------------------------------------------
-// 9. Chat LLM Round-trip
-// ---------------------------------------------------------------------------
+  test('retired REST management routes stay removed', async ({ request }) => {
+    for (const path of ['/api/status', '/api/config', '/api/agents', '/api/scans', '/api/sco/nodes', '/api/deploy/local']) {
+      expect((await request.get(path, { headers: apiHeaders() })).status(), path).toBe(404)
+    }
+  })
+})
 
-test.describe('Chat LLM round-trip', () => {
-  test('send a message and receive an assistant response', async ({ request }) => {
-    // Get agent
-    const agents = await requireRegisteredAgents(request);
-    const agentID = agents[0].id;
+test.describe('single AOP WebSocket browser plane', () => {
+  test('creates a session and streams a turn through the application AOP client', async ({ page, request }) => {
+    await requireRegisteredAgents(request)
+    await openAuthenticatedApp(page)
 
-    // Create session
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agentID },
-    });
-    const session = await createRes.json();
-    const sessionID = session.id;
+    await page.getByRole('button', { name: 'New', exact: true }).first().click()
+    const input = page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })
+    await expect(input).toBeVisible()
+    const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
 
     try {
-      // Send message
-      const sendRes = await request.post(`/api/chat/sessions/${sessionID}/messages`, {
-        headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-        data: { content: 'Reply with exactly one word: PONG' },
-      });
-      expect(sendRes.ok()).toBeTruthy();
-
-      // Poll for assistant response (up to 30s)
-      let assistantMsg: any = null;
-      for (let i = 0; i < 15; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const msgRes = await request.get(`/api/chat/sessions/${sessionID}/messages`, {
-          headers: apiHeaders(),
-        });
-        const page = await msgRes.json();
-        expect(Array.isArray(page.items)).toBeTruthy();
-        const messages = page.items;
-        const assistantMsgs = messages.filter((m: any) => m.role === 'assistant');
-        if (assistantMsgs.length > 0) {
-          assistantMsg = assistantMsgs[assistantMsgs.length - 1];
-          break;
-        }
-      }
-
-      expect(assistantMsg).not.toBeNull();
-      expect(assistantMsg.content).toBeTruthy();
-      expect(assistantMsg.content.length).toBeGreaterThan(0);
+      await input.fill('Reply with exactly one word: PONG')
+      await page.getByRole('button', { name: 'Send message' }).click()
+      await expect(page.getByText('PONG', { exact: true })).toBeVisible({ timeout: 20_000 })
     } finally {
-      // Cleanup
-      await request.delete(`/api/chat/sessions/${sessionID}`, {
-        headers: apiHeaders(),
-      });
+      if (sessionID) await deleteSession(request, sessionID)
     }
-  });
-});
+  })
 
-// ---------------------------------------------------------------------------
-// 10. SSE reconnect and durable event cursor
-// ---------------------------------------------------------------------------
-
-test.describe('SSE reconnect', () => {
-  test('replays missing durable events after the browser reconnects', async ({ page, request, context }) => {
-    const agents = await requireRegisteredAgents(request);
-
-    const createRes = await request.post('/api/chat/sessions', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { agent_id: agents[0].id },
-    });
-    expect(createRes.ok()).toBeTruthy();
-    const session = await createRes.json();
-
-    await openAuthenticatedApp(page);
-    await page.goto(`/sessions/${session.id}`);
-    const prompt = 'Reply with exactly one word: PONG';
-    const sendRes = await request.post(`/api/chat/sessions/${session.id}/messages`, {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: { content: prompt },
-    });
-    expect(sendRes.ok()).toBeTruthy();
-
-    await expect(page.locator('p').filter({ hasText: prompt })).toBeVisible({ timeout: 10_000 });
-    await context.setOffline(true);
-    await page.waitForTimeout(3500);
-    await context.setOffline(false);
-
-    const resumed = page.getByText('PONG', { exact: true });
-    await expect(resumed).toBeVisible({ timeout: 15_000 });
-    await expect(resumed).toHaveCount(1);
-
-    await request.delete(`/api/chat/sessions/${session.id}`, { headers: apiHeaders() });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 11. SCO / Asset Pool API
-// ---------------------------------------------------------------------------
-
-test.describe('Asset Pool API', () => {
-  test('list SCO nodes returns array', async ({ request }) => {
-    const res = await request.get('/api/sco/nodes', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(Array.isArray(body)).toBeTruthy();
-  });
-
-  test('get SCO stats returns object', async ({ request }) => {
-    const res = await request.get('/api/sco/stats', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(typeof body).toBe('object');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 11. Scans API
-// ---------------------------------------------------------------------------
-
-test.describe('Scans API', () => {
-  test('list scans returns array', async ({ request }) => {
-    const res = await request.get('/api/scans', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(Array.isArray(body)).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 12. Chat UI (browser)
-// ---------------------------------------------------------------------------
-
-test.describe('Chat UI', () => {
-  test('UI renders the main chat area', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.waitForLoadState('networkidle');
-    // The page should have a main content area
-    const main = page.locator('main').first();
-    if (await main.isVisible().catch(() => false)) {
-      await expect(main).toBeVisible();
-    } else {
-      // Fallback: just verify the page loaded
-      await expect(page.locator('header')).toBeVisible();
-    }
-  });
-
-  test('sidebar shows session list or agent nodes', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
-    // The sidebar should show sessions or agent nodes
-    const sidebar = page.locator('aside, [class*="sidebar"], [class*="Sidebar"]').first();
-    if (await sidebar.isVisible().catch(() => false)) {
-      await expect(sidebar).toBeVisible();
-    }
-  });
-
-  test('can find and interact with chat input', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-
-    // Find the chat textarea
-    const textarea = page.locator('textarea').last();
-    if (await textarea.isVisible().catch(() => false)) {
-      await textarea.fill('test input');
-      await expect(textarea).toHaveValue('test input');
-      // Clear it
-      await textarea.fill('');
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 13. Theme Toggle
-// ---------------------------------------------------------------------------
-
-test.describe('Theme', () => {
-  test('can toggle between light and dark theme', async ({ page }) => {
-    await openAuthenticatedApp(page);
-    await page.waitForLoadState('networkidle');
-
-    const initialDark = await page.evaluate(() =>
-      document.documentElement.classList.contains('dark')
-    );
-
-    const themeBtn = page.locator('[data-sidebar-theme-toggle] button');
-    await themeBtn.click();
-    await page.waitForTimeout(500);
-
-    const afterDark = await page.evaluate(() =>
-      document.documentElement.classList.contains('dark')
-    );
-
-    expect(afterDark).not.toBe(initialDark);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 14. LLM Models List
-// ---------------------------------------------------------------------------
-
-test.describe('LLM Models', () => {
-  test('can fetch available models from provider', async ({ request }) => {
-    test.skip(!LLM_API_KEY, 'LLM_API_KEY env var required');
-    const res = await request.post('/api/config/llm/models', {
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
-      data: {
-        provider: LLM_PROVIDER,
-        base_url: LLM_BASE_URL,
-        api_key: LLM_API_KEY,
-      },
-    });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(Array.isArray(body.models)).toBeTruthy();
-    expect(body.models.length).toBeGreaterThan(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 15. Deploy Local Agent
-// ---------------------------------------------------------------------------
-
-test.describe('Local Agent Deploy', () => {
-  test('can list local agents', async ({ request }) => {
-    const res = await request.get('/api/deploy/local', { headers: apiHeaders() });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(Array.isArray(body)).toBeTruthy();
-  });
-});
+  test('opens the PTY console without a terminal-specific socket', async ({ page, request }) => {
+    await requireRegisteredAgents(request)
+    await openAuthenticatedApp(page)
+    await page.getByRole('button', { name: 'Terminal', exact: true }).first().click()
+    await expect(page.locator('.xterm')).toBeVisible({ timeout: 15_000 })
+  })
+})

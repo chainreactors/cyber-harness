@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestIsLocalAgentTerminal(t *testing.T) {
@@ -66,11 +69,11 @@ func (p *captureConsoleProvider) Name() string { return "capture" }
 
 func (p *captureConsoleProvider) ChatCompletion(_ context.Context, req *agent.ChatCompletionRequest) (*agent.ChatCompletionResponse, error) {
 	cp := *req
-	cp.Messages = append([]agent.ChatMessage(nil), req.Messages...)
+	cp.Messages = append([]*aop.Message(nil), req.Messages...)
 	p.requests = append(p.requests, &cp)
 	return &agent.ChatCompletionResponse{
 		Choices: []agent.Choice{{
-			Message: agent.NewTextMessage("assistant", "ok"),
+			Message: agent.TextMessage("assistant", "ok"),
 		}},
 	}, nil
 }
@@ -90,10 +93,10 @@ type consoleTextTool struct {
 	output string
 }
 
-func (t *consoleTextTool) Name() string                { return "bash" }
-func (t *consoleTextTool) Description() string         { return "console output test tool" }
-func (t *consoleTextTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *consoleTextTool) Execute(context.Context, string) (tool.Result, error) {
+func (t *consoleTextTool) Name() string                 { return "bash" }
+func (t *consoleTextTool) Description() string          { return "console output test tool" }
+func (t *consoleTextTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *consoleTextTool) Execute(context.Context, string) (*tool.Result, error) {
 	return tool.TextResult(t.output), nil
 }
 
@@ -296,17 +299,17 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	dir := t.TempDir()
-	if err := agent.SaveSession(dir, &agent.SessionData{
+	if err := agent.SaveCheckpoint(dir, &agent.CheckpointData{
 		Model:    "test-model",
 		Provider: "capture",
-		Messages: []agent.ChatMessage{
-			agent.NewTextMessage("user", "previous user"),
-			agent.NewTextMessage("assistant", "previous assistant"),
+		Messages: []*aop.Message{
+			agent.TextMessage("user", "previous user"),
+			agent.TextMessage("assistant", "previous assistant"),
 		},
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-	sessions, err := agent.ListSessions(dir)
+	sessions, err := agent.ListCheckpoints(dir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -337,9 +340,7 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	}
 	var contents []string
 	for _, msg := range prov.requests[0].Messages {
-		if msg.Content != nil {
-			contents = append(contents, *msg.Content)
-		}
+		contents = append(contents, provider.MessageText(msg))
 	}
 	joined := strings.Join(contents, "\n")
 	for _, want := range []string{"previous user", "previous assistant", "new prompt"} {
@@ -384,11 +385,15 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 
 func writeConsoleSession(t *testing.T, path, model, content string, updatedAt time.Time) {
 	t.Helper()
-	raw, err := json.Marshal(agent.SessionData{
-		Version:   1,
-		UpdatedAt: updatedAt,
-		Model:     model,
-		Messages:  []agent.ChatMessage{agent.NewTextMessage("user", content)},
+	msgRaw, err := protojson.Marshal(agent.TextMessage("user", content))
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"version":    1,
+		"updated_at": updatedAt,
+		"model":      model,
+		"messages":   []json.RawMessage{msgRaw},
 	})
 	if err != nil {
 		t.Fatalf("marshal session: %v", err)

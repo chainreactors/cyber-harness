@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/invopop/jsonschema"
 )
 
@@ -30,16 +31,15 @@ func SchemaOf(proto any) map[string]any {
 	return m
 }
 
-// ToolDef builds a complete Definition from a name,
+// Def builds a complete Definition from a name,
 // description, and an args struct prototype.
-func Def(name, description string, argsProto any) Definition {
-	return Definition{
-		Type: "function",
-		Function: FuncDef{
-			Name:        name,
-			Description: description,
-			Parameters:  SchemaOf(argsProto),
-		},
+func Def(name, description string, argsProto any) *aop.ToolDefinition {
+	schema, _ := aop.JSONValue(SchemaOf(argsProto))
+	return &aop.ToolDefinition{
+		Type:        "function",
+		Name:        name,
+		Description: description,
+		InputSchema: schema,
 	}
 }
 

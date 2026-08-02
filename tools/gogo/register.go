@@ -22,7 +22,11 @@ func init() {
 				return
 			}
 			impl := New(es.Gogo).WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithDataBus(d.DataBus)
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(), Run: impl.Run}, "scanner")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
+				Run:             impl.Run,
+			}, "scanner")
 		},
 	})
 }

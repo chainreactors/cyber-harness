@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -195,14 +197,14 @@ func TestBeforeRunFoldsSystemPromptAndAggregatesPrepend(t *testing.T) {
 	BeforeRun.On(r, "base", func(_ context.Context, ev RunStartEvent) (RunStartResult, error) {
 		return RunStartResult{
 			SystemPrompt: ptr(ev.SystemPrompt + "\nbase"),
-			Prepend:      []Msg{{Role: "system", Content: ptr("one")}},
+			Prepend:      []*Msg{{Role: "system", Content: []*aop.Content{aop.Text("one")}}},
 		}, nil
 	})
 	BeforeRun.On(r, "extra", func(_ context.Context, ev RunStartEvent) (RunStartResult, error) {
 		observed = ev.SystemPrompt
 		return RunStartResult{
 			SystemPrompt: ptr(ev.SystemPrompt + "\nextra"),
-			Prepend:      []Msg{{Role: "user", Content: ptr("two")}},
+			Prepend:      []*Msg{{Role: "user", Content: []*aop.Content{aop.Text("two")}}},
 		}, nil
 	})
 
@@ -233,7 +235,7 @@ func TestContextReplacementFolds(t *testing.T) {
 		return ContextResult{}, nil
 	})
 
-	res, err := Context.Emit(context.Background(), r, ContextEvent{Messages: make([]Msg, 3)})
+	res, err := Context.Emit(context.Background(), r, ContextEvent{Messages: make([]*Msg, 3)})
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -309,7 +311,7 @@ func TestEmitFastPathDoesNotAllocate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	ev := ToolCallEvent{SessionID: "s1", TurnID: "t1", Call: ToolCall{ID: "c1"}}
+	ev := ToolCallEvent{SessionID: "s1", TurnID: "t1", Call: &ToolCall{Id: "c1"}}
 
 	if got := testing.AllocsPerRun(100, func() {
 		sinkResult, sinkErr = ToolCallHook.Emit(ctx, r, ev)

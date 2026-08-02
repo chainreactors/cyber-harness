@@ -31,12 +31,12 @@ type Engine struct {
 
 // HeadlessOptions configures the headless engine.
 type HeadlessOptions struct {
-	Proxy          string
-	UserAgent      string
-	Headers        map[string]string
-	ShowBrowser    bool
-	PageTimeout    int // seconds, default 30
-	DisableCookie  bool
+	Proxy         string
+	UserAgent     string
+	Headers       map[string]string
+	ShowBrowser   bool
+	PageTimeout   int // seconds, default 30
+	DisableCookie bool
 }
 
 // EngineOption configures Engine creation.

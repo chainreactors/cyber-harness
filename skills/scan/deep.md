@@ -41,7 +41,7 @@ For fingerprinted non-web assets, do not invent browser activity. Use the suppli
 
 ## Output Format
 
-When finished, call the `checkpoint` tool (or `ioa_send checkpoint` in IOA collaboration mode):
+When finished, call the `checkpoint` tool (or `ioa send checkpoint` in IOA collaboration mode):
 
 - **kind**: "deep"
 - **target**: tested URL

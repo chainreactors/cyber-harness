@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package aiscan.rpc.agent;
+
+import "types/agent.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+
+service AgentService {
+  rpc ListAgents(aiscan.agent.ListAgentsRequest) returns (aiscan.agent.ListAgentsResponse);
+}

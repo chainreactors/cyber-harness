@@ -20,10 +20,10 @@ type Expander struct {
 var atPattern = regexp.MustCompile(`@(?:(file|skill):)?(\S+)`)
 
 func (e *Expander) Expand(msg Message) Message {
-	if msg.ChatMessage.Content == nil {
+	content := messageText(msg.Message)
+	if content == "" {
 		return msg
 	}
-	content := *msg.ChatMessage.Content
 	matches := atPattern.FindAllStringSubmatchIndex(content, -1)
 	if len(matches) == 0 {
 		return msg

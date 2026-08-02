@@ -113,6 +113,7 @@ func mergeOption(dst, src *Option) {
 		dst.ReconLimit = src.ReconLimit
 	}
 	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
+	dst.ServerURL = ResolveString(dst.ServerURL, src.ServerURL)
 	dst.WebURL = ResolveString(dst.WebURL, src.WebURL)
 	dst.Transport = ResolveString(dst.Transport, src.Transport)
 	dst.IOAURL = ResolveString(dst.IOAURL, src.IOAURL)

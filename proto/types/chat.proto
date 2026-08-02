@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package aiscan.chat;
+
+import "aop/chat.proto";
+import "types/command.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+
+message SessionRecord {
+  aop.Session session = 1;
+  string agent_name = 2;
+  repeated string scan_ids = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message ListSessionsRequest {
+  string after_cursor = 1;
+  uint32 limit = 2;
+  bool include_closed = 3;
+}
+
+message ListSessionsResponse {
+  repeated SessionRecord sessions = 1;
+  string next_cursor = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  SessionRecord session = 1;
+}
+
+message ResetSessionRequest {
+  string request_id = 1;
+  string session_id = 2;
+  string new_session_id = 3;
+  string title = 4;
+}
+
+message ResetSessionReceipt {
+  aop.Session previous = 1;
+  SessionRecord current = 2;
+}
+
+message ResetSessionResponse {
+  string request_id = 1;
+  oneof outcome {
+    ResetSessionReceipt accepted = 2;
+    aop.Rejection rejected = 3;
+  }
+}
+
+message DeleteSessionRequest {
+  string request_id = 1;
+  string session_id = 2;
+}
+
+message DeleteSessionResponse {
+  string request_id = 1;
+  oneof outcome {
+    aop.Session accepted = 2;
+    aop.Rejection rejected = 3;
+  }
+}
+
+message ListCommandsRequest {
+  string session_id = 1;
+}
+
+message ListCommandsResponse {
+  repeated aiscan.command.CommandSpec commands = 1;
+}

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
-	xcommand "github.com/chainreactors/aiscan/core/aop/x/command"
-	"github.com/chainreactors/utils/parsers"
+	aop "github.com/chainreactors/aiscan/aop"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // ---------------------------------------------------------------------------
@@ -54,46 +54,15 @@ func ParseTimelineFile(path string) ([]TimelineEntry, error) {
 }
 
 func parseLine(line []byte) (TimelineEntry, bool) {
-	var event aop.Event
-	if json.Unmarshal(line, &event) == nil && event.Valid() {
-		timestamp, err := time.Parse(time.RFC3339Nano, event.TS)
-		if err == nil {
-			return TimelineEntry{Timestamp: timestamp, Type: event.Type, Data: &event}, true
+	event := new(aop.Event)
+	if protojson.Unmarshal(line, event) == nil && event.SessionId != "" && event.Payload != nil {
+		timestamp := time.Time{}
+		if event.EmittedAt != nil {
+			timestamp = event.EmittedAt.AsTime()
 		}
-	}
-	rec, err := ParseRecord(line)
-	if err != nil || rec.Type == "" {
-		return TimelineEntry{}, false
-	}
-	if item := parseRecordData(rec); item != nil {
-		return TimelineEntry{Timestamp: rec.Timestamp, Type: string(rec.Type), Data: item}, true
+		return TimelineEntry{Timestamp: timestamp, Type: aop.Kind(event), Data: event}, true
 	}
 	return TimelineEntry{}, false
-}
-
-func parseRecordData(rec Record) any {
-	if rec.Loot {
-		return unmarshalItem[parsers.Loot](rec.Data)
-	}
-	switch rec.Type {
-	case TypeScanStart:
-		return unmarshalItem[ScanStart](rec.Data)
-	case TypeGogo:
-		return unmarshalItem[parsers.GOGOResult](rec.Data)
-	case TypeSpray:
-		return unmarshalItem[parsers.SprayResult](rec.Data)
-	case TypeScanEnd:
-		return unmarshalItem[ScanEnd](rec.Data)
-	}
-	return nil
-}
-
-func unmarshalItem[T any](data json.RawMessage) *T {
-	var v T
-	if json.Unmarshal(data, &v) != nil {
-		return nil
-	}
-	return &v
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +79,28 @@ func RenderTimelineMarkdown(w io.Writer, entries []TimelineEntry) error {
 	return err
 }
 
+// RenderFile renders an AOP Event ProtoJSONL file. Raw scanner JSONL files are
+// intentionally not accepted as agent timelines.
+func RenderFile(path, format, outputPath string) error {
+	var writer io.Writer = os.Stdout
+	if outputPath != "" {
+		file, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer file.Close()
+		writer = file
+	}
+	entries, err := ParseTimelineFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(format, "markdown") || strings.EqualFold(format, "md") {
+		return RenderTimelineMarkdown(writer, entries)
+	}
+	return RenderTimeline(writer, entries)
+}
+
 func BuildTimelineMarkdown(entries []TimelineEntry) string {
 	var sb strings.Builder
 	sess := collectSessionMeta(entries)
@@ -117,18 +108,8 @@ func BuildTimelineMarkdown(entries []TimelineEntry) string {
 
 	for _, e := range entries {
 		switch d := e.Data.(type) {
-		case *ScanStart:
-			d.writeMarkdown(&sb)
-		case *parsers.GOGOResult:
-			writeGogoMarkdown(&sb, d)
-		case *parsers.SprayResult:
-			writeSprayMarkdown(&sb, d)
-		case *parsers.Loot:
-			writeLootMarkdown(&sb, d)
 		case *aop.Event:
 			writeAOPMarkdown(&sb, d)
-		case *ScanEnd:
-			d.writeMarkdown(&sb)
 		}
 	}
 	return sb.String()
@@ -164,19 +145,6 @@ func writeHeader(sb *strings.Builder, sess *sessionMeta) {
 }
 
 // ---------------------------------------------------------------------------
-// Scan types
-// ---------------------------------------------------------------------------
-
-func (d *ScanStart) writeMarkdown(sb *strings.Builder) {
-	sb.WriteString(fmt.Sprintf("- **scan** targets=%s mode=%s\n", strings.Join(d.Targets, ", "), d.Mode))
-}
-
-func (d *ScanEnd) writeMarkdown(sb *strings.Builder) {
-	sb.WriteString(fmt.Sprintf("\n> **scan done** %.1fs — %d services, %d webs, %d loots\n\n",
-		d.Duration, d.Services, d.Webs, d.Loots))
-}
-
-// ---------------------------------------------------------------------------
 // Session metadata
 // ---------------------------------------------------------------------------
 
@@ -199,32 +167,28 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 		switch d := e.Data.(type) {
 		case *aop.Event:
 			if m.id == "" {
-				m.id = d.SessionID
+				m.id = d.SessionId
 			}
-			switch d.Type {
-			case aop.TypeSessionStart:
+			switch payload := d.Payload.(type) {
+			case *aop.Event_SessionStarted:
 				m.startTS = e.Timestamp
-				if data, err := aop.DecodeData[aop.SessionStartData](*d); err == nil {
-					m.parentID = data.ParentSessionID
-					if data.Model != "" && m.model == "" {
-						m.model = data.Model
-					}
+				m.parentID = payload.SessionStarted.ParentSessionId
+				if payload.SessionStarted.Model != "" && m.model == "" {
+					m.model = payload.SessionStarted.Model
 				}
-			case aop.TypeSessionEnd:
+			case *aop.Event_SessionEnded:
 				m.endTS = e.Timestamp
-			case aop.TypeTurnStart:
+			case *aop.Event_TurnStarted:
 				m.turns++
-			case aop.TypeTurnEnd:
+			case *aop.Event_TurnEnded:
 				m.endTS = e.Timestamp
-				if data, err := aop.DecodeData[aop.TurnEndData](*d); err == nil {
-					m.stop = data.Stop
-					if data.Usage != nil && data.Usage.TotalTokens > 0 {
-						m.totalTokens = data.Usage.TotalTokens
-					}
+				m.stop = payload.TurnEnded.StopReason
+				if payload.TurnEnded.Usage != nil && payload.TurnEnded.Usage.TotalTokens > 0 {
+					m.totalTokens = int(payload.TurnEnded.Usage.TotalTokens)
 				}
-			case aop.TypeUsage:
-				if data, err := aop.DecodeData[aop.UsageData](*d); err == nil && data.TotalTokens > 0 {
-					m.totalTokens = data.TotalTokens
+			case *aop.Event_Usage:
+				if payload.Usage.TotalTokens > 0 {
+					m.totalTokens = int(payload.Usage.TotalTokens)
 				}
 			}
 		}
@@ -356,19 +320,16 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 	if event == nil {
 		return
 	}
-	switch event.Type {
-	case aop.TypeTurnStart:
-		sb.WriteString(fmt.Sprintf("## Run %s\n\n", event.TurnID))
+	switch payload := event.Payload.(type) {
+	case *aop.Event_TurnStarted:
+		sb.WriteString(fmt.Sprintf("## Run %s\n\n", event.TurnId))
 
-	case aop.TypeMessage:
-		data, err := aop.DecodeData[aop.MessageData](*event)
-		if err != nil {
-			return
-		}
+	case *aop.Event_Message:
+		data := payload.Message
 		var textParts []string
-		for _, part := range data.Parts {
-			if part.Type == aop.PartText && part.Text != "" {
-				textParts = append(textParts, part.Text)
+		for _, part := range data.Content {
+			if text := part.GetText().GetText(); text != "" {
+				textParts = append(textParts, text)
 			}
 		}
 		text := strings.Join(textParts, "\n")
@@ -378,7 +339,7 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 		if data.Role == "user" {
 			sb.WriteString(fmt.Sprintf("> %s\n\n", TruncateStr(text, 200)))
 		} else {
-			detail, ok, _ := xcommand.GetDetail(*event)
+			detail, ok, _ := types.GetCommandDetail(event)
 			if ok && detail.Presentation == "preformatted" {
 				sb.WriteString(markdownCodeFence(text) + "\n\n")
 			} else {
@@ -386,70 +347,57 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 			}
 		}
 
-	case aop.TypeToolCall:
-		data, err := aop.DecodeData[aop.ToolCallData](*event)
-		if err != nil {
-			return
-		}
-		argsStr := ""
-		switch args := data.Args.(type) {
-		case string:
-			argsStr = args
-		case map[string]any:
-			raw, _ := json.Marshal(args)
-			argsStr = string(raw)
-		}
-		summary := summarizeToolArgs(data.ToolName, argsStr)
+	case *aop.Event_ToolCall:
+		data := payload.ToolCall
+		argsStr := string(data.GetArguments().GetData())
+		summary := summarizeToolArgs(data.Name, argsStr)
 		if summary != "" {
-			sb.WriteString(fmt.Sprintf("- **%s** `%s`\n", data.ToolName, summary))
+			sb.WriteString(fmt.Sprintf("- **%s** `%s`\n", data.Name, summary))
 		} else {
-			sb.WriteString(fmt.Sprintf("- **%s**\n", data.ToolName))
+			sb.WriteString(fmt.Sprintf("- **%s**\n", data.Name))
 		}
 
-	case aop.TypeToolResult:
-		data, err := aop.DecodeData[aop.ToolResultData](*event)
-		if err != nil {
-			return
-		}
-		result := aop.ToolResultText(data.Content)
+	case *aop.Event_ToolResult:
+		data := payload.ToolResult
+		result := aopContentText(data.Output)
 		if data.IsError {
 			sb.WriteString(fmt.Sprintf("  - ✗ `%s`\n", TruncateStr(result, 120)))
 		} else {
 			sb.WriteString(fmt.Sprintf("  - ✓ %s\n", compactResult(result, 150)))
 		}
 
-	case aop.TypeUsage:
-		data, err := aop.DecodeData[aop.UsageData](*event)
-		if err != nil {
-			return
-		}
+	case *aop.Event_Usage:
+		data := payload.Usage
 		if data.TotalTokens > 0 {
 			usage := fmt.Sprintf("*%d tokens", data.TotalTokens)
-			if data.CacheReadTokens > 0 && data.InputTokens > 0 {
-				pct := float64(data.CacheReadTokens) / float64(data.InputTokens) * 100
+			if data.Detail["cache_read"] > 0 && data.InputTokens > 0 {
+				pct := float64(data.Detail["cache_read"]) / float64(data.InputTokens) * 100
 				usage += fmt.Sprintf(", cache %.0f%%", pct)
 			}
 			sb.WriteString("\n" + usage + "*\n\n")
 		}
 
-	case aop.TypeError:
-		data, err := aop.DecodeData[aop.ErrorData](*event)
-		if err == nil && data.Message != "" {
-			sb.WriteString(fmt.Sprintf("\n> **error:** %s\n\n", data.Message))
+	case *aop.Event_Error:
+		if payload.Error.Message != "" {
+			sb.WriteString(fmt.Sprintf("\n> **error:** %s\n\n", payload.Error.Message))
 		}
 
-	case aop.TypeTurnEnd:
-		data, err := aop.DecodeData[aop.TurnEndData](*event)
-		if err == nil {
-			sb.WriteString(fmt.Sprintf("\n> **run done** (stop=%s)\n\n", data.Stop))
-		}
+	case *aop.Event_TurnEnded:
+		sb.WriteString(fmt.Sprintf("\n> **run done** (stop=%s)\n\n", payload.TurnEnded.StopReason))
 
-	case aop.TypeSessionEnd:
-		data, err := aop.DecodeData[aop.SessionEndData](*event)
-		if err == nil {
-			sb.WriteString(fmt.Sprintf("\n> **session closed** (reason=%s)\n\n", data.Reason))
+	case *aop.Event_SessionEnded:
+		sb.WriteString(fmt.Sprintf("\n> **session closed** (reason=%s)\n\n", payload.SessionEnded.Reason))
+	}
+}
+
+func aopContentText(content []*aop.Content) string {
+	var parts []string
+	for _, item := range content {
+		if text := item.GetText().GetText(); text != "" {
+			parts = append(parts, text)
 		}
 	}
+	return strings.Join(parts, "\n")
 }
 
 func markdownCodeFence(text string) string {

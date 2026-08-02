@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/truncate"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 const compactSystemPrompt = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
@@ -71,7 +73,7 @@ type CompactResult struct {
 
 func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult, error) {
 	a.mu.Lock()
-	msgs := append([]ChatMessage(nil), a.state.Messages...)
+	msgs := append([]*aop.Message(nil), a.state.Messages...)
 	em := a.Cfg.emitter
 	if cfg.Provider == nil {
 		cfg.Provider = a.Cfg.Provider
@@ -90,10 +92,10 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	}
 	a.mu.Unlock()
 
-	em.status(xcompact.StateStart, "", nil)
+	em.status(types.CompactStateStart, nil)
 	newMsgs, result, err := compactHistory(ctx, cfg, msgs)
 	if err != nil {
-		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: err.Error()})
+		em.status(types.CompactStateError, &types.CompactDetail{Error: err.Error()})
 		return nil, err
 	}
 
@@ -101,11 +103,11 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	a.state.Messages = newMsgs
 	a.mu.Unlock()
 
-	em.status(xcompact.StateEnd, xcompact.NS, xcompact.Detail{TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter, KeptMessages: result.KeptMessages})
+	em.status(types.CompactStateEnd, &types.CompactDetail{TokensBefore: uint64(max(result.TokensBefore, 0)), TokensAfter: uint64(max(result.TokensAfter, 0)), KeptMessages: uint64(max(result.KeptMessages, 0))})
 	return result, nil
 }
 
-func compactHistory(ctx context.Context, cfg CompactConfig, msgs []ChatMessage) ([]ChatMessage, *CompactResult, error) {
+func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message) ([]*aop.Message, *CompactResult, error) {
 	if len(msgs) < 2 {
 		return nil, nil, fmt.Errorf("nothing to compact (too few messages)")
 	}
@@ -167,10 +169,10 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []ChatMessage) 
 		}
 	}
 
-	summaryMsg := NewTextMessage("user",
+	summaryMsg := provider.TextMessage("user",
 		"The conversation history before this point was compacted into the following summary:\n\n<summary>\n"+
 			summary+"\n</summary>")
-	newMsgs := make([]ChatMessage, 0, 1+len(msgs)-cut.FirstKept)
+	newMsgs := make([]*aop.Message, 0, 1+len(msgs)-cut.FirstKept)
 	newMsgs = append(newMsgs, summaryMsg)
 	newMsgs = append(newMsgs, msgs[cut.FirstKept:]...)
 	tokensAfter := estimateAllTokens(newMsgs)
@@ -184,23 +186,27 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []ChatMessage) 
 	}, nil
 }
 
-func estimateMessageTokens(msg ChatMessage) int {
+func estimateMessageTokens(msg *aop.Message) int {
 	chars := 0
-	if msg.Content != nil {
-		chars += len(*msg.Content)
-	}
-	for _, part := range msg.ContentParts {
-		if part.Type == "image_url" {
+	for _, part := range msg.GetContent() {
+		switch value := part.Value.(type) {
+		case *aop.Content_Text:
+			chars += len(value.Text.Text)
+		case *aop.Content_Reasoning:
+			chars += len(value.Reasoning.Text)
+		case *aop.Content_Media:
 			chars += 4800
-		} else {
-			chars += len(part.Text)
+		case *aop.Content_ToolCall:
+			chars += len(value.ToolCall.Name) + len(value.ToolCall.GetArguments().GetData())
+		case *aop.Content_ToolResult:
+			for _, block := range value.ToolResult.Output {
+				if text := block.GetText(); text != nil {
+					chars += len(text.Text)
+				} else if block.GetMedia() != nil {
+					chars += 4800
+				}
+			}
 		}
-	}
-	if msg.ReasoningContent != nil {
-		chars += len(*msg.ReasoningContent)
-	}
-	for _, tc := range msg.ToolCalls {
-		chars += len(tc.Function.Name) + len(tc.Function.Arguments)
 	}
 	if chars == 0 {
 		return 0
@@ -208,7 +214,7 @@ func estimateMessageTokens(msg ChatMessage) int {
 	return (chars + 3) / 4
 }
 
-func estimateAllTokens(msgs []ChatMessage) int {
+func estimateAllTokens(msgs []*aop.Message) int {
 	total := 0
 	for _, m := range msgs {
 		total += estimateMessageTokens(m)
@@ -222,14 +228,14 @@ type compactionCut struct {
 	SplitTurn bool
 }
 
-func isCompactionCutPoint(msg ChatMessage) bool {
-	return (msg.Role == "user" && msg.ToolCallID == "") || msg.Role == "assistant"
+func isCompactionCutPoint(msg *aop.Message) bool {
+	return (msg.Role == "user" && provider.MessageToolResult(msg) == nil) || msg.Role == "assistant"
 }
 
 // findCompactionCut walks backward to retain approximately keepTokens. A cut
 // may land at a user turn boundary or at an assistant message inside a single
 // oversized turn, but never at a tool result.
-func findCompactionCut(msgs []ChatMessage, keepTokens int) compactionCut {
+func findCompactionCut(msgs []*aop.Message, keepTokens int) compactionCut {
 	valid := make([]int, 0, len(msgs))
 	for i := range msgs {
 		if isCompactionCutPoint(msgs[i]) {
@@ -262,11 +268,11 @@ func findCompactionCut(msgs []ChatMessage, keepTokens int) compactionCut {
 	if cutIdx <= 0 {
 		return compactionCut{}
 	}
-	if msgs[cutIdx].Role == "user" && msgs[cutIdx].ToolCallID == "" {
+	if msgs[cutIdx].Role == "user" && provider.MessageToolResult(msgs[cutIdx]) == nil {
 		return compactionCut{FirstKept: cutIdx, TurnStart: cutIdx}
 	}
 	for i := cutIdx - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" && msgs[i].ToolCallID == "" {
+		if msgs[i].Role == "user" && provider.MessageToolResult(msgs[i]) == nil {
 			return compactionCut{FirstKept: cutIdx, TurnStart: i, SplitTurn: true}
 		}
 	}
@@ -274,20 +280,17 @@ func findCompactionCut(msgs []ChatMessage, keepTokens int) compactionCut {
 }
 
 // findCutPoint is kept as the simple index helper used by trigger checks.
-func findCutPoint(msgs []ChatMessage, keepTokens int) int {
+func findCutPoint(msgs []*aop.Message, keepTokens int) int {
 	return findCompactionCut(msgs, keepTokens).FirstKept
 }
 
-func serializeMessages(msgs []ChatMessage) string {
+func serializeMessages(msgs []*aop.Message) string {
 	var sb strings.Builder
 	for _, m := range msgs {
-		content := ""
-		if m.Content != nil {
-			content = *m.Content
-		}
+		content := provider.MessageText(m)
 		switch m.Role {
 		case "user":
-			if m.ToolCallID != "" {
+			if provider.MessageToolResult(m) != nil {
 				continue
 			}
 			fmt.Fprintf(&sb, "[User]: %s\n\n", content)
@@ -295,9 +298,9 @@ func serializeMessages(msgs []ChatMessage) string {
 			if content != "" {
 				fmt.Fprintf(&sb, "[Assistant]: %s\n\n", content)
 			}
-			for _, tc := range m.ToolCalls {
+			for _, call := range provider.MessageToolCalls(m) {
 				fmt.Fprintf(&sb, "[Tool Call]: %s(%s)\n\n",
-					tc.Function.Name, truncate.Clip(tc.Function.Arguments, 200))
+					call.Name, truncate.Clip(string(call.GetArguments().GetData()), 200))
 			}
 		case "tool":
 			fmt.Fprintf(&sb, "[Tool Result]: %s\n\n", truncate.Clip(content, 500))
@@ -308,7 +311,7 @@ func serializeMessages(msgs []ChatMessage) string {
 	return sb.String()
 }
 
-func summarize(ctx context.Context, p Provider, model string, msgs []ChatMessage, customInstructions string, maxTokens int) (string, error) {
+func summarize(ctx context.Context, p Provider, model string, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {
 	prompt := compactUserPrompt
 	if customInstructions != "" {
 		prompt += "\n\nAdditional focus: " + customInstructions
@@ -316,15 +319,15 @@ func summarize(ctx context.Context, p Provider, model string, msgs []ChatMessage
 	return summarizeConversation(ctx, p, model, msgs, prompt, maxTokens)
 }
 
-func summarizeConversation(ctx context.Context, p Provider, model string, msgs []ChatMessage, prompt string, maxTokens int) (string, error) {
+func summarizeConversation(ctx context.Context, p Provider, model string, msgs []*aop.Message, prompt string, maxTokens int) (string, error) {
 	userContent := "<conversation>\n" + serializeMessages(msgs) + "</conversation>\n\n" + prompt
 
 	temp := float64(0)
 	resp, err := p.ChatCompletion(ctx, &ChatCompletionRequest{
 		Model: model,
-		Messages: []ChatMessage{
-			NewTextMessage("system", compactSystemPrompt),
-			NewTextMessage("user", userContent),
+		Messages: []*aop.Message{
+			provider.TextMessage("system", compactSystemPrompt),
+			provider.TextMessage("user", userContent),
 		},
 		MaxTokens:   maxTokens,
 		Temperature: &temp,
@@ -339,19 +342,9 @@ func summarizeConversation(ctx context.Context, p Provider, model string, msgs [
 	if isOutputLimitFinishReason(choice.FinishReason) {
 		return "", fmt.Errorf("summary output truncated (finish_reason=%s)", choice.FinishReason)
 	}
-	content := choice.Message.Content
-	if content == nil || *content == "" {
+	content := provider.MessageText(choice.Message)
+	if content == "" {
 		return "", fmt.Errorf("empty summary returned")
 	}
-	return *content, nil
-}
-
-func usageTotalTokens(usage *Usage) int {
-	if usage == nil {
-		return 0
-	}
-	if usage.TotalTokens > 0 {
-		return usage.TotalTokens
-	}
-	return usage.PromptTokens + usage.CompletionTokens
+	return content, nil
 }

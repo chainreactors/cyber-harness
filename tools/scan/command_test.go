@@ -1345,13 +1345,6 @@ func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	if !strings.Contains(out, "7 tasks 9 requests") {
 		t.Fatalf("summary missing aggregated stats:\n%s", out)
 	}
-
-	report := coll.ReportMarkdown()
-	for _, want := range []string{"| Tasks | 7 |", "| Requests | 9 |"} {
-		if !strings.Contains(report, want) {
-			t.Fatalf("report missing %q:\n%s", want, report)
-		}
-	}
 }
 
 func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
@@ -1419,7 +1412,7 @@ func TestScanPlainTextStripsANSI(t *testing.T) {
 	}
 }
 
-func TestScanAggregatesAssets(t *testing.T) {
+func TestStructuredResultKeepsScannerValuesInsideCollector(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	service := parsers.NewGOGOResult("127.0.0.1", "8080")
 	service.Protocol = "http"
@@ -1437,26 +1430,15 @@ func TestScanAggregatesAssets(t *testing.T) {
 	coll.Finish()
 
 	result := coll.StructuredResult()
-	if len(result.Assets) != 1 {
-		t.Fatalf("assets = %d, want 1: %#v", len(result.Assets), result.Assets)
+	if len(result.GOGO) != 1 || result.GOGO[0].Port != "8080" {
+		t.Fatalf("gogo results = %#v", result.GOGO)
 	}
-	kinds := assetItemKindCounts(result.Assets[0].Items)
-	for _, kind := range []string{output.AssetItemService, output.AssetItemPath, output.AssetItemFingerprint} {
-		if kinds[kind] != 1 {
-			t.Fatalf("asset item %s count = %d, want 1 in %#v", kind, kinds[kind], result.Assets[0].Items)
-		}
+	if len(result.Spray) != 1 || result.Spray[0].UrlString != "http://127.0.0.1:8080/admin" {
+		t.Fatalf("spray results = %#v", result.Spray)
 	}
 }
 
-func assetItemKindCounts(items []output.AssetItem) map[string]int {
-	counts := make(map[string]int)
-	for _, item := range items {
-		counts[item.Kind]++
-	}
-	return counts
-}
-
-func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
+func TestScanOutputFileContainsRawRecordsWithoutChangingStdout(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
 	file := filepath.Join(t.TempDir(), "scan.txt")
@@ -1465,8 +1447,10 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if details == nil {
-		t.Fatal("Run() returned nil details")
+	// Structured scan records flow through the artifact stream; Run no longer
+	// returns a second result envelope.
+	if details != nil {
+		t.Fatalf("Run() returned unexpected details: %#v", details)
 	}
 	out := stdout.String()
 	data, err := os.ReadFile(file)
@@ -1477,8 +1461,8 @@ func TestScanOutputFileWritesPlainTextWithoutChangingStdout(t *testing.T) {
 	if hasANSI(fileOut) {
 		t.Fatalf("file output contains ANSI: %q", fileOut)
 	}
-	if !strings.Contains(fileOut, "[summary] completed") {
-		t.Fatalf("file output missing summary: %q", fileOut)
+	if strings.Contains(fileOut, "[summary]") || strings.Contains(fileOut, "scan_start") || strings.Contains(fileOut, "scan_end") {
+		t.Fatalf("raw record file contains presentation data: %q", fileOut)
 	}
 	if !strings.Contains(output.StripANSI(out), "[summary] completed") {
 		t.Fatalf("stdout output missing summary: %q", out)
@@ -1508,29 +1492,6 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 	w.once.Do(func() { close(w.started) })
 	<-w.release
 	return len(p), nil
-}
-
-func TestScanReportMarkdown(t *testing.T) {
-	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
-		IsValid:   true,
-		UrlString: "http://127.0.0.1:80",
-		Status:    200,
-		Distance:  1,
-	}))})
-	coll.Finish()
-
-	report := coll.ReportMarkdown()
-	if hasANSI(report) {
-		t.Fatalf("report contains ANSI: %q", report)
-	}
-	for _, want := range []string{"# Scan Report", "## Metrics", "## Open Services"} {
-		if !strings.Contains(report, want) {
-			t.Fatalf("report missing %q:\n%s", want, report)
-		}
-	}
 }
 
 func TestPipelinePerRouteDedupIsolation(t *testing.T) {
@@ -1720,4 +1681,38 @@ func TestCleanupGogoTempFilesIgnoresMissingFile(t *testing.T) {
 	}()
 
 	engine.CleanupGogoTempFiles()
+}
+
+func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
+	bus := eventbus.New[output.ToolDataEvent]()
+	cmd := New(&engine.Set{}, WithDataBus(bus))
+
+	var events []output.ToolDataEvent
+	unsub := bus.Subscribe(func(event output.ToolDataEvent) {
+		events = append(events, event)
+	})
+	defer unsub()
+
+	ctx := output.ContextWithCallID(context.Background(), "scan-call-1")
+	cmd.emitStructuredData(ctx, &output.ScanResult{
+		GOGO: []*parsers.GOGOResult{{Ip: "127.0.0.1", Port: "8080", Protocol: "http"}},
+		Spray: []*parsers.SprayResult{{
+			UrlString: "http://127.0.0.1:8080/", Status: 200,
+		}},
+	})
+
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %#v", len(events), events)
+	}
+	if events[0].Tool != "gogo" || events[0].Kind != output.ToolDataService {
+		t.Fatalf("service event = %#v", events[0])
+	}
+	if events[1].Tool != "spray" || events[1].Kind != output.ToolDataWeb {
+		t.Fatalf("web event = %#v", events[1])
+	}
+	for _, event := range events {
+		if event.CallID != "scan-call-1" {
+			t.Fatalf("call id = %q, want scan-call-1", event.CallID)
+		}
+	}
 }

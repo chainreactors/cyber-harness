@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/chainreactors/aiscan/core/config"
 )
 
 type Provider interface {
@@ -43,26 +45,22 @@ type ProviderConfig struct {
 }
 
 const (
-	ProviderOpenAI    = "openai"
-	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = config.ProviderOpenAI
+	ProviderAnthropic = config.ProviderAnthropic
 )
 
-var providerBaseURLs = map[string]string{
-	ProviderOpenAI:    "https://api.openai.com/v1",
-	ProviderAnthropic: "https://api.anthropic.com/v1",
+func NormalizeProvider(name string) string {
+	return config.NormalizeProvider(name)
 }
 
-func NormalizeProvider(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
+// protocolOf maps a provider name — a wire protocol or a known
+// OpenAI-compatible vendor — to the protocol spoken on the wire.
+func protocolOf(name string) string {
+	return config.ProtocolOf(name)
 }
 
 func IsSupportedProvider(name string) bool {
-	switch NormalizeProvider(name) {
-	case ProviderOpenAI, ProviderAnthropic:
-		return true
-	default:
-		return false
-	}
+	return config.IsSupportedProvider(name)
 }
 
 func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
@@ -78,11 +76,12 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	if providerName == "" {
 		providerName = InferFromBaseURL(resolved.BaseURL)
 	}
-	if !IsSupportedProvider(providerName) {
-		return nil, fmt.Errorf("unsupported provider %q: use openai or anthropic", providerName)
+	protocol := protocolOf(providerName)
+	if protocol == "" {
+		return nil, fmt.Errorf("unsupported provider %q: use openai/anthropic, a known OpenAI-compatible vendor (deepseek, moonshot, qwen, glm, groq, xai, mistral, openrouter, together, siliconflow, ollama), or provider=openai with a custom base_url", providerName)
 	}
 	if strings.TrimSpace(resolved.BaseURL) == "" {
-		resolved.BaseURL = providerBaseURLs[providerName]
+		resolved.BaseURL = config.ProviderBaseURL(providerName)
 	}
 	resolved.Provider = providerName
 
@@ -123,7 +122,7 @@ func inferImageSupport(provider, model string) bool {
 		return false
 	}
 
-	switch p {
+	switch protocolOf(p) {
 	case "anthropic":
 		return true
 	}
@@ -140,14 +139,11 @@ func inferImageSupport(provider, model string) bool {
 // caught later as an actionable 404 from the provider (see hint404), not a
 // silent failure.
 func InferFromBaseURL(baseURL string) string {
-	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
-		return ProviderAnthropic
-	}
-	return ProviderOpenAI
+	return config.InferProviderFromBaseURL(baseURL)
 }
 
 func NewProviderFromResolved(cfg *ProviderConfig) (Provider, error) {
-	switch NormalizeProvider(cfg.Provider) {
+	switch protocolOf(cfg.Provider) {
 	case ProviderAnthropic:
 		return NewAnthropicProvider(cfg)
 	case ProviderOpenAI:

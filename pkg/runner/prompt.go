@@ -135,7 +135,7 @@ Available pseudo-commands:
 {{.ScannerDocs}}
 NOTE: ` + "`scan`" + ` already runs gogo → spray → zombie → neutron as a pipeline. Use individual commands (gogo, spray, etc.) only when you need a single stage or fine-grained control. Do not run spray separately and then scan — that duplicates the web probing work.
 
-Read the corresponding skill file for detailed usage: ` + "`aiscan://skills/<command>/SKILL.md`" + `.
+Read the corresponding tool concept for detailed usage: ` + "`aiscan://skills/aiscan/okf/easm/<command>.md`" + `.
 {{end}}
 {{- if .Skills}}
 ## Available Skills

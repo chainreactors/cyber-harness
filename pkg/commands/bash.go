@@ -82,19 +82,19 @@ type BashArgs struct {
 	Timeout int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in seconds. The command is killed when it exceeds this. Omit to use the default (300s). Commands still running after 15s are moved to background and keep running until this timeout."`
 }
 
-func (t *BashTool) Definition() coretool.Definition {
+func (t *BashTool) Definition() *coretool.Definition {
 	return coretool.Def("bash", t.Description(), BashArgs{})
 }
 
-func (t *BashTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	args, err := coretool.ParseArgs[BashArgs](arguments)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 
 	command := strings.TrimSpace(args.Command)
 	if command == "" {
-		return coretool.Result{}, fmt.Errorf("empty command")
+		return nil, fmt.Errorf("empty command")
 	}
 	if isOnlyCommentsOrBlank(command) {
 		return coretool.TextResult("ok"), nil
@@ -107,7 +107,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (coretool.Resu
 	}
 	execution, err := t.Start(ctx, command, options)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 
 	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx)), nil
@@ -179,13 +179,13 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 }
 
 // RunForegroundTool executes a command in the foreground and returns the
-// collected ToolResult (bounded text plus structured Details), streaming raw
+// collected ToolResult (bounded text and media), streaming raw
 // output through options.OnOutput. Transports that must not auto-background
 // (AOP tool.call) use this instead of Execute.
-func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (coretool.Result, error) {
+func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (*coretool.Result, error) {
 	execution, err := t.RunForeground(ctx, command, options)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 	return t.collectResult(execution), nil
 }
@@ -406,7 +406,7 @@ func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 	}
 }
 
-func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) coretool.Result {
+func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) *coretool.Result {
 	done := t.tasks.Done(execution.ID)
 	select {
 	case <-done:
@@ -426,7 +426,7 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, t
 	}
 }
 
-func (t *BashTool) collectResult(execution *Execution) coretool.Result {
+func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 	raw := t.tasks.PeekOrEmpty(execution.ID, truncate.DefaultMaxLines)
 	r := truncate.Tail(raw, truncate.Options{})
 	text := r.Content
@@ -444,7 +444,6 @@ func (t *BashTool) collectResult(execution *Execution) coretool.Result {
 		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
 	result := coretool.TextResult(text)
-	result.Details = execution.Details
 	return result
 }
 

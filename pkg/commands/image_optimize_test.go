@@ -76,7 +76,7 @@ func TestOptimize_PayloadUnderLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payloadSize := len(opt.Base64Data)
+	payloadSize := len(opt.Data)
 	if payloadSize > maxPayloadBytes {
 		t.Errorf("payload %d exceeds limit %d", payloadSize, maxPayloadBytes)
 	}

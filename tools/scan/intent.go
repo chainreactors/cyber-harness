@@ -37,3 +37,11 @@ func ScannerSkillName(command string) string {
 		return ""
 	}
 }
+
+// ScannerConceptURI returns the OKF tool concept URI for a scanner command.
+func ScannerConceptURI(command string) string {
+	if ScannerSkillName(command) == "" {
+		return ""
+	}
+	return "aiscan://skills/aiscan/okf/easm/" + command + ".md"
+}

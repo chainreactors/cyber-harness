@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# Two parallel build jobs (standard / full) → one release job
+# One frontend bundle + standard/full native build matrix → draft release
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -81,26 +81,98 @@ jobs:
 
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
 
-  # ── Parallel build matrix ───────────────────────────────────────
-  build:
+  # ── Build the embedded frontend once for every full target ─────
+  frontend:
     needs: prepare
     runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build embedded frontend
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run build
+          test -s web/static/index.html
+          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
+
+      - name: Upload embedded frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
+          retention-days: 1
+
+  # ── Parallel build matrix ───────────────────────────────────────
+  build:
+    needs: [prepare, frontend]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: aiscan
             profile: standard
+            runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan
             tags: "forceposix emptytemplates noembed osusergo netgo"
-            generate: true
-          - id: aiscan-full
+            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
+            cgo: "0"
+          - id: aiscan-full-linux-amd64
             profile: full
+            runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
-            generate: true
+            targets: "linux/amd64"
+            cgo: "1"
+          - id: aiscan-full-linux-arm64
+            profile: full
+            runner: ubuntu-24.04-arm
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            targets: "linux/arm64"
+            cgo: "1"
+          - id: aiscan-full-darwin-amd64
+            profile: full
+            runner: macos-15-intel
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            targets: "darwin/amd64"
+            cgo: "1"
+          - id: aiscan-full-darwin-arm64
+            profile: full
+            runner: macos-15
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            targets: "darwin/arm64"
+            cgo: "1"
+          - id: aiscan-full-windows-amd64
+            profile: full
+            runner: windows-2022
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            targets: "windows/amd64"
+            cgo: "1"
 
     env:
       GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}
@@ -120,38 +192,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Node.js
-        if: matrix.profile == 'full'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
+      - name: Set up mingw for libcstx
+        if: runner.os == 'Windows'
+        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
-      - name: Build embedded frontend
+      - name: Download embedded frontend
         if: matrix.profile == 'full'
-        run: |
-          npm --prefix web/frontend ci
-          npm --prefix web/frontend run build
-          test -s web/static/index.html
-          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
+        uses: actions/download-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
 
       - name: Generate embedded resources
-        if: matrix.generate
         run: go generate ./core/resources
 
-      - name: Warm build cache
-        run: CGO_ENABLED=0 go build -tags "${{ matrix.tags }}" ${{ matrix.main }}/...
-
-      - name: Install upx
-        run: sudo apt install upx -y
-        continue-on-error: true
-
-      - name: Cross-compile
+      - name: Build binaries
         shell: bash
         run: |
           set -euo pipefail
-          TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+          TARGETS="${{ matrix.targets }}"
           TAGS="${{ matrix.tags }}"
           BINARY="${{ matrix.binary }}"
           MAIN="${{ matrix.main }}"
@@ -164,67 +223,26 @@ jobs:
             suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
             out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+            CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
               go build -trimpath -tags "$TAGS" \
               -ldflags "-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}" \
               -buildvcs=false \
               -o "$out" "$MAIN"
           done
 
-          version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
-          test "$version_output" = "aiscan v${VERSION}"
+          if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
+            version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
+            test "$version_output" = "aiscan v${VERSION}"
+          fi
 
           echo "=== Binaries ==="
           ls -lh "${OUTDIR}/"
 
-      - name: Compress with UPX
-        continue-on-error: true
-        shell: bash
-        run: |
-          for f in dist/build/*_linux_amd64 dist/build/*_windows_amd64.exe; do
-            [ -f "$f" ] || continue
-            echo "upx: $f"
-            upx --best --lzma "$f" || true
-          done
-
-      - name: Package archives
-        shell: bash
-        run: |
-          set -euo pipefail
-          BINARY="${{ matrix.binary }}"
-          ARCHDIR="dist/archives"
-          mkdir -p "${ARCHDIR}"
-
-          for f in dist/build/${BINARY}_*; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f")
-            # strip .exe for archive name
-            archive_name="${base%.exe}"
-            zipfile="${ARCHDIR}/${archive_name}.zip"
-            echo "  zip: ${zipfile}"
-
-            # rename binary inside zip to just the binary name (+ .exe if windows)
-            inner_name="${BINARY}"
-            [[ "$base" == *.exe ]] && inner_name="${BINARY}.exe"
-
-            tmpdir=$(mktemp -d)
-            cp "$f" "${tmpdir}/${inner_name}"
-            cp README.md "${tmpdir}/" 2>/dev/null || true
-            if [ -d docs ]; then
-              cp -r docs "${tmpdir}/" 2>/dev/null || true
-            fi
-            (cd "$tmpdir" && zip -r - .) > "$zipfile"
-            rm -rf "$tmpdir"
-          done
-
-          echo "=== Archives ==="
-          ls -lh "${ARCHDIR}/"
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: release-${{ matrix.profile }}
-          path: dist/archives/*.zip
+          name: release-${{ matrix.id }}
+          path: dist/build/*
           retention-days: 1
 
   # ── Publish release ─────────────────────────────────────────────
@@ -243,8 +261,40 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v7
         with:
-          path: dist/release
+          pattern: release-*
+          path: dist/build
           merge-multiple: true
+
+      - name: Compress supported binaries with UPX
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx-ucl
+          for f in dist/build/*_linux_amd64 dist/build/*_windows_amd64.exe; do
+            [ -f "$f" ] || continue
+            upx --best --lzma "$f" || true
+          done
+
+      - name: Package archives
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          for f in dist/build/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            archive_name="${base%.exe}"
+            binary="${base%%_*}"
+            inner_name="$binary"
+            [[ "$base" == *.exe ]] && inner_name="${binary}.exe"
+
+            tmpdir=$(mktemp -d)
+            cp "$f" "${tmpdir}/${inner_name}"
+            cp README.md "${tmpdir}/" 2>/dev/null || true
+            cp -r docs "${tmpdir}/" 2>/dev/null || true
+            (cd "$tmpdir" && zip -r - .) > "${GITHUB_WORKSPACE}/dist/release/${archive_name}.zip"
+            rm -rf "$tmpdir"
+          done
+          ls -lh dist/release
 
       - name: Generate checksums
         run: |

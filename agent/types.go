@@ -8,35 +8,27 @@ import (
 	"github.com/chainreactors/aiscan/agent/hooks"
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-// Re-export provider types so external consumers only import agent.
+// The agent loop operates on AOP protos directly. Vendored JSON shapes live
+// only inside the provider adapters.
 
-type ChatMessage = provider.ChatMessage
-type ChatMessageDelta = provider.ChatMessageDelta
-type ToolCall = provider.ToolCall
-type ToolCallDelta = provider.ToolCallDelta
-type FunctionCall = provider.FunctionCall
-type FunctionCallDelta = provider.FunctionCallDelta
-type ToolDefinition = provider.ToolDefinition
-type FunctionDefinition = provider.FunctionDefinition
-type ContentPart = provider.ContentPart
-type ImageURL = provider.ImageURL
-type ChatCompletionRequest = provider.ChatCompletionRequest
-type ChatCompletionResponse = provider.ChatCompletionResponse
-type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
-type Choice = provider.Choice
-type Usage = provider.Usage
-type APIError = provider.APIError
-type CacheRetention = provider.CacheRetention
+type ToolDefinition = aop.ToolDefinition
 type Provider = provider.Provider
 type StreamingProvider = provider.StreamingProvider
 type ProviderConfig = provider.ProviderConfig
+type ChatCompletionRequest = provider.ChatCompletionRequest
+type ChatCompletionResponse = provider.ChatCompletionResponse
+type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
+type ProviderRawFrame = provider.RawFrame
+type Choice = provider.Choice
+type APIError = provider.APIError
+type CacheRetention = provider.CacheRetention
 
 const (
 	CacheNone  = provider.CacheNone
@@ -45,12 +37,7 @@ const (
 )
 
 var (
-	NewTextMessage       = provider.NewTextMessage
-	NewToolResultMessage = provider.NewToolResultMessage
-	NewMultimodalMessage = provider.NewMultimodalMessage
-	TextPart             = provider.TextPart
-	ImagePart            = provider.ImagePart
-	ParseDataURI         = provider.ParseDataURI
+	TextMessage = provider.TextMessage
 
 	NewProvider              = provider.NewProvider
 	NewProviderFromResolved  = provider.NewProviderFromResolved
@@ -79,13 +66,13 @@ const (
 	StopReasonCanceled   = hooks.StopReasonCanceled
 )
 
-type TransformContextFunc func([]ChatMessage) []ChatMessage
+type TransformContextFunc func([]*aop.Message) []*aop.Message
 
 type BeforeToolCallContext struct {
-	AssistantMessage ChatMessage
-	ToolCall         ToolCall
+	AssistantMessage *aop.Message
+	ToolCall         *aop.ToolCall
 	SystemPrompt     string
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 }
 
 type BeforeToolCallResult struct {
@@ -94,12 +81,12 @@ type BeforeToolCallResult struct {
 }
 
 type AfterToolCallContext struct {
-	AssistantMessage ChatMessage
-	ToolCall         ToolCall
+	AssistantMessage *aop.Message
+	ToolCall         *aop.ToolCall
 	Result           string
 	IsError          bool
 	SystemPrompt     string
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 }
 
 type ToolFlowDecision int
@@ -135,7 +122,7 @@ type Config struct {
 	Model            string
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 	MaxTokens        int
 	ContextWindow    int
 	Compaction       CompactionSettings
@@ -145,7 +132,7 @@ type Config struct {
 	TokenBudget      int
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              *eventbus.Bus[aop.Event]
+	Bus              EventEmitter
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
 	Hooks *hooks.Registry
@@ -165,33 +152,36 @@ type Config struct {
 	TurnID           string
 	ParentSessionID  string
 	ParentToolCallID string
-	Delegation       *delegation.DelegationDetail
+	Delegation       *types.DelegationDetail
 	// AgentName tags emitted AOP events; defaults to "aiscan".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
 	// restored; Result.MessageCounter carries the final value for saving.
 	MessageCounter int64
+	// CaptureProviderFrames emits exact provider request/response bytes as AOP
+	// ProviderFrame events. Disabled by default because payloads may be sensitive.
+	CaptureProviderFrames bool
 
 	emitter *aopEmitter
 }
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config            { c.Provider = p; return c }
-func (c Config) WithTools(t tool.Executor) Config          { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config                 { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config          { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config    { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config                  { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config           { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config      { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[aop.Event]) Config { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config                { c.MaxTokens = n; return c }
-func (c Config) WithContextWindow(n int) Config            { c.ContextWindow = n; return c }
-func (c Config) WithTemperature(t float64) Config          { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config               { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config              { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config     { c.Expander = e; return c }
+func (c Config) WithProvider(p Provider) Config             { c.Provider = p; return c }
+func (c Config) WithTools(t tool.Executor) Config           { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config                  { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config           { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []*aop.Message) Config    { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                   { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config            { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config       { c.Logger = l; return c }
+func (c Config) WithBus(b EventEmitter) Config { c.Bus = b; return c }
+func (c Config) WithMaxTokens(n int) Config                 { c.MaxTokens = n; return c }
+func (c Config) WithContextWindow(n int) Config             { c.ContextWindow = n; return c }
+func (c Config) WithTemperature(t float64) Config           { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config                { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config               { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config      { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
@@ -245,7 +235,7 @@ func (c Config) init() Config {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	if c.Bus == nil {
-		c.Bus = eventbus.New[aop.Event]()
+		c.Bus = eventbus.New[*aop.Event]()
 	}
 	if c.emitter == nil {
 		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)
@@ -271,22 +261,14 @@ func NewAgent(cfg Config) *Agent {
 	}
 }
 
-type TurnUsage struct {
-	Turn             int `json:"turn"`
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
-}
-
 type Result struct {
-	Output         string
-	NewMessages    []ChatMessage
-	Messages       []ChatMessage
-	Turns          int
-	TotalUsage     Usage
-	TurnUsages     []TurnUsage
+	Output      string
+	NewMessages []*aop.Message
+	Messages    []*aop.Message
+	Turns       int
+	TotalUsage  *aop.TokenUsage
+	// TurnUsages holds per-turn usage; the turn number is the slice index + 1.
+	TurnUsages     []*aop.TokenUsage
 	ContextTokens  int
 	Stop           StopReason
 	Err            error
@@ -295,7 +277,7 @@ type Result struct {
 
 type State struct {
 	SystemPrompt string
-	Messages     []ChatMessage
+	Messages     []*aop.Message
 	Tools        tool.Executor
 	ErrorMessage string
 	LastError    error

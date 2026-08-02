@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
 )
@@ -39,7 +39,7 @@ type LiveStatus struct {
 
 	turn           int
 	turnToolCalls  int
-	turnUsage      *agent.Usage
+	turnUsage      *aop.TokenUsage
 	outputEstimate int
 	contextTokens  int
 	contextWindow  int
@@ -128,11 +128,11 @@ func (l *LiveStatus) NoteDelta(textDelta bool) {
 	}
 }
 
-func (l *LiveStatus) SetTurnUsage(usage agent.Usage) {
+func (l *LiveStatus) SetTurnUsage(usage *aop.TokenUsage) {
 	if l == nil {
 		return
 	}
-	l.turnUsage = &usage
+	l.turnUsage = usage
 }
 
 func (l *LiveStatus) SetOutputEstimate(tokens int) {
@@ -232,8 +232,8 @@ func (l *LiveStatus) FinishTurn(contextTokens int) {
 	}
 	if contextTokens > 0 {
 		l.contextTokens = contextTokens
-	} else if l.turnUsage != nil && l.turnUsage.PromptTokens > 0 {
-		l.contextTokens = l.turnUsage.PromptTokens
+	} else if l.turnUsage != nil && l.turnUsage.InputTokens > 0 {
+		l.contextTokens = int(l.turnUsage.InputTokens)
 	}
 	l.turnUsage = nil
 }
@@ -379,8 +379,8 @@ func (l *LiveStatus) formatTurnDetails() string {
 		contextTokens := l.contextTokens
 		if l.turnUsage != nil {
 			parts = append(parts, formatTokenUsage(l.turnUsage))
-			if l.turnUsage.PromptTokens > 0 {
-				contextTokens = l.turnUsage.PromptTokens
+			if l.turnUsage.InputTokens > 0 {
+				contextTokens = int(l.turnUsage.InputTokens)
 			}
 		} else if l.outputEstimate > 0 {
 			parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
@@ -408,16 +408,6 @@ func (l *LiveStatus) ContextUsage(tokens int) string {
 		util.FormatNumber(tokens),
 		util.FormatNumber(l.contextWindow),
 		formatUsagePercent(tokens, l.contextWindow))
-}
-
-func usageTotal(usage *agent.Usage) int {
-	if usage == nil {
-		return 0
-	}
-	if usage.TotalTokens > 0 {
-		return usage.TotalTokens
-	}
-	return usage.PromptTokens + usage.CompletionTokens
 }
 
 func formatUsagePercent(used, total int) string {

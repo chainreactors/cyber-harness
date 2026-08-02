@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 type Origin string
@@ -33,7 +33,7 @@ type Attachment struct {
 }
 
 type Message struct {
-	ChatMessage provider.ChatMessage
+	Message     *aop.Message
 	Origin      Origin
 	Priority    Priority
 	Attachments []Attachment
@@ -43,9 +43,9 @@ type Message struct {
 
 func NewMessage(origin Origin, role, content string) Message {
 	return Message{
-		ChatMessage: provider.NewTextMessage(role, content),
-		Origin:      origin,
-		CreatedAt:   time.Now(),
+		Message:   &aop.Message{Role: role, Content: []*aop.Content{aop.Text(content)}},
+		Origin:    origin,
+		CreatedAt: time.Now(),
 	}
 }
 
@@ -57,29 +57,41 @@ func NewSystemMessage(content string) Message {
 	return NewMessage(OriginSystem, "user", content)
 }
 
-func FromChatMessage(msg provider.ChatMessage, origin Origin) Message {
+func FromAOPMessage(msg *aop.Message, origin Origin) Message {
 	return Message{
-		ChatMessage: msg,
-		Origin:      origin,
-		CreatedAt:   time.Now(),
+		Message:   msg,
+		Origin:    origin,
+		CreatedAt: time.Now(),
 	}
 }
 
-// ToChatMessages converts an inbox Message to LLM-compatible ChatMessages.
+// ToMessages converts an inbox Message to LLM-bound aop messages.
 // User-origin messages with no attachments pass through unchanged.
 // All other origins get a metadata envelope so the LLM knows the source.
-func (m Message) ToChatMessages() []provider.ChatMessage {
-	content := m.renderContent()
-	msg := m.ChatMessage
-	msg.Content = &content
-	return []provider.ChatMessage{msg}
+func (m Message) ToMessages() []*aop.Message {
+	if !m.needsEnvelope() && len(m.Attachments) == 0 {
+		return []*aop.Message{m.Message}
+	}
+	rendered := m.renderContent()
+	msg := m.Message
+	return []*aop.Message{{Id: msg.Id, Role: msg.Role, Name: msg.Name, Content: []*aop.Content{aop.Text(rendered)}}}
+}
+
+func messageText(msg *aop.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, part := range msg.Content {
+		if text := part.GetText(); text != nil {
+			sb.WriteString(text.Text)
+		}
+	}
+	return sb.String()
 }
 
 func (m Message) renderContent() string {
-	body := ""
-	if m.ChatMessage.Content != nil {
-		body = *m.ChatMessage.Content
-	}
+	body := messageText(m.Message)
 
 	var sb strings.Builder
 

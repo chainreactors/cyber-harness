@@ -6,30 +6,30 @@
 
 ## 1. Agent 池稳定身份
 
-**问题**: hub 原来每次 WS 连接都 `generateID()` 生成随机 key。chat session 在创建时冻结 `agent_id`，agent 断连重连后 id 变化，session 绑定的旧 id 解析到空，消息被拒为 "not connected"。
+**问题**: hub 原来每次 WS 连接都 `generateID()` 生成随机 key。Chat Session 在创建时绑定 `node_id`；如果连接 key 不稳定，节点重连后 Session 会解析到空并拒绝新消息。
 
-**机制**: `agentKey()` 从 agent 的 `RegisterPayload` 中提取稳定标识（`NodeName` → `Name` → fallback random），作为 pool 的唯一 key。重连的 agent 覆盖旧 slot 而非新建。
+**机制**: `agentKey()` 从生成的 `aop.AgentHello` 中提取稳定标识，作为 pool 的唯一 key。重连的 agent 覆盖旧 slot 而非新建。
 
 **守卫**:
 - `register()` 检测旧连接并 Close，触发旧 read loop 退出
 - `unregister()` 只在 slot 仍属于当前实例时才删除，防止旧 defer 误删新连接
-- SQLite migration 将历史 session 的 `agent_id` 对齐到 `agent_name`
+- SQLite v2 migration 将历史 `chat_sessions.agent_id` 列原位重命名为 `node_id`
 
 **文件**: `pkg/web/agents.go`
 
 ---
 
-## 2. SSE 可靠性分级
+## 2. Typed broker 可靠性分级
 
-**问题**: SSE buffer 满时所有事件同等丢弃。终结性事件（message_end、error）被丢弃后 UI 永远停在 streaming indicator。
+**问题**: live buffer 满时若所有事件同等丢弃，终结性事件被丢弃后 UI 会停在 streaming indicator。
 
-**机制**: `HubEvent` 新增 `Reliable bool`。`Hub.Broadcast` 在 buffer 满时:
-- 非 Reliable（token delta）: 直接丢弃，下一个 delta 会补
-- Reliable（终结性事件）: 驱逐最旧的 queued 事件腾出空间，保证送达
+**机制**: `Hub` 只传递 typed `AOPDelivery` 和 `scan.ScanEvent`。广播方显式标记可靠性；buffer 满时：
+- 非 reliable（token delta、scan progress）：直接丢弃
+- reliable（完整 message、turn ended、scan terminal）：驱逐最旧 queued 事件后入队
 
-**Reliable 事件**: message, message_end, error, scan_complete, scan_error, eval
+持久化重放由 `chat_aop_events` 和 Scan snapshot 负责，live protobuf 不经过 JSON envelope。
 
-**文件**: `pkg/web/sse.go`, `pkg/web/service.go`
+**文件**: `pkg/web/broker.go`, `pkg/web/api/envelope.go`, `pkg/web/service.go`
 
 ---
 
@@ -60,35 +60,25 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/webagent/agent.go`, `pkg/runner/runner.go`, `agent/agent.go`
+**文件**: `pkg/web/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/agents.go`, `pkg/node/agent.go`, `pkg/runner/runner.go`, `agent/agent.go`
 
 ---
 
-## 4. ChatPayload — Goal 模式协议
+## 4. Goal 模式 AOP 扩展
 
-**旧协议**: `"chat"` 消息的 Payload 只有 `{"session_id":"..."}`。
+Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；AIScan 专属字段编码为
+`Any<aiscan.agent.AgentRunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
+`type.googleapis.com/aiscan.agent.AgentRunOptions` 表达。普通对话和 evaluator 复用同一
+Run/Turn 生命周期。
 
-**新协议**: 扩展为 `webproto.ChatPayload`:
-
-```go
-type ChatPayload struct {
-    SessionID       string  // web session 隔离
-    Persist         bool    // 多轮保持
-    EvalCriteria    string  // Goal 评判标准 (非空触发 evaluator loop)
-    EvalMaxRounds   int     // 评估轮次上限
-    PersistMaxTurns int     // 单轮 turn 上限
-}
-```
-
-从前端 Goal 面板 → hub `SendMessageRequest` → `DispatchChatSession` → agent WS 透传。agent 端 `runChatWithAgent` 据此决定执行普通对话还是进入 evaluator 循环。
-
-**文件**: `pkg/webproto/message.go`, `pkg/web/types.go`, `pkg/webagent/agent.go`
+**文件**: `proto/types/agent.proto`, `pkg/runner/runtime_protocol.go`, `pkg/web/service.go`
 
 ---
 
 ## 5. Eval 事件透传与持久化
 
-agent 在 producer 边缘生成原生 AOP envelope；hub 只校验 envelope，并以固定的 `aop` transport frame 原样转发。评估字段保留在 `ext.aiscan` 中，嵌套结构不会 flatten。
+agent 在 producer 边缘生成 `aop.Event`；hub 通过 `aop.Envelope` 原样转发。
+评估字段使用 `aiscan.agent.EvalDetail` protobuf `Any` 扩展，不做 flatten。
 
 eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事件，但不会再投影成另一套 agent 事件或 system message。会话正文只持久化到 `chat_aop_events`，刷新后从同一 AOP 源重建。
 
@@ -113,7 +103,7 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 | search | Tavily "ping" search |
 | ioa | Client.ListSpaces() |
 
-统一模式: probe 失败写入 `ConnCheck.Error`，不返回 error。返回的 error 仅表示 section 不可测。
+统一模式: probe 失败写入 protobuf `ConnectionCheck.error`，不返回传输 error。返回的 error 仅表示 section 不可测。
 
 ### LLM 探活
 
@@ -151,19 +141,11 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ---
 
-## 8. 本地 Agent 管理 (LocalAgents)
+## 8. 内嵌 Agent (Embedded Agent)
 
-hub 可通过 API 在本机 fork `aiscan agent` 子进程:
+`aiscan web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `aiscan agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`aiscan web --no-agent` 只启动 web 控制台。
 
-```
-POST /api/deploy/local     — Launch (fork aiscan agent, 自动拨入 hub)
-GET  /api/deploy/local     — List (cross-reference pool 判断连接/忙碌状态)
-DELETE /api/deploy/local/{id} — Stop (kill 子进程)
-```
-
-子进程通过 `--web-url`/`--ioa-url` 连接 hub 的回环端口，IOA token 嵌入 URL userinfo。退出自动从 roster 移除，hub shutdown 时 `StopAll()` kill 全部。
-
-**文件**: `pkg/web/localagent.go`, `cmd/aiscan/web_full.go`
+**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
 
 ---
 
@@ -173,7 +155,7 @@ DELETE /api/deploy/local/{id} — Stop (kill 子进程)
 
 `dispatchUserMessage` 对 `/verb` 消息分三层路由:
 
-1. `/clear` — hub 全权处理（清 store → 信号 UI → 转发 agent 清 context）
+1. `/clear` — 前端调用 `SessionService.ResetSession`，原 session 关闭并创建 clean session
 2. hub 命令 (`/scan`, `/agents`, `/help`) — 本地执行
 3. 其余 — 透传给 agent 的 `runChatREPLLine`，由 agent 的完整 TUI console 执行
 
@@ -181,7 +163,7 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 
 ### 命令菜单
 
-`GET /api/chat/sessions/{id}/commands` 返回 `SessionMenu()` — hub 3 个命令 + agent 注册时上报的命令元数据（从 `tui.Command` 提取，含 skill）。前端 "/" 弹出菜单从这里拉取。
+`aiscan.chat.SessionService/ListCommands` 返回 `SessionMenu()` — hub 命令 + agent 注册时上报的命令元数据（从 `tui.Command` 提取，含 skill）。前端 "/" 弹出菜单通过生成的 Connect client 拉取；Scan 不属于 Chat 命令协议。
 
 **文件**: `pkg/web/service.go`, `pkg/web/handler.go`
 
@@ -189,13 +171,15 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 
 ## 10. System Message i18n
 
-`broadcastSystemMessage(sessionID, code, fallback, params)`:
+`broadcastSystemMessage(sessionID, code, fallback, params)` 直接生成并持久化 AOP message event：
 
 - `code`: 稳定翻译 key（如 `file_uploaded`）
 - `params`: 插值变量（如 `{"filename": "note.txt", "path": "/tmp/..."}`)
 - `fallback`: 英文文本，供非 i18n 消费者 / 日志 / 测试使用
 
-AOP error 事件把 code 保存在标准 data 中，并把 params 保存在 `ext["aiscan.web"]`。通用 reducer 会保留该扩展块，前端从中渲染本地化文本；因此实时流和重放使用同一参数来源。
+AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
+`Any<aiscan.agent.WebMessageMetadata>` 放入 Event extension。通用 reducer
+保留该扩展，因此实时流和重放使用同一参数来源。
 
 已定义的 code:
 
@@ -222,7 +206,7 @@ AOP error 事件把 code 保存在标准 data 中，并把 params 保存在 `ext
 2. 下次该 session 的自然语言消息到达时，`takePendingUploads` 一次性 drain 所有 note，拼接到 prompt 前面
 3. REPL 命令（`/` 或 `!` 开头）不触发 drain，防止污染命令语法，note 保留到下一条自然语言消息
 
-**文件**: `pkg/webagent/agent.go`
+**文件**: `pkg/node/agent.go`
 
 ---
 
@@ -232,9 +216,10 @@ AOP error 事件把 code 保存在标准 data 中，并把 params 保存在 `ext
 
 **机制**: Runtime 产生的 typed AOP event 是 Agent 消息、工具调用和 turn 状态的唯一语义来源。Web 层直接转发和持久化这些事件，不再合成第二套 assistant 完成事件，也不再为中间轮次维护独立的聊天事件协议。
 
-scan、agent joined、session cleared 等产品事件保留独立的 `DomainEvent`，不携带 Agent 的 role/content/message ID 字段。
+AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
+`Event.extension = Any<aiscan.scan.SessionScanEvent>` 表达。`Any.type_url` 是唯一类型身份，不再维护 `ExtensionEvent`、namespace 字符串或 `DomainEvent`。
 
-**文件**: `pkg/runner/`, `core/aop/`, `pkg/web/service.go`
+**文件**: `pkg/runner/`, `aop/`, `pkg/web/service.go`
 
 ---
 
@@ -260,7 +245,7 @@ scan、agent joined、session cleared 等产品事件保留独立的 `DomainEven
 
 跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web timeline 在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不再处理 Markdown 或终端格式。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/tui/ioa.go`, `core/aop/x/command/command.go`, `core/output/timeline.go`
+**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/types/extensions.go`, `core/output/timeline.go`
 
 ---
 

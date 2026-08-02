@@ -38,21 +38,21 @@ type GlobArgs struct {
 	Path    string `json:"path,omitempty" jsonschema:"description=Base directory for the search (default: working directory)"`
 }
 
-func (t *GlobTool) Definition() coretool.Definition {
+func (t *GlobTool) Definition() *coretool.Definition {
 	return coretool.Def("glob", t.Description(), GlobArgs{})
 }
 
-func (t *GlobTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+func (t *GlobTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	effective := *t
 	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
 	t = &effective
 	args, err := coretool.ParseArgs[GlobArgs](arguments)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 
 	if args.Pattern == "" {
-		return coretool.Result{}, fmt.Errorf("pattern is required")
+		return nil, fmt.Errorf("pattern is required")
 	}
 
 	baseDir := t.workDir
@@ -73,7 +73,7 @@ func (t *GlobTool) Execute(ctx context.Context, arguments string) (coretool.Resu
 		matches, err = filepath.Glob(pattern)
 	}
 	if err != nil {
-		return coretool.Result{}, fmt.Errorf("glob error: %w", err)
+		return nil, fmt.Errorf("glob error: %w", err)
 	}
 
 	// Also search virtual/embedded files

@@ -31,7 +31,7 @@ func (p *gateProvider) ChatCompletion(ctx context.Context, _ *agent.ChatCompleti
 		}
 	}
 	return &agent.ChatCompletionResponse{
-		Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}},
+		Choices: []agent.Choice{{Message: agent.TextMessage("assistant", "done")}},
 	}, nil
 }
 

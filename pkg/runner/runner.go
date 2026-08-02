@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/aop"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -35,12 +35,11 @@ type AgentRuntime struct {
 	systemPrompt   string
 	option         *cfg.Option
 	config         agent.Config
-	bus            *eventbus.Bus[aop.Event]
-	kernelBus      *eventbus.Bus[aop.Event]
+	bus            *eventbus.Bus[*aop.Event]
 	sessionEvents  *sessionEmitter
-	output         *tui.AgentOutput
+	output         RunOutput
 	configFile     string
-	resumeMessages []agent.ChatMessage
+	resumeMessages []*aop.Message
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
@@ -50,6 +49,7 @@ type AgentRuntime struct {
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
 	operations     sync.WaitGroup
+	namespaceMux   *aop.NamespaceMux
 	ptyManager     *tmuxpkg.Manager
 	replMode       REPLMode
 	maxPending     int
@@ -65,15 +65,24 @@ const (
 	REPLPersistent
 )
 
+// RunOutput is the presentation sink an entry point may attach to a runtime.
+// The runtime never constructs one — CLI/TUI hosts inject it; headless hosts
+// (stdio, WebSocket nodes, the web hub) leave it nil.
+type RunOutput interface {
+	HandleEvent(*aop.Event)
+	SetContextWindow(int)
+	Start(label, text string)
+	Final(content string)
+}
+
 type RuntimeConfig struct {
-	ExistingApp       *App
-	IOA               *IOAConfig
-	PromptConfig      *PromptConfig
-	NoOutput          bool
-	InteractiveOutput bool
-	ProviderOptional  bool
-	REPLMode          REPLMode
-	MaxPending        int
+	ExistingApp      *App
+	IOA              *IOAConfig
+	PromptConfig     *PromptConfig
+	Output           RunOutput
+	ProviderOptional bool
+	REPLMode         REPLMode
+	MaxPending       int
 }
 
 const baseAgentSkillName = "aiscan"
@@ -93,6 +102,12 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		sessions: make(map[string]*sessionState),
 		runs:     make(map[string]*Run),
 	}
+	namespaceMux, err := newRuntimeNamespaceMux(rt)
+	if err != nil {
+		runtimeCancel()
+		return nil, fmt.Errorf("init runtime namespaces: %w", err)
+	}
+	rt.namespaceMux = namespaceMux
 	if rc != nil {
 		rt.replMode = rc.REPLMode
 		rt.maxPending = rc.MaxPending
@@ -184,22 +199,16 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	rt.systemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
-	if rc == nil || !rc.NoOutput {
-		if rc != nil && rc.InteractiveOutput {
-			rt.output = tui.NewAgentOutput(option)
-		} else {
-			rt.output = tui.NewStaticAgentOutput(option)
-		}
+	if rc != nil {
+		rt.output = rc.Output
 	}
 
-	publicBus := eventbus.New[aop.Event]()
+	publicBus := eventbus.New[*aop.Event]()
 	if rt.output != nil {
 		publicBus.Subscribe(rt.output.HandleEvent)
 	}
 	rt.bus = publicBus
-	rt.kernelBus = eventbus.New[aop.Event]()
 	rt.sessionEvents = newSessionEmitter(publicBus)
-	rt.kernelBus.Subscribe(rt.sessionEvents.emit)
 
 	var ioaCancel func()
 	var handoffCancel func()
@@ -219,15 +228,16 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	}
 
 	rt.config = agent.Config{
-		Provider:       rt.app.Provider,
-		Tools:          rt.app.Commands,
-		Model:          rt.app.ProviderConfig.Model,
-		MaxTokens:      rt.app.ProviderConfig.MaxTokens,
-		ContextWindow:  rt.app.ProviderConfig.ContextWindow,
-		Logger:         logger,
-		CacheRetention: agent.CacheShort,
-		Bus:            rt.kernelBus,
-		Hooks:          rt.app.Hooks,
+		Provider:              rt.app.Provider,
+		Tools:                 rt.app.Commands,
+		Model:                 rt.app.ProviderConfig.Model,
+		MaxTokens:             rt.app.ProviderConfig.MaxTokens,
+		ContextWindow:         rt.app.ProviderConfig.ContextWindow,
+		Logger:                logger,
+		CacheRetention:        agent.CacheShort,
+		Bus:                   rt.sessionEvents,
+		Hooks:                 rt.app.Hooks,
+		CaptureProviderFrames: option.CaptureProviderFrames,
 	}
 
 	if option.SaveSession {
@@ -236,7 +246,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			if result == nil || len(result.Messages) == 0 {
 				return
 			}
-			if err := agent.SaveSession(sessDir, &agent.SessionData{
+			if err := agent.SaveCheckpoint(sessDir, &agent.CheckpointData{
 				Model:          option.Model,
 				Provider:       option.Provider,
 				Messages:       result.Messages,
@@ -271,11 +281,15 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	handoffCancel = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
 	rt.app.Commands.RegisterTool(subAgentTool)
 	loop := newLoopCommand()
-	rt.app.Commands.Register(cmdpkg.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
+	rt.app.Commands.Register(cmdpkg.Command{
+		Name: loop.Name(), Usage: loop.Usage(),
+		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
+		Run:             loop.Run,
+	}, "loop")
 
 	if option.Resume != "" {
 		path := option.Resume
-		data, err := agent.LoadSession(path)
+		data, err := agent.LoadCheckpoint(path)
 		if err != nil {
 			rt.Close()
 			return nil, fmt.Errorf("resume session: %w", err)
@@ -450,7 +464,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	rt, err := NewAgentRuntime(ctx, option, logger, nil)
+	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{Output: tui.NewStaticAgentOutput(option)})
 	if err != nil {
 		return err
 	}
@@ -471,7 +485,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 	run, err := session.Run(ctx, RunInput{
-		Parts:    []aop.MessagePart{{Type: aop.PartText, Text: task}},
+		Content:  []*aop.Content{aop.Text(task)},
 		MaxTurns: rt.config.MaxTurns, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 	if err != nil {
@@ -491,7 +505,6 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
 	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{
-		NoOutput: true,
 		REPLMode: REPLEphemeral,
 	})
 	if err != nil {

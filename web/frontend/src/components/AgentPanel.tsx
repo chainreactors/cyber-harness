@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { LoaderCircle, Monitor, Search } from 'lucide-react'
-import type { AgentInfo } from '../api'
+import { timestampDate } from '@bufbuild/protobuf/wkt'
+import type { AgentView } from '../api'
 const terminalChunkReloadKey = 'aiscan-terminal-chunk-reload'
 const loadAgentTerminal = () => import('./terminal')
 async function loadAgentTerminalWithRecovery() {
@@ -28,29 +29,29 @@ import {
   ListRow,
   StatusDot,
 } from '@cyber/ui'
-import { ConsoleDrawer } from './layout/ConsoleDrawer'
+import { ToolDrawer } from './layout/ToolDrawer'
 
 interface AgentPanelProps {
   open: boolean
   /** The roster from useChatSession — avoids a redundant listAgents poll. */
-  agents: AgentInfo[]
+  agents: AgentView[]
   /** When opened from a deck node click, focus this agent's console. */
-  focusAgentID?: string
+  focusNodeID?: string
   onClose: () => void
 }
 
-export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, onClose }: AgentPanelProps) {
+export default function AgentPanel({ open, agents: rosterAgents, focusNodeID, onClose }: AgentPanelProps) {
   const { t } = useTranslation('agent')
-  const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusAgentID)
+  const { agents, selected, selectedNodeID, setSelectedNodeID } = useAgentDirectory(open, rosterAgents, focusNodeID)
   const showAgentList = agents.length > 1
 
   return (
-    <ConsoleDrawer
+    <ToolDrawer
       open={open}
       onClose={onClose}
       icon={Monitor}
       title={t('agentConsole')}
-      description={selected ? `${selected.name} · ${selected.busy ? t('busy') : t('idle')}` : t('noAgentSelected')}
+      description={selected ? `${selected.hello?.name || ''} · ${selected.busy ? t('busy') : t('idle')}` : t('noAgentSelected')}
       titleMeta={(
         <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
           {agents.length}
@@ -66,8 +67,8 @@ export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, o
           {showAgentList && (
             <AgentList
               agents={agents}
-              selectedID={selectedID}
-              onSelect={setSelectedID}
+              selectedNodeID={selectedNodeID}
+              onSelect={setSelectedNodeID}
             />
           )}
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -84,19 +85,19 @@ export default function AgentPanel({ open, agents: rosterAgents, focusAgentID, o
           </section>
         </div>
       )}
-    </ConsoleDrawer>
+    </ToolDrawer>
   )
 }
 
 // Derives selection state from the parent-provided roster (useChatSession
 // already polls listAgents every 5s). No internal fetch or polling — the agent
 // list is a prop, so the panel never double-polls.
-function useAgentDirectory(open: boolean, roster: AgentInfo[], focusAgentID?: string) {
-  const [selectedID, setSelectedID] = useState('')
+function useAgentDirectory(open: boolean, roster: AgentView[], focusNodeID?: string) {
+  const [selectedNodeID, setSelectedNodeID] = useState('')
 
   // Keep selection valid as the roster changes (agents disconnect / reconnect).
   useEffect(() => {
-    setSelectedID((current) => roster.some((a) => a.id === current) ? current : roster[0]?.id || '')
+    setSelectedNodeID((current) => roster.some((a) => a.hello?.nodeId === current) ? current : roster[0]?.hello?.nodeId || '')
   }, [roster])
 
   // Focus a specific node when the panel is opened from a deck node click.
@@ -107,28 +108,28 @@ function useAgentDirectory(open: boolean, roster: AgentInfo[], focusAgentID?: st
   const focusAppliedRef = useRef(false)
   useEffect(() => {
     focusAppliedRef.current = false
-  }, [open, focusAgentID])
+  }, [open, focusNodeID])
   useEffect(() => {
     if (focusAppliedRef.current) return
-    if (open && focusAgentID && roster.some((a) => a.id === focusAgentID)) {
-      setSelectedID(focusAgentID)
+    if (open && focusNodeID && roster.some((a) => a.hello?.nodeId === focusNodeID)) {
+      setSelectedNodeID(focusNodeID)
       focusAppliedRef.current = true
     }
-  }, [open, focusAgentID, roster])
+  }, [open, focusNodeID, roster])
 
-  const selected = roster.find((agent) => agent.id === selectedID) || roster[0] || null
+  const selected = roster.find((agent) => agent.hello?.nodeId === selectedNodeID) || roster[0] || null
 
-  return { agents: roster, selected, selectedID, setSelectedID }
+  return { agents: roster, selected, selectedNodeID, setSelectedNodeID }
 }
 
 function AgentList({
   agents,
   onSelect,
-  selectedID,
+  selectedNodeID,
 }: {
-  agents: AgentInfo[]
-  onSelect: (id: string) => void
-  selectedID: string
+  agents: AgentView[]
+  onSelect: (nodeID: string) => void
+  selectedNodeID: string
 }) {
   const { t } = useTranslation('agent')
   const [query, setQuery] = useState('')
@@ -138,7 +139,7 @@ function AgentList({
     () =>
       [...agents].sort((a, b) => {
         if (a.busy !== b.busy) return a.busy ? -1 : 1
-        return (a.name || '').localeCompare(b.name || '')
+        return (a.hello?.name || '').localeCompare(b.hello?.name || '')
       }),
     [agents],
   )
@@ -146,7 +147,7 @@ function AgentList({
     const q = query.trim().toLowerCase()
     if (!q) return sorted
     return sorted.filter((a) =>
-      `${a.name} ${a.status?.model || ''} ${a.status?.provider || ''} ${a.runtime?.hostname || ''}`
+      `${a.hello?.name || ''} ${a.status?.model || ''} ${a.status?.provider || ''} ${a.hello?.runtime?.hostname || ''}`
         .toLowerCase()
         .includes(q),
     )
@@ -184,16 +185,16 @@ function AgentList({
         ) : (
           filtered.map((agent) => (
             <ListRow
-              key={agent.id}
-              active={selectedID === agent.id}
+              key={agent.hello?.nodeId}
+              active={selectedNodeID === agent.hello?.nodeId}
               leading={<StatusDot status={agent.busy ? 'warning' : 'info'} className="mt-1" />}
-              onClick={() => onSelect(agent.id)}
+              onClick={() => onSelect(agent.hello?.nodeId || '')}
               title={agentDetails(agent)}
               className="mb-1"
             >
-              <span className="block truncate text-sm font-medium">{agent.name}</span>
+              <span className="block truncate text-sm font-medium">{agent.hello?.name}</span>
               <span className="mt-0.5 block truncate text-xs">
-                {agent.busy ? t('busy') : t('idle')} · {formatRelativeTime(agent.connected_at, t)}
+                {agent.busy ? t('busy') : t('idle')} · {formatRelativeTime(agent.connectedAt ? timestampDate(agent.connectedAt).toISOString() : '', t)}
               </span>
             </ListRow>
           ))
@@ -203,26 +204,26 @@ function AgentList({
   )
 }
 
-function agentDetails(agent: AgentInfo) {
-  const runtime = agent.runtime || {}
-  const status = agent.status || { bound: false }
-  const stats = agent.stats || {}
+function agentDetails(agent: AgentView) {
+  const runtime = agent.hello?.runtime
+  const status = agent.status
+  const stats = agent.stats
   const parts = [
-    `name: ${agent.name}`,
-    `id: ${agent.id}`,
+    `name: ${agent.hello?.name || ''}`,
+    `id: ${agent.hello?.nodeId || ''}`,
     `state: ${agent.busy ? 'busy' : 'idle'}`,
-    `connected: ${formatDateTime(agent.connected_at)}`,
-    runtime.hostname ? `host: ${runtime.hostname}` : '',
-    runtime.username ? `user: ${runtime.username}` : '',
-    runtime.working_dir ? `cwd: ${runtime.working_dir}` : '',
-    runtime.os || runtime.arch ? `runtime: ${[runtime.os, runtime.arch].filter(Boolean).join('/')}` : '',
-    runtime.pid ? `pid: ${runtime.pid}` : '',
-    status.provider || status.model ? `llm: ${[status.provider, status.model].filter(Boolean).join(' / ')}` : '',
-    agent.commands?.length ? `commands: ${agent.commands.join(', ')}` : '',
-    runtime.capabilities?.length ? `capabilities: ${runtime.capabilities.join(', ')}` : '',
-    typeof stats.turns === 'number' ? `turns: ${stats.turns}` : '',
-    typeof stats.tool_calls === 'number' ? `tool calls: ${stats.tool_calls}` : '',
-    typeof stats.total_tokens === 'number' ? `tokens: ${stats.total_tokens}` : '',
+    `connected: ${agent.connectedAt ? formatDateTime(timestampDate(agent.connectedAt).toISOString()) : ''}`,
+    runtime?.hostname ? `host: ${runtime.hostname}` : '',
+    runtime?.username ? `user: ${runtime.username}` : '',
+    runtime?.workingDir ? `cwd: ${runtime.workingDir}` : '',
+    runtime?.os || runtime?.arch ? `runtime: ${[runtime.os, runtime.arch].filter(Boolean).join('/')}` : '',
+    runtime?.pid ? `pid: ${runtime.pid}` : '',
+    status?.provider || status?.model ? `llm: ${[status.provider, status.model].filter(Boolean).join(' / ')}` : '',
+    agent.commands.length ? `commands: ${agent.commands.map((command) => command.name).join(', ')}` : '',
+    agent.hello?.capabilities.length ? `capabilities: ${agent.hello.capabilities.join(', ')}` : '',
+    stats ? `turns: ${stats.turns}` : '',
+    stats ? `tool calls: ${stats.toolCalls}` : '',
+    stats ? `tokens: ${stats.totalTokens}` : '',
   ]
   return parts.filter(Boolean).join('\n')
 }

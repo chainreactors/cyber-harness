@@ -12,13 +12,16 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
-	xcommand "github.com/chainreactors/aiscan/core/aop/x/command"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	toolpkg "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tui"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const DefaultSessionPendingLimit = 64
@@ -28,7 +31,7 @@ type SessionOptions struct {
 	ParentSessionID  string
 	ParentToolCallID string
 	AgentName        string
-	Messages         []agent.ChatMessage
+	Messages         []*aop.Message
 }
 
 type SessionCloseReason string
@@ -41,8 +44,8 @@ const (
 
 type RunInput struct {
 	TurnID        string
-	Parts         []aop.MessagePart
-	NoEcho        bool
+	Message       *aop.Message
+	Content       []*aop.Content
 	MaxTurns      int
 	EvalCriteria  string
 	EvalMaxRounds int
@@ -54,14 +57,8 @@ type RunInput struct {
 type RunResult struct {
 	Output        string
 	Stop          agent.StopReason
-	Usage         agent.Usage
+	Usage         *aop.TokenUsage
 	ContextTokens int
-}
-
-type CommandResult struct {
-	Command      string            `json:"command"`
-	Presentation string            `json:"presentation,omitempty"`
-	Parts        []aop.MessagePart `json:"parts,omitempty"`
 }
 
 const (
@@ -74,12 +71,13 @@ type Session struct {
 }
 
 type Run struct {
-	turnID string
-	done   chan struct{}
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	result RunResult
-	err    error
+	sessionID string
+	turnID    string
+	done      chan struct{}
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	result    RunResult
+	err       error
 }
 
 func (r *Run) TurnID() string {
@@ -114,34 +112,43 @@ type sessionOperation struct {
 }
 
 type commandOutcome struct {
-	result CommandResult
+	result *types.CommandResult
 	err    error
 }
 
 type sessionEmitter struct {
-	bus *eventbus.Bus[aop.Event]
+	bus *eventbus.Bus[*aop.Event]
 	mu  sync.Mutex
-	seq map[string]int
+	seq map[string]uint64
 }
 
-func newSessionEmitter(bus *eventbus.Bus[aop.Event]) *sessionEmitter {
-	return &sessionEmitter{bus: bus, seq: make(map[string]int)}
+func newSessionEmitter(bus *eventbus.Bus[*aop.Event]) *sessionEmitter {
+	return &sessionEmitter{bus: bus, seq: make(map[string]uint64)}
 }
 
-func (e *sessionEmitter) emit(event aop.Event) {
-	if event.TS == "" {
-		event.TS = time.Now().UTC().Format(time.RFC3339Nano)
+// Emit stamps the event with runtime metadata (timestamp, per-session
+// sequence, fallback id) and forwards it to the runtime's single public bus.
+// It satisfies agent.EventEmitter so session agents emit through it directly.
+func (e *sessionEmitter) Emit(event *aop.Event) {
+	if event.EmittedAt == nil {
+		event.EmittedAt = timestamppb.Now()
 	}
 	e.mu.Lock()
-	e.seq[event.SessionID]++
-	event.Seq = e.seq[event.SessionID]
+	e.seq[event.SessionId]++
+	event.Seq = e.seq[event.SessionId]
+	if event.Id == "" {
+		event.Id = fmt.Sprintf("runtime-%d", event.Seq)
+	}
 	e.mu.Unlock()
 	e.bus.Emit(event)
 }
 
-func (e *sessionEmitter) lifecycle(typ, sessionID, agentName string, data any) {
-	raw, _ := json.Marshal(data)
-	e.emit(aop.Event{Type: typ, SessionID: sessionID, Agent: agentName, Data: raw})
+func (e *sessionEmitter) sessionStarted(sessionID, agentName string, started *aop.SessionStarted) {
+	e.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}})
+}
+
+func (e *sessionEmitter) sessionEnded(sessionID, agentName, reason string) {
+	e.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
 type turnEmitter struct {
@@ -152,17 +159,15 @@ type turnEmitter struct {
 }
 
 func (e *turnEmitter) start() {
-	raw, _ := json.Marshal(aop.TurnStartData{})
-	e.emitter.emit(aop.Event{Type: aop.TypeTurnStart, SessionID: e.sessionID, TurnID: e.turnID, Agent: e.agentName, Data: raw})
+	e.emitter.Emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
 func (e *turnEmitter) end(result RunResult, runErr error) {
-	data := aop.TurnEndData{Stop: string(result.Stop), Usage: runtimeUsageData(result.Usage), ContextTokens: result.ContextTokens}
+	ended := &aop.TurnEnded{StopReason: string(result.Stop), Usage: result.Usage, ContextTokens: uint64(max(result.ContextTokens, 0))}
 	if runErr != nil {
-		data.Error = runErr.Error()
+		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
-	raw, _ := json.Marshal(data)
-	e.emitter.emit(aop.Event{Type: aop.TypeTurnEnd, SessionID: e.sessionID, TurnID: e.turnID, Agent: e.agentName, Data: raw})
+	e.emitter.Emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
 }
 
 type commandSession struct {
@@ -270,13 +275,13 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if err != nil {
 		return commandOutcome{err: err}
 	}
-	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(result.Text(), " \t\r\n"))
+	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(toolpkg.ResultText(result), " \t\r\n"))
 }
 
 func commandText(line, presentation, text string) commandOutcome {
-	result := CommandResult{Command: line, Presentation: presentation}
+	result := &types.CommandResult{Command: line, Presentation: presentation}
 	if text != "" {
-		result.Parts = []aop.MessagePart{{Type: aop.PartText, Text: text}}
+		result.Content = []*aop.Content{aop.Text(text)}
 	}
 	return commandOutcome{result: result}
 }
@@ -398,7 +403,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		WithInbox(mailbox).
 		WithSessionID(id).
 		WithAgentName(agentName).
-		WithBus(rt.kernelBus)
+		WithBus(rt.sessionEvents)
 	agentCfg.ParentSessionID = options.ParentSessionID
 	agentCfg.ParentToolCallID = options.ParentToolCallID
 	agentCfg.LoopScheduler = scheduler
@@ -430,8 +435,8 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		})
 	}
 	go rt.runSession(state)
-	rt.sessionEvents.lifecycle(aop.TypeSessionStart, id, agentName, aop.SessionStartData{
-		Model: rt.config.Model, ParentSessionID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID,
+	rt.sessionEvents.sessionStarted(id, agentName, &aop.SessionStarted{
+		Model: rt.config.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	})
 	return public, nil
 }
@@ -510,11 +515,11 @@ func (rt *AgentRuntime) CloseSession(ctx context.Context, sessionID string, reas
 	}
 	state.scheduler.Stop()
 	state.inbox.Close()
-	rt.sessionEvents.lifecycle(aop.TypeSessionEnd, state.id, state.agentName, aop.SessionEndData{Reason: string(reason)})
+	rt.sessionEvents.sessionEnded(state.id, state.agentName, string(reason))
 	return nil
 }
 
-func (rt *AgentRuntime) Subscribe(fn func(aop.Event)) func() {
+func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) func() {
 	if rt == nil || rt.bus == nil || fn == nil {
 		return func() {}
 	}
@@ -542,10 +547,10 @@ func (rt *AgentRuntime) RunSession(ctx context.Context, sessionID string, input 
 	return session.Run(ctx, input)
 }
 
-func (rt *AgentRuntime) CommandSession(ctx context.Context, sessionID, line string) (CommandResult, error) {
+func (rt *AgentRuntime) CommandSession(ctx context.Context, sessionID, line string) (*types.CommandResult, error) {
 	session, err := rt.session(sessionID)
 	if err != nil {
-		return CommandResult{}, err
+		return nil, err
 	}
 	return session.Command(ctx, line)
 }
@@ -560,6 +565,22 @@ func (rt *AgentRuntime) CancelRun(turnID string) error {
 	rt.mu.RUnlock()
 	if run == nil {
 		return fmt.Errorf("turn %q is not active", turnID)
+	}
+	run.cancel()
+	return nil
+}
+
+func (rt *AgentRuntime) CancelSessionRun(sessionID, turnID string) error {
+	if rt == nil {
+		return fmt.Errorf("agent runtime is not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	turnID = strings.TrimSpace(turnID)
+	rt.mu.RLock()
+	run := rt.runs[turnID]
+	rt.mu.RUnlock()
+	if run == nil || run.sessionID != sessionID {
+		return fmt.Errorf("turn %q is not active in session %q", turnID, sessionID)
 	}
 	run.cancel()
 	return nil
@@ -580,15 +601,15 @@ func (s *Session) Run(ctx context.Context, input RunInput) (*Run, error) {
 	return s.state.startRun(ctx, input)
 }
 
-func (s *Session) Command(ctx context.Context, line string) (CommandResult, error) {
+func (s *Session) Command(ctx context.Context, line string) (*types.CommandResult, error) {
 	if s == nil || s.state == nil {
-		return CommandResult{}, fmt.Errorf("session is not configured")
+		return nil, fmt.Errorf("session is not configured")
 	}
 	done := make(chan commandOutcome, 1)
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
 			outcome := s.state.commands.execute(runCtx, line)
-			if outcome.err == nil && len(outcome.result.Parts) > 0 {
+			if outcome.err == nil && len(outcome.result.GetContent()) > 0 {
 				s.state.emitCommandResult(outcome.result)
 			}
 			done <- outcome
@@ -596,7 +617,7 @@ func (s *Session) Command(ctx context.Context, line string) (CommandResult, erro
 		reject: func(err error) { done <- commandOutcome{err: err} },
 	}
 	if err := s.state.admit(ctx, op); err != nil {
-		return CommandResult{}, err
+		return nil, err
 	}
 	outcome := <-done
 	return outcome.result, outcome.err
@@ -610,7 +631,7 @@ func (s *Session) ID() string {
 
 }
 
-func (s *Session) MessagesSnapshot() []agent.ChatMessage {
+func (s *Session) MessagesSnapshot() []*aop.Message {
 	if s == nil || s.state == nil {
 		return nil
 	}
@@ -618,7 +639,7 @@ func (s *Session) MessagesSnapshot() []agent.ChatMessage {
 }
 
 func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, error) {
-	if !input.automatic && !input.Continue && !hasRunInput(input.Parts) {
+	if !input.automatic && !input.Continue && !hasRunInput(runInputContent(input)) {
 		return nil, fmt.Errorf("run input is empty")
 	}
 	turnID := strings.TrimSpace(input.TurnID)
@@ -629,7 +650,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 		ctx = context.Background()
 	}
 	runCtx, runCancel := context.WithCancel(ctx)
-	run := &Run{turnID: turnID, done: make(chan struct{}), cancel: runCancel}
+	run := &Run{sessionID: s.id, turnID: turnID, done: make(chan struct{}), cancel: runCancel}
 	s.runtime.mu.Lock()
 	if _, exists := s.runtime.runs[turnID]; exists {
 		s.runtime.mu.Unlock()
@@ -681,12 +702,12 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	return run, nil
 }
 
-func hasRunInput(parts []aop.MessagePart) bool {
-	for _, part := range parts {
-		if part.Type == aop.PartText && strings.TrimSpace(part.Text) != "" {
+func hasRunInput(content []*aop.Content) bool {
+	for _, part := range content {
+		if strings.TrimSpace(part.GetText().GetText()) != "" {
 			return true
 		}
-		if part.Type == aop.PartImage && part.Image != nil {
+		if part.GetMedia() != nil {
 			return true
 		}
 	}
@@ -700,21 +721,34 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	if input.EvalCriteria == "" {
 		input.EvalCriteria = s.commands.evalCriteria
 	}
-	if len(input.Parts) == 1 && input.Parts[0].Type == aop.PartText {
-		input.Parts[0].Text = skills.ExpandCommand(input.Parts[0].Text, s.runtime.app.Skills)
+	message := input.Message
+	if message == nil {
+		message = &aop.Message{Role: "user", Content: input.Content}
+	} else {
+		message = proto.CloneOf(message)
 	}
-	message := aop.MessageData{Role: "user", Parts: input.Parts}
-	agentInput := agent.InputFromAOPMessage(message)
-	agentInput.NoEcho = input.NoEcho
+	if message.Role == "" {
+		message.Role = "user"
+	}
+	if len(message.Content) == 1 && message.Content[0].GetText() != nil {
+		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.app.Skills)
+	}
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, agentInput, input.EvalCriteria, input.EvalMaxRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalMaxRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 		return result, err
 	}
-	return s.agent.Run(ctx, agentInput, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
+	return s.agent.Run(ctx, message, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
+}
+
+func runInputContent(input RunInput) []*aop.Content {
+	if input.Message != nil {
+		return input.Message.Content
+	}
+	return input.Content
 }
 
 func (s *sessionState) startAutomaticRun() {
@@ -799,13 +833,12 @@ func (rt *AgentRuntime) runSession(session *sessionState) {
 	}
 }
 
-func (s *sessionState) emitCommandResult(result CommandResult) {
-	raw, _ := json.Marshal(aop.MessageData{
-		MessageID: s.runtime.nextRuntimeID("command"), Role: "assistant", Parts: result.Parts,
-	})
-	event := aop.Event{Type: aop.TypeMessage, SessionID: s.id, Agent: s.agentName, Data: raw}
-	_ = xcommand.SetDetail(&event, xcommand.Detail{Line: result.Command, Presentation: result.Presentation})
-	s.runtime.sessionEvents.emit(event)
+func (s *sessionState) emitCommandResult(result *types.CommandResult) {
+	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
+		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
+	}}}
+	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
+	s.runtime.sessionEvents.Emit(event)
 }
 
 func (rt *AgentRuntime) pendingLimit() int {
@@ -860,16 +893,6 @@ func (rt *AgentRuntime) providerSnapshot() (agent.Provider, string, telemetry.Lo
 	return rt.config.Provider, rt.config.Model, rt.config.Logger
 }
 
-func runtimeUsageData(usage agent.Usage) *aop.UsageData {
-	if usage == (agent.Usage{}) {
-		return nil
-	}
-	return &aop.UsageData{
-		InputTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens,
-		CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
-	}
-}
-
 func (rt *AgentRuntime) consoleAppInfo() tui.AppInfo {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
@@ -889,7 +912,7 @@ func (rt *AgentRuntime) consoleAppInfoForSession(session *Session) tui.AppInfo {
 	info.Run = func(ctx context.Context, prompt string, continuation bool) (*agent.Result, error) {
 		input := RunInput{Continue: continuation}
 		if !continuation {
-			input.Parts = []aop.MessagePart{{Type: aop.PartText, Text: prompt}}
+			input.Content = []*aop.Content{aop.Text(prompt)}
 		}
 		run, err := session.Run(ctx, input)
 		if err != nil {

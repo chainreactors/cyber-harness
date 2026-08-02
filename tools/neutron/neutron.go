@@ -21,6 +21,7 @@ import (
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -224,6 +225,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	var sb strings.Builder
 	jsonOutput := flags.JSON || flags.JSONL
 	statsEnabled := (flags.Stats || !flags.NoStats) && !flags.NoStats
+	results := make([]*sdktypes.TemplateResult, 0, len(targets)*len(selected))
 
 	for _, target := range targets {
 		targetOpts := opts
@@ -244,6 +246,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 				summary.Errors++
 			}
 			record := neutronResultFromExecution(target, result)
+			results = append(results, result.TemplateResult(target))
 			if record.Matched {
 				summary.Matched++
 				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
@@ -266,7 +269,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		fmt.Fprint(execution.Stdout, line)
 	}
 	_, wErr := c.writeOrReturn(flags.OutputFile, sb.String())
-	return nil, wErr
+	return results, wErr
 }
 
 func normalizeNucleiStyleArgs(args []string) []string {

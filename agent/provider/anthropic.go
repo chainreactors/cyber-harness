@@ -2,11 +2,14 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 const (
@@ -57,13 +60,16 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *ChatComplet
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	captureFrame(ctx, RawFrame{Provider: p.Name(), Protocol: ProviderAnthropic, Direction: "request", Transport: "http", Payload: bodyBytes, MediaType: "application/json"})
 
 	data, err := (&apiRequest{client: p.client, timeout: timeoutFromConfig(p.config.Timeout)}).do(
 		ctx, "POST", p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
 	)
 	if err != nil {
+		captureAPIErrorFrame(ctx, p.Name(), ProviderAnthropic, err)
 		return nil, hint404(err, p.completionEndpoint(), "OpenAI", "openai")
 	}
+	captureFrame(ctx, RawFrame{Provider: p.Name(), Protocol: ProviderAnthropic, Direction: "response", Transport: "http", Payload: data, MediaType: "application/json"})
 
 	result, err := parseAnthropicResponse(data)
 	if err != nil {
@@ -92,7 +98,7 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 
 	parser := &anthropicStreamParser{}
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
-		p.completionEndpoint(), bodyBytes, p.setAuthHeaders,
+		p.completionEndpoint(), bodyBytes, p.setAuthHeaders, p.Name(), ProviderAnthropic,
 		false,
 		parser.parse,
 	)
@@ -170,14 +176,17 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 
 	var tools []anthropicTool
 	official := strings.Contains(p.config.BaseURL, "anthropic.com")
-	for _, t := range req.Tools {
-		inputSchema := t.Function.Parameters
-		if inputSchema == nil {
-			inputSchema = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+	for _, def := range req.Tools {
+		inputSchema := map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+		if def.InputSchema != nil {
+			var schema map[string]interface{}
+			if err := json.Unmarshal(def.InputSchema.Data, &schema); err == nil && schema != nil {
+				inputSchema = schema
+			}
 		}
 		at := anthropicTool{
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
+			Name:        def.Name,
+			Description: def.Description,
 			InputSchema: inputSchema,
 		}
 		if official {
@@ -192,29 +201,35 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 	var systemParts []string
 	var messages []aMsg
 	for _, m := range req.Messages {
+		if m == nil {
+			continue
+		}
 		switch m.Role {
 		case "system":
-			if m.Content != nil {
-				systemParts = append(systemParts, *m.Content)
+			if text := MessageText(m); text != "" {
+				systemParts = append(systemParts, text)
 			}
 
 		case "assistant":
 			var blocks []map[string]interface{}
-			if m.Content != nil && *m.Content != "" {
-				blocks = append(blocks, map[string]interface{}{"type": "text", "text": *m.Content})
+			if text := MessageText(m); text != "" {
+				blocks = append(blocks, map[string]interface{}{"type": "text", "text": text})
 			}
-			for _, tc := range m.ToolCalls {
+			for _, call := range MessageToolCalls(m) {
 				var input interface{}
-				args := strings.TrimSpace(tc.Function.Arguments)
+				args := ""
+				if call.Arguments != nil {
+					args = strings.TrimSpace(string(call.Arguments.Data))
+				}
 				if args == "" {
 					input = map[string]interface{}{}
 				} else if err := json.Unmarshal([]byte(args), &input); err != nil {
-					return nil, fmt.Errorf("anthropic tool call %q has invalid JSON arguments: %w", tc.Function.Name, err)
+					return nil, fmt.Errorf("anthropic tool call %q has invalid JSON arguments: %w", call.Name, err)
 				}
 				blocks = append(blocks, map[string]interface{}{
 					"type":  "tool_use",
-					"id":    tc.ID,
-					"name":  tc.Function.Name,
+					"id":    call.Id,
+					"name":  call.Name,
 					"input": input,
 				})
 			}
@@ -224,18 +239,16 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 			messages = append(messages, aMsg{Role: "assistant", Content: blocks})
 
 		case "tool":
-			var resultContent interface{}
-			if len(m.ContentParts) > 0 {
-				resultContent = contentPartsToAnthropicBlocks(m.ContentParts)
-			} else {
-				resultContent = deref(m.Content)
+			result := MessageToolResult(m)
+			if result == nil {
+				continue
 			}
 			resultBlock := map[string]interface{}{
 				"type":        "tool_result",
-				"tool_use_id": m.ToolCallID,
-				"content":     resultContent,
+				"tool_use_id": result.CallId,
+				"content":     toolResultToAnthropicContent(result),
 			}
-			if m.ToolResultIsError {
+			if result.IsError {
 				resultBlock["is_error"] = true
 			}
 			messages = append(messages, aMsg{
@@ -244,21 +257,8 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 			})
 
 		default:
-			if len(m.ContentParts) > 0 {
-				messages = append(messages, aMsg{
-					Role:    m.Role,
-					Content: contentPartsToAnthropicBlocks(m.ContentParts),
-				})
-			} else {
-				text := ""
-				if m.Content != nil {
-					text = *m.Content
-				}
-				messages = append(messages, aMsg{
-					Role:    m.Role,
-					Content: []map[string]interface{}{{"type": "text", "text": text}},
-				})
-			}
+			blocks := messageContentToAnthropicBlocks(m)
+			messages = append(messages, aMsg{Role: m.Role, Content: blocks})
 		}
 	}
 
@@ -311,6 +311,59 @@ func (p *AnthropicProvider) marshalRequest(req *ChatCompletionRequest) ([]byte, 
 	return json.Marshal(wrapper)
 }
 
+func toolResultToAnthropicContent(result *aop.ToolResult) interface{} {
+	blocks := messageBlocksFromContents(result.Output)
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 && blocks[0]["type"] == "text" {
+		return blocks[0]["text"]
+	}
+	return blocks
+}
+
+func messageContentToAnthropicBlocks(m *aop.Message) []map[string]interface{} {
+	blocks := messageBlocksFromContents(m.Content)
+	if len(blocks) == 0 {
+		return []map[string]interface{}{{"type": "text", "text": ""}}
+	}
+	return blocks
+}
+
+func messageBlocksFromContents(contents []*aop.Content) []map[string]interface{} {
+	var blocks []map[string]interface{}
+	for _, content := range contents {
+		switch value := content.Value.(type) {
+		case *aop.Content_Text:
+			blocks = append(blocks, map[string]interface{}{"type": "text", "text": value.Text.Text})
+		case *aop.Content_Media:
+			media := value.Media
+			if media.Kind != "image" || media.Resource == nil {
+				continue
+			}
+			data := media.Resource.GetData()
+			if len(data) == 0 {
+				if uri := media.Resource.GetUri(); uri != "" {
+					blocks = append(blocks, map[string]interface{}{
+						"type":   "image",
+						"source": map[string]interface{}{"type": "url", "url": uri},
+					})
+				}
+				continue
+			}
+			blocks = append(blocks, map[string]interface{}{
+				"type": "image",
+				"source": map[string]interface{}{
+					"type":       "base64",
+					"media_type": media.Resource.MediaType,
+					"data":       base64.StdEncoding.EncodeToString(data),
+				},
+			})
+		}
+	}
+	return blocks
+}
+
 // --- Anthropic response types and parsing ---
 
 type aMsg struct {
@@ -332,29 +385,6 @@ func mergeConsecutive(msgs []aMsg) []aMsg {
 		}
 	}
 	return merged
-}
-
-func contentPartsToAnthropicBlocks(parts []ContentPart) []map[string]interface{} {
-	blocks := make([]map[string]interface{}, 0, len(parts))
-	for _, part := range parts {
-		switch part.Type {
-		case "text":
-			blocks = append(blocks, map[string]interface{}{"type": "text", "text": part.Text})
-		case "image_url":
-			if part.ImageURL != nil {
-				mediaType, data := ParseDataURI(part.ImageURL.URL)
-				blocks = append(blocks, map[string]interface{}{
-					"type": "image",
-					"source": map[string]interface{}{
-						"type":       "base64",
-						"media_type": mediaType,
-						"data":       data,
-					},
-				})
-			}
-		}
-	}
-	return blocks
 }
 
 type anthropicUsage struct {
@@ -414,12 +444,12 @@ func parseAnthropicResponse(data []byte) (*ChatCompletionResponse, error) {
 	}, nil
 }
 
-func anthropicBlocksToMessage(role string, blocks []anthropicContentBlock) ChatMessage {
+func anthropicBlocksToMessage(role string, blocks []anthropicContentBlock) *aop.Message {
 	if role == "" {
 		role = "assistant"
 	}
+	msg := &aop.Message{Role: role}
 	var text, thinking strings.Builder
-	toolCalls := make([]ToolCall, 0)
 	for _, block := range blocks {
 		switch block.Type {
 		case "thinking":
@@ -428,26 +458,23 @@ func anthropicBlocksToMessage(role string, blocks []anthropicContentBlock) ChatM
 			text.WriteString(block.Text)
 		case "tool_use":
 			args := anthropicToolArguments(block.Input)
-			toolCalls = append(toolCalls, ToolCall{
-				ID:   block.ID,
-				Type: "function",
-				Function: FunctionCall{
-					Name:      block.Name,
-					Arguments: args,
-				},
-			})
+			msg.Content = append(msg.Content, &aop.Content{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+				Id:        block.ID,
+				Name:      block.Name,
+				Kind:      "function",
+				Arguments: &aop.EncodedValue{Data: []byte(args), MediaType: aop.JSONMediaType},
+			}}})
 		}
 	}
-
-	msg := ChatMessage{Role: role}
 	if content := thinking.String(); content != "" {
-		msg.ReasoningContent = &content
+		msg.Content = append([]*aop.Content{aop.Reasoning(content)}, msg.Content...)
 	}
 	if content := text.String(); content != "" {
-		msg.Content = &content
-	}
-	if len(toolCalls) > 0 {
-		msg.ToolCalls = toolCalls
+		insertAt := 0
+		if len(msg.Content) > 0 && msg.Content[0].GetReasoning() != nil {
+			insertAt = 1
+		}
+		msg.Content = append(msg.Content[:insertAt], append([]*aop.Content{aop.Text(content)}, msg.Content[insertAt:]...)...)
 	}
 	return msg
 }
@@ -473,19 +500,13 @@ func mapAnthropicStopReason(reason string) string {
 	}
 }
 
-func convertAnthropicUsage(usage *anthropicUsage) *Usage {
+func convertAnthropicUsage(usage *anthropicUsage) *aop.TokenUsage {
 	if usage == nil {
 		return nil
 	}
 	promptTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
 	completionTokens := usage.OutputTokens
-	return &Usage{
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      promptTokens + completionTokens,
-		CacheReadTokens:  usage.CacheReadInputTokens,
-		CacheWriteTokens: usage.CacheCreationInputTokens,
-	}
+	return TokenUsage(promptTokens, completionTokens, promptTokens+completionTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
 }
 
 // --- Anthropic streaming ---
@@ -527,7 +548,7 @@ func (p *anthropicStreamParser) parse(eventName string, data []byte) (ChatComple
 			role = "assistant"
 		}
 		return ChatCompletionStreamEvent{
-			Delta: ChatMessageDelta{Role: role},
+			Role:  role,
 			Usage: p.usageSnapshot(),
 		}, nil
 
@@ -544,26 +565,20 @@ func (p *anthropicStreamParser) parse(eventName string, data []byte) (ChatComple
 			if event.ContentBlock.Text == "" {
 				return ChatCompletionStreamEvent{}, nil
 			}
-			text := event.ContentBlock.Text
-			return ChatCompletionStreamEvent{Delta: ChatMessageDelta{Content: &text}}, nil
+			return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+				Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
+				Value:     &aop.MessageDelta_Text{Text: event.ContentBlock.Text},
+			}}, nil
 		case "tool_use":
-			args := anthropicToolArguments(event.ContentBlock.Input)
-			delta := ToolCallDelta{
-				Index: event.Index,
-				ID:    event.ContentBlock.ID,
-				Type:  "function",
-				Function: FunctionCallDelta{
-					Name: event.ContentBlock.Name,
-				},
+			delta := &aop.ToolCallDelta{
+				Index:  uint32(event.Index),
+				CallId: event.ContentBlock.ID,
+				Name:   event.ContentBlock.Name,
 			}
-			if args != "{}" {
-				delta.Function.Arguments = args
+			if args := anthropicToolArguments(event.ContentBlock.Input); args != "{}" {
+				delta.Arguments = []byte(args)
 			}
-			return ChatCompletionStreamEvent{
-				Delta: ChatMessageDelta{
-					ToolCalls: []ToolCallDelta{delta},
-				},
-			}, nil
+			return ChatCompletionStreamEvent{ToolDeltas: []*aop.ToolCallDelta{delta}}, nil
 		default:
 			return ChatCompletionStreamEvent{}, nil
 		}
@@ -583,22 +598,22 @@ func (p *anthropicStreamParser) parse(eventName string, data []byte) (ChatComple
 		}
 		switch event.Delta.Type {
 		case "text_delta":
-			text := event.Delta.Text
-			return ChatCompletionStreamEvent{Delta: ChatMessageDelta{Content: &text}}, nil
+			return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+				Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
+				Value:     &aop.MessageDelta_Text{Text: event.Delta.Text},
+			}}, nil
 		case "input_json_delta":
 			return ChatCompletionStreamEvent{
-				Delta: ChatMessageDelta{
-					ToolCalls: []ToolCallDelta{{
-						Index: event.Index,
-						Function: FunctionCallDelta{
-							Arguments: event.Delta.PartialJSON,
-						},
-					}},
-				},
+				ToolDeltas: []*aop.ToolCallDelta{{
+					Index:     uint32(event.Index),
+					Arguments: []byte(event.Delta.PartialJSON),
+				}},
 			}, nil
 		case "thinking_delta":
-			thinking := event.Delta.Thinking
-			return ChatCompletionStreamEvent{Delta: ChatMessageDelta{ReasoningContent: &thinking}}, nil
+			return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+				Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
+				Value:     &aop.MessageDelta_Reasoning{Reasoning: event.Delta.Thinking},
+			}}, nil
 		default:
 			return ChatCompletionStreamEvent{}, nil
 		}
@@ -654,7 +669,7 @@ func (p *anthropicStreamParser) mergeUsage(usage *anthropicUsage) {
 	}
 }
 
-func (p *anthropicStreamParser) usageSnapshot() *Usage {
+func (p *anthropicStreamParser) usageSnapshot() *aop.TokenUsage {
 	if p.usage.InputTokens == 0 &&
 		p.usage.OutputTokens == 0 &&
 		p.usage.CacheCreationInputTokens == 0 &&

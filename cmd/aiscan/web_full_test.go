@@ -4,23 +4,22 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	"github.com/chainreactors/aiscan/pkg/web"
-	"github.com/chainreactors/aiscan/pkg/webproto"
-	"gopkg.in/yaml.v3"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aiscan.yaml")
 	old := configForWebStore("old-model", "secret-key")
-	oldBytes, err := yaml.Marshal(&old)
+	oldBytes, err := cfg.MarshalDistributeConfigYAML(old)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +52,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0600 {
 		t.Fatalf("candidate permissions = %o, want 600", perm)
 	}
-	if got := prepared.Config.LLM.Active().APIKey; got != "secret-key" {
+	if got := cfg.ActiveLLMProvider(prepared.Config.GetLlm()).GetApiKey(); got != "secret-key" {
 		t.Fatalf("prepared API key = %q, want preserved secret", got)
 	}
 
@@ -64,40 +63,52 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded || committed.LLM.Active().Model != "new-model" || committed.LLM.Active().APIKey != "secret-key" {
-		t.Fatalf("committed config = %+v", committed.LLM)
+	active := cfg.ActiveLLMProvider(committed.GetLlm())
+	if !loaded || active.GetModel() != "new-model" || active.GetApiKey() != "secret-key" {
+		t.Fatalf("committed config = %+v", committed.Llm)
 	}
 }
 
-func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
-	store, err := web.NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	application := &runner.App{SCOSidecar: &output.SCOSidecar{}}
+func TestWireWebAppBindsRawArtifactsForReloadedApp(t *testing.T) {
+	bus := eventbus.New[output.ToolDataEvent]()
+	application := &runner.App{Artifacts: output.NewArtifactStream(bus)}
+	defer application.Artifacts.Close()
+	ingestor := &recordingArtifactIngestor{}
 
-	wireWebApp(application, store)
-	if application.SCOSidecar.OnNodes == nil {
-		t.Fatal("reloaded app SCO sidecar callback was not bound")
-	}
-	application.SCOSidecar.OnNodes("scan-1", []json.RawMessage{
-		json.RawMessage(`{"cstx_id":"node-1","cstx_type":"asset","data":{}}`),
+	wireWebApp(application, ingestor)
+	bus.Emit(output.ToolDataEvent{
+		Tool: "gogo", Kind: output.ToolDataService, CallID: "scan-1",
+		Data: map[string]string{"ip": "127.0.0.1"},
 	})
-	nodes, err := store.ListSCONodesByScanID(context.Background(), "scan-1", "", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(nodes) != 1 {
-		t.Fatalf("persisted SCO nodes = %d, want 1", len(nodes))
+	if ingestor.operationID != "scan-1" || ingestor.artifact.Tool != "gogo" {
+		t.Fatalf("artifact was not forwarded: %+v", ingestor.artifact)
 	}
 }
 
-func configForWebStore(model, apiKey string) webproto.DistributeConfig {
-	var cfg webproto.DistributeConfig
-	cfg.LLM.ActiveProfile = "primary"
-	cfg.LLM.Providers = []webproto.LLMProviderConfig{{
-		ID: "primary", Provider: "openai", Model: model, APIKey: apiKey,
-	}}
-	return cfg
+type recordingArtifactIngestor struct {
+	operationID string
+	artifact    output.ToolArtifact
+}
+
+func (i *recordingArtifactIngestor) IngestArtifact(_ context.Context, operationID string, artifact output.ToolArtifact) error {
+	i.operationID, i.artifact = operationID, artifact
+	return nil
+}
+
+func (*recordingArtifactIngestor) NormalizeArtifact(context.Context, string, string, []byte) (uint64, uint64, error) {
+	return 0, 0, nil
+}
+
+func (*recordingArtifactIngestor) SupportedArtifacts() []string { return nil }
+func (*recordingArtifactIngestor) Close() error                 { return nil }
+
+func configForWebStore(model, apiKey string) *types.DistributeConfig {
+	return &types.DistributeConfig{
+		Llm: &types.LLMConfig{
+			ActiveProfile: "primary",
+			Providers: []*types.LLMProviderConfig{{
+				Id: "primary", Provider: "openai", Model: model, ApiKey: apiKey,
+			}},
+		},
+	}
 }

@@ -35,7 +35,7 @@ STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo cstx_native $(
 FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full cstx_native katana_slim $(RE2_TAGS)
 BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: help prepare frontend aop-gen standard full web-build web-run web all clean
+.PHONY: help prepare frontend proto-gen aop-gen standard full web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets:"
@@ -43,6 +43,7 @@ help:
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
+	@echo "  make proto-gen        Regenerate all AOP and AIScan protobuf bindings"
 	@echo "  make all              Build the standard and full editions"
 	@echo ""
 	@echo "Variables:"
@@ -53,8 +54,11 @@ help:
 prepare:
 	mkdir -p "$(BIN_DIR)"
 
-aop-gen:
-	$(GO) generate ./core/aop/...
+proto-gen:
+	$(GO) run ./cmd/gen
+
+# Compatibility alias; AOP and product schemas share one generation entrypoint.
+aop-gen: proto-gen
 
 frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build

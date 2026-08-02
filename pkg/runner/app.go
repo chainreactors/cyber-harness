@@ -17,6 +17,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 	ioaclient "github.com/chainreactors/ioa/client"
@@ -35,7 +36,7 @@ type App struct {
 	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
 	DataBus           *eventbus.Bus[output.ToolDataEvent]
-	SCOSidecar        *output.SCOSidecar
+	Artifacts         *output.ArtifactStream
 	enginesReady      chan struct{}
 	loggerMu          sync.RWMutex
 	logger            telemetry.Logger
@@ -55,7 +56,7 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	})
 
 	a.DataBus = eventbus.New[output.ToolDataEvent]()
-	a.SCOSidecar = output.NewSCOSidecar(a.DataBus, output.CSTXTransform)
+	a.Artifacts = output.NewArtifactStream(a.DataBus)
 
 	store, diagnostics := skills.LoadAll(rc.CLISkillPaths)
 	a.Skills = store
@@ -167,8 +168,8 @@ func (a *App) Close() {
 	if a == nil {
 		return
 	}
-	if a.SCOSidecar != nil {
-		a.SCOSidecar.Close()
+	if a.Artifacts != nil {
+		a.Artifacts.Close()
 	}
 	if a.Commands != nil {
 		for _, t := range a.Commands.Tools() {
@@ -209,10 +210,10 @@ func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger
 	probeCtx, cancel := context.WithTimeout(ctx, startupLLMProbeTimeout)
 	defer cancel()
 
-	result, err := probe.TestLLM(probeCtx, probe.LLMProbeRequest{
+	result, err := probe.TestLLM(probeCtx, &types.LLMProbeRequest{
 		Provider: provCfg.Provider,
-		BaseURL:  provCfg.BaseURL,
-		APIKey:   provCfg.APIKey,
+		BaseUrl:  provCfg.BaseURL,
+		ApiKey:   provCfg.APIKey,
 		Model:    provCfg.Model,
 		Proxy:    provCfg.Proxy,
 	}, "")
@@ -220,7 +221,7 @@ func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger
 		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %s", llmConfigLabel(provCfg.Provider, provCfg.Model), err.Error())))
 		return
 	}
-	if !result.OK {
+	if !result.Ok {
 		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %dms · %s", llmConfigLabel(result.Provider, result.Model), result.LatencyMs, result.Error)))
 		return
 	}

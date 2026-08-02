@@ -6,33 +6,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
-func msg(role, content string) ChatMessage {
-	return NewTextMessage(role, content)
+func msg(role, content string) *aop.Message {
+	return textMessage(role, content)
 }
 
-func toolResult(id, content string) ChatMessage {
-	return NewToolResultMessage(id, content)
+func toolResult(id, content string) *aop.Message {
+	return toolResultMessage(id, content)
 }
 
 func TestEstimateMessageTokens(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  ChatMessage
+		msg  *aop.Message
 		want int
 	}{
-		{"empty", ChatMessage{Role: "user"}, 0},
+		{"empty", &aop.Message{Role: "user"}, 0},
 		{"short text", msg("user", "hello"), 2},                                // 5 chars → ceil(5/4) = 2
 		{"exact boundary", msg("user", "abcd"), 1},                             // 4 chars → 1
 		{"longer text", msg("user", "hello world, this is a test message"), 9}, // 35 chars → ceil(35/4) = 9
-		{"image", NewMultimodalMessage("user", []ContentPart{ImagePart("image/png", "data", "high")}), 1200},
-		{"with tool calls", ChatMessage{
-			Role: "assistant",
-			ToolCalls: []ToolCall{{
-				Function: FunctionCall{Name: "bash", Arguments: `{"command":"ls -la"}`},
-			}},
+		{"image", imageMessage("user", aop.Image("image/png", []byte("data"))), 1200},
+		{"with tool calls", &aop.Message{
+			Role:    "assistant",
+			Content: []*aop.Content{toolCallContent("", "bash", `{"command":"ls -la"}`)},
 		}, 6}, // (4+19+3)/4 = 6
 	}
 	for _, tt := range tests {
@@ -46,7 +46,7 @@ func TestEstimateMessageTokens(t *testing.T) {
 }
 
 func TestEstimateAllTokens(t *testing.T) {
-	msgs := []ChatMessage{
+	msgs := []*aop.Message{
 		msg("user", "hello"),       // 2
 		msg("assistant", "world"),  // 2
 		msg("user", "how are you"), // 3
@@ -67,25 +67,25 @@ func TestFindCutPoint(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		msgs       []ChatMessage
+		msgs       []*aop.Message
 		keepTokens int
 		wantIdx    int
 	}{
 		{
 			"all fit within budget",
-			[]ChatMessage{msg("user", "hi"), msg("assistant", "hello")},
+			[]*aop.Message{msg("user", "hi"), msg("assistant", "hello")},
 			20000,
 			0,
 		},
 		{
 			"split a single oversized turn",
-			[]ChatMessage{msg("user", longStr), msg("assistant", "recent")},
+			[]*aop.Message{msg("user", longStr), msg("assistant", "recent")},
 			20000,
 			1,
 		},
 		{
 			"split at assistant boundary to honor recent budget",
-			[]ChatMessage{
+			[]*aop.Message{
 				msg("user", longStr),      // ~25000 tokens — old
 				msg("assistant", longStr), // ~25000 tokens — old
 				msg("user", "recent"),     // kept
@@ -96,7 +96,7 @@ func TestFindCutPoint(t *testing.T) {
 		},
 		{
 			"assistant boundary before old tool result",
-			[]ChatMessage{
+			[]*aop.Message{
 				msg("user", longStr),
 				msg("assistant", longStr),
 				toolResult("tc1", "result"),
@@ -108,7 +108,7 @@ func TestFindCutPoint(t *testing.T) {
 		},
 		{
 			"split an oversized tool turn at an assistant boundary",
-			[]ChatMessage{
+			[]*aop.Message{
 				msg("user", longStr),
 				msg("assistant", "calling a tool"),
 				toolResult("tc1", longStr),
@@ -119,7 +119,7 @@ func TestFindCutPoint(t *testing.T) {
 		},
 		{
 			"empty messages",
-			[]ChatMessage{},
+			[]*aop.Message{},
 			20000,
 			0,
 		},
@@ -141,8 +141,8 @@ func TestCompactHistorySummarizesOversizedTurnPrefix(t *testing.T) {
 	}}
 	toolCall := ChatMessage{Role: "assistant", ToolCalls: []ToolCall{{
 		ID: "tc1", Type: "function", Function: FunctionCall{Name: "bash", Arguments: `{"command":"scan"}`},
-	}}}
-	messages := []ChatMessage{
+	}}}.toAOP()
+	messages := []*aop.Message{
 		msg("user", long),
 		toolCall,
 		toolResult("tc1", long),
@@ -172,7 +172,7 @@ func TestCompactHistorySummarizesOversizedTurnPrefix(t *testing.T) {
 }
 
 func TestSerializeMessages(t *testing.T) {
-	msgs := []ChatMessage{
+	msgs := []*aop.Message{
 		msg("user", "search for bugs"),
 		msg("assistant", "I'll search now"),
 	}
@@ -189,7 +189,7 @@ func TestSerializeMessages(t *testing.T) {
 }
 
 func TestSerializeMessagesSkipsToolResultRoleUser(t *testing.T) {
-	msgs := []ChatMessage{
+	msgs := []*aop.Message{
 		toolResult("tc1", "some tool output"),
 	}
 	result := serializeMessages(msgs)
@@ -236,7 +236,7 @@ func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
 			KeepRecentTokens: 20,
 		},
 	})
-	agent.LoadMessages([]ChatMessage{
+	agent.LoadMessages([]*aop.Message{
 		msg("user", long), msg("assistant", long),
 		msg("user", long), msg("assistant", long),
 	})
@@ -258,9 +258,10 @@ func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
 	if got, want := requests[1].MaxTokens, 20; got != want {
 		t.Fatalf("turn-prefix max_tokens = %d, want %d", got, want)
 	}
-	if len(result.Messages) < 3 || result.Messages[0].Content == nil ||
-		!strings.Contains(*result.Messages[0].Content, "history checkpoint") ||
-		!strings.Contains(*result.Messages[0].Content, "turn-prefix checkpoint") {
+	firstContent := provider.MessageText(result.Messages[0])
+	if len(result.Messages) < 3 ||
+		!strings.Contains(firstContent, "history checkpoint") ||
+		!strings.Contains(firstContent, "turn-prefix checkpoint") {
 		t.Fatalf("compacted messages = %#v", result.Messages)
 	}
 	if len(result.NewMessages) != 2 {
@@ -294,7 +295,7 @@ func TestRunRecoversFromContextOverflowOnce(t *testing.T) {
 			KeepRecentTokens: 20,
 		},
 	})
-	agent.LoadMessages([]ChatMessage{
+	agent.LoadMessages([]*aop.Message{
 		msg("user", long), msg("assistant", long),
 		msg("user", long), msg("assistant", long),
 	})
@@ -312,11 +313,11 @@ func TestCompactHistoryRejectsTruncatedSummary(t *testing.T) {
 	long := strings.Repeat("x", 240)
 	llm := &scriptedProvider{responses: []*ChatCompletionResponse{{
 		Choices: []Choice{{
-			Message:      NewTextMessage("assistant", "incomplete checkpoint"),
+			Message:      NewTextMessage("assistant", "incomplete checkpoint").toAOP(),
 			FinishReason: "max_tokens",
 		}},
 	}}}
-	messages := []ChatMessage{
+	messages := []*aop.Message{
 		msg("user", long), msg("assistant", long),
 		msg("user", "recent"), msg("assistant", "reply"),
 	}

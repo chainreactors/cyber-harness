@@ -6,6 +6,7 @@ import (
 	"io"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
@@ -54,10 +55,9 @@ func (rt *AgentRuntime) startMainREPL() error {
 // newPTYRouter returns a connection-scoped router over the Runtime-owned PTY
 // manager. Closing the router only detaches its monitors; Runtime.Close owns
 // session shutdown.
-func (rt *AgentRuntime) newPTYRouter() (*pty.Router, error) {
+func (rt *AgentRuntime) newPTYRouter() (*coreterminal.Router, error) {
 	if rt == nil || rt.ptyManager == nil || rt.ptyManager.Manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
-	openers := pty.DefaultOpeners(rt.ptyManager.Manager, pty.DefaultSessionTimeout, pty.DefaultEnv())
-	return pty.NewRouter(rt.ptyManager.Manager, pty.WithOpeners(openers)), nil
+	return coreterminal.NewRuntimeRouter(rt.ptyManager.Manager), nil
 }

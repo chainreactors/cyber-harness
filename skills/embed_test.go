@@ -7,26 +7,10 @@ import (
 	"testing"
 )
 
-var baseExpectedSkills = []string{"aiscan", "playwright", "scan", "gogo", "spray", "zombie", "neutron", "proton"}
-var baseInternalSkills = []string{"playwright", "scan", "gogo", "spray", "zombie", "neutron", "proton"}
-
-var extraExpected []string
-var extraInternal []string
-
-//nolint:unused // called from build-tagged test files
-func addExpectedSkill(name string, internal bool) {
-	extraExpected = append(extraExpected, name)
-	if internal {
-		extraInternal = append(extraInternal, name)
-	}
-}
+var baseExpectedSkills = []string{"aiscan"}
 
 func expectedEmbeddedSkillNames() []string {
-	return append(append([]string(nil), baseExpectedSkills...), extraExpected...)
-}
-
-func internalPromptSkillNames() []string {
-	return append(append([]string(nil), baseInternalSkills...), extraInternal...)
+	return append([]string(nil), baseExpectedSkills...)
 }
 
 func TestLoadEmbeddedSkills(t *testing.T) {
@@ -77,9 +61,9 @@ func TestFormatForPrompt(t *testing.T) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	for _, internal := range internalPromptSkillNames() {
+	for _, internal := range []string{"scan", "gogo", "spray", "katana", "zombie", "neutron", "proton", "playwright"} {
 		if strings.Contains(prompt, "<name>"+internal+"</name>") {
-			t.Fatalf("prompt includes internal skill %q:\n%s", internal, prompt)
+			t.Fatalf("prompt includes removed scanner skill %q:\n%s", internal, prompt)
 		}
 	}
 
@@ -100,12 +84,12 @@ func TestExpandCommand(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 
-	expanded := ExpandCommand("/skill:gogo gogo -i 127.0.0.1 -p 80", store)
+	expanded := ExpandCommand("/skill:aiscan check this target", store)
 	for _, want := range []string{
-		`<skill name="gogo" location="aiscan://skills/gogo/SKILL.md">`,
-		"References are relative to aiscan://skills/gogo.",
-		"# Gogo",
-		"gogo -i 127.0.0.1 -p 80",
+		`<skill name="aiscan" location="aiscan://skills/aiscan/SKILL.md">`,
+		"References are relative to aiscan://skills/aiscan.",
+		"# Aiscan",
+		"check this target",
 	} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded missing %q:\n%s", want, expanded)
@@ -137,6 +121,62 @@ func TestReadVirtual(t *testing.T) {
 	_, handled, err = store.ReadVirtual("aiscan://skills/missing/SKILL.md")
 	if !handled || err == nil {
 		t.Fatalf("missing handled=%v err=%v, want handled error", handled, err)
+	}
+}
+
+func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
+	store, diags := LoadAll(nil)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %#v", diags)
+	}
+	for _, name := range []string{"checkpoint", "handoff", "swarm", "team"} {
+		skill, ok := store.ByName(name)
+		if !ok {
+			t.Fatalf("missing ioa module skill %q", name)
+		}
+		if !skill.Internal {
+			t.Fatalf("ioa skill %q should be internal", name)
+		}
+		if body := store.ReadBody(name); body == "" {
+			t.Fatalf("ReadBody(%q) returned empty", name)
+		}
+	}
+
+	content, handled, err := store.ReadVirtual("ioa://skills/checkpoint/SKILL.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtual(ioa checkpoint) handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(content, "name: checkpoint") {
+		t.Fatalf("unexpected checkpoint content:\n%s", content)
+	}
+
+	schema, handled, err := store.ReadVirtual("ioa://skills/checkpoint/schema.json")
+	if err != nil || !handled || !strings.HasPrefix(strings.TrimSpace(schema), "{") {
+		t.Fatalf("ReadVirtual(ioa checkpoint schema) handled=%v err=%v", handled, err)
+	}
+}
+
+func TestReadVirtualOKFConcept(t *testing.T) {
+	store, _ := LoadEmbeddedStore()
+	content, handled, err := store.ReadVirtual("aiscan://skills/aiscan/okf/easm/gogo.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtual(easm/gogo) handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(content, "type: Tool Playbook") || !strings.Contains(content, "# Gogo") {
+		t.Fatalf("unexpected concept content:\n%s", content)
+	}
+
+	body, handled, err := store.ReadVirtualBody("aiscan://skills/aiscan/okf/easm/gogo.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtualBody(easm/gogo) handled=%v err=%v", handled, err)
+	}
+	if strings.Contains(body, "---") || !strings.Contains(body, "# Gogo") {
+		t.Fatalf("ReadVirtualBody should strip frontmatter:\n%s", body)
+	}
+
+	_, handled, err = store.ReadVirtual("aiscan://skills/aiscan/okf/easm/missing.md")
+	if !handled || err == nil {
+		t.Fatalf("missing concept handled=%v err=%v, want handled error", handled, err)
 	}
 }
 

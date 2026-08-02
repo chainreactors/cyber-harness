@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"regexp"
 	"strings"
@@ -11,10 +10,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
-	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type syncedBuffer struct {
@@ -50,69 +50,50 @@ func stripANSI(s string) string {
 // AOP event builders
 // ---------------------------------------------------------------------------
 
-func aopTestEvent(typ string, data any) aop.Event {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		panic(err)
-	}
-	return aop.Event{Type: typ, TurnID: "run-test", Data: raw}
+func turnStartEvent(turn int) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}}
 }
 
-func turnStartEvent(turn int) aop.Event {
-	return aopTestEvent(aop.TypeTurnStart, aop.TurnStartData{})
+func turnEndEvent(turn, contextTokens int) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
+		StopReason: string(agent.StopReasonCompleted), ContextTokens: uint64(contextTokens),
+	}}}
 }
 
-func turnEndEvent(turn, contextTokens int) aop.Event {
-	return aopTestEvent(aop.TypeTurnEnd, aop.TurnEndData{Stop: string(agent.StopReasonCompleted), ContextTokens: contextTokens})
+func textDeltaEvent(messageID, delta string) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{
+		MessageId: messageID, Value: &aop.MessageDelta_Text{Text: delta},
+	}}}
 }
 
-func textDeltaEvent(messageID, delta string) aop.Event {
-	return aopTestEvent(aop.TypeMessageDelta, aop.MessageDeltaData{
-		MessageID: messageID,
-		PartType:  aop.PartText,
-		Delta:     delta,
-	})
+func reasoningDeltaEvent(messageID, delta string) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{
+		MessageId: messageID, Value: &aop.MessageDelta_Reasoning{Reasoning: delta},
+	}}}
 }
 
-func reasoningDeltaEvent(messageID, delta string) aop.Event {
-	return aopTestEvent(aop.TypeMessageDelta, aop.MessageDeltaData{
-		MessageID: messageID,
-		PartType:  aop.PartReasoning,
-		Delta:     delta,
-	})
+func messageEvent(messageID, role string, content ...*aop.Content) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_Message{Message: &aop.Message{
+		Id: messageID, Role: role, Content: content,
+	}}}
 }
 
-func messageEvent(messageID, role string, parts ...aop.MessagePart) aop.Event {
-	return aopTestEvent(aop.TypeMessage, aop.MessageData{
-		MessageID: messageID,
-		Role:      role,
-		Parts:     parts,
-	})
+func toolCallEvent(id, name, args string) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{
+		Id: id, Name: name, Arguments: &aop.EncodedValue{Data: []byte(args), MediaType: aop.JSONMediaType},
+	}}}
 }
 
-func toolCallEvent(id, name, args string) aop.Event {
-	return aopTestEvent(aop.TypeToolCall, aop.ToolCallData{
-		ToolCallID: id,
-		ToolName:   name,
-		Args:       args,
-	})
+func toolResultEvent(id, name, result string, isError bool) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{
+		CallId: id, Name: name, Output: []*aop.Content{aop.Text(result)}, IsError: isError,
+	}}}
 }
 
-func toolResultEvent(id, name, result string, isError bool) aop.Event {
-	return aopTestEvent(aop.TypeToolResult, aop.ToolResultData{
-		ToolCallID: id,
-		ToolName:   name,
-		Content:    result,
-		IsError:    isError,
-	})
-}
-
-func usageEvent(input, outputTok, total int) aop.Event {
-	return aopTestEvent(aop.TypeUsage, aop.UsageData{
-		InputTokens:  input,
-		OutputTokens: outputTok,
-		TotalTokens:  total,
-	})
+func usageEvent(input, outputTok, total int) *aop.Event {
+	return &aop.Event{TurnId: "run-test", Payload: &aop.Event_Usage{Usage: &aop.TokenUsage{
+		InputTokens: uint64(input), OutputTokens: uint64(outputTok), TotalTokens: uint64(total),
+	}}}
 }
 
 func testOutput(stderr io.Writer, verbosity int, debug bool) *AgentOutput {
@@ -145,11 +126,7 @@ func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 }
 
 func TestFormatTokenUsageUsesCompactMarkers(t *testing.T) {
-	got := formatTokenUsage(&agent.Usage{
-		PromptTokens:     1832,
-		CompletionTokens: 63,
-		CacheReadTokens:  1026,
-	})
+	got := formatTokenUsage(provider.TokenUsage(1832, 63, 0, 1026, 0))
 	if got != "↑1,832 ↓63 ↻56%" {
 		t.Fatalf("formatTokenUsage() = %q", got)
 	}
@@ -256,7 +233,7 @@ func TestNonTTYMessageUpdateBuffersUntilTurnEnd(t *testing.T) {
 		t.Fatalf("non-TTY update streamed stdout before turn end: %q", stdout.String())
 	}
 
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: content}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Text(content)))
 	o.HandleEvent(turnEndEvent(1, 0))
 	if !strings.Contains(stdout.String(), content) {
 		t.Fatalf("non-TTY turn end did not render content: stdout=%q stderr=%q", stdout.String(), stderr.String())
@@ -684,7 +661,7 @@ func TestReadlineThinkingAppendsWithoutSyntheticNewlines(t *testing.T) {
 	}
 
 	reasoning := "The user wants me to inspect the image\nthen report"
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Reasoning(reasoning)))
 	o.HandleEvent(turnEndEvent(1, 0))
 	if len(committed) != 2 || committed[1] != "then report" {
 		t.Fatalf("final reasoning commits = %#v", committed)
@@ -711,7 +688,7 @@ func TestReadlineDefaultDoesNotCommitThinking(t *testing.T) {
 	reasoning := "private chain of thought\nsecond line"
 	o.HandleEvent(turnStartEvent(1))
 	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Reasoning(reasoning)))
 	o.HandleEvent(turnEndEvent(1, 0))
 
 	if joined := strings.Join(committed, "\n"); strings.Contains(joined, "private chain of thought") {
@@ -740,7 +717,7 @@ func TestReadlineShowsAndCommitsIntermediateAssistantTextBeforeTool(t *testing.T
 	o.HandleEvent(turnStartEvent(1))
 	o.HandleEvent(textDeltaEvent("m-1", text))
 
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: text}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Text(text)))
 	o.HandleEvent(toolCallEvent("call-1", "bash", `{"command":"scan image.png"}`))
 	if len(committed) != 1 || !strings.Contains(committed[0], text) {
 		t.Fatalf("intermediate assistant text was not committed before tool: %#v", committed)
@@ -766,8 +743,8 @@ func TestReadlineCommitsFinalTextForImageResponse(t *testing.T) {
 
 	o.HandleEvent(turnStartEvent(1))
 	o.HandleEvent(messageEvent("m-1", "assistant",
-		aop.MessagePart{Type: aop.PartText, Text: "The screenshot shows an exposed admin login."},
-		aop.MessagePart{Type: aop.PartText, Text: "No credentials are visible."},
+		aop.Text("The screenshot shows an exposed admin login."),
+		aop.Text("No credentials are visible."),
 	))
 	o.HandleEvent(turnEndEvent(1, 0))
 
@@ -784,7 +761,7 @@ func TestThinkingBlockFinalRenderingHasNoTags(t *testing.T) {
 	reasoning := "checking target scope\nprobing admin route"
 
 	o.HandleEvent(turnStartEvent(1))
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartReasoning, Text: reasoning}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Reasoning(reasoning)))
 	o.HandleEvent(turnEndEvent(1, 0))
 
 	got := stripANSI(stderr.String())
@@ -829,7 +806,7 @@ func TestAgentOutputToolDebugDetails(t *testing.T) {
 	if !strings.Contains(got, "read") || !strings.Contains(got, "docs/usage.md") {
 		t.Fatalf("stderr missing read summary: %q", got)
 	}
-	if !strings.Contains(got, `raw: {"path":"docs/usage.md","limit":20}`) {
+	if !strings.Contains(got, `raw: {`) || !strings.Contains(got, `"path":"docs/usage.md"`) || !strings.Contains(got, `"limit":20`) {
 		t.Fatalf("stderr missing compact args in debug mode: %q", got)
 	}
 	if !strings.Contains(got, "file content") {
@@ -957,8 +934,8 @@ func TestAgentOutputSeparatesReasoningAndFinalAnswerStreams(t *testing.T) {
 	o.HandleEvent(reasoningDeltaEvent("m-1", reasoning))
 	o.HandleEvent(textDeltaEvent("m-1", answer+"\n\n"))
 	o.HandleEvent(messageEvent("m-1", "assistant",
-		aop.MessagePart{Type: aop.PartReasoning, Text: reasoning},
-		aop.MessagePart{Type: aop.PartText, Text: answer},
+		aop.Reasoning(reasoning),
+		aop.Text(answer),
 	))
 	o.HandleEvent(turnEndEvent(1, 0))
 
@@ -1136,8 +1113,8 @@ func TestEvalEndRendering(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	passed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
-	_ = xeval.SetDetail(&passed, xeval.Detail{Round: 1, Pass: true, Reason: "all checks passed"})
+	passed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
+	_ = types.SetEvalDetail(passed, &types.EvalDetail{Round: 1, Pass: true, Reason: "all checks passed"})
 	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
@@ -1151,8 +1128,8 @@ func TestEvalEndRendering(t *testing.T) {
 	}
 
 	stderr.Reset()
-	failed := aopTestEvent(aop.TypeStatus, aop.StatusData{State: xeval.StateEnd})
-	_ = xeval.SetDetail(&failed, xeval.Detail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
+	failed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
+	_ = types.SetEvalDetail(failed, &types.EvalDetail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
 	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {
@@ -1177,7 +1154,7 @@ func TestCompleteMessageClearsDeltaAccumulator(t *testing.T) {
 
 	o.HandleEvent(turnStartEvent(1))
 	o.HandleEvent(textDeltaEvent("m-1", "hello"))
-	o.HandleEvent(messageEvent("m-1", "assistant", aop.MessagePart{Type: aop.PartText, Text: "hello"}))
+	o.HandleEvent(messageEvent("m-1", "assistant", aop.Text("hello")))
 	if len(o.deltas) != 0 {
 		t.Fatalf("delta accumulator not cleared on complete message: %d entries", len(o.deltas))
 	}

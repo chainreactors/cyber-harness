@@ -1,228 +1,195 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync/atomic"
-	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/tool"
+	types "github.com/chainreactors/aiscan/pkg/types"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// aopEmitter is the agent kernel's single event-emission path. Every event
-// leaves through it so seq numbering, message_id allocation, and session
-// tagging stay consistent per session. Safe for concurrent use.
+const (
+	partText                 = "text"
+	partReasoning            = "reasoning"
+	statusTokenBudgetWarning = "token_budget_warning"
+	statusLLMRequest         = "llm_request"
+)
+
+// EventEmitter is the narrow event sink an agent needs — callers may wrap a
+// bus with stamping/routing middleware (e.g. the runner's sessionEmitter)
+// instead of handing over a raw *eventbus.Bus.
+type EventEmitter interface {
+	Emit(*aop.Event)
+}
+
 type aopEmitter struct {
-	bus              *eventbus.Bus[aop.Event]
+	bus              EventEmitter
 	agentName        string
 	sessionID        string
 	turnID           string
 	parentSessionID  string
 	parentToolCallID string
-	delegation       *delegation.DelegationDetail
+	delegation       *types.DelegationDetail
 	state            *emitState
 }
 
 type emitState struct {
-	seq        atomic.Int64
+	seq        atomic.Uint64
 	messageSeq atomic.Int64
 }
 
-func newAOPEmitter(bus *eventbus.Bus[aop.Event], agentName, sessionID, parentSessionID, parentToolCallID string, detail *delegation.DelegationDetail, msgCounter int64) *aopEmitter {
+func newAOPEmitter(bus EventEmitter, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
 	em := &aopEmitter{
-		bus:              bus,
-		agentName:        agentName,
-		sessionID:        sessionID,
-		parentSessionID:  parentSessionID,
-		parentToolCallID: parentToolCallID,
-		delegation:       detail,
-		state:            &emitState{},
+		bus: bus, agentName: agentName, sessionID: sessionID,
+		parentSessionID: parentSessionID, parentToolCallID: parentToolCallID,
+		delegation: detail, state: &emitState{},
 	}
 	em.state.messageSeq.Store(msgCounter)
 	return em
 }
 
 func (e *aopEmitter) turn(turnID string) *aopEmitter {
-	return &aopEmitter{bus: e.bus, agentName: e.agentName, sessionID: e.sessionID, turnID: turnID, parentSessionID: e.parentSessionID, parentToolCallID: e.parentToolCallID, delegation: e.delegation, state: e.state}
+	return &aopEmitter{
+		bus: e.bus, agentName: e.agentName, sessionID: e.sessionID, turnID: turnID,
+		parentSessionID: e.parentSessionID, parentToolCallID: e.parentToolCallID,
+		delegation: e.delegation, state: e.state,
+	}
 }
 
-func (e *aopEmitter) event(typ string, data any) aop.Event {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		raw, _ = json.Marshal(map[string]string{"marshal_error": err.Error()})
-	}
-	return aop.Event{
-		Type:      typ,
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
-		SessionID: e.sessionID,
-		TurnID:    e.turnID,
-		Agent:     e.agentName,
-		Seq:       int(e.state.seq.Add(1)),
-		Data:      raw,
-	}
-
+func (e *aopEmitter) emit(event *aop.Event) {
+	seq := e.state.seq.Add(1)
+	event.Id = fmt.Sprintf("e-%d", seq)
+	event.EmittedAt = timestamppb.Now()
+	event.SessionId = e.sessionID
+	event.TurnId = e.turnID
+	event.Emitter = e.agentName
+	event.Seq = seq
+	e.bus.Emit(event)
 }
 
-func (e *aopEmitter) emit(typ string, data any) {
-	ev := e.event(typ, data)
-	e.bus.Emit(ev)
-}
-
-func (e *aopEmitter) emitWithExt(typ string, data any, namespace string, ext any) {
-	ev := e.event(typ, data)
-	if err := aop.SetExt(&ev, namespace, ext); err != nil {
-		return
+func (e *aopEmitter) emitWithExt(event *aop.Event, value proto.Message) {
+	if err := aop.SetTypedExtension(event, value); err == nil {
+		e.emit(event)
 	}
-	e.bus.Emit(ev)
 }
 
 func (e *aopEmitter) allocMessageID() string {
 	return fmt.Sprintf("m-%d", e.state.messageSeq.Add(1))
 }
 
-func (e *aopEmitter) messageCounter() int64 {
-	return e.state.messageSeq.Load()
-}
+func (e *aopEmitter) messageCounter() int64 { return e.state.messageSeq.Load() }
 
 func (e *aopEmitter) sessionStart(model string) {
-	data := aop.SessionStartData{
-		Model:            model,
-		ParentSessionID:  e.parentSessionID,
-		ParentToolCallID: e.parentToolCallID,
-	}
+	event := &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
+		Model: model, ParentSessionId: e.parentSessionID, ParentToolCallId: e.parentToolCallID,
+	}}}
 	if e.delegation != nil {
-		e.emitWithExt(aop.TypeSessionStart, data, delegation.NS, *e.delegation)
+		e.emitWithExt(event, e.delegation)
 		return
 	}
-	e.emit(aop.TypeSessionStart, data)
+	e.emit(event)
 }
 
 func (e *aopEmitter) sessionEnd(reason string) {
-	e.emit(aop.TypeSessionEnd, aop.SessionEndData{Reason: reason})
+	e.emit(&aop.Event{Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
 func (e *aopEmitter) turnStart() {
-	e.emit(aop.TypeTurnStart, aop.TurnStartData{})
+	e.emit(&aop.Event{Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
-func (e *aopEmitter) turnEnd(stop StopReason, totalUsage Usage, contextTokens int, runErr error) {
-	data := aop.TurnEndData{Stop: string(stop), Usage: usageData(totalUsage), ContextTokens: contextTokens}
+func (e *aopEmitter) turnEnd(stop StopReason, totalUsage *aop.TokenUsage, contextTokens int, runErr error) {
+	ended := &aop.TurnEnded{StopReason: string(stop), Usage: totalUsage, ContextTokens: uint64(max(contextTokens, 0))}
 	if runErr != nil {
-		data.Error = runErr.Error()
+		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
-	e.emit(aop.TypeTurnEnd, data)
+	e.emit(&aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
 }
 
-// message emits a complete message event, allocating a fresh message_id.
-// Returns the allocated id.
-func (e *aopEmitter) message(role string, parts []aop.MessagePart) string {
+func (e *aopEmitter) message(role string, content []*aop.Content) string {
 	id := e.allocMessageID()
-	e.messageWithID(id, role, parts)
+	e.messageWithID(id, role, content)
 	return id
 }
 
-// messageWithID emits a complete message event with a caller-chosen id —
-// used when a streaming message's id was allocated before the retry loop so
-// deltas and the final message share it across retries.
-func (e *aopEmitter) messageWithID(id, role string, parts []aop.MessagePart) {
-	e.emit(aop.TypeMessage, aop.MessageData{MessageID: id, Role: role, Parts: parts})
+func (e *aopEmitter) messageWithID(id, role string, content []*aop.Content) {
+	e.messageWithIdentity(id, role, "", content)
 }
 
-func (e *aopEmitter) messageDelta(messageID string, partIndex int, partType, delta string) {
-	e.emit(aop.TypeMessageDelta, aop.MessageDeltaData{
-		MessageID: messageID,
-		PartIndex: partIndex,
-		PartType:  partType,
-		Delta:     delta,
-	})
+func (e *aopEmitter) messageWithIdentity(id, role, name string, content []*aop.Content) {
+	e.emit(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: id, Role: role, Name: name, Content: content}}})
 }
 
-func (e *aopEmitter) toolCall(toolCallID, toolName string, args any, workDir string) {
-	data := aop.ToolCallData{
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Args:       args,
-		WorkDir:    workDir,
+// messageProto emits an already-built assistant message. The message id is
+// assigned by the caller (requestWithRetry) so retries and deltas share it.
+func (e *aopEmitter) messageProto(msg *aop.Message) {
+	e.emit(&aop.Event{Payload: &aop.Event_Message{Message: msg}})
+}
+
+func (e *aopEmitter) messageDelta(messageID string, contentIndex int, partType, delta string) {
+	messageDelta := &aop.MessageDelta{
+		MessageId: messageID, ContentIndex: uint32(max(contentIndex, 0)), Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
 	}
-	if detail, ok := delegationFromToolCall(toolName, args); ok {
-		e.emitWithExt(aop.TypeToolCall, data, delegation.NS, detail)
+	if partType == partReasoning {
+		messageDelta.Value = &aop.MessageDelta_Reasoning{Reasoning: delta}
+	} else {
+		messageDelta.Value = &aop.MessageDelta_Text{Text: delta}
+	}
+	e.emit(&aop.Event{Payload: &aop.Event_MessageDelta{MessageDelta: messageDelta}})
+}
+
+func (e *aopEmitter) toolCall(call *aop.ToolCall) {
+	event := &aop.Event{Payload: &aop.Event_ToolCall{ToolCall: call}}
+	if detail, ok := delegationFromToolCall(call.Name, decodeToolArguments(call)); ok {
+		e.emitWithExt(event, detail)
 		return
 	}
-	e.emit(aop.TypeToolCall, data)
+	e.emit(event)
 }
 
-func (e *aopEmitter) toolResult(toolCallID, toolName string, content, details any, terminate, isError bool, durationMs int) {
-	e.emit(aop.TypeToolResult, aop.ToolResultData{
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Content:    content,
-		Details:    details,
-		Terminate:  terminate,
-		IsError:    isError,
-		DurationMs: durationMs,
-	})
+func (e *aopEmitter) toolResult(call *aop.ToolCall, content []*aop.Content, fullResult *tool.Result, terminate, isError bool, durationMs int) {
+	result := &aop.ToolResult{
+		CallId: call.Id, Name: call.Name, Output: content,
+		Terminate: terminate, IsError: isError, DurationMs: uint64(max(durationMs, 0)),
+	}
+	e.emit(&aop.Event{Payload: &aop.Event_ToolResult{ToolResult: result}})
 }
 
-func (e *aopEmitter) usage(u *Usage, model string) {
-	if u == nil {
+func (e *aopEmitter) usage(usage *aop.TokenUsage, model string) {
+	if usage == nil {
 		return
 	}
-	e.emit(aop.TypeUsage, aop.UsageData{
-		InputTokens:      u.PromptTokens,
-		OutputTokens:     u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
-		Model:            model,
-	})
+	value := proto.CloneOf(usage)
+	value.Model = model
+	e.emit(&aop.Event{Payload: &aop.Event_Usage{Usage: value}})
 }
 
 func (e *aopEmitter) errorEvt(err error, retryable bool) {
-	e.emit(aop.TypeError, aop.ErrorData{Message: err.Error(), Retryable: retryable})
+	e.emit(&aop.Event{Payload: &aop.Event_Error{Error: &aop.ProtocolError{Message: err.Error(), Retryable: retryable}}})
 }
 
-func (e *aopEmitter) status(state, namespace string, detail any) {
-	if detail == nil {
-		e.emit(aop.TypeStatus, aop.StatusData{State: state})
+func (e *aopEmitter) providerFrame(frame ProviderRawFrame) {
+	direction := aop.Direction_DIRECTION_UNSPECIFIED
+	switch frame.Direction {
+	case "request":
+		direction = aop.Direction_DIRECTION_REQUEST
+	case "response":
+		direction = aop.Direction_DIRECTION_RESPONSE
+	}
+	e.emit(&aop.Event{Payload: &aop.Event_ProviderFrame{ProviderFrame: &aop.ProviderFrame{
+		Provider: frame.Provider, Protocol: frame.Protocol, EventType: frame.EventType,
+		Direction: direction, Transport: frame.Transport, Payload: frame.Payload, MediaType: frame.MediaType,
+	}}})
+}
+
+func (e *aopEmitter) status(state string, detail proto.Message) {
+	event := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: state}}}
+	if detail != nil {
+		e.emitWithExt(event, detail)
 		return
 	}
-	e.emitWithExt(aop.TypeStatus, aop.StatusData{State: state}, namespace, detail)
-}
-
-func usageData(u Usage) *aop.UsageData {
-	if u == (Usage{}) {
-		return nil
-	}
-	return &aop.UsageData{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens}
-}
-
-// messagePartsFromChat flattens a ChatMessage into AOP parts for echo/persist.
-func messagePartsFromChat(msg ChatMessage) []aop.MessagePart {
-	var parts []aop.MessagePart
-	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
-		parts = append(parts, aop.MessagePart{Type: aop.PartReasoning, Text: *msg.ReasoningContent})
-	}
-	if msg.Content != nil && *msg.Content != "" {
-		parts = append(parts, aop.MessagePart{Type: aop.PartText, Text: *msg.Content})
-	}
-	for _, p := range msg.ContentParts {
-		switch p.Type {
-		case "text":
-			if p.Text != "" {
-				parts = append(parts, aop.MessagePart{Type: aop.PartText, Text: p.Text})
-			}
-		case "image_url":
-			if p.ImageURL == nil {
-				continue
-			}
-			mediaType, base64Data := ParseDataURI(p.ImageURL.URL)
-			parts = append(parts, aop.MessagePart{
-				Type:  aop.PartImage,
-				Image: &aop.ImageSource{Base64: base64Data, MediaType: mediaType},
-			})
-		}
-	}
-	return parts
+	e.emit(event)
 }

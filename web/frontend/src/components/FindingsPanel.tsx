@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, CheckCircle2, Crosshair, ExternalLink, Key, Radar, Shield } from 'lucide-react'
-import type { ScanResult } from '../api'
-import { buildFindings, findingTargetURL, PRIORITY_ORDER, type FindingItem, type FindingPriority } from '../lib/scan-result'
+import { findingTargetURL, PRIORITY_ORDER, type FindingItem, type FindingPriority } from '../lib/scan-result'
 import { severityTone } from '../lib/tones'
 import { cn } from '@cyber/theme'
 import { Badge, Chip, EmptyState } from '@cyber/ui'
@@ -10,14 +9,13 @@ import { AiPanel } from '@/components/AiPanel'
 import { MarkdownContent } from '@/markdown'
 
 interface FindingsPanelProps {
-  result: ScanResult
+  findings: FindingItem[]
 }
 
 type FilterValue = 'all' | FindingPriority | 'ai_verified'
 
-export default function FindingsPanel({ result }: FindingsPanelProps) {
+export default function FindingsPanel({ findings }: FindingsPanelProps) {
   const { t } = useTranslation('findings')
-  const findings = useMemo(() => buildFindings(result), [result])
   const [filter, setFilter] = useState<FilterValue>('all')
 
   const filtered = useMemo(() => {

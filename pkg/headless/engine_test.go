@@ -137,8 +137,8 @@ func TestCompileAllNucleiTemplates(t *testing.T) {
 	// variables defined by the HTTP section that doesn't exist in our headless-only engine.
 	// These are expected to fail compilation and are excluded from the compile test.
 	skipCompile := map[string]bool{
-		"CVE-2025-25062.yaml": true,  // mixed HTTP+headless, variables from HTTP section
-		"retool-dom-xss.yaml": true,  // DSL matcher references runtime variables
+		"CVE-2025-25062.yaml": true, // mixed HTTP+headless, variables from HTTP section
+		"retool-dom-xss.yaml": true, // DSL matcher references runtime variables
 	}
 
 	templates := findAllTemplates(t)
