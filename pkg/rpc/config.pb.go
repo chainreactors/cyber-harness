@@ -10,7 +10,6 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	unsafe "unsafe"
 )
@@ -26,9 +25,9 @@ var File_rpc_config_proto protoreflect.FileDescriptor
 
 const file_rpc_config_proto_rawDesc = "" +
 	"\n" +
-	"\x10rpc/config.proto\x12\x11aiscan.rpc.config\x1a\x12types/config.proto\x1a\x1bgoogle/protobuf/empty.proto2\x89\x04\n" +
-	"\rConfigService\x12E\n" +
-	"\tGetConfig\x12\x16.google.protobuf.Empty\x1a .aiscan.config.GetConfigResponse\x12W\n" +
+	"\x10rpc/config.proto\x12\x11aiscan.rpc.config\x1a\x12types/config.proto2\x92\x04\n" +
+	"\rConfigService\x12N\n" +
+	"\tGetConfig\x12\x1f.aiscan.config.GetConfigRequest\x1a .aiscan.config.GetConfigResponse\x12W\n" +
 	"\fUpdateConfig\x12\".aiscan.config.UpdateConfigRequest\x1a#.aiscan.config.UpdateConfigResponse\x12`\n" +
 	"\x0fActivateProfile\x12%.aiscan.config.ActivateProfileRequest\x1a&.aiscan.config.ActivateProfileResponse\x12H\n" +
 	"\aTestLLM\x12\x1e.aiscan.config.LLMProbeRequest\x1a\x1d.aiscan.config.LLMProbeResult\x12M\n" +
@@ -37,7 +36,7 @@ const file_rpc_config_proto_rawDesc = "" +
 	"\x0eTestConnection\x12$.aiscan.config.TestConnectionRequest\x1a%.aiscan.config.TestConnectionResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_config_proto_goTypes = []any{
-	(*emptypb.Empty)(nil),                 // 0: google.protobuf.Empty
+	(*types.GetConfigRequest)(nil),        // 0: aiscan.config.GetConfigRequest
 	(*types.UpdateConfigRequest)(nil),     // 1: aiscan.config.UpdateConfigRequest
 	(*types.ActivateProfileRequest)(nil),  // 2: aiscan.config.ActivateProfileRequest
 	(*types.LLMProbeRequest)(nil),         // 3: aiscan.config.LLMProbeRequest
@@ -50,7 +49,7 @@ var file_rpc_config_proto_goTypes = []any{
 	(*types.TestConnectionResponse)(nil),  // 10: aiscan.config.TestConnectionResponse
 }
 var file_rpc_config_proto_depIdxs = []int32{
-	0,  // 0: aiscan.rpc.config.ConfigService.GetConfig:input_type -> google.protobuf.Empty
+	0,  // 0: aiscan.rpc.config.ConfigService.GetConfig:input_type -> aiscan.config.GetConfigRequest
 	1,  // 1: aiscan.rpc.config.ConfigService.UpdateConfig:input_type -> aiscan.config.UpdateConfigRequest
 	2,  // 2: aiscan.rpc.config.ConfigService.ActivateProfile:input_type -> aiscan.config.ActivateProfileRequest
 	3,  // 3: aiscan.rpc.config.ConfigService.TestLLM:input_type -> aiscan.config.LLMProbeRequest

@@ -13,29 +13,24 @@ import (
 // of the event stores; live protobuf values never pass through JSON envelopes.
 type Hub struct {
 	mu              sync.Mutex
-	aopSubscribers  map[string]map[chan AOPDelivery]struct{}
+	aopSubscribers  map[string]map[chan *aop.EventDelivery]struct{}
 	scanSubscribers map[string]map[chan *types.ScanEvent]struct{}
 	scanSequence    map[string]uint64
 }
 
-type AOPDelivery struct {
-	Cursor int64
-	Event  *aop.Event
-}
-
 func NewHub() *Hub {
 	return &Hub{
-		aopSubscribers:  make(map[string]map[chan AOPDelivery]struct{}),
+		aopSubscribers:  make(map[string]map[chan *aop.EventDelivery]struct{}),
 		scanSubscribers: make(map[string]map[chan *types.ScanEvent]struct{}),
 		scanSequence:    make(map[string]uint64),
 	}
 }
 
-func (h *Hub) SubscribeAOP(sessionID string) (<-chan AOPDelivery, func()) {
-	ch := make(chan AOPDelivery, 64)
+func (h *Hub) SubscribeAOP(sessionID string) (<-chan *aop.EventDelivery, func()) {
+	ch := make(chan *aop.EventDelivery, 64)
 	h.mu.Lock()
 	if _, ok := h.aopSubscribers[sessionID]; !ok {
-		h.aopSubscribers[sessionID] = make(map[chan AOPDelivery]struct{})
+		h.aopSubscribers[sessionID] = make(map[chan *aop.EventDelivery]struct{})
 	}
 	h.aopSubscribers[sessionID][ch] = struct{}{}
 	h.mu.Unlock()
@@ -52,13 +47,13 @@ func (h *Hub) SubscribeAOP(sessionID string) (<-chan AOPDelivery, func()) {
 	}
 }
 
-func (h *Hub) BroadcastAOP(sessionID string, delivery AOPDelivery, reliable bool) {
-	if delivery.Event == nil {
+func (h *Hub) BroadcastAOP(sessionID string, delivery *aop.EventDelivery, reliable bool) {
+	if delivery == nil || delivery.Event == nil {
 		return
 	}
 	h.mu.Lock()
 	for ch := range h.aopSubscribers[sessionID] {
-		value := AOPDelivery{Cursor: delivery.Cursor, Event: protobuf.Clone(delivery.Event).(*aop.Event)}
+		value := protobuf.Clone(delivery).(*aop.EventDelivery)
 		broadcastBuffered(ch, value, reliable)
 	}
 	h.mu.Unlock()

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file types/config.proto.
  */
 export const file_types_config: GenFile = /*@__PURE__*/
-  fileDesc("ChJ0eXBlcy9jb25maWcucHJvdG8SDWFpc2Nhbi5jb25maWcivQIKEERpc3RyaWJ1dGVDb25maWcSJQoDbGxtGAEgASgLMhguYWlzY2FuLmNvbmZpZy5MTE1Db25maWcSLwoIY3liZXJodWIYAiABKAsyHS5haXNjYW4uY29uZmlnLkN5YmVyaHViQ29uZmlnEikKBXJlY29uGAMgASgLMhouYWlzY2FuLmNvbmZpZy5SZWNvbkNvbmZpZxInCgRzY2FuGAQgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEisKBnNlYXJjaBgFIAEoCzIbLmFpc2Nhbi5jb25maWcuU2VhcmNoQ29uZmlnEiUKA2lvYRgGIAEoCzIYLmFpc2Nhbi5jb25maWcuSU9BQ29uZmlnEikKBWFnZW50GAcgASgLMhouYWlzY2FuLmNvbmZpZy5BZ2VudENvbmZpZyJYCglMTE1Db25maWcSFgoOYWN0aXZlX3Byb2ZpbGUYASABKAkSMwoJcHJvdmlkZXJzGAIgAygLMiAuYWlzY2FuLmNvbmZpZy5MTE1Qcm92aWRlckNvbmZpZyKsAQoRTExNUHJvdmlkZXJDb25maWcSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghwcm92aWRlchgDIAEoCRIQCghiYXNlX3VybBgEIAEoCRIPCgdhcGlfa2V5GAUgASgJEg0KBW1vZGVsGAYgASgJEg0KBXByb3h5GAcgASgJEhIKCm1heF90b2tlbnMYCCABKAUSFgoOY29udGV4dF93aW5kb3cYCSABKAUiRwoOQ3liZXJodWJDb25maWcSCwoDdXJsGAEgASgJEgsKA2tleRgCIAEoCRIMCgRtb2RlGAMgASgJEg0KBXByb3h5GAQgASgJIn8KC1JlY29uQ29uZmlnEhIKCmZvZmFfZW1haWwYASABKAkSEAoIZm9mYV9rZXkYAiABKAkSFAoMaHVudGVyX3Rva2VuGAMgASgJEhYKDmh1bnRlcl9hcGlfa2V5GAQgASgJEg0KBXByb3h5GAUgASgJEg0KBWxpbWl0GAYgASgFIhwKClNjYW5Db25maWcSDgoGdmVyaWZ5GAEgASgJIiMKDFNlYXJjaENvbmZpZxITCgt0YXZpbHlfa2V5cxgBIAEoCSJJCglJT0FDb25maWcSCwoDdXJsGAEgASgJEg0KBXRva2VuGAIgASgJEhEKCW5vZGVfbmFtZRgDIAEoCRINCgVzcGFjZRgEIAEoCSJDCgtBZ2VudENvbmZpZxINCgV0b29scxgBIAMoCRIPCgd0aW1lb3V0GAIgASgFEhQKDHNhdmVfc2Vzc2lvbhgDIAEoCCK1AQoPTExNUHJvdmlkZXJWaWV3EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcHJvdmlkZXIYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSGgoSYXBpX2tleV9jb25maWd1cmVkGAUgASgIEg0KBW1vZGVsGAYgASgJEg0KBXByb3h5GAcgASgJEhIKCm1heF90b2tlbnMYCCABKAUSFgoOY29udGV4dF93aW5kb3cYCSABKAUihAEKB0xMTVZpZXcSFgoOYWN0aXZlX3Byb2ZpbGUYASABKAkSLgoGYWN0aXZlGAIgASgLMh4uYWlzY2FuLmNvbmZpZy5MTE1Qcm92aWRlclZpZXcSMQoJcHJvdmlkZXJzGAMgAygLMh4uYWlzY2FuLmNvbmZpZy5MTE1Qcm92aWRlclZpZXciUAoMQ3liZXJodWJWaWV3EgsKA3VybBgBIAEoCRIWCg5rZXlfY29uZmlndXJlZBgCIAEoCBIMCgRtb2RlGAMgASgJEg0KBXByb3h5GAQgASgJIp4BCglSZWNvblZpZXcSEgoKZm9mYV9lbWFpbBgBIAEoCRIbChNmb2ZhX2tleV9jb25maWd1cmVkGAIgASgIEh8KF2h1bnRlcl90b2tlbl9jb25maWd1cmVkGAMgASgIEiEKGWh1bnRlcl9hcGlfa2V5X2NvbmZpZ3VyZWQYBCABKAgSDQoFcHJveHkYBSABKAkSDQoFbGltaXQYBiABKAUiLAoKU2VhcmNoVmlldxIeChZ0YXZpbHlfa2V5c19jb25maWd1cmVkGAEgASgIIlIKB0lPQVZpZXcSCwoDdXJsGAEgASgJEhgKEHRva2VuX2NvbmZpZ3VyZWQYAiABKAgSEQoJbm9kZV9uYW1lGAMgASgJEg0KBXNwYWNlGAQgASgJIssCCgpDb25maWdWaWV3EgwKBHBhdGgYASABKAkSDgoGbG9hZGVkGAIgASgIEiMKA2xsbRgDIAEoCzIWLmFpc2Nhbi5jb25maWcuTExNVmlldxItCghjeWJlcmh1YhgEIAEoCzIbLmFpc2Nhbi5jb25maWcuQ3liZXJodWJWaWV3EicKBXJlY29uGAUgASgLMhguYWlzY2FuLmNvbmZpZy5SZWNvblZpZXcSJwoEc2NhbhgGIAEoCzIZLmFpc2Nhbi5jb25maWcuU2NhbkNvbmZpZxIpCgZzZWFyY2gYByABKAsyGS5haXNjYW4uY29uZmlnLlNlYXJjaFZpZXcSIwoDaW9hGAggASgLMhYuYWlzY2FuLmNvbmZpZy5JT0FWaWV3EikKBWFnZW50GAkgASgLMhouYWlzY2FuLmNvbmZpZy5BZ2VudENvbmZpZyI+ChFHZXRDb25maWdSZXNwb25zZRIpCgZjb25maWcYASABKAsyGS5haXNjYW4uY29uZmlnLkNvbmZpZ1ZpZXciRgoTVXBkYXRlQ29uZmlnUmVxdWVzdBIvCgZjb25maWcYASABKAsyHy5haXNjYW4uY29uZmlnLkRpc3RyaWJ1dGVDb25maWciQQoUVXBkYXRlQ29uZmlnUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IiwKFkFjdGl2YXRlUHJvZmlsZVJlcXVlc3QSEgoKcHJvZmlsZV9pZBgBIAEoCSJEChdBY3RpdmF0ZVByb2ZpbGVSZXNwb25zZRIpCgZjb25maWcYASABKAsyGS5haXNjYW4uY29uZmlnLkNvbmZpZ1ZpZXcieAoPTExNUHJvYmVSZXF1ZXN0EhIKCnByb2ZpbGVfaWQYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEAoIYmFzZV91cmwYAyABKAkSDwoHYXBpX2tleRgEIAEoCRINCgVtb2RlbBgFIAEoCRINCgVwcm94eRgGIAEoCSJvCg5MTE1Qcm9iZVJlc3VsdBIKCgJvaxgBIAEoCBIQCghwcm92aWRlchgCIAEoCRINCgVtb2RlbBgDIAEoCRISCgpsYXRlbmN5X21zGAQgASgDEg0KBXJlcGx5GAUgASgJEg0KBWVycm9yGAYgASgJIlAKEExpc3RNb2RlbHNSZXN1bHQSCgoCb2sYASABKAgSEQoJc3VwcG9ydGVkGAIgASgIEg4KBm1vZGVscxgDIAMoCRINCgVlcnJvchgEIAEoCSJZChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDwoHc2VjdGlvbhgBIAEoCRIvCgZjb25maWcYAiABKAsyHy5haXNjYW4uY29uZmlnLkRpc3RyaWJ1dGVDb25maWciXgoPQ29ubmVjdGlvbkNoZWNrEgwKBG5hbWUYASABKAkSCgoCb2sYAiABKAgSEgoKbGF0ZW5jeV9tcxgDIAEoAxIOCgZkZXRhaWwYBCABKAkSDQoFZXJyb3IYBSABKAkiSAoWVGVzdENvbm5lY3Rpb25SZXNwb25zZRIuCgZjaGVja3MYASADKAsyHi5haXNjYW4uY29uZmlnLkNvbm5lY3Rpb25DaGVja0IxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy90eXBlczt0eXBlc2IGcHJvdG8z");
+  fileDesc("ChJ0eXBlcy9jb25maWcucHJvdG8SDWFpc2Nhbi5jb25maWcivQIKEERpc3RyaWJ1dGVDb25maWcSJQoDbGxtGAEgASgLMhguYWlzY2FuLmNvbmZpZy5MTE1Db25maWcSLwoIY3liZXJodWIYAiABKAsyHS5haXNjYW4uY29uZmlnLkN5YmVyaHViQ29uZmlnEikKBXJlY29uGAMgASgLMhouYWlzY2FuLmNvbmZpZy5SZWNvbkNvbmZpZxInCgRzY2FuGAQgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEisKBnNlYXJjaBgFIAEoCzIbLmFpc2Nhbi5jb25maWcuU2VhcmNoQ29uZmlnEiUKA2lvYRgGIAEoCzIYLmFpc2Nhbi5jb25maWcuSU9BQ29uZmlnEikKBWFnZW50GAcgASgLMhouYWlzY2FuLmNvbmZpZy5BZ2VudENvbmZpZyJYCglMTE1Db25maWcSFgoOYWN0aXZlX3Byb2ZpbGUYASABKAkSMwoJcHJvdmlkZXJzGAIgAygLMiAuYWlzY2FuLmNvbmZpZy5MTE1Qcm92aWRlckNvbmZpZyLdAQoRTExNUHJvdmlkZXJDb25maWcSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghwcm92aWRlchgDIAEoCRIQCghiYXNlX3VybBgEIAEoCRIPCgdhcGlfa2V5GAUgASgJEg0KBW1vZGVsGAYgASgJEg0KBXByb3h5GAcgASgJEhIKCm1heF90b2tlbnMYCCABKAUSFgoOY29udGV4dF93aW5kb3cYCSABKAUSDwoHdGltZW91dBgKIAEoBRITCgZpbWFnZXMYCyABKAhIAIgBAUIJCgdfaW1hZ2VzIkcKDkN5YmVyaHViQ29uZmlnEgsKA3VybBgBIAEoCRILCgNrZXkYAiABKAkSDAoEbW9kZRgDIAEoCRINCgVwcm94eRgEIAEoCSJ/CgtSZWNvbkNvbmZpZxISCgpmb2ZhX2VtYWlsGAEgASgJEhAKCGZvZmFfa2V5GAIgASgJEhQKDGh1bnRlcl90b2tlbhgDIAEoCRIWCg5odW50ZXJfYXBpX2tleRgEIAEoCRINCgVwcm94eRgFIAEoCRINCgVsaW1pdBgGIAEoBSIcCgpTY2FuQ29uZmlnEg4KBnZlcmlmeRgBIAEoCSIjCgxTZWFyY2hDb25maWcSEwoLdGF2aWx5X2tleXMYASABKAkiSQoJSU9BQ29uZmlnEgsKA3VybBgBIAEoCRINCgV0b2tlbhgCIAEoCRIRCglub2RlX25hbWUYAyABKAkSDQoFc3BhY2UYBCABKAkiQwoLQWdlbnRDb25maWcSDQoFdG9vbHMYASADKAkSDwoHdGltZW91dBgCIAEoBRIUCgxzYXZlX3Nlc3Npb24YAyABKAgi5gEKD0xMTVByb3ZpZGVyVmlldxIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHByb3ZpZGVyGAMgASgJEhAKCGJhc2VfdXJsGAQgASgJEhoKEmFwaV9rZXlfY29uZmlndXJlZBgFIAEoCBINCgVtb2RlbBgGIAEoCRINCgVwcm94eRgHIAEoCRISCgptYXhfdG9rZW5zGAggASgFEhYKDmNvbnRleHRfd2luZG93GAkgASgFEg8KB3RpbWVvdXQYCiABKAUSEwoGaW1hZ2VzGAsgASgISACIAQFCCQoHX2ltYWdlcyKEAQoHTExNVmlldxIWCg5hY3RpdmVfcHJvZmlsZRgBIAEoCRIuCgZhY3RpdmUYAiABKAsyHi5haXNjYW4uY29uZmlnLkxMTVByb3ZpZGVyVmlldxIxCglwcm92aWRlcnMYAyADKAsyHi5haXNjYW4uY29uZmlnLkxMTVByb3ZpZGVyVmlldyJQCgxDeWJlcmh1YlZpZXcSCwoDdXJsGAEgASgJEhYKDmtleV9jb25maWd1cmVkGAIgASgIEgwKBG1vZGUYAyABKAkSDQoFcHJveHkYBCABKAkingEKCVJlY29uVmlldxISCgpmb2ZhX2VtYWlsGAEgASgJEhsKE2ZvZmFfa2V5X2NvbmZpZ3VyZWQYAiABKAgSHwoXaHVudGVyX3Rva2VuX2NvbmZpZ3VyZWQYAyABKAgSIQoZaHVudGVyX2FwaV9rZXlfY29uZmlndXJlZBgEIAEoCBINCgVwcm94eRgFIAEoCRINCgVsaW1pdBgGIAEoBSIsCgpTZWFyY2hWaWV3Eh4KFnRhdmlseV9rZXlzX2NvbmZpZ3VyZWQYASABKAgiUgoHSU9BVmlldxILCgN1cmwYASABKAkSGAoQdG9rZW5fY29uZmlndXJlZBgCIAEoCBIRCglub2RlX25hbWUYAyABKAkSDQoFc3BhY2UYBCABKAkiywIKCkNvbmZpZ1ZpZXcSDAoEcGF0aBgBIAEoCRIOCgZsb2FkZWQYAiABKAgSIwoDbGxtGAMgASgLMhYuYWlzY2FuLmNvbmZpZy5MTE1WaWV3Ei0KCGN5YmVyaHViGAQgASgLMhsuYWlzY2FuLmNvbmZpZy5DeWJlcmh1YlZpZXcSJwoFcmVjb24YBSABKAsyGC5haXNjYW4uY29uZmlnLlJlY29uVmlldxInCgRzY2FuGAYgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEikKBnNlYXJjaBgHIAEoCzIZLmFpc2Nhbi5jb25maWcuU2VhcmNoVmlldxIjCgNpb2EYCCABKAsyFi5haXNjYW4uY29uZmlnLklPQVZpZXcSKQoFYWdlbnQYCSABKAsyGi5haXNjYW4uY29uZmlnLkFnZW50Q29uZmlnIhIKEEdldENvbmZpZ1JlcXVlc3QiPgoRR2V0Q29uZmlnUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IkYKE1VwZGF0ZUNvbmZpZ1JlcXVlc3QSLwoGY29uZmlnGAEgASgLMh8uYWlzY2FuLmNvbmZpZy5EaXN0cmlidXRlQ29uZmlnIkEKFFVwZGF0ZUNvbmZpZ1Jlc3BvbnNlEikKBmNvbmZpZxgBIAEoCzIZLmFpc2Nhbi5jb25maWcuQ29uZmlnVmlldyIsChZBY3RpdmF0ZVByb2ZpbGVSZXF1ZXN0EhIKCnByb2ZpbGVfaWQYASABKAkiRAoXQWN0aXZhdGVQcm9maWxlUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IngKD0xMTVByb2JlUmVxdWVzdBISCgpwcm9maWxlX2lkGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhAKCGJhc2VfdXJsGAMgASgJEg8KB2FwaV9rZXkYBCABKAkSDQoFbW9kZWwYBSABKAkSDQoFcHJveHkYBiABKAkibwoOTExNUHJvYmVSZXN1bHQSCgoCb2sYASABKAgSEAoIcHJvdmlkZXIYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKbGF0ZW5jeV9tcxgEIAEoAxINCgVyZXBseRgFIAEoCRINCgVlcnJvchgGIAEoCSJQChBMaXN0TW9kZWxzUmVzdWx0EgoKAm9rGAEgASgIEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZtb2RlbHMYAyADKAkSDQoFZXJyb3IYBCABKAkiWQoVVGVzdENvbm5lY3Rpb25SZXF1ZXN0Eg8KB3NlY3Rpb24YASABKAkSLwoGY29uZmlnGAIgASgLMh8uYWlzY2FuLmNvbmZpZy5EaXN0cmlidXRlQ29uZmlnIl4KD0Nvbm5lY3Rpb25DaGVjaxIMCgRuYW1lGAEgASgJEgoKAm9rGAIgASgIEhIKCmxhdGVuY3lfbXMYAyABKAMSDgoGZGV0YWlsGAQgASgJEg0KBWVycm9yGAUgASgJIkgKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USLgoGY2hlY2tzGAEgAygLMh4uYWlzY2FuLmNvbmZpZy5Db25uZWN0aW9uQ2hlY2tCMVovZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2Fpc2Nhbi9wa2cvdHlwZXM7dHlwZXNiBnByb3RvMw");
 
 /**
  * @generated from message aiscan.config.DistributeConfig
@@ -129,6 +129,16 @@ export type LLMProviderConfig = Message<"aiscan.config.LLMProviderConfig"> & {
    * @generated from field: int32 context_window = 9;
    */
   contextWindow: number;
+
+  /**
+   * @generated from field: int32 timeout = 10;
+   */
+  timeout: number;
+
+  /**
+   * @generated from field: optional bool images = 11;
+   */
+  images?: boolean | undefined;
 };
 
 /**
@@ -353,6 +363,16 @@ export type LLMProviderView = Message<"aiscan.config.LLMProviderView"> & {
    * @generated from field: int32 context_window = 9;
    */
   contextWindow: number;
+
+  /**
+   * @generated from field: int32 timeout = 10;
+   */
+  timeout: number;
+
+  /**
+   * @generated from field: optional bool images = 11;
+   */
+  images?: boolean | undefined;
 };
 
 /**
@@ -570,6 +590,19 @@ export const ConfigViewSchema: GenMessage<ConfigView> = /*@__PURE__*/
   messageDesc(file_types_config, 15);
 
 /**
+ * @generated from message aiscan.config.GetConfigRequest
+ */
+export type GetConfigRequest = Message<"aiscan.config.GetConfigRequest"> & {
+};
+
+/**
+ * Describes the message aiscan.config.GetConfigRequest.
+ * Use `create(GetConfigRequestSchema)` to create a new message.
+ */
+export const GetConfigRequestSchema: GenMessage<GetConfigRequest> = /*@__PURE__*/
+  messageDesc(file_types_config, 16);
+
+/**
  * @generated from message aiscan.config.GetConfigResponse
  */
 export type GetConfigResponse = Message<"aiscan.config.GetConfigResponse"> & {
@@ -584,7 +617,7 @@ export type GetConfigResponse = Message<"aiscan.config.GetConfigResponse"> & {
  * Use `create(GetConfigResponseSchema)` to create a new message.
  */
 export const GetConfigResponseSchema: GenMessage<GetConfigResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 16);
+  messageDesc(file_types_config, 17);
 
 /**
  * @generated from message aiscan.config.UpdateConfigRequest
@@ -601,7 +634,7 @@ export type UpdateConfigRequest = Message<"aiscan.config.UpdateConfigRequest"> &
  * Use `create(UpdateConfigRequestSchema)` to create a new message.
  */
 export const UpdateConfigRequestSchema: GenMessage<UpdateConfigRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 17);
+  messageDesc(file_types_config, 18);
 
 /**
  * @generated from message aiscan.config.UpdateConfigResponse
@@ -618,7 +651,7 @@ export type UpdateConfigResponse = Message<"aiscan.config.UpdateConfigResponse">
  * Use `create(UpdateConfigResponseSchema)` to create a new message.
  */
 export const UpdateConfigResponseSchema: GenMessage<UpdateConfigResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 18);
+  messageDesc(file_types_config, 19);
 
 /**
  * @generated from message aiscan.config.ActivateProfileRequest
@@ -635,7 +668,7 @@ export type ActivateProfileRequest = Message<"aiscan.config.ActivateProfileReque
  * Use `create(ActivateProfileRequestSchema)` to create a new message.
  */
 export const ActivateProfileRequestSchema: GenMessage<ActivateProfileRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 19);
+  messageDesc(file_types_config, 20);
 
 /**
  * @generated from message aiscan.config.ActivateProfileResponse
@@ -652,7 +685,7 @@ export type ActivateProfileResponse = Message<"aiscan.config.ActivateProfileResp
  * Use `create(ActivateProfileResponseSchema)` to create a new message.
  */
 export const ActivateProfileResponseSchema: GenMessage<ActivateProfileResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 20);
+  messageDesc(file_types_config, 21);
 
 /**
  * @generated from message aiscan.config.LLMProbeRequest
@@ -694,7 +727,7 @@ export type LLMProbeRequest = Message<"aiscan.config.LLMProbeRequest"> & {
  * Use `create(LLMProbeRequestSchema)` to create a new message.
  */
 export const LLMProbeRequestSchema: GenMessage<LLMProbeRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 21);
+  messageDesc(file_types_config, 22);
 
 /**
  * @generated from message aiscan.config.LLMProbeResult
@@ -736,7 +769,7 @@ export type LLMProbeResult = Message<"aiscan.config.LLMProbeResult"> & {
  * Use `create(LLMProbeResultSchema)` to create a new message.
  */
 export const LLMProbeResultSchema: GenMessage<LLMProbeResult> = /*@__PURE__*/
-  messageDesc(file_types_config, 22);
+  messageDesc(file_types_config, 23);
 
 /**
  * @generated from message aiscan.config.ListModelsResult
@@ -768,7 +801,7 @@ export type ListModelsResult = Message<"aiscan.config.ListModelsResult"> & {
  * Use `create(ListModelsResultSchema)` to create a new message.
  */
 export const ListModelsResultSchema: GenMessage<ListModelsResult> = /*@__PURE__*/
-  messageDesc(file_types_config, 23);
+  messageDesc(file_types_config, 24);
 
 /**
  * @generated from message aiscan.config.TestConnectionRequest
@@ -790,7 +823,7 @@ export type TestConnectionRequest = Message<"aiscan.config.TestConnectionRequest
  * Use `create(TestConnectionRequestSchema)` to create a new message.
  */
 export const TestConnectionRequestSchema: GenMessage<TestConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 24);
+  messageDesc(file_types_config, 25);
 
 /**
  * @generated from message aiscan.config.ConnectionCheck
@@ -827,7 +860,7 @@ export type ConnectionCheck = Message<"aiscan.config.ConnectionCheck"> & {
  * Use `create(ConnectionCheckSchema)` to create a new message.
  */
 export const ConnectionCheckSchema: GenMessage<ConnectionCheck> = /*@__PURE__*/
-  messageDesc(file_types_config, 25);
+  messageDesc(file_types_config, 26);
 
 /**
  * @generated from message aiscan.config.TestConnectionResponse
@@ -844,4 +877,4 @@ export type TestConnectionResponse = Message<"aiscan.config.TestConnectionRespon
  * Use `create(TestConnectionResponseSchema)` to create a new message.
  */
 export const TestConnectionResponseSchema: GenMessage<TestConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 26);
+  messageDesc(file_types_config, 27);

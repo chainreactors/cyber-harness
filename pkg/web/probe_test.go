@@ -4,7 +4,6 @@ import (
 	"connectrpc.com/connect"
 	"context"
 	"encoding/json"
-	agentprobe "github.com/chainreactors/aiscan/agent/probe"
 	"github.com/chainreactors/aiscan/pkg/probe"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -30,13 +29,13 @@ func newService(store ConfigStore) *Service {
 	return NewService(ServiceConfig{ConfigStore: store})
 }
 
-func findCheck(checks []probe.ConnCheck, name string) (probe.ConnCheck, bool) {
+func findCheck(checks []*types.ConnectionCheck, name string) (*types.ConnectionCheck, bool) {
 	for _, c := range checks {
 		if c.Name == name {
 			return c, true
 		}
 	}
-	return probe.ConnCheck{}, false
+	return nil, false
 }
 
 func TestTestConnUnknownSection(t *testing.T) {
@@ -71,7 +70,7 @@ func TestProbeCyberhubSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if c, ok := findCheck(resp, "cyberhub"); !ok || !c.OK {
+	if c, ok := findCheck(resp, "cyberhub"); !ok || !c.Ok {
 		t.Fatalf("expected cyberhub ok, got %+v", resp)
 	}
 }
@@ -91,7 +90,7 @@ func TestProbeCyberhubAuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if c, _ := findCheck(resp, "cyberhub"); c.OK {
+	if c, _ := findCheck(resp, "cyberhub"); c.Ok {
 		t.Fatal("expected cyberhub failure, got ok")
 	}
 }
@@ -119,7 +118,7 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	c, ok := findCheck(resp, "fofa")
-	if !ok || !c.OK {
+	if !ok || !c.Ok {
 		t.Fatalf("expected fofa ok, got %+v", resp)
 	}
 	if gotKey != "stored-fofa" {
@@ -144,7 +143,7 @@ func TestProbeFofaError(t *testing.T) {
 		c.Recon = &types.ReconConfig{FofaKey: "bad"}
 	}))
 	c, ok := findCheck(resp, "fofa")
-	if !ok || c.OK {
+	if !ok || c.Ok {
 		t.Fatalf("expected fofa failure, got %+v", resp)
 	}
 	if !strings.Contains(c.Error, "account invalid") {
@@ -171,7 +170,7 @@ func TestProbeHunterSuccess(t *testing.T) {
 	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "hk"}
 	}))
-	if c, ok := findCheck(resp, "hunter"); !ok || !c.OK {
+	if c, ok := findCheck(resp, "hunter"); !ok || !c.Ok {
 		t.Fatalf("expected hunter ok, got %+v", resp)
 	}
 }
@@ -190,7 +189,7 @@ func TestProbeHunterError(t *testing.T) {
 		c.Recon = &types.ReconConfig{HunterToken: "bad"}
 	}))
 	c, ok := findCheck(resp, "hunter")
-	if !ok || c.OK {
+	if !ok || c.Ok {
 		t.Fatalf("expected hunter failure, got %+v", resp)
 	}
 	if !strings.Contains(c.Error, "invalid api-key") {
@@ -201,14 +200,14 @@ func TestProbeHunterError(t *testing.T) {
 func TestReconNoCredentials(t *testing.T) {
 	svc := newService(&fakeConfigStore{})
 	resp, _ := svc.TestConn(context.Background(), "recon", configWith(nil))
-	if c, ok := findCheck(resp, "recon"); !ok || c.OK || c.Error == "" {
+	if c, ok := findCheck(resp, "recon"); !ok || c.Ok || c.Error == "" {
 		t.Fatalf("expected a single failing recon check, got %+v", resp)
 	}
 }
 
 func TestHandlerTestConnRouting(t *testing.T) {
 	svc := newService(&fakeConfigStore{})
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, ""))
+	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
 	defer srv.Close()
 	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
 
@@ -248,7 +247,7 @@ func TestProbeIOASuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	c, ok := findCheck(resp, "ioa")
-	if !ok || !c.OK {
+	if !ok || !c.Ok {
 		t.Fatalf("expected ioa ok, got %+v", resp)
 	}
 	if !strings.Contains(c.Detail, "1 space") {
@@ -308,16 +307,16 @@ func TestTestLLMSuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.TestLLM(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  srv.URL + "/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  srv.URL + "/v1",
+		ApiKey:   "sk-test",
 		Model:    "gpt-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if res.Reply != "pong" {
@@ -330,11 +329,11 @@ func TestTestLLMSuccess(t *testing.T) {
 
 func TestTestLLMMissingModel(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.TestLLM(context.Background(), agentprobe.LLMProbeRequest{Provider: "openai", APIKey: "sk-test"})
+	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{Provider: "openai", ApiKey: "sk-test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.OK {
+	if res.Ok {
 		t.Fatal("expected failure when model is empty")
 	}
 	if !strings.Contains(res.Error, "model") {
@@ -354,15 +353,15 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
-	res, err := svc.TestLLM(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  srv.URL + "/v1",
+		BaseUrl:  srv.URL + "/v1",
 		Model:    "gpt-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if gotAuth != "Bearer sk-stored" {
@@ -373,16 +372,16 @@ func TestTestLLMFallsBackToStoredKey(t *testing.T) {
 func TestTestLLMReportsTransportError(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
 	// Unroutable port → connection refused, surfaced inside the result.
-	res, err := svc.TestLLM(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.TestLLM(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  "http://127.0.0.1:1/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  "http://127.0.0.1:1/v1",
+		ApiKey:   "sk-test",
 		Model:    "gpt-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.OK {
+	if res.Ok {
 		t.Fatal("expected failure against unreachable endpoint")
 	}
 	if res.Error == "" {
@@ -415,15 +414,15 @@ func TestListLLMModelsSuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  srv.URL + "/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  srv.URL + "/v1",
+		ApiKey:   "sk-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if len(res.Models) != 2 || res.Models[0] != "gpt-4.1" {
@@ -446,14 +445,14 @@ func TestListLLMModelsFallsBackToStoredKey(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
 	// APIKey left blank: the stored secret must be used.
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  srv.URL + "/v1",
+		BaseUrl:  srv.URL + "/v1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if gotAuth != "Bearer sk-stored" {
@@ -476,15 +475,15 @@ func TestListLLMModelsUsesSelectedProfileStoredKey(t *testing.T) {
 	}}
 	svc := NewService(ServiceConfig{ConfigStore: store})
 
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
-		ProfileID: "secondary",
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
+		ProfileId: "secondary",
 		Provider:  "openai",
-		BaseURL:   srv.URL + "/v1",
+		BaseUrl:   srv.URL + "/v1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if gotAuth != "Bearer sk-secondary" {
@@ -497,30 +496,30 @@ func TestListLLMModelsTreatsNotFoundAsUnsupported(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  srv.URL + "/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  srv.URL + "/v1",
+		ApiKey:   "sk-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK || res.Supported || res.Error != "" {
+	if !res.Ok || res.Supported || res.Error != "" {
 		t.Fatalf("result = %+v, want graceful unsupported response", res)
 	}
 }
 
 func TestListLLMModelsReportsTransportError(t *testing.T) {
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "openai",
-		BaseURL:  "http://127.0.0.1:1/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  "http://127.0.0.1:1/v1",
+		ApiKey:   "sk-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.OK {
+	if res.Ok {
 		t.Fatal("expected failure against unreachable endpoint")
 	}
 	if res.Error == "" {
@@ -551,15 +550,15 @@ func TestListLLMModelsAnthropic(t *testing.T) {
 	defer srv.Close()
 
 	svc := NewService(ServiceConfig{ConfigStore: &fakeConfigStore{}})
-	res, err := svc.ListLLMModels(context.Background(), agentprobe.LLMProbeRequest{
+	res, err := svc.ListLLMModels(context.Background(), &types.LLMProbeRequest{
 		Provider: "anthropic",
-		BaseURL:  srv.URL + "/v1",
-		APIKey:   "sk-test",
+		BaseUrl:  srv.URL + "/v1",
+		ApiKey:   "sk-test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !res.OK {
+	if !res.Ok {
 		t.Fatalf("expected ok, got error: %q", res.Error)
 	}
 	if len(res.Models) != 2 || res.Models[0] != "claude-opus-4-8" {

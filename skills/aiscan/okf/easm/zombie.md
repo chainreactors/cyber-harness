@@ -4,9 +4,7 @@ title: zombie
 description: Use this playbook when working with zombie for authorized weak credential checks and authentication result analysis.
 tags: [easm, weakpass]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # Zombie

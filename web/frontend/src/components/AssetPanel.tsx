@@ -9,16 +9,13 @@ import {
   Badge,
   Button,
   EmptyState,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
   Spinner,
   Tabs,
   TabsList,
   TabsTrigger,
 } from '@cyber/ui'
 import { cn } from '@cyber/theme'
+import { ToolDrawer } from './layout/ToolDrawer'
 
 interface AssetPanelProps {
   open: boolean
@@ -235,14 +232,45 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
 
   return (
     <>
-      <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-        <SheetContent
-          side="right"
-          className="flex w-full flex-col gap-0 border-l border-border/70 bg-card p-0 sm:max-w-[min(96rem,94vw)]"
-          onDragOver={(e: React.DragEvent) => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={(e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) }}
-          onDrop={handleDrop}
-        >
+      <ToolDrawer
+        open={open}
+        onClose={onClose}
+        icon={Box}
+        title={t('title')}
+        description={t('openAssets')}
+        titleMeta={(
+          <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
+            {nodes.length}
+          </Badge>
+        )}
+        actions={(
+          <>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setImportOpen(true)}
+              className="gap-1.5 text-muted-foreground"
+            >
+              <Import className="h-3.5 w-3.5" />
+              {t('import')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={load}
+              disabled={loading}
+              className="text-muted-foreground"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            </Button>
+          </>
+        )}
+        contentProps={{
+          onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOver(true) },
+          onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) },
+          onDrop: handleDrop,
+        }}
+      >
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
               <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-primary bg-card/90 px-6 py-4 text-sm font-medium text-primary shadow-lg">
@@ -251,39 +279,6 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
               </div>
             </div>
           )}
-
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4 pr-12">
-            <div className="flex min-w-0 items-center gap-3">
-              <Box className="h-4 w-4 shrink-0 text-primary" />
-              <div className="flex min-w-0 items-center gap-2">
-                <SheetTitle className="text-sm font-medium text-foreground">{t('title')}</SheetTitle>
-                <Badge variant="secondary" size="sm" className="py-0 font-mono font-normal">
-                  {nodes.length}
-                </Badge>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setImportOpen(true)}
-                className="gap-1.5 text-muted-foreground"
-              >
-                <Import className="h-3.5 w-3.5" />
-                {t('import')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={load}
-                disabled={loading}
-                className="text-muted-foreground"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-              </Button>
-            </div>
-          </div>
-          <SheetDescription className="sr-only">{t('openAssets')}</SheetDescription>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {error ? (
@@ -362,8 +357,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
               </div>
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+      </ToolDrawer>
 
       <CstxImportDialog
         open={importOpen}

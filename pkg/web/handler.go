@@ -4,24 +4,17 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 )
 
 type Handler struct{ handler http.Handler }
 
-func NewHandler(service *Service, agents *AgentPool, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
+func NewHandler(service *Service, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, accessKey)
-	connectHandler := NewConnectHandler(accessKey, service, agents)
-	mux.Handle("/"+rpc.SessionServiceName+"/", connectHandler)
-	mux.Handle("/"+rpc.ScanServiceName+"/", connectHandler)
-	mux.Handle("/"+rpc.ConfigServiceName+"/", connectHandler)
-	mux.Handle("/"+rpc.AgentServiceName+"/", connectHandler)
-	mux.Handle("/"+rpc.SystemServiceName+"/", connectHandler)
-	mux.Handle("/"+rpc.SCOServiceName+"/", connectHandler)
-	if agents != nil {
-		mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) { HandleAOPWebSocket(service, agents, w, r) })
+	connectHandler := NewConnectHandler(accessKey, service)
+	mountConnectHandlers(mux, connectHandler)
+	if service != nil && service.agents != nil {
+		mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) { HandleAOPWebSocket(service, w, r) })
 	}
 	if ioaHandler != nil {
 		mux.Handle("/ioa/", http.StripPrefix("/ioa", ioaHandler))

@@ -17,9 +17,12 @@ var _ tool.Executor = (*CommandRegistry)(nil)
 // state belongs to Execution; command-specific dependencies are captured by
 // Run at construction time.
 type Command struct {
-	Name            string
-	Usage           string
-	QuickReference  string
+	Name           string
+	Usage          string
+	QuickReference string
+	// DescriptionPath points at the OKF markdown concept whose frontmatter
+	// description is advertised to management and composer surfaces.
+	DescriptionPath string
 	Run             func(context.Context, *Execution) (any, error)
 	SetProxy        func(string)
 	GetProxy        func() string

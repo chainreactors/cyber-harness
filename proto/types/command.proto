@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package aiscan.command;
 
+import "aop/content.proto";
+
 option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
 
 message CommandSpec {
@@ -19,8 +21,10 @@ message CommandRequest {
 }
 
 message CommandResult {
-  bytes data = 1;
-  string media_type = 2;
+  reserved 1, 2;
+  string command = 3;
+  string presentation = 4;
+  repeated aop.Content content = 5;
 }
 
 message CommandReceipt {

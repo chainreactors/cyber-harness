@@ -4,7 +4,7 @@ import { cn } from '@cyber/theme'
 
 type SheetContentProps = ComponentProps<typeof SheetContent>
 
-export interface ConsoleDrawerProps {
+export interface ToolDrawerProps {
   open: boolean
   onClose: () => void
   icon: ComponentType<{ className?: string }>
@@ -14,10 +14,13 @@ export interface ConsoleDrawerProps {
   actions?: ReactNode
   children: ReactNode
   bodyClassName?: string
-  contentProps?: Omit<SheetContentProps, 'children' | 'className' | 'side'>
+  contentProps?: Omit<SheetContentProps, 'children' | 'className' | 'side' | 'overlayClassName'>
 }
 
-export function ConsoleDrawer({
+const drawerTop = 'top-[calc(3rem+env(safe-area-inset-top))]'
+const drawerHeight = 'h-[calc(100dvh-3rem-env(safe-area-inset-top))]'
+
+export function ToolDrawer({
   open,
   onClose,
   icon: Icon,
@@ -28,13 +31,28 @@ export function ConsoleDrawer({
   children,
   bodyClassName,
   contentProps,
-}: ConsoleDrawerProps) {
+}: ToolDrawerProps) {
+  const { onInteractOutside, ...restContentProps } = contentProps ?? {}
+
   return (
-    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+    <Sheet open={open} modal={false} onOpenChange={(next) => { if (!next) onClose() }}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 border-l border-border/70 bg-background p-0 sm:max-w-none md:w-[75vw] md:min-w-[760px] md:max-w-none"
-        {...contentProps}
+        className={cn(
+          'flex w-full flex-col gap-0 border-l border-border/70 bg-background p-0 sm:max-w-none',
+          'md:w-[75vw] md:min-w-[760px] md:max-w-[96rem]',
+          drawerTop,
+          drawerHeight,
+        )}
+        overlayClassName={drawerTop}
+        onInteractOutside={(event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('[data-tool-drawer-trigger]')) {
+            event.preventDefault()
+          }
+          onInteractOutside?.(event)
+        }}
+        {...restContentProps}
       >
         <header className="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border/70 px-4 pr-12">
           <div className="flex min-w-0 items-center gap-3">

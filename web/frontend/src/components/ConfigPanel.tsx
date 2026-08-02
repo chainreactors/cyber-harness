@@ -5,9 +5,10 @@ import { create } from '@bufbuild/protobuf'
 import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../aiscan-proto'
 import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
 import type { ConfigView, ConnectionCheck, DistributeConfig, LLMProbeResult, ServerStatus } from '../api'
-import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, ResultLine } from '@cyber/ui'
+import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, ResultLine } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ModelCombobox } from './ModelCombobox'
+import { ToolDrawer } from './layout/ToolDrawer'
 
 // ConfigFormState is the panel's editable form model (secrets as typed, blank =
 // keep the stored value). It converts to the proto DistributeConfig at the API
@@ -23,6 +24,8 @@ interface LLMProfileForm {
   proxy: string
   context_window?: number
   max_tokens?: number
+  timeout?: number
+  images?: boolean
 }
 
 interface ConfigFormState {
@@ -49,6 +52,8 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
         proxy: profile.proxy,
         maxTokens: profile.max_tokens ?? 0,
         contextWindow: profile.context_window ?? 0,
+        timeout: profile.timeout ?? 0,
+        images: profile.images,
       })),
     },
     cyberhub: { ...form.cyberhub },
@@ -127,6 +132,8 @@ function statusToForm(cs: ConfigView): ConfigFormState {
         proxy: profile.proxy,
         context_window: positiveInteger(profile.contextWindow),
         max_tokens: positiveInteger(profile.maxTokens),
+        timeout: positiveInteger(profile.timeout),
+        images: profile.images,
       }))
     : [{
         id: cs.llm?.activeProfile || 'default',
@@ -138,6 +145,8 @@ function statusToForm(cs: ConfigView): ConfigFormState {
         proxy: active?.proxy || '',
         context_window: positiveInteger(active?.contextWindow),
         max_tokens: positiveInteger(active?.maxTokens),
+        timeout: positiveInteger(active?.timeout),
+        images: active?.images,
       }]
   return {
     llm: {
@@ -263,22 +272,15 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent
-        onInteractOutside={(e) => e.preventDefault()}
-        className="flex h-[85dvh] max-h-[42rem] w-full max-w-3xl gap-0 overflow-hidden rounded-lg border-border/70 bg-card p-0"
-      >
-        <form onSubmit={handleSave} className="flex h-full min-h-0 w-full flex-col">
-        <DialogHeader className="flex shrink-0 flex-row items-center justify-between border-b border-border/60 px-4 py-3 pr-12 text-left">
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-primary" />
-            <div>
-              <DialogTitle className="text-sm font-medium text-foreground">{t('settings')}</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">{cs?.path || status?.configPath || 'config.yaml'}</DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
+    <ToolDrawer
+      open={open}
+      onClose={onClose}
+      icon={Settings}
+      title={t('settings')}
+      description={cs?.path || status?.configPath || 'config.yaml'}
+      contentProps={{ onInteractOutside: (event) => event.preventDefault() }}
+    >
+      <form onSubmit={handleSave} className="flex h-full min-h-0 w-full flex-col">
         <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 py-1">
           {TABS.map((tab) => (
             <Button
@@ -337,13 +339,12 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
           {error && <Callout tone="destructive" className="mt-3">{error}</Callout>}
         </div>
 
-        <DialogFooter className="flex shrink-0 flex-row justify-end gap-2 border-t border-border/60 px-4 py-3 sm:space-x-0">
+        <div className="flex shrink-0 flex-row justify-end gap-2 border-t border-border/60 px-4 py-3">
           <Button type="button" variant="outline" onClick={onClose}>{t('close')}</Button>
           <Button type="submit" disabled={loading || saving}>{saving && <Spinner className="h-4 w-4" />}{t('save')}</Button>
-        </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </form>
+    </ToolDrawer>
   )
 }
 
@@ -574,7 +575,23 @@ function LLMTab({
           placeholder={t('modelDefault')}
         />
       </Field>
+      <Field label={t('llmTimeout')}>
+        <Input
+          type="number"
+          min={1}
+          step={1}
+          value={profile.timeout ?? ''}
+          onChange={(e) => updateProfile('timeout', positiveIntegerFromInput(e.target.value))}
+          placeholder={t('providerDefault')}
+        />
+      </Field>
       <Field label={t('proxy')}><Input value={profile.proxy} onChange={(e) => updateProfile('proxy', e.target.value)} placeholder="http://127.0.0.1:7890" /></Field>
+      <div className="sm:col-span-2">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Switch checked={profile.images ?? false} onCheckedChange={(value) => updateProfile('images', value)} />
+          {t('imageInput')}
+        </label>
+      </div>
       <div className="sm:col-span-2">
         <Field label={t('apiKey')}>
           <Input type="password" value={profile.api_key} onChange={(e) => updateProfile('api_key', e.target.value)}

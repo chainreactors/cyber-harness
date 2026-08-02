@@ -24,7 +24,11 @@ func init() {
 				d.Skip("proton.rules", deps.Name(resources.SetKey))
 			}
 			cmd.SetWorkDir(d.WorkDir)
-			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "scanner")
+			reg.Register(commands.Command{
+				Name: cmd.Name(), Usage: cmd.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/proton.md",
+				Run:             cmd.Run,
+			}, "scanner")
 		},
 	})
 }

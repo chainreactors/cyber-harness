@@ -126,7 +126,7 @@ func BuildGroup(group string, deps *Deps, reg *CommandRegistry)    // 构建指�
 | `scanner` | 引擎就绪后加载 | scan, gogo, spray, zombie, neutron |
 | `search` | 可选（默认加载） | web_search, fetch, cyberhub |
 | `browser` | 可选 + `full` 构建标签 | playwright |
-| `ioa` | IOA 连接后加载 | ioa_space, ioa_send, ioa_read |
+| `ioa` | IOA 连接后加载 | ioa (space/send/read 子命令) |
 | `proxy` | 始终加载 | proxy |
 
 **Deps 依赖注入：**

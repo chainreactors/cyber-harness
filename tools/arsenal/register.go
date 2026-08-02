@@ -17,7 +17,11 @@ func init() {
 				logger.Warnf("arsenal init: %v", err)
 				return
 			}
-			reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "arsenal")
+			reg.Register(commands.Command{
+				Name: cmd.Name(), Usage: cmd.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/arsenal.md",
+				Run:             cmd.Run,
+			}, "arsenal")
 		},
 	})
 }

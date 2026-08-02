@@ -36,7 +36,6 @@ func cloneCommandSpecs(values []*types.CommandSpec) []*types.CommandSpec {
 
 type taskResult struct {
 	Output string
-	Result json.RawMessage
 	File   *filepb.Result
 	Err    string
 	Turn   int
@@ -177,10 +176,10 @@ type remoteAgent struct {
 	done chan struct{}
 }
 
-func (a *remoteAgent) NodeID() string         { return a.nodeID }
-func (a *remoteAgent) Name() string           { return a.name }
-func (a *remoteAgent) state() *nodeState      { return a.nodeState }
-func (a *remoteAgent) shutdown()              { a.close() }
+func (a *remoteAgent) NodeID() string    { return a.nodeID }
+func (a *remoteAgent) Name() string      { return a.name }
+func (a *remoteAgent) state() *nodeState { return a.nodeState }
+func (a *remoteAgent) shutdown()         { a.close() }
 func (a *remoteAgent) chatCapable() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()

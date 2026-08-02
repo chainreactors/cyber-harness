@@ -180,7 +180,7 @@ func (p *AgentPool) handleAgentCommandMessage(agent *remoteAgent, envelope *aop.
 		return
 	}
 	if result := value.GetResult(); result != nil {
-		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{Result: append(json.RawMessage(nil), result.Data...)})
+		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{})
 	}
 }
 
@@ -198,8 +198,7 @@ func (p *AgentPool) handleAgentExecMessage(agent *remoteAgent, envelope *aop.Env
 		return
 	}
 	if result := value.GetResult(); result != nil {
-		encoded, _ := json.Marshal(result)
-		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{Result: encoded})
+		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{})
 	}
 	// Output is intentionally streaming-only and does not complete the task.
 }

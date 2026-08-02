@@ -69,7 +69,7 @@ Available only when they appear in the runtime pseudo-command list:
 - `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `aiscan://skills/aiscan/okf/runtime/search.md`.
 - `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `aiscan://skills/aiscan/okf/runtime/tmux.md`.
 - `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/okf/runtime/proxy.md`.
-- `ioa_space` / `ioa_send` / `ioa_read`: multi-agent collaboration via shared message spaces. Supports `ioa_send checkpoint`. Reference: `aiscan://skills/aiscan/okf/runtime/ioa.md`.
+- `ioa`: multi-agent collaboration via shared message spaces — `ioa space <name> <desc>`, `ioa send`, `ioa read --all`, and `ioa send checkpoint`. Reference: `aiscan://skills/ioa/SKILL.md`; wire-protocol formats live in the ioa module skills (`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`).
 
 ## Fingerprint → POC Workflow
 

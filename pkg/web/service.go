@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,24 +24,12 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-type ConfigStore interface {
-	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg *types.DistributeConfig, err error)
-	PrepareDistributeConfig(ctx context.Context, cfg *types.DistributeConfig) (*PreparedConfig, error)
-	CommitDistributeConfig(ctx context.Context, prepared *PreparedConfig) error
-	DiscardDistributeConfig(prepared *PreparedConfig)
-}
-
-type PreparedConfig struct {
-	Config      *types.DistributeConfig
-	RuntimePath string
-	TargetPath  string
-}
 
 type ServiceConfig struct {
 	Store         *SQLiteStore
@@ -56,9 +45,7 @@ type Service struct {
 	store   *SQLiteStore
 	appMu   sync.Mutex
 	app     *managedApp
-	saveMu  sync.Mutex
-	config  ConfigStore
-	reload  func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
+	api     *managementapi.API
 	agents  *AgentPool
 	hub     *Hub
 	sem     chan struct{}
@@ -95,8 +82,6 @@ func NewService(cfg ServiceConfig) *Service {
 	svc := &Service{
 		store:        cfg.Store,
 		app:          wrapManagedApp(cfg.App),
-		config:       cfg.ConfigStore,
-		reload:       cfg.AppFactory,
 		agents:       cfg.AgentPool,
 		hub:          NewHub(),
 		sem:          make(chan struct{}, maxConcurrent),
@@ -109,7 +94,26 @@ func NewService(cfg ServiceConfig) *Service {
 		sessionSeq:   make(map[string]uint64),
 		endedTurns:   make(map[string]bool),
 	}
+	configAPI := managementapi.NewConfig(managementapi.ConfigOptions{
+		Store: cfg.ConfigStore,
+		Build: cfg.AppFactory,
+		Apply: svc.swapApp,
+		Broadcast: func(config *types.DistributeConfig) {
+			if svc.agents != nil {
+				svc.agents.BroadcastConfigReload(config)
+			}
+		},
+	})
+	svc.api = &managementapi.API{
+		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
+		Config:    configAPI,
+		Scans:     managementapi.NewScans(svc, svc.hub),
+		SCO:       managementapi.NewSCO(cfg.Store),
+		Status:    svc,
+		ServerURL: "/",
+	}
 	if cfg.AgentPool != nil {
+		svc.api.Agents = cfg.AgentPool
 		cfg.AgentPool.SetSessionLookup(svc)
 	}
 	return svc
@@ -119,6 +123,16 @@ func (s *Service) Hub() *Hub { return s.hub }
 
 func (s *Service) SetAgentPool(pool *AgentPool) {
 	s.agents = pool
+	if s.api != nil {
+		if pool == nil {
+			s.api.Agents = nil
+		} else {
+			s.api.Agents = pool
+		}
+	}
+	if pool == nil {
+		return
+	}
 	pool.SetSessionLookup(s)
 	pool.config = s.GetDistributeConfig
 }
@@ -158,125 +172,21 @@ func (s *Service) Status() *types.SystemStatus {
 		status.LlmApiKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
 	}
 	release()
-	if s.config != nil {
-		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
-			status.ConfigPath = path
-			status.ConfigLoaded = loaded
-			if active := config.ActiveLLMProvider(dc.GetLlm()); active != nil {
-				if status.LlmProvider == "" {
-					status.LlmProvider = active.Provider
-				}
-				if status.LlmModel == "" {
-					status.LlmModel = active.Model
-				}
-				status.LlmApiKeyConfigured = status.LlmApiKeyConfigured || active.ApiKey != ""
+	if response, err := s.api.Config.GetConfig(context.Background(), &types.GetConfigRequest{}); err == nil {
+		view := response.GetConfig()
+		status.ConfigPath = view.GetPath()
+		status.ConfigLoaded = view.GetLoaded()
+		if active := view.GetLlm().GetActive(); active != nil {
+			if status.LlmProvider == "" {
+				status.LlmProvider = active.GetProvider()
 			}
+			if status.LlmModel == "" {
+				status.LlmModel = active.GetModel()
+			}
+			status.LlmApiKeyConfigured = status.LlmApiKeyConfigured || active.GetApiKeyConfigured()
 		}
 	}
 	return status
-}
-
-func (s *Service) GetConfigView(ctx context.Context) (*types.ConfigView, error) {
-	if s.config == nil {
-		return nil, fmt.Errorf("config store is not configured")
-	}
-	path, loaded, dc, err := s.config.GetDistributeConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return ConfigViewFromDistribute(dc, path, loaded), nil
-}
-
-func (s *Service) SaveConfig(ctx context.Context, cfg *types.DistributeConfig) (*types.ConfigView, error) {
-	s.saveMu.Lock()
-	defer s.saveMu.Unlock()
-	if s.config == nil {
-		return nil, fmt.Errorf("config store is not configured")
-	}
-	if err := ValidateLLMConfig(cfg.GetLlm()); err != nil {
-		return nil, err
-	}
-	prepared, err := s.config.PrepareDistributeConfig(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			s.config.DiscardDistributeConfig(prepared)
-		}
-	}()
-	if prepared == nil {
-		return nil, fmt.Errorf("config store returned no prepared config")
-	}
-	if err := ValidateLLMConfig(prepared.Config.GetLlm()); err != nil {
-		return nil, err
-	}
-
-	var nextApp *runner.App
-	if s.reload != nil {
-		nextApp, err = s.reload(ctx, prepared)
-		if err != nil {
-			view, _ := s.GetConfigView(ctx)
-			return view, fmt.Errorf("reload aiscan runtime: %w", err)
-		}
-		if nextApp == nil {
-			return nil, fmt.Errorf("reload aiscan runtime returned no app")
-		}
-	}
-	if err := s.config.CommitDistributeConfig(ctx, prepared); err != nil {
-		if nextApp != nil {
-			nextApp.Close()
-		}
-		return nil, err
-	}
-	committed = true
-	if nextApp != nil {
-		s.swapApp(nextApp)
-	}
-	// Tell connected agents to hot-swap their own provider too — the hub reload
-	// above only refreshes the hub's in-process runtime, not the agent subprocesses.
-	if s.agents != nil {
-		s.agents.BroadcastConfigReload(prepared.Config)
-	}
-	return s.GetConfigView(ctx)
-}
-
-func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (*types.ConfigView, error) {
-	if strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("LLM profile id is required")
-	}
-	if s.config == nil {
-		return nil, fmt.Errorf("config store is not configured")
-	}
-	_, _, stored, err := s.config.GetDistributeConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	found := false
-	for _, profile := range stored.GetLlm().GetProviders() {
-		if profile.Id == id {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, fmt.Errorf("LLM profile %q was not found", id)
-	}
-	cfg := proto.Clone(stored).(*types.DistributeConfig)
-	if cfg.Llm == nil {
-		cfg.Llm = &types.LLMConfig{}
-	}
-	cfg.Llm.ActiveProfile = id
-	return s.SaveConfig(ctx, cfg)
-}
-
-func (s *Service) GetDistributeConfig(ctx context.Context) (*types.DistributeConfig, error) {
-	if s.config == nil {
-		return nil, fmt.Errorf("config store is not configured")
-	}
-	_, _, dc, err := s.config.GetDistributeConfig(ctx)
-	return dc, err
 }
 
 func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*types.Scan, error) {
@@ -1029,7 +939,11 @@ func (s *Service) resetTurnTerminal(sessionID, turnID string) {
 }
 
 func (s *Service) broadcastAOPEvent(sessionID string, event *aop.Event, cursor int64) {
-	s.hub.BroadcastAOP(sessionID, AOPDelivery{Cursor: cursor, Event: event}, isReliableAOPEvent(event))
+	deliveryCursor := ""
+	if cursor > 0 {
+		deliveryCursor = strconv.FormatInt(cursor, 10)
+	}
+	s.hub.BroadcastAOP(sessionID, &aop.EventDelivery{Cursor: deliveryCursor, Event: event}, isReliableAOPEvent(event))
 }
 
 // broadcastHubError emits a hub-originated failure as an AOP error event: the
@@ -1043,7 +957,7 @@ func (s *Service) broadcastHubError(sessionID, code, message string, params map[
 	}
 	if len(params) > 0 {
 		if values, err := structpb.NewStruct(params); err == nil {
-			_ = types.SetWebMessage(event, types.WebMessageExtension{Params: values})
+			_ = types.SetWebMessage(event, types.WebMessageMetadata{Params: values})
 		}
 	}
 	s.BroadcastAOPEvent(sessionID, event)
@@ -1151,7 +1065,7 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 		return
 	}
 	agents := s.agents.List()
-	list := make([]map[string]any, 0, len(agents))
+	list := make([]*types.AgentListEntry, 0, len(agents))
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%d agent(s) connected:\n", len(agents)))
 	for _, agentView := range agents {
@@ -1166,17 +1080,19 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 			shortID = shortID[:8]
 		}
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", hello.GetName(), shortID, status))
-		entry := map[string]any{"name": hello.GetName(), "id": shortID, "busy": agentView.GetBusy()}
+		entry := &types.AgentListEntry{Name: hello.GetName(), NodeId: shortID, Busy: agentView.GetBusy()}
 		if statusView.GetModel() != "" {
 			sb.WriteString(fmt.Sprintf(" — %s/%s", statusView.GetProvider(), statusView.GetModel()))
-			entry["provider"] = statusView.GetProvider()
-			entry["model"] = statusView.GetModel()
+			entry.Provider = statusView.GetProvider()
+			entry.Model = statusView.GetModel()
 		}
 		sb.WriteString("\n")
 		list = append(list, entry)
 	}
-	s.broadcastSystemMessage(sessionID, SysAgentsList, sb.String(),
-		map[string]any{"count": len(agents), "agents": list})
+	s.broadcastSystemMessageMetadata(sessionID, sb.String(), &types.WebMessageMetadata{
+		Code:      SysAgentsList,
+		AgentList: &types.AgentListMetadata{Agents: list},
+	})
 }
 
 func (s *Service) sessionAgent(sessionID string) *remoteAgent {
@@ -1306,15 +1222,22 @@ func (s *Service) closeRemoteSession(sessionID string) {
 // tests. params feeds i18n interpolation and is stored next to code so the
 // message stays localizable after a reload.
 func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, params map[string]any) {
+	metadata := &types.WebMessageMetadata{Code: code}
+	if code != "" {
+		metadata.Params, _ = structpb.NewStruct(params)
+	}
+	s.broadcastSystemMessageMetadata(sessionID, fallback, metadata)
+}
+
+func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, metadata *types.WebMessageMetadata) {
 	event := &aop.Event{
 		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
 		Payload: &aop.Event_Message{Message: &aop.Message{
 			Id: generateID(), Role: "system", Content: []*aop.Content{aop.Text(fallback)},
 		}},
 	}
-	if code != "" {
-		encodedParams, _ := structpb.NewStruct(params)
-		_ = types.SetWebMessage(event, types.WebMessageExtension{Code: code, Params: encodedParams})
+	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil) {
+		_ = types.SetWebMessage(event, *metadata)
 	}
 	s.BroadcastAOPEvent(sessionID, event)
 }

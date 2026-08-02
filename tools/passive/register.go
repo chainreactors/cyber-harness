@@ -32,7 +32,11 @@ func init() {
 				d.Skip("passive.recon", deps.Name(engine.SetKey)+".Uncover")
 			}
 			impl := New(backend).WithLogger(d.GetLogger())
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "scanner")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/passive.md",
+				Run:             impl.Run,
+			}, "scanner")
 		},
 	})
 }

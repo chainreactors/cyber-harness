@@ -76,7 +76,7 @@ func (p *AgentPool) serveAgentStream(parent context.Context, stream aop.Envelope
 	ctx, cancel := context.WithCancel(parent)
 	agent := &remoteAgent{
 		nodeState: newNodeState(),
-		nodeID: nodeID, name: name, capabilities: append([]string(nil), hello.Capabilities...),
+		nodeID:    nodeID, name: name, capabilities: append([]string(nil), hello.Capabilities...),
 		close: cancel, sendCh: make(chan *aop.Envelope, 64),
 		connectAt: time.Now(), runtime: runtimeInfo,
 		status: &aop.AgentStatus{}, stats: &aop.AgentStats{},

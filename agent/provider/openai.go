@@ -143,7 +143,7 @@ func (p *OpenAIProvider) setAuthHeaders(req *http.Request) {
 type openAIMessage struct {
 	Name             string           `json:"name,omitempty"`
 	Role             string           `json:"role"`
-	Content          any              `json:"content,omitempty"`
+	Content          any              `json:"content"`
 	ReasoningContent string           `json:"reasoning_content,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
@@ -185,7 +185,11 @@ func aopToOpenAIMessages(messages []*aop.Message) []openAIMessage {
 		if m == nil {
 			continue
 		}
-		wire := openAIMessage{Role: m.Role, Name: m.Name}
+		// Some OpenAI-compatible gateways model `content` as a required field for
+		// every message, including assistant tool calls and empty tool results.
+		// Start with an explicit empty string and replace it with multipart content
+		// below when media is present.
+		wire := openAIMessage{Role: m.Role, Name: m.Name, Content: ""}
 		var text strings.Builder
 		var parts []openAIContentPart
 		for _, content := range m.Content {

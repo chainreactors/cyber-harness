@@ -127,8 +127,8 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 		}
 	}()
 
-	chat := NewAOPChatServer(s)
-	scans := newScanServiceCore(s)
+	sessions := s.api.Sessions
+	scans := s.api.Scans
 	handle := func(envelope *aop.Envelope) {
 		message, err := aop.Unwrap(envelope)
 		if err != nil {
@@ -140,7 +140,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 			switch payload := value.Message.(type) {
 			case *aop.ProtocolMessage_OpenSessionRequest:
 				go func() {
-					response, err := chat.OpenSession(ctx, envelope.Id, payload.OpenSessionRequest)
+					response, err := sessions.OpenSession(ctx, envelope.Id, payload.OpenSessionRequest)
 					if err != nil {
 						fail(envelope.Id, "OPEN_SESSION_FAILED", err)
 						return
@@ -149,7 +149,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				}()
 			case *aop.ProtocolMessage_RunTurnRequest:
 				go func() {
-					response, err := chat.RunTurn(ctx, envelope.Id, payload.RunTurnRequest)
+					response, err := sessions.RunTurn(ctx, envelope.Id, payload.RunTurnRequest)
 					if err != nil {
 						fail(envelope.Id, "RUN_TURN_FAILED", err)
 						return
@@ -158,7 +158,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				}()
 			case *aop.ProtocolMessage_CancelTurnRequest:
 				go func() {
-					response, err := chat.CancelTurn(ctx, envelope.Id, payload.CancelTurnRequest)
+					response, err := sessions.CancelTurn(ctx, envelope.Id, payload.CancelTurnRequest)
 					if err != nil {
 						fail(envelope.Id, "CANCEL_TURN_FAILED", err)
 						return
@@ -167,7 +167,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				}()
 			case *aop.ProtocolMessage_CloseSessionRequest:
 				go func() {
-					response, err := chat.CloseSession(ctx, envelope.Id, payload.CloseSessionRequest)
+					response, err := sessions.CloseSession(ctx, envelope.Id, payload.CloseSessionRequest)
 					if err != nil {
 						fail(envelope.Id, "CLOSE_SESSION_FAILED", err)
 						return
@@ -176,7 +176,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				}()
 			case *aop.ProtocolMessage_ListEventsRequest:
 				go func() {
-					response, err := chat.ListEvents(ctx, payload.ListEventsRequest)
+					response, err := sessions.ListEvents(ctx, payload.ListEventsRequest)
 					if err != nil {
 						fail(envelope.Id, "LIST_EVENTS_FAILED", err)
 						return
@@ -188,7 +188,7 @@ func (s *Service) serveBrowserAOP(parent context.Context, stream aop.EnvelopeStr
 				setSubscription(envelope.Id, subscriptionCancel)
 				go func(subscriptionID string) {
 					defer cancelSubscription(subscriptionID)
-					err := chat.watchEvents(payload.WatchEventsRequest, subscriptionCtx, func(delivery *aop.EventDelivery) error {
+					err := sessions.WatchEvents(subscriptionCtx, payload.WatchEventsRequest, func(delivery *aop.EventDelivery) error {
 						if delivery.GetEvent() == nil {
 							return nil
 						}

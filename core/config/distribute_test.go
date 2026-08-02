@@ -24,3 +24,26 @@ func TestNormalizeLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
 		t.Fatalf("unsupported provider must not be rewritten, got %q", llm.Providers[2].Provider)
 	}
 }
+
+func TestDistributeConfigYAMLRoundTripPreservesProviderCapabilities(t *testing.T) {
+	images := false
+	want := &types.DistributeConfig{Llm: &types.LLMConfig{
+		ActiveProfile: "primary",
+		Providers: []*types.LLMProviderConfig{{
+			Id: "primary", Provider: "openai", Model: "gpt-test",
+			Timeout: 45, Images: &images,
+		}},
+	}}
+	data, err := MarshalDistributeConfigYAML(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadDistributeConfigYAML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := got.GetLlm().GetProviders()[0]
+	if profile.GetTimeout() != 45 || profile.Images == nil || profile.GetImages() {
+		t.Fatalf("provider capabilities lost: %+v", profile)
+	}
+}

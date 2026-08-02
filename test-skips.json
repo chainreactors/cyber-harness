@@ -28,21 +28,21 @@
     "reason": "Provider conformance against a live endpoint requires explicit credentials and model selection."
   },
   {
-    "path": "agent/provider/provider_cache_test.go",
+    "path": "agent/provider/provider_test.go",
     "format": "set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL to run live cache test",
     "count": 1,
     "category": "live_llm",
     "reason": "Prompt-cache behavior can only be verified against a credentialed live provider."
   },
   {
-    "path": "agent/provider/provider_cache_test.go",
+    "path": "agent/provider/provider_test.go",
     "format": "%s: provider does not support streaming",
     "count": 1,
     "category": "capability",
     "reason": "The shared provider matrix includes implementations that intentionally do not expose streaming."
   },
   {
-    "path": "agent/provider/provider_cache_test.go",
+    "path": "agent/provider/provider_test.go",
     "format": "set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL",
     "count": 1,
     "category": "live_llm",

@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	ioaskills "github.com/chainreactors/ioa/skills"
 )
 
 const uriPrefix = "aiscan://skills/"
@@ -27,6 +29,7 @@ const (
 	SourceProject  SkillSource = "project" // .aiscan/skills/
 	SourceAgent    SkillSource = "agent"   // .agent/skills/
 	SourceCLI      SkillSource = "cli"     // -s path
+	SourceIOA      SkillSource = "ioa"     // chainreactors/ioa module
 )
 
 type Frontmatter struct {
@@ -72,6 +75,10 @@ func LoadAll(cliPaths []string) (*Store, []Diagnostic) {
 
 	embedded, diags := LoadEmbedded()
 	allSkills = append(allSkills, embedded...)
+	allDiags = append(allDiags, diags...)
+
+	ioaSkills, diags := loadIOAModuleSkills()
+	allSkills = append(allSkills, ioaSkills...)
 	allDiags = append(allDiags, diags...)
 
 	for _, rel := range []struct {
@@ -277,6 +284,9 @@ func (s *Store) AgentTypes() []Skill {
 
 // ReadVirtual reads a file from skill sources (embedded or local).
 func (s *Store) ReadVirtual(location string) (string, bool, error) {
+	if strings.HasPrefix(location, ioaURIPrefix) {
+		return readIOAVirtual(location)
+	}
 	if filepath.IsAbs(location) {
 		if !s.isKnownLocalPath(location) {
 			return "", false, nil
@@ -361,6 +371,13 @@ func (s *Store) ReadBody(name string) string {
 	skill, ok := s.byName[name]
 	if !ok {
 		return readEmbeddedBody(name)
+	}
+	if skill.Source == SourceIOA {
+		body, err := ioaskills.ReadSkill(name)
+		if err != nil {
+			return ""
+		}
+		return body
 	}
 	if skill.Source == SourceEmbedded || skill.Source == "" {
 		return readEmbeddedBody(name)

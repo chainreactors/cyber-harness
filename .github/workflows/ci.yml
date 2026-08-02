@@ -262,6 +262,29 @@ jobs:
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
             ./tools
 
+      - name: Run remaining full-tag unit variants
+        run: |
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            -run '^TestKatanaProfileExtender$' \
+            ./tools/scan
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            -run '^Test(Parse|Execute_|ResolvePath_|NameAndUsage|WithDefaultSession|Format)' \
+            ./tools/playwright
+
+      - name: Compile browser-backed full-tag suites
+        run: |
+          go test -c -tags "full re2_cgo re2_static" \
+            -o "$RUNNER_TEMP/headless.test" ./pkg/headless
+          go test -c -tags "full re2_cgo re2_static" \
+            -o "$RUNNER_TEMP/playwright.test" ./tools/playwright
+
+      - name: Run native CSTX variants
+        run: |
+          go test -tags "cstx_native re2_cgo re2_static" -count=1 -timeout 5m \
+            ./core/output ./tools/scan
+
   # ── Generated templates tests (depends on tidy) ───────────────
 
   generated-test:
@@ -290,6 +313,44 @@ jobs:
             ./core/resources/...
 
       - name: Check generated resources are committed
+        run: git diff --exit-code
+
+  protobuf-generated:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Set up protoc 35.1
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "35.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install frontend dependencies
+        run: npm --prefix web/frontend ci
+
+      - name: Regenerate protobuf bindings
+        run: go run ./cmd/gen
+
+      - name: Check generated protobuf bindings are committed
         run: git diff --exit-code
 
   # ── E2E tests (depends on test) ───────────────────────────────

@@ -9,7 +9,6 @@ import (
 	context "context"
 	errors "errors"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	http "net/http"
 	strings "strings"
 )
@@ -54,7 +53,7 @@ const (
 
 // ConfigServiceClient is a client for the aiscan.rpc.config.ConfigService service.
 type ConfigServiceClient interface {
-	GetConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[types.GetConfigResponse], error)
+	GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error)
 	UpdateConfig(context.Context, *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error)
 	ActivateProfile(context.Context, *connect.Request[types.ActivateProfileRequest]) (*connect.Response[types.ActivateProfileResponse], error)
 	TestLLM(context.Context, *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.LLMProbeResult], error)
@@ -73,7 +72,7 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 	baseURL = strings.TrimRight(baseURL, "/")
 	configServiceMethods := File_rpc_config_proto.Services().ByName("ConfigService").Methods()
 	return &configServiceClient{
-		getConfig: connect.NewClient[emptypb.Empty, types.GetConfigResponse](
+		getConfig: connect.NewClient[types.GetConfigRequest, types.GetConfigResponse](
 			httpClient,
 			baseURL+ConfigServiceGetConfigProcedure,
 			connect.WithSchema(configServiceMethods.ByName("GetConfig")),
@@ -114,7 +113,7 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // configServiceClient implements ConfigServiceClient.
 type configServiceClient struct {
-	getConfig       *connect.Client[emptypb.Empty, types.GetConfigResponse]
+	getConfig       *connect.Client[types.GetConfigRequest, types.GetConfigResponse]
 	updateConfig    *connect.Client[types.UpdateConfigRequest, types.UpdateConfigResponse]
 	activateProfile *connect.Client[types.ActivateProfileRequest, types.ActivateProfileResponse]
 	testLLM         *connect.Client[types.LLMProbeRequest, types.LLMProbeResult]
@@ -123,7 +122,7 @@ type configServiceClient struct {
 }
 
 // GetConfig calls aiscan.rpc.config.ConfigService.GetConfig.
-func (c *configServiceClient) GetConfig(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[types.GetConfigResponse], error) {
+func (c *configServiceClient) GetConfig(ctx context.Context, req *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
 	return c.getConfig.CallUnary(ctx, req)
 }
 
@@ -154,7 +153,7 @@ func (c *configServiceClient) TestConnection(ctx context.Context, req *connect.R
 
 // ConfigServiceHandler is an implementation of the aiscan.rpc.config.ConfigService service.
 type ConfigServiceHandler interface {
-	GetConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[types.GetConfigResponse], error)
+	GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error)
 	UpdateConfig(context.Context, *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error)
 	ActivateProfile(context.Context, *connect.Request[types.ActivateProfileRequest]) (*connect.Response[types.ActivateProfileResponse], error)
 	TestLLM(context.Context, *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.LLMProbeResult], error)
@@ -228,7 +227,7 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 // UnimplementedConfigServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedConfigServiceHandler struct{}
 
-func (UnimplementedConfigServiceHandler) GetConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[types.GetConfigResponse], error) {
+func (UnimplementedConfigServiceHandler) GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.GetConfig is not implemented"))
 }
 

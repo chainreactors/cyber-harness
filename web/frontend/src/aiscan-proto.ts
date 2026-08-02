@@ -18,9 +18,11 @@ export {
 } from './gen/rpc/system_pb.js'
 
 export {
-  AgentRunOptionsSchema as RunOptionsSchema,
+  AgentRunOptionsSchema,
   WebMessageMetadataSchema,
+  type AgentListMetadata,
   type AgentView,
+  type WebMessageMetadata,
 } from './gen/types/agent_pb.js'
 export {
   type SessionRecord,
@@ -55,7 +57,6 @@ export {
   ScanOptionsSchema,
   ScanEventSchema,
   ScanProgressSchema,
-  ScanStatsSchema,
   ScanCompletedSchema,
   ScanFailedSchema,
   SessionBindingSchema,

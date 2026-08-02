@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file types/scan.proto.
  */
 export const file_types_scan: GenFile = /*@__PURE__*/
-  fileDesc("ChB0eXBlcy9zY2FuLnByb3RvEgthaXNjYW4uc2NhbiI7CgtTY2FuT3B0aW9ucxIOCgZ2ZXJpZnkYASABKAgSDgoGc25pcGVyGAIgASgIEgwKBGRlZXAYAyABKAgimwIKBFNjYW4SCgoCaWQYASABKAkSDgoGdGFyZ2V0GAIgASgJEgwKBG1vZGUYAyABKAkSKQoHb3B0aW9ucxgEIAEoCzIYLmFpc2Nhbi5zY2FuLlNjYW5PcHRpb25zEicKBnN0YXR1cxgFIAEoDjIXLmFpc2Nhbi5zY2FuLlNjYW5TdGF0dXMSEAoIcHJvZ3Jlc3MYBiABKAkSDgoGcmVwb3J0GAcgASgJEg0KBWVycm9yGAkgASgJEi4KCmNyZWF0ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSgQICBAJInAKEVN1Ym1pdFNjYW5SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSDgoGdGFyZ2V0GAIgASgJEgwKBG1vZGUYAyABKAkSKQoHb3B0aW9ucxgEIAEoCzIYLmFpc2Nhbi5zY2FuLlNjYW5PcHRpb25zIn4KElN1Ym1pdFNjYW5SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEiUKCGFjY2VwdGVkGAIgASgLMhEuYWlzY2FuLnNjYW4uU2NhbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiIQoOR2V0U2NhblJlcXVlc3QSDwoHc2Nhbl9pZBgBIAEoCSIyCg9HZXRTY2FuUmVzcG9uc2USHwoEc2NhbhgBIAEoCzIRLmFpc2Nhbi5zY2FuLlNjYW4iEgoQTGlzdFNjYW5zUmVxdWVzdCI1ChFMaXN0U2NhbnNSZXNwb25zZRIgCgVzY2FucxgBIAMoCzIRLmFpc2Nhbi5zY2FuLlNjYW4iOAoRQ2FuY2VsU2NhblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdzY2FuX2lkGAIgASgJIn4KEkNhbmNlbFNjYW5SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEiUKCGFjY2VwdGVkGAIgASgLMhEuYWlzY2FuLnNjYW4uU2NhbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiKQoWV2F0Y2hTY2FuRXZlbnRzUmVxdWVzdBIPCgdzY2FuX2lkGAEgASgJIhwKDFNjYW5Qcm9ncmVzcxIMCgRkYXRhGAEgASgJIm4KCVNjYW5TdGF0cxIyCgZ2YWx1ZXMYASADKAsyIi5haXNjYW4uc2Nhbi5TY2FuU3RhdHMuVmFsdWVzRW50cnkaLQoLVmFsdWVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgEOgI4ASIPCg1TY2FuQ29tcGxldGVkIi8KClNjYW5GYWlsZWQSDwoHbWVzc2FnZRgBIAEoCRIQCghjYW5jZWxlZBgCIAEoCCIhCg5TZXNzaW9uQmluZGluZxIPCgdzY2FuX2lkGAEgASgJIkwKEFNlc3Npb25TY2FuRXZlbnQSDwoHc2Nhbl9pZBgBIAEoCRInCgZzdGF0dXMYAiABKA4yFy5haXNjYW4uc2Nhbi5TY2FuU3RhdHVzIu8CCglTY2FuRXZlbnQSDwoHc2Nhbl9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoBBIuCgplbWl0dGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIlCghzbmFwc2hvdBgKIAEoCzIRLmFpc2Nhbi5zY2FuLlNjYW5IABIpCgZzdGF0dXMYCyABKA4yFy5haXNjYW4uc2Nhbi5TY2FuU3RhdHVzSAASLQoIcHJvZ3Jlc3MYDCABKAsyGS5haXNjYW4uc2Nhbi5TY2FuUHJvZ3Jlc3NIABInCgVzdGF0cxgNIAEoCzIWLmFpc2Nhbi5zY2FuLlNjYW5TdGF0c0gAEi8KCWNvbXBsZXRlZBgOIAEoCzIaLmFpc2Nhbi5zY2FuLlNjYW5Db21wbGV0ZWRIABIpCgZmYWlsZWQYDyABKAsyFy5haXNjYW4uc2Nhbi5TY2FuRmFpbGVkSABCCQoHcGF5bG9hZCKOAQoTU2NhblByb3RvY29sTWVzc2FnZRJDChR3YXRjaF9ldmVudHNfcmVxdWVzdBgKIAEoCzIjLmFpc2Nhbi5zY2FuLldhdGNoU2NhbkV2ZW50c1JlcXVlc3RIABInCgVldmVudBgLIAEoCzIWLmFpc2Nhbi5zY2FuLlNjYW5FdmVudEgAQgkKB21lc3NhZ2UiOQoUR2V0U2NhblJlcG9ydFJlcXVlc3QSDwoHc2Nhbl9pZBgBIAEoCRIQCghsYW5ndWFnZRgCIAEoCSI9ChVHZXRTY2FuUmVwb3J0UmVzcG9uc2USEAoIbWFya2Rvd24YASABKAkSEgoKbWVkaWFfdHlwZRgCIAEoCSqnAQoKU2NhblN0YXR1cxIbChdTQ0FOX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElNDQU5fU1RBVFVTX1FVRVVFRBABEhcKE1NDQU5fU1RBVFVTX1JVTk5JTkcQAhIZChVTQ0FOX1NUQVRVU19DT01QTEVURUQQAxIWChJTQ0FOX1NUQVRVU19GQUlMRUQQBBIYChRTQ0FOX1NUQVRVU19DQU5DRUxFRBAFQjFaL2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3R5cGVzO3R5cGVzYgZwcm90bzM", [file_aop_chat, file_google_protobuf_timestamp]);
+  fileDesc("ChB0eXBlcy9zY2FuLnByb3RvEgthaXNjYW4uc2NhbiI7CgtTY2FuT3B0aW9ucxIOCgZ2ZXJpZnkYASABKAgSDgoGc25pcGVyGAIgASgIEgwKBGRlZXAYAyABKAgimwIKBFNjYW4SCgoCaWQYASABKAkSDgoGdGFyZ2V0GAIgASgJEgwKBG1vZGUYAyABKAkSKQoHb3B0aW9ucxgEIAEoCzIYLmFpc2Nhbi5zY2FuLlNjYW5PcHRpb25zEicKBnN0YXR1cxgFIAEoDjIXLmFpc2Nhbi5zY2FuLlNjYW5TdGF0dXMSEAoIcHJvZ3Jlc3MYBiABKAkSDgoGcmVwb3J0GAcgASgJEg0KBWVycm9yGAkgASgJEi4KCmNyZWF0ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSgQICBAJInAKEVN1Ym1pdFNjYW5SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSDgoGdGFyZ2V0GAIgASgJEgwKBG1vZGUYAyABKAkSKQoHb3B0aW9ucxgEIAEoCzIYLmFpc2Nhbi5zY2FuLlNjYW5PcHRpb25zIn4KElN1Ym1pdFNjYW5SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEiUKCGFjY2VwdGVkGAIgASgLMhEuYWlzY2FuLnNjYW4uU2NhbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiIQoOR2V0U2NhblJlcXVlc3QSDwoHc2Nhbl9pZBgBIAEoCSIyCg9HZXRTY2FuUmVzcG9uc2USHwoEc2NhbhgBIAEoCzIRLmFpc2Nhbi5zY2FuLlNjYW4iEgoQTGlzdFNjYW5zUmVxdWVzdCI1ChFMaXN0U2NhbnNSZXNwb25zZRIgCgVzY2FucxgBIAMoCzIRLmFpc2Nhbi5zY2FuLlNjYW4iOAoRQ2FuY2VsU2NhblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdzY2FuX2lkGAIgASgJIn4KEkNhbmNlbFNjYW5SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEiUKCGFjY2VwdGVkGAIgASgLMhEuYWlzY2FuLnNjYW4uU2NhbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiKQoWV2F0Y2hTY2FuRXZlbnRzUmVxdWVzdBIPCgdzY2FuX2lkGAEgASgJIhwKDFNjYW5Qcm9ncmVzcxIMCgRkYXRhGAEgASgJIg8KDVNjYW5Db21wbGV0ZWQiLwoKU2NhbkZhaWxlZBIPCgdtZXNzYWdlGAEgASgJEhAKCGNhbmNlbGVkGAIgASgIIiEKDlNlc3Npb25CaW5kaW5nEg8KB3NjYW5faWQYASABKAkiTAoQU2Vzc2lvblNjYW5FdmVudBIPCgdzY2FuX2lkGAEgASgJEicKBnN0YXR1cxgCIAEoDjIXLmFpc2Nhbi5zY2FuLlNjYW5TdGF0dXMizAIKCVNjYW5FdmVudBIPCgdzY2FuX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEi4KCmVtaXR0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiUKCHNuYXBzaG90GAogASgLMhEuYWlzY2FuLnNjYW4uU2NhbkgAEikKBnN0YXR1cxgLIAEoDjIXLmFpc2Nhbi5zY2FuLlNjYW5TdGF0dXNIABItCghwcm9ncmVzcxgMIAEoCzIZLmFpc2Nhbi5zY2FuLlNjYW5Qcm9ncmVzc0gAEi8KCWNvbXBsZXRlZBgOIAEoCzIaLmFpc2Nhbi5zY2FuLlNjYW5Db21wbGV0ZWRIABIpCgZmYWlsZWQYDyABKAsyFy5haXNjYW4uc2Nhbi5TY2FuRmFpbGVkSABCCQoHcGF5bG9hZEoECA0QDiKOAQoTU2NhblByb3RvY29sTWVzc2FnZRJDChR3YXRjaF9ldmVudHNfcmVxdWVzdBgKIAEoCzIjLmFpc2Nhbi5zY2FuLldhdGNoU2NhbkV2ZW50c1JlcXVlc3RIABInCgVldmVudBgLIAEoCzIWLmFpc2Nhbi5zY2FuLlNjYW5FdmVudEgAQgkKB21lc3NhZ2UiOQoUR2V0U2NhblJlcG9ydFJlcXVlc3QSDwoHc2Nhbl9pZBgBIAEoCRIQCghsYW5ndWFnZRgCIAEoCSI9ChVHZXRTY2FuUmVwb3J0UmVzcG9uc2USEAoIbWFya2Rvd24YASABKAkSEgoKbWVkaWFfdHlwZRgCIAEoCSqnAQoKU2NhblN0YXR1cxIbChdTQ0FOX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElNDQU5fU1RBVFVTX1FVRVVFRBABEhcKE1NDQU5fU1RBVFVTX1JVTk5JTkcQAhIZChVTQ0FOX1NUQVRVU19DT01QTEVURUQQAxIWChJTQ0FOX1NUQVRVU19GQUlMRUQQBBIYChRTQ0FOX1NUQVRVU19DQU5DRUxFRBAFQjFaL2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3R5cGVzO3R5cGVzYgZwcm90bzM", [file_aop_chat, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message aiscan.scan.ScanOptions
@@ -326,23 +326,6 @@ export const ScanProgressSchema: GenMessage<ScanProgress> = /*@__PURE__*/
   messageDesc(file_types_scan, 11);
 
 /**
- * @generated from message aiscan.scan.ScanStats
- */
-export type ScanStats = Message<"aiscan.scan.ScanStats"> & {
-  /**
-   * @generated from field: map<string, uint64> values = 1;
-   */
-  values: { [key: string]: bigint };
-};
-
-/**
- * Describes the message aiscan.scan.ScanStats.
- * Use `create(ScanStatsSchema)` to create a new message.
- */
-export const ScanStatsSchema: GenMessage<ScanStats> = /*@__PURE__*/
-  messageDesc(file_types_scan, 12);
-
-/**
  * @generated from message aiscan.scan.ScanCompleted
  */
 export type ScanCompleted = Message<"aiscan.scan.ScanCompleted"> & {
@@ -353,7 +336,7 @@ export type ScanCompleted = Message<"aiscan.scan.ScanCompleted"> & {
  * Use `create(ScanCompletedSchema)` to create a new message.
  */
 export const ScanCompletedSchema: GenMessage<ScanCompleted> = /*@__PURE__*/
-  messageDesc(file_types_scan, 13);
+  messageDesc(file_types_scan, 12);
 
 /**
  * @generated from message aiscan.scan.ScanFailed
@@ -375,7 +358,7 @@ export type ScanFailed = Message<"aiscan.scan.ScanFailed"> & {
  * Use `create(ScanFailedSchema)` to create a new message.
  */
 export const ScanFailedSchema: GenMessage<ScanFailed> = /*@__PURE__*/
-  messageDesc(file_types_scan, 14);
+  messageDesc(file_types_scan, 13);
 
 /**
  * SessionBinding attaches an AIScan Scan to an AOP Session at open time.
@@ -394,7 +377,7 @@ export type SessionBinding = Message<"aiscan.scan.SessionBinding"> & {
  * Use `create(SessionBindingSchema)` to create a new message.
  */
 export const SessionBindingSchema: GenMessage<SessionBinding> = /*@__PURE__*/
-  messageDesc(file_types_scan, 15);
+  messageDesc(file_types_scan, 14);
 
 /**
  * SessionScanEvent links a completed scan into an AOP session timeline without
@@ -419,7 +402,7 @@ export type SessionScanEvent = Message<"aiscan.scan.SessionScanEvent"> & {
  * Use `create(SessionScanEventSchema)` to create a new message.
  */
 export const SessionScanEventSchema: GenMessage<SessionScanEvent> = /*@__PURE__*/
-  messageDesc(file_types_scan, 16);
+  messageDesc(file_types_scan, 15);
 
 /**
  * @generated from message aiscan.scan.ScanEvent
@@ -463,12 +446,6 @@ export type ScanEvent = Message<"aiscan.scan.ScanEvent"> & {
     case: "progress";
   } | {
     /**
-     * @generated from field: aiscan.scan.ScanStats stats = 13;
-     */
-    value: ScanStats;
-    case: "stats";
-  } | {
-    /**
      * @generated from field: aiscan.scan.ScanCompleted completed = 14;
      */
     value: ScanCompleted;
@@ -487,7 +464,7 @@ export type ScanEvent = Message<"aiscan.scan.ScanEvent"> & {
  * Use `create(ScanEventSchema)` to create a new message.
  */
 export const ScanEventSchema: GenMessage<ScanEvent> = /*@__PURE__*/
-  messageDesc(file_types_scan, 17);
+  messageDesc(file_types_scan, 16);
 
 /**
  * ProtocolMessage carries AIScan scan runtime semantics over the shared AOP
@@ -519,7 +496,7 @@ export type ScanProtocolMessage = Message<"aiscan.scan.ScanProtocolMessage"> & {
  * Use `create(ScanProtocolMessageSchema)` to create a new message.
  */
 export const ScanProtocolMessageSchema: GenMessage<ScanProtocolMessage> = /*@__PURE__*/
-  messageDesc(file_types_scan, 18);
+  messageDesc(file_types_scan, 17);
 
 /**
  * @generated from message aiscan.scan.GetScanReportRequest
@@ -541,7 +518,7 @@ export type GetScanReportRequest = Message<"aiscan.scan.GetScanReportRequest"> &
  * Use `create(GetScanReportRequestSchema)` to create a new message.
  */
 export const GetScanReportRequestSchema: GenMessage<GetScanReportRequest> = /*@__PURE__*/
-  messageDesc(file_types_scan, 19);
+  messageDesc(file_types_scan, 18);
 
 /**
  * @generated from message aiscan.scan.GetScanReportResponse
@@ -563,7 +540,7 @@ export type GetScanReportResponse = Message<"aiscan.scan.GetScanReportResponse">
  * Use `create(GetScanReportResponseSchema)` to create a new message.
  */
 export const GetScanReportResponseSchema: GenMessage<GetScanReportResponse> = /*@__PURE__*/
-  messageDesc(file_types_scan, 20);
+  messageDesc(file_types_scan, 19);
 
 /**
  * @generated from enum aiscan.scan.ScanStatus

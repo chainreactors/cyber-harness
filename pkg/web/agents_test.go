@@ -201,7 +201,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) {
-		HandleAOPWebSocket(svc, pool, w, r)
+		HandleAOPWebSocket(svc, w, r)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -447,7 +447,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
 
-	srv := httptest.NewServer(NewHandler(svc, pool, nil, nil, ""))
+	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
@@ -834,7 +834,7 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 		}
 	})
 
-	srv := httptest.NewServer(NewHandler(svc, pool, nil, static, ""))
+	srv := httptest.NewServer(NewHandler(svc, nil, static, ""))
 	t.Cleanup(srv.Close)
 	resp, err := http.Get(srv.URL + "/api/auth/session") //nolint:gosec // test-only local server
 	if err != nil {

@@ -124,6 +124,38 @@ func TestReadVirtual(t *testing.T) {
 	}
 }
 
+func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
+	store, diags := LoadAll(nil)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %#v", diags)
+	}
+	for _, name := range []string{"checkpoint", "handoff", "swarm", "team"} {
+		skill, ok := store.ByName(name)
+		if !ok {
+			t.Fatalf("missing ioa module skill %q", name)
+		}
+		if !skill.Internal {
+			t.Fatalf("ioa skill %q should be internal", name)
+		}
+		if body := store.ReadBody(name); body == "" {
+			t.Fatalf("ReadBody(%q) returned empty", name)
+		}
+	}
+
+	content, handled, err := store.ReadVirtual("ioa://skills/checkpoint/SKILL.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtual(ioa checkpoint) handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(content, "name: checkpoint") {
+		t.Fatalf("unexpected checkpoint content:\n%s", content)
+	}
+
+	schema, handled, err := store.ReadVirtual("ioa://skills/checkpoint/schema.json")
+	if err != nil || !handled || !strings.HasPrefix(strings.TrimSpace(schema), "{") {
+		t.Fatalf("ReadVirtual(ioa checkpoint schema) handled=%v err=%v", handled, err)
+	}
+}
+
 func TestReadVirtualOKFConcept(t *testing.T) {
 	store, _ := LoadEmbeddedStore()
 	content, handled, err := store.ReadVirtual("aiscan://skills/aiscan/okf/easm/gogo.md")

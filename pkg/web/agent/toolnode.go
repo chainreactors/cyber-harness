@@ -17,6 +17,8 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/aiscan/skills"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -65,6 +67,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		"arch":    runtime.GOARCH,
 		"cores":   runtime.NumCPU(),
 	})
+	skillStore, _ := skills.LoadEmbeddedStore()
 	return connect(ctx, connectionConfig{
 		ServerURL:     cfg.ServerURL,
 		WSPath:        cfg.WSPath,
@@ -77,6 +80,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		NodeID:        runnerID,
 		Runtime:       runnerRuntime,
 		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
+		Menu:          func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) },
 		RunnerFileRPC: true,
 	})
 }

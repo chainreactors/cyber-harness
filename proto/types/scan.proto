@@ -86,10 +86,6 @@ message ScanProgress {
   string data = 1;
 }
 
-message ScanStats {
-  map<string, uint64> values = 1;
-}
-
 message ScanCompleted {}
 
 message ScanFailed {
@@ -113,11 +109,11 @@ message ScanEvent {
   string scan_id = 1;
   uint64 sequence = 2;
   google.protobuf.Timestamp emitted_at = 3;
+  reserved 13;
   oneof payload {
     Scan snapshot = 10;
     ScanStatus status = 11;
     ScanProgress progress = 12;
-    ScanStats stats = 13;
     ScanCompleted completed = 14;
     ScanFailed failed = 15;
   }

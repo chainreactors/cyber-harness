@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -167,12 +166,7 @@ func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *ao
 			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
 			return
 		}
-		encoded, err := json.Marshal(result)
-		if err != nil {
-			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
-			return
-		}
-		_ = reply(&types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Result{Result: &types.CommandResult{Data: encoded, MediaType: aop.JSONMediaType}}})
+		_ = reply(&types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Result{Result: result}})
 	}()
 	return nil
 }

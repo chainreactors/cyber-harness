@@ -27,7 +27,7 @@ var testOutput = &captureWriter{}
 const knownSpaceID = "a34763e95c29179802a4451597446c35"
 
 // ---------------------------------------------------------------------------
-// ioa_space subcommands
+// ioa space subcommands
 // ---------------------------------------------------------------------------
 
 func TestSpaceJoinExplicit(t *testing.T) {
@@ -35,10 +35,8 @@ func TestSpaceJoinExplicit(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{
-		"join", "--name", "my-space", "--description", "test",
-	}); err != nil {
-		t.Fatalf("ioa_space join: %v", err)
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{"my-space", "test"}); err != nil {
+		t.Fatalf("ioa space join: %v", err)
 	}
 	if len(client.spaceCalls) != 1 || client.spaceCalls[0] != "my-space" {
 		t.Fatalf("space calls = %v, want [my-space]", client.spaceCalls)
@@ -49,15 +47,14 @@ func TestSpaceJoinExplicit(t *testing.T) {
 	}
 }
 
-func TestSpaceJoinImplicit(t *testing.T) {
+func TestSpaceJoinWithTags(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 
-	// no "join" subcommand, should still work
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{
-		"--name", "my-space", "--description", "test",
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{
+		"my-space", "test", "--tag", "recon",
 	}); err != nil {
-		t.Fatalf("ioa_space (implicit join): %v", err)
+		t.Fatalf("ioa space with tags: %v", err)
 	}
 	if len(client.spaceCalls) != 1 {
 		t.Fatalf("space calls = %d, want 1", len(client.spaceCalls))
@@ -71,14 +68,13 @@ func TestSpaceJoinMissingArgs(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"no args", []string{"join"}},
-		{"name only", []string{"join", "--name", "x"}},
-		{"desc only", []string{"join", "--description", "x"}},
+		{"no args", []string{}},
+		{"name only", []string{"x"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testOutput.Reset(nil)
-			err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), tt.args)
+			err := findSubCmd(t, cmds, "space").Execute(context.Background(), tt.args)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -94,8 +90,8 @@ func TestSpaceList(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{"list"}); err != nil {
-		t.Fatalf("ioa_space list: %v", err)
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{"list"}); err != nil {
+		t.Fatalf("ioa space list: %v", err)
 	}
 	out := testOutput.Captured()
 	if !strings.Contains(out, "space-one") || !strings.Contains(out, "space-two") {
@@ -112,8 +108,8 @@ func TestSpaceNodes(t *testing.T) {
 	joinSpaceByName(t, cmds, "test-space")
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{"nodes"}); err != nil {
-		t.Fatalf("ioa_space nodes: %v", err)
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{"nodes"}); err != nil {
+		t.Fatalf("ioa space nodes: %v", err)
 	}
 	out := testOutput.Captured()
 	if !strings.Contains(out, "scanner-01") {
@@ -124,8 +120,8 @@ func TestSpaceNodes(t *testing.T) {
 func TestSpaceNodesWithoutJoin(t *testing.T) {
 	cmds := NewCommands(newFullFakeIOAClient(), "tester", nil)
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{"nodes"})
-	if err == nil || !strings.Contains(err.Error(), "ioa_space join") {
+	err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{"nodes"})
+	if err == nil || !strings.Contains(err.Error(), "no space joined") {
 		t.Fatalf("expected 'no space joined' error, got: %v", err)
 	}
 }
@@ -141,8 +137,8 @@ func TestSpaceTopics(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{"topics"}); err != nil {
-		t.Fatalf("ioa_space topics: %v", err)
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{"topics"}); err != nil {
+		t.Fatalf("ioa space topics: %v", err)
 	}
 	out := testOutput.Captured()
 	if strings.Contains(out, "reply-1") {
@@ -156,14 +152,14 @@ func TestSpaceTopics(t *testing.T) {
 func TestSpaceUnknownSubcommand(t *testing.T) {
 	cmds := NewCommands(newFakeIOAClient(), "tester", nil)
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{"bogus"})
+	err := findCmd(t, cmds, "ioa").Execute(context.Background(), []string{"bogus"})
 	if err == nil || !strings.Contains(err.Error(), "unknown subcommand") {
 		t.Fatalf("expected unknown subcommand error, got: %v", err)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// ioa_send subcommands
+// ioa send subcommands
 // ---------------------------------------------------------------------------
 
 func TestSendBroadcast(t *testing.T) {
@@ -171,10 +167,10 @@ func TestSendBroadcast(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"--content", `{"content":"hello"}`,
 	}); err != nil {
-		t.Fatalf("ioa_send: %v", err)
+		t.Fatalf("ioa send: %v", err)
 	}
 	if len(client.sentSpaceIDs) != 1 || client.sentSpaceIDs[0] != knownSpaceID {
 		t.Fatalf("sent to %v, want [%s]", client.sentSpaceIDs, knownSpaceID)
@@ -189,27 +185,27 @@ func TestSendToNode(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
-		"to", "--node", "target-node-42", "--content", `{"content":"hi"}`,
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
+		"--ref-nodes", "target-node-42", "--content", `{"content":"hi"}`,
 	}); err != nil {
-		t.Fatalf("ioa_send to: %v", err)
+		t.Fatalf("ioa send to: %v", err)
 	}
 	if client.lastSentBody.Refs == nil || len(client.lastSentBody.Refs.Nodes) != 1 || client.lastSentBody.Refs.Nodes[0] != "target-node-42" {
 		t.Fatalf("send to node refs = %+v, want nodes=[target-node-42]", client.lastSentBody.Refs)
 	}
 }
 
-func TestSendToNodeMissingFlag(t *testing.T) {
+func TestSendInvalidContent(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
-		"to", "--content", `{"content":"hi"}`,
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
+		"--content", "not-json",
 	})
-	if err == nil || !strings.Contains(err.Error(), "--node") {
-		t.Fatalf("expected --node required error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid content JSON") {
+		t.Fatalf("expected invalid content JSON error, got: %v", err)
 	}
 }
 
@@ -218,37 +214,37 @@ func TestSendReply(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
-		"reply", "--to", "msg-99", "--content", `{"content":"noted"}`,
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
+		"--ref-messages", "msg-99", "--content", `{"content":"noted"}`,
 	}); err != nil {
-		t.Fatalf("ioa_send reply: %v", err)
+		t.Fatalf("ioa send reply: %v", err)
 	}
 	if client.lastSentBody.Refs == nil || len(client.lastSentBody.Refs.Messages) != 1 || client.lastSentBody.Refs.Messages[0] != "msg-99" {
 		t.Fatalf("reply refs = %+v, want messages=[msg-99]", client.lastSentBody.Refs)
 	}
 }
 
-func TestSendReplyMissingTo(t *testing.T) {
+func TestSendUnknownProtocol(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
-		"reply", "--content", `{"content":"x"}`,
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
+		"nosuchproto", "--content", `{"content":"x"}`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "--to") {
-		t.Fatalf("expected --to required error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown subcommand or argument") {
+		t.Fatalf("expected unknown protocol error, got: %v", err)
 	}
 }
 
 func TestSendWithoutSpace(t *testing.T) {
 	cmds := NewCommands(newFakeIOAClient(), "tester", nil)
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"--content", `{"content":"hello"}`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "ioa_space") {
+	if err == nil || !strings.Contains(err.Error(), "ioa space") {
 		t.Fatalf("expected space error, got: %v", err)
 	}
 }
@@ -259,7 +255,7 @@ func TestSendWithoutContent(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), nil)
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "--content") {
 		t.Fatalf("expected content error, got: %v", err)
 	}
@@ -271,10 +267,10 @@ func TestSendUnknownSubcommand(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"bogus", "--content", `{"content":"x"}`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown subcommand") {
+	if err == nil || !strings.Contains(err.Error(), "unknown subcommand or argument") {
 		t.Fatalf("expected unknown subcommand error, got: %v", err)
 	}
 }
@@ -285,7 +281,7 @@ func TestSendCheckpoint(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"checkpoint",
 		"--kind", "verify",
 		"--title", "SQL Injection Found",
@@ -293,7 +289,7 @@ func TestSendCheckpoint(t *testing.T) {
 		"--target", "http://10.0.0.1:8080",
 		"--status", "confirmed",
 	}); err != nil {
-		t.Fatalf("ioa_send checkpoint: %v", err)
+		t.Fatalf("ioa send checkpoint: %v", err)
 	}
 	if len(client.sentSpaceIDs) != 1 || client.sentSpaceIDs[0] != knownSpaceID {
 		t.Fatalf("sent to %v, want [%s]", client.sentSpaceIDs, knownSpaceID)
@@ -316,17 +312,21 @@ func TestSendCheckpoint(t *testing.T) {
 	}
 }
 
-func TestSendCheckpointMissingArgs(t *testing.T) {
+func TestSendCheckpointKindOnly(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	// Upstream checkpoint protocol does not require title; it sends what it gets.
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"checkpoint", "--kind", "verify",
 	})
-	if err == nil || !strings.Contains(err.Error(), "--title") {
-		t.Fatalf("expected --title required error, got: %v", err)
+	if err != nil {
+		t.Fatalf("ioa send checkpoint with kind only: %v", err)
+	}
+	if client.lastSentBody.ContentType != "checkpoint" {
+		t.Fatalf("content_type = %q, want checkpoint", client.lastSentBody.ContentType)
 	}
 }
 
@@ -335,7 +335,7 @@ func TestSendCheckpointWithoutSpace(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"checkpoint", "--kind", "verify", "--title", "test",
 	})
 	if err == nil || !strings.Contains(err.Error(), "no space joined") {
@@ -348,10 +348,10 @@ func TestSendHandoff(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"handoff", "--title", "Delegate scan", "--message", "Inspect the target",
 	}); err != nil {
-		t.Fatalf("ioa_send handoff: %v", err)
+		t.Fatalf("ioa send handoff: %v", err)
 	}
 	if client.lastSentBody.ContentType != "handoff" {
 		t.Fatalf("content_type = %q, want handoff", client.lastSentBody.ContentType)
@@ -362,7 +362,7 @@ func TestSendHandoff(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ioa_read subcommands
+// ioa read subcommands
 // ---------------------------------------------------------------------------
 
 func TestReadDefault(t *testing.T) {
@@ -371,8 +371,8 @@ func TestReadDefault(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), nil); err != nil {
-		t.Fatalf("ioa_read: %v", err)
+	if err := findSubCmd(t, cmds, "read").Execute(context.Background(), nil); err != nil {
+		t.Fatalf("ioa read: %v", err)
 	}
 	if client.lastReadOpts.All {
 		t.Fatal("default read should not set All")
@@ -384,13 +384,13 @@ func TestReadAll(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), []string{
-		"all", "--limit", "10",
+	if err := findSubCmd(t, cmds, "read").Execute(context.Background(), []string{
+		"--all", "--limit", "10",
 	}); err != nil {
-		t.Fatalf("ioa_read all: %v", err)
+		t.Fatalf("ioa read all: %v", err)
 	}
 	if !client.lastReadOpts.All {
-		t.Fatal("ioa_read all should set All=true")
+		t.Fatal("ioa read all should set All=true")
 	}
 	if client.lastReadOpts.Limit != 10 {
 		t.Fatalf("limit = %d, want 10", client.lastReadOpts.Limit)
@@ -402,25 +402,25 @@ func TestReadThread(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), []string{
-		"thread", "--id", "msg-42",
+	if err := findSubCmd(t, cmds, "read").Execute(context.Background(), []string{
+		"--message", "msg-42",
 	}); err != nil {
-		t.Fatalf("ioa_read thread: %v", err)
+		t.Fatalf("ioa read thread: %v", err)
 	}
 	if client.lastReadOpts.MessageID != "msg-42" {
 		t.Fatalf("message_id = %q, want msg-42", client.lastReadOpts.MessageID)
 	}
 }
 
-func TestReadThreadMissingID(t *testing.T) {
+func TestReadUnknownFlag(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), []string{"thread"})
-	if err == nil || !strings.Contains(err.Error(), "--id") {
-		t.Fatalf("expected --id required error, got: %v", err)
+	err := findSubCmd(t, cmds, "read").Execute(context.Background(), []string{"--bogus"})
+	if err == nil {
+		t.Fatalf("expected unknown flag error")
 	}
 }
 
@@ -429,10 +429,10 @@ func TestReadNew(t *testing.T) {
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
-	if err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), []string{
-		"new", "--after", "cursor-abc",
+	if err := findSubCmd(t, cmds, "read").Execute(context.Background(), []string{
+		"--after", "cursor-abc",
 	}); err != nil {
-		t.Fatalf("ioa_read new: %v", err)
+		t.Fatalf("ioa read new: %v", err)
 	}
 	if client.lastReadOpts.After != "cursor-abc" {
 		t.Fatalf("after = %q, want cursor-abc", client.lastReadOpts.After)
@@ -442,8 +442,8 @@ func TestReadNew(t *testing.T) {
 func TestReadWithoutSpace(t *testing.T) {
 	cmds := NewCommands(newFakeIOAClient(), "tester", nil)
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), nil)
-	if err == nil || !strings.Contains(err.Error(), "ioa_space") {
+	err := findSubCmd(t, cmds, "read").Execute(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "ioa space") {
 		t.Fatalf("expected space error, got: %v", err)
 	}
 }
@@ -454,9 +454,9 @@ func TestReadUnknownSubcommand(t *testing.T) {
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
-	err := findCmd(t, cmds, "ioa_read").Execute(context.Background(), []string{"bogus"})
-	if err == nil || !strings.Contains(err.Error(), "unknown subcommand") {
-		t.Fatalf("expected unknown subcommand error, got: %v", err)
+	err := findSubCmd(t, cmds, "read").Execute(context.Background(), []string{"bogus"})
+	if err == nil {
+		t.Fatalf("expected error for unknown subcommand")
 	}
 }
 
@@ -467,12 +467,12 @@ func TestReadUnknownSubcommand(t *testing.T) {
 func TestDefaultSpaceSkipsJoin(t *testing.T) {
 	client := newFakeIOAClient()
 	cmds := NewCommands(client, "tester", nil)
-	findCmd(t, cmds, "ioa_space").SetDefaultSpace(knownSpaceID)
+	findSubCmd(t, cmds, "space").SetDefaultSpace(knownSpaceID)
 
-	if err := findCmd(t, cmds, "ioa_send").Execute(context.Background(), []string{
+	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"--content", `{"content":"hello"}`,
 	}); err != nil {
-		t.Fatalf("ioa_send with default space: %v", err)
+		t.Fatalf("ioa send with default space: %v", err)
 	}
 	if len(client.sentSpaceIDs) != 1 || client.sentSpaceIDs[0] != knownSpaceID {
 		t.Fatalf("sent to %v, want [%s]", client.sentSpaceIDs, knownSpaceID)
@@ -530,7 +530,7 @@ func TestLLMIOAToolUsage(t *testing.T) {
 Available pseudo-commands:
 ` + registry.UsageDocs() + `
 
-IMPORTANT: These pseudo-commands run through the bash tool. Example: bash {"command": "ioa_space join --name test --description agent"}
+IMPORTANT: These pseudo-commands run through the bash tool. Example: bash {"command": "ioa space test-space "integration test""}
 
 Your task:
 1. First, join the space named "test-space" with description "integration test"
@@ -560,13 +560,13 @@ Execute each step one at a time.`
 
 	// Verify the LLM actually called the tools
 	if len(client.spaceCalls) == 0 {
-		t.Error("LLM never called ioa_space join")
+		t.Error("LLM never called ioa space join")
 	}
 	if len(client.sentSpaceIDs) == 0 {
-		t.Error("LLM never called ioa_send")
+		t.Error("LLM never called ioa send")
 	}
 	if len(client.readSpaceIDs) == 0 {
-		t.Error("LLM never called ioa_read")
+		t.Error("LLM never called ioa read")
 	}
 
 	// Verify the correct space was used
@@ -604,10 +604,8 @@ func joinSpace(t *testing.T, cmds []commands.Command) {
 func joinSpaceByName(t *testing.T, cmds []commands.Command, name string) {
 	t.Helper()
 	testOutput.Reset(nil)
-	if err := findCmd(t, cmds, "ioa_space").Execute(context.Background(), []string{
-		"join", "--name", name, "--description", "test",
-	}); err != nil {
-		t.Fatalf("ioa_space join %s: %v", name, err)
+	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{name, "test"}); err != nil {
+		t.Fatalf("ioa space join %s: %v", name, err)
 	}
 }
 
@@ -633,6 +631,19 @@ func findCmd(t *testing.T, cmds []commands.Command, name string) testCommand {
 	}
 	t.Fatalf("command %q not found", name)
 	return testCommand{}
+}
+
+// findSubCmd returns the ioa root command wrapped to dispatch the given
+// subcommand (space/send/read), so tests read like the old ioa_* commands.
+func findSubCmd(t *testing.T, cmds []commands.Command, sub string) testCommand {
+	t.Helper()
+	root := findCmd(t, cmds, "ioa")
+	inner := root.Run
+	root.Run = func(ctx context.Context, execution *commands.Execution) (any, error) {
+		execution.Args = append([]string{sub}, execution.Args...)
+		return inner(ctx, execution)
+	}
+	return root
 }
 
 // ---------------------------------------------------------------------------

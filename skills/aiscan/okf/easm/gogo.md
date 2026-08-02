@@ -4,9 +4,7 @@ title: gogo
 description: Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery.
 tags: [easm, discovery]
 status: stable
-generated:
-  actor: process:okf-migration
-  at: 2026-08-02
+generated: { by: process:okf-migration, at: 2026-08-02T00:00:00Z }
 ---
 
 # Gogo

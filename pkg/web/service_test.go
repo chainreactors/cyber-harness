@@ -44,7 +44,7 @@ func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
 
-	response, err := NewAOPChatServer(svc).RunTurn(context.Background(), "run-1", &aop.RunTurnRequest{
+	response, err := svc.api.Sessions.RunTurn(context.Background(), "run-1", &aop.RunTurnRequest{
 		SessionId: "missing", TurnId: "turn-1",
 		Input: &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: "hello"}}}}},
 	})
@@ -67,7 +67,7 @@ func TestLegacyChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	handler := NewHandler(svc, nil, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := NewHandler(svc, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}), "")
 	for _, test := range []struct {
@@ -182,7 +182,7 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 // frontend "/" menu uses and proves it returns the protobuf command catalog.
 func TestSessionCommandsConnectRPC(t *testing.T) {
 	svc := newMenuTestService(t)
-	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, ""))
+	srv := httptest.NewServer(NewHandler(svc, nil, nil, ""))
 	defer srv.Close()
 
 	client := rpc.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -559,7 +560,7 @@ func (s *SQLiteStore) MaxAOPEventSeq(ctx context.Context, sessionID string) (uin
 	return maximum, rows.Err()
 }
 
-func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, before int64, limit int) ([]persistedAOPEvent, int64, error) {
+func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, before int64, limit int) ([]*aop.EventDelivery, int64, error) {
 	if limit <= 0 {
 		limit = 10000
 	}
@@ -583,7 +584,7 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 		return nil, 0, err
 	}
 	defer rows.Close()
-	events := make([]persistedAOPEvent, 0, limit+1)
+	events := make([]*aop.EventDelivery, 0, limit+1)
 	for rows.Next() {
 		var raw []byte
 		var cursor int64
@@ -592,7 +593,7 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 		}
 		event := new(aop.Event)
 		if protobuf.Unmarshal(raw, event) == nil && event.SessionId != "" && event.Payload != nil {
-			events = append(events, persistedAOPEvent{Cursor: cursor, Event: event})
+			events = append(events, &aop.EventDelivery{Cursor: strconv.FormatInt(cursor, 10), Event: event})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -602,13 +603,13 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 	if len(events) > limit {
 		events = events[1:]
 		if len(events) > 0 {
-			next = events[0].Cursor
+			next, _ = strconv.ParseInt(events[0].Cursor, 10, 64)
 		}
 	}
 	return events, next, nil
 }
 
-func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, after int64, limit int) ([]persistedAOPEvent, error) {
+func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, after int64, limit int) ([]*aop.EventDelivery, error) {
 	if after <= 0 {
 		events, _, err := s.ListAOPEventPage(ctx, sessionID, 0, limit)
 		return events, err
@@ -627,16 +628,16 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 		return nil, err
 	}
 	defer rows.Close()
-	var events []persistedAOPEvent
+	var events []*aop.EventDelivery
 	for rows.Next() {
-		var stored persistedAOPEvent
+		var cursor int64
 		var raw []byte
-		if err := rows.Scan(&stored.Cursor, &raw); err != nil {
+		if err := rows.Scan(&cursor, &raw); err != nil {
 			return nil, err
 		}
-		stored.Event = new(aop.Event)
-		if protobuf.Unmarshal(raw, stored.Event) == nil && stored.Event.SessionId != "" && stored.Event.Payload != nil {
-			events = append(events, stored)
+		event := new(aop.Event)
+		if protobuf.Unmarshal(raw, event) == nil && event.SessionId != "" && event.Payload != nil {
+			events = append(events, &aop.EventDelivery{Cursor: strconv.FormatInt(cursor, 10), Event: event})
 		}
 	}
 	return events, rows.Err()

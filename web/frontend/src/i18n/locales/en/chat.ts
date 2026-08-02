@@ -87,6 +87,8 @@ export default {
     chooseFile: 'Choose file…',
     fileHint: 'Attach a file to this message — inlined as context or uploaded to the agent.',
     empty: 'No matches',
+    switchCategory: 'switch category',
+    navigate: 'move',
   },
   // Backend system messages (localized by code; English here is also the fallback).
   // Mirrors the Sys* codes in pkg/web.

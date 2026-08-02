@@ -25,8 +25,6 @@ const (
 	DelegationRunForeground = "foreground"
 )
 
-type WebMessageExtension = WebMessageMetadata
-
 func GetCommandDetail(event *aop.Event) (CommandDetail, bool, error) {
 	value := new(CommandDetail)
 	ok, err := aop.FindTypedExtension(event, value)
@@ -77,12 +75,12 @@ func SetEvalDetail(event *aop.Event, value EvalDetail) error {
 	return aop.SetTypedExtension(event, &value)
 }
 
-func GetWebMessage(event *aop.Event) (WebMessageExtension, bool, error) {
-	value := new(WebMessageExtension)
+func GetWebMessage(event *aop.Event) (WebMessageMetadata, bool, error) {
+	value := new(WebMessageMetadata)
 	ok, err := aop.FindTypedExtension(event, value)
 	return *value, ok, err
 }
 
-func SetWebMessage(event *aop.Event, value WebMessageExtension) error {
+func SetWebMessage(event *aop.Event, value WebMessageMetadata) error {
 	return aop.SetTypedExtension(event, &value)
 }

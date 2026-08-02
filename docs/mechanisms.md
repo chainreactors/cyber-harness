@@ -67,8 +67,8 @@ Settings UI 保存
 ## 4. Goal 模式 AOP 扩展
 
 Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；AIScan 专属字段编码为
-`Any<aiscan.agent.RunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
-`type.googleapis.com/aiscan.agent.RunOptions` 表达。普通对话和 evaluator 复用同一
+`Any<aiscan.agent.AgentRunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
+`type.googleapis.com/aiscan.agent.AgentRunOptions` 表达。普通对话和 evaluator 复用同一
 Run/Turn 生命周期。
 
 **文件**: `proto/types/agent.proto`, `pkg/runner/runtime_protocol.go`, `pkg/web/service.go`
@@ -103,7 +103,7 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 | search | Tavily "ping" search |
 | ioa | Client.ListSpaces() |
 
-统一模式: probe 失败写入 `ConnCheck.Error`，不返回 error。返回的 error 仅表示 section 不可测。
+统一模式: probe 失败写入 protobuf `ConnectionCheck.error`，不返回传输 error。返回的 error 仅表示 section 不可测。
 
 ### LLM 探活
 
