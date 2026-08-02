@@ -85,7 +85,23 @@ export default function AgentTerminal({ agent }: { agent: AgentView }) {
       if (payload.$typeName !== 'aop.pty.ProtocolMessage') return
       const frame = payload as PtyProtocolMessage
       switch (frame.message.case) {
-        case 'sessions': applySessions(sessionsFromFrame(frame)); setStatus('connected'); break
+        case 'sessions': {
+          const next = sessionsFromFrame(frame)
+          applySessions(next)
+          setStatus('connected')
+          if (!activeRef.current) {
+            const repl = next.find((session) => session.state === 'running' && session.kind === 'repl' && (session.name === REPL_NAME || !session.name))
+              || next.find((session) => session.state === 'running' && session.kind === 'repl')
+            if (repl?.id) {
+              term.reset()
+              activeRef.current = repl.id
+              setActiveID(repl.id)
+              markSessionRead(repl.id, repl)
+              sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'attach', value: { streamId: streamID, sessionId: repl.id, cols: term.cols, rows: term.rows } } }))
+            }
+          }
+          break
+        }
         case 'opened':
         case 'attached': {
           const session = sessionFromFrame(frame)
