@@ -1,6 +1,6 @@
 # 外部接入指南：基于 AOP 协议接入 aiscan
 
-> 字段级 API 参考（请求/响应、事件全表、错误码、幂等与重放语义）见 [api.md](api.md)。
+> 多语言开发者版（Android/Kotlin 为例）：proto 代码生成 + chat 输入/输出字段参考见 [api.md](api.md)。
 
 本文档面向**外部程序的开发者**：如何不修改 aiscan 代码，通过网络协议接入 aiscan 的能力。两种典型角色：
 
