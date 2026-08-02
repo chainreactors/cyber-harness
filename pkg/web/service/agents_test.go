@@ -1368,7 +1368,7 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 		session.Session.NodeId = remote.nodeID
 		_ = store.UpdateSession(context.Background(), session)
 	}
-	service.handleAgentRun("session-1", &aop.RunTurnRequest{
+	service.StartAgentTurn("session-1", &aop.RunTurnRequest{
 		SessionId: "session-1", TurnId: "turn-1",
 		Input: &aop.Message{Role: "user", Content: []*aop.Content{aop.Text("hello")}},
 	})

@@ -28,9 +28,9 @@ type FileUploader interface {
 // It speaks generated protobuf only; frame conversion belongs to the
 // mechanism layer implementing this interface.
 type PTYRouter interface {
-	Subscribe(nodeID, streamID string) (<-chan *ptypb.ProtocolMessage, bool, func())
-	Forward(nodeID string, message *ptypb.ProtocolMessage) error
-	Close(nodeID, streamID string)
+	SubscribePTY(nodeID, streamID string) (<-chan *ptypb.ProtocolMessage, bool, func())
+	ForwardPTY(nodeID string, message *ptypb.ProtocolMessage) error
+	ClosePTY(nodeID, streamID string)
 }
 
 // ApplicationConnection is the minimal mechanism surface required by the
@@ -114,7 +114,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		}
 		route.unsubscribe()
 		if detach && backends.PTY != nil {
-			backends.PTY.Close(route.nodeID, streamID)
+			backends.PTY.ClosePTY(route.nodeID, streamID)
 		}
 	}
 	defer func() {
@@ -136,7 +136,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		for streamID, route := range routes {
 			route.unsubscribe()
 			if backends.PTY != nil {
-				backends.PTY.Close(route.nodeID, streamID)
+				backends.PTY.ClosePTY(route.nodeID, streamID)
 			}
 		}
 	}()
@@ -313,7 +313,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return nil
 		}
 		if !routed {
-			messages, online, unsubscribe := backends.PTY.Subscribe(nodeID, streamID)
+			messages, online, unsubscribe := backends.PTY.SubscribePTY(nodeID, streamID)
 			stateMu.Lock()
 			ptyRoutes[streamID] = applicationPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
 			stateMu.Unlock()
@@ -334,7 +334,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				_ = send(streamID, "", coreterminal.NewDetached(streamID))
 			}
 		}
-		if forwardErr := backends.PTY.Forward(nodeID, value); forwardErr != nil {
+		if forwardErr := backends.PTY.ForwardPTY(nodeID, value); forwardErr != nil {
 			fail(envelope.Id, "PTY_FORWARD_FAILED", forwardErr)
 			removePTY(streamID, false)
 			return nil
