@@ -6,9 +6,8 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-// ScanResult is private collector state. It never crosses an AOP, ConnectRPC,
-// persistence, or frontend boundary; scanner-native values are transformed to
-// libcstx SCO nodes before leaving the process.
+// ScanResult is private collector state. Scanner-native records leave a node
+// only as ToolArtifact messages; the server owns normalization and persistence.
 type ScanResult struct {
 	Summary Summary                `json:"summary"`
 	GOGO    []*parsers.GOGOResult  `json:"gogo,omitempty"`

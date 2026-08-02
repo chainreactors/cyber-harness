@@ -183,8 +183,8 @@ github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186 h1:oKM8D7wYAl8
 github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
 github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2 h1:pc7Vw1H4CyFnzOCxRmM1kdDwX0vJBTotIxOQjA78J/Q=
 github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2/go.mod h1:X0uOEyD6Q/d7QBQ/MMU+J9bN83Xc/+XN3M2KJDaQuNw=
-github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7 h1:DJxafZodSjffB7ilvNf2eZDEAcSkD5I2GzSWlJUlb3A=
-github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7/go.mod h1:YQNpUU90e8tw9k1VNEUF7smIY8kSI0J3T0/zp8ri85Y=
+github.com/chainreactors/libcstx/go v0.3.2 h1:mzJOyeVeRnJVPL9qt14wTf+BdF1PctjGM2WEmHtmhh8=
+github.com/chainreactors/libcstx/go v0.3.2/go.mod h1:Z7N6Vhtc83se3NbdmwQ/+2wVeMn6tL3PZ2vtRJjx4cA=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc h1:e6rjnU8dmfhAnkFzLp/R5gta0LbFM13L27djxbC/i4I=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc/go.mod h1:VrXmYPbNN5AVoo1sc5aeyPVBYqubMdb3KO/tn5rRZpo=
 github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6 h1:apEDnJeZ5fe2AaEJHV6TRDldoy2t/d7E1maxmUz2tfU=

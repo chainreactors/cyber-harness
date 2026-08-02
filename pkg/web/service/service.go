@@ -27,6 +27,7 @@ type ServiceConfig struct {
 	ConfigStore   ConfigStore
 	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
 	AgentPool     *AgentPool
+	Artifacts     ArtifactIngestor
 	MaxConcurrent int
 	ScanTimeout   time.Duration
 	AccessKey     string
@@ -94,7 +95,7 @@ func NewService(cfg ServiceConfig) *Service {
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,
 		Scans:     managementapi.NewScans(svc, svc.hub),
-		SCO:       managementapi.NewSCO(cfg.Store),
+		SCO:       managementapi.NewSCO(cfg.Store, cfg.Artifacts),
 		Status:    svc,
 		ServerURL: "/",
 	}

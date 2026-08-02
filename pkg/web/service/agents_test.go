@@ -2,12 +2,11 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/output"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/go-rod/rod"
@@ -122,31 +121,37 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 	}
 }
 
-type recordingSCOStore struct {
-	scanID string
-	nodes  []json.RawMessage
+type recordingArtifactSink struct {
+	operationID string
+	artifact    output.ToolArtifact
 }
 
-func (s *recordingSCOStore) UpsertSCONodes(_ context.Context, scanID string, nodes []json.RawMessage) error {
-	s.scanID = scanID
-	s.nodes = append([]json.RawMessage(nil), nodes...)
+func (s *recordingArtifactSink) IngestArtifact(_ context.Context, operationID string, artifact output.ToolArtifact) error {
+	s.operationID, s.artifact = operationID, artifact
 	return nil
 }
 
-func TestAgentPoolPersistsToolSCO(t *testing.T) {
-	store := &recordingSCOStore{}
+func (*recordingArtifactSink) NormalizeArtifact(context.Context, string, string, []byte) (uint64, uint64, error) {
+	return 0, 0, nil
+}
+
+func (*recordingArtifactSink) SupportedArtifacts() []string { return nil }
+func (*recordingArtifactSink) Close() error                 { return nil }
+
+func TestAgentPoolForwardsRawToolArtifact(t *testing.T) {
+	sink := &recordingArtifactSink{}
 	pool := NewAgentPool(NewHub())
-	pool.SetSCOStore(store)
-	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","value":"127.0.0.1"}`)
-	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &scopb.ProtocolMessage{Message: &scopb.ProtocolMessage_Nodes{Nodes: &scopb.Nodes{
-		Nodes: [][]byte{node},
+	pool.SetArtifactIngestor(sink)
+	raw := []byte(`{"ip":"127.0.0.1","port":"80"}`)
+	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Artifact{Artifact: &toolpb.Artifact{
+		Tool: "gogo", Kind: output.ToolDataService, Data: raw, MediaType: aop.JSONMediaType,
 	}}}))
 
-	if store.scanID != "call-gogo-1" {
-		t.Fatalf("scan id = %q, want tool call id", store.scanID)
+	if sink.operationID != "call-gogo-1" {
+		t.Fatalf("operation id = %q, want tool call id", sink.operationID)
 	}
-	if len(store.nodes) != 1 || string(store.nodes[0]) != string(node) {
-		t.Fatalf("stored nodes = %s", store.nodes)
+	if sink.artifact.Tool != "gogo" || string(sink.artifact.Data) != string(raw) {
+		t.Fatalf("forwarded artifact = %+v", sink.artifact)
 	}
 }
 

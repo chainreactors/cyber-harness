@@ -27,8 +27,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
-	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 type webSocketEnvelopeStream struct {
@@ -227,7 +227,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		})
 		defer unsubscribe()
 	}
-	if detach := attachToolEvents(cc.DataBus, cc.SCO, send); detach != nil {
+	if detach := attachToolEvents(cc.DataBus, cc.Artifacts, send); detach != nil {
 		defer detach()
 	}
 	if cc.Status != nil {

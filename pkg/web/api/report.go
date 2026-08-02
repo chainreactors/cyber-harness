@@ -12,12 +12,12 @@ import (
 const DefaultReportLang = "zh"
 
 type scoReportFacts struct {
-	ips        []*cstx.Ip
-	ports      []*cstx.Port
-	apps       []*cstx.App
-	urls       []*cstx.Url
-	frameworks []*cstx.Framework
-	vulns      []*cstx.Vuln
+	ips        []*cstx.IpNode
+	ports      []*cstx.PortNode
+	apps       []*cstx.AppNode
+	urls       []*cstx.UrlNode
+	frameworks []*cstx.FrameworkNode
+	vulns      []*cstx.VulnNode
 	other      map[string]int
 }
 
@@ -37,17 +37,17 @@ func collectSCOReportFacts(rawNodes []json.RawMessage) scoReportFacts {
 			continue
 		}
 		switch value := node.(type) {
-		case *cstx.Ip:
+		case *cstx.IpNode:
 			facts.ips = append(facts.ips, value)
-		case *cstx.Port:
+		case *cstx.PortNode:
 			facts.ports = append(facts.ports, value)
-		case *cstx.App:
+		case *cstx.AppNode:
 			facts.apps = append(facts.apps, value)
-		case *cstx.Url:
+		case *cstx.UrlNode:
 			facts.urls = append(facts.urls, value)
-		case *cstx.Framework:
+		case *cstx.FrameworkNode:
 			facts.frameworks = append(facts.frameworks, value)
-		case *cstx.Vuln:
+		case *cstx.VulnNode:
 			facts.vulns = append(facts.vulns, value)
 		default:
 			facts.other[node.CstxType()]++

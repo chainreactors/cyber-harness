@@ -1,3 +1,5 @@
+//go:build full
+
 package main
 
 import (
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -22,11 +25,16 @@ import (
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, app *runner.App, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
-	service := webservice.NewService(webservice.ServiceConfig{Store: store, App: app, AccessKey: token})
+func newHeadlessHandler(store *webservice.SQLiteStore, app *runner.App, ingestor webservice.ArtifactIngestor, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
+	service := webservice.NewService(webservice.ServiceConfig{Store: store, App: app, Artifacts: ingestor, AccessKey: token})
 	pool := webservice.NewAgentPool(service.Hub())
-	pool.SetSCOStore(store)
+	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
+	if app != nil && app.Artifacts != nil && ingestor != nil {
+		app.Artifacts.SetHandler(func(artifact output.ToolArtifact) {
+			_ = ingestor.IngestArtifact(context.Background(), artifact.CallID, artifact)
+		})
+	}
 	return service, pool, web.NewHandler(service, nil, nil)
 }
 
@@ -61,6 +69,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+	ingestor, err := webservice.NewArtifactIngestor(store)
+	if err != nil {
+		logger.Errorf("init artifact normalization: %v", err)
+		os.Exit(1)
+	}
+	defer ingestor.Close()
 
 	option := &cfg.Option{}
 	if _, err := runner.ResolveRuntimeConfig(option); err != nil {
@@ -79,7 +93,7 @@ func main() {
 	}
 	defer app.Close()
 
-	service, _, handler := newHeadlessHandler(store, app, token)
+	service, _, handler := newHeadlessHandler(store, app, ingestor, token)
 	defer service.Close()
 
 	listener, err := net.Listen("tcp", addr)

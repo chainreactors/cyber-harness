@@ -3,13 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	aopsco "github.com/chainreactors/aiscan/aop/sco"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	cstx "github.com/chainreactors/libcstx/go"
 )
 
 type SCOStore interface {
@@ -21,10 +19,22 @@ type SCOStore interface {
 }
 
 type SCO struct {
-	store SCOStore
+	store      SCOStore
+	normalizer ArtifactNormalizer
 }
 
-func NewSCO(store SCOStore) *SCO { return &SCO{store: store} }
+type ArtifactNormalizer interface {
+	NormalizeArtifact(context.Context, string, string, []byte) (uint64, uint64, error)
+	SupportedArtifacts() []string
+}
+
+func NewSCO(store SCOStore, normalizers ...ArtifactNormalizer) *SCO {
+	var normalizer ArtifactNormalizer
+	if len(normalizers) > 0 {
+		normalizer = normalizers[0]
+	}
+	return &SCO{store: store, normalizer: normalizer}
+}
 
 func (s *SCO) ListNodes(ctx context.Context, request *types.ListNodesRequest) (*types.ListNodesResponse, error) {
 	if s == nil || s.store == nil {
@@ -104,32 +114,23 @@ func (s *SCO) ImportNodes(ctx context.Context, request *types.ImportNodesRequest
 	if artifact == "" {
 		return nil, Errorf(CodeInvalidArgument, "artifact is required")
 	}
-	nodes, err := cstx.Parse(artifact, request.GetData())
-	if err != nil {
-		return nil, NewError(CodeInvalidArgument, err)
-	}
-	seen := make(map[string]struct{}, len(nodes))
-	raw := make([]json.RawMessage, 0, len(nodes))
-	for _, node := range nodes {
-		if _, ok := seen[node.CstxID()]; ok {
-			continue
-		}
-		seen[node.CstxID()] = struct{}{}
-		encoded, err := json.Marshal(node)
-		if err == nil {
-			raw = append(raw, encoded)
-		}
+	if s.normalizer == nil {
+		return nil, Errorf(CodeFailedPrecondition, "artifact normalization is unavailable")
 	}
 	operationID := strings.TrimSpace(request.GetOperationId())
 	if operationID == "" {
 		operationID = "import"
 	}
-	if err := s.store.UpsertSCONodes(ctx, operationID, raw); err != nil {
-		return nil, fmt.Errorf("import SCO nodes: %w", err)
+	nodes, duplicates, err := s.normalizer.NormalizeArtifact(ctx, operationID, artifact, request.GetData())
+	if err != nil {
+		return nil, NewError(CodeInvalidArgument, err)
 	}
-	return &types.ImportNodesResponse{Nodes: uint64(len(raw)), Duplicates: uint64(len(nodes) - len(raw)), Artifact: artifact}, nil
+	return &types.ImportNodesResponse{Nodes: nodes, Duplicates: duplicates, Artifact: artifact}, nil
 }
 
-func (*SCO) ListArtifacts(context.Context, *types.ListArtifactsRequest) (*types.ListArtifactsResponse, error) {
-	return &types.ListArtifactsResponse{Artifacts: cstx.SupportedArtifacts()}, nil
+func (s *SCO) ListArtifacts(context.Context, *types.ListArtifactsRequest) (*types.ListArtifactsResponse, error) {
+	if s == nil || s.normalizer == nil {
+		return &types.ListArtifactsResponse{}, nil
+	}
+	return &types.ListArtifactsResponse{Artifacts: s.normalizer.SupportedArtifacts()}, nil
 }

@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -25,19 +23,20 @@ import (
 )
 
 // ToolNodeConfig configures a tool-only runner: an outbound WebSocket
-// connection exposing Command, native file RPCs, PTY, tool.data and tool.sco,
+// connection exposing Command, native file RPCs, PTY, progress and raw tool
+// artifacts,
 // with no LLM provider, agent loop, or IOA dependency.
 type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string
 	// ID is the stable node identity used by Cairn as the runner primary key.
-	ID       string
-	Token    string
-	Registry *commands.CommandRegistry
-	DataBus  *eventbus.Bus[output.ToolDataEvent]
-	SCO      *output.SCOSidecar
-	Logger   telemetry.Logger
-	Version  string
+	ID        string
+	Token     string
+	Registry  *commands.CommandRegistry
+	DataBus   *eventbus.Bus[output.ToolDataEvent]
+	Artifacts *output.ArtifactStream
+	Logger    telemetry.Logger
+	Version   string
 	// JSONFrames switches the hub wire to standard ProtoJSON text frames;
 	// hubs expecting binary protobuf (AIScan) leave it false.
 	JSONFrames bool
@@ -78,6 +77,11 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		skillStore, _ := skills.LoadEmbeddedStore()
 		menu = func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) }
 	}
+	artifacts := cfg.Artifacts
+	if artifacts == nil && cfg.DataBus != nil {
+		artifacts = output.NewArtifactStream(cfg.DataBus)
+		defer artifacts.Close()
+	}
 	return connect(ctx, connectionConfig{
 		ServerURL:     cfg.ServerURL,
 		WSPath:        cfg.WSPath,
@@ -85,22 +89,21 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		Token:         cfg.Token,
 		Registry:      cfg.Registry,
 		DataBus:       cfg.DataBus,
-		SCO:           cfg.SCO,
+		Artifacts:     artifacts,
 		Logger:        logger,
 		NodeID:        runnerID,
 		Runtime:       runnerRuntime,
-		Capabilities:  []string{"pty", "file", "exec", "tool", "sco"},
+		Capabilities:  []string{"pty", "file", "exec", "tool", "artifact"},
 		Menu:          menu,
 		RunnerFileRPC: true,
 		JSONFrames:    cfg.JSONFrames,
 	})
 }
 
-// attachToolEvents forwards scanner telemetry (tool.data) and normalized SCO
-// nodes (tool.sco) onto the hub connection, correlated by call ID. Returns an
-// idempotent detach func, or nil when both sources are absent.
-func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.SCOSidecar, send func(string, protobuf.Message)) func() {
-	if dataBus == nil && sco == nil {
+// attachToolEvents forwards progress and scanner-native artifacts onto the hub
+// connection. Nodes never normalize artifacts into SCO.
+func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], artifacts *output.ArtifactStream, send func(string, protobuf.Message)) func() {
+	if dataBus == nil && artifacts == nil {
 		return nil
 	}
 	var unsub func()
@@ -122,14 +125,18 @@ func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.S
 			}}})
 		})
 	}
-	if sco != nil {
-		sco.OnNodes = func(callID string, nodes []json.RawMessage) {
-			encoded := make([][]byte, 0, len(nodes))
-			for _, node := range nodes {
-				encoded = append(encoded, append([]byte(nil), node...))
+	if artifacts != nil {
+		artifacts.SetHandler(func(artifact output.ToolArtifact) {
+			timestamp := artifact.Timestamp
+			if timestamp.IsZero() {
+				timestamp = time.Now()
 			}
-			send(callID, &scopb.ProtocolMessage{Message: &scopb.ProtocolMessage_Nodes{Nodes: &scopb.Nodes{Nodes: encoded, MediaType: aop.JSONMediaType}}})
-		}
+			send(artifact.CallID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Artifact{Artifact: &toolpb.Artifact{
+				Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target,
+				Data: append([]byte(nil), artifact.Data...), MediaType: aop.JSONMediaType,
+				Timestamp: timestamppb.New(timestamp),
+			}}})
+		})
 	}
 	var once bool
 	return func() {
@@ -140,8 +147,8 @@ func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], sco *output.S
 		if unsub != nil {
 			unsub()
 		}
-		if sco != nil {
-			sco.OnNodes = nil
+		if artifacts != nil {
+			artifacts.SetHandler(nil)
 		}
 	}
 }

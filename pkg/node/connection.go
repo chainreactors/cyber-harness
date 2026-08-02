@@ -28,7 +28,7 @@ type connectionConfig struct {
 	Registry       *commands.CommandRegistry
 	AgentSubscribe func(func(*aop.Event)) func()
 	DataBus        *eventbus.Bus[output.ToolDataEvent]
-	SCO            *output.SCOSidecar
+	Artifacts      *output.ArtifactStream
 	Logger         telemetry.Logger
 	Chat           *chatAgentHandler
 	// AgentRuntime handles the AOP core/command namespaces directly via

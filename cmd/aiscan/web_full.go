@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -38,6 +38,11 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
+	ingestor, err := webservice.NewArtifactIngestor(store)
+	if err != nil {
+		return fmt.Errorf("init artifact normalization: %w", err)
+	}
+	defer ingestor.Close()
 
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
@@ -59,6 +64,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	service := webservice.NewService(webservice.ServiceConfig{
 		Store:       store,
 		App:         application,
+		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
 		AppFactory: func(ctx context.Context, prepared *webservice.PreparedConfig) (*runner.App, error) {
@@ -83,7 +89,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			if err != nil {
 				return nil, err
 			}
-			wireWebApp(candidate, store)
+			wireWebApp(candidate, ingestor)
 			return candidate, nil
 		},
 		MaxConcurrent: opts.MaxScans,
@@ -91,7 +97,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	})
 	defer service.Close()
 
-	wireWebApp(application, store)
+	wireWebApp(application, ingestor)
 
 	var pool *webservice.AgentPool
 	if option.Debug {
@@ -99,7 +105,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	} else {
 		pool = webservice.NewAgentPool(service.Hub())
 	}
-	pool.SetSCOStore(store)
+	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
@@ -167,13 +173,13 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	return nil
 }
 
-func wireWebApp(application *runner.App, store *webservice.SQLiteStore) {
-	if application == nil || store == nil || application.SCOSidecar == nil {
+func wireWebApp(application *runner.App, ingestor webservice.ArtifactIngestor) {
+	if application == nil || ingestor == nil || application.Artifacts == nil {
 		return
 	}
-	application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
-		_ = store.UpsertSCONodes(context.Background(), callID, nodes)
-	}
+	application.Artifacts.SetHandler(func(artifact output.ToolArtifact) {
+		_ = ingestor.IngestArtifact(context.Background(), artifact.CallID, artifact)
+	})
 }
 
 func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
