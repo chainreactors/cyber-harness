@@ -9,7 +9,7 @@ import (
 	providerpkg "github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -221,11 +221,11 @@ func (a *Agent) DeriveNamed(name string) *Agent {
 	return a.deriveNamed(name, "", nil)
 }
 
-func (a *Agent) deriveNamed(name, parentToolCallID string, detail *ext.DelegationDetail) *Agent {
+func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
 }
 
-func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ext.DelegationDetail) *Agent {
+func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return NewAgent(Config{
 		Provider:              cfg.Provider,
 		Tools:                 cfg.Tools,

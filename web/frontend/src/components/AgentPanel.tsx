@@ -36,13 +36,13 @@ interface AgentPanelProps {
   /** The roster from useChatSession — avoids a redundant listAgents poll. */
   agents: AgentView[]
   /** When opened from a deck node click, focus this agent's console. */
-  focusNodeURI?: string
+  focusNodeID?: string
   onClose: () => void
 }
 
-export default function AgentPanel({ open, agents: rosterAgents, focusNodeURI, onClose }: AgentPanelProps) {
+export default function AgentPanel({ open, agents: rosterAgents, focusNodeID, onClose }: AgentPanelProps) {
   const { t } = useTranslation('agent')
-  const { agents, selected, selectedID, setSelectedID } = useAgentDirectory(open, rosterAgents, focusNodeURI)
+  const { agents, selected, selectedNodeID, setSelectedNodeID } = useAgentDirectory(open, rosterAgents, focusNodeID)
   const showAgentList = agents.length > 1
 
   return (
@@ -67,8 +67,8 @@ export default function AgentPanel({ open, agents: rosterAgents, focusNodeURI, o
           {showAgentList && (
             <AgentList
               agents={agents}
-              selectedID={selectedID}
-              onSelect={setSelectedID}
+              selectedNodeID={selectedNodeID}
+              onSelect={setSelectedNodeID}
             />
           )}
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -92,12 +92,12 @@ export default function AgentPanel({ open, agents: rosterAgents, focusNodeURI, o
 // Derives selection state from the parent-provided roster (useChatSession
 // already polls listAgents every 5s). No internal fetch or polling — the agent
 // list is a prop, so the panel never double-polls.
-function useAgentDirectory(open: boolean, roster: AgentView[], focusNodeURI?: string) {
-  const [selectedID, setSelectedID] = useState('')
+function useAgentDirectory(open: boolean, roster: AgentView[], focusNodeID?: string) {
+  const [selectedNodeID, setSelectedNodeID] = useState('')
 
   // Keep selection valid as the roster changes (agents disconnect / reconnect).
   useEffect(() => {
-    setSelectedID((current) => roster.some((a) => a.nodeUri === current) ? current : roster[0]?.nodeUri || '')
+    setSelectedNodeID((current) => roster.some((a) => a.hello?.nodeId === current) ? current : roster[0]?.hello?.nodeId || '')
   }, [roster])
 
   // Focus a specific node when the panel is opened from a deck node click.
@@ -108,28 +108,28 @@ function useAgentDirectory(open: boolean, roster: AgentView[], focusNodeURI?: st
   const focusAppliedRef = useRef(false)
   useEffect(() => {
     focusAppliedRef.current = false
-  }, [open, focusNodeURI])
+  }, [open, focusNodeID])
   useEffect(() => {
     if (focusAppliedRef.current) return
-    if (open && focusNodeURI && roster.some((a) => a.nodeUri === focusNodeURI)) {
-      setSelectedID(focusNodeURI)
+    if (open && focusNodeID && roster.some((a) => a.hello?.nodeId === focusNodeID)) {
+      setSelectedNodeID(focusNodeID)
       focusAppliedRef.current = true
     }
-  }, [open, focusNodeURI, roster])
+  }, [open, focusNodeID, roster])
 
-  const selected = roster.find((agent) => agent.nodeUri === selectedID) || roster[0] || null
+  const selected = roster.find((agent) => agent.hello?.nodeId === selectedNodeID) || roster[0] || null
 
-  return { agents: roster, selected, selectedID, setSelectedID }
+  return { agents: roster, selected, selectedNodeID, setSelectedNodeID }
 }
 
 function AgentList({
   agents,
   onSelect,
-  selectedID,
+  selectedNodeID,
 }: {
   agents: AgentView[]
-  onSelect: (id: string) => void
-  selectedID: string
+  onSelect: (nodeID: string) => void
+  selectedNodeID: string
 }) {
   const { t } = useTranslation('agent')
   const [query, setQuery] = useState('')
@@ -185,10 +185,10 @@ function AgentList({
         ) : (
           filtered.map((agent) => (
             <ListRow
-              key={agent.nodeUri}
-              active={selectedID === agent.nodeUri}
+              key={agent.hello?.nodeId}
+              active={selectedNodeID === agent.hello?.nodeId}
               leading={<StatusDot status={agent.busy ? 'warning' : 'info'} className="mt-1" />}
-              onClick={() => onSelect(agent.nodeUri)}
+              onClick={() => onSelect(agent.hello?.nodeId || '')}
               title={agentDetails(agent)}
               className="mb-1"
             >
@@ -210,7 +210,7 @@ function agentDetails(agent: AgentView) {
   const stats = agent.stats
   const parts = [
     `name: ${agent.hello?.name || ''}`,
-    `id: ${agent.hello?.agentId || ''}`,
+    `id: ${agent.hello?.nodeId || ''}`,
     `state: ${agent.busy ? 'busy' : 'idle'}`,
     `connected: ${agent.connectedAt ? formatDateTime(timestampDate(agent.connectedAt).toISOString()) : ''}`,
     runtime?.hostname ? `host: ${runtime.hostname}` : '',

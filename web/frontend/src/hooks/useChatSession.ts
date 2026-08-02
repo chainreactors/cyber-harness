@@ -52,7 +52,7 @@ function safeUUID(): string {
 function aopExtension(event: AOPEvent): Record<string, unknown> | undefined {
   for (const extension of event.extensions) {
     const value = anyUnpack(extension, WebMessageMetadataSchema)
-    if (value) return { agentId: value.agentId, code: value.code, params: value.params }
+    if (value) return { nodeId: value.nodeId, code: value.code, params: value.params }
   }
   return undefined
 }
@@ -67,7 +67,7 @@ export interface ChatMessage {
   id: string
   session_id: string
   role: 'user' | 'assistant' | 'system'
-  agent_id?: string
+  node_id?: string
   agent_name?: string
   content: string
   metadata?: Record<string, unknown>
@@ -92,11 +92,11 @@ function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
     .map((part) => part.value.case === 'text' ? part.value.value.text : '')
     .join('\n')
   let metadata: Record<string, unknown> | undefined
-  let agentID: string | undefined
+  let nodeID: string | undefined
   for (const extension of event.extensions) {
     const decoded = anyUnpack(extension, WebMessageMetadataSchema)
     if (decoded) {
-      agentID = decoded.agentId || undefined
+      nodeID = decoded.nodeId || undefined
       metadata = { code: decoded.code, params: decoded.params }
       break
     }
@@ -106,7 +106,7 @@ function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
     id: message.id,
     session_id: event.sessionId,
     role,
-    agent_id: agentID,
+    node_id: nodeID,
     agent_name: event.emitter,
     content: text,
     metadata,
@@ -142,7 +142,7 @@ interface SessionSnapshot {
 // on every 5s poll. Ordering by node URI keeps the list — and any "first agent"
 // auto-pick — put across refreshes.
 function sortAgentsByNode(list: AgentView[]): AgentView[] {
-  return [...list].sort((a, b) => a.nodeUri.localeCompare(b.nodeUri))
+  return [...list].sort((a, b) => (a.hello?.nodeId || '').localeCompare(b.hello?.nodeId || ''))
 }
 
 // Cheap staleness probe for the cache revalidation fast-path. Persisted history
@@ -161,7 +161,7 @@ function messagesDiffer(a: ChatMessage[], b: ChatMessage[]): boolean {
 export function useChatSession() {
   const { t } = useTranslation('chat')
   const [agents, setAgents] = useState<AgentView[]>([])
-  const [selectedNodeURI, setSelectedNodeURI] = useState<string | null>(null)
+  const [selectedNodeID, setSelectedNodeID] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -177,7 +177,7 @@ export function useChatSession() {
   const activeSessionRef = useRef<string | null>(null)
   const activeTurnRef = useRef<string>('')
   // Latest roster mirrors `agents` for event handlers that run between renders.
-  // selectedNodeURI is already the canonical node_uri; no second identity or
+  // selectedNodeID is the Web-scoped node_id; no second identity or
   // reconnect remapping state is needed.
   const agentsRef = useRef<AgentView[]>([])
   const sessionCacheRef = useRef<Map<string, SessionSnapshot>>(new Map())
@@ -204,10 +204,10 @@ export function useChatSession() {
       const list = sortAgentsByNode(await listAgents())
       agentsRef.current = list
       setAgents(list)
-      setSelectedNodeURI((current) => {
-        // node_uri survives reconnects. Keep an absent selection so a temporary
+      setSelectedNodeID((current) => {
+        // node_id survives reconnects. Keep an absent selection so a temporary
         // disconnect does not silently retarget the operator to another node.
-        return current || list[0]?.nodeUri || null
+        return current || list[0]?.hello?.nodeId || null
       })
     } catch {}
   }, [])
@@ -452,10 +452,10 @@ export function useChatSession() {
     )
   }
 
-  async function handleCreateSession(nodeURI: string) {
+  async function handleCreateSession(nodeID: string) {
     try {
-      const session = await createChatSession(nodeURI)
-      setSelectedNodeURI(nodeURI)
+      const session = await createChatSession(nodeID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
     } catch (err: any) {
@@ -563,15 +563,15 @@ export function useChatSession() {
     if (activeSessionRef.current) return activeSessionRef.current
     // Prefer the selected node only while it's actually connected; a selection
     // left dangling by a node that went away falls back to the first agent.
-    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
-    const nodeURI = connected?.nodeUri || agents[0]?.nodeUri
-    if (!nodeURI) {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const nodeID = connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!nodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(nodeURI)
-      setSelectedNodeURI(nodeURI)
+      const session = await createChatSession(nodeID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
       return session.id
@@ -599,21 +599,21 @@ export function useChatSession() {
   async function quickDispatch(
     target: string,
     prompt: string,
-    nodeURI?: string,
+    nodeID?: string,
     opts?: { activate?: boolean; skipRefresh?: boolean },
   ): Promise<AOPSession | null> {
-    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
-    const targetNodeURI = nodeURI || connected?.nodeUri || agents[0]?.nodeUri
-    if (!targetNodeURI) {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const targetNodeID = nodeID || connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!targetNodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(targetNodeURI, target)
+      const session = await createChatSession(targetNodeID, target)
       await sendChatMessage(session.id, prompt)
       if (!opts?.skipRefresh) await refreshSessions()
       if (opts?.activate) {
-        setSelectedNodeURI(targetNodeURI)
+        setSelectedNodeID(targetNodeID)
         await activateSession(session.id, 'push')
       }
       return session
@@ -634,15 +634,15 @@ export function useChatSession() {
     seedPrompt: string
     scanID?: string
   }): Promise<string | null> {
-    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
-    const nodeURI = connected?.nodeUri || agents[0]?.nodeUri
-    if (!nodeURI) {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const nodeID = connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!nodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(nodeURI, args.title, args.scanID)
-      setSelectedNodeURI(nodeURI)
+      const session = await createChatSession(nodeID, args.title, args.scanID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
       await handleSendMessage(args.seedPrompt)
@@ -668,7 +668,7 @@ export function useChatSession() {
       const batch = items.slice(i, i + CONCURRENCY)
       await Promise.all(
         batch.map((it, j) =>
-          quickDispatch(it.target, it.prompt, fleet[(i + j) % fleet.length].nodeUri, { skipRefresh: true }),
+          quickDispatch(it.target, it.prompt, fleet[(i + j) % fleet.length].hello?.nodeId, { skipRefresh: true }),
         ),
       )
     }
@@ -714,7 +714,7 @@ export function useChatSession() {
 
   return {
     agents,
-    selectedNodeURI,
+    selectedNodeID,
     sessions,
     activeSessionID,
     timeline,
@@ -723,8 +723,8 @@ export function useChatSession() {
     isThinking,
     busy: pendingResponse || isThinking,
     error,
-    selectNode: (nodeURI: string) => {
-      setSelectedNodeURI(nodeURI)
+    selectNode: (nodeID: string) => {
+      setSelectedNodeID(nodeID)
     },
     createSession: handleCreateSession,
     selectSession: (id: string) => activateSession(id, 'push'),

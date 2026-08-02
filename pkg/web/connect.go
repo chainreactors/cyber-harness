@@ -6,12 +6,7 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
-	"github.com/chainreactors/aiscan/pkg/rpc/agent/agentconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/chat/chatconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/config/configconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/scan/scanconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/sco/scoconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/system/systemconnect"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	"github.com/chainreactors/aiscan/pkg/web/auth"
 )
 
@@ -31,12 +26,12 @@ func NewConnectHandler(accessKey string, service *Service, pool *AgentPool, loca
 	}
 	mux := http.NewServeMux()
 	chatCore := NewAOPChatServer(service)
-	sessionPath, sessionHandler := chatconnect.NewSessionServiceHandler(newConnectSessionServer(service, chatCore), opts...)
-	scanPath, scanHandler := scanconnect.NewScanServiceHandler(newConnectScanServer(service), opts...)
-	configPath, configHandler := configconnect.NewConfigServiceHandler(newConnectConfigServer(service), opts...)
-	agentPath, agentHandler := agentconnect.NewAgentServiceHandler(&connectAgentServer{pool: pool, local: local}, opts...)
-	systemPath, systemHandler := systemconnect.NewSystemServiceHandler(&connectSystemServer{service: service, pool: pool, serverURL: "/"}, opts...)
-	scoPath, scoHandler := scoconnect.NewSCOServiceHandler(&connectSCOServer{service: service}, opts...)
+	sessionPath, sessionHandler := rpc.NewSessionServiceHandler(newConnectSessionServer(service, chatCore), opts...)
+	scanPath, scanHandler := rpc.NewScanServiceHandler(newConnectScanServer(service), opts...)
+	configPath, configHandler := rpc.NewConfigServiceHandler(newConnectConfigServer(service), opts...)
+	agentPath, agentHandler := rpc.NewAgentServiceHandler(&connectAgentServer{pool: pool, local: local}, opts...)
+	systemPath, systemHandler := rpc.NewSystemServiceHandler(&connectSystemServer{service: service, pool: pool, serverURL: "/"}, opts...)
+	scoPath, scoHandler := rpc.NewSCOServiceHandler(&connectSCOServer{service: service}, opts...)
 	mux.Handle(sessionPath, sessionHandler)
 	mux.Handle(scanPath, scanHandler)
 	mux.Handle(configPath, configHandler)
@@ -104,4 +99,4 @@ func connectAuthenticated(header http.Header, accessKey string) bool {
 	return false
 }
 
-var _ chatconnect.SessionServiceHandler = (*connectSessionServer)(nil)
+var _ rpc.SessionServiceHandler = (*connectSessionServer)(nil)

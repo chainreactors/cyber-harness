@@ -30,18 +30,18 @@ interface Props {
   agents?: AgentView[]
   sessions?: SessionRecord[]
   activeSessionID: string | null
-  selectedNodeURI: string | null
-  terminalNodeURI: string | null
-  onSelectNode: (nodeURI: string) => void
+  selectedNodeID: string | null
+  terminalNodeID: string | null
+  onSelectNode: (nodeID: string) => void
   onSelectSession: (id: string) => void
-  onCreateSession: (nodeURI: string) => void
+  onCreateSession: (nodeID: string) => void
   onDeleteSession: (id: string) => void
-  onOpenTerminal: (nodeURI: string) => void
+  onOpenTerminal: (nodeID: string) => void
 }
 
 export default function SessionList({
   open, onToggle, agents = [], sessions = [],
-  activeSessionID, selectedNodeURI, terminalNodeURI,
+  activeSessionID, selectedNodeID, terminalNodeID,
   onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
 }: Props) {
   const { t } = useTranslation('sidebar')
@@ -79,7 +79,7 @@ export default function SessionList({
     const orphanMap = new Map<string, SessionRecord[]>()
     for (const s of sessions) {
       if (claimed.has(recordID(s))) continue
-      const key = s.agentName || s.session?.nodeUri || 'unknown'
+      const key = s.agentName || s.session?.nodeId || 'unknown'
       const list = orphanMap.get(key) || []
       list.push(s)
       orphanMap.set(key, list)
@@ -160,17 +160,17 @@ export default function SessionList({
                 )}
                 {groups.map(({ agent, sessions: own }) => (
                   <AgentGroup
-                    key={agent.nodeUri}
+                    key={agent.hello?.nodeId}
                     agent={agent}
                     sessions={own}
-                    isSelected={agent.nodeUri === selectedNodeURI}
+                    isSelected={agent.hello?.nodeId === selectedNodeID}
                     activeSessionID={activeSessionID}
-                    terminalActive={agent.nodeUri === terminalNodeURI}
-                    onSelectNode={() => onSelectNode(agent.nodeUri)}
+                    terminalActive={agent.hello?.nodeId === terminalNodeID}
+                    onSelectNode={() => onSelectNode(agent.hello?.nodeId || '')}
                     onSelectSession={onSelectSession}
-                    onCreateSession={() => onCreateSession(agent.nodeUri)}
+                    onCreateSession={() => onCreateSession(agent.hello?.nodeId || '')}
                     onDeleteSession={onDeleteSession}
-                    onOpenTerminal={() => onOpenTerminal(agent.nodeUri)}
+                    onOpenTerminal={() => onOpenTerminal(agent.hello?.nodeId || '')}
                   />
                 ))}
                 {orphanGroups.length > 0 && (
@@ -198,13 +198,13 @@ export default function SessionList({
         ) : (
           <div className="flex flex-col items-center gap-2 pt-3">
             {agents.map((agent) => (
-              <Tooltip key={agent.nodeUri}>
+              <Tooltip key={agent.hello?.nodeId}>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    active={agent.nodeUri === selectedNodeURI}
-                    onClick={() => { onSelectNode(agent.nodeUri); onToggle() }}
+                    active={agent.hello?.nodeId === selectedNodeID}
+                    onClick={() => { onSelectNode(agent.hello?.nodeId || ''); onToggle() }}
                     className="relative"
                   >
                     <Monitor className="w-4 h-4 text-muted-foreground" />

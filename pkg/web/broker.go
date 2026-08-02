@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -14,7 +14,7 @@ import (
 type Hub struct {
 	mu              sync.Mutex
 	aopSubscribers  map[string]map[chan AOPDelivery]struct{}
-	scanSubscribers map[string]map[chan *scanpb.ScanEvent]struct{}
+	scanSubscribers map[string]map[chan *types.ScanEvent]struct{}
 	scanSequence    map[string]uint64
 }
 
@@ -26,7 +26,7 @@ type AOPDelivery struct {
 func NewHub() *Hub {
 	return &Hub{
 		aopSubscribers:  make(map[string]map[chan AOPDelivery]struct{}),
-		scanSubscribers: make(map[string]map[chan *scanpb.ScanEvent]struct{}),
+		scanSubscribers: make(map[string]map[chan *types.ScanEvent]struct{}),
 		scanSequence:    make(map[string]uint64),
 	}
 }
@@ -67,11 +67,11 @@ func (h *Hub) BroadcastAOP(sessionID string, delivery AOPDelivery, reliable bool
 // SubscribeScan registers a live subscriber and returns the sequence that was
 // current at the subscription boundary. A caller can stamp its initial
 // snapshot with this value, then safely ignore queued events at or below it.
-func (h *Hub) SubscribeScan(scanID string) (<-chan *scanpb.ScanEvent, uint64, func()) {
-	ch := make(chan *scanpb.ScanEvent, 64)
+func (h *Hub) SubscribeScan(scanID string) (<-chan *types.ScanEvent, uint64, func()) {
+	ch := make(chan *types.ScanEvent, 64)
 	h.mu.Lock()
 	if _, ok := h.scanSubscribers[scanID]; !ok {
-		h.scanSubscribers[scanID] = make(map[chan *scanpb.ScanEvent]struct{})
+		h.scanSubscribers[scanID] = make(map[chan *types.ScanEvent]struct{})
 	}
 	h.scanSubscribers[scanID][ch] = struct{}{}
 	sequence := h.scanSequence[scanID]
@@ -89,7 +89,7 @@ func (h *Hub) SubscribeScan(scanID string) (<-chan *scanpb.ScanEvent, uint64, fu
 	}
 }
 
-func (h *Hub) BroadcastScan(event *scanpb.ScanEvent, reliable bool) {
+func (h *Hub) BroadcastScan(event *types.ScanEvent, reliable bool) {
 	if event == nil || event.ScanId == "" {
 		return
 	}
@@ -104,7 +104,7 @@ func (h *Hub) BroadcastScan(event *scanpb.ScanEvent, reliable bool) {
 		event.EmittedAt = timestamppb.Now()
 	}
 	for ch := range h.scanSubscribers[event.ScanId] {
-		broadcastBuffered(ch, protobuf.Clone(event).(*scanpb.ScanEvent), reliable)
+		broadcastBuffered(ch, protobuf.Clone(event).(*types.ScanEvent), reliable)
 	}
 	h.mu.Unlock()
 }

@@ -253,9 +253,9 @@ interface Props {
   injectText?: { text: string; nonce: number }
   agentOffline?: boolean
   agentName?: string
-  agents?: { nodeURI: string; name?: string }[]
-  onCreateSession?: (nodeURI: string) => void
-  onOpenTerminal?: (nodeURI: string) => void
+  agents?: { nodeID: string; name?: string }[]
+  onCreateSession?: (nodeID: string) => void
+  onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
   onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
   onPause: () => void
@@ -534,17 +534,17 @@ export default function ChatPanel({
                 // surface with a hairline divider, so the pair no longer looks like
                 // a solid chip next to a stray bare link.
                 <div
-                  key={agent.nodeURI}
+                  key={agent.nodeID}
                   className="inline-flex items-stretch divide-x divide-border overflow-hidden rounded-md border border-border bg-card shadow-soft"
                 >
                   {onCreateSession && (
-                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.nodeURI)} className="gap-1.5 rounded-none shadow-none">
+                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.nodeID)} className="gap-1.5 rounded-none shadow-none">
                       <MessageSquare className="h-3.5 w-3.5 text-primary" />
                       {agent.name || t('chat')}
                     </Button>
                   )}
                   {onOpenTerminal && (
-                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.nodeURI)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
+                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.nodeID)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
                       <Terminal className="h-3.5 w-3.5" />
                       {t('terminal')}
                     </Button>

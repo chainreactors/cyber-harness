@@ -34,3 +34,19 @@ func TestNamespaceMuxRejectsDuplicate(t *testing.T) {
 		t.Fatal("duplicate namespace registration succeeded")
 	}
 }
+
+func TestNamespaceMessageNamesAllowDomainPrefixes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{name: "ProtocolMessage", want: true},
+		{name: "CommandProtocolMessage", want: true},
+		{name: "ReloadProtocolMessage", want: true},
+		{name: "Request", want: false},
+	} {
+		if got := isNamespaceProtocolMessageName(test.name); got != test.want {
+			t.Errorf("name %q accepted = %v, want %v", test.name, got, test.want)
+		}
+	}
+}

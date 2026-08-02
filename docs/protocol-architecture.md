@@ -35,7 +35,7 @@ Agent 对外只需要一个 `--server-url` 作为 AIScan Web/AOP 基址；旧 `-
 
 ### AIScan
 
-`proto/aiscan` 只定义产品机制：
+`proto/types` 与 `proto/rpc` 只定义 AIScan 产品机制：
 
 - `aiscan.command`：AIScan 命令目录、请求、结果与 receipt；
 - `aiscan.scan`：Scan 状态、快照和实时事件；
@@ -76,7 +76,7 @@ WebSocket 本身提供连续字节传输，但不提供业务 correlation、可�
 
 浏览器最终唯一连接所有者是 `@cyber/aop` 的 `AOPClient`。Terminal、Chat、Command、File 和 Scan watcher 将只提交 protobuf message，不创建 socket。该浏览器 cutover 当前延期，现有 Chat/WatchEvents ConnectRPC 与 Terminal WebSocket 暂时保留。
 
-服务端第一帧若是 `AgentHello`，进入 Agent peer loop；其他支持的 request 进入 browser peer loop。顶层 `<namespace>.ProtocolMessage` 通过应用实例拥有的 `NamespaceMux` 注册；namespace 内部 oneof 继续使用显式 type switch。Mux 不拥有 Connection、PendingOperations、Session 或 Turn 生命周期。
+服务端第一帧若是 `AgentHello`，进入 Agent peer loop；其他支持的 request 进入 browser peer loop。顶层 namespace 消息（名称以 `ProtocolMessage` 结尾）通过应用实例拥有的 `NamespaceMux` 注册；namespace 内部 oneof 继续使用显式 type switch。Mux 不拥有 Connection、PendingOperations、Session 或 Turn 生命周期。
 
 Go 传输边界只有：
 
@@ -98,15 +98,15 @@ Context 由调用者显式传入，Stream 不拥有 Session、Turn 或 operation
 
 ## 7. Agent 身份
 
-`AgentHello.agent_id` 是节点本地 ID，`AgentHello.authority` 是身份 authority。服务端组合两者得到 `AgentView.node_uri`。
+`AgentHello.node_id` 是 Web 作用域内唯一的节点 ID。Pool、`Session.node_id`、PTY 路由和前端选择状态直接使用同一个值。
 
-`node_uri` 是 Pool key、`Session.node_uri`、PTY 路由和前端选择状态使用的唯一身份。`hello.agent_id` 只用于展示和诊断；不得作为跨 authority 的路由 key，也不得以 Agent name 做 fallback 匹配。
+`server-url` 只决定节点连接到哪个 Web，不进入节点身份。IOA 使用独立的 `ioa-url` 和 IOA Node ID，不参与 Web 的 Chat/PTY 路由。
 
 ## 8. 类型与管理服务
 
 - `aop/`：AOP core 与官方 `aop.*` 生成类型；
-- `pkg/types/`：Agent、Runner、TUI、Web 共用的 AIScan protobuf message，不依赖 Connect；
-- `pkg/rpc/`：AIScan ConnectRPC service descriptor、client 和 handler；
+- `pkg/types/`：Agent、Runner、TUI、Web 共用的 AIScan protobuf message 与 typed extension helper，单一 Go 包且不依赖 Connect；
+- `pkg/rpc/`：AIScan ConnectRPC service descriptor、client 和 handler，`.pb.go` 与 `.connect.go` 位于同一 Go 包；
 - `pkg/web/`：管理 RPC 的 Hub 实现；
 - `cmd/gen/`：唯一 protobuf/TypeScript 生成入口。
 
@@ -146,8 +146,8 @@ ConnectRPC 只暴露以下 unary 服务：
 ## 11. 实现位置与验收
 
 - AOP schema：`web/frontend/cyber-ui/packages/aop/proto/aop`
-- AIScan message schema：`proto/aiscan/types`
-- AIScan RPC schema：`proto/aiscan/rpc`
+- AIScan message schema：`proto/types`
+- AIScan RPC schema：`proto/rpc`
 - AIScan Go message：`pkg/types`
 - AIScan Go RPC：`pkg/rpc`
 - 生成入口：`cmd/gen`

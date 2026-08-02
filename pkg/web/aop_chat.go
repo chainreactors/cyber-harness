@@ -12,8 +12,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -54,14 +53,14 @@ func (s *aopChatServer) OpenSession(ctx context.Context, requestID string, req *
 		}
 		return response, nil
 	}
-	if strings.TrimSpace(req.NodeUri) == "" {
-		return finish(rejectedOpen("INVALID_ARGUMENT", "node_uri is required"))
+	if strings.TrimSpace(req.NodeId) == "" {
+		return finish(rejectedOpen("INVALID_ARGUMENT", "node_id is required"))
 	}
 	scanID, err := openSessionScanID(req)
 	if err != nil {
 		return finish(rejectedOpen("INVALID_ARGUMENT", err.Error()))
 	}
-	if s.service.agents == nil || s.service.agents.get(req.NodeUri) == nil {
+	if s.service.agents == nil || s.service.agents.get(req.NodeId) == nil {
 		return finish(rejectedOpen("UNAVAILABLE", "node is not connected"))
 	}
 
@@ -70,9 +69,9 @@ func (s *aopChatServer) OpenSession(ctx context.Context, requestID string, req *
 		id = generateID()
 	}
 	createdNew := false
-	var created *chatpb.SessionRecord
+	var created *types.SessionRecord
 	if existing, err := s.service.store.GetSession(ctx, id); err == nil {
-		if existing.GetSession().GetNodeUri() != req.NodeUri {
+		if existing.GetSession().GetNodeId() != req.NodeId {
 			return finish(rejectedOpen("ALREADY_EXISTS", "session is bound to another node"))
 		}
 		created = existing
@@ -80,12 +79,12 @@ func (s *aopChatServer) OpenSession(ctx context.Context, requestID string, req *
 		return nil, fmt.Errorf("get session: %v", err)
 	} else {
 		now := nowProto()
-		created = &chatpb.SessionRecord{
-			Session:   &aop.Session{Id: id, State: SessionStateOpen, NodeUri: req.NodeUri, Title: req.Title},
+		created = &types.SessionRecord{
+			Session:   &aop.Session{Id: id, State: SessionStateOpen, NodeId: req.NodeId, Title: req.Title},
 			CreatedAt: now, UpdatedAt: now,
 		}
-		if agent := s.service.agents.get(req.NodeUri); agent != nil {
-			created.AgentName = agent.name
+		if agent := s.service.agents.get(req.NodeId); agent != nil {
+			created.AgentName = agent.Name()
 		}
 		if err := s.service.store.CreateSession(ctx, created); err != nil {
 			return nil, fmt.Errorf("create session: %v", err)
@@ -106,10 +105,10 @@ func (s *aopChatServer) OpenSession(ctx context.Context, requestID string, req *
 			return nil, fmt.Errorf("link scan to session: %v", err)
 		}
 	}
-	if !s.service.agents.SessionOpen(req.NodeUri, id) {
+	if !s.service.agents.SessionOpen(req.NodeId, id) {
 		forward := proto.Clone(req).(*aop.OpenSessionRequest)
 		forward.SessionId = id
-		resultCh, err := s.service.agents.DispatchOpenSession(req.NodeUri, requestID, forward)
+		resultCh, err := s.service.agents.DispatchOpenSession(req.NodeId, requestID, forward)
 		if err != nil {
 			if createdNew {
 				_ = s.service.store.DeleteSession(context.Background(), id)
@@ -294,9 +293,9 @@ func (s *aopChatServer) CloseSession(ctx context.Context, requestID string, req 
 		}
 		return nil, fmt.Errorf("get session: %v", err)
 	}
-	agentConnected := s.service.agents != nil && s.service.agents.get(session.GetSession().GetNodeUri()) != nil
+	agentConnected := s.service.agents != nil && s.service.agents.get(session.GetSession().GetNodeId()) != nil
 	if agentConnected {
-		resultCh, dispatchErr := s.service.agents.DispatchCloseSession(session.GetSession().GetNodeUri(), requestID, proto.Clone(req).(*aop.CloseSessionRequest))
+		resultCh, dispatchErr := s.service.agents.DispatchCloseSession(session.GetSession().GetNodeId(), requestID, proto.Clone(req).(*aop.CloseSessionRequest))
 		if dispatchErr != nil {
 			return finish(rejectedClose("UNAVAILABLE", dispatchErr.Error()))
 		}
@@ -438,7 +437,7 @@ func openSessionScanID(request *aop.OpenSessionRequest) (string, error) {
 		return "", nil
 	}
 	for _, extension := range request.Extensions {
-		link := new(scanpb.SessionBinding)
+		link := new(types.SessionBinding)
 		if extension == nil || !extension.MessageIs(link) {
 			continue
 		}

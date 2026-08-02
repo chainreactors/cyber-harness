@@ -8,8 +8,8 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	"github.com/chainreactors/ioa/protocols"
+	"github.com/chainreactors/aiscan/pkg/runner"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -28,10 +28,13 @@ type connectionConfig struct {
 	SCO            *output.SCOSidecar
 	Logger         telemetry.Logger
 	Chat           *chatAgentHandler
-	Node           protocols.NodeRef
+	// AgentRuntime handles the AOP core/command namespaces directly via
+	// HandleEnvelope; nil on tool-only nodes, which reject chat messages.
+	AgentRuntime   *runner.AgentRuntime
+	NodeID         string
 	Runtime        *aop.AgentRuntimeInfo
 	Status         func() *aop.AgentStatus
-	Menu           func() []*commandpb.Spec
+	Menu           func() []*types.CommandSpec
 	RunnerFileRPC  bool
 	PTYRouter      func() (*pty.Router, error)
 }

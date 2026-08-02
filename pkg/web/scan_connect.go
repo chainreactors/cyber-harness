@@ -4,20 +4,20 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
-	"github.com/chainreactors/aiscan/pkg/rpc/scan/scanconnect"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type connectScanServer struct {
-	scanconnect.UnimplementedScanServiceHandler
+	rpc.UnimplementedScanServiceHandler
 	core *scanServiceCore
 }
 
-func newConnectScanServer(service *Service) scanconnect.ScanServiceHandler {
+func newConnectScanServer(service *Service) rpc.ScanServiceHandler {
 	return &connectScanServer{core: newScanServiceCore(service)}
 }
 
-func (s *connectScanServer) SubmitScan(ctx context.Context, req *connect.Request[scanpb.SubmitScanRequest]) (*connect.Response[scanpb.SubmitScanResponse], error) {
+func (s *connectScanServer) SubmitScan(ctx context.Context, req *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error) {
 	response, err := s.core.SubmitScan(ctx, req.Msg)
 	if err != nil {
 		return nil, asConnectScanError(err)
@@ -25,7 +25,7 @@ func (s *connectScanServer) SubmitScan(ctx context.Context, req *connect.Request
 	return connect.NewResponse(response), nil
 }
 
-func (s *connectScanServer) GetScan(ctx context.Context, req *connect.Request[scanpb.GetScanRequest]) (*connect.Response[scanpb.GetScanResponse], error) {
+func (s *connectScanServer) GetScan(ctx context.Context, req *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error) {
 	response, err := s.core.GetScan(ctx, req.Msg)
 	if err != nil {
 		return nil, asConnectScanError(err)
@@ -33,7 +33,7 @@ func (s *connectScanServer) GetScan(ctx context.Context, req *connect.Request[sc
 	return connect.NewResponse(response), nil
 }
 
-func (s *connectScanServer) ListScans(ctx context.Context, req *connect.Request[scanpb.ListScansRequest]) (*connect.Response[scanpb.ListScansResponse], error) {
+func (s *connectScanServer) ListScans(ctx context.Context, req *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error) {
 	response, err := s.core.ListScans(ctx, req.Msg)
 	if err != nil {
 		return nil, asConnectScanError(err)
@@ -41,7 +41,7 @@ func (s *connectScanServer) ListScans(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(response), nil
 }
 
-func (s *connectScanServer) CancelScan(ctx context.Context, req *connect.Request[scanpb.CancelScanRequest]) (*connect.Response[scanpb.CancelScanResponse], error) {
+func (s *connectScanServer) CancelScan(ctx context.Context, req *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error) {
 	response, err := s.core.CancelScan(ctx, req.Msg)
 	if err != nil {
 		return nil, asConnectScanError(err)
@@ -49,7 +49,7 @@ func (s *connectScanServer) CancelScan(ctx context.Context, req *connect.Request
 	return connect.NewResponse(response), nil
 }
 
-func (s *connectScanServer) GetScanReport(ctx context.Context, req *connect.Request[scanpb.GetScanReportRequest]) (*connect.Response[scanpb.GetScanReportResponse], error) {
+func (s *connectScanServer) GetScanReport(ctx context.Context, req *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
 	response, err := s.core.GetScanReport(ctx, req.Msg)
 	if err != nil {
 		return nil, asConnectScanError(err)
@@ -57,4 +57,4 @@ func (s *connectScanServer) GetScanReport(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(response), nil
 }
 
-var _ scanconnect.ScanServiceHandler = (*connectScanServer)(nil)
+var _ rpc.ScanServiceHandler = (*connectScanServer)(nil)

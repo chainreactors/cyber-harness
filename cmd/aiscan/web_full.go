@@ -19,7 +19,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
@@ -246,13 +246,13 @@ type webConfigStore struct {
 	mu       sync.Mutex
 }
 
-func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *configpb.DistributeConfig, error) {
+func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, nil, err
 	}
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, &configpb.DistributeConfig{}, nil
+		return p, false, &types.DistributeConfig{}, nil
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -263,19 +263,19 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 }
 
 // parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
-func parseDistributeConfig(data []byte) *configpb.DistributeConfig {
+func parseDistributeConfig(data []byte) *types.DistributeConfig {
 	dc, err := cfg.LoadDistributeConfigYAML(data)
 	if err != nil || dc == nil {
-		dc = &configpb.DistributeConfig{}
+		dc = &types.DistributeConfig{}
 	}
 	if dc.Llm == nil {
-		dc.Llm = &configpb.LLMConfig{}
+		dc.Llm = &types.LLMConfig{}
 	}
 	cfg.NormalizeLLMConfig(dc.Llm)
 	return dc
 }
 
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *configpb.DistributeConfig) (*web.PreparedConfig, error) {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*web.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 	defer s.mu.Unlock()
 
 	p, loaded := s.resolveConfigPath()
-	var current *configpb.DistributeConfig
+	var current *types.DistributeConfig
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -291,26 +291,26 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		}
 		current = parseDistributeConfig(data)
 	} else {
-		current = &configpb.DistributeConfig{}
+		current = &types.DistributeConfig{}
 	}
 	if incoming == nil {
-		incoming = &configpb.DistributeConfig{}
+		incoming = &types.DistributeConfig{}
 	}
 	if incoming.Llm == nil {
-		incoming.Llm = &configpb.LLMConfig{}
+		incoming.Llm = &types.LLMConfig{}
 	}
 	cfg.NormalizeLLMConfig(incoming.Llm)
 
 	// Preserve existing secrets when incoming value is empty.
 	preserveLLMProfileSecrets(incoming.Llm, current.GetLlm())
-	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *configpb.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
-	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *configpb.ReconConfig) {
+	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *types.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
+	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *types.ReconConfig) {
 		preserveSecret(&c.FofaKey, current.GetRecon().GetFofaKey())
 		preserveSecret(&c.HunterToken, current.GetRecon().GetHunterToken())
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
-	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *configpb.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
-	incoming.Ioa = preserveConfigSection(incoming.Ioa, current.GetIoa(), func(c *configpb.IOAConfig) { preserveSecret(&c.Token, current.GetIoa().GetToken()) })
+	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
+	incoming.Ioa = preserveConfigSection(incoming.Ioa, current.GetIoa(), func(c *types.IOAConfig) { preserveSecret(&c.Token, current.GetIoa().GetToken()) })
 
 	next, err := cfg.MarshalDistributeConfigYAML(incoming)
 	if err != nil {
@@ -402,11 +402,11 @@ func preserveConfigSection[T any](incoming *T, current *T, fn func(*T)) *T {
 	return incoming
 }
 
-func preserveLLMProfileSecrets(incoming *configpb.LLMConfig, existing *configpb.LLMConfig) {
+func preserveLLMProfileSecrets(incoming *types.LLMConfig, existing *types.LLMConfig) {
 	if incoming == nil {
 		return
 	}
-	byID := make(map[string]*configpb.LLMProviderConfig)
+	byID := make(map[string]*types.LLMProviderConfig)
 	if existing != nil {
 		for _, profile := range existing.Providers {
 			if profile.Id != "" {
@@ -414,7 +414,7 @@ func preserveLLMProfileSecrets(incoming *configpb.LLMConfig, existing *configpb.
 			}
 		}
 	}
-	var existingProviders []*configpb.LLMProviderConfig
+	var existingProviders []*types.LLMProviderConfig
 	if existing != nil {
 		existingProviders = existing.Providers
 	}

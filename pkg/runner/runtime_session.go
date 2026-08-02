@@ -18,7 +18,7 @@ import (
 	toolpkg "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tui"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -132,7 +132,10 @@ func newSessionEmitter(bus *eventbus.Bus[*aop.Event]) *sessionEmitter {
 	return &sessionEmitter{bus: bus, seq: make(map[string]uint64)}
 }
 
-func (e *sessionEmitter) emit(event *aop.Event) {
+// Emit stamps the event with runtime metadata (timestamp, per-session
+// sequence, fallback id) and forwards it to the runtime's single public bus.
+// It satisfies agent.EventEmitter so session agents emit through it directly.
+func (e *sessionEmitter) Emit(event *aop.Event) {
 	if event.EmittedAt == nil {
 		event.EmittedAt = timestamppb.Now()
 	}
@@ -147,11 +150,11 @@ func (e *sessionEmitter) emit(event *aop.Event) {
 }
 
 func (e *sessionEmitter) sessionStarted(sessionID, agentName string, started *aop.SessionStarted) {
-	e.emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}})
+	e.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}})
 }
 
 func (e *sessionEmitter) sessionEnded(sessionID, agentName, reason string) {
-	e.emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
+	e.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
 type turnEmitter struct {
@@ -162,7 +165,7 @@ type turnEmitter struct {
 }
 
 func (e *turnEmitter) start() {
-	e.emitter.emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
+	e.emitter.Emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
 func (e *turnEmitter) end(result RunResult, runErr error) {
@@ -170,7 +173,7 @@ func (e *turnEmitter) end(result RunResult, runErr error) {
 	if runErr != nil {
 		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
-	e.emitter.emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
+	e.emitter.Emit(&aop.Event{SessionId: e.sessionID, TurnId: e.turnID, Emitter: e.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
 }
 
 type commandSession struct {
@@ -406,7 +409,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		WithInbox(mailbox).
 		WithSessionID(id).
 		WithAgentName(agentName).
-		WithBus(rt.kernelBus)
+		WithBus(rt.sessionEvents)
 	agentCfg.ParentSessionID = options.ParentSessionID
 	agentCfg.ParentToolCallID = options.ParentToolCallID
 	agentCfg.LoopScheduler = scheduler
@@ -840,8 +843,8 @@ func (s *sessionState) emitCommandResult(result CommandResult) {
 	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
 		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.Content,
 	}}}
-	_ = ext.SetCommandDetail(event, ext.CommandDetail{Line: result.Command, Presentation: result.Presentation})
-	s.runtime.sessionEvents.emit(event)
+	_ = types.SetCommandDetail(event, types.CommandDetail{Line: result.Command, Presentation: result.Presentation})
+	s.runtime.sessionEvents.Emit(event)
 }
 
 func (rt *AgentRuntime) pendingLimit() int {

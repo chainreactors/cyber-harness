@@ -4,18 +4,18 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
-	"github.com/chainreactors/aiscan/pkg/rpc/system/systemconnect"
-	systempb "github.com/chainreactors/aiscan/pkg/types/system"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type connectSystemServer struct {
-	systemconnect.UnimplementedSystemServiceHandler
+	rpc.UnimplementedSystemServiceHandler
 	service   *Service
 	pool      *AgentPool
 	serverURL string
 }
 
-func (s *connectSystemServer) GetStatus(context.Context, *connect.Request[systempb.GetStatusRequest]) (*connect.Response[systempb.GetStatusResponse], error) {
+func (s *connectSystemServer) GetStatus(context.Context, *connect.Request[types.GetStatusRequest]) (*connect.Response[types.GetStatusResponse], error) {
 	status := s.service.Status()
 	if s.pool != nil {
 		status.Agents = uint32(s.pool.Count())
@@ -23,7 +23,7 @@ func (s *connectSystemServer) GetStatus(context.Context, *connect.Request[system
 	if s.serverURL != "" {
 		status.ServerUrl = s.serverURL
 	}
-	return connect.NewResponse(&systempb.GetStatusResponse{Status: status}), nil
+	return connect.NewResponse(&types.GetStatusResponse{Status: status}), nil
 }
 
-var _ systemconnect.SystemServiceHandler = (*connectSystemServer)(nil)
+var _ rpc.SystemServiceHandler = (*connectSystemServer)(nil)

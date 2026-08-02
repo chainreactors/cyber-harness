@@ -6,7 +6,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -48,7 +48,7 @@ func TestTimelineFormatsPreformattedCommandAtPresentationBoundary(t *testing.T) 
 	event := timelineEvent(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{
 		Id: "command-1", Role: "assistant", Content: []*aop.Content{aop.Text("one\ntwo")},
 	}}})
-	_ = ext.SetCommandDetail(event, ext.CommandDetail{Line: "/status", Presentation: "preformatted"})
+	_ = types.SetCommandDetail(event, types.CommandDetail{Line: "/status", Presentation: "preformatted"})
 	markdown := BuildTimelineMarkdown([]TimelineEntry{{Timestamp: event.EmittedAt.AsTime(), Type: aop.Kind(event), Data: event}})
 	if !strings.Contains(markdown, "```\none\ntwo\n```") {
 		t.Fatalf("timeline markdown = %q", markdown)

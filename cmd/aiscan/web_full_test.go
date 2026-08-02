@@ -13,7 +13,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
 )
 
@@ -94,11 +94,11 @@ func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
 	}
 }
 
-func configForWebStore(model, apiKey string) *configpb.DistributeConfig {
-	return &configpb.DistributeConfig{
-		Llm: &configpb.LLMConfig{
+func configForWebStore(model, apiKey string) *types.DistributeConfig {
+	return &types.DistributeConfig{
+		Llm: &types.LLMConfig{
 			ActiveProfile: "primary",
-			Providers: []*configpb.LLMProviderConfig{{
+			Providers: []*types.LLMProviderConfig{{
 				Id: "primary", Provider: "openai", Model: model, ApiKey: apiKey,
 			}},
 		},

@@ -12,13 +12,12 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-func RuntimeCommandSpecs() []*commandpb.Spec {
-	return []*commandpb.Spec{
+func RuntimeCommandSpecs() []*types.CommandSpec {
+	return []*types.CommandSpec{
 		{Name: "/status", Description: "Show Runtime session and provider status"},
 		{Name: "/clear", Description: "Clear the current Agent context"},
 		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
@@ -36,7 +35,7 @@ func (rt *AgentRuntime) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSes
 		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
 		return response
 	}
-	response.Outcome = &aop.OpenSessionResponse_Accepted{Accepted: &aop.Session{Id: session.ID(), State: "open", NodeUri: req.NodeUri, Title: req.Title}}
+	response.Outcome = &aop.OpenSessionResponse_Accepted{Accepted: &aop.Session{Id: session.ID(), State: "open", NodeId: req.NodeId, Title: req.Title}}
 	return response
 }
 
@@ -46,7 +45,7 @@ func (rt *AgentRuntime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest)
 		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id, turn_id, and input are required unless continue_session is true")}
 		return response
 	}
-	options := new(agentpb.RunOptions)
+	options := new(types.AgentRunOptions)
 	for _, extension := range req.Extensions {
 		if extension != nil && extension.MessageIs(options) {
 			if err := extension.UnmarshalTo(options); err != nil {
@@ -130,7 +129,7 @@ func newRuntimeNamespaceMux(rt *AgentRuntime) (*aop.NamespaceMux, error) {
 	if err := mux.Register(&aop.ProtocolMessage{}, rt.handleCoreNamespace); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&commandpb.ProtocolMessage{}, rt.handleCommandNamespace); err != nil {
+	if err := mux.Register(&types.CommandProtocolMessage{}, rt.handleCommandNamespace); err != nil {
 		return nil, err
 	}
 	return mux, nil
@@ -154,7 +153,7 @@ func (rt *AgentRuntime) handleCoreNamespace(ctx context.Context, envelope *aop.E
 }
 
 func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
-	value := message.(*commandpb.ProtocolMessage)
+	value := message.(*types.CommandProtocolMessage)
 	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
 	request := value.GetRequest()
 	if request == nil || strings.TrimSpace(request.Line) == "" {
@@ -173,7 +172,7 @@ func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *ao
 			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
 			return
 		}
-		_ = reply(&commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Result{Result: &commandpb.Result{Data: encoded, MediaType: aop.JSONMediaType}}})
+		_ = reply(&types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Result{Result: &types.CommandResult{Data: encoded, MediaType: aop.JSONMediaType}}})
 	}()
 	return nil
 }

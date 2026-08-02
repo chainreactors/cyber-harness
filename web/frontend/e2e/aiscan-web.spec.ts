@@ -43,7 +43,7 @@ async function requireRegisteredAgents(request: APIRequestContext) {
     message: 'the E2E server must register its local mock-backed agent',
     timeout: 15_000,
   }).toBeGreaterThan(0)
-  expect(agents[0].nodeUri).toBeTruthy()
+  expect(agents[0].hello?.nodeId).toBeTruthy()
   return agents
 }
 
@@ -111,8 +111,7 @@ test.describe('ConnectRPC management plane', () => {
     expect(config.config?.loaded).toBe(true)
 
     const agents = await requireRegisteredAgents(request)
-    expect(agents[0].hello?.agentId).toBeTruthy()
-    expect(agents[0].nodeUri).toContain('://')
+    expect(agents[0].hello?.nodeId).toBe('local-1')
   })
 
   test('session, scan, SCO and local-agent queries use ConnectRPC', async ({ request }) => {

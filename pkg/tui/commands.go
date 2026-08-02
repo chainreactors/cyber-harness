@@ -10,7 +10,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 )
 
@@ -217,14 +217,14 @@ func redactURLUserinfoFallback(raw string) string {
 // WebMenuSpecs extracts the web-visible command metadata from a Command list.
 // Run-control commands (/stop, /followup, /eval, /loop, /exit) are excluded
 // because the web expresses those through UI controls, not slash text.
-func WebMenuSpecs(cmds []Command) []*commandpb.Spec {
+func WebMenuSpecs(cmds []Command) []*types.CommandSpec {
 	hidden := map[string]bool{"/stop": true, "/continue": true, "/followup": true, "/eval": true, "/loop": true, "/exit": true}
-	var specs []*commandpb.Spec
+	var specs []*types.CommandSpec
 	for _, c := range cmds {
 		if c.Hidden || hidden[c.Name] {
 			continue
 		}
-		specs = append(specs, &commandpb.Spec{
+		specs = append(specs, &types.CommandSpec{
 			Name:        c.Name,
 			Aliases:     c.Aliases,
 			Description: c.Description,

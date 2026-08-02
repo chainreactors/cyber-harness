@@ -31,7 +31,7 @@ func NewNamespaceMux() *NamespaceMux {
 	return &NamespaceMux{handlers: make(map[protoreflect.FullName]namespaceEntry)}
 }
 
-// Register adds one <namespace>.ProtocolMessage handler. Applications register
+// Register adds one namespace protocol-message handler. Applications register
 // namespaces during construction, before Dispatch is used concurrently.
 func (m *NamespaceMux) Register(prototype proto.Message, handler NamespaceHandler) error {
 	if m == nil {
@@ -42,8 +42,8 @@ func (m *NamespaceMux) Register(prototype proto.Message, handler NamespaceHandle
 	}
 	descriptor := prototype.ProtoReflect().Descriptor()
 	name := descriptor.FullName()
-	if !strings.HasSuffix(string(name), ".ProtocolMessage") && name != "aop.ProtocolMessage" {
-		return fmt.Errorf("namespace message %q must be named ProtocolMessage", name)
+	if !isNamespaceProtocolMessageName(string(descriptor.Name())) {
+		return fmt.Errorf("namespace message %q must have a ProtocolMessage suffix", name)
 	}
 	if m.handlers == nil {
 		m.handlers = make(map[protoreflect.FullName]namespaceEntry)
@@ -53,6 +53,10 @@ func (m *NamespaceMux) Register(prototype proto.Message, handler NamespaceHandle
 	}
 	m.handlers[name] = namespaceEntry{messageType: prototype.ProtoReflect().Type(), handler: handler}
 	return nil
+}
+
+func isNamespaceProtocolMessageName(name string) bool {
+	return strings.HasSuffix(name, "ProtocolMessage")
 }
 
 // Dispatch decodes and handles one registered namespace. Unknown namespaces

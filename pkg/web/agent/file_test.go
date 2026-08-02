@@ -7,11 +7,10 @@ import (
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/ioa/protocols"
 )
 
 func TestDefaultAgentRuntimeDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
-	hello, err := BuildHello("agent", commands.NewRegistry(), protocols.NodeRef{ID: "agent", Authority: "local"}, DefaultRuntime())
+	hello, err := BuildHello("agent", commands.NewRegistry(), "agent", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

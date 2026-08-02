@@ -14,7 +14,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type syncedBuffer struct {
@@ -1113,8 +1113,8 @@ func TestEvalEndRendering(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 1, false)
 
-	passed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: ext.EvalStateEnd}}}
-	_ = ext.SetEvalDetail(passed, ext.EvalDetail{Round: 1, Pass: true, Reason: "all checks passed"})
+	passed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
+	_ = types.SetEvalDetail(passed, types.EvalDetail{Round: 1, Pass: true, Reason: "all checks passed"})
 	o.HandleEvent(passed)
 	got := stripANSI(stderr.String())
 	if !strings.Contains(got, "✓") || !strings.Contains(got, "eval") || !strings.Contains(got, "pass") {
@@ -1128,8 +1128,8 @@ func TestEvalEndRendering(t *testing.T) {
 	}
 
 	stderr.Reset()
-	failed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: ext.EvalStateEnd}}}
-	_ = ext.SetEvalDetail(failed, ext.EvalDetail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
+	failed := &aop.Event{Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}}}
+	_ = types.SetEvalDetail(failed, types.EvalDetail{Round: 2, Pass: false, Reason: "port 443 not scanned"})
 	o.HandleEvent(failed)
 	got = stripANSI(stderr.String())
 	if !strings.Contains(got, "⟳") || !strings.Contains(got, "fail") {

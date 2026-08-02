@@ -11,14 +11,14 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Target:  "127.0.0.1",
 		Mode:    "full",
-		Options: &scanpb.ScanOptions{Verify: true, Sniper: true, Deep: true},
+		Options: &types.ScanOptions{Verify: true, Sniper: true, Deep: true},
 	}
 
 	got := scanArgsForScan(scan)

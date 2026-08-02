@@ -1,9 +1,8 @@
 import type { AgentView, SessionRecord } from '../api'
 
-// Session.node_uri and AgentView.node_uri are the same canonical identity.
-// AgentHello.agent_id is node-local registration data and is display-only.
+// Chat sessions and live agents use the same Web-scoped node_id.
 export function agentMatchesSession(agent: AgentView, session: SessionRecord): boolean {
-  return agent.nodeUri === session.session?.nodeUri
+  return agent.hello?.nodeId === session.session?.nodeId
 }
 
 // Whether some connected agent currently backs this session (i.e. a live turn

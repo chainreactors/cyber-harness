@@ -5,13 +5,13 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestProviderConfigFromProtoSelectsActiveProfileAndFallbacks(t *testing.T) {
-	llm := &configpb.LLMConfig{
+	llm := &types.LLMConfig{
 		ActiveProfile: "openai",
-		Providers: []*configpb.LLMProviderConfig{
+		Providers: []*types.LLMProviderConfig{
 			{Id: "deepseek", Provider: "openai", ApiKey: "dk-111", Model: "deepseek-chat", MaxTokens: 8192},
 			{Id: "openai", Provider: "openai", ApiKey: "sk-222", Model: "gpt-4o", MaxTokens: 32768},
 		},
@@ -27,7 +27,7 @@ func TestProviderConfigFromProtoSelectsActiveProfileAndFallbacks(t *testing.T) {
 }
 
 func TestProviderConfigFromProtoInfersProtocolFromBaseURL(t *testing.T) {
-	llm := &configpb.LLMConfig{Providers: []*configpb.LLMProviderConfig{
+	llm := &types.LLMConfig{Providers: []*types.LLMProviderConfig{
 		{Id: "claude", BaseUrl: "https://api.anthropic.com", ApiKey: "ak", Model: "claude-opus-4-7"},
 	}}
 	primary := ProviderConfigFromProto(llm)
@@ -37,19 +37,19 @@ func TestProviderConfigFromProtoInfersProtocolFromBaseURL(t *testing.T) {
 }
 
 func TestAppConfigFromDistributeMapsProtoSections(t *testing.T) {
-	dc := &configpb.DistributeConfig{
-		Llm: &configpb.LLMConfig{
+	dc := &types.DistributeConfig{
+		Llm: &types.LLMConfig{
 			ActiveProfile: "main",
-			Providers:     []*configpb.LLMProviderConfig{{Id: "main", Provider: "openai", ApiKey: "sk", Model: "gpt-4o"}},
+			Providers:     []*types.LLMProviderConfig{{Id: "main", Provider: "openai", ApiKey: "sk", Model: "gpt-4o"}},
 		},
-		Cyberhub: &configpb.CyberhubConfig{Url: "https://hub", Key: "hub-key", Mode: "release", Proxy: "http://proxy"},
-		Recon: &configpb.ReconConfig{
+		Cyberhub: &types.CyberhubConfig{Url: "https://hub", Key: "hub-key", Mode: "release", Proxy: "http://proxy"},
+		Recon: &types.ReconConfig{
 			FofaEmail: "a@b.c", FofaKey: "fofa", HunterToken: "ht", HunterApiKey: "hk",
 			Proxy: "http://recon-proxy", Limit: 42,
 		},
-		Scan:   &configpb.ScanConfig{Verify: "high"},
-		Search: &configpb.SearchConfig{TavilyKeys: "tv-1,tv-2"},
-		Agent:  &configpb.AgentConfig{Tools: []string{"search", "browser"}},
+		Scan:   &types.ScanConfig{Verify: "high"},
+		Search: &types.SearchConfig{TavilyKeys: "tv-1,tv-2"},
+		Agent:  &types.AgentConfig{Tools: []string{"search", "browser"}},
 	}
 	rc := AppConfigFromDistribute(dc, RuntimeFeatures{ProviderEnabled: true, ToolsEnabled: true, AIEnabled: true}, telemetry.NopLogger())
 
@@ -74,7 +74,7 @@ func TestAppConfigFromDistributeMapsProtoSections(t *testing.T) {
 }
 
 func TestMergeOptionExtrasLayersNonProtoFields(t *testing.T) {
-	rc := AppConfigFromDistribute(&configpb.DistributeConfig{}, RuntimeFeatures{}, telemetry.NopLogger())
+	rc := AppConfigFromDistribute(&types.DistributeConfig{}, RuntimeFeatures{}, telemetry.NopLogger())
 	option := &cfg.Option{
 		PlaywrightSession:  "browser-1",
 		UncoverCredentials: map[string]string{"SHODAN_API_KEY": "shodan-key"},

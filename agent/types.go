@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 // The agent loop operates on AOP protos directly. Vendored JSON shapes live
@@ -132,7 +132,7 @@ type Config struct {
 	TokenBudget      int
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              *eventbus.Bus[*aop.Event]
+	Bus              EventEmitter
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
 	Hooks *hooks.Registry
@@ -152,7 +152,7 @@ type Config struct {
 	TurnID           string
 	ParentSessionID  string
 	ParentToolCallID string
-	Delegation       *ext.DelegationDetail
+	Delegation       *types.DelegationDetail
 	// AgentName tags emitted AOP events; defaults to "aiscan".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
@@ -175,7 +175,7 @@ func (c Config) WithMessages(msgs []*aop.Message) Config    { c.Messages = msgs;
 func (c Config) WithStream(s bool) Config                   { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config            { c.Inbox = ib; return c }
 func (c Config) WithLogger(l telemetry.Logger) Config       { c.Logger = l; return c }
-func (c Config) WithBus(b *eventbus.Bus[*aop.Event]) Config { c.Bus = b; return c }
+func (c Config) WithBus(b EventEmitter) Config { c.Bus = b; return c }
 func (c Config) WithMaxTokens(n int) Config                 { c.MaxTokens = n; return c }
 func (c Config) WithContextWindow(n int) Config             { c.ContextWindow = n; return c }
 func (c Config) WithTemperature(t float64) Config           { c.Temperature = &t; return c }

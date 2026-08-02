@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package aiscan.rpc.chat;
+
+import "aop/chat.proto";
+import "types/chat.proto";
+
+option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+
+service SessionService {
+  rpc ListSessions(aiscan.chat.ListSessionsRequest) returns (aiscan.chat.ListSessionsResponse);
+  rpc GetSession(aiscan.chat.GetSessionRequest) returns (aiscan.chat.GetSessionResponse);
+  rpc ResetSession(aiscan.chat.ResetSessionRequest) returns (aiscan.chat.ResetSessionResponse);
+  rpc DeleteSession(aiscan.chat.DeleteSessionRequest) returns (aiscan.chat.DeleteSessionResponse);
+  rpc ListCommands(aiscan.chat.ListCommandsRequest) returns (aiscan.chat.ListCommandsResponse);
+  rpc ListEvents(aop.ListEventsRequest) returns (aop.ListEventsResponse);
+}

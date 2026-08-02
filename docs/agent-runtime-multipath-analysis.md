@@ -65,7 +65,7 @@ protocol_error
 ```
 
 - Web Run API 只使用 `turn_id` 关联；协议中不存在独立的 `run_id`；
-- Runner 注册携带本地 `agent_id + authority`；组合后的 `node_uri` 是唯一节点路由身份，不进入 `Session → Run` 领域模型，也不与 `turn_id` 混用；
+- Runner 注册携带 Web 作用域内的 `node_id`；Chat、Command 与 PTY 直接使用该 ID 路由，不与 `session_id`、`turn_id` 混用；
 - direct structured tool execution 使用 `tool_call` / AOP `tool_result`；
 - PTY、file、exec、tool 属于 AOP namespace，不伪装成 Agent Turn，也不创建独立传输。
 

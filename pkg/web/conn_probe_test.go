@@ -10,16 +10,16 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/chainreactors/aiscan/pkg/probe"
-	"github.com/chainreactors/aiscan/pkg/rpc/config/configconnect"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-type cfgT = *configpb.DistributeConfig
+type cfgT = *types.DistributeConfig
 
 // configWith builds a DistributeConfig, letting each test set only the fields
 // it cares about. Pass nil for an empty config.
-func configWith(fn func(*configpb.DistributeConfig)) cfgT {
-	c := &configpb.DistributeConfig{}
+func configWith(fn func(*types.DistributeConfig)) cfgT {
+	c := &types.DistributeConfig{}
 	if fn != nil {
 		fn(c)
 	}
@@ -64,8 +64,8 @@ func TestProbeCyberhubSuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	cfg := configWith(func(c *configpb.DistributeConfig) {
-		c.Cyberhub = &configpb.CyberhubConfig{Url: srv.URL, Key: "hub-key"}
+	cfg := configWith(func(c *types.DistributeConfig) {
+		c.Cyberhub = &types.CyberhubConfig{Url: srv.URL, Key: "hub-key"}
 	})
 	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
 	if err != nil {
@@ -84,8 +84,8 @@ func TestProbeCyberhubAuthError(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	cfg := configWith(func(c *configpb.DistributeConfig) {
-		c.Cyberhub = &configpb.CyberhubConfig{Url: srv.URL, Key: "nope"}
+	cfg := configWith(func(c *types.DistributeConfig) {
+		c.Cyberhub = &types.CyberhubConfig{Url: srv.URL, Key: "nope"}
 	})
 	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
-	store.cfg = &configpb.DistributeConfig{Recon: &configpb.ReconConfig{FofaKey: "stored-fofa"}}
+	store.cfg = &types.DistributeConfig{Recon: &types.ReconConfig{FofaKey: "stored-fofa"}}
 	svc := newService(store)
 
 	resp, err := svc.TestConn(context.Background(), "recon", configWith(nil))
@@ -140,8 +140,8 @@ func TestProbeFofaError(t *testing.T) {
 	defer func() { probe.FofaInfoEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
-		c.Recon = &configpb.ReconConfig{FofaKey: "bad"}
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+		c.Recon = &types.ReconConfig{FofaKey: "bad"}
 	}))
 	c, ok := findCheck(resp, "fofa")
 	if !ok || c.OK {
@@ -168,8 +168,8 @@ func TestProbeHunterSuccess(t *testing.T) {
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
-		c.Recon = &configpb.ReconConfig{HunterApiKey: "hk"}
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+		c.Recon = &types.ReconConfig{HunterApiKey: "hk"}
 	}))
 	if c, ok := findCheck(resp, "hunter"); !ok || !c.OK {
 		t.Fatalf("expected hunter ok, got %+v", resp)
@@ -186,8 +186,8 @@ func TestProbeHunterError(t *testing.T) {
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
-		c.Recon = &configpb.ReconConfig{HunterToken: "bad"}
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *types.DistributeConfig) {
+		c.Recon = &types.ReconConfig{HunterToken: "bad"}
 	}))
 	c, ok := findCheck(resp, "hunter")
 	if !ok || c.OK {
@@ -210,10 +210,10 @@ func TestHandlerTestConnRouting(t *testing.T) {
 	svc := newService(&fakeConfigStore{})
 	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, nil, ""))
 	defer srv.Close()
-	client := configconnect.NewConfigServiceClient(srv.Client(), srv.URL)
+	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
 
-	response, err := client.TestConnection(context.Background(), connect.NewRequest(&configpb.TestConnectionRequest{
-		Section: "cyberhub", Config: &configpb.DistributeConfig{},
+	response, err := client.TestConnection(context.Background(), connect.NewRequest(&types.TestConnectionRequest{
+		Section: "cyberhub", Config: &types.DistributeConfig{},
 	}))
 	if err != nil {
 		t.Fatalf("TestConnection: %v", err)
@@ -222,8 +222,8 @@ func TestHandlerTestConnRouting(t *testing.T) {
 		t.Fatalf("expected one cyberhub check, got %+v", response.Msg.Checks)
 	}
 
-	_, err = client.TestConnection(context.Background(), connect.NewRequest(&configpb.TestConnectionRequest{
-		Section: "agent", Config: &configpb.DistributeConfig{},
+	_, err = client.TestConnection(context.Background(), connect.NewRequest(&types.TestConnectionRequest{
+		Section: "agent", Config: &types.DistributeConfig{},
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("expected invalid_argument for untestable section, got %v", err)
@@ -241,8 +241,8 @@ func TestProbeIOASuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	resp, err := svc.TestConn(context.Background(), "ioa", configWith(func(c *configpb.DistributeConfig) {
-		c.Ioa = &configpb.IOAConfig{Url: srv.URL, Token: "t"}
+	resp, err := svc.TestConn(context.Background(), "ioa", configWith(func(c *types.DistributeConfig) {
+		c.Ioa = &types.IOAConfig{Url: srv.URL, Token: "t"}
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

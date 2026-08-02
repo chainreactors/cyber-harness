@@ -16,8 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
-	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func runLoop(ctx context.Context, cfg Config) (*Result, error) {
@@ -163,7 +162,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				return end(result, result.Err, StopReasonBudget)
 			}
 			if transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget)*DefaultTokenBudgetWarningPct/100 {
-				em.status(statusTokenBudgetWarning, &agentpb.BudgetWarning{
+				em.status(statusTokenBudgetWarning, &types.BudgetWarning{
 					ContextTokens: uint64(max(transcript.contextTokens, 0)), TokenBudget: uint64(max(cfg.TokenBudget, 0)),
 				})
 				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget)
@@ -356,7 +355,7 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		return false, nil
 	}
 
-	em.status(ext.CompactStateStart, nil)
+	em.status(types.CompactStateStart, nil)
 	newMessages, result, err := compactHistory(ctx, CompactConfig{
 		Provider:         cfg.Provider,
 		Model:            cfg.Model,
@@ -365,11 +364,11 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		MaxTokens:        cfg.MaxTokens,
 	}, transcript.messages)
 	if err != nil {
-		em.status(ext.CompactStateError, &ext.CompactDetail{Error: err.Error()})
+		em.status(types.CompactStateError, &types.CompactDetail{Error: err.Error()})
 		return false, err
 	}
 	transcript.replace(newMessages, result.TokensAfter)
-	em.status(ext.CompactStateEnd, &ext.CompactDetail{
+	em.status(types.CompactStateEnd, &types.CompactDetail{
 		TokensBefore: uint64(max(result.TokensBefore, 0)),
 		TokensAfter:  uint64(max(result.TokensAfter, 0)),
 		KeptMessages: uint64(max(result.KeptMessages, 0)),

@@ -6,18 +6,19 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 )
 
-func TestWebNodeRefUsesWebIdentity(t *testing.T) {
-	ref, err := webNodeRef(&cfg.Option{
-		AgentOptions: cfg.AgentOptions{ServerURL: "https://secret@example.test/hub"},
-		IOAOptions:   cfg.IOAOptions{IOANodeName: "worker-1"},
-	})
+func TestWebNodeID(t *testing.T) {
+	nodeID, err := webNodeID(&cfg.Option{IOAOptions: cfg.IOAOptions{IOANodeName: "worker-1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.ID != "worker-1" || ref.Authority != "https://example.test/hub" {
-		t.Fatalf("node ref = %#v", ref)
+	if nodeID != "worker-1" {
+		t.Fatalf("node_id = %q", nodeID)
 	}
-	if _, err := webNodeRef(&cfg.Option{AgentOptions: cfg.AgentOptions{ServerURL: "https://example.test"}}); err == nil {
-		t.Fatal("expected missing ioa.node_name error")
+	nodeID, err = webNodeID(&cfg.Option{IOAOptions: cfg.IOAOptions{IOANodeID: "existing-1", IOANodeName: "worker-1"}})
+	if err != nil || nodeID != "existing-1" {
+		t.Fatalf("existing node_id = %q, err = %v", nodeID, err)
+	}
+	if _, err := webNodeID(&cfg.Option{}); err == nil {
+		t.Fatal("expected missing node_id error")
 	}
 }

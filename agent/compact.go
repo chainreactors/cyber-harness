@@ -8,7 +8,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/truncate"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 const compactSystemPrompt = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
@@ -92,10 +92,10 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	}
 	a.mu.Unlock()
 
-	em.status(ext.CompactStateStart, nil)
+	em.status(types.CompactStateStart, nil)
 	newMsgs, result, err := compactHistory(ctx, cfg, msgs)
 	if err != nil {
-		em.status(ext.CompactStateError, &ext.CompactDetail{Error: err.Error()})
+		em.status(types.CompactStateError, &types.CompactDetail{Error: err.Error()})
 		return nil, err
 	}
 
@@ -103,7 +103,7 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	a.state.Messages = newMsgs
 	a.mu.Unlock()
 
-	em.status(ext.CompactStateEnd, &ext.CompactDetail{TokensBefore: uint64(max(result.TokensBefore, 0)), TokensAfter: uint64(max(result.TokensAfter, 0)), KeptMessages: uint64(max(result.KeptMessages, 0))})
+	em.status(types.CompactStateEnd, &types.CompactDetail{TokensBefore: uint64(max(result.TokensBefore, 0)), TokensAfter: uint64(max(result.TokensAfter, 0)), KeptMessages: uint64(max(result.KeptMessages, 0))})
 	return result, nil
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 const defaultMaxEvalRounds = 3
@@ -101,7 +101,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 			return finish(result), lastVerdict, result.Err
 		}
 
-		a.EmitStatus(ext.EvalStateStart, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0))}, cfg.TurnID)
+		a.EmitStatus(types.EvalStateStart, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0))}, cfg.TurnID)
 
 		verdict, evalErr := cfg.Evaluator.Evaluate(
 			ctx, cfg.Goal, cfg.Criteria,
@@ -110,7 +110,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 
 		if evalErr != nil {
 			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", round, evalErr)
-			a.EmitStatus(ext.EvalStateError, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Error: evalErr.Error()}, cfg.TurnID)
+			a.EmitStatus(types.EvalStateError, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Error: evalErr.Error()}, cfg.TurnID)
 			if round == cfg.MaxEvalRounds {
 				return finish(result), lastVerdict, evalErr
 			}
@@ -120,7 +120,7 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 		}
 
 		lastVerdict = verdict
-		a.EmitStatus(ext.EvalStateEnd, &ext.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
+		a.EmitStatus(types.EvalStateEnd, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
 		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", round, verdict.Pass, verdict.InheritContext, verdict.Reason)
 
 		if verdict.Pass {

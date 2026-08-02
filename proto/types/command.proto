@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package aiscan.command;
+
+option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+
+message CommandSpec {
+  string name = 1;
+  repeated string aliases = 2;
+  string usage = 3;
+  string description = 4;
+}
+
+message CommandCatalog { repeated CommandSpec commands = 1; }
+
+message CommandRequest {
+  string session_id = 1;
+  string line = 2;
+}
+
+message CommandResult {
+  bytes data = 1;
+  string media_type = 2;
+}
+
+message CommandReceipt {
+  string operation_id = 1;
+  string session_id = 2;
+  string state = 3;
+}
+
+message CommandProtocolMessage {
+  oneof message {
+    CommandRequest request = 10;
+    CommandResult result = 11;
+    CommandCatalog catalog = 12;
+    CommandReceipt receipt = 13;
+  }
+}

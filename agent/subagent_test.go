@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestSubAgentSyncReturnsResult(t *testing.T) {
@@ -112,11 +112,11 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		if data.ParentToolCallId != "spawn-context" {
 			t.Fatalf("parent tool call = %q, want spawn-context", data.ParentToolCallId)
 		}
-		detail, ok, err := ext.GetDelegation(event)
+		detail, ok, err := types.GetDelegation(event)
 		if err != nil || !ok {
 			t.Fatalf("delegation ext = %#v, %v, %v", detail, ok, err)
 		}
-		if detail.AgentName != "context-worker" || detail.Task != "work" || detail.RunMode != ext.DelegationRunBackground {
+		if detail.AgentName != "context-worker" || detail.Task != "work" || detail.RunMode != types.DelegationRunBackground {
 			t.Fatalf("delegation detail = %#v", detail)
 		}
 		return
@@ -141,14 +141,14 @@ func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
 	})
 
 	event := <-events
-	detail, ok, err := ext.GetDelegation(event)
+	detail, ok, err := types.GetDelegation(event)
 	if err != nil || !ok {
 		t.Fatalf("delegation ext = %#v, %v, %v", detail, ok, err)
 	}
 	if detail.Task != "inspect the repository" || detail.AgentName != "explorer" || detail.AgentType != "reviewer" {
 		t.Fatalf("delegation detail = %#v", detail)
 	}
-	if detail.RunMode != ext.DelegationRunBackground || detail.ContextMode != ext.DelegationContextFork {
+	if detail.RunMode != types.DelegationRunBackground || detail.ContextMode != types.DelegationContextFork {
 		t.Fatalf("delegation modes = %#v", detail)
 	}
 }

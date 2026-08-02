@@ -5,7 +5,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func defaultProviderConfig() agent.ProviderConfig {
@@ -128,7 +128,7 @@ func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig agent.Provi
 // ProviderConfigFromProto resolves the active LLM profile directly from the
 // canonical config proto. This is the only provider-config path used when a
 // DistributeConfig is already in hand (remote agents, hub reload).
-func ProviderConfigFromProto(llm *configpb.LLMConfig) agent.ProviderConfig {
+func ProviderConfigFromProto(llm *types.LLMConfig) agent.ProviderConfig {
 	active := cfg.ActiveLLMProvider(llm)
 	if active == nil {
 		return defaultProviderConfig()
@@ -137,7 +137,7 @@ func ProviderConfigFromProto(llm *configpb.LLMConfig) agent.ProviderConfig {
 }
 
 // FallbackProviderConfigsFromProto returns every non-active profile in order.
-func FallbackProviderConfigsFromProto(llm *configpb.LLMConfig) []agent.ProviderConfig {
+func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []agent.ProviderConfig {
 	if llm == nil {
 		return nil
 	}
@@ -152,7 +152,7 @@ func FallbackProviderConfigsFromProto(llm *configpb.LLMConfig) []agent.ProviderC
 	return configs
 }
 
-func providerConfigFromProto(profile *configpb.LLMProviderConfig) agent.ProviderConfig {
+func providerConfigFromProto(profile *types.LLMProviderConfig) agent.ProviderConfig {
 	profile = cfg.NormalizeLLMProvider(profile)
 	providerName := strings.TrimSpace(profile.Provider)
 	if providerName == "" {

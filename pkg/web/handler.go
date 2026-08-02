@@ -5,12 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/chainreactors/aiscan/pkg/rpc/agent/agentconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/chat/chatconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/config/configconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/scan/scanconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/sco/scoconnect"
-	"github.com/chainreactors/aiscan/pkg/rpc/system/systemconnect"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 )
 
 type Handler struct{ handler http.Handler }
@@ -19,12 +14,12 @@ func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHand
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, accessKey)
 	connectHandler := NewConnectHandler(accessKey, service, agents, local)
-	mux.Handle("/"+chatconnect.SessionServiceName+"/", connectHandler)
-	mux.Handle("/"+scanconnect.ScanServiceName+"/", connectHandler)
-	mux.Handle("/"+configconnect.ConfigServiceName+"/", connectHandler)
-	mux.Handle("/"+agentconnect.AgentServiceName+"/", connectHandler)
-	mux.Handle("/"+systemconnect.SystemServiceName+"/", connectHandler)
-	mux.Handle("/"+scoconnect.SCOServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.SessionServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.ScanServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.ConfigServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.AgentServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.SystemServiceName+"/", connectHandler)
+	mux.Handle("/"+rpc.SCOServiceName+"/", connectHandler)
 	if agents != nil {
 		mux.HandleFunc("/api/aop/ws", func(w http.ResponseWriter, r *http.Request) { HandleAOPWebSocket(service, agents, w, r) })
 	}

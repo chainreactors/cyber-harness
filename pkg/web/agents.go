@@ -13,26 +13,22 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
-	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
-	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
-	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func cloneCommandSpecs(values []*commandpb.Spec) []*commandpb.Spec {
+func cloneCommandSpecs(values []*types.CommandSpec) []*types.CommandSpec {
 	if len(values) == 0 {
 		return nil
 	}
-	out := make([]*commandpb.Spec, 0, len(values))
+	out := make([]*types.CommandSpec, 0, len(values))
 	for _, value := range values {
 		if value != nil {
-			out = append(out, protobuf.Clone(value).(*commandpb.Spec))
+			out = append(out, protobuf.Clone(value).(*types.CommandSpec))
 		}
 	}
 	return out
@@ -46,47 +42,185 @@ type taskResult struct {
 	Turn   int
 }
 
+// nodeState is the per-node task/session bookkeeping shared by both pool
+// member kinds. tasks map in-flight operation IDs to their waiter channels;
+// toolCalls marks tasks dispatched via DispatchToolCall: only they converge
+// on a tool.result. Chat tasks see tool.result events too (LLM tool use)
+// and must ignore them as terminals. childSessions tracks derived sub-agent
+// session IDs per task: only a ROOT session.end converges the task.
+type nodeState struct {
+	mu            sync.Mutex
+	tasks         map[string]chan taskResult
+	turns         map[string]int
+	openSessions  map[string]struct{}
+	toolCalls     map[string]struct{}
+	childSessions map[string]map[string]struct{}
+}
+
+func newNodeState() *nodeState {
+	return &nodeState{
+		tasks:         make(map[string]chan taskResult),
+		turns:         make(map[string]int),
+		openSessions:  make(map[string]struct{}),
+		toolCalls:     make(map[string]struct{}),
+		childSessions: make(map[string]map[string]struct{}),
+	}
+}
+
+func (s *nodeState) busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.tasks) > 0
+}
+
+func (s *nodeState) sessionOpen(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.openSessions[sessionID]
+	return ok
+}
+
+// finishTask delivers result to the waiter of taskID and clears its
+// bookkeeping. Idempotent — a late frame after convergence is a no-op.
+func (s *nodeState) finishTask(taskID string, result taskResult) {
+	if taskID == "" {
+		return
+	}
+	s.mu.Lock()
+	ch, ok := s.tasks[taskID]
+	result.Turn = s.turns[taskID]
+	if ok {
+		delete(s.tasks, taskID)
+		delete(s.turns, taskID)
+		delete(s.toolCalls, taskID)
+		delete(s.childSessions, taskID)
+	}
+	s.mu.Unlock()
+	if ok && ch != nil {
+		ch <- result
+		close(ch)
+	}
+}
+
+// dropTask clears taskID's bookkeeping and closes its waiter with no result.
+func (s *nodeState) dropTask(taskID string) (chan taskResult, bool) {
+	s.mu.Lock()
+	ch, pending := s.tasks[taskID]
+	if pending {
+		delete(s.tasks, taskID)
+		delete(s.turns, taskID)
+		delete(s.toolCalls, taskID)
+		delete(s.childSessions, taskID)
+	}
+	s.mu.Unlock()
+	return ch, pending
+}
+
+// convergeOnToolResult closes a tool.call task on its terminal tool.result.
+// SCO facts travel independently through the SCO namespace; tool.result
+// carries only operation completion and human-readable output.
+func (s *nodeState) convergeOnToolResult(taskID string, ev *aop.Event) {
+	s.mu.Lock()
+	if _, isToolCall := s.toolCalls[taskID]; !isToolCall {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	d := ev.GetToolResult()
+	res := taskResult{Output: aopToolResultText(d.Output)}
+	if d.IsError {
+		res.Err = res.Output
+		res.Output = ""
+	}
+	s.finishTask(taskID, res)
+}
+
+// convergeOnTurnEnd closes a chat task when the ROOT agent session ends.
+// A canceled run still carries the ctx error ("context canceled") — only
+// non-canceled stops surface it as a task error.
+func (s *nodeState) convergeOnTurnEnd(taskID string, ev *aop.Event) {
+	if taskID == "" {
+		return
+	}
+	d := ev.GetTurnEnded()
+	res := taskResult{}
+	if d.StopReason != "canceled" && d.Error != nil {
+		res.Err = d.Error.Message
+	}
+	s.finishTask(taskID, res)
+}
+
+func (s *nodeState) closeAllTasks() {
+	s.mu.Lock()
+	for _, ch := range s.tasks {
+		close(ch)
+	}
+	s.tasks = nil
+	s.toolCalls = nil
+	s.childSessions = nil
+	s.mu.Unlock()
+}
+
+// Node is one AgentPool member: an agent that can execute sessions, turns,
+// commands and tool calls. remoteNode speaks AOP over WebSocket to a remote
+// `aiscan agent` process; inprocessNode wraps an in-hub AgentRuntime.
+type Node interface {
+	NodeID() string
+	Name() string
+	state() *nodeState
+	view() *types.AgentView
+	commandSpecs() []*types.CommandSpec
+	enqueue(*aop.Envelope) error
+	reloadConfig(*types.DistributeConfig)
+	chatCapable() bool
+	shutdown()
+}
+
 type remoteAgent struct {
-	nodeURI      string
+	*nodeState
+	nodeID       string
 	name         string
 	capabilities []string
-	commandsMenu []*commandpb.Spec
+	commandsMenu []*types.CommandSpec
 	close        func()
 	sendCh       chan *aop.Envelope
 	connectAt    time.Time
-	node         protocols.NodeRef
 	runtime      *aop.AgentRuntimeInfo
 	status       *aop.AgentStatus
 	stats        *aop.AgentStats
 
-	mu           sync.Mutex
-	tasks        map[string]chan taskResult
-	turns        map[string]int
-	openSessions map[string]struct{}
-	// toolCalls marks tasks dispatched via DispatchToolCall: only they converge
-	// on a tool.result. Chat tasks see tool.result events too (LLM tool use)
-	// and must ignore them as terminals.
-	toolCalls map[string]struct{}
-	// childSessions tracks derived sub-agent session IDs per task, learned from
-	// session.start's parent_session_id. Only a ROOT session.end converges the
-	// task; child ends are lifecycle noise.
-	childSessions map[string]map[string]struct{}
-	done          chan struct{}
+	done chan struct{}
 }
 
-func (a *remoteAgent) view() *agentpb.View {
+func (a *remoteAgent) NodeID() string         { return a.nodeID }
+func (a *remoteAgent) Name() string           { return a.name }
+func (a *remoteAgent) state() *nodeState      { return a.nodeState }
+func (a *remoteAgent) shutdown()              { a.close() }
+func (a *remoteAgent) chatCapable() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.status != nil && a.status.Provider != ""
+}
+
+func (a *remoteAgent) reloadConfig(config *types.DistributeConfig) {
+	message := &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Request{Request: &types.ReloadRequest{Config: protobuf.Clone(config).(*types.DistributeConfig)}}}
+	if envelope, err := aop.Wrap(generateID(), "", message); err == nil {
+		_ = a.enqueue(envelope)
+	}
+}
+
+func (a *remoteAgent) view() *types.AgentView {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	hello := &aop.AgentHello{
-		AgentId:      a.node.ID,
+		NodeId:       a.nodeID,
 		Name:         a.name,
-		Authority:    a.node.Authority,
 		Capabilities: append([]string(nil), a.capabilities...),
 	}
 	if a.runtime != nil {
 		hello.Runtime = protobuf.Clone(a.runtime).(*aop.AgentRuntimeInfo)
 	}
-	view := &agentpb.View{Hello: hello, NodeUri: a.node.URI(), ConnectedAt: timestamppb.New(a.connectAt), Commands: cloneCommandSpecs(a.commandsMenu), Busy: len(a.tasks) > 0}
+	view := &types.AgentView{Hello: hello, ConnectedAt: timestamppb.New(a.connectAt), Commands: cloneCommandSpecs(a.commandsMenu), Busy: len(a.tasks) > 0}
 	if a.status != nil {
 		view.Status = protobuf.Clone(a.status).(*aop.AgentStatus)
 	}
@@ -99,7 +233,7 @@ func (a *remoteAgent) view() *agentpb.View {
 // commandSpecs returns the agent's reported "/verb" catalog (its agent-scope
 // menu commands plus one per loaded skill). Immutable after register, so it
 // needs no lock. The hub merges it with its hub-scope commands in SessionMenu.
-func (a *remoteAgent) commandSpecs() []*commandpb.Spec {
+func (a *remoteAgent) commandSpecs() []*types.CommandSpec {
 	if a == nil {
 		return nil
 	}
@@ -118,17 +252,19 @@ type SCOStore interface {
 	UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error
 }
 
-// AgentPool manages connected remote aiscan agents via WebSocket.
+// AgentPool manages connected agent nodes — remote `aiscan agent` processes
+// over WebSocket and the hub's own in-process runtime — behind the Node
+// interface.
 type AgentPool struct {
 	mu             sync.RWMutex
-	agents         map[string]*remoteAgent
+	agents         map[string]Node
 	hub            *Hub
 	sessions       SessionLookup
 	sco            SCOStore
-	config         func(context.Context) (*configpb.DistributeConfig, error)
+	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan pty.Frame
-	ptyNodeURIs    map[string]string
+	ptyNodeIDs     map[string]string
 	ptyDrops       atomic.Int64
 	allowedOrigins []string
 	upgrader       websocket.Upgrader
@@ -136,10 +272,10 @@ type AgentPool struct {
 
 func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
-		agents:         make(map[string]*remoteAgent),
+		agents:         make(map[string]Node),
 		hub:            hub,
 		ptySubs:        make(map[string]chan pty.Frame),
-		ptyNodeURIs:    make(map[string]string),
+		ptyNodeIDs:     make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
 		allowedOrigins: allowedOrigins,
 	}
@@ -153,66 +289,49 @@ func (p *AgentPool) SetSCOStore(store SCOStore) {
 	p.sco = store
 }
 
-// canonicalNodeURI is the pool key for a registering agent: its canonical Web identity, so
-// a reconnecting agent (WS flap, hub restart, config-driven bounce) re-registers
-// under the SAME key. The hub used to mint a throwaway id per connection, which
-// dangled every chat session bound to it — the session freezes the node URI at
-// creation, so on reconnect the stored URI resolved to nothing and the chat
-// rejected every message as "not connected" even with the agent right back.
-func canonicalNodeURI(agentID, authority string) string {
-	return (protocols.NodeRef{ID: agentID, Authority: authority}).URI()
-}
-
-func (p *AgentPool) register(a *remoteAgent) {
+func (p *AgentPool) register(a Node) {
 	p.mu.Lock()
-	old := p.agents[a.nodeURI]
-	p.agents[a.nodeURI] = a
+	old := p.agents[a.NodeID()]
+	p.agents[a.NodeID()] = a
 	p.mu.Unlock()
-	// The pool is keyed by stable identity (see canonicalNodeURI), so a reconnecting agent
-	// — or a second agent sharing the same node name — lands on an occupied slot.
+	// The pool is keyed directly by node_id, so a reconnecting node lands on the
+	// same slot instead of creating a connection-scoped identity.
 	// Tear the stale connection down: its read loop then exits and its
 	// identity-checked unregister no-ops, leaving `a` alone in the slot.
 	if old != nil && old != a {
-		if old.close != nil {
-			old.close()
-		}
+		old.shutdown()
 	}
-	p.rebindPTY(a)
+	if remote, ok := a.(*remoteAgent); ok {
+		p.rebindPTY(remote)
+	}
 }
 
-func (p *AgentPool) unregister(a *remoteAgent) {
+func (p *AgentPool) unregister(a Node) {
 	p.mu.Lock()
 	// Only vacate the slot if it still holds THIS instance. After a reconnect the
 	// slot was already reassigned to the replacement under the same key; the old
 	// instance tearing down must not evict its successor.
-	removed := p.agents[a.nodeURI] == a
+	removed := p.agents[a.NodeID()] == a
 	if removed {
-		delete(p.agents, a.nodeURI)
+		delete(p.agents, a.NodeID())
 	}
 	p.mu.Unlock()
 	if removed {
-		p.notifyPTY(a.nodeURI, pty.Frame{Type: pty.FrameDetached})
+		p.notifyPTY(a.NodeID(), pty.Frame{Type: pty.FrameDetached})
 	}
-	a.mu.Lock()
-	for _, ch := range a.tasks {
-		close(ch)
-	}
-	a.tasks = nil
-	a.toolCalls = nil
-	a.childSessions = nil
-	a.mu.Unlock()
+	a.state().closeAllTasks()
 }
 
-func (p *AgentPool) get(nodeURI string) *remoteAgent {
+func (p *AgentPool) get(nodeID string) Node {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.agents[nodeURI]
+	return p.agents[nodeID]
 }
 
-func (p *AgentPool) List() []*agentpb.View {
+func (p *AgentPool) List() []*types.AgentView {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	out := make([]*agentpb.View, 0, len(p.agents))
+	out := make([]*types.AgentView, 0, len(p.agents))
 	for _, a := range p.agents {
 		out = append(out, a.view())
 	}
@@ -226,15 +345,12 @@ func (p *AgentPool) Count() int {
 }
 
 // Pick selects an idle agent, or any agent if none idle.
-func (p *AgentPool) Pick() *remoteAgent {
+func (p *AgentPool) Pick() Node {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	var fallback *remoteAgent
+	var fallback Node
 	for _, a := range p.agents {
-		a.mu.Lock()
-		busy := len(a.tasks) > 0
-		a.mu.Unlock()
-		if !busy {
+		if !a.state().busy() {
 			return a
 		}
 		if fallback == nil {
@@ -246,19 +362,15 @@ func (p *AgentPool) Pick() *remoteAgent {
 
 // PickChat selects an idle LLM-capable agent, or any LLM-capable agent if all
 // are busy.
-func (p *AgentPool) PickChat() *remoteAgent {
+func (p *AgentPool) PickChat() Node {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	var fallback *remoteAgent
+	var fallback Node
 	for _, a := range p.agents {
-		a.mu.Lock()
-		busy := len(a.tasks) > 0
-		chatCapable := a.status.Provider != ""
-		a.mu.Unlock()
-		if !chatCapable {
+		if !a.chatCapable() {
 			continue
 		}
-		if !busy {
+		if !a.state().busy() {
 			return a
 		}
 		if fallback == nil {
@@ -270,10 +382,10 @@ func (p *AgentPool) PickChat() *remoteAgent {
 
 // DispatchToolCall sends a canonical AOP tool.call to a tool-capable node.
 // The task completes only on the matching AOP tool.result.
-func (p *AgentPool) DispatchToolCall(nodeURI, taskID string, call *aop.ToolCall) (<-chan taskResult, error) {
-	a := p.get(nodeURI)
+func (p *AgentPool) DispatchToolCall(nodeID, taskID string, call *aop.ToolCall) (<-chan taskResult, error) {
+	a := p.get(nodeID)
 	if a == nil {
-		return nil, fmt.Errorf("node %s not connected", nodeURI)
+		return nil, fmt.Errorf("node %s not connected", nodeID)
 	}
 	call.Id = taskID
 	sessionID := taskID
@@ -282,27 +394,25 @@ func (p *AgentPool) DispatchToolCall(nodeURI, taskID string, call *aop.ToolCall)
 			sessionID = sid
 		}
 	}
-	agentName := a.name
+	agentName := a.Name()
 	if agentName == "" {
-		agentName = a.nodeURI
+		agentName = a.NodeID()
 	}
 	event := &aop.Event{
 		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, TurnId: taskID, Emitter: agentName,
 		Payload: &aop.Event_ToolCall{ToolCall: call},
 	}
-	a.mu.Lock()
-	if a.toolCalls == nil {
-		a.toolCalls = map[string]struct{}{}
-	}
-	a.toolCalls[taskID] = struct{}{}
-	a.mu.Unlock()
-	ch, err := p.dispatchMessage(nodeURI, taskID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{
+	st := a.state()
+	st.mu.Lock()
+	st.toolCalls[taskID] = struct{}{}
+	st.mu.Unlock()
+	ch, err := p.dispatchMessage(nodeID, taskID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{
 		SessionId: sessionID, TurnId: taskID, Call: call,
 	}}})
 	if err != nil {
-		a.mu.Lock()
-		delete(a.toolCalls, taskID)
-		a.mu.Unlock()
+		st.mu.Lock()
+		delete(st.toolCalls, taskID)
+		st.mu.Unlock()
 		return nil, err
 	}
 	if p.sessions != nil && sessionID != taskID {
@@ -312,122 +422,112 @@ func (p *AgentPool) DispatchToolCall(nodeURI, taskID string, call *aop.ToolCall)
 }
 
 // DispatchChat sends a natural-language prompt to an LLM-capable agent.
-func (p *AgentPool) DispatchChat(nodeURI, taskID, prompt string) (<-chan taskResult, error) {
-	return p.DispatchRun(nodeURI, &aop.RunTurnRequest{
+func (p *AgentPool) DispatchChat(nodeID, taskID, prompt string) (<-chan taskResult, error) {
+	return p.DispatchRun(nodeID, &aop.RunTurnRequest{
 		TurnId: taskID,
 		Input:  &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Text{Text: &aop.TextContent{Text: prompt}}}}},
 	})
 }
 
-func (p *AgentPool) DispatchOpenSession(nodeURI, requestID string, request *aop.OpenSessionRequest) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchOpenSession(nodeID, requestID string, request *aop.OpenSessionRequest) (<-chan taskResult, error) {
 	if request == nil || strings.TrimSpace(requestID) == "" || strings.TrimSpace(request.SessionId) == "" {
 		return nil, fmt.Errorf("open session envelope id and session_id are required")
 	}
-	return p.dispatchMessage(nodeURI, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: request}})
+	return p.dispatchMessage(nodeID, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: request}})
 }
 
-func (p *AgentPool) SessionOpen(nodeURI, sessionID string) bool {
-	agent := p.get(nodeURI)
+func (p *AgentPool) SessionOpen(nodeID, sessionID string) bool {
+	agent := p.get(nodeID)
 	if agent == nil {
 		return false
 	}
-	agent.mu.Lock()
-	defer agent.mu.Unlock()
-	_, ok := agent.openSessions[sessionID]
-	return ok
+	return agent.state().sessionOpen(sessionID)
 }
 
-func (p *AgentPool) DispatchCloseSession(nodeURI, requestID string, request *aop.CloseSessionRequest) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchCloseSession(nodeID, requestID string, request *aop.CloseSessionRequest) (<-chan taskResult, error) {
 	if request == nil || strings.TrimSpace(requestID) == "" || strings.TrimSpace(request.SessionId) == "" {
 		return nil, fmt.Errorf("close session envelope id and session_id are required")
 	}
-	return p.dispatchMessage(nodeURI, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: request}})
+	return p.dispatchMessage(nodeID, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: request}})
 }
 
-func (p *AgentPool) DispatchRun(nodeURI string, request *aop.RunTurnRequest) (<-chan taskResult, error) {
-	a := p.get(nodeURI)
+// ensureSessionOpen optimistically marks sessionID open on the node and sends
+// the OpenSessionRequest once. Used by DispatchRun/DispatchCommand, which can
+// arrive on a session the hub never explicitly opened.
+func (p *AgentPool) ensureSessionOpen(a Node, sessionID string) error {
+	st := a.state()
+	st.mu.Lock()
+	_, opened := st.openSessions[sessionID]
+	if !opened {
+		st.openSessions[sessionID] = struct{}{}
+	}
+	st.mu.Unlock()
+	if opened {
+		return nil
+	}
+	requestID := "open:" + sessionID
+	if err := p.sendAgentMessage(a.NodeID(), requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: &aop.OpenSessionRequest{
+		SessionId: sessionID, NodeId: a.NodeID(),
+	}}}); err != nil {
+		st.mu.Lock()
+		delete(st.openSessions, sessionID)
+		st.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (p *AgentPool) DispatchRun(nodeID string, request *aop.RunTurnRequest) (<-chan taskResult, error) {
+	a := p.get(nodeID)
 	if a == nil {
-		return nil, fmt.Errorf("node %s not connected", nodeURI)
+		return nil, fmt.Errorf("node %s not connected", nodeID)
 	}
 	if request == nil || request.Input == nil || request.TurnId == "" {
 		return nil, fmt.Errorf("run request with input and turn_id is required")
 	}
 	if request.SessionId != "" {
-		a.mu.Lock()
-		_, opened := a.openSessions[request.SessionId]
-		if !opened {
-			a.openSessions[request.SessionId] = struct{}{}
-		}
-		a.mu.Unlock()
-		if !opened {
-			requestID := "open:" + request.SessionId
-			if err := p.sendAgentMessage(nodeURI, requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: &aop.OpenSessionRequest{
-				SessionId: request.SessionId, NodeUri: nodeURI,
-			}}}); err != nil {
-				a.mu.Lock()
-				delete(a.openSessions, request.SessionId)
-				a.mu.Unlock()
-				return nil, err
-			}
+		if err := p.ensureSessionOpen(a, request.SessionId); err != nil {
+			return nil, err
 		}
 	}
-	return p.dispatchMessage(nodeURI, request.TurnId, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnRequest{RunTurnRequest: request}})
+	return p.dispatchMessage(nodeID, request.TurnId, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnRequest{RunTurnRequest: request}})
 }
 
-func (p *AgentPool) DispatchCommand(nodeURI, taskID string, command *commandpb.Request) (<-chan taskResult, error) {
+func (p *AgentPool) DispatchCommand(nodeID, taskID string, command *types.CommandRequest) (<-chan taskResult, error) {
 	if command == nil || taskID == "" {
 		return nil, fmt.Errorf("command and operation id are required")
 	}
-	a := p.get(nodeURI)
+	a := p.get(nodeID)
 	if a == nil {
-		return nil, fmt.Errorf("node %s not connected", nodeURI)
+		return nil, fmt.Errorf("node %s not connected", nodeID)
 	}
 	if command.SessionId != "" {
-		a.mu.Lock()
-		_, opened := a.openSessions[command.SessionId]
-		if !opened {
-			a.openSessions[command.SessionId] = struct{}{}
-		}
-		a.mu.Unlock()
-		if !opened {
-			requestID := "open:" + command.SessionId
-			if err := p.sendAgentMessage(nodeURI, requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: &aop.OpenSessionRequest{
-				SessionId: command.SessionId, NodeUri: nodeURI,
-			}}}); err != nil {
-				a.mu.Lock()
-				delete(a.openSessions, command.SessionId)
-				a.mu.Unlock()
-				return nil, err
-			}
+		if err := p.ensureSessionOpen(a, command.SessionId); err != nil {
+			return nil, err
 		}
 	}
-	return p.dispatchMessage(nodeURI, taskID, &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Request{Request: protobuf.Clone(command).(*commandpb.Request)}})
+	return p.dispatchMessage(nodeID, taskID, &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: protobuf.Clone(command).(*types.CommandRequest)}})
 }
 
-func (p *AgentPool) dispatchMessage(nodeURI, taskID string, message protobuf.Message) (<-chan taskResult, error) {
-	a := p.get(nodeURI)
+func (p *AgentPool) dispatchMessage(nodeID, taskID string, message protobuf.Message) (<-chan taskResult, error) {
+	a := p.get(nodeID)
 	if a == nil {
-		return nil, fmt.Errorf("node %s not connected", nodeURI)
+		return nil, fmt.Errorf("node %s not connected", nodeID)
 	}
 	ch := make(chan taskResult, 1)
-	a.mu.Lock()
-	a.tasks[taskID] = ch
-	a.turns[taskID] = 0
-	a.mu.Unlock()
+	st := a.state()
+	st.mu.Lock()
+	st.tasks[taskID] = ch
+	st.turns[taskID] = 0
+	st.mu.Unlock()
 	envelope, err := aop.Wrap(taskID, "", message)
 	if err != nil {
-		a.mu.Lock()
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		a.mu.Unlock()
+		st.dropTask(taskID)
 		close(ch)
 		return nil, err
 	}
 	if err := a.enqueue(envelope); err != nil {
-		a.mu.Lock()
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		a.mu.Unlock()
+		st.dropTask(taskID)
 		close(ch)
 		return nil, err
 	}
@@ -436,31 +536,28 @@ func (p *AgentPool) dispatchMessage(nodeURI, taskID string, message protobuf.Mes
 
 // BroadcastConfigReload sends the committed protobuf config on the same FIFO as
 // every other application message. Agents never fetch a second REST DTO.
-func (p *AgentPool) BroadcastConfigReload(config *configpb.DistributeConfig) int {
+func (p *AgentPool) BroadcastConfigReload(config *types.DistributeConfig) int {
 	if config == nil {
 		return 0
 	}
 	p.mu.RLock()
-	agents := make([]*remoteAgent, 0, len(p.agents))
+	agents := make([]Node, 0, len(p.agents))
 	for _, a := range p.agents {
 		agents = append(agents, a)
 	}
 	p.mu.RUnlock()
 	n := 0
 	for _, a := range agents {
-		message := &reloadpb.ProtocolMessage{Message: &reloadpb.ProtocolMessage_Request{Request: &reloadpb.Request{Config: protobuf.Clone(config).(*configpb.DistributeConfig)}}}
-		envelope, err := aop.Wrap(generateID(), "", message)
-		if err == nil && a.enqueue(envelope) == nil {
-			n++
-		}
+		a.reloadConfig(config)
+		n++
 	}
 	return n
 }
 
-func (p *AgentPool) sendAgentMessage(nodeURI, id, replyTo string, message protobuf.Message) error {
-	a := p.get(nodeURI)
+func (p *AgentPool) sendAgentMessage(nodeID, id, replyTo string, message protobuf.Message) error {
+	a := p.get(nodeID)
 	if a == nil {
-		return fmt.Errorf("node %s not connected", nodeURI)
+		return fmt.Errorf("node %s not connected", nodeID)
 	}
 	envelope, err := aop.Wrap(id, replyTo, message)
 	if err != nil {
@@ -481,21 +578,16 @@ func (a *remoteAgent) enqueue(envelope *aop.Envelope) error {
 	}
 }
 
-func (p *AgentPool) CancelTask(nodeURI, taskID string, sessionID ...string) error {
-	a := p.get(nodeURI)
+func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error {
+	a := p.get(nodeID)
 	if a == nil {
 		return nil
 	}
-	a.mu.Lock()
-	resultCh, pending := a.tasks[taskID]
-	_, isToolCall := a.toolCalls[taskID]
-	if pending {
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		delete(a.toolCalls, taskID)
-		delete(a.childSessions, taskID)
-	}
-	a.mu.Unlock()
+	st := a.state()
+	st.mu.Lock()
+	_, isToolCall := st.toolCalls[taskID]
+	st.mu.Unlock()
+	resultCh, pending := st.dropTask(taskID)
 	if !pending {
 		return nil
 	}
@@ -513,18 +605,18 @@ func (p *AgentPool) CancelTask(nodeURI, taskID string, sessionID ...string) erro
 	if resultCh != nil {
 		close(resultCh)
 	}
-	return p.sendAgentMessage(nodeURI, requestID, "", cancelMessage)
+	return p.sendAgentMessage(nodeID, requestID, "", cancelMessage)
 }
 
-func (p *AgentPool) CancelPTY(nodeURI, terminalID string) {
-	_ = p.sendAgentMessage(nodeURI, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameKill, StreamID: terminalID}))
+func (p *AgentPool) CancelPTY(nodeID, terminalID string) {
+	_ = p.sendAgentMessage(nodeID, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameKill, StreamID: terminalID}))
 }
 
-func (p *AgentPool) CloseTerminal(nodeURI, terminalID string) {
-	_ = p.sendAgentMessage(nodeURI, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
+func (p *AgentPool) CloseTerminal(nodeID, terminalID string) {
+	_ = p.sendAgentMessage(nodeID, generateID(), "", terminalcodec.ToProto(pty.Frame{Type: pty.FrameDetach, StreamID: terminalID}))
 }
 
-func (p *AgentPool) subscribePTY(nodeURI, terminalID string) (<-chan pty.Frame, bool, func()) {
+func (p *AgentPool) subscribePTY(nodeID, terminalID string) (<-chan pty.Frame, bool, func()) {
 	ch := make(chan pty.Frame, 256)
 	// Snapshot connectivity while registering the subscription under the pool
 	// lock. An unregister cannot otherwise be distinguished from an initially
@@ -532,26 +624,26 @@ func (p *AgentPool) subscribePTY(nodeURI, terminalID string) (<-chan pty.Frame, 
 	p.mu.RLock()
 	p.ptyMu.Lock()
 	p.ptySubs[terminalID] = ch
-	p.ptyNodeURIs[terminalID] = nodeURI
-	online := p.agents[nodeURI] != nil
+	p.ptyNodeIDs[terminalID] = nodeID
+	online := p.agents[nodeID] != nil
 	p.ptyMu.Unlock()
 	p.mu.RUnlock()
 	return ch, online, func() {
 		p.ptyMu.Lock()
 		if p.ptySubs[terminalID] == ch {
 			delete(p.ptySubs, terminalID)
-			delete(p.ptyNodeURIs, terminalID)
+			delete(p.ptyNodeIDs, terminalID)
 			close(ch)
 		}
 		p.ptyMu.Unlock()
 	}
 }
 
-func (p *AgentPool) notifyPTY(nodeURI string, frame pty.Frame) {
+func (p *AgentPool) notifyPTY(nodeID string, frame pty.Frame) {
 	p.ptyMu.RLock()
 	defer p.ptyMu.RUnlock()
-	for terminalID, boundNodeURI := range p.ptyNodeURIs {
-		if boundNodeURI != nodeURI {
+	for terminalID, boundNodeID := range p.ptyNodeIDs {
+		if boundNodeID != nodeID {
 			continue
 		}
 		out := frame
@@ -572,8 +664,8 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	}
 	p.ptyMu.RLock()
 	terminalIDs := make([]string, 0)
-	for terminalID, nodeURI := range p.ptyNodeURIs {
-		if nodeURI == agent.nodeURI {
+	for terminalID, nodeID := range p.ptyNodeIDs {
+		if nodeID == agent.nodeID {
 			terminalIDs = append(terminalIDs, terminalID)
 		}
 	}
@@ -603,69 +695,6 @@ func buildUpgrader(origins []string) websocket.Upgrader {
 			return false
 		},
 	}
-}
-
-// convergeTaskOnToolResult closes a tool.call task on its terminal
-// tool.result. SCO facts travel independently through the SCO namespace;
-// tool.result carries only operation completion and human-readable output.
-func (p *AgentPool) convergeTaskOnToolResult(a *remoteAgent, taskID string, ev *aop.Event) {
-	a.mu.Lock()
-	if _, isToolCall := a.toolCalls[taskID]; !isToolCall {
-		a.mu.Unlock()
-		return
-	}
-	ch, ok := a.tasks[taskID]
-	turn := a.turns[taskID]
-	if ok {
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		delete(a.toolCalls, taskID)
-		delete(a.childSessions, taskID)
-	}
-	a.mu.Unlock()
-	if !ok || ch == nil {
-		return
-	}
-	d := ev.GetToolResult()
-	res := taskResult{Output: aopToolResultText(d.Output), Turn: turn}
-	if d.IsError {
-		res.Err = res.Output
-		res.Output = ""
-	}
-	ch <- res
-	close(ch)
-}
-
-// convergeTaskOnSessionEnd closes a chat task when the ROOT agent session
-// ends: this terminal event drives task cleanup; child (derived sub-agent)
-// session ends and mid-run AOP error events are not terminal. Idempotent —
-// a file-RPC complete frame arriving after this close is a no-op.
-func (p *AgentPool) convergeTaskOnTurnEnd(a *remoteAgent, taskID string, ev *aop.Event) {
-	if taskID == "" {
-		return
-	}
-	a.mu.Lock()
-	ch, ok := a.tasks[taskID]
-	turn := a.turns[taskID]
-	if ok {
-		delete(a.tasks, taskID)
-		delete(a.turns, taskID)
-		delete(a.toolCalls, taskID)
-		delete(a.childSessions, taskID)
-	}
-	a.mu.Unlock()
-	if !ok || ch == nil {
-		return
-	}
-	d := ev.GetTurnEnded()
-	res := taskResult{Turn: turn}
-	// A canceled run still carries the ctx error ("context canceled") — only
-	// non-canceled stops surface it as a task error.
-	if d.StopReason != "canceled" && d.Error != nil {
-		res.Err = d.Error.Message
-	}
-	ch <- res
-	close(ch)
 }
 
 func aopToolResultText(content []*aop.Content) string {

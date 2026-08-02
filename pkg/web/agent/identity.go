@@ -3,49 +3,24 @@ package agent
 import (
 	"fmt"
 	"net/url"
-	"os"
-	"os/user"
-	"runtime"
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/ioa/protocols"
-	"google.golang.org/protobuf/types/known/structpb"
+	"github.com/chainreactors/aiscan/pkg/runner"
 )
 
-// DefaultRuntime returns OS process metadata without introducing another
-// identity beside the IOA NodeRef.
-func DefaultRuntime() *aop.AgentRuntimeInfo {
-	metadata, _ := structpb.NewStruct(map[string]any{"client": "aiscan", "transport": "websocket"})
-	runtimeInfo := &aop.AgentRuntimeInfo{
-		Os:       runtime.GOOS,
-		Arch:     runtime.GOARCH,
-		Pid:      int32(os.Getpid()),
-		Metadata: metadata,
-	}
-	if host, err := os.Hostname(); err == nil {
-		runtimeInfo.Hostname = host
-	}
-	if wd, err := os.Getwd(); err == nil {
-		runtimeInfo.WorkingDir = wd
-	}
-	if current, err := user.Current(); err == nil && current != nil {
-		runtimeInfo.Username = current.Username
-	}
-	return runtimeInfo
-}
-
 // BuildHello builds the AOP core agent registration message.
-func BuildHello(name string, reg *commands.CommandRegistry, ref protocols.NodeRef, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
-	if !ref.Valid() {
-		return nil, fmt.Errorf("valid node reference is required")
+func BuildHello(name string, reg *commands.CommandRegistry, nodeID string, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return nil, fmt.Errorf("node_id is required")
 	}
 	if runtimeInfo == nil || runtimeInfo.Os == "" {
-		runtimeInfo = DefaultRuntime()
+		runtimeInfo = runner.DefaultRuntimeInfo()
 	}
 	hello := &aop.AgentHello{
-		AgentId: ref.ID, Authority: ref.Authority, Name: name,
+		NodeId: nodeID, Name: name,
 		Capabilities: []string{"repl", "pty", "tmux", "ioa", "file", "exec", "sco"},
 		Runtime:      runtimeInfo, Tools: reg.ToolDefinitions(),
 	}

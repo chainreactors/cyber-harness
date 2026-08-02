@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ResolveAgentServerURLs makes --server-url the canonical Web/AOP endpoint.
+// ResolveAgentServerURLs makes --server-url the Web/AOP endpoint.
 // Deprecated --web-url is only an alias. IOA remains independently configurable
 // and falls back to the Web server's same-origin /ioa endpoint when omitted.
 func ResolveAgentServerURLs(option *Option) error {

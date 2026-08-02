@@ -3,11 +3,11 @@ package config
 import (
 	"testing"
 
-	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestNormalizeLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
-	llm := &configpb.LLMConfig{Providers: []*configpb.LLMProviderConfig{
+	llm := &types.LLMConfig{Providers: []*types.LLMProviderConfig{
 		{Id: "openai", Provider: " OPENAI ", BaseUrl: "https://api.deepseek.com/v1"},
 		{Id: "claude", Provider: "ANTHROPIC"},
 		{Id: "invalid", Provider: "deepseek"},

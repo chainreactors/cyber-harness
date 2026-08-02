@@ -11,7 +11,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -339,7 +339,7 @@ func writeAOPMarkdown(sb *strings.Builder, event *aop.Event) {
 		if data.Role == "user" {
 			sb.WriteString(fmt.Sprintf("> %s\n\n", TruncateStr(text, 200)))
 		} else {
-			detail, ok, _ := ext.GetCommandDetail(event)
+			detail, ok, _ := types.GetCommandDetail(event)
 			if ok && detail.Presentation == "preformatted" {
 				sb.WriteString(markdownCodeFence(text) + "\n\n")
 			} else {

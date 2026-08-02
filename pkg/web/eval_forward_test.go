@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type evalSink struct {
@@ -22,27 +22,27 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	sink := &evalSink{sid: "sess-eval", found: true}
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
-	remote := &remoteAgent{nodeURI: "agent-1", name: "worker", tasks: map[string]chan taskResult{}, turns: map[string]int{}}
+	remote := &remoteAgent{nodeState: newNodeState(), nodeID: "agent-1", name: "worker"}
 
 	event := &aop.Event{
 		SessionId: "agent-session", TurnId: "turn-1", Emitter: "test-agent",
-		Payload: &aop.Event_Status{Status: &aop.Status{State: ext.EvalStateEnd}},
+		Payload: &aop.Event_Status{Status: &aop.Status{State: types.EvalStateEnd}},
 	}
-	_ = ext.SetEvalDetail(event, ext.EvalDetail{Round: 1, Pass: true, Reason: "found SQLi"})
-	_ = ext.SetCompactDetail(event, ext.CompactDetail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
+	_ = types.SetEvalDetail(event, types.EvalDetail{Round: 1, Pass: true, Reason: "found SQLi"})
+	_ = types.SetCompactDetail(event, types.CompactDetail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
 	pool.forwardAOPFrame(remote, "turn-1", event)
 
 	if len(sink.aopEvents) == 0 {
 		t.Fatal("AOP event was not forwarded")
 	}
-	evalDetail, ok, err := ext.GetEvalDetail(sink.aopEvents[0])
+	evalDetail, ok, err := types.GetEvalDetail(sink.aopEvents[0])
 	if err != nil || !ok {
 		t.Fatalf("eval extension = %#v, %v, %v", sink.aopEvents[0].Extensions, ok, err)
 	}
 	if evalDetail.Round != 1 || !evalDetail.Pass || evalDetail.Reason != "found SQLi" {
 		t.Fatalf("eval detail = %#v", evalDetail)
 	}
-	compactDetail, ok, err := ext.GetCompactDetail(sink.aopEvents[0])
+	compactDetail, ok, err := types.GetCompactDetail(sink.aopEvents[0])
 	if err != nil || !ok || compactDetail.TokensBefore != 1000 || compactDetail.KeptMessages != 8 {
 		t.Fatalf("compact detail = %#v, %v, %v", compactDetail, ok, err)
 	}
@@ -53,7 +53,7 @@ func TestForwardStandaloneScanAOPDoesNotCreateChatHistory(t *testing.T) {
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
 	event := &aop.Event{SessionId: "scan-not-chat", Emitter: "worker", Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}}}
-	pool.forwardAOPFrame(&remoteAgent{}, "scan-not-chat", event)
+	pool.forwardAOPFrame(&remoteAgent{nodeState: newNodeState()}, "scan-not-chat", event)
 	if len(sink.aopEvents) != 0 {
 		t.Fatalf("standalone scan AOP was forwarded to chat history: %+v", sink.aopEvents)
 	}
@@ -63,7 +63,9 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 	sink := &evalSink{}
 	pool := NewAgentPool(NewHub())
 	pool.SetSessionLookup(sink)
-	remote := &remoteAgent{openSessions: map[string]struct{}{"session-command": {}}}
+	state := newNodeState()
+	state.openSessions["session-command"] = struct{}{}
+	remote := &remoteAgent{nodeState: state}
 	event := &aop.Event{
 		SessionId: "session-command",
 		Emitter:   "worker",

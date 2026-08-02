@@ -5,9 +5,8 @@ import (
 	"sync/atomic"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/tool"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -19,14 +18,21 @@ const (
 	statusLLMRequest         = "llm_request"
 )
 
+// EventEmitter is the narrow event sink an agent needs — callers may wrap a
+// bus with stamping/routing middleware (e.g. the runner's sessionEmitter)
+// instead of handing over a raw *eventbus.Bus.
+type EventEmitter interface {
+	Emit(*aop.Event)
+}
+
 type aopEmitter struct {
-	bus              *eventbus.Bus[*aop.Event]
+	bus              EventEmitter
 	agentName        string
 	sessionID        string
 	turnID           string
 	parentSessionID  string
 	parentToolCallID string
-	delegation       *ext.DelegationDetail
+	delegation       *types.DelegationDetail
 	state            *emitState
 }
 
@@ -35,7 +41,7 @@ type emitState struct {
 	messageSeq atomic.Int64
 }
 
-func newAOPEmitter(bus *eventbus.Bus[*aop.Event], agentName, sessionID, parentSessionID, parentToolCallID string, detail *ext.DelegationDetail, msgCounter int64) *aopEmitter {
+func newAOPEmitter(bus EventEmitter, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
 	em := &aopEmitter{
 		bus: bus, agentName: agentName, sessionID: sessionID,
 		parentSessionID: parentSessionID, parentToolCallID: parentToolCallID,

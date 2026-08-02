@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	"github.com/chainreactors/aiscan/pkg/rpc/chat/chatconnect"
-	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -79,8 +79,8 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, nil, ""))
 	defer srv.Close()
 
-	client := chatconnect.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())
-	resp, err := client.ListCommands(context.Background(), connect.NewRequest(&chatpb.ListCommandsRequest{SessionId: "anything"}))
+	client := rpc.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())
+	resp, err := client.ListCommands(context.Background(), connect.NewRequest(&types.ListCommandsRequest{SessionId: "anything"}))
 	if err != nil {
 		t.Fatalf("ListCommands: %v", err)
 	}

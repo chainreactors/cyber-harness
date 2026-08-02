@@ -9,16 +9,14 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
-	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
-	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
 	t.Helper()
-	if err := store.CreateSession(context.Background(), &chatpb.SessionRecord{
+	if err := store.CreateSession(context.Background(), &types.SessionRecord{
 		Session: &aop.Session{Id: id, State: SessionStateOpen}, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatalf("CreateSession(%q): %v", id, err)
@@ -64,14 +62,14 @@ func TestSQLiteStoreRejectsLegacySchema(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreMigratesV1AgentIDToNodeURI(t *testing.T) {
+func TestSQLiteStoreMigratesV1AgentIDToNodeID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := &chatpb.SessionRecord{
-		Session:   &aop.Session{Id: "s1", State: SessionStateOpen, NodeUri: "https://web.example/nodes/local-1"},
+	record := &types.SessionRecord{
+		Session:   &aop.Session{Id: "s1", State: SessionStateOpen, NodeId: "local-1"},
 		CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	raw, err := protobuf.Marshal(record)
@@ -94,7 +92,7 @@ func TestSQLiteStoreMigratesV1AgentIDToNodeURI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO chat_sessions (id, agent_id, status, session_proto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		"s1", record.GetSession().GetNodeUri(), SessionStateOpen, raw,
+		"s1", record.GetSession().GetNodeId(), SessionStateOpen, raw,
 		formatProtoTime(record.CreatedAt), formatProtoTime(record.UpdatedAt)); err != nil {
 		_ = db.Close()
 		t.Fatal(err)
@@ -110,8 +108,8 @@ func TestSQLiteStoreMigratesV1AgentIDToNodeURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GetSession().GetNodeUri() != record.GetSession().GetNodeUri() {
-		t.Fatalf("node_uri = %q, want %q", got.GetSession().GetNodeUri(), record.GetSession().GetNodeUri())
+	if got.GetSession().GetNodeId() != record.GetSession().GetNodeId() {
+		t.Fatalf("node_id = %q, want %q", got.GetSession().GetNodeId(), record.GetSession().GetNodeId())
 	}
 	var version int
 	if err := store.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != sqliteSchemaVersion {
@@ -132,7 +130,7 @@ func TestSQLiteStoreMigratesV1AgentIDToNodeURI(t *testing.T) {
 		}
 		columns[name] = true
 	}
-	if !columns["node_uri"] || columns["agent_id"] {
+	if !columns["node_id"] || columns["agent_id"] {
 		t.Fatalf("chat_sessions columns = %+v", columns)
 	}
 }
@@ -151,7 +149,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 		Id: "e-user", EmittedAt: timestamppb.New(created), SessionId: "s1", Emitter: "operator",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}},
 	}
-	_ = ext.SetWebMessage(user, ext.WebMessageExtension{Code: "x"})
+	_ = types.SetWebMessage(user, types.WebMessageExtension{Code: "x"})
 	if err := store.AddAOPEvent(ctx, "s1", user); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +183,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 	if message := events[0].GetMessage(); message.GetId() != "m1" || message.GetRole() != "user" || message.GetContent()[0].GetText().GetText() != "hello" {
 		t.Fatalf("user event = %+v", events[0])
 	}
-	webExtension, ok, err := ext.GetWebMessage(events[0])
+	webExtension, ok, err := types.GetWebMessage(events[0])
 	if err != nil || !ok {
 		t.Fatalf("web extension = %+v, ok = %v, err = %v", webExtension, ok, err)
 	}
@@ -209,12 +207,12 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 	}
 	defer store.Close()
 
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Id:        "scan-1",
 		Target:    "127.0.0.1",
 		Mode:      "quick",
-		Options:   &scanpb.ScanOptions{Verify: true, Deep: true},
-		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
+		Options:   &types.ScanOptions{Verify: true, Deep: true},
+		Status:    types.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: nowProto(),
 		UpdatedAt: nowProto(),
 	}
@@ -264,23 +262,23 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 	}
 	defer store.Close()
 
-	scan := &scanpb.Scan{
+	scan := &types.Scan{
 		Id: "scan-transition", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: types.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
 
-	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
+	scan.Status = types.ScanStatus_SCAN_STATUS_CANCELED
 	scan.UpdatedAt = nowProto()
-	changed, err := store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
+	changed, err := store.TransitionScan(context.Background(), scan, types.ScanStatus_SCAN_STATUS_QUEUED, types.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		t.Fatalf("queued -> canceled = %v, %v; want true, nil", changed, err)
 	}
 
-	scan.Status = scanpb.ScanStatus_SCAN_STATUS_COMPLETED
-	changed, err = store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
+	scan.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
+	changed, err = store.TransitionScan(context.Background(), scan, types.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +286,7 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 		t.Fatal("terminal canceled status was overwritten")
 	}
 	stored, err := store.Get(context.Background(), scan.Id)
-	if err != nil || stored.Status != scanpb.ScanStatus_SCAN_STATUS_CANCELED {
+	if err != nil || stored.Status != types.ScanStatus_SCAN_STATUS_CANCELED {
 		t.Fatalf("stored scan = %+v, %v", stored, err)
 	}
 }
@@ -310,7 +308,7 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	session := &chatpb.SessionRecord{
+	session := &types.SessionRecord{
 		Session:   &aop.Session{Id: "session-cascade", State: SessionStateOpen},
 		CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
@@ -323,9 +321,9 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Create(ctx, &scanpb.Scan{
+	if err := store.Create(ctx, &types.Scan{
 		Id: "scan-cascade", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
 	}
