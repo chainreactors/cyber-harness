@@ -8,7 +8,4 @@ option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
 
 service AgentService {
   rpc ListAgents(aiscan.agent.ListAgentsRequest) returns (aiscan.agent.ListAgentsResponse);
-  rpc ListLocalAgents(aiscan.agent.ListLocalAgentsRequest) returns (aiscan.agent.ListLocalAgentsResponse);
-  rpc LaunchLocalAgent(aiscan.agent.LaunchLocalAgentRequest) returns (aiscan.agent.LaunchLocalAgentResponse);
-  rpc StopLocalAgent(aiscan.agent.StopLocalAgentRequest) returns (aiscan.agent.StopLocalAgentResponse);
 }

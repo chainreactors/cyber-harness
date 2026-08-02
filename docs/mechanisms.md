@@ -141,19 +141,11 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ---
 
-## 8. 本地 Agent 管理 (LocalAgents)
+## 8. 内嵌 Agent (Embedded Agent)
 
-hub 可通过 API 在本机 fork `aiscan agent` 子进程:
+`aiscan web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `aiscan agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`aiscan web --no-agent` 只启动 web 控制台。
 
-```
-POST /api/deploy/local     — Launch (fork aiscan agent, 自动拨入 hub)
-GET  /api/deploy/local     — List (cross-reference pool 判断连接/忙碌状态)
-DELETE /api/deploy/local/{id} — Stop (kill 子进程)
-```
-
-子进程通过 `--web-url`/`--ioa-url` 连接 hub 的回环端口，IOA token 嵌入 URL userinfo。退出自动从 roster 移除，hub shutdown 时 `StopAll()` kill 全部。
-
-**文件**: `pkg/web/localagent.go`, `cmd/aiscan/web_full.go`
+**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/web/agent/agent.go`（node 侧入口）
 
 ---
 

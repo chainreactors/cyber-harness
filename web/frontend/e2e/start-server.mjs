@@ -129,14 +129,53 @@ const child = spawn(binary, [
 })
 
 let shuttingDown = false
+let agentChild = null
+
+async function launchRemoteAgent() {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (shuttingDown) return
+    try {
+      const response = await fetch(`http://${host}:${webPort}/health`)
+      if (response.ok) break
+    } catch {
+      // The Web listener is still starting.
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  }
+  if (shuttingDown) return
+  agentChild = spawn(binary, [
+    '--config', configPath,
+    '--data-dir', join(workDir, 'agent-data'),
+    'agent',
+    '--server-url', `http://test-token@${host}:${webPort}`,
+    '--node-name', 'e2e-node',
+  ], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+  agentChild.once('error', (error) => {
+    console.error(error)
+    void shutdown(1)
+  })
+  agentChild.once('exit', (code, signal) => {
+    if (!shuttingDown) {
+      console.error(`AIScan E2E agent exited early (code=${code}, signal=${signal})`)
+      void shutdown(code ?? 1)
+    }
+  })
+}
+
 async function shutdown(code) {
   if (shuttingDown) return
   shuttingDown = true
+  if (agentChild?.exitCode === null) agentChild.kill()
   if (child.exitCode === null) child.kill()
   if (mockLLM) await new Promise((resolveClose) => mockLLM.close(resolveClose))
   await rm(workDir, { recursive: true, force: true })
   process.exit(code)
 }
+
+void launchRemoteAgent()
 
 child.once('error', (error) => {
   console.error(error)

@@ -2,14 +2,20 @@ package web
 
 import (
 	"context"
-	"path/filepath"
-	"testing"
-
+	"errors"
 	aop "github.com/chainreactors/aiscan/aop"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
 )
 
 func TestAOPEnvelopeBinaryAndJSONAreEquivalent(t *testing.T) {
@@ -52,7 +58,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
@@ -107,7 +113,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
@@ -140,7 +146,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
@@ -222,7 +228,7 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	service.SetAgentPool(pool)
 	pool.agents["agent-1"] = &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
 		done: make(chan struct{}),
 	}
 	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1", Title: "original"}
@@ -252,5 +258,225 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	rejected, err := server.OpenSession(context.Background(), "open-durable", conflict)
 	if err != nil || rejected.GetRejected().GetCode() != "ALREADY_EXISTS" {
 		t.Fatalf("durable conflict = %v, %v", rejected, err)
+	}
+}
+
+type lockedResponseRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func newLockedResponseRecorder() *lockedResponseRecorder {
+	return &lockedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *lockedResponseRecorder) Header() http.Header {
+	return r.ResponseRecorder.Header()
+}
+
+func (r *lockedResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.WriteHeader(statusCode)
+}
+
+func (r *lockedResponseRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(data)
+}
+
+func (r *lockedResponseRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *lockedResponseRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Body.String()
+}
+
+// ListEvents replay is a pure read: it must not dispatch frames, converge an
+// in-flight task, or append another copy of a terminal event.
+func TestListEventsReplayHasNoSideEffects(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "replay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	pool := NewAgentPool(NewHub())
+	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
+	remote := &remoteAgent{
+		nodeState: newNodeState(),
+		nodeID:    "agent-1", name: "worker", sendCh: make(chan *aop.Envelope, 8), done: make(chan struct{}),
+	}
+	taskCh := make(chan taskResult, 1)
+	remote.tasks["task-1"] = taskCh
+	pool.register(remote)
+
+	ctx := context.Background()
+	session, err := svc.CreateSession(ctx, "agent-1", "replay me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments, _ := aop.JSONValue(map[string]string{"command": "ls"})
+	stored := []*aop.Event{
+		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+			Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hi")}}}},
+		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "tc-1", Name: "bash", Arguments: arguments}}},
+		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.GetSession().GetId(), TurnId: "turn-1", Emitter: "aiscan",
+			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}},
+	}
+	for _, event := range stored {
+		if err := store.AddAOPEvent(ctx, session.GetSession().GetId(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response, err := NewAOPChatServer(svc).ListEvents(ctx, &aop.ListEventsRequest{SessionId: session.GetSession().GetId(), Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Events) != len(stored) {
+		t.Fatalf("replayed events = %d, want %d", len(response.Events), len(stored))
+	}
+	for index, delivery := range response.Events {
+		if !proto.Equal(delivery.Event, stored[index]) {
+			t.Fatalf("delivery %d = %v, want %v", index, delivery.Event, stored[index])
+		}
+	}
+	select {
+	case frame := <-remote.sendCh:
+		t.Fatalf("replay dispatched a frame: %v", frame)
+	default:
+	}
+	remote.mu.Lock()
+	_, stillRegistered := remote.tasks["task-1"]
+	remote.mu.Unlock()
+	if !stillRegistered {
+		t.Fatal("replay converged the in-flight task")
+	}
+	select {
+	case result, ok := <-taskCh:
+		t.Fatalf("replay wrote to task channel: result=%+v ok=%v", result, ok)
+	default:
+	}
+	after, err := store.ListAOPEvents(ctx, session.GetSession().GetId(), 100)
+	if err != nil || len(after) != len(stored) {
+		t.Fatalf("stored events after replay = %d, %v", len(after), err)
+	}
+}
+
+func TestWatchEventsResumesAfterCursor(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	session, err := svc.CreateSession(context.Background(), "", "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for seq := 1; seq <= 3; seq++ {
+		if err := store.AddAOPEvent(context.Background(), session.GetSession().GetId(), &aop.Event{
+			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+			Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var deliveries []*aop.EventDelivery
+	err = NewAOPChatServer(svc).watchEvents(&aop.WatchEventsRequest{
+		SessionId: session.GetSession().GetId(), AfterCursor: "2",
+	}, ctx, func(delivery *aop.EventDelivery) error {
+		deliveries = append(deliveries, delivery)
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WatchEvents error = %v, want context canceled", err)
+	}
+	if len(deliveries) != 1 || deliveries[0].Cursor != "3" || deliveries[0].Event.Id != "3" {
+		t.Fatalf("resumed deliveries = %v, want only cursor 3", deliveries)
+	}
+}
+
+func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "upload-session")
+	session, err := store.GetSession(context.Background(), "upload-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Session.NodeId = "upload-agent"
+	if err := store.UpdateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+
+	pool := NewAgentPool(NewHub())
+	remote := newFakeAgent(session.GetSession().GetNodeId(), 1)
+	pool.register(remote)
+	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.HandleFileUpload(ctx, session.GetSession().GetId(), "note.txt", []byte("hello"))
+		done <- err
+	}()
+
+	var upload *aop.Envelope
+	select {
+	case upload = <-remote.sendCh:
+	case <-time.After(time.Second):
+		t.Fatal("upload was not dispatched")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("upload cancellation error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("upload did not return after request cancellation")
+	}
+
+	message, err := aop.Unwrap(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := message.(*filepb.ProtocolMessage); !ok {
+		t.Fatalf("upload dispatch = %T, want file protocol message", message)
+	}
+	taskID := upload.GetId()
+	remote.mu.Lock()
+	_, pending := remote.tasks[taskID]
+	remote.mu.Unlock()
+	if pending {
+		t.Fatal("canceled upload remained in the agent task map")
+	}
+	select {
+	case envelope := <-remote.sendCh:
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetCancelTurnRequest().GetTurnId() != taskID {
+			t.Fatalf("upload cancel envelope = %+v", message)
+		}
+	default:
+		t.Fatal("upload cancellation was not sent to the agent")
 	}
 }

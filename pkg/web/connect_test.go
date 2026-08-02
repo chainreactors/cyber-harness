@@ -1,20 +1,19 @@
 package web
 
 import (
-	"context"
-	"net/http/httptest"
-	"testing"
-
 	"connectrpc.com/connect"
+	"context"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"net/http/httptest"
+	"testing"
 )
 
 func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	service := NewService(ServiceConfig{})
 	defer service.Close()
 
-	server := httptest.NewUnstartedServer(NewConnectHandler("", service, NewAgentPool(nil), nil))
+	server := httptest.NewUnstartedServer(NewConnectHandler("", service, NewAgentPool(nil)))
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()

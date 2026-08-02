@@ -18,7 +18,6 @@ func TestRuntimeOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	option := &cfg.Option{REPLMode: "fast"}
 	rt, err := NewAgentRuntime(ctx, option, telemetry.NopLogger(), &RuntimeConfig{
 		ProviderOptional: true,
-		NoOutput:         true,
 		REPLMode:         REPLPersistent,
 	})
 	if err != nil {
@@ -137,7 +136,6 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 
 	rt, err := NewAgentRuntime(ctx, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), &RuntimeConfig{
 		ProviderOptional: true,
-		NoOutput:         true,
 		REPLMode:         REPLEphemeral,
 	})
 	if err != nil {

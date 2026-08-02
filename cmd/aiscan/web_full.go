@@ -21,6 +21,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
+	webagent "github.com/chainreactors/aiscan/pkg/web/agent"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -127,18 +128,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	// Local agents: the hub can spawn `aiscan agent` children on its own host
-	// (one-click launch/stop from the UI). Each child dials the hub's loopback
-	// web + IOA endpoints — the IOA access key is embedded into the IOA URL — and
-	// registers in the pool like any node. The hub holds the only handle to them,
-	// so they are all killed on shutdown.
-	localAgents := web.NewLocalAgents(hubLocalURL(listenAddr), accessKey, configFile, pool)
-	go func() {
-		<-ctx.Done()
-		localAgents.StopAll()
-	}()
-
-	httpHandler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey)
+	httpHandler := web.NewHandler(service, pool, ioaHandler, newSPAFileServer(staticSub), accessKey)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
@@ -155,10 +145,20 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	logger.Infof("aiscan server listening on http://%s", listenAddr)
 	logger.Infof("  web access token: %s", accessKey)
 	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
-	if localAgent, err := localAgents.Launch(ctx); err != nil {
-		logger.Warnf("auto-start local agent: %s", err)
-	} else {
-		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.Pid)
+	if !opts.NoAgent {
+		// The hub's own agent comes online exactly like any node: an
+		// `aiscan agent` dialed into this server over loopback WebSocket,
+		// just in-process. The pool never sees a special "local" kind.
+		agentOption := *option
+		agentOption.ServerURL = "http://" + accessKey + "@" + listenAddr
+		if agentOption.IOANodeID == "" && agentOption.IOANodeName == "" {
+			agentOption.IOANodeName = "local"
+		}
+		go func() {
+			if err := webagent.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
+				logger.Warnf("embedded agent stopped: %s", err)
+			}
+		}()
 	}
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err

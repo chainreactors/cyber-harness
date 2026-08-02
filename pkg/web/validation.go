@@ -20,7 +20,7 @@ func ValidateLLMConfig(cfg *types.LLMConfig) error {
 	for i, profile := range cfg.Providers {
 		profile = config.NormalizeLLMProvider(profile)
 		if !agentprovider.IsSupportedProvider(profile.Provider) {
-			return fmt.Errorf("LLM provider %q is unsupported: use openai or anthropic", profile.Provider)
+			return fmt.Errorf("LLM provider %q is unsupported: use openai/anthropic or a known OpenAI-compatible vendor", profile.Provider)
 		}
 		if strings.TrimSpace(profile.Model) == "" {
 			name := strings.TrimSpace(profile.Name)

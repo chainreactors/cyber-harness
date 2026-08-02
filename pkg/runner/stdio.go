@@ -91,7 +91,7 @@ func newStdioHost(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 }
 
 func (h *stdioHost) init() error {
-	rt, err := NewAgentRuntime(h.ctx, h.option, h.logger, &RuntimeConfig{NoOutput: true})
+	rt, err := NewAgentRuntime(h.ctx, h.option, h.logger, &RuntimeConfig{})
 	if err != nil {
 		return err
 	}

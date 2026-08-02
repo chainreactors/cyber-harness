@@ -1,19 +1,24 @@
-package agent
+package runner
 
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type aopToolExecutor interface {
+// ToolExecutor is the minimal surface a tool call dispatcher needs.
+// *commands.CommandRegistry implements it.
+type ToolExecutor interface {
 	ExecuteTool(context.Context, string, string) (*tool.Result, error)
 }
 
@@ -30,10 +35,48 @@ type foregroundTool interface {
 	RunForegroundTool(context.Context, string, commands.BashExecOptions) (*tool.Result, error)
 }
 
+// ExecuteToolRequest runs one canonical AOP tool call against the executor
+// and wraps the outcome as a ToolResult event correlated to operationID.
+func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor ToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent]) (*aop.Event, error) {
+	if request == nil || request.Call == nil || operationID == "" {
+		return nil, fmt.Errorf("tool call correlation is invalid")
+	}
+	call := request.Call
+	if call.Id == "" {
+		call.Id = operationID
+	}
+	if call.Id != operationID {
+		return nil, fmt.Errorf("tool call id must match envelope id")
+	}
+	if strings.TrimSpace(call.Name) == "" {
+		return nil, fmt.Errorf("tool name is required")
+	}
+	if call.WorkingDirectory != "" {
+		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkingDirectory})
+	}
+	ctx = output.ContextWithCallID(ctx, operationID)
+	started := time.Now()
+	result, execErr := executeCall(ctx, executor, call, dataBus, operationID)
+	if result == nil {
+		result = &aop.ToolResult{}
+	}
+	if execErr != nil {
+		result.IsError = true
+		result.Output = []*aop.Content{aop.Text(execErr.Error())}
+	}
+	result.CallId = call.Id
+	result.Name = call.Name
+	result.DurationMs = uint64(time.Since(started).Milliseconds())
+	return &aop.Event{
+		Id: runtimeEnvelopeID(), EmittedAt: timestamppb.Now(), SessionId: request.SessionId,
+		TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: result},
+	}, nil
+}
+
 // executeCall runs the tool call. Tools with foreground capability stream
 // stdout lines as tool.data progress events on dataBus while running; all
 // other tools take the plain ExecuteTool path.
-func executeCall(ctx context.Context, executor aopToolExecutor, call *aop.ToolCall, dataBus *eventbus.Bus[output.ToolDataEvent], callID string) (*tool.Result, error) {
+func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall, dataBus *eventbus.Bus[output.ToolDataEvent], callID string) (*tool.Result, error) {
 	arguments := call.GetArguments().GetData()
 	if len(arguments) == 0 {
 		arguments = []byte("{}")

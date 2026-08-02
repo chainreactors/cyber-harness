@@ -252,7 +252,7 @@ func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result ta
 	agent.finishTask(taskID, result)
 }
 
-func (p *AgentPool) forwardAOPFrame(agent Node, correlationID string, event *aop.Event) {
+func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, event *aop.Event) {
 	if event == nil || event.SessionId == "" || event.Payload == nil {
 		return
 	}

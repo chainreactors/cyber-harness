@@ -2,16 +2,15 @@ package web
 
 import (
 	"context"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want types.ScanStatus) *types.Scan {
@@ -78,7 +77,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	}
 
 	// A result that races with cancellation must not resurrect the scan.
-	pool.handleAgentEnvelope(pool.Pick().(*remoteAgent), wrapMessage(t, generateID(), scan.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
+	pool.handleAgentEnvelope(pool.Pick(), wrapMessage(t, generateID(), scan.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: &aop.Event{
 		SessionId: scan.Id, TurnId: scan.Id, Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: scan.Id}},
 	}}}))
 	time.Sleep(20 * time.Millisecond)

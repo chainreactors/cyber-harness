@@ -22,16 +22,13 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	terminalcodec "github.com/chainreactors/aiscan/pkg/web/terminal"
 	"github.com/chainreactors/utils/pty"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type webSocketEnvelopeStream struct {
@@ -403,7 +400,7 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	trackOperation(operationsMu, operations, operationID, taskCancel)
 	go func() {
 		defer finishOperation(operationsMu, operations, operationID, taskCancel)
-		event, err := executeToolRequest(taskCtx, operationID, request, cc.Registry, cc.DataBus)
+		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.DataBus)
 		if err != nil {
 			fail(err.Error())
 			return
@@ -514,42 +511,6 @@ func finishOperation(mu *sync.Mutex, operations map[string]context.CancelFunc, i
 	mu.Lock()
 	delete(operations, id)
 	mu.Unlock()
-}
-
-func executeToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor aopToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent]) (*aop.Event, error) {
-	if request == nil || request.Call == nil || operationID == "" {
-		return nil, fmt.Errorf("tool call correlation is invalid")
-	}
-	call := request.Call
-	if call.Id == "" {
-		call.Id = operationID
-	}
-	if call.Id != operationID {
-		return nil, fmt.Errorf("tool call id must match envelope id")
-	}
-	if strings.TrimSpace(call.Name) == "" {
-		return nil, fmt.Errorf("tool name is required")
-	}
-	if call.WorkingDirectory != "" {
-		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkingDirectory})
-	}
-	ctx = output.ContextWithCallID(ctx, operationID)
-	started := time.Now()
-	result, execErr := executeCall(ctx, executor, call, dataBus, operationID)
-	if result == nil {
-		result = &aop.ToolResult{}
-	}
-	if execErr != nil {
-		result.IsError = true
-		result.Output = []*aop.Content{aop.Text(execErr.Error())}
-	}
-	result.CallId = call.Id
-	result.Name = call.Name
-	result.DurationMs = uint64(time.Since(started).Milliseconds())
-	return &aop.Event{
-		Id: nextEnvelopeID("event"), EmittedAt: timestamppb.Now(), SessionId: request.SessionId,
-		TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: result},
-	}, nil
 }
 
 type fileResultValue struct {

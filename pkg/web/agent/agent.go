@@ -38,7 +38,7 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	defer application.Close()
 	runner.ApplyResolvedProviderOptions(option, application.ProviderConfig)
 	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
-		ExistingApp: application, NoOutput: true, REPLMode: runner.REPLPersistent,
+		ExistingApp: application, REPLMode: runner.REPLPersistent,
 	})
 	if err != nil {
 		return err

@@ -956,20 +956,23 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 	s.broadcastAOPEvent(sessionID, event, cursor)
 }
 
-func (s *Service) broadcastUserMessage(sessionID, turnID string, message *aop.Message) {
+// publishUserMessage records the operator input in the durable AOP timeline.
+// Node delivery remains the caller's RunTurn/Command request; this function
+// does not create a second transport path.
+func (s *Service) publishUserMessage(sessionID, turnID string, message *aop.Message) {
 	if message == nil || len(message.Content) == 0 {
 		return
 	}
-	canonical := proto.Clone(message).(*aop.Message)
-	if canonical.Id == "" {
-		canonical.Id = generateID()
+	userMessage := proto.Clone(message).(*aop.Message)
+	if userMessage.Id == "" {
+		userMessage.Id = generateID()
 	}
-	canonical.Role = "user"
+	userMessage.Role = "user"
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
 		SessionId: sessionID,
 		TurnId:    turnID,
 		Emitter:   "aiscan.web",
-		Payload:   &aop.Event_Message{Message: canonical},
+		Payload:   &aop.Event_Message{Message: userMessage},
 	})
 }
 
@@ -1176,7 +1179,7 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 		map[string]any{"count": len(agents), "agents": list})
 }
 
-func (s *Service) sessionAgent(sessionID string) Node {
+func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	session, err := s.store.GetSession(context.Background(), sessionID)
 	if err != nil || session.GetSession().GetNodeId() == "" {
 		return nil
@@ -1243,7 +1246,7 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		}
 		return "", err
 	}
-	s.broadcastUserMessage(sessionID, "", &aop.Message{Role: "user", Content: []*aop.Content{aop.Text(line)}})
+	s.publishUserMessage(sessionID, "", &aop.Message{Role: "user", Content: []*aop.Content{aop.Text(line)}})
 	if verb, args, ok := parseCommand(line); ok {
 		switch verb {
 		case "help", "agents":

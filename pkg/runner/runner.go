@@ -37,7 +37,7 @@ type AgentRuntime struct {
 	config         agent.Config
 	bus            *eventbus.Bus[*aop.Event]
 	sessionEvents  *sessionEmitter
-	output         *tui.AgentOutput
+	output         RunOutput
 	configFile     string
 	resumeMessages []*aop.Message
 	ctx            context.Context
@@ -65,15 +65,24 @@ const (
 	REPLPersistent
 )
 
+// RunOutput is the presentation sink an entry point may attach to a runtime.
+// The runtime never constructs one — CLI/TUI hosts inject it; headless hosts
+// (stdio, WebSocket nodes, the web hub) leave it nil.
+type RunOutput interface {
+	HandleEvent(*aop.Event)
+	SetContextWindow(int)
+	Start(label, text string)
+	Final(content string)
+}
+
 type RuntimeConfig struct {
-	ExistingApp       *App
-	IOA               *IOAConfig
-	PromptConfig      *PromptConfig
-	NoOutput          bool
-	InteractiveOutput bool
-	ProviderOptional  bool
-	REPLMode          REPLMode
-	MaxPending        int
+	ExistingApp      *App
+	IOA              *IOAConfig
+	PromptConfig     *PromptConfig
+	Output           RunOutput
+	ProviderOptional bool
+	REPLMode         REPLMode
+	MaxPending       int
 }
 
 const baseAgentSkillName = "aiscan"
@@ -190,12 +199,8 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 	rt.systemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
-	if rc == nil || !rc.NoOutput {
-		if rc != nil && rc.InteractiveOutput {
-			rt.output = tui.NewAgentOutput(option)
-		} else {
-			rt.output = tui.NewStaticAgentOutput(option)
-		}
+	if rc != nil {
+		rt.output = rc.Output
 	}
 
 	publicBus := eventbus.New[*aop.Event]()
@@ -241,7 +246,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 			if result == nil || len(result.Messages) == 0 {
 				return
 			}
-			if err := agent.SaveSession(sessDir, &agent.SessionData{
+			if err := agent.SaveCheckpoint(sessDir, &agent.CheckpointData{
 				Model:          option.Model,
 				Provider:       option.Provider,
 				Messages:       result.Messages,
@@ -280,7 +285,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 
 	if option.Resume != "" {
 		path := option.Resume
-		data, err := agent.LoadSession(path)
+		data, err := agent.LoadCheckpoint(path)
 		if err != nil {
 			rt.Close()
 			return nil, fmt.Errorf("resume session: %w", err)
@@ -455,7 +460,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	rt, err := NewAgentRuntime(ctx, option, logger, nil)
+	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{Output: tui.NewStaticAgentOutput(option)})
 	if err != nil {
 		return err
 	}
@@ -496,7 +501,6 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
 	rt, err := NewAgentRuntime(ctx, option, logger, &RuntimeConfig{
-		NoOutput: true,
 		REPLMode: REPLEphemeral,
 	})
 	if err != nil {

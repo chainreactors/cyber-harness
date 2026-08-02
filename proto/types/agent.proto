@@ -19,21 +19,8 @@ message AgentView {
   bool busy = 7;
 }
 
-message LocalAgent {
-  string name = 1;
-  int32 pid = 2;
-  bool registered = 3;
-  bool busy = 4;
-}
-
 message ListAgentsRequest {}
 message ListAgentsResponse { repeated AgentView agents = 1; }
-message ListLocalAgentsRequest {}
-message ListLocalAgentsResponse { repeated LocalAgent agents = 1; }
-message LaunchLocalAgentRequest {}
-message LaunchLocalAgentResponse { LocalAgent agent = 1; }
-message StopLocalAgentRequest { string name = 1; }
-message StopLocalAgentResponse {}
 
 message AgentRunOptions {
   string eval_criteria = 1;

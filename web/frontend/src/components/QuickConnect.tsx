@@ -157,6 +157,8 @@ export default function QuickConnect({ serverURL, version }: Props) {
 
       {open && (
         <div
+          role="dialog"
+          aria-label={t('quickConnectTitle')}
           className={cn(
             'z-50 rounded-lg border border-border bg-popover p-3 shadow-lg',
             // Phone: a right-aligned dropdown spills off the LEFT edge here. The

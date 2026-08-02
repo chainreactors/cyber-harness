@@ -14,12 +14,36 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+type recordingBash struct {
+	command string
+	options commands.BashExecOptions
+}
+
+func (*recordingBash) Name() string        { return "bash" }
+func (*recordingBash) Description() string { return "test bash" }
+func (*recordingBash) Definition() *tool.Definition {
+	return tool.Def("bash", "test bash", struct {
+		Command string `json:"command"`
+	}{})
+}
+func (*recordingBash) Execute(context.Context, string) (*tool.Result, error) {
+	return nil, nil
+}
+func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options commands.BashExecOptions) (*tool.Result, error) {
+	b.command = command
+	b.options = options
+	options.OnOutput([]byte("streamed\n"))
+	result := tool.TextResult("streamed")
+	return result, nil
+}
 
 type hubScript struct {
 	t          *testing.T

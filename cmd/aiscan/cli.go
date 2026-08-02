@@ -32,6 +32,7 @@ type webCommand struct {
 	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
 	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
 	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	NoAgent            bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
 	cfg.LLMOptions     `group:"LLM Options"`
 	cfg.ScannerOptions `group:"Scanner Options"`
 	cfg.IOAOptions     `group:"Server Options"`

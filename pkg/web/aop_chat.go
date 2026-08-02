@@ -208,7 +208,7 @@ func (s *aopChatServer) RunTurn(ctx context.Context, requestID string, req *aop.
 		return nil, err
 	}
 	if !req.ContinueSession {
-		s.service.broadcastUserMessage(req.SessionId, turnID, forward.Input)
+		s.service.publishUserMessage(req.SessionId, turnID, forward.Input)
 	}
 	s.service.handleAgentRun(req.SessionId, &forward)
 	return response, nil
