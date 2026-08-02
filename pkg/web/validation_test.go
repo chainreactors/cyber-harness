@@ -9,10 +9,20 @@ import (
 
 func TestValidateLLMConfigRejectsUnsupportedProvider(t *testing.T) {
 	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
+		Provider: "bogus-vendor",
+		Model:    "some-model",
+	}}}
+	if err := ValidateLLMConfig(cfg); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("ValidateLLMConfig() error = %v", err)
+	}
+}
+
+func TestValidateLLMConfigAcceptsVendorAlias(t *testing.T) {
+	cfg := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{
 		Provider: "deepseek",
 		Model:    "deepseek-chat",
 	}}}
-	if err := ValidateLLMConfig(cfg); err == nil || !strings.Contains(err.Error(), "use openai or anthropic") {
+	if err := ValidateLLMConfig(cfg); err != nil {
 		t.Fatalf("ValidateLLMConfig() error = %v", err)
 	}
 }

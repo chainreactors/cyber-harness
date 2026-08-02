@@ -626,8 +626,8 @@ func TestResolveRuntimeConfigRejectsUnsupportedProvider(t *testing.T) {
 		}
 		defer os.Chdir(origDir)
 
-		option := Option{LLMOptions: LLMOptions{Provider: "deepseek"}}
-		if _, err := ResolveRuntimeConfig(&option, true); err == nil || !strings.Contains(err.Error(), "use openai or anthropic") {
+		option := Option{LLMOptions: LLMOptions{Provider: "bogus-vendor"}}
+		if _, err := ResolveRuntimeConfig(&option, true); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 			t.Fatalf("ResolveRuntimeConfig() error = %v", err)
 		}
 	})

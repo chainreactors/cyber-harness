@@ -10,10 +10,10 @@ import (
 
 type Handler struct{ handler http.Handler }
 
-func NewHandler(service *Service, agents *AgentPool, local *LocalAgents, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
+func NewHandler(service *Service, agents *AgentPool, ioaHandler http.Handler, static http.Handler, accessKey string) *Handler {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, accessKey)
-	connectHandler := NewConnectHandler(accessKey, service, agents, local)
+	connectHandler := NewConnectHandler(accessKey, service, agents)
 	mux.Handle("/"+rpc.SessionServiceName+"/", connectHandler)
 	mux.Handle("/"+rpc.ScanServiceName+"/", connectHandler)
 	mux.Handle("/"+rpc.ConfigServiceName+"/", connectHandler)

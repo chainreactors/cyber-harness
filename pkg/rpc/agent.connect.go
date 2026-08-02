@@ -35,23 +35,11 @@ const (
 const (
 	// AgentServiceListAgentsProcedure is the fully-qualified name of the AgentService's ListAgents RPC.
 	AgentServiceListAgentsProcedure = "/aiscan.rpc.agent.AgentService/ListAgents"
-	// AgentServiceListLocalAgentsProcedure is the fully-qualified name of the AgentService's
-	// ListLocalAgents RPC.
-	AgentServiceListLocalAgentsProcedure = "/aiscan.rpc.agent.AgentService/ListLocalAgents"
-	// AgentServiceLaunchLocalAgentProcedure is the fully-qualified name of the AgentService's
-	// LaunchLocalAgent RPC.
-	AgentServiceLaunchLocalAgentProcedure = "/aiscan.rpc.agent.AgentService/LaunchLocalAgent"
-	// AgentServiceStopLocalAgentProcedure is the fully-qualified name of the AgentService's
-	// StopLocalAgent RPC.
-	AgentServiceStopLocalAgentProcedure = "/aiscan.rpc.agent.AgentService/StopLocalAgent"
 )
 
 // AgentServiceClient is a client for the aiscan.rpc.agent.AgentService service.
 type AgentServiceClient interface {
 	ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error)
-	ListLocalAgents(context.Context, *connect.Request[types.ListLocalAgentsRequest]) (*connect.Response[types.ListLocalAgentsResponse], error)
-	LaunchLocalAgent(context.Context, *connect.Request[types.LaunchLocalAgentRequest]) (*connect.Response[types.LaunchLocalAgentResponse], error)
-	StopLocalAgent(context.Context, *connect.Request[types.StopLocalAgentRequest]) (*connect.Response[types.StopLocalAgentResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the aiscan.rpc.agent.AgentService service. By
@@ -71,33 +59,12 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("ListAgents")),
 			connect.WithClientOptions(opts...),
 		),
-		listLocalAgents: connect.NewClient[types.ListLocalAgentsRequest, types.ListLocalAgentsResponse](
-			httpClient,
-			baseURL+AgentServiceListLocalAgentsProcedure,
-			connect.WithSchema(agentServiceMethods.ByName("ListLocalAgents")),
-			connect.WithClientOptions(opts...),
-		),
-		launchLocalAgent: connect.NewClient[types.LaunchLocalAgentRequest, types.LaunchLocalAgentResponse](
-			httpClient,
-			baseURL+AgentServiceLaunchLocalAgentProcedure,
-			connect.WithSchema(agentServiceMethods.ByName("LaunchLocalAgent")),
-			connect.WithClientOptions(opts...),
-		),
-		stopLocalAgent: connect.NewClient[types.StopLocalAgentRequest, types.StopLocalAgentResponse](
-			httpClient,
-			baseURL+AgentServiceStopLocalAgentProcedure,
-			connect.WithSchema(agentServiceMethods.ByName("StopLocalAgent")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
 // agentServiceClient implements AgentServiceClient.
 type agentServiceClient struct {
-	listAgents       *connect.Client[types.ListAgentsRequest, types.ListAgentsResponse]
-	listLocalAgents  *connect.Client[types.ListLocalAgentsRequest, types.ListLocalAgentsResponse]
-	launchLocalAgent *connect.Client[types.LaunchLocalAgentRequest, types.LaunchLocalAgentResponse]
-	stopLocalAgent   *connect.Client[types.StopLocalAgentRequest, types.StopLocalAgentResponse]
+	listAgents *connect.Client[types.ListAgentsRequest, types.ListAgentsResponse]
 }
 
 // ListAgents calls aiscan.rpc.agent.AgentService.ListAgents.
@@ -105,27 +72,9 @@ func (c *agentServiceClient) ListAgents(ctx context.Context, req *connect.Reques
 	return c.listAgents.CallUnary(ctx, req)
 }
 
-// ListLocalAgents calls aiscan.rpc.agent.AgentService.ListLocalAgents.
-func (c *agentServiceClient) ListLocalAgents(ctx context.Context, req *connect.Request[types.ListLocalAgentsRequest]) (*connect.Response[types.ListLocalAgentsResponse], error) {
-	return c.listLocalAgents.CallUnary(ctx, req)
-}
-
-// LaunchLocalAgent calls aiscan.rpc.agent.AgentService.LaunchLocalAgent.
-func (c *agentServiceClient) LaunchLocalAgent(ctx context.Context, req *connect.Request[types.LaunchLocalAgentRequest]) (*connect.Response[types.LaunchLocalAgentResponse], error) {
-	return c.launchLocalAgent.CallUnary(ctx, req)
-}
-
-// StopLocalAgent calls aiscan.rpc.agent.AgentService.StopLocalAgent.
-func (c *agentServiceClient) StopLocalAgent(ctx context.Context, req *connect.Request[types.StopLocalAgentRequest]) (*connect.Response[types.StopLocalAgentResponse], error) {
-	return c.stopLocalAgent.CallUnary(ctx, req)
-}
-
 // AgentServiceHandler is an implementation of the aiscan.rpc.agent.AgentService service.
 type AgentServiceHandler interface {
 	ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error)
-	ListLocalAgents(context.Context, *connect.Request[types.ListLocalAgentsRequest]) (*connect.Response[types.ListLocalAgentsResponse], error)
-	LaunchLocalAgent(context.Context, *connect.Request[types.LaunchLocalAgentRequest]) (*connect.Response[types.LaunchLocalAgentResponse], error)
-	StopLocalAgent(context.Context, *connect.Request[types.StopLocalAgentRequest]) (*connect.Response[types.StopLocalAgentResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -141,34 +90,10 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("ListAgents")),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentServiceListLocalAgentsHandler := connect.NewUnaryHandler(
-		AgentServiceListLocalAgentsProcedure,
-		svc.ListLocalAgents,
-		connect.WithSchema(agentServiceMethods.ByName("ListLocalAgents")),
-		connect.WithHandlerOptions(opts...),
-	)
-	agentServiceLaunchLocalAgentHandler := connect.NewUnaryHandler(
-		AgentServiceLaunchLocalAgentProcedure,
-		svc.LaunchLocalAgent,
-		connect.WithSchema(agentServiceMethods.ByName("LaunchLocalAgent")),
-		connect.WithHandlerOptions(opts...),
-	)
-	agentServiceStopLocalAgentHandler := connect.NewUnaryHandler(
-		AgentServiceStopLocalAgentProcedure,
-		svc.StopLocalAgent,
-		connect.WithSchema(agentServiceMethods.ByName("StopLocalAgent")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/aiscan.rpc.agent.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceListAgentsProcedure:
 			agentServiceListAgentsHandler.ServeHTTP(w, r)
-		case AgentServiceListLocalAgentsProcedure:
-			agentServiceListLocalAgentsHandler.ServeHTTP(w, r)
-		case AgentServiceLaunchLocalAgentProcedure:
-			agentServiceLaunchLocalAgentHandler.ServeHTTP(w, r)
-		case AgentServiceStopLocalAgentProcedure:
-			agentServiceStopLocalAgentHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -180,16 +105,4 @@ type UnimplementedAgentServiceHandler struct{}
 
 func (UnimplementedAgentServiceHandler) ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.agent.AgentService.ListAgents is not implemented"))
-}
-
-func (UnimplementedAgentServiceHandler) ListLocalAgents(context.Context, *connect.Request[types.ListLocalAgentsRequest]) (*connect.Response[types.ListLocalAgentsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.agent.AgentService.ListLocalAgents is not implemented"))
-}
-
-func (UnimplementedAgentServiceHandler) LaunchLocalAgent(context.Context, *connect.Request[types.LaunchLocalAgentRequest]) (*connect.Response[types.LaunchLocalAgentResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.agent.AgentService.LaunchLocalAgent is not implemented"))
-}
-
-func (UnimplementedAgentServiceHandler) StopLocalAgent(context.Context, *connect.Request[types.StopLocalAgentRequest]) (*connect.Response[types.StopLocalAgentResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.agent.AgentService.StopLocalAgent is not implemented"))
 }

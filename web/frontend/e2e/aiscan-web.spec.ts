@@ -111,10 +111,10 @@ test.describe('ConnectRPC management plane', () => {
     expect(config.config?.loaded).toBe(true)
 
     const agents = await requireRegisteredAgents(request)
-    expect(agents[0].hello?.nodeId).toBe('local-1')
+    expect(agents.some((agent) => agent.hello?.nodeId === 'local')).toBeTruthy()
   })
 
-  test('session, scan, SCO and local-agent queries use ConnectRPC', async ({ request }) => {
+  test('session, scan, SCO and node queries use ConnectRPC', async ({ request }) => {
     const sessions = await connectRPC(request, '/aiscan.rpc.chat.SessionService/ListSessions', { includeClosed: true })
     expect(Array.isArray(sessions.sessions ?? [])).toBeTruthy()
 
@@ -124,8 +124,9 @@ test.describe('ConnectRPC management plane', () => {
     const nodes = await connectRPC(request, '/aiscan.rpc.sco.SCOService/ListNodes', { limit: 10 })
     expect(Array.isArray(nodes.nodes?.nodes ?? [])).toBeTruthy()
 
-    const local = await connectRPC(request, '/aiscan.rpc.agent.AgentService/ListLocalAgents', {})
-    expect(Array.isArray(local.agents ?? [])).toBeTruthy()
+    const agents = await connectRPC(request, '/aiscan.rpc.agent.AgentService/ListAgents', {})
+    expect(Array.isArray(agents.agents ?? [])).toBeTruthy()
+    expect(agents.agents?.some((agent: { hello?: { nodeId?: string } }) => agent.hello?.nodeId === 'local')).toBeTruthy()
   })
 
   test('retired REST management routes stay removed', async ({ request }) => {

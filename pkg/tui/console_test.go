@@ -299,7 +299,7 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	dir := t.TempDir()
-	if err := agent.SaveSession(dir, &agent.SessionData{
+	if err := agent.SaveCheckpoint(dir, &agent.CheckpointData{
 		Model:    "test-model",
 		Provider: "capture",
 		Messages: []*aop.Message{
@@ -309,7 +309,7 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-	sessions, err := agent.ListSessions(dir)
+	sessions, err := agent.ListCheckpoints(dir)
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}

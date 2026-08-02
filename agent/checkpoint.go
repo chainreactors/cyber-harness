@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-type SessionData struct {
+type CheckpointData struct {
 	Version   int            `json:"version"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -23,7 +23,7 @@ type SessionData struct {
 	MessageCounter int64 `json:"message_counter,omitempty"`
 }
 
-type SessionInfo struct {
+type CheckpointInfo struct {
 	Path      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -33,9 +33,9 @@ type SessionInfo struct {
 	Messages  int
 }
 
-const sessionVersion = 1
+const checkpointVersion = 1
 
-func SaveSession(dir string, data *SessionData) error {
+func SaveCheckpoint(dir string, data *CheckpointData) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
@@ -44,10 +44,10 @@ func SaveSession(dir string, data *SessionData) error {
 		data.CreatedAt = now
 	}
 	data.UpdatedAt = now
-	data.Version = sessionVersion
+	data.Version = checkpointVersion
 	data.Messages = sanitizeMessagesForSave(data.Messages)
 
-	raw, err := json.MarshalIndent(sessionJSON{
+	raw, err := json.MarshalIndent(checkpointJSON{
 		Version:        data.Version,
 		CreatedAt:      data.CreatedAt,
 		UpdatedAt:      data.UpdatedAt,
@@ -69,12 +69,12 @@ func SaveSession(dir string, data *SessionData) error {
 	return nil
 }
 
-func LoadSession(path string) (*SessionData, error) {
+func LoadCheckpoint(path string) (*CheckpointData, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read session file: %w", err)
 	}
-	var data sessionJSON
+	var data checkpointJSON
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, fmt.Errorf("parse session file: %w", err)
 	}
@@ -82,7 +82,7 @@ func LoadSession(path string) (*SessionData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse session messages: %w", err)
 	}
-	return &SessionData{
+	return &CheckpointData{
 		Version:        data.Version,
 		CreatedAt:      data.CreatedAt,
 		UpdatedAt:      data.UpdatedAt,
@@ -93,9 +93,9 @@ func LoadSession(path string) (*SessionData, error) {
 	}, nil
 }
 
-// sessionJSON is the on-disk envelope. Messages are stored as proto-JSON so
+// checkpointJSON is the on-disk envelope. Messages are stored as proto-JSON so
 // the file format mirrors the AOP truth instead of a vendor shape.
-type sessionJSON struct {
+type checkpointJSON struct {
 	Version        int               `json:"version"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
@@ -129,7 +129,7 @@ func unmarshalMessages(raw []json.RawMessage) ([]*aop.Message, error) {
 	return out, nil
 }
 
-type sessionMeta struct {
+type checkpointMeta struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	Model     string            `json:"model,omitempty"`
@@ -137,7 +137,7 @@ type sessionMeta struct {
 	Messages  []json.RawMessage `json:"messages"`
 }
 
-func ListSessions(dir string) ([]SessionInfo, error) {
+func ListCheckpoints(dir string) ([]CheckpointInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -145,7 +145,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		}
 		return nil, fmt.Errorf("read session dir: %w", err)
 	}
-	sessions := make([]SessionInfo, 0, len(entries))
+	sessions := make([]CheckpointInfo, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -158,7 +158,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		if err != nil {
 			continue
 		}
-		var meta sessionMeta
+		var meta checkpointMeta
 		if err := json.Unmarshal(raw, &meta); err != nil {
 			continue
 		}
@@ -167,7 +167,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		if fi != nil {
 			modTime = fi.ModTime()
 		}
-		sessions = append(sessions, SessionInfo{
+		sessions = append(sessions, CheckpointInfo{
 			Path:      path,
 			CreatedAt: meta.CreatedAt,
 			UpdatedAt: meta.UpdatedAt,
@@ -188,7 +188,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	return sessions, nil
 }
 
-func (s SessionInfo) SortTime() time.Time {
+func (s CheckpointInfo) SortTime() time.Time {
 	switch {
 	case !s.UpdatedAt.IsZero():
 		return s.UpdatedAt

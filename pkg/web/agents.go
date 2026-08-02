@@ -161,21 +161,6 @@ func (s *nodeState) closeAllTasks() {
 	s.mu.Unlock()
 }
 
-// Node is one AgentPool member: an agent that can execute sessions, turns,
-// commands and tool calls. remoteNode speaks AOP over WebSocket to a remote
-// `aiscan agent` process; inprocessNode wraps an in-hub AgentRuntime.
-type Node interface {
-	NodeID() string
-	Name() string
-	state() *nodeState
-	view() *types.AgentView
-	commandSpecs() []*types.CommandSpec
-	enqueue(*aop.Envelope) error
-	reloadConfig(*types.DistributeConfig)
-	chatCapable() bool
-	shutdown()
-}
-
 type remoteAgent struct {
 	*nodeState
 	nodeID       string
@@ -252,12 +237,12 @@ type SCOStore interface {
 	UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error
 }
 
-// AgentPool manages connected agent nodes — remote `aiscan agent` processes
-// over WebSocket and the hub's own in-process runtime — behind the Node
-// interface.
+// AgentPool manages connected aiscan agent nodes. Every member is a node that
+// registered over the application WebSocket — including the hub's own embedded
+// agent, which connects over loopback like any other node.
 type AgentPool struct {
 	mu             sync.RWMutex
-	agents         map[string]Node
+	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
 	sco            SCOStore
@@ -272,7 +257,7 @@ type AgentPool struct {
 
 func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
-		agents:         make(map[string]Node),
+		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
 		ptySubs:        make(map[string]chan pty.Frame),
 		ptyNodeIDs:     make(map[string]string),
@@ -289,7 +274,7 @@ func (p *AgentPool) SetSCOStore(store SCOStore) {
 	p.sco = store
 }
 
-func (p *AgentPool) register(a Node) {
+func (p *AgentPool) register(a *remoteAgent) {
 	p.mu.Lock()
 	old := p.agents[a.NodeID()]
 	p.agents[a.NodeID()] = a
@@ -301,12 +286,10 @@ func (p *AgentPool) register(a Node) {
 	if old != nil && old != a {
 		old.shutdown()
 	}
-	if remote, ok := a.(*remoteAgent); ok {
-		p.rebindPTY(remote)
-	}
+	p.rebindPTY(a)
 }
 
-func (p *AgentPool) unregister(a Node) {
+func (p *AgentPool) unregister(a *remoteAgent) {
 	p.mu.Lock()
 	// Only vacate the slot if it still holds THIS instance. After a reconnect the
 	// slot was already reassigned to the replacement under the same key; the old
@@ -322,7 +305,7 @@ func (p *AgentPool) unregister(a Node) {
 	a.state().closeAllTasks()
 }
 
-func (p *AgentPool) get(nodeID string) Node {
+func (p *AgentPool) get(nodeID string) *remoteAgent {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.agents[nodeID]
@@ -345,10 +328,10 @@ func (p *AgentPool) Count() int {
 }
 
 // Pick selects an idle agent, or any agent if none idle.
-func (p *AgentPool) Pick() Node {
+func (p *AgentPool) Pick() *remoteAgent {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	var fallback Node
+	var fallback *remoteAgent
 	for _, a := range p.agents {
 		if !a.state().busy() {
 			return a
@@ -362,10 +345,10 @@ func (p *AgentPool) Pick() Node {
 
 // PickChat selects an idle LLM-capable agent, or any LLM-capable agent if all
 // are busy.
-func (p *AgentPool) PickChat() Node {
+func (p *AgentPool) PickChat() *remoteAgent {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	var fallback Node
+	var fallback *remoteAgent
 	for _, a := range p.agents {
 		if !a.chatCapable() {
 			continue
@@ -454,7 +437,7 @@ func (p *AgentPool) DispatchCloseSession(nodeID, requestID string, request *aop.
 // ensureSessionOpen optimistically marks sessionID open on the node and sends
 // the OpenSessionRequest once. Used by DispatchRun/DispatchCommand, which can
 // arrive on a session the hub never explicitly opened.
-func (p *AgentPool) ensureSessionOpen(a Node, sessionID string) error {
+func (p *AgentPool) ensureSessionOpen(a *remoteAgent, sessionID string) error {
 	st := a.state()
 	st.mu.Lock()
 	_, opened := st.openSessions[sessionID]
@@ -541,7 +524,7 @@ func (p *AgentPool) BroadcastConfigReload(config *types.DistributeConfig) int {
 		return 0
 	}
 	p.mu.RLock()
-	agents := make([]Node, 0, len(p.agents))
+	agents := make([]*remoteAgent, 0, len(p.agents))
 	for _, a := range p.agents {
 		agents = append(agents, a)
 	}

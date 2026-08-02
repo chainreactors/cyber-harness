@@ -1,10 +1,9 @@
 package commands
 
 import (
-	"testing"
-
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/tool"
+	"testing"
 )
 
 type testReadArgs struct {

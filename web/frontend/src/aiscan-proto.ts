@@ -21,7 +21,6 @@ export {
   AgentRunOptionsSchema as RunOptionsSchema,
   WebMessageMetadataSchema,
   type AgentView,
-  type LocalAgent,
 } from './gen/types/agent_pb.js'
 export {
   type SessionRecord,

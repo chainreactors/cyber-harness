@@ -16,7 +16,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file types/agent.proto.
  */
 export const file_types_agent: GenFile = /*@__PURE__*/
-  fileDesc("ChF0eXBlcy9hZ2VudC5wcm90bxIMYWlzY2FuLmFnZW50IuIBCglBZ2VudFZpZXcSHgoFaGVsbG8YASABKAsyDy5hb3AuQWdlbnRIZWxsbxIgCgZzdGF0dXMYAiABKAsyEC5hb3AuQWdlbnRTdGF0dXMSHgoFc3RhdHMYAyABKAsyDy5hb3AuQWdlbnRTdGF0cxIwCgxjb25uZWN0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCGNvbW1hbmRzGAYgAygLMhsuYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFNwZWMSDAoEYnVzeRgHIAEoCEoECAQQBSJJCgpMb2NhbEFnZW50EgwKBG5hbWUYASABKAkSCwoDcGlkGAIgASgFEhIKCnJlZ2lzdGVyZWQYAyABKAgSDAoEYnVzeRgEIAEoCCITChFMaXN0QWdlbnRzUmVxdWVzdCI9ChJMaXN0QWdlbnRzUmVzcG9uc2USJwoGYWdlbnRzGAEgAygLMhcuYWlzY2FuLmFnZW50LkFnZW50VmlldyIYChZMaXN0TG9jYWxBZ2VudHNSZXF1ZXN0IkMKF0xpc3RMb2NhbEFnZW50c1Jlc3BvbnNlEigKBmFnZW50cxgBIAMoCzIYLmFpc2Nhbi5hZ2VudC5Mb2NhbEFnZW50IhkKF0xhdW5jaExvY2FsQWdlbnRSZXF1ZXN0IkMKGExhdW5jaExvY2FsQWdlbnRSZXNwb25zZRInCgVhZ2VudBgBIAEoCzIYLmFpc2Nhbi5hZ2VudC5Mb2NhbEFnZW50IiUKFVN0b3BMb2NhbEFnZW50UmVxdWVzdBIMCgRuYW1lGAEgASgJIhgKFlN0b3BMb2NhbEFnZW50UmVzcG9uc2UiQQoPQWdlbnRSdW5PcHRpb25zEhUKDWV2YWxfY3JpdGVyaWEYASABKAkSFwoPZXZhbF9tYXhfcm91bmRzGAIgASgNIjMKDUNvbW1hbmREZXRhaWwSDAoEbGluZRgBIAEoCRIUCgxwcmVzZW50YXRpb24YAiABKAkiYgoNQ29tcGFjdERldGFpbBINCgVlcnJvchgBIAEoCRIVCg1rZXB0X21lc3NhZ2VzGAIgASgEEhQKDHRva2Vuc19hZnRlchgDIAEoBBIVCg10b2tlbnNfYmVmb3JlGAQgASgEIoIBChBEZWxlZ2F0aW9uRGV0YWlsEhAKCGFnZW50X2lkGAEgASgJEhIKCmFnZW50X25hbWUYAiABKAkSEgoKYWdlbnRfdHlwZRgDIAEoCRIUCgxjb250ZXh0X21vZGUYBCABKAkSEAoIcnVuX21vZGUYBSABKAkSDAoEdGFzaxgGIAEoCSIzCgtFdmFsQ29udHJvbBIQCghjcml0ZXJpYRgBIAEoCRISCgptYXhfcm91bmRzGAIgASgNIlwKCkV2YWxEZXRhaWwSDQoFZXJyb3IYASABKAkSEgoKbWF4X3JvdW5kcxgCIAEoDRIMCgRwYXNzGAMgASgIEg4KBnJlYXNvbhgEIAEoCRINCgVyb3VuZBgFIAEoDSI9Cg1CdWRnZXRXYXJuaW5nEhYKDmNvbnRleHRfdG9rZW5zGAEgASgEEhQKDHRva2VuX2J1ZGdldBgCIAEoBCJXChBMTE1SZXF1ZXN0RGV0YWlsEg0KBW1vZGVsGAEgASgJEhAKCG1lc3NhZ2VzGAIgASgNEhIKCm1heF90b2tlbnMYAyABKA0SDgoGc3RyZWFtGAQgASgIIlwKEldlYk1lc3NhZ2VNZXRhZGF0YRIPCgdub2RlX2lkGAEgASgJEgwKBGNvZGUYAiABKAkSJwoGcGFyYW1zGAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEIxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy90eXBlczt0eXBlc2IGcHJvdG8z", [file_aop_protocol, file_types_command, file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("ChF0eXBlcy9hZ2VudC5wcm90bxIMYWlzY2FuLmFnZW50IuIBCglBZ2VudFZpZXcSHgoFaGVsbG8YASABKAsyDy5hb3AuQWdlbnRIZWxsbxIgCgZzdGF0dXMYAiABKAsyEC5hb3AuQWdlbnRTdGF0dXMSHgoFc3RhdHMYAyABKAsyDy5hb3AuQWdlbnRTdGF0cxIwCgxjb25uZWN0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCGNvbW1hbmRzGAYgAygLMhsuYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFNwZWMSDAoEYnVzeRgHIAEoCEoECAQQBSITChFMaXN0QWdlbnRzUmVxdWVzdCI9ChJMaXN0QWdlbnRzUmVzcG9uc2USJwoGYWdlbnRzGAEgAygLMhcuYWlzY2FuLmFnZW50LkFnZW50VmlldyJBCg9BZ2VudFJ1bk9wdGlvbnMSFQoNZXZhbF9jcml0ZXJpYRgBIAEoCRIXCg9ldmFsX21heF9yb3VuZHMYAiABKA0iMwoNQ29tbWFuZERldGFpbBIMCgRsaW5lGAEgASgJEhQKDHByZXNlbnRhdGlvbhgCIAEoCSJiCg1Db21wYWN0RGV0YWlsEg0KBWVycm9yGAEgASgJEhUKDWtlcHRfbWVzc2FnZXMYAiABKAQSFAoMdG9rZW5zX2FmdGVyGAMgASgEEhUKDXRva2Vuc19iZWZvcmUYBCABKAQiggEKEERlbGVnYXRpb25EZXRhaWwSEAoIYWdlbnRfaWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRISCgphZ2VudF90eXBlGAMgASgJEhQKDGNvbnRleHRfbW9kZRgEIAEoCRIQCghydW5fbW9kZRgFIAEoCRIMCgR0YXNrGAYgASgJIjMKC0V2YWxDb250cm9sEhAKCGNyaXRlcmlhGAEgASgJEhIKCm1heF9yb3VuZHMYAiABKA0iXAoKRXZhbERldGFpbBINCgVlcnJvchgBIAEoCRISCgptYXhfcm91bmRzGAIgASgNEgwKBHBhc3MYAyABKAgSDgoGcmVhc29uGAQgASgJEg0KBXJvdW5kGAUgASgNIj0KDUJ1ZGdldFdhcm5pbmcSFgoOY29udGV4dF90b2tlbnMYASABKAQSFAoMdG9rZW5fYnVkZ2V0GAIgASgEIlcKEExMTVJlcXVlc3REZXRhaWwSDQoFbW9kZWwYASABKAkSEAoIbWVzc2FnZXMYAiABKA0SEgoKbWF4X3Rva2VucxgDIAEoDRIOCgZzdHJlYW0YBCABKAgiXAoSV2ViTWVzc2FnZU1ldGFkYXRhEg8KB25vZGVfaWQYASABKAkSDAoEY29kZRgCIAEoCRInCgZwYXJhbXMYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0QjFaL2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3R5cGVzO3R5cGVzYgZwcm90bzM", [file_aop_protocol, file_types_command, file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message aiscan.agent.AgentView
@@ -61,38 +61,6 @@ export const AgentViewSchema: GenMessage<AgentView> = /*@__PURE__*/
   messageDesc(file_types_agent, 0);
 
 /**
- * @generated from message aiscan.agent.LocalAgent
- */
-export type LocalAgent = Message<"aiscan.agent.LocalAgent"> & {
-  /**
-   * @generated from field: string name = 1;
-   */
-  name: string;
-
-  /**
-   * @generated from field: int32 pid = 2;
-   */
-  pid: number;
-
-  /**
-   * @generated from field: bool registered = 3;
-   */
-  registered: boolean;
-
-  /**
-   * @generated from field: bool busy = 4;
-   */
-  busy: boolean;
-};
-
-/**
- * Describes the message aiscan.agent.LocalAgent.
- * Use `create(LocalAgentSchema)` to create a new message.
- */
-export const LocalAgentSchema: GenMessage<LocalAgent> = /*@__PURE__*/
-  messageDesc(file_types_agent, 1);
-
-/**
  * @generated from message aiscan.agent.ListAgentsRequest
  */
 export type ListAgentsRequest = Message<"aiscan.agent.ListAgentsRequest"> & {
@@ -103,7 +71,7 @@ export type ListAgentsRequest = Message<"aiscan.agent.ListAgentsRequest"> & {
  * Use `create(ListAgentsRequestSchema)` to create a new message.
  */
 export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_types_agent, 2);
+  messageDesc(file_types_agent, 1);
 
 /**
  * @generated from message aiscan.agent.ListAgentsResponse
@@ -120,97 +88,7 @@ export type ListAgentsResponse = Message<"aiscan.agent.ListAgentsResponse"> & {
  * Use `create(ListAgentsResponseSchema)` to create a new message.
  */
 export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_types_agent, 3);
-
-/**
- * @generated from message aiscan.agent.ListLocalAgentsRequest
- */
-export type ListLocalAgentsRequest = Message<"aiscan.agent.ListLocalAgentsRequest"> & {
-};
-
-/**
- * Describes the message aiscan.agent.ListLocalAgentsRequest.
- * Use `create(ListLocalAgentsRequestSchema)` to create a new message.
- */
-export const ListLocalAgentsRequestSchema: GenMessage<ListLocalAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_types_agent, 4);
-
-/**
- * @generated from message aiscan.agent.ListLocalAgentsResponse
- */
-export type ListLocalAgentsResponse = Message<"aiscan.agent.ListLocalAgentsResponse"> & {
-  /**
-   * @generated from field: repeated aiscan.agent.LocalAgent agents = 1;
-   */
-  agents: LocalAgent[];
-};
-
-/**
- * Describes the message aiscan.agent.ListLocalAgentsResponse.
- * Use `create(ListLocalAgentsResponseSchema)` to create a new message.
- */
-export const ListLocalAgentsResponseSchema: GenMessage<ListLocalAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_types_agent, 5);
-
-/**
- * @generated from message aiscan.agent.LaunchLocalAgentRequest
- */
-export type LaunchLocalAgentRequest = Message<"aiscan.agent.LaunchLocalAgentRequest"> & {
-};
-
-/**
- * Describes the message aiscan.agent.LaunchLocalAgentRequest.
- * Use `create(LaunchLocalAgentRequestSchema)` to create a new message.
- */
-export const LaunchLocalAgentRequestSchema: GenMessage<LaunchLocalAgentRequest> = /*@__PURE__*/
-  messageDesc(file_types_agent, 6);
-
-/**
- * @generated from message aiscan.agent.LaunchLocalAgentResponse
- */
-export type LaunchLocalAgentResponse = Message<"aiscan.agent.LaunchLocalAgentResponse"> & {
-  /**
-   * @generated from field: aiscan.agent.LocalAgent agent = 1;
-   */
-  agent?: LocalAgent | undefined;
-};
-
-/**
- * Describes the message aiscan.agent.LaunchLocalAgentResponse.
- * Use `create(LaunchLocalAgentResponseSchema)` to create a new message.
- */
-export const LaunchLocalAgentResponseSchema: GenMessage<LaunchLocalAgentResponse> = /*@__PURE__*/
-  messageDesc(file_types_agent, 7);
-
-/**
- * @generated from message aiscan.agent.StopLocalAgentRequest
- */
-export type StopLocalAgentRequest = Message<"aiscan.agent.StopLocalAgentRequest"> & {
-  /**
-   * @generated from field: string name = 1;
-   */
-  name: string;
-};
-
-/**
- * Describes the message aiscan.agent.StopLocalAgentRequest.
- * Use `create(StopLocalAgentRequestSchema)` to create a new message.
- */
-export const StopLocalAgentRequestSchema: GenMessage<StopLocalAgentRequest> = /*@__PURE__*/
-  messageDesc(file_types_agent, 8);
-
-/**
- * @generated from message aiscan.agent.StopLocalAgentResponse
- */
-export type StopLocalAgentResponse = Message<"aiscan.agent.StopLocalAgentResponse"> & {
-};
-
-/**
- * Describes the message aiscan.agent.StopLocalAgentResponse.
- * Use `create(StopLocalAgentResponseSchema)` to create a new message.
- */
-export const StopLocalAgentResponseSchema: GenMessage<StopLocalAgentResponse> = /*@__PURE__*/
-  messageDesc(file_types_agent, 9);
+  messageDesc(file_types_agent, 2);
 
 /**
  * @generated from message aiscan.agent.AgentRunOptions
@@ -232,7 +110,7 @@ export type AgentRunOptions = Message<"aiscan.agent.AgentRunOptions"> & {
  * Use `create(AgentRunOptionsSchema)` to create a new message.
  */
 export const AgentRunOptionsSchema: GenMessage<AgentRunOptions> = /*@__PURE__*/
-  messageDesc(file_types_agent, 10);
+  messageDesc(file_types_agent, 3);
 
 /**
  * @generated from message aiscan.agent.CommandDetail
@@ -254,7 +132,7 @@ export type CommandDetail = Message<"aiscan.agent.CommandDetail"> & {
  * Use `create(CommandDetailSchema)` to create a new message.
  */
 export const CommandDetailSchema: GenMessage<CommandDetail> = /*@__PURE__*/
-  messageDesc(file_types_agent, 11);
+  messageDesc(file_types_agent, 4);
 
 /**
  * @generated from message aiscan.agent.CompactDetail
@@ -286,7 +164,7 @@ export type CompactDetail = Message<"aiscan.agent.CompactDetail"> & {
  * Use `create(CompactDetailSchema)` to create a new message.
  */
 export const CompactDetailSchema: GenMessage<CompactDetail> = /*@__PURE__*/
-  messageDesc(file_types_agent, 12);
+  messageDesc(file_types_agent, 5);
 
 /**
  * @generated from message aiscan.agent.DelegationDetail
@@ -328,7 +206,7 @@ export type DelegationDetail = Message<"aiscan.agent.DelegationDetail"> & {
  * Use `create(DelegationDetailSchema)` to create a new message.
  */
 export const DelegationDetailSchema: GenMessage<DelegationDetail> = /*@__PURE__*/
-  messageDesc(file_types_agent, 13);
+  messageDesc(file_types_agent, 6);
 
 /**
  * @generated from message aiscan.agent.EvalControl
@@ -350,7 +228,7 @@ export type EvalControl = Message<"aiscan.agent.EvalControl"> & {
  * Use `create(EvalControlSchema)` to create a new message.
  */
 export const EvalControlSchema: GenMessage<EvalControl> = /*@__PURE__*/
-  messageDesc(file_types_agent, 14);
+  messageDesc(file_types_agent, 7);
 
 /**
  * @generated from message aiscan.agent.EvalDetail
@@ -387,7 +265,7 @@ export type EvalDetail = Message<"aiscan.agent.EvalDetail"> & {
  * Use `create(EvalDetailSchema)` to create a new message.
  */
 export const EvalDetailSchema: GenMessage<EvalDetail> = /*@__PURE__*/
-  messageDesc(file_types_agent, 15);
+  messageDesc(file_types_agent, 8);
 
 /**
  * @generated from message aiscan.agent.BudgetWarning
@@ -409,7 +287,7 @@ export type BudgetWarning = Message<"aiscan.agent.BudgetWarning"> & {
  * Use `create(BudgetWarningSchema)` to create a new message.
  */
 export const BudgetWarningSchema: GenMessage<BudgetWarning> = /*@__PURE__*/
-  messageDesc(file_types_agent, 16);
+  messageDesc(file_types_agent, 9);
 
 /**
  * @generated from message aiscan.agent.LLMRequestDetail
@@ -441,7 +319,7 @@ export type LLMRequestDetail = Message<"aiscan.agent.LLMRequestDetail"> & {
  * Use `create(LLMRequestDetailSchema)` to create a new message.
  */
 export const LLMRequestDetailSchema: GenMessage<LLMRequestDetail> = /*@__PURE__*/
-  messageDesc(file_types_agent, 17);
+  messageDesc(file_types_agent, 10);
 
 /**
  * @generated from message aiscan.agent.WebMessageMetadata
@@ -468,4 +346,4 @@ export type WebMessageMetadata = Message<"aiscan.agent.WebMessageMetadata"> & {
  * Use `create(WebMessageMetadataSchema)` to create a new message.
  */
 export const WebMessageMetadataSchema: GenMessage<WebMessageMetadata> = /*@__PURE__*/
-  messageDesc(file_types_agent, 18);
+  messageDesc(file_types_agent, 11);

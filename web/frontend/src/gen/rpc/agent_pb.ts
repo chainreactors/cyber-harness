@@ -4,14 +4,14 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { LaunchLocalAgentRequestSchema, LaunchLocalAgentResponseSchema, ListAgentsRequestSchema, ListAgentsResponseSchema, ListLocalAgentsRequestSchema, ListLocalAgentsResponseSchema, StopLocalAgentRequestSchema, StopLocalAgentResponseSchema } from "../types/agent_pb.js";
+import type { ListAgentsRequestSchema, ListAgentsResponseSchema } from "../types/agent_pb.js";
 import { file_types_agent } from "../types/agent_pb.js";
 
 /**
  * Describes the file rpc/agent.proto.
  */
 export const file_rpc_agent: GenFile = /*@__PURE__*/
-  fileDesc("Cg9ycGMvYWdlbnQucHJvdG8SEGFpc2Nhbi5ycGMuYWdlbnQy/wIKDEFnZW50U2VydmljZRJPCgpMaXN0QWdlbnRzEh8uYWlzY2FuLmFnZW50Lkxpc3RBZ2VudHNSZXF1ZXN0GiAuYWlzY2FuLmFnZW50Lkxpc3RBZ2VudHNSZXNwb25zZRJeCg9MaXN0TG9jYWxBZ2VudHMSJC5haXNjYW4uYWdlbnQuTGlzdExvY2FsQWdlbnRzUmVxdWVzdBolLmFpc2Nhbi5hZ2VudC5MaXN0TG9jYWxBZ2VudHNSZXNwb25zZRJhChBMYXVuY2hMb2NhbEFnZW50EiUuYWlzY2FuLmFnZW50LkxhdW5jaExvY2FsQWdlbnRSZXF1ZXN0GiYuYWlzY2FuLmFnZW50LkxhdW5jaExvY2FsQWdlbnRSZXNwb25zZRJbCg5TdG9wTG9jYWxBZ2VudBIjLmFpc2Nhbi5hZ2VudC5TdG9wTG9jYWxBZ2VudFJlcXVlc3QaJC5haXNjYW4uYWdlbnQuU3RvcExvY2FsQWdlbnRSZXNwb25zZUItWitnaXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy9ycGM7cnBjYgZwcm90bzM", [file_types_agent]);
+  fileDesc("Cg9ycGMvYWdlbnQucHJvdG8SEGFpc2Nhbi5ycGMuYWdlbnQyXwoMQWdlbnRTZXJ2aWNlEk8KCkxpc3RBZ2VudHMSHy5haXNjYW4uYWdlbnQuTGlzdEFnZW50c1JlcXVlc3QaIC5haXNjYW4uYWdlbnQuTGlzdEFnZW50c1Jlc3BvbnNlQi1aK2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3JwYztycGNiBnByb3RvMw", [file_types_agent]);
 
 /**
  * @generated from service aiscan.rpc.agent.AgentService
@@ -24,30 +24,6 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof ListAgentsRequestSchema;
     output: typeof ListAgentsResponseSchema;
-  },
-  /**
-   * @generated from rpc aiscan.rpc.agent.AgentService.ListLocalAgents
-   */
-  listLocalAgents: {
-    methodKind: "unary";
-    input: typeof ListLocalAgentsRequestSchema;
-    output: typeof ListLocalAgentsResponseSchema;
-  },
-  /**
-   * @generated from rpc aiscan.rpc.agent.AgentService.LaunchLocalAgent
-   */
-  launchLocalAgent: {
-    methodKind: "unary";
-    input: typeof LaunchLocalAgentRequestSchema;
-    output: typeof LaunchLocalAgentResponseSchema;
-  },
-  /**
-   * @generated from rpc aiscan.rpc.agent.AgentService.StopLocalAgent
-   */
-  stopLocalAgent: {
-    methodKind: "unary";
-    input: typeof StopLocalAgentRequestSchema;
-    output: typeof StopLocalAgentResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_rpc_agent, 0);

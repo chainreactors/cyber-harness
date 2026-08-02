@@ -40,11 +40,44 @@ func TestResolveProviderPresets(t *testing.T) {
 }
 
 func TestResolveRejectsUnsupportedProvider(t *testing.T) {
-	for _, name := range []string{"deepseek", "openrouter", "ollama", "custom"} {
+	for _, name := range []string{"custom", "bogus-vendor"} {
 		_, err := Resolve(&ProviderConfig{Provider: name, BaseURL: "https://gateway.example/v1", APIKey: "key"})
-		if err == nil || !strings.Contains(err.Error(), "use openai or anthropic") {
+		if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 			t.Fatalf("Resolve(%q) error = %v", name, err)
 		}
+	}
+}
+
+func TestResolveVendorAliases(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		baseURL      string
+		wantProvider string
+		wantBaseURL  string
+	}{
+		{name: "deepseek default endpoint", provider: "deepseek", wantProvider: "deepseek", wantBaseURL: "https://api.deepseek.com/v1"},
+		{name: "deepseek keeps explicit base_url", provider: "deepseek", baseURL: "https://api.deepseek.com", wantProvider: "deepseek", wantBaseURL: "https://api.deepseek.com"},
+		{name: "ollama default endpoint", provider: "ollama", wantProvider: "ollama", wantBaseURL: "http://localhost:11434/v1"},
+		{name: "openrouter default endpoint", provider: "openrouter", wantProvider: "openrouter", wantBaseURL: "https://openrouter.ai/api/v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(&ProviderConfig{Provider: tt.provider, BaseURL: tt.baseURL, APIKey: "key"})
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if resolved.Provider != tt.wantProvider || resolved.BaseURL != tt.wantBaseURL {
+				t.Fatalf("Resolve() = provider %q, base_url %q; want %q, %q", resolved.Provider, resolved.BaseURL, tt.wantProvider, tt.wantBaseURL)
+			}
+			prov, err := NewProviderFromResolved(resolved)
+			if err != nil {
+				t.Fatalf("NewProviderFromResolved() error = %v", err)
+			}
+			if _, ok := prov.(*OpenAIProvider); !ok {
+				t.Fatalf("vendor alias resolved to %T, want *OpenAIProvider", prov)
+			}
+		})
 	}
 }
 
@@ -588,3 +621,20 @@ func TestOpenAIProviderChatCompletionStreamErrorBodyTimeout(t *testing.T) {
 		t.Fatalf("ChatCompletionStream() took %s, want timeout near 1s", elapsed)
 	}
 }
+
+// Compile-time capability parity guard: every optional capability the app
+// asserts at runtime must be satisfied by both providers.
+var (
+	_ interface {
+		ListModels(context.Context) ([]string, error)
+	} = (*OpenAIProvider)(nil)
+	_ interface {
+		ListModels(context.Context) ([]string, error)
+	} = (*AnthropicProvider)(nil)
+	_ StreamingProvider            = (*OpenAIProvider)(nil)
+	_ StreamingProvider            = (*AnthropicProvider)(nil)
+	_ WebSearchProvider            = (*OpenAIProvider)(nil)
+	_ WebSearchProvider            = (*AnthropicProvider)(nil)
+	_ interface{ DisableImages() } = (*OpenAIProvider)(nil)
+	_ interface{ DisableImages() } = (*AnthropicProvider)(nil)
+)

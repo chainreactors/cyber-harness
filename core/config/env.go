@@ -256,8 +256,8 @@ func providerAPIKeyEnv(providerName string, lookup envLookup) string {
 }
 
 func canonicalEnvProvider(providerName string) string {
-	providerName = normalizeProviderName(providerName)
-	if !isSupportedProviderName(providerName) {
+	providerName = NormalizeProvider(providerName)
+	if !IsSupportedProvider(providerName) {
 		return ""
 	}
 	return providerName
@@ -282,18 +282,11 @@ func normalizeProviderOptions(option *Option) error {
 }
 
 func normalizeProviderName(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
-}
-
-func isSupportedProviderName(name string) bool {
-	return name == "openai" || name == "anthropic"
+	return NormalizeProvider(name)
 }
 
 func inferProviderName(baseURL string) string {
-	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
-		return "anthropic"
-	}
-	return "openai"
+	return InferProviderFromBaseURL(baseURL)
 }
 
 func resolveProviderName(name, baseURL string) (string, error) {
@@ -301,8 +294,8 @@ func resolveProviderName(name, baseURL string) (string, error) {
 	if name == "" {
 		name = inferProviderName(baseURL)
 	}
-	if !isSupportedProviderName(name) {
-		return "", fmt.Errorf("unsupported provider %q: use openai or anthropic", name)
+	if !IsSupportedProvider(name) {
+		return "", fmt.Errorf("unsupported provider %q: use openai/anthropic or a known OpenAI-compatible vendor", name)
 	}
 	return name, nil
 }

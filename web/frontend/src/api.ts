@@ -30,7 +30,6 @@ import {
   SessionService,
   SystemService,
   type AgentView,
-  type LocalAgent,
   type CommandProtocolMessage,
   type CommandSpec,
   type ConfigView,
@@ -52,7 +51,7 @@ export type { AOPEvent };
 
 // Generated proto types are the single source of truth for the API surface.
 // Re-exported here so views keep a single import site for API types.
-export type { AgentView, LocalAgent, CommandSpec, ConfigView, DistributeConfig, EventDelivery, LLMProviderView, LLMProbeRequest, LLMProbeResult, ListModelsResult, TestConnectionResponse, ConnectionCheck, Scan, ScanOptions, SessionRecord, ServerStatus, TurnReceipt };
+export type { AgentView, CommandSpec, ConfigView, DistributeConfig, EventDelivery, LLMProviderView, LLMProbeRequest, LLMProbeResult, ListModelsResult, TestConnectionResponse, ConnectionCheck, Scan, ScanOptions, SessionRecord, ServerStatus, TurnReceipt };
 export type { Session as AOPSession } from '@cyber/aop';
 export { ScanStatus };
 
@@ -221,19 +220,7 @@ export async function testConn(section: string, config: DistributeConfig): Promi
   return aiscanRPC.config.testConnection({ section, config })
 }
 
-// --- Local agents (hub-hosted nodes: one-click launch + delete) ---
-
-export type LocalAgentView = LocalAgent
-
-export async function launchLocalAgent(): Promise<LocalAgent> {
-  const response = await aiscanRPC.agents.launchLocalAgent({})
-  if (!response.agent) throw new Error('Failed to launch local agent')
-  return response.agent
-}
-
-export async function listLocalAgents(): Promise<LocalAgent[]> {
-  return (await aiscanRPC.agents.listLocalAgents({})).agents
-}
+// --- IOA overview ---
 
 export async function getIOAOverview(): Promise<IOAOverview> {
   const signal = AbortSignal.timeout(10_000)
@@ -243,10 +230,6 @@ export async function getIOAOverview(): Promise<IOAOverview> {
     apiJSON<IOAMessage[]>('/ioa/messages', 'Failed to load IOA messages', { signal }),
   ])
   return { nodes, spaces, messages }
-}
-
-export async function stopLocalAgent(name: string): Promise<void> {
-  await aiscanRPC.agents.stopLocalAgent({ name })
 }
 
 export async function submitScan(target: string, mode: string, options: ScanOptions): Promise<Scan> {

@@ -1161,7 +1161,7 @@ func (r *AgentConsole) resumeSession(path string) error {
 	if err != nil {
 		return err
 	}
-	data, err := agent.LoadSession(path)
+	data, err := agent.LoadCheckpoint(path)
 	if err != nil {
 		return err
 	}
@@ -1191,12 +1191,12 @@ func (r *AgentConsole) renderSessions() (string, error) {
 	return r.renderPanel("sessions", renderHelpRows(rows, colorEnabled), colorEnabled), nil
 }
 
-func (r *AgentConsole) listSavedSessions() ([]agent.SessionInfo, error) {
+func (r *AgentConsole) listSavedSessions() ([]agent.CheckpointInfo, error) {
 	dir := r.sessionDir
 	if dir == "" {
 		dir = cfg.DataSubDir("sessions")
 	}
-	return agent.ListSessions(dir)
+	return agent.ListCheckpoints(dir)
 }
 
 func (r *AgentConsole) resumeSessionInteractive() error {
@@ -1261,7 +1261,7 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 	return selector, nil
 }
 
-func sessionDetail(session agent.SessionInfo) string {
+func sessionDetail(session agent.CheckpointInfo) string {
 	parts := make([]string, 0, 4)
 	if ts := session.SortTime(); !ts.IsZero() {
 		parts = append(parts, ts.Local().Format("2006-01-02 15:04:05"))

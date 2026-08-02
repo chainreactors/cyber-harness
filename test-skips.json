@@ -21,28 +21,28 @@
     "reason": "Calls a live model and therefore requires an explicitly supplied credential."
   },
   {
-    "path": "agent/helpers_test.go",
+    "path": "agent/agent_test.go",
     "format": "set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL to run live tests",
     "count": 1,
     "category": "live_llm",
     "reason": "Provider conformance against a live endpoint requires explicit credentials and model selection."
   },
   {
-    "path": "agent/provider/cache_test.go",
+    "path": "agent/provider/provider_cache_test.go",
     "format": "set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL to run live cache test",
     "count": 1,
     "category": "live_llm",
     "reason": "Prompt-cache behavior can only be verified against a credentialed live provider."
   },
   {
-    "path": "agent/provider/cache_test.go",
+    "path": "agent/provider/provider_cache_test.go",
     "format": "%s: provider does not support streaming",
     "count": 1,
     "category": "capability",
     "reason": "The shared provider matrix includes implementations that intentionally do not expose streaming."
   },
   {
-    "path": "agent/provider/cache_test.go",
+    "path": "agent/provider/provider_cache_test.go",
     "format": "set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL",
     "count": 1,
     "category": "live_llm",
@@ -119,14 +119,14 @@
     "reason": "The external arsenal binary fixture is published only for linux/amd64."
   },
   {
-    "path": "tools/functional_integration_full_test.go",
+    "path": "tools/register_command_full_integration_test.go",
     "format": "set AISCAN_INTEGRATION=1 to run public network regression tests",
     "count": 1,
     "category": "external_api",
     "reason": "The scheduled full scanner regression contacts public network targets."
   },
   {
-    "path": "tools/functional_integration_test.go",
+    "path": "tools/register_command_integration_test.go",
     "format": "set AISCAN_INTEGRATION=1 to run public network regression tests",
     "count": 1,
     "category": "external_api",
@@ -161,21 +161,21 @@
     "reason": "The command fixture asserts POSIX file permission semantics."
   },
   {
-    "path": "tools/register_command_integration_test.go",
+    "path": "tools/register_command_full_integration_test.go",
     "format": "set AISCAN_INTEGRATION=1 to run",
     "count": 2,
     "category": "external_api",
     "reason": "The passive search integrations are opt-in because they call external services."
   },
   {
-    "path": "tools/register_command_integration_test.go",
+    "path": "tools/register_command_full_integration_test.go",
     "format": "FOFA_EMAIL / FOFA_KEY required",
     "count": 1,
     "category": "external_api",
     "reason": "The FOFA integration requires user-supplied service credentials."
   },
   {
-    "path": "tools/register_command_integration_test.go",
+    "path": "tools/register_command_full_integration_test.go",
     "format": "HUNTER_TOKEN or HUNTER_API_KEY required",
     "count": 1,
     "category": "external_api",

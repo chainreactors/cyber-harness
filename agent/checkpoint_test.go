@@ -11,7 +11,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 )
 
-func TestSaveAndLoadSession(t *testing.T) {
+func TestSaveAndLoadCheckpoint(t *testing.T) {
 	dir := t.TempDir()
 
 	content := "hello world"
@@ -28,33 +28,33 @@ func TestSaveAndLoadSession(t *testing.T) {
 		toolResultMessage("tc1", content),
 	}
 
-	data := &SessionData{
+	data := &CheckpointData{
 		Model:    "gpt-4o",
 		Provider: "openai",
 		Messages: messages,
 	}
-	if err := SaveSession(dir, data); err != nil {
-		t.Fatalf("SaveSession: %v", err)
+	if err := SaveCheckpoint(dir, data); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "latest.json")); !os.IsNotExist(err) {
 		t.Fatalf("latest.json should not be written, err=%v", err)
 	}
 
-	sessions, err := ListSessions(dir)
+	sessions, err := ListCheckpoints(dir)
 	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+		t.Fatalf("ListCheckpoints: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
 
-	loaded, err := LoadSession(sessions[0].Path)
+	loaded, err := LoadCheckpoint(sessions[0].Path)
 	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
+		t.Fatalf("LoadCheckpoint: %v", err)
 	}
-	if loaded.Version != sessionVersion {
-		t.Errorf("version = %d, want %d", loaded.Version, sessionVersion)
+	if loaded.Version != checkpointVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, checkpointVersion)
 	}
 	if loaded.Model != "gpt-4o" {
 		t.Errorf("model = %q, want %q", loaded.Model, "gpt-4o")
@@ -84,32 +84,32 @@ func TestSaveAndLoadSession(t *testing.T) {
 	}
 }
 
-func TestListSessionsSortsNewestFirst(t *testing.T) {
+func TestListCheckpointsSortsNewestFirst(t *testing.T) {
 	dir := t.TempDir()
 	oldTime := time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)
 	newTime := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
-	writeSessionFile(t, filepath.Join(dir, "session-old.json"), SessionData{
-		Version:   sessionVersion,
+	writeSessionFile(t, filepath.Join(dir, "session-old.json"), CheckpointData{
+		Version:   checkpointVersion,
 		UpdatedAt: oldTime,
 		Model:     "old",
 		Messages:  []*aop.Message{textMessage("user", "old")},
 	})
-	writeSessionFile(t, filepath.Join(dir, "session-new.json"), SessionData{
-		Version:   sessionVersion,
+	writeSessionFile(t, filepath.Join(dir, "session-new.json"), CheckpointData{
+		Version:   checkpointVersion,
 		UpdatedAt: newTime,
 		Model:     "new",
 		Messages:  []*aop.Message{textMessage("user", "new")},
 	})
-	writeSessionFile(t, filepath.Join(dir, "latest.json"), SessionData{
-		Version:   sessionVersion,
+	writeSessionFile(t, filepath.Join(dir, "latest.json"), CheckpointData{
+		Version:   checkpointVersion,
 		UpdatedAt: newTime.Add(time.Hour),
 		Model:     "ignored",
 		Messages:  []*aop.Message{textMessage("user", "ignored")},
 	})
 
-	sessions, err := ListSessions(dir)
+	sessions, err := ListCheckpoints(dir)
 	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+		t.Fatalf("ListCheckpoints: %v", err)
 	}
 	if len(sessions) != 2 {
 		t.Fatalf("sessions len = %d, want 2", len(sessions))
@@ -122,7 +122,7 @@ func TestListSessionsSortsNewestFirst(t *testing.T) {
 	}
 }
 
-func writeSessionFile(t *testing.T, path string, data SessionData) {
+func writeSessionFile(t *testing.T, path string, data CheckpointData) {
 	t.Helper()
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -162,8 +162,8 @@ func TestSanitizeMessagesForSave(t *testing.T) {
 	}
 }
 
-func TestLoadSessionNotFound(t *testing.T) {
-	_, err := LoadSession("/nonexistent/path.json")
+func TestLoadCheckpointNotFound(t *testing.T) {
+	_, err := LoadCheckpoint("/nonexistent/path.json")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}

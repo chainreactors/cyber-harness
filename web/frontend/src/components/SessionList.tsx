@@ -1,23 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   PanelLeftClose, PanelLeft,
   MessageSquare, Plus, Trash2,
   ChevronDown, ChevronRight, Monitor, Terminal,
-  MonitorPlay, Loader2, AlertTriangle, Unplug,
+  Unplug,
 } from 'lucide-react'
 import {
-  Button, Callout, Tooltip, TooltipTrigger, TooltipContent,
-  Popover, PopoverTrigger, PopoverContent, EmptyState, StatusDot, ThemeToggle,
+  Button, Tooltip, TooltipTrigger, TooltipContent,
+  EmptyState, StatusDot, ThemeToggle,
 } from '@cyber/ui'
 import { cn, useTheme } from '@cyber/theme'
 import LanguageToggle from './LanguageToggle'
-import { launchLocalAgent, listLocalAgents, stopLocalAgent } from '../api'
-import type { AgentView, SessionRecord, LocalAgentView } from '../api'
+import type { AgentView, SessionRecord } from '../api'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { agentActivity } from '../lib/agentActivity'
 import { agentMatchesSession } from '../lib/session-agent'
-import { usePolling } from '../hooks/usePolling'
 import i18n from '../i18n'
 
 function recordID(record: SessionRecord): string {
@@ -125,7 +123,6 @@ export default function SessionList({
                   {online > 0 ? t('onlineCount', { count: online }) : t('rosterIdle')}
                 </span>
               </div>
-              <LocalAgentControl />
               <Button ref={closeButtonRef} variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
                 <PanelLeftClose className="w-4 h-4" />
               </Button>
@@ -455,134 +452,6 @@ function OfflineAgentGroup({
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-// LocalAgentControl is the top-left launcher for hub-hosted agents: a button that
-// spawns an `aiscan agent` on the console host (wired back over loopback) and a
-// popover to watch/delete the ones it started. Connected nodes also appear in the
-// roster below — this popover owns their process lifecycle, not the conversation.
-function LocalAgentControl() {
-  const { t } = useTranslation('sidebar')
-  const [open, setOpen] = useState(false)
-  const [items, setItems] = useState<LocalAgentView[]>([])
-  const [launching, setLaunching] = useState(false)
-  const [error, setError] = useState('')
-
-  const refresh = useCallback(async () => {
-    try {
-      setItems(await listLocalAgents())
-    } catch {
-      /* transient / admin-gated — keep the last known roster */
-    }
-  }, [])
-
-  // Immediate load on mount and whenever the popover opens (so a just-launched
-  // node shows promptly).
-  useEffect(() => {
-    void refresh()
-  }, [open, refresh])
-
-  // Poll for the badge + roster; tighter cadence while the popover is open. The
-  // poll pauses while the tab is hidden and catches up on return to foreground.
-  usePolling(refresh, open ? 2500 : 8000)
-
-  const launch = async () => {
-    setLaunching(true)
-    setError('')
-    try {
-      await launchLocalAgent()
-      await refresh()
-    } catch (err) {
-      setError((err as Error)?.message || t('launchLocal'))
-    } finally {
-      setLaunching(false)
-    }
-  }
-
-  const remove = async (name: string) => {
-    setError('')
-    try {
-      await stopLocalAgent(name)
-      await refresh()
-    } catch (err) {
-      setError((err as Error)?.message || t('stopLocal'))
-    }
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon-xs" active={open} aria-label={t('launchLocal')} className="relative">
-              <MonitorPlay className="h-4 w-4" />
-              {items.length > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold text-primary-foreground">
-                  {items.length > 9 ? '9+' : items.length}
-                </span>
-              )}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{t('localAgents')}</TooltipContent>
-      </Tooltip>
-
-      <PopoverContent align="end" sideOffset={6} className="z-[70] w-64 rounded-xl p-2 shadow-elevated">
-        <div className="px-1 pb-1.5">
-          <span className="text-xs font-semibold text-foreground">{t('localAgents')}</span>
-        </div>
-
-        {error && (
-          <Callout tone="destructive" icon={<AlertTriangle className="h-3 w-3" />} className="mb-1.5 gap-1.5 px-2 py-1.5 text-[11px]">
-            {error}
-          </Callout>
-        )}
-
-        <div className="max-h-56 space-y-0.5 overflow-auto">
-          {items.length === 0 ? (
-            <p className="px-1 py-3 text-center text-[11px] text-muted-foreground/70">{t('noLocalAgents')}</p>
-          ) : (
-            items.map((it) => <LocalAgentRow key={it.name} item={it} onRemove={() => void remove(it.name)} />)
-          )}
-        </div>
-
-        <Button variant="soft" size="sm" onClick={() => void launch()} disabled={launching} className="mt-1.5 h-8 w-full gap-1.5 text-xs">
-          {launching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          {launching ? t('launching') : t('launchLocal')}
-        </Button>
-        <p className="mt-1 px-1 text-[10px] leading-snug text-muted-foreground/70">{t('localHint')}</p>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function LocalAgentRow({ item, onRemove }: { item: LocalAgentView; onRemove: () => void }) {
-  const { t } = useTranslation('sidebar')
-  const connected = item.registered
-
-  return (
-    <div className="group flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-accent/50">
-      <StatusDot status={connected ? 'online' : 'pending'} className="h-2 w-2" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium text-foreground">{item.name}</div>
-        <div className="truncate text-[10px] text-muted-foreground">
-          {connected ? t('localConnected') : t('localStarting')}
-          {item.busy ? ` · ${t('busy')}` : ''}
-          {item.pid ? ` · pid ${item.pid}` : ''}
-        </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onRemove}
-        aria-label={t('stopLocal')}
-        title={t('stopLocal')}
-        className="h-6 w-6 shrink-0 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
     </div>
   )
 }

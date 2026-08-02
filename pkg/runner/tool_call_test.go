@@ -1,4 +1,4 @@
-package agent
+package runner
 
 import (
 	"context"
@@ -36,8 +36,17 @@ func (e structuredResultExecutor) ExecuteTool(context.Context, string, string) (
 	}, e.err
 }
 
+func toolRequest(t *testing.T, id, name string, arguments map[string]any) *toolpb.Call {
+	t.Helper()
+	value, err := aop.JSONValue(arguments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &toolpb.Call{SessionId: "session-1", TurnId: "turn-1", Call: &aop.ToolCall{Id: id, Name: name, Arguments: value}}
+}
+
 func TestExecuteToolRequestPreservesStructuredResult(t *testing.T) {
-	event, err := executeToolRequest(context.Background(), "call-structured", toolRequest(t, "call-structured", "scan", nil), structuredResultExecutor{}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-structured", toolRequest(t, "call-structured", "scan", nil), structuredResultExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +60,7 @@ func TestExecuteToolRequestPreservesStructuredResult(t *testing.T) {
 }
 
 func TestExecuteToolRequestUsesExecutionErrorText(t *testing.T) {
-	event, err := executeToolRequest(context.Background(), "call-error", toolRequest(t, "call-error", "scan", nil), structuredResultExecutor{err: errors.New("failed")}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-error", toolRequest(t, "call-error", "scan", nil), structuredResultExecutor{err: errors.New("failed")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,17 +70,8 @@ func TestExecuteToolRequestUsesExecutionErrorText(t *testing.T) {
 	}
 }
 
-func toolRequest(t *testing.T, id, name string, arguments map[string]any) *toolpb.Call {
-	t.Helper()
-	value, err := aop.JSONValue(arguments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &toolpb.Call{SessionId: "session-1", TurnId: "turn-1", Call: &aop.ToolCall{Id: id, Name: name, Arguments: value}}
-}
-
 func TestExecuteToolRequest(t *testing.T) {
-	event, err := executeToolRequest(context.Background(), "call-1", toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"}), aopTestExecutor{}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-1", toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"}), aopTestExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestExecuteToolRequest(t *testing.T) {
 
 func TestExecuteToolRequestRejectsMismatchedCorrelation(t *testing.T) {
 	request := toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"})
-	if _, err := executeToolRequest(context.Background(), "other", request, aopTestExecutor{}, nil); err == nil {
+	if _, err := ExecuteToolRequest(context.Background(), "other", request, aopTestExecutor{}, nil); err == nil {
 		t.Fatal("expected correlation error")
 	}
 }
@@ -122,7 +122,7 @@ func TestExecuteToolRequestForeground(t *testing.T) {
 			progress = append(progress, event)
 		}
 	})
-	event, err := executeToolRequest(context.Background(), "task-1", toolRequest(t, "task-1", "bash", map[string]any{"command": "echo test", "timeout": 7}), registry, dataBus)
+	event, err := ExecuteToolRequest(context.Background(), "task-1", toolRequest(t, "task-1", "bash", map[string]any{"command": "echo test", "timeout": 7}), registry, dataBus)
 	if err != nil {
 		t.Fatal(err)
 	}

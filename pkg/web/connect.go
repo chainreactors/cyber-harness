@@ -17,7 +17,7 @@ const connectMaxMessageBytes = 72 << 20
 // NewConnectHandler exposes AIScan's management/query services from their
 // protobuf schemas. Realtime AOP, file, command and PTY traffic is not mounted
 // here; it uses the single application WebSocket.
-func NewConnectHandler(accessKey string, service *Service, pool *AgentPool, local *LocalAgents) http.Handler {
+func NewConnectHandler(accessKey string, service *Service, pool *AgentPool) http.Handler {
 	interceptor := connectAuthInterceptor{accessKey: accessKey}
 	opts := []connect.HandlerOption{
 		connect.WithInterceptors(interceptor),
@@ -29,7 +29,7 @@ func NewConnectHandler(accessKey string, service *Service, pool *AgentPool, loca
 	sessionPath, sessionHandler := rpc.NewSessionServiceHandler(newConnectSessionServer(service, chatCore), opts...)
 	scanPath, scanHandler := rpc.NewScanServiceHandler(newConnectScanServer(service), opts...)
 	configPath, configHandler := rpc.NewConfigServiceHandler(newConnectConfigServer(service), opts...)
-	agentPath, agentHandler := rpc.NewAgentServiceHandler(&connectAgentServer{pool: pool, local: local}, opts...)
+	agentPath, agentHandler := rpc.NewAgentServiceHandler(&connectAgentServer{pool: pool}, opts...)
 	systemPath, systemHandler := rpc.NewSystemServiceHandler(&connectSystemServer{service: service, pool: pool, serverURL: "/"}, opts...)
 	scoPath, scoHandler := rpc.NewSCOServiceHandler(&connectSCOServer{service: service}, opts...)
 	mux.Handle(sessionPath, sessionHandler)
