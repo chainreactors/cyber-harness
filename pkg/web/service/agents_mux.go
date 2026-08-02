@@ -10,7 +10,6 @@ import (
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	scopb "github.com/chainreactors/aiscan/aop/sco"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
 	coreterminal "github.com/chainreactors/aiscan/core/terminal"
@@ -90,7 +89,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*toolpb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -98,16 +97,9 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 		if progress := value.GetProgress(); progress != nil {
 			p.handleToolProgress(envelope.ReplyTo, progress)
 		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register(&scopb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, err := namespaceMessage[*scopb.ProtocolMessage](message)
-		if err != nil {
-			return err
+		if artifact := value.GetArtifact(); artifact != nil {
+			p.handleToolArtifact(ctx, envelope, artifact)
 		}
-		p.handleAgentSCOMessage(ctx, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -267,23 +259,22 @@ func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *types.Re
 	agent.mu.Unlock()
 }
 
-func (p *AgentPool) handleAgentSCOMessage(ctx context.Context, envelope *aop.Envelope, value *scopb.ProtocolMessage) {
-	if envelope == nil || value == nil {
+func (p *AgentPool) handleToolArtifact(ctx context.Context, envelope *aop.Envelope, value *toolpb.Artifact) {
+	if envelope == nil || value == nil || p.artifacts == nil || len(value.Data) == 0 {
 		return
-	}
-	nodes := value.GetNodes()
-	if p.sco == nil || nodes == nil || len(nodes.Nodes) == 0 {
-		return
-	}
-	values := make([]json.RawMessage, 0, len(nodes.Nodes))
-	for _, node := range nodes.Nodes {
-		values = append(values, append(json.RawMessage(nil), node...))
 	}
 	operationID := envelope.ReplyTo
 	if operationID == "" {
 		operationID = envelope.Id
 	}
-	_ = p.sco.UpsertSCONodes(ctx, operationID, values)
+	artifact := output.ToolArtifact{
+		Tool: value.Tool, Kind: value.Kind, Target: value.Target,
+		Data: append(json.RawMessage(nil), value.Data...), CallID: operationID,
+	}
+	if value.Timestamp != nil {
+		artifact.Timestamp = value.Timestamp.AsTime()
+	}
+	_ = p.artifacts.IngestArtifact(ctx, operationID, artifact)
 }
 
 func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result taskResult) {

@@ -232,8 +232,8 @@ type SessionLookup interface {
 	BroadcastAOPEvent(sessionID string, event *aop.Event)
 }
 
-// SCOStore persists libcstx nodes and records which AOP operation observed
-// them. Node identity is global; operation membership is many-to-many.
+// SCOStore persists server-normalized nodes and records which AOP operation
+// observed them. Node identity is global; operation membership is many-to-many.
 type SCOStore interface {
 	UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error
 }
@@ -246,7 +246,7 @@ type AgentPool struct {
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
-	sco            SCOStore
+	artifacts      ArtifactIngestor
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan *ptypb.ProtocolMessage
@@ -271,8 +271,8 @@ func (p *AgentPool) SetSessionLookup(sl SessionLookup) {
 	p.sessions = sl
 }
 
-func (p *AgentPool) SetSCOStore(store SCOStore) {
-	p.sco = store
+func (p *AgentPool) SetArtifactIngestor(ingestor ArtifactIngestor) {
+	p.artifacts = ingestor
 }
 
 func (p *AgentPool) register(a *remoteAgent) {

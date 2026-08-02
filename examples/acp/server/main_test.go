@@ -1,3 +1,5 @@
+//go:build full
+
 package main
 
 import (
@@ -35,7 +37,12 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	service, _, handler := newHeadlessHandler(store, nil, "test-token")
+	ingestor, err := webservice.NewArtifactIngestor(store)
+	if err != nil {
+		t.Fatalf("open artifact ingestor: %v", err)
+	}
+	t.Cleanup(func() { _ = ingestor.Close() })
+	service, _, handler := newHeadlessHandler(store, nil, ingestor, "test-token")
 	t.Cleanup(service.Close)
 	return httptest.NewServer(handler)
 }

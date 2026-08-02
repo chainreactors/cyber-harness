@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -37,7 +36,7 @@ type flags struct {
 	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
 	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
-	OutputFile      string   `short:"f" long:"file" description:"Write output to file without ANSI colors"`
+	OutputFile      string   `short:"f" long:"file" description:"Write raw scanner records as JSON Lines"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
 	Threads         int      // derived from Thread; not a CLI flag
@@ -95,9 +94,9 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if out != "" {
 		fmt.Fprint(execution.Stdout, out)
 	}
-	// Structured scan facts are emitted through the SCO sidecar. Returning the
-	// collector's private aggregation here would leak a second result schema
-	// through AOP tool.result.
+	// Structured scanner records are emitted through the artifact stream.
+	// Returning the collector's private aggregation here would leak a second
+	// result schema through AOP tool.result.
 	return nil, nil
 }
 
@@ -188,12 +187,10 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	result := coll.StructuredResult()
 	c.emitStructuredData(ctx, result)
 	if flags.OutputFile != "" {
-		nodes := buildSCONodes(result)
-		lines := make([][]byte, 0, len(nodes))
-		for _, node := range nodes {
-			lines = append(lines, node)
-		}
-		if err := writeOutputFile(flags.OutputFile, string(bytes.Join(lines, []byte{'\n'}))); err != nil {
+		raw, outputErr := coll.JSONLines()
+		if outputErr != nil {
+			c.Logger.Errorf("scan output file: %s", outputErr)
+		} else if err := writeOutputFile(flags.OutputFile, raw); err != nil {
 			c.Logger.Errorf("%s", err.Error())
 		}
 	}

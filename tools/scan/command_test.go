@@ -1438,7 +1438,7 @@ func TestStructuredResultKeepsScannerValuesInsideCollector(t *testing.T) {
 	}
 }
 
-func TestScanOutputFileContainsOnlySCOFactsWithoutChangingStdout(t *testing.T) {
+func TestScanOutputFileContainsRawRecordsWithoutChangingStdout(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
 	file := filepath.Join(t.TempDir(), "scan.txt")
@@ -1447,7 +1447,7 @@ func TestScanOutputFileContainsOnlySCOFactsWithoutChangingStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	// Structured scan facts flow through the SCO sidecar; Run no longer
+	// Structured scan records flow through the artifact stream; Run no longer
 	// returns a second result envelope.
 	if details != nil {
 		t.Fatalf("Run() returned unexpected details: %#v", details)
@@ -1462,7 +1462,7 @@ func TestScanOutputFileContainsOnlySCOFactsWithoutChangingStdout(t *testing.T) {
 		t.Fatalf("file output contains ANSI: %q", fileOut)
 	}
 	if strings.Contains(fileOut, "[summary]") || strings.Contains(fileOut, "scan_start") || strings.Contains(fileOut, "scan_end") {
-		t.Fatalf("fact file contains legacy record data: %q", fileOut)
+		t.Fatalf("raw record file contains presentation data: %q", fileOut)
 	}
 	if !strings.Contains(output.StripANSI(out), "[summary] completed") {
 		t.Fatalf("stdout output missing summary: %q", out)

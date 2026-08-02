@@ -18,8 +18,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
-	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -55,12 +55,13 @@ type hubScript struct {
 	progress   chan string
 	fileData   chan []byte
 	toolData   chan *toolpb.Progress
+	artifact   chan *toolpb.Artifact
 }
 
 func newHubScript(t *testing.T) *hubScript {
 	return &hubScript{
 		t: t, registered: make(chan *aop.AgentHello, 1), catalog: make(chan *types.CommandCatalog, 1), toolResult: make(chan *aop.ToolResult, 1),
-		progress: make(chan string, 16), fileData: make(chan []byte, 1), toolData: make(chan *toolpb.Progress, 4),
+		progress: make(chan string, 16), fileData: make(chan []byte, 1), toolData: make(chan *toolpb.Progress, 4), artifact: make(chan *toolpb.Artifact, 4),
 	}
 }
 
@@ -130,11 +131,12 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 				h.toolResult <- result
 			}
 		case *toolpb.ProtocolMessage:
-			progress := value.GetProgress()
-			if progress == nil {
-				continue
+			if progress := value.GetProgress(); progress != nil {
+				h.progress <- progress.Text
 			}
-			h.progress <- progress.Text
+			if artifact := value.GetArtifact(); artifact != nil {
+				h.artifact <- artifact
+			}
 		case *filepb.ProtocolMessage:
 			if result := value.GetResult(); result != nil {
 				h.fileData <- result.Data
@@ -202,7 +204,7 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	for _, capability := range hello.Capabilities {
 		capabilities[capability] = true
 	}
-	if !capabilities["file"] || !capabilities["tool"] || !capabilities["sco"] {
+	if !capabilities["file"] || !capabilities["tool"] || !capabilities["artifact"] {
 		t.Fatalf("capabilities = %+v", hello.Capabilities)
 	}
 	if len(hello.Tools) != 1 || hello.Tools[0].Name != "bash" {
@@ -214,6 +216,14 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	}
 	if got := catalog.Commands[0].GetDescription(); got != "Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery." {
 		t.Fatalf("gogo description = %q", got)
+	}
+	dataBus.Emit(output.ToolDataEvent{
+		Tool: "gogo", Kind: output.ToolDataService, Target: "192.0.2.1:80",
+		Data: map[string]string{"ip": "192.0.2.1", "port": "80"}, CallID: "exec-1",
+	})
+	artifact := wait(t, hub.artifact, "tool artifact")
+	if artifact.Tool != "gogo" || artifact.Kind != output.ToolDataService || string(artifact.Data) != `{"ip":"192.0.2.1","port":"80"}` {
+		t.Fatalf("artifact = %+v data=%s", artifact, artifact.Data)
 	}
 	if line := wait(t, hub.progress, "tool progress"); line != "streamed" {
 		t.Fatalf("progress = %q", line)

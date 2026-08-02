@@ -66,7 +66,7 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 			Registry:       application.Commands,
 			AgentSubscribe: rt.Subscribe,
 			DataBus:        application.DataBus,
-			SCO:            application.SCOSidecar,
+			Artifacts:      application.Artifacts,
 			Logger:         logger,
 			Chat:           chatHandler,
 			AgentRuntime:   rt,

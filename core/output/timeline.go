@@ -79,8 +79,8 @@ func RenderTimelineMarkdown(w io.Writer, entries []TimelineEntry) error {
 	return err
 }
 
-// RenderFile renders an AOP Event ProtoJSONL file. Scanner fact files are
-// libcstx SCO JSONL and are intentionally not accepted as agent timelines.
+// RenderFile renders an AOP Event ProtoJSONL file. Raw scanner JSONL files are
+// intentionally not accepted as agent timelines.
 func RenderFile(path, format, outputPath string) error {
 	var writer io.Writer = os.Stdout
 	if outputPath != "" {

@@ -151,12 +151,99 @@ func (x *Progress) GetText() string {
 	return ""
 }
 
+// Artifact carries one scanner-native structured record. Nodes remain thin:
+// only the server normalizes these records into canonical SCO documents.
+type Artifact struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tool          string                 `protobuf:"bytes,1,opt,name=tool,proto3" json:"tool,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	MediaType     string                 `protobuf:"bytes,5,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Artifact) Reset() {
+	*x = Artifact{}
+	mi := &file_aop_tool_protocol_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Artifact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Artifact) ProtoMessage() {}
+
+func (x *Artifact) ProtoReflect() protoreflect.Message {
+	mi := &file_aop_tool_protocol_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Artifact.ProtoReflect.Descriptor instead.
+func (*Artifact) Descriptor() ([]byte, []int) {
+	return file_aop_tool_protocol_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Artifact) GetTool() string {
+	if x != nil {
+		return x.Tool
+	}
+	return ""
+}
+
+func (x *Artifact) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Artifact) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *Artifact) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *Artifact) GetMediaType() string {
+	if x != nil {
+		return x.MediaType
+	}
+	return ""
+}
+
+func (x *Artifact) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
 type ProtocolMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Message:
 	//
 	//	*ProtocolMessage_Progress
 	//	*ProtocolMessage_Call
+	//	*ProtocolMessage_Artifact
 	Message       isProtocolMessage_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -164,7 +251,7 @@ type ProtocolMessage struct {
 
 func (x *ProtocolMessage) Reset() {
 	*x = ProtocolMessage{}
-	mi := &file_aop_tool_protocol_proto_msgTypes[2]
+	mi := &file_aop_tool_protocol_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -176,7 +263,7 @@ func (x *ProtocolMessage) String() string {
 func (*ProtocolMessage) ProtoMessage() {}
 
 func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_tool_protocol_proto_msgTypes[2]
+	mi := &file_aop_tool_protocol_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -189,7 +276,7 @@ func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolMessage.ProtoReflect.Descriptor instead.
 func (*ProtocolMessage) Descriptor() ([]byte, []int) {
-	return file_aop_tool_protocol_proto_rawDescGZIP(), []int{2}
+	return file_aop_tool_protocol_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProtocolMessage) GetMessage() isProtocolMessage_Message {
@@ -217,6 +304,15 @@ func (x *ProtocolMessage) GetCall() *Call {
 	return nil
 }
 
+func (x *ProtocolMessage) GetArtifact() *Artifact {
+	if x != nil {
+		if x, ok := x.Message.(*ProtocolMessage_Artifact); ok {
+			return x.Artifact
+		}
+	}
+	return nil
+}
+
 type isProtocolMessage_Message interface {
 	isProtocolMessage_Message()
 }
@@ -229,9 +325,15 @@ type ProtocolMessage_Call struct {
 	Call *Call `protobuf:"bytes,11,opt,name=call,proto3,oneof"`
 }
 
+type ProtocolMessage_Artifact struct {
+	Artifact *Artifact `protobuf:"bytes,12,opt,name=artifact,proto3,oneof"`
+}
+
 func (*ProtocolMessage_Progress) isProtocolMessage_Message() {}
 
 func (*ProtocolMessage_Call) isProtocolMessage_Message() {}
+
+func (*ProtocolMessage_Artifact) isProtocolMessage_Message() {}
 
 var File_aop_tool_protocol_proto protoreflect.FileDescriptor
 
@@ -247,11 +349,20 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x16\n" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x128\n" +
 	"\ttimestamp\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x12\n" +
-	"\x04text\x18\x06 \x01(\tR\x04textJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"t\n" +
+	"\x04text\x18\x06 \x01(\tR\x04textJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"\xb7\x01\n" +
+	"\bArtifact\x12\x12\n" +
+	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x16\n" +
+	"\x06target\x18\x03 \x01(\tR\x06target\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\x12\x1d\n" +
+	"\n" +
+	"media_type\x18\x05 \x01(\tR\tmediaType\x128\n" +
+	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\xa6\x01\n" +
 	"\x0fProtocolMessage\x120\n" +
 	"\bprogress\x18\n" +
 	" \x01(\v2\x12.aop.tool.ProgressH\x00R\bprogress\x12$\n" +
-	"\x04call\x18\v \x01(\v2\x0e.aop.tool.CallH\x00R\x04callB\t\n" +
+	"\x04call\x18\v \x01(\v2\x0e.aop.tool.CallH\x00R\x04call\x120\n" +
+	"\bartifact\x18\f \x01(\v2\x12.aop.tool.ArtifactH\x00R\bartifactB\t\n" +
 	"\amessageB/Z-github.com/chainreactors/aiscan/aop/tool;toolb\x06proto3"
 
 var (
@@ -266,24 +377,27 @@ func file_aop_tool_protocol_proto_rawDescGZIP() []byte {
 	return file_aop_tool_protocol_proto_rawDescData
 }
 
-var file_aop_tool_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_aop_tool_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_aop_tool_protocol_proto_goTypes = []any{
 	(*Call)(nil),                  // 0: aop.tool.Call
 	(*Progress)(nil),              // 1: aop.tool.Progress
-	(*ProtocolMessage)(nil),       // 2: aop.tool.ProtocolMessage
-	(*aop.ToolCall)(nil),          // 3: aop.ToolCall
-	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
+	(*Artifact)(nil),              // 2: aop.tool.Artifact
+	(*ProtocolMessage)(nil),       // 3: aop.tool.ProtocolMessage
+	(*aop.ToolCall)(nil),          // 4: aop.ToolCall
+	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
 }
 var file_aop_tool_protocol_proto_depIdxs = []int32{
-	3, // 0: aop.tool.Call.call:type_name -> aop.ToolCall
-	4, // 1: aop.tool.Progress.timestamp:type_name -> google.protobuf.Timestamp
-	1, // 2: aop.tool.ProtocolMessage.progress:type_name -> aop.tool.Progress
-	0, // 3: aop.tool.ProtocolMessage.call:type_name -> aop.tool.Call
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: aop.tool.Call.call:type_name -> aop.ToolCall
+	5, // 1: aop.tool.Progress.timestamp:type_name -> google.protobuf.Timestamp
+	5, // 2: aop.tool.Artifact.timestamp:type_name -> google.protobuf.Timestamp
+	1, // 3: aop.tool.ProtocolMessage.progress:type_name -> aop.tool.Progress
+	0, // 4: aop.tool.ProtocolMessage.call:type_name -> aop.tool.Call
+	2, // 5: aop.tool.ProtocolMessage.artifact:type_name -> aop.tool.Artifact
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_aop_tool_protocol_proto_init() }
@@ -291,9 +405,10 @@ func file_aop_tool_protocol_proto_init() {
 	if File_aop_tool_protocol_proto != nil {
 		return
 	}
-	file_aop_tool_protocol_proto_msgTypes[2].OneofWrappers = []any{
+	file_aop_tool_protocol_proto_msgTypes[3].OneofWrappers = []any{
 		(*ProtocolMessage_Progress)(nil),
 		(*ProtocolMessage_Call)(nil),
+		(*ProtocolMessage_Artifact)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -301,7 +416,7 @@ func file_aop_tool_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aop_tool_protocol_proto_rawDesc), len(file_aop_tool_protocol_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

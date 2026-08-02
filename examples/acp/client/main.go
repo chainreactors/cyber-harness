@@ -13,8 +13,9 @@ import (
 	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
-// acp client: send one natural-language prompt to an aiscan headless server
-// and stream the agent's events back to stdout.
+// Application WebSocket example: send one natural-language prompt to aiscan
+// and stream the agent's events back to stdout. Management queries use the
+// separate examples/acp/connectrpc program.
 //
 //	go run ./examples/acp/client --server http://127.0.0.1:8080 --token <key> --node local -p "list files with bash"
 func main() {
