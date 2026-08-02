@@ -213,8 +213,8 @@ func streamSSE(
 				sseSend(ctx, events, event)
 				return
 			}
-			if event.Delta.Role != "" || event.Delta.Content != nil ||
-				event.Delta.ReasoningContent != nil || len(event.Delta.ToolCalls) > 0 ||
+			if event.Role != "" || event.MessageDelta != nil ||
+				len(event.ToolDeltas) > 0 ||
 				event.FinishReason != "" || event.Usage != nil {
 				select {
 				case events <- event:

@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
@@ -214,14 +214,14 @@ const (
 )
 
 // formatTokenUsage formats token usage like: "↑2,378 ↓27 ↻95%".
-func formatTokenUsage(u *agent.Usage) string {
+func formatTokenUsage(u *aop.TokenUsage) string {
 	if u == nil {
 		return ""
 	}
 	s := fmt.Sprintf("%s%s %s%s",
-		inputTokenMarker, util.FormatNumber(u.PromptTokens),
-		outputTokenMarker, util.FormatNumber(u.CompletionTokens))
-	if ratio := u.CacheHitRatio(); ratio > 0 {
+		inputTokenMarker, util.FormatNumber(int(u.InputTokens)),
+		outputTokenMarker, util.FormatNumber(int(u.OutputTokens)))
+	if ratio := provider.CacheHitRatio(u); ratio > 0 {
 		s += fmt.Sprintf(" %s%.0f%%", cacheHitMarker, ratio*100)
 	}
 	return s

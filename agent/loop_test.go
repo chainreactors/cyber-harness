@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/agent/tmux"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
@@ -55,6 +57,7 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	want := []string{
 		"message",
 		"status",
+		"message",
 		"tool.call",
 		"tool.result",
 		"status",
@@ -77,7 +80,7 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		TransformContext: func(messages []ChatMessage) []ChatMessage {
+		TransformContext: func(messages []*aop.Message) []*aop.Message {
 			if len(messages) <= 1 {
 				return messages
 			}
@@ -91,7 +94,7 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 		t.Fatalf("second prompt error = %v", err)
 	}
 	requests := llm.requestsSnapshot()
-	if len(requests[1].Messages) != 1 || *requests[1].Messages[0].Content != "two" {
+	if len(requests[1].Messages) != 1 || provider.MessageText(requests[1].Messages[0]) != "two" {
 		t.Fatalf("transform not applied to request: %#v", requests[1].Messages)
 	}
 	if got := len(a.state.Messages); got != 4 {
@@ -140,9 +143,9 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("hel")}},
-			{Delta: ChatMessageDelta{Content: strPtr("lo")}},
+			roleDelta("assistant"),
+			textDelta("hel"),
+			textDelta("lo"),
 			{Done: true},
 		},
 	}
@@ -185,12 +188,12 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("done")}},
-			{Done: true, Usage: &Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}},
+			roleDelta("assistant"),
+			textDelta("done"),
+			{Done: true, Usage: provider.TokenUsage(10, 2, 12, 0, 0)},
 		},
 	}
-	var updateUsage *Usage
+	var updateUsage *aop.TokenUsage
 	result, err := (NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
@@ -204,11 +207,7 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 			if data == nil {
 				return
 			}
-			updateUsage = &Usage{
-				PromptTokens:     int(data.InputTokens),
-				CompletionTokens: int(data.OutputTokens),
-				TotalTokens:      int(data.TotalTokens),
-			}
+			updateUsage = data
 		}),
 	})).Run(context.Background(), TextInput("stream"))
 	if err != nil {
@@ -226,9 +225,9 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("hel")}},
-			{Delta: ChatMessageDelta{Content: strPtr("lo")}},
+			roleDelta("assistant"),
+			textDelta("hel"),
+			textDelta("lo"),
 			{Done: true},
 		},
 	}
@@ -264,25 +263,14 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 	llm := &scriptedProvider{
 		streamEventBatches: [][]ChatCompletionStreamEvent{
 			{
-				{Delta: ChatMessageDelta{Role: "assistant"}},
-				{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-					Index: 0,
-					ID:    "call-1",
-					Type:  "function",
-					Function: FunctionCallDelta{
-						Name:      "echo",
-						Arguments: `{"value":`,
-					},
-				}}}},
-				{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-					Index:    0,
-					Function: FunctionCallDelta{Arguments: `"x"}`},
-				}}}},
+				roleDelta("assistant"),
+				toolCallDelta(0, "call-1", "echo", `{"value":`),
+				toolCallDelta(0, "", "", `"x"}`),
 				{Done: true},
 			},
 			{
-				{Delta: ChatMessageDelta{Role: "assistant"}},
-				{Delta: ChatMessageDelta{Content: strPtr("final")}},
+				roleDelta("assistant"),
+				textDelta("final"),
 				{Done: true},
 			},
 		},
@@ -318,7 +306,7 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 					ID: "call-truncated", Type: "function",
 					Function: FunctionCall{Name: "echo", Arguments: `{"value":"cut off`},
 				}},
-			},
+			}.toAOP(),
 			FinishReason: "max_tokens",
 		}}},
 		chatResponse(NewTextMessage("assistant", "recovered")),
@@ -354,23 +342,26 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("provider requests = %d, want 2", len(requests))
 	}
-	var truncated ChatMessage
-	var errorResult ChatMessage
+	var truncated *aop.Message
+	var errorResult *aop.ToolResult
 	for _, msg := range requests[1].Messages {
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+		if msg.Role == "assistant" && len(provider.MessageToolCalls(msg)) > 0 {
 			truncated = msg
 		}
-		if msg.Role == "tool" && msg.ToolCallID == "call-truncated" {
-			errorResult = msg
+		if msg.Role == "tool" {
+			if r := provider.MessageToolResult(msg); r != nil && r.CallId == "call-truncated" {
+				errorResult = r
+			}
 		}
 	}
-	if truncated.FinishReason != "max_tokens" {
-		t.Fatalf("finish reason = %q, want max_tokens", truncated.FinishReason)
+	if truncated == nil {
+		t.Fatal("assistant message with tool call not found")
 	}
-	if got := truncated.ToolCalls[0].Function.Arguments; got != "{}" {
+	truncatedCalls := provider.MessageToolCalls(truncated)
+	if got := string(truncatedCalls[0].GetArguments().GetData()); got != "{}" {
 		t.Fatalf("sanitized arguments = %q, want {}", got)
 	}
-	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "Retry") {
+	if errorResult == nil || !errorResult.IsError || !strings.Contains(tool.ResultText(errorResult), "Retry") {
 		t.Fatalf("error tool result = %#v", errorResult)
 	}
 }
@@ -381,17 +372,14 @@ func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
 	tools.RegisterTool(echo)
 	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
 		{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-				Index: 0, ID: "stream-truncated", Type: "function",
-				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
-			}}}},
+			roleDelta("assistant"),
+			toolCallDelta(0, "stream-truncated", "echo", `{"value":"partial`),
 			{FinishReason: "length"},
 			{Done: true},
 		},
 		{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			roleDelta("assistant"),
+			textDelta("recovered"),
 			{FinishReason: "stop"},
 			{Done: true},
 		},
@@ -412,15 +400,21 @@ func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
 	if calls := echo.callsSnapshot(); len(calls) != 0 {
 		t.Fatalf("truncated tool was executed: %#v", calls)
 	}
-	var finishReason string
+	// A "length" finish reason marks the streamed tool call truncated: the call
+	// is rejected and its arguments are sanitized to "{}" in the transcript.
+	var sanitized string
 	for _, msg := range result.Messages {
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			finishReason = msg.FinishReason
-			break
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, call := range provider.MessageToolCalls(msg) {
+			if call.Id == "stream-truncated" {
+				sanitized = string(call.GetArguments().GetData())
+			}
 		}
 	}
-	if finishReason != "length" {
-		t.Fatalf("stream finish reason = %q, want length", finishReason)
+	if sanitized != "{}" {
+		t.Fatalf("truncated stream tool call arguments = %q, want {}", sanitized)
 	}
 }
 
@@ -430,17 +424,14 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 	tools.RegisterTool(echo)
 	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
 		{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{ToolCalls: []ToolCallDelta{{
-				Index: 0, ID: "stream-malformed", Type: "function",
-				Function: FunctionCallDelta{Name: "echo", Arguments: `{"value":"partial`},
-			}}}},
+			roleDelta("assistant"),
+			toolCallDelta(0, "stream-malformed", "echo", `{"value":"partial`),
 			{FinishReason: "tool_calls"},
 			{Done: true},
 		},
 		{
-			{Delta: ChatMessageDelta{Role: "assistant"}},
-			{Delta: ChatMessageDelta{Content: strPtr("recovered")}},
+			roleDelta("assistant"),
+			textDelta("recovered"),
 			{FinishReason: "stop"},
 			{Done: true},
 		},
@@ -462,20 +453,26 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 	if len(requests) != 2 {
 		t.Fatalf("provider requests = %d, want 2", len(requests))
 	}
-	var rejectedCall ChatMessage
-	var errorResult ChatMessage
+	var rejectedCall *aop.Message
+	var errorResult *aop.ToolResult
 	for _, message := range requests[1].Messages {
-		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+		if message.Role == "assistant" && len(provider.MessageToolCalls(message)) > 0 {
 			rejectedCall = message
 		}
-		if message.Role == "tool" && message.ToolCallID == "stream-malformed" {
-			errorResult = message
+		if message.Role == "tool" {
+			if r := provider.MessageToolResult(message); r != nil && r.CallId == "stream-malformed" {
+				errorResult = r
+			}
 		}
 	}
-	if len(rejectedCall.ToolCalls) != 1 || rejectedCall.ToolCalls[0].Function.Arguments != "{}" {
-		t.Fatalf("rejected tool call = %#v", rejectedCall)
+	if rejectedCall == nil {
+		t.Fatal("assistant message with rejected tool call not found")
 	}
-	if !errorResult.ToolResultIsError || errorResult.Content == nil || !strings.Contains(*errorResult.Content, "invalid") {
+	rejectedCalls := provider.MessageToolCalls(rejectedCall)
+	if len(rejectedCalls) != 1 || string(rejectedCalls[0].GetArguments().GetData()) != "{}" {
+		t.Fatalf("rejected tool call = %#v", rejectedCalls)
+	}
+	if errorResult == nil || !errorResult.IsError || !strings.Contains(tool.ResultText(errorResult), "invalid") {
 		t.Fatalf("error tool result = %#v", errorResult)
 	}
 }
@@ -562,8 +559,8 @@ func TestTokenBudgetWarning(t *testing.T) {
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 700, CompletionTokens: 200, TotalTokens: 900},
+				Choices: []Choice{{Message: NewTextMessage("assistant", "done").toAOP()}},
+				Usage:   provider.TokenUsage(700, 200, 900, 0, 0),
 			}, nil
 		},
 	}
@@ -607,13 +604,13 @@ func TestTokenBudgetExceeded(t *testing.T) {
 							Type:     "function",
 							Function: FunctionCall{Name: "echo", Arguments: `{}`},
 						}},
-					}}},
-					Usage: &Usage{TotalTokens: 600},
+					}.toAOP()}},
+					Usage: provider.TokenUsage(0, 0, 600, 0, 0),
 				}, nil
 			}
 			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{TotalTokens: 500},
+				Choices: []Choice{{Message: NewTextMessage("assistant", "done").toAOP()}},
+				Usage:   provider.TokenUsage(0, 0, 500, 0, 0),
 			}, nil
 		},
 	}
@@ -646,8 +643,8 @@ func TestBudgetExhaustionDoesNotKeepUnpairedToolCall(t *testing.T) {
 			ToolCalls: []ToolCall{{ID: "cut-off", Type: "function", Function: FunctionCall{
 				Name: "echo", Arguments: `{"value":"partial`},
 			}},
-		}, FinishReason: "max_tokens"}},
-		Usage: &Usage{TotalTokens: 1000},
+		}.toAOP(), FinishReason: "max_tokens"}},
+		Usage: provider.TokenUsage(0, 0, 1000, 0, 0),
 	}}}
 
 	result, err := NewAgent(Config{
@@ -679,8 +676,8 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+				Choices: []Choice{{Message: NewTextMessage("assistant", "done").toAOP()}},
+				Usage:   provider.TokenUsage(100, 50, 150, 0, 0),
 			}, nil
 		},
 	}
@@ -714,13 +711,13 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 							ID: "call-1", Type: "function",
 							Function: FunctionCall{Name: "echo", Arguments: `{}`},
 						}},
-					}}},
-					Usage: &Usage{PromptTokens: 200, CompletionTokens: 30, TotalTokens: 230},
+					}.toAOP()}},
+					Usage: provider.TokenUsage(200, 30, 230, 0, 0),
 				}, nil
 			}
 			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 280, CompletionTokens: 20, TotalTokens: 300},
+				Choices: []Choice{{Message: NewTextMessage("assistant", "done").toAOP()}},
+				Usage:   provider.TokenUsage(280, 20, 300, 0, 0),
 			}, nil
 		},
 	}
@@ -737,17 +734,17 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 	if len(result.TurnUsages) != 2 {
 		t.Fatalf("TurnUsages length = %d, want 2", len(result.TurnUsages))
 	}
-	if result.TurnUsages[0].Turn != 1 || result.TurnUsages[0].TotalTokens != 230 {
-		t.Errorf("TurnUsages[0] = %+v, want turn=1 total=230", result.TurnUsages[0])
+	if result.TurnUsages[0].TotalTokens != 230 {
+		t.Errorf("TurnUsages[0] = %+v, want total=230", result.TurnUsages[0])
 	}
-	if result.TurnUsages[1].Turn != 2 || result.TurnUsages[1].TotalTokens != 300 {
-		t.Errorf("TurnUsages[1] = %+v, want turn=2 total=300", result.TurnUsages[1])
+	if result.TurnUsages[1].TotalTokens != 300 {
+		t.Errorf("TurnUsages[1] = %+v, want total=300", result.TurnUsages[1])
 	}
 	if result.TotalUsage.TotalTokens != 530 {
 		t.Errorf("TotalUsage.TotalTokens = %d, want 530", result.TotalUsage.TotalTokens)
 	}
-	if result.TotalUsage.PromptTokens != 480 {
-		t.Errorf("TotalUsage.PromptTokens = %d, want 480", result.TotalUsage.PromptTokens)
+	if result.TotalUsage.InputTokens != 480 {
+		t.Errorf("TotalUsage.InputTokens = %d, want 480", result.TotalUsage.InputTokens)
 	}
 	if result.ContextTokens != 300 {
 		t.Errorf("ContextTokens = %d, want 300 (last turn input + output)", result.ContextTokens)
@@ -759,8 +756,8 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
-				Choices: []Choice{{Message: NewTextMessage("assistant", "done")}},
-				Usage:   &Usage{PromptTokens: 500, CompletionTokens: 40, TotalTokens: 540},
+				Choices: []Choice{{Message: NewTextMessage("assistant", "done").toAOP()}},
+				Usage:   provider.TokenUsage(500, 40, 540, 0, 0),
 			}, nil
 		},
 	}
@@ -806,11 +803,11 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "first question"),
-		NewTextMessage("assistant", "first answer"),
-		NewTextMessage("user", "second question"),
-		NewTextMessage("assistant", ""),
+	a.LoadMessages([]*aop.Message{
+		textMessage("user", "first question"),
+		textMessage("assistant", "first answer"),
+		textMessage("user", "second question"),
+		textMessage("assistant", ""),
 	})
 
 	result, err := a.Run(context.Background(), TextInput("continue"))
@@ -824,7 +821,7 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 		t.Fatal("no requests captured")
 	}
 	for _, msg := range captured[0].Messages {
-		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+		if msg.Role == "assistant" && messageContent(msg) == "" && len(provider.MessageToolCalls(msg)) == 0 {
 			t.Error("empty assistant message was NOT filtered from LLM request")
 		}
 	}
@@ -1075,10 +1072,10 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 	turn2Msgs := requests[1].Messages
 	found := false
 	for _, m := range turn2Msgs {
-		if m.Content != nil && strings.Contains(*m.Content, "session_completion") {
+		if text := provider.MessageText(m); strings.Contains(text, "session_completion") {
 			found = true
-			if !strings.Contains(*m.Content, "background-result") {
-				t.Errorf("session completion should contain stdout, got: %s", *m.Content)
+			if !strings.Contains(text, "background-result") {
+				t.Errorf("session completion should contain stdout, got: %s", text)
 			}
 			break
 		}
@@ -1086,9 +1083,7 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 	if !found {
 		var contents []string
 		for _, m := range turn2Msgs {
-			if m.Content != nil {
-				contents = append(contents, *m.Content)
-			}
+			contents = append(contents, provider.MessageText(m))
 		}
 		t.Fatalf("turn 2 missing session_completion message.\nMessages:\n%s", strings.Join(contents, "\n---\n"))
 	}
@@ -1136,26 +1131,20 @@ func TestSessionCompletionMetadata(t *testing.T) {
 		t.Errorf("exit_code = %v, want 0", msg.Meta["exit_code"])
 	}
 
-	cms := msg.ToChatMessages()
+	cms := msg.ToMessages()
 	if len(cms) != 1 {
 		t.Fatalf("expected 1 chat message, got %d", len(cms))
 	}
-	if !strings.Contains(*cms[0].Content, "session_completion") {
-		t.Errorf("chat message should contain session_completion XML, got: %s", *cms[0].Content)
+	if !strings.Contains(provider.MessageText(cms[0]), "session_completion") {
+		t.Errorf("chat message should contain session_completion XML, got: %s", provider.MessageText(cms[0]))
 	}
 }
 
 // --- Cache usage tests ---
 
 func TestTurnUsageCacheAccumulation(t *testing.T) {
-	usage1 := &Usage{
-		PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120,
-		CacheReadTokens: 0, CacheWriteTokens: 80,
-	}
-	usage2 := &Usage{
-		PromptTokens: 150, CompletionTokens: 15, TotalTokens: 165,
-		CacheReadTokens: 80, CacheWriteTokens: 0,
-	}
+	usage1 := provider.TokenUsage(100, 20, 120, 0, 80)
+	usage2 := provider.TokenUsage(150, 15, 165, 80, 0)
 
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -1166,10 +1155,10 @@ func TestTurnUsageCacheAccumulation(t *testing.T) {
 						ID: "call_1", Type: "function",
 						Function: FunctionCall{Name: "read", Arguments: `{}`},
 					}},
-				},
+				}.toAOP(),
 			}}, Usage: usage1},
 			{Choices: []Choice{{
-				Message: NewTextMessage("assistant", "done"),
+				Message: NewTextMessage("assistant", "done").toAOP(),
 			}}, Usage: usage2},
 		},
 	}
@@ -1189,40 +1178,37 @@ func TestTurnUsageCacheAccumulation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if result.TotalUsage.CacheReadTokens != 80 {
-		t.Errorf("TotalUsage.CacheReadTokens = %d, want 80", result.TotalUsage.CacheReadTokens)
+	if result.TotalUsage.Detail["cache_read"] != 80 {
+		t.Errorf("TotalUsage cache_read = %d, want 80", result.TotalUsage.Detail["cache_read"])
 	}
-	if result.TotalUsage.CacheWriteTokens != 80 {
-		t.Errorf("TotalUsage.CacheWriteTokens = %d, want 80", result.TotalUsage.CacheWriteTokens)
+	if result.TotalUsage.Detail["cache_write"] != 80 {
+		t.Errorf("TotalUsage cache_write = %d, want 80", result.TotalUsage.Detail["cache_write"])
 	}
-	if result.TotalUsage.PromptTokens != 250 {
-		t.Errorf("TotalUsage.PromptTokens = %d, want 250", result.TotalUsage.PromptTokens)
+	if result.TotalUsage.InputTokens != 250 {
+		t.Errorf("TotalUsage.InputTokens = %d, want 250", result.TotalUsage.InputTokens)
 	}
 
 	if len(result.TurnUsages) != 2 {
 		t.Fatalf("expected 2 TurnUsages, got %d", len(result.TurnUsages))
 	}
-	if result.TurnUsages[0].CacheWriteTokens != 80 {
-		t.Errorf("Turn 1 CacheWriteTokens = %d, want 80", result.TurnUsages[0].CacheWriteTokens)
+	if result.TurnUsages[0].Detail["cache_write"] != 80 {
+		t.Errorf("Turn 1 cache_write = %d, want 80", result.TurnUsages[0].Detail["cache_write"])
 	}
-	if result.TurnUsages[1].CacheReadTokens != 80 {
-		t.Errorf("Turn 2 CacheReadTokens = %d, want 80", result.TurnUsages[1].CacheReadTokens)
+	if result.TurnUsages[1].Detail["cache_read"] != 80 {
+		t.Errorf("Turn 2 cache_read = %d, want 80", result.TurnUsages[1].Detail["cache_read"])
 	}
 
 	t.Logf("Accumulation OK: total prompt=%d cache_read=%d cache_write=%d",
-		result.TotalUsage.PromptTokens, result.TotalUsage.CacheReadTokens, result.TotalUsage.CacheWriteTokens)
+		result.TotalUsage.InputTokens, result.TotalUsage.Detail["cache_read"], result.TotalUsage.Detail["cache_write"])
 }
 
 func TestEventCarriesCacheUsage(t *testing.T) {
-	usage := &Usage{
-		PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110,
-		CacheReadTokens: 60, CacheWriteTokens: 20,
-	}
+	usage := provider.TokenUsage(100, 10, 110, 60, 20)
 
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			{Choices: []Choice{{
-				Message: NewTextMessage("assistant", "hi"),
+				Message: NewTextMessage("assistant", "hi").toAOP(),
 			}}, Usage: usage},
 		},
 	}

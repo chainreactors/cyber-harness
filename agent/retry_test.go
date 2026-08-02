@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -239,22 +238,21 @@ func TestImageErrorAutoRecovery(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "take screenshot"),
+	a.LoadMessages([]*aop.Message{
+		textMessage("user", "take screenshot"),
 		{
-			Role: "assistant",
-			ToolCalls: []ToolCall{{
-				ID: "tc1", Type: "function",
-				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
-			}},
+			Role:    "assistant",
+			Content: []*aop.Content{toolCallContent("tc1", "screenshot", "{}")},
 		},
 		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("Screenshot captured"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
+			Role: "tool",
+			Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: &aop.ToolResult{
+				CallId: "tc1",
+				Output: []*aop.Content{
+					aop.Text("Screenshot captured"),
+					aop.Image("image/png", []byte("iVBORw0KGgo=")),
+				},
+			}}}},
 		},
 	})
 
@@ -280,22 +278,21 @@ func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "take screenshot"),
+	a.LoadMessages([]*aop.Message{
+		textMessage("user", "take screenshot"),
 		{
-			Role: "assistant",
-			ToolCalls: []ToolCall{{
-				ID: "tc1", Type: "function",
-				Function: FunctionCall{Name: "screenshot", Arguments: "{}"},
-			}},
+			Role:    "assistant",
+			Content: []*aop.Content{toolCallContent("tc1", "screenshot", "{}")},
 		},
 		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("Screenshot taken"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
+			Role: "tool",
+			Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: &aop.ToolResult{
+				CallId: "tc1",
+				Output: []*aop.Content{
+					aop.Text("Screenshot taken"),
+					aop.Image("image/png", []byte("iVBORw0KGgo=")),
+				},
+			}}}},
 		},
 	})
 
@@ -324,15 +321,17 @@ func TestMultiTurnAfterImageError(t *testing.T) {
 		Logger:     telemetry.NopLogger(),
 	})
 
-	a.LoadMessages([]ChatMessage{
-		NewTextMessage("user", "screenshot"),
+	a.LoadMessages([]*aop.Message{
+		textMessage("user", "screenshot"),
 		{
-			Role:       "tool",
-			ToolCallID: "tc1",
-			ContentParts: []ContentPart{
-				provider.TextPart("img"),
-				provider.ImagePart("image/png", "iVBORw0KGgo=", "high"),
-			},
+			Role: "tool",
+			Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: &aop.ToolResult{
+				CallId: "tc1",
+				Output: []*aop.Content{
+					aop.Text("img"),
+					aop.Image("image/png", []byte("iVBORw0KGgo=")),
+				},
+			}}}},
 		},
 	})
 

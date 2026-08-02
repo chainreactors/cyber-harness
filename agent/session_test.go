@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 func TestSaveAndLoadSession(t *testing.T) {
@@ -13,16 +16,16 @@ func TestSaveAndLoadSession(t *testing.T) {
 
 	content := "hello world"
 	toolArgs := `{"cmd":"ls"}`
-	messages := []ChatMessage{
-		{Role: "user", Content: &content},
+	messages := []*aop.Message{
+		textMessage("user", content),
 		{
-			Role:    "assistant",
-			Content: &content,
-			ToolCalls: []ToolCall{
-				{ID: "tc1", Type: "function", Function: FunctionCall{Name: "bash", Arguments: toolArgs}},
+			Role: "assistant",
+			Content: []*aop.Content{
+				aop.Text(content),
+				toolCallContent("tc1", "bash", toolArgs),
 			},
 		},
-		{Role: "tool", Content: &content, ToolCallID: "tc1"},
+		toolResultMessage("tc1", content),
 	}
 
 	data := &SessionData{
@@ -59,14 +62,14 @@ func TestSaveAndLoadSession(t *testing.T) {
 	if len(loaded.Messages) != 3 {
 		t.Fatalf("messages len = %d, want 3", len(loaded.Messages))
 	}
-	if loaded.Messages[0].Role != "user" || *loaded.Messages[0].Content != "hello world" {
+	if loaded.Messages[0].Role != "user" || provider.MessageText(loaded.Messages[0]) != "hello world" {
 		t.Errorf("message[0] = %+v", loaded.Messages[0])
 	}
-	if len(loaded.Messages[1].ToolCalls) != 1 || loaded.Messages[1].ToolCalls[0].Function.Name != "bash" {
-		t.Errorf("message[1] tool_calls = %+v", loaded.Messages[1].ToolCalls)
+	if calls := provider.MessageToolCalls(loaded.Messages[1]); len(calls) != 1 || calls[0].Name != "bash" {
+		t.Errorf("message[1] tool_calls = %+v", calls)
 	}
-	if loaded.Messages[2].ToolCallID != "tc1" {
-		t.Errorf("message[2] tool_call_id = %q, want %q", loaded.Messages[2].ToolCallID, "tc1")
+	if r := provider.MessageToolResult(loaded.Messages[2]); r == nil || r.CallId != "tc1" {
+		t.Errorf("message[2] tool result = %+v, want call id tc1", r)
 	}
 
 	entries, _ := os.ReadDir(dir)
@@ -89,19 +92,19 @@ func TestListSessionsSortsNewestFirst(t *testing.T) {
 		Version:   sessionVersion,
 		UpdatedAt: oldTime,
 		Model:     "old",
-		Messages:  []ChatMessage{NewTextMessage("user", "old")},
+		Messages:  []*aop.Message{textMessage("user", "old")},
 	})
 	writeSessionFile(t, filepath.Join(dir, "session-new.json"), SessionData{
 		Version:   sessionVersion,
 		UpdatedAt: newTime,
 		Model:     "new",
-		Messages:  []ChatMessage{NewTextMessage("user", "new")},
+		Messages:  []*aop.Message{textMessage("user", "new")},
 	})
 	writeSessionFile(t, filepath.Join(dir, "latest.json"), SessionData{
 		Version:   sessionVersion,
 		UpdatedAt: newTime.Add(time.Hour),
 		Model:     "ignored",
-		Messages:  []ChatMessage{NewTextMessage("user", "ignored")},
+		Messages:  []*aop.Message{textMessage("user", "ignored")},
 	})
 
 	sessions, err := ListSessions(dir)
@@ -131,17 +134,14 @@ func writeSessionFile(t *testing.T, path string, data SessionData) {
 }
 
 func TestSanitizeMessagesForSave(t *testing.T) {
-	text := "some text"
-	reasoning := "thinking..."
-	msgs := []ChatMessage{
+	msgs := []*aop.Message{
 		{
-			Role:             "assistant",
-			Content:          &text,
-			ReasoningContent: &reasoning,
-			ContentParts: []ContentPart{
-				{Type: "text", Text: "part1"},
-				{Type: "image_url"},
-				{Type: "text", Text: "part2"},
+			Role: "assistant",
+			Content: []*aop.Content{
+				aop.Reasoning("thinking..."),
+				aop.Text("part1"),
+				aop.Image("image/png", []byte("binary-image-data")),
+				aop.Text("part2"),
 			},
 		},
 	}
@@ -149,11 +149,16 @@ func TestSanitizeMessagesForSave(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("len = %d", len(out))
 	}
-	if out[0].Content == nil || *out[0].Content != "part1\npart2" {
-		t.Errorf("content = %v, want %q", out[0].Content, "part1\npart2")
+	if got := provider.MessageText(out[0]); got != "part1part2" {
+		t.Errorf("content = %q, want %q", got, "part1part2")
 	}
-	if len(out[0].ContentParts) != 0 {
-		t.Error("ContentParts should be empty after sanitize")
+	for _, part := range out[0].Content {
+		if part.GetMedia() != nil {
+			t.Error("media parts should be stripped after sanitize")
+		}
+	}
+	if got := provider.MessageReasoning(out[0]); got != "thinking..." {
+		t.Errorf("reasoning = %q, want preserved", got)
 	}
 }
 

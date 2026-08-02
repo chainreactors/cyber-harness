@@ -13,7 +13,7 @@ func TestExpandNoReferences(t *testing.T) {
 	if len(result.Attachments) != 0 {
 		t.Fatalf("expected no attachments, got %d", len(result.Attachments))
 	}
-	if *result.ChatMessage.Content != "scan 10.0.0.0/24" {
+	if messageText(result.Message) != "scan 10.0.0.0/24" {
 		t.Errorf("content should be unchanged")
 	}
 }
@@ -186,17 +186,17 @@ func TestExpandNilContent(t *testing.T) {
 	}
 }
 
-func TestToChatMessagesWithAttachments(t *testing.T) {
+func TestToMessagesWithAttachments(t *testing.T) {
 	msg := NewUserMessage("hello")
 	msg.Attachments = []Attachment{
 		{Type: "file", Ref: "@/tmp/a", Content: "file-data"},
 		{Type: "skill", Ref: "@scan", Content: "skill-body"},
 	}
-	cms := msg.ToChatMessages()
+	cms := msg.ToMessages()
 	if len(cms) != 1 {
 		t.Fatalf("expected 1 chat message, got %d", len(cms))
 	}
-	content := *cms[0].Content
+	content := messageText(cms[0])
 	if !strings.Contains(content, "hello") {
 		t.Error("should contain original content")
 	}
@@ -211,13 +211,13 @@ func TestToChatMessagesWithAttachments(t *testing.T) {
 	}
 }
 
-func TestToChatMessagesWithAttachmentError(t *testing.T) {
+func TestToMessagesWithAttachmentError(t *testing.T) {
 	msg := NewUserMessage("hello")
 	msg.Attachments = []Attachment{
 		{Type: "file", Ref: "@/bad", Error: "not found"},
 	}
-	cms := msg.ToChatMessages()
-	content := *cms[0].Content
+	cms := msg.ToMessages()
+	content := messageText(cms[0])
 	if !strings.Contains(content, "attachment_error") {
 		t.Error("should contain error tag")
 	}

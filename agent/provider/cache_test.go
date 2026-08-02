@@ -11,7 +11,45 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	aop "github.com/chainreactors/aiscan/aop"
 )
+
+// toolDef builds an aop.ToolDefinition for tests.
+func toolDef(name, description string, parameters map[string]interface{}) *aop.ToolDefinition {
+	def := &aop.ToolDefinition{Type: "function", Name: name, Description: description}
+	if parameters != nil {
+		schema, err := aop.JSONValue(parameters)
+		if err == nil {
+			def.InputSchema = schema
+		}
+	}
+	return def
+}
+
+// newToolCall builds an aop.ToolCall for tests.
+func newToolCall(id, name, arguments string) *aop.ToolCall {
+	return &aop.ToolCall{
+		Id:        id,
+		Name:      name,
+		Kind:      "function",
+		Arguments: &aop.EncodedValue{Data: []byte(arguments), MediaType: aop.JSONMediaType},
+	}
+}
+
+// assistantToolCallMsg builds an assistant aop message carrying tool calls.
+func assistantToolCallMsg(calls ...*aop.ToolCall) *aop.Message {
+	msg := &aop.Message{Role: "assistant"}
+	for _, call := range calls {
+		msg.Content = append(msg.Content, &aop.Content{Value: &aop.Content_ToolCall{ToolCall: call}})
+	}
+	return msg
+}
+
+// toolResultMsg builds a tool-role aop message carrying a text tool result.
+func toolResultMsg(callID, text string) *aop.Message {
+	return ToolResultMessage(callID, &aop.ToolResult{Output: []*aop.Content{aop.Text(text)}})
+}
 
 // =============================================================================
 // Tests from cache_test.go (original)
@@ -43,13 +81,13 @@ func TestLiveCacheMetrics(t *testing.T) {
 	// Build a substantial system prompt to exceed provider's minimum cache threshold
 	systemPrompt := "You are a helpful security analysis assistant. " + strings.Repeat("You have deep expertise in vulnerability assessment, penetration testing, and secure code review. ", 40)
 
-	sysMsg := NewTextMessage("system", systemPrompt)
-	userMsg1 := NewTextMessage("user", "What is 2+2? Answer in one word.")
+	sysMsg := TextMessage("system", systemPrompt)
+	userMsg1 := TextMessage("user", "What is 2+2? Answer in one word.")
 
 	// Turn 1
 	req1 := &ChatCompletionRequest{
 		Model:          model,
-		Messages:       []ChatMessage{sysMsg, userMsg1},
+		Messages:       []*aop.Message{sysMsg, userMsg1},
 		MaxTokens:      50,
 		CacheRetention: CacheShort,
 		SessionID:      "test-cache-session-001",
@@ -62,16 +100,16 @@ func TestLiveCacheMetrics(t *testing.T) {
 	}
 
 	t.Logf("=== Turn 1 ===")
-	t.Logf("Response: %s", deref(resp1.Choices[0].Message.Content))
+	t.Logf("Response: %s", MessageText(resp1.Choices[0].Message))
 	logUsage(t, resp1.Usage)
 
 	// Turn 2 — same prefix, new user message
 	assistantReply := resp1.Choices[0].Message
-	userMsg2 := NewTextMessage("user", "What is 3+3? Answer in one word.")
+	userMsg2 := TextMessage("user", "What is 3+3? Answer in one word.")
 
 	req2 := &ChatCompletionRequest{
 		Model:          model,
-		Messages:       []ChatMessage{sysMsg, userMsg1, assistantReply, userMsg2},
+		Messages:       []*aop.Message{sysMsg, userMsg1, assistantReply, userMsg2},
 		MaxTokens:      50,
 		CacheRetention: CacheShort,
 		SessionID:      "test-cache-session-001",
@@ -83,16 +121,16 @@ func TestLiveCacheMetrics(t *testing.T) {
 	}
 
 	t.Logf("=== Turn 2 ===")
-	t.Logf("Response: %s", deref(resp2.Choices[0].Message.Content))
+	t.Logf("Response: %s", MessageText(resp2.Choices[0].Message))
 	logUsage(t, resp2.Usage)
 
 	// Turn 3 — even longer prefix
 	assistantReply2 := resp2.Choices[0].Message
-	userMsg3 := NewTextMessage("user", "What is 4+4? Answer in one word.")
+	userMsg3 := TextMessage("user", "What is 4+4? Answer in one word.")
 
 	req3 := &ChatCompletionRequest{
 		Model:          model,
-		Messages:       []ChatMessage{sysMsg, userMsg1, assistantReply, userMsg2, assistantReply2, userMsg3},
+		Messages:       []*aop.Message{sysMsg, userMsg1, assistantReply, userMsg2, assistantReply2, userMsg3},
 		MaxTokens:      50,
 		CacheRetention: CacheShort,
 		SessionID:      "test-cache-session-001",
@@ -104,7 +142,7 @@ func TestLiveCacheMetrics(t *testing.T) {
 	}
 
 	t.Logf("=== Turn 3 ===")
-	t.Logf("Response: %s", deref(resp3.Choices[0].Message.Content))
+	t.Logf("Response: %s", MessageText(resp3.Choices[0].Message))
 	logUsage(t, resp3.Usage)
 
 	// Summary
@@ -112,16 +150,16 @@ func TestLiveCacheMetrics(t *testing.T) {
 	for i, resp := range []*ChatCompletionResponse{resp1, resp2, resp3} {
 		if resp.Usage != nil {
 			ratio := 0.0
-			if resp.Usage.PromptTokens > 0 {
-				ratio = float64(resp.Usage.CacheReadTokens) / float64(resp.Usage.PromptTokens) * 100
+			if resp.Usage.InputTokens > 0 {
+				ratio = float64(resp.Usage.Detail["cache_read"]) / float64(resp.Usage.InputTokens) * 100
 			}
 			t.Logf("Turn %d: prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
-				i+1, resp.Usage.PromptTokens, resp.Usage.CacheReadTokens, resp.Usage.CacheWriteTokens, ratio)
+				i+1, resp.Usage.InputTokens, resp.Usage.Detail["cache_read"], resp.Usage.Detail["cache_write"], ratio)
 		}
 	}
 }
 
-func logUsage(t *testing.T, u *Usage) {
+func logUsage(t *testing.T, u *aop.TokenUsage) {
 	if u == nil {
 		t.Log("Usage: nil")
 		return
@@ -129,7 +167,7 @@ func logUsage(t *testing.T, u *Usage) {
 	raw, _ := json.Marshal(u)
 	t.Logf("Usage: %s", raw)
 	t.Logf("  prompt=%d completion=%d total=%d cache_read=%d cache_write=%d",
-		u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CacheReadTokens, u.CacheWriteTokens)
+		u.InputTokens, u.OutputTokens, u.TotalTokens, u.Detail["cache_read"], u.Detail["cache_write"])
 }
 
 // Also test that the marshalRequest correctly adds cache_control for Anthropic
@@ -145,13 +183,13 @@ func TestAnthropicMarshalCacheControl(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sysMsg := NewTextMessage("system", "You are a helpful assistant.")
-	userMsg := NewTextMessage("user", "Hello")
+	sysMsg := TextMessage("system", "You are a helpful assistant.")
+	userMsg := TextMessage("user", "Hello")
 
 	// Without cache
 	req := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       []ChatMessage{sysMsg, userMsg},
+		Messages:       []*aop.Message{sysMsg, userMsg},
 		CacheRetention: CacheNone,
 	}
 	data, err := prov.marshalRequest(req)
@@ -208,17 +246,17 @@ func TestAnthropicMarshalCacheControlWithTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sysMsg := NewTextMessage("system", "You are a helpful assistant.")
-	userMsg := NewTextMessage("user", "Hello")
+	sysMsg := TextMessage("system", "You are a helpful assistant.")
+	userMsg := TextMessage("user", "Hello")
 
-	tools := []ToolDefinition{
-		{Type: "function", Function: FunctionDefinition{Name: "tool_a", Description: "first tool"}},
-		{Type: "function", Function: FunctionDefinition{Name: "tool_b", Description: "second tool"}},
+	tools := []*aop.ToolDefinition{
+		toolDef("tool_a", "first tool", nil),
+		toolDef("tool_b", "second tool", nil),
 	}
 
 	req := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       []ChatMessage{sysMsg, userMsg},
+		Messages:       []*aop.Message{sysMsg, userMsg},
 		Tools:          tools,
 		CacheRetention: CacheShort,
 	}
@@ -251,7 +289,7 @@ func TestAnthropicMarshalCacheControlWithTools(t *testing.T) {
 func TestOpenAIMarshalCacheKey(t *testing.T) {
 	req := &ChatCompletionRequest{
 		Model:          "gpt-4o",
-		Messages:       []ChatMessage{NewTextMessage("user", "Hello")},
+		Messages:       []*aop.Message{TextMessage("user", "Hello")},
 		CacheRetention: CacheShort,
 		SessionID:      "sess-123",
 	}
@@ -301,7 +339,7 @@ func TestOpenAIMarshalCacheKey(t *testing.T) {
 func TestOpenAIStreamRequestIncludesUsage(t *testing.T) {
 	req := &ChatCompletionRequest{
 		Model:    "gpt-4o",
-		Messages: []ChatMessage{NewTextMessage("user", "Hello")},
+		Messages: []*aop.Message{TextMessage("user", "Hello")},
 		Stream:   true,
 	}
 
@@ -325,7 +363,7 @@ func TestOpenAIStreamRequestIncludesUsage(t *testing.T) {
 
 func TestUsageUnmarshalDeepSeek(t *testing.T) {
 	raw := `{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20}`
-	var u Usage
+	var u openAIUsage
 	if err := json.Unmarshal([]byte(raw), &u); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +377,7 @@ func TestUsageUnmarshalDeepSeek(t *testing.T) {
 
 func TestUsageUnmarshalOpenAI(t *testing.T) {
 	raw := `{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":10}}`
-	var u Usage
+	var u openAIUsage
 	if err := json.Unmarshal([]byte(raw), &u); err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +391,7 @@ func TestUsageUnmarshalOpenAI(t *testing.T) {
 
 func TestUsageUnmarshalNoCacheFields(t *testing.T) {
 	raw := `{"prompt_tokens":50,"completion_tokens":10,"total_tokens":60}`
-	var u Usage
+	var u openAIUsage
 	if err := json.Unmarshal([]byte(raw), &u); err != nil {
 		t.Fatal(err)
 	}
@@ -372,14 +410,14 @@ func TestConvertAnthropicUsageCacheFields(t *testing.T) {
 		CacheCreationInputTokens: 50,
 		CacheReadInputTokens:     30,
 	})
-	if u.PromptTokens != 180 {
-		t.Errorf("PromptTokens: want 180, got %d", u.PromptTokens)
+	if u.InputTokens != 180 {
+		t.Errorf("InputTokens: want 180, got %d", u.InputTokens)
 	}
-	if u.CacheReadTokens != 30 {
-		t.Errorf("CacheReadTokens: want 30, got %d", u.CacheReadTokens)
+	if u.Detail["cache_read"] != 30 {
+		t.Errorf("cache_read: want 30, got %d", u.Detail["cache_read"])
 	}
-	if u.CacheWriteTokens != 50 {
-		t.Errorf("CacheWriteTokens: want 50, got %d", u.CacheWriteTokens)
+	if u.Detail["cache_write"] != 50 {
+		t.Errorf("cache_write: want 50, got %d", u.Detail["cache_write"])
 	}
 	fmt.Println("usage:", mustJSON(u))
 }
@@ -394,17 +432,17 @@ func TestConvertAnthropicUsageCacheFields(t *testing.T) {
 func TestCacheBreakpointPlacementMultiTurn(t *testing.T) {
 	prov := mustAnthropicProvider(t)
 
-	sysMsg := NewTextMessage("system", "You are a helpful assistant.")
-	tools := []ToolDefinition{
-		{Type: "function", Function: FunctionDefinition{Name: "read", Description: "read file"}},
-		{Type: "function", Function: FunctionDefinition{Name: "write", Description: "write file"}},
+	sysMsg := TextMessage("system", "You are a helpful assistant.")
+	tools := []*aop.ToolDefinition{
+		toolDef("read", "read file", nil),
+		toolDef("write", "write file", nil),
 	}
 
 	// --- Turn 1: system + user1 ---
-	user1 := NewTextMessage("user", "Hello turn 1")
+	user1 := TextMessage("user", "Hello turn 1")
 	req1 := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       []ChatMessage{sysMsg, user1},
+		Messages:       []*aop.Message{sysMsg, user1},
 		Tools:          tools,
 		CacheRetention: CacheShort,
 	}
@@ -419,11 +457,11 @@ func TestCacheBreakpointPlacementMultiTurn(t *testing.T) {
 	t.Log(prettyJSON(p1))
 
 	// --- Turn 2: system + user1 + assistant1 + user2 ---
-	assistant1 := NewTextMessage("assistant", "Hi there")
-	user2 := NewTextMessage("user", "Hello turn 2")
+	assistant1 := TextMessage("assistant", "Hi there")
+	user2 := TextMessage("user", "Hello turn 2")
 	req2 := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       []ChatMessage{sysMsg, user1, assistant1, user2},
+		Messages:       []*aop.Message{sysMsg, user1, assistant1, user2},
 		Tools:          tools,
 		CacheRetention: CacheShort,
 	}
@@ -455,14 +493,14 @@ func TestCacheBreakpointPlacementMultiTurn(t *testing.T) {
 	assertPrefixStable(t, "tools", p1, p2)
 
 	// --- Turn 3: with tool_result (maps to user role) ---
-	tc := ToolCall{ID: "call_1", Type: "function", Function: FunctionCall{Name: "read", Arguments: `{"path":"test.go"}`}}
-	assistant2 := ChatMessage{Role: "assistant", ToolCalls: []ToolCall{tc}}
-	toolResult := NewToolResultMessage("call_1", "file contents here")
-	user3 := NewTextMessage("user", "Now what?")
+	tc := newToolCall("call_1", "read", `{"path":"test.go"}`)
+	assistant2 := assistantToolCallMsg(tc)
+	toolResult := toolResultMsg("call_1", "file contents here")
+	user3 := TextMessage("user", "Now what?")
 
 	req3 := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       []ChatMessage{sysMsg, user1, assistant1, user2, assistant2, toolResult, user3},
+		Messages:       []*aop.Message{sysMsg, user1, assistant1, user2, assistant2, toolResult, user3},
 		Tools:          tools,
 		CacheRetention: CacheShort,
 	}
@@ -504,28 +542,28 @@ func TestCacheBreakpointPlacementMultiTurn(t *testing.T) {
 func TestCacheBreakpointSubagentFork(t *testing.T) {
 	prov := mustAnthropicProvider(t)
 
-	sysMsg := NewTextMessage("system", "You are a security scanner.")
-	tools := []ToolDefinition{
-		{Type: "function", Function: FunctionDefinition{Name: "scan", Description: "scan target"}},
+	sysMsg := TextMessage("system", "You are a security scanner.")
+	tools := []*aop.ToolDefinition{
+		toolDef("scan", "scan target", nil),
 	}
 
 	// Parent conversation: system + user1 + assistant1 + user2 + assistant2
-	user1 := NewTextMessage("user", "Scan target.com")
-	assistant1 := NewTextMessage("assistant", "Starting scan...")
-	user2 := NewTextMessage("user", "Check port 443")
-	assistant2 := NewTextMessage("assistant", "Port 443 is open")
+	user1 := TextMessage("user", "Scan target.com")
+	assistant1 := TextMessage("assistant", "Starting scan...")
+	user2 := TextMessage("user", "Check port 443")
+	assistant2 := TextMessage("assistant", "Port 443 is open")
 
-	parentMessages := []ChatMessage{user1, assistant1, user2, assistant2}
+	parentMessages := []*aop.Message{user1, assistant1, user2, assistant2}
 
 	// Fork child: inherits parent messages, adds child prompt as new user message
-	childPrompt := NewTextMessage("user", "Analyze the SSL certificate on port 443")
-	childMessages := append([]ChatMessage{sysMsg}, parentMessages...)
+	childPrompt := TextMessage("user", "Analyze the SSL certificate on port 443")
+	childMessages := append([]*aop.Message{sysMsg}, parentMessages...)
 	childMessages = append(childMessages, childPrompt)
 
 	// Parent's last request (before forking)
 	parentReq := &ChatCompletionRequest{
 		Model:          "claude-sonnet-4-20250514",
-		Messages:       append([]ChatMessage{sysMsg}, append(parentMessages, NewTextMessage("user", "fork a subagent"))...),
+		Messages:       append([]*aop.Message{sysMsg}, append(parentMessages, TextMessage("user", "fork a subagent"))...),
 		Tools:          tools,
 		CacheRetention: CacheShort,
 	}
@@ -590,14 +628,14 @@ func TestCacheNoneProducesNoCacheControl(t *testing.T) {
 
 	req := &ChatCompletionRequest{
 		Model: "claude-sonnet-4-20250514",
-		Messages: []ChatMessage{
-			NewTextMessage("system", "system prompt"),
-			NewTextMessage("user", "hello"),
-			NewTextMessage("assistant", "hi"),
-			NewTextMessage("user", "bye"),
+		Messages: []*aop.Message{
+			TextMessage("system", "system prompt"),
+			TextMessage("user", "hello"),
+			TextMessage("assistant", "hi"),
+			TextMessage("user", "bye"),
 		},
-		Tools: []ToolDefinition{
-			{Type: "function", Function: FunctionDefinition{Name: "tool1", Description: "t1"}},
+		Tools: []*aop.ToolDefinition{
+			toolDef("tool1", "t1", nil),
 		},
 		CacheRetention: CacheNone,
 	}
@@ -614,17 +652,17 @@ func TestCacheNoneProducesNoCacheControl(t *testing.T) {
 func TestCacheBreakpointToolResultMerge(t *testing.T) {
 	prov := mustAnthropicProvider(t)
 
-	sysMsg := NewTextMessage("system", "system prompt")
-	user1 := NewTextMessage("user", "call the tool")
-	tc := ToolCall{ID: "c1", Type: "function", Function: FunctionCall{Name: "read", Arguments: `{}`}}
-	assistant1 := ChatMessage{Role: "assistant", ToolCalls: []ToolCall{tc}}
-	toolResult := NewToolResultMessage("c1", "file content here")
+	sysMsg := TextMessage("system", "system prompt")
+	user1 := TextMessage("user", "call the tool")
+	tc := newToolCall("c1", "read", `{}`)
+	assistant1 := assistantToolCallMsg(tc)
+	toolResult := toolResultMsg("c1", "file content here")
 
 	// Case A: tool_result is the LAST message (no user msg after it)
 	// tool_result maps to user role → it becomes the "last user message"
 	reqA := &ChatCompletionRequest{
 		Model:          "test",
-		Messages:       []ChatMessage{sysMsg, user1, assistant1, toolResult},
+		Messages:       []*aop.Message{sysMsg, user1, assistant1, toolResult},
 		CacheRetention: CacheShort,
 	}
 	jA := mustMarshal(t, prov, reqA)
@@ -645,10 +683,10 @@ func TestCacheBreakpointToolResultMerge(t *testing.T) {
 		len(blocksA), lastBlockA["type"])
 
 	// Case B: tool_result followed by user message → they merge (consecutive user role)
-	user2 := NewTextMessage("user", "now analyze it")
+	user2 := TextMessage("user", "now analyze it")
 	reqB := &ChatCompletionRequest{
 		Model:          "test",
-		Messages:       []ChatMessage{sysMsg, user1, assistant1, toolResult, user2},
+		Messages:       []*aop.Message{sysMsg, user1, assistant1, toolResult, user2},
 		CacheRetention: CacheShort,
 	}
 	jB := mustMarshal(t, prov, reqB)
@@ -666,14 +704,14 @@ func TestCacheBreakpointToolResultMerge(t *testing.T) {
 		len(blocksB), lastBlockB["type"], lastBlockB["text"])
 
 	// Case C: multiple tool calls → multiple tool_results merge into one user message
-	tc2 := ToolCall{ID: "c2", Type: "function", Function: FunctionCall{Name: "write", Arguments: `{}`}}
-	assistant2 := ChatMessage{Role: "assistant", ToolCalls: []ToolCall{tc, tc2}}
-	toolResult1 := NewToolResultMessage("c1", "result1")
-	toolResult2 := NewToolResultMessage("c2", "result2")
+	tc2 := newToolCall("c2", "write", `{}`)
+	assistant2 := assistantToolCallMsg(tc, tc2)
+	toolResult1 := toolResultMsg("c1", "result1")
+	toolResult2 := toolResultMsg("c2", "result2")
 
 	reqC := &ChatCompletionRequest{
 		Model:          "test",
-		Messages:       []ChatMessage{sysMsg, user1, assistant2, toolResult1, toolResult2},
+		Messages:       []*aop.Message{sysMsg, user1, assistant2, toolResult1, toolResult2},
 		CacheRetention: CacheShort,
 	}
 	jC := mustMarshal(t, prov, reqC)
@@ -701,18 +739,18 @@ func TestCacheBreakpointToolResultMerge(t *testing.T) {
 func TestCacheBreakpointStabilityAcrossTurns(t *testing.T) {
 	prov := mustAnthropicProvider(t)
 
-	sys := NewTextMessage("system", "system prompt here")
-	tools := []ToolDefinition{
-		{Type: "function", Function: FunctionDefinition{Name: "tool1", Description: "desc"}},
+	sys := TextMessage("system", "system prompt here")
+	tools := []*aop.ToolDefinition{
+		toolDef("tool1", "desc", nil),
 	}
 
 	// Build 5 turns of conversation
-	msgs := []ChatMessage{sys}
+	msgs := []*aop.Message{sys}
 	for turn := 1; turn <= 5; turn++ {
-		msgs = append(msgs, NewTextMessage("user", fmt.Sprintf("question %d", turn)))
-		msgs = append(msgs, NewTextMessage("assistant", fmt.Sprintf("answer %d", turn)))
+		msgs = append(msgs, TextMessage("user", fmt.Sprintf("question %d", turn)))
+		msgs = append(msgs, TextMessage("assistant", fmt.Sprintf("answer %d", turn)))
 	}
-	msgs = append(msgs, NewTextMessage("user", "final question"))
+	msgs = append(msgs, TextMessage("user", "final question"))
 
 	// Marshal the full request
 	reqFull := &ChatCompletionRequest{
@@ -722,7 +760,7 @@ func TestCacheBreakpointStabilityAcrossTurns(t *testing.T) {
 	pFull := mustParse(t, jFull)
 
 	// Marshal a shorter prefix (first 3 turns + new question)
-	shortMsgs := append(msgs[:7], NewTextMessage("user", "different question")) // sys + 3 turns + new user
+	shortMsgs := append(msgs[:7], TextMessage("user", "different question")) // sys + 3 turns + new user
 	reqShort := &ChatCompletionRequest{
 		Model: "test", Messages: shortMsgs, Tools: tools, CacheRetention: CacheShort,
 	}
@@ -1085,17 +1123,17 @@ func TestAnthropicProtocol_ToolCallCache(t *testing.T) {
 	})
 
 	ctx := testContext()
-	sys := NewTextMessage("system", "You are a tool-using assistant.")
-	user1 := NewTextMessage("user", "Read test.go")
-	tools := []ToolDefinition{
-		{Type: "function", Function: FunctionDefinition{Name: "read", Description: "read file",
-			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}}}}},
-		{Type: "function", Function: FunctionDefinition{Name: "write", Description: "write file"}},
+	sys := TextMessage("system", "You are a tool-using assistant.")
+	user1 := TextMessage("user", "Read test.go")
+	tools := []*aop.ToolDefinition{
+		toolDef("read", "read file",
+			map[string]interface{}{"type": "object", "properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}}}),
+		toolDef("write", "write file", nil),
 	}
 
 	// Turn 1: triggers tool_use
 	req1 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1},
+		Messages: []*aop.Message{sys, user1},
 		Tools:    tools, CacheRetention: CacheShort, SessionID: "sess-tool",
 	}
 	resp1, err := prov.ChatCompletion(ctx, req1)
@@ -1106,11 +1144,11 @@ func TestAnthropicProtocol_ToolCallCache(t *testing.T) {
 
 	// Turn 2: tool_result + follow-up (simulates the agent loop)
 	assistant1 := resp1.Choices[0].Message
-	toolResult := NewToolResultMessage("call_abc", "package main...")
-	user2 := NewTextMessage("user", "What does it do?")
+	toolResult := toolResultMsg("call_abc", "package main...")
+	user2 := TextMessage("user", "What does it do?")
 
 	req2 := &ChatCompletionRequest{
-		Messages: []ChatMessage{sys, user1, assistant1, toolResult, user2},
+		Messages: []*aop.Message{sys, user1, assistant1, toolResult, user2},
 		Tools:    tools, CacheRetention: CacheShort, SessionID: "sess-tool",
 	}
 	resp2, err := prov.ChatCompletion(ctx, req2)
@@ -1119,7 +1157,7 @@ func TestAnthropicProtocol_ToolCallCache(t *testing.T) {
 	}
 	assertCacheFields(t, "tool turn 2", resp2.Usage)
 
-	if resp2.Usage.CacheReadTokens == 0 {
+	if resp2.Usage.Detail["cache_read"] == 0 {
 		t.Error("tool turn 2: expected cache_read > 0")
 	}
 
@@ -1167,12 +1205,12 @@ func TestLive_OpenAIProtocol_AllScenarios(t *testing.T) {
 func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	t.Helper()
 	ctx := testContext()
-	sys := NewTextMessage("system", "You are a helpful assistant. "+strings.Repeat("You have deep expertise in mathematics and always answer with just the numeric result. ", 30))
-	user1 := NewTextMessage("user", "What is 2+2?")
+	sys := TextMessage("system", "You are a helpful assistant. "+strings.Repeat("You have deep expertise in mathematics and always answer with just the numeric result. ", 30))
+	user1 := TextMessage("user", "What is 2+2?")
 
 	// Turn 1
 	req1 := &ChatCompletionRequest{
-		Messages:  []ChatMessage{sys, user1},
+		Messages:  []*aop.Message{sys, user1},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp1, err := prov.ChatCompletion(ctx, req1)
@@ -1183,9 +1221,9 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 
 	// Turn 2
 	a1 := resp1.Choices[0].Message
-	user2 := NewTextMessage("user", "What is 3+3?")
+	user2 := TextMessage("user", "What is 3+3?")
 	req2 := &ChatCompletionRequest{
-		Messages:  []ChatMessage{sys, user1, a1, user2},
+		Messages:  []*aop.Message{sys, user1, a1, user2},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp2, err := prov.ChatCompletion(ctx, req2)
@@ -1196,9 +1234,9 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 
 	// Turn 3
 	a2 := resp2.Choices[0].Message
-	user3 := NewTextMessage("user", "What is 4+4?")
+	user3 := TextMessage("user", "What is 4+4?")
 	req3 := &ChatCompletionRequest{
-		Messages:  []ChatMessage{sys, user1, a1, user2, a2, user3},
+		Messages:  []*aop.Message{sys, user1, a1, user2, a2, user3},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-mt",
 	}
 	resp3, err := prov.ChatCompletion(ctx, req3)
@@ -1208,13 +1246,13 @@ func runMultiTurnScenario(t *testing.T, prov Provider, label string) {
 	assertCacheFields(t, label+" turn 3", resp3.Usage)
 
 	// Context should grow
-	if resp3.Usage.PromptTokens <= resp1.Usage.PromptTokens {
+	if resp3.Usage.InputTokens <= resp1.Usage.InputTokens {
 		t.Errorf("%s: prompt tokens should grow (turn1=%d turn3=%d)",
-			label, resp1.Usage.PromptTokens, resp3.Usage.PromptTokens)
+			label, resp1.Usage.InputTokens, resp3.Usage.InputTokens)
 	}
 
 	// Cache should improve (may be 0 if prompt is below provider's minimum cache threshold)
-	if resp2.Usage.CacheReadTokens == 0 && resp3.Usage.CacheReadTokens == 0 {
+	if resp2.Usage.Detail["cache_read"] == 0 && resp3.Usage.Detail["cache_read"] == 0 {
 		t.Logf("%s: WARNING cache_read=0 in turn 2 and 3 — prompt may be below provider minimum cache threshold", label)
 	}
 
@@ -1231,21 +1269,21 @@ func runStreamingMultiTurnScenario(t *testing.T, prov Provider, label string) {
 		t.Skipf("%s: provider does not support streaming", label)
 	}
 	ctx := testContext()
-	sys := NewTextMessage("system", "You translate to French. "+strings.Repeat("Always respond with just the translation. ", 30))
+	sys := TextMessage("system", "You translate to French. "+strings.Repeat("Always respond with just the translation. ", 30))
 
 	// Turn 1
-	user1 := NewTextMessage("user", "Hello")
+	user1 := TextMessage("user", "Hello")
 	req1 := &ChatCompletionRequest{
-		Messages:  []ChatMessage{sys, user1},
+		Messages:  []*aop.Message{sys, user1},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-stream", Stream: true,
 	}
 	msg1, usage1 := collectStream(t, sp, ctx, req1)
 
 	// Turn 2
-	a1 := NewTextMessage("assistant", msg1)
-	user2 := NewTextMessage("user", "Goodbye")
+	a1 := TextMessage("assistant", msg1)
+	user2 := TextMessage("user", "Goodbye")
 	req2 := &ChatCompletionRequest{
-		Messages:  []ChatMessage{sys, user1, a1, user2},
+		Messages:  []*aop.Message{sys, user1, a1, user2},
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-stream", Stream: true,
 	}
 	_, usage2 := collectStream(t, sp, ctx, req2)
@@ -1254,7 +1292,7 @@ func runStreamingMultiTurnScenario(t *testing.T, prov Provider, label string) {
 		t.Fatalf("%s: streaming did not return usage", label)
 	}
 
-	if usage2.CacheReadTokens == 0 {
+	if usage2.Detail["cache_read"] == 0 {
 		t.Errorf("%s: expected cache_read > 0 in stream turn 2", label)
 	}
 
@@ -1266,20 +1304,20 @@ func runStreamingMultiTurnScenario(t *testing.T, prov Provider, label string) {
 func runForkScenario(t *testing.T, prov Provider, label string) {
 	t.Helper()
 	ctx := testContext()
-	sys := NewTextMessage("system", "You are a scanner. "+strings.Repeat("Analyze targets. ", 30))
+	sys := TextMessage("system", "You are a scanner. "+strings.Repeat("Analyze targets. ", 30))
 
 	// Build parent conversation (3 exchanges)
-	parentMsgs := []ChatMessage{sys}
+	parentMsgs := []*aop.Message{sys}
 	for i := 1; i <= 3; i++ {
 		parentMsgs = append(parentMsgs,
-			NewTextMessage("user", fmt.Sprintf("question %d", i)),
-			NewTextMessage("assistant", fmt.Sprintf("answer %d", i)),
+			TextMessage("user", fmt.Sprintf("question %d", i)),
+			TextMessage("assistant", fmt.Sprintf("answer %d", i)),
 		)
 	}
 
 	// Parent's next request
 	parentReq := &ChatCompletionRequest{
-		Messages:  append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "parent question 4")),
+		Messages:  append(append([]*aop.Message(nil), parentMsgs...), TextMessage("user", "parent question 4")),
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-fork",
 	}
 	parentResp, err := prov.ChatCompletion(ctx, parentReq)
@@ -1289,7 +1327,7 @@ func runForkScenario(t *testing.T, prov Provider, label string) {
 
 	// Fork child: inherits parent messages, new prompt
 	childReq := &ChatCompletionRequest{
-		Messages:  append(append([]ChatMessage(nil), parentMsgs...), NewTextMessage("user", "forked child task")),
+		Messages:  append(append([]*aop.Message(nil), parentMsgs...), TextMessage("user", "forked child task")),
 		MaxTokens: 50, CacheRetention: CacheShort, SessionID: "sess-fork",
 	}
 	childResp, err := prov.ChatCompletion(ctx, childReq)
@@ -1298,17 +1336,17 @@ func runForkScenario(t *testing.T, prov Provider, label string) {
 	}
 
 	// Both should have cache reads (shared prefix)
-	if childResp.Usage.CacheReadTokens == 0 {
+	if childResp.Usage.Detail["cache_read"] == 0 {
 		t.Errorf("%s: fork child expected cache_read > 0", label)
 	}
 
 	t.Logf("\n=== %s Fork Summary ===", label)
 	t.Logf("  Parent: prompt=%d cache_read=%d cache_write=%d (%.0f%%)",
-		parentResp.Usage.PromptTokens, parentResp.Usage.CacheReadTokens, parentResp.Usage.CacheWriteTokens,
-		parentResp.Usage.CacheHitRatio()*100)
+		parentResp.Usage.InputTokens, parentResp.Usage.Detail["cache_read"], parentResp.Usage.Detail["cache_write"],
+		CacheHitRatio(parentResp.Usage)*100)
 	t.Logf("  Child:  prompt=%d cache_read=%d cache_write=%d (%.0f%%)",
-		childResp.Usage.PromptTokens, childResp.Usage.CacheReadTokens, childResp.Usage.CacheWriteTokens,
-		childResp.Usage.CacheHitRatio()*100)
+		childResp.Usage.InputTokens, childResp.Usage.Detail["cache_read"], childResp.Usage.Detail["cache_write"],
+		CacheHitRatio(childResp.Usage)*100)
 }
 
 // =============================================================================
@@ -1498,14 +1536,14 @@ func skipLive(t *testing.T) (*ProviderConfig, Provider) {
 	return cfg, p
 }
 
-func collectStream(t *testing.T, sp StreamingProvider, ctx context.Context, req *ChatCompletionRequest) (string, *Usage) {
+func collectStream(t *testing.T, sp StreamingProvider, ctx context.Context, req *ChatCompletionRequest) (string, *aop.TokenUsage) {
 	t.Helper()
 	ch, err := sp.ChatCompletionStream(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var content strings.Builder
-	var lastUsage *Usage
+	var lastUsage *aop.TokenUsage
 	for event := range ch {
 		if event.Err != nil {
 			t.Fatal(event.Err)
@@ -1513,8 +1551,8 @@ func collectStream(t *testing.T, sp StreamingProvider, ctx context.Context, req 
 		if event.Usage != nil {
 			lastUsage = event.Usage
 		}
-		if event.Delta.Content != nil {
-			content.WriteString(*event.Delta.Content)
+		if delta := event.MessageDelta; delta != nil {
+			content.WriteString(delta.GetText())
 		}
 		if event.Done {
 			break
@@ -1523,28 +1561,24 @@ func collectStream(t *testing.T, sp StreamingProvider, ctx context.Context, req 
 	return content.String(), lastUsage
 }
 
-func assertCacheFields(t *testing.T, label string, u *Usage) {
+func assertCacheFields(t *testing.T, label string, u *aop.TokenUsage) {
 	t.Helper()
 	if u == nil {
 		t.Errorf("%s: usage is nil", label)
 		return
 	}
-	if u.PromptTokens == 0 {
+	if u.InputTokens == 0 {
 		t.Errorf("%s: prompt_tokens = 0", label)
-	}
-	// Cache fields should be non-negative (0 is fine for first turn)
-	if u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
-		t.Errorf("%s: negative cache tokens: read=%d write=%d", label, u.CacheReadTokens, u.CacheWriteTokens)
 	}
 }
 
-func logTurn(t *testing.T, turn int, u *Usage) {
+func logTurn(t *testing.T, turn int, u *aop.TokenUsage) {
 	t.Helper()
 	if u == nil {
 		t.Logf("  Turn %d: usage=nil", turn)
 		return
 	}
 	t.Logf("  Turn %d: prompt=%d completion=%d cache_read=%d cache_write=%d hit_ratio=%.0f%%",
-		turn, u.PromptTokens, u.CompletionTokens,
-		u.CacheReadTokens, u.CacheWriteTokens, u.CacheHitRatio()*100)
+		turn, u.InputTokens, u.OutputTokens,
+		u.Detail["cache_read"], u.Detail["cache_write"], CacheHitRatio(u)*100)
 }

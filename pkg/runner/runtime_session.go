@@ -13,11 +13,12 @@ import (
 	"github.com/chainreactors/aiscan/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	toolpkg "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tui"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"github.com/chainreactors/aiscan/skills"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -30,7 +31,7 @@ type SessionOptions struct {
 	ParentSessionID  string
 	ParentToolCallID string
 	AgentName        string
-	Messages         []agent.ChatMessage
+	Messages         []*aop.Message
 }
 
 type SessionCloseReason string
@@ -56,7 +57,7 @@ type RunInput struct {
 type RunResult struct {
 	Output        string
 	Stop          agent.StopReason
-	Usage         agent.Usage
+	Usage         *aop.TokenUsage
 	ContextTokens int
 }
 
@@ -165,7 +166,7 @@ func (e *turnEmitter) start() {
 }
 
 func (e *turnEmitter) end(result RunResult, runErr error) {
-	ended := &aop.TurnEnded{StopReason: string(result.Stop), Usage: runtimeUsageData(result.Usage), ContextTokens: uint64(max(result.ContextTokens, 0))}
+	ended := &aop.TurnEnded{StopReason: string(result.Stop), Usage: result.Usage, ContextTokens: uint64(max(result.ContextTokens, 0))}
 	if runErr != nil {
 		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
@@ -277,7 +278,7 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if err != nil {
 		return commandOutcome{err: err}
 	}
-	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(result.Text(), " \t\r\n"))
+	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(toolpkg.ResultText(result), " \t\r\n"))
 }
 
 func commandText(line, presentation, text string) commandOutcome {
@@ -633,7 +634,7 @@ func (s *Session) ID() string {
 
 }
 
-func (s *Session) MessagesSnapshot() []agent.ChatMessage {
+func (s *Session) MessagesSnapshot() []*aop.Message {
 	if s == nil || s.state == nil {
 		return nil
 	}
@@ -735,16 +736,15 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	if len(message.Content) == 1 && message.Content[0].GetText() != nil {
 		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.app.Skills)
 	}
-	agentInput := agent.InputFromAOPMessage(message)
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, agentInput, input.EvalCriteria, input.EvalMaxRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalMaxRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 		return result, err
 	}
-	return s.agent.Run(ctx, agentInput, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
+	return s.agent.Run(ctx, message, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 }
 
 func runInputContent(input RunInput) []*aop.Content {
@@ -894,16 +894,6 @@ func (rt *AgentRuntime) providerSnapshot() (agent.Provider, string, telemetry.Lo
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.config.Provider, rt.config.Model, rt.config.Logger
-}
-
-func runtimeUsageData(usage agent.Usage) *aop.TokenUsage {
-	if usage == (agent.Usage{}) {
-		return nil
-	}
-	return &aop.TokenUsage{
-		InputTokens: uint64(max(usage.PromptTokens, 0)), OutputTokens: uint64(max(usage.CompletionTokens, 0)), TotalTokens: uint64(max(usage.TotalTokens, 0)),
-		Detail: map[string]uint64{"cache_read": uint64(max(usage.CacheReadTokens, 0)), "cache_write": uint64(max(usage.CacheWriteTokens, 0))},
-	}
 }
 
 func (rt *AgentRuntime) consoleAppInfo() tui.AppInfo {

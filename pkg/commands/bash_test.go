@@ -78,20 +78,20 @@ func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (a
 // panicTool is a test tool that always panics.
 type panicTool struct{ msg string }
 
-func (t *panicTool) Name() string                { return "panic_tool" }
-func (t *panicTool) Description() string         { return "always panics" }
-func (t *panicTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *panicTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *panicTool) Name() string                 { return "panic_tool" }
+func (t *panicTool) Description() string          { return "always panics" }
+func (t *panicTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *panicTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	panic(t.msg)
 }
 
 // normalTool returns a result without panicking.
 type normalTool struct{}
 
-func (t *normalTool) Name() string                { return "normal_tool" }
-func (t *normalTool) Description() string         { return "works fine" }
-func (t *normalTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *normalTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *normalTool) Name() string                 { return "normal_tool" }
+func (t *normalTool) Description() string          { return "works fine" }
+func (t *normalTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *normalTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	return tool.TextResult("hello"), nil
 }
 
@@ -108,10 +108,10 @@ type loggerAwareTool struct {
 	logger telemetry.Logger
 }
 
-func (t *loggerAwareTool) Name() string                { return t.name }
-func (t *loggerAwareTool) Description() string         { return t.name }
-func (t *loggerAwareTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *loggerAwareTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *loggerAwareTool) Name() string                 { return t.name }
+func (t *loggerAwareTool) Description() string          { return t.name }
+func (t *loggerAwareTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *loggerAwareTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	return tool.TextResult("ok"), nil
 }
 func (t *loggerAwareTool) InitLogger(logger telemetry.Logger) {
@@ -178,7 +178,7 @@ func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
 			if err == nil {
-				t.Fatalf("expected error, got output %q", res.Text())
+				t.Fatalf("expected error, got output %q", tool.ResultText(res))
 			}
 			if !strings.Contains(err.Error(), tt.wantHint) {
 				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
@@ -200,7 +200,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	out := res.Text()
+	out := tool.ResultText(res)
 	for _, envVar := range []string{"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
 		if !strings.Contains(out, envVar+"="+proxy) {
 			t.Errorf("env output missing %s", envVar)
@@ -218,7 +218,7 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	if strings.Contains(res.Text(), "ALL_PROXY=socks5://") {
+	if strings.Contains(tool.ResultText(res), "ALL_PROXY=socks5://") {
 		t.Errorf("should not inject proxy when empty")
 	}
 }
@@ -304,7 +304,7 @@ func TestPseudoPipeGrep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -328,7 +328,7 @@ func TestPseudoPipeHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -347,7 +347,7 @@ func TestPseudoPipeWc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "5" {
@@ -365,7 +365,7 @@ func TestPseudoPipeChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "3" {
@@ -383,7 +383,7 @@ func TestPseudoPipeAwk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	if !strings.Contains(out, "[critical]") {
@@ -406,7 +406,7 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -452,8 +452,8 @@ func TestNoPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "all findings here") {
-		t.Errorf("output %q should contain expected text", res.Text())
+	if !strings.Contains(tool.ResultText(res), "all findings here") {
+		t.Errorf("output %q should contain expected text", tool.ResultText(res))
 	}
 }
 
@@ -633,8 +633,8 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("timeout arg not enforced promptly, took %s", elapsed)
 	}
-	if !strings.Contains(res.Text(), "timeout after 1s") {
-		t.Fatalf("result = %q", res.Text())
+	if !strings.Contains(tool.ResultText(res), "timeout after 1s") {
+		t.Fatalf("result = %q", tool.ResultText(res))
 	}
 }
 
@@ -687,7 +687,7 @@ func TestShellPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	if out != "3" {
 		t.Errorf("expected 3, got %q", out)
 	}
@@ -706,8 +706,8 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "match") {
-		t.Errorf("output %q should contain 'match'", res.Text())
+	if !strings.Contains(tool.ResultText(res), "match") {
+		t.Errorf("output %q should contain 'match'", tool.ResultText(res))
 	}
 }
 
@@ -729,8 +729,8 @@ func TestExecuteTool_RecoversPanic(t *testing.T) {
 	if !strings.Contains(err.Error(), "tool panic_tool panic") {
 		t.Fatalf("error should identify the tool, got: %s", err.Error())
 	}
-	if result.Text() != "" {
-		t.Fatalf("result should be empty on panic, got: %s", result.Text())
+	if tool.ResultText(result) != "" {
+		t.Fatalf("result should be empty on panic, got: %s", tool.ResultText(result))
 	}
 }
 
@@ -742,8 +742,8 @@ func TestExecuteTool_NormalToolUnaffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Text() != "hello" {
-		t.Fatalf("expected 'hello', got: %s", result.Text())
+	if tool.ResultText(result) != "hello" {
+		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
 	}
 }
 
@@ -764,10 +764,10 @@ func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normal tool failed after panic recovery: %v", err)
 	}
-	if result.Text() != "hello" {
-		t.Fatalf("expected 'hello', got: %s", result.Text())
+	if tool.ResultText(result) != "hello" {
+		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
 	}
-	t.Logf("call 2 (normal_tool): succeeded after panic → result=%q", result.Text())
+	t.Logf("call 2 (normal_tool): succeeded after panic → result=%q", tool.ResultText(result))
 
 	// Call 3: panic again — still recoverable.
 	_, err = reg.ExecuteTool(context.Background(), "panic_tool", "{}")
@@ -781,5 +781,5 @@ func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normal tool failed after second panic: %v", err)
 	}
-	t.Logf("call 4 (normal_tool): still works → result=%q", result.Text())
+	t.Logf("call 4 (normal_tool): still works → result=%q", tool.ResultText(result))
 }

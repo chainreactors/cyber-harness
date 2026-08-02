@@ -3,17 +3,22 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	agentpb "github.com/chainreactors/aiscan/pkg/types/agent"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-const AIScanRunOptionsNamespace = "io.chainreactors.aiscan.run"
-
-func RuntimeCommandSpecs() []*transport.CommandSpec {
-	return []*transport.CommandSpec{
+func RuntimeCommandSpecs() []*commandpb.Spec {
+	return []*commandpb.Spec{
 		{Name: "/status", Description: "Show Runtime session and provider status"},
 		{Name: "/clear", Description: "Clear the current Agent context"},
 		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
@@ -22,9 +27,6 @@ func RuntimeCommandSpecs() []*transport.CommandSpec {
 
 func (rt *AgentRuntime) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
 	response := &aop.OpenSessionResponse{}
-	if req != nil {
-		response.RequestId = req.RequestId
-	}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
 		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
 		return response
@@ -34,23 +36,20 @@ func (rt *AgentRuntime) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSes
 		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
 		return response
 	}
-	response.Outcome = &aop.OpenSessionResponse_Accepted{Accepted: &aop.Session{Id: session.ID(), State: "open", Participant: req.Participant, Title: req.Title}}
+	response.Outcome = &aop.OpenSessionResponse_Accepted{Accepted: &aop.Session{Id: session.ID(), State: "open", NodeUri: req.NodeUri, Title: req.Title}}
 	return response
 }
 
 func (rt *AgentRuntime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop.RunTurnResponse {
 	response := &aop.RunTurnResponse{}
-	if req != nil {
-		response.RequestId = req.RequestId
-	}
 	if rt == nil || req == nil || (!req.ContinueSession && req.Input == nil) || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
 		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id, turn_id, and input are required unless continue_session is true")}
 		return response
 	}
-	options := new(transport.RunOptions)
+	options := new(agentpb.RunOptions)
 	for _, extension := range req.Extensions {
-		if extension.GetNamespace() == AIScanRunOptionsNamespace {
-			if err := aop.DecodeProtoJSON(extension.GetValue(), options); err != nil {
+		if extension != nil && extension.MessageIs(options) {
+			if err := extension.UnmarshalTo(options); err != nil {
 				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid AIScan run options: "+err.Error())}
 				return response
 			}
@@ -75,9 +74,6 @@ func (rt *AgentRuntime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest)
 
 func (rt *AgentRuntime) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResponse {
 	response := &aop.CancelTurnResponse{}
-	if req != nil {
-		response.RequestId = req.RequestId
-	}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
 		response.Outcome = &aop.CancelTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id and turn_id are required")}
 		return response
@@ -92,9 +88,6 @@ func (rt *AgentRuntime) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTur
 
 func (rt *AgentRuntime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionRequest) *aop.CloseSessionResponse {
 	response := &aop.CloseSessionResponse{}
-	if req != nil {
-		response.RequestId = req.RequestId
-	}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
 		response.Outcome = &aop.CloseSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
 		return response
@@ -107,53 +100,122 @@ func (rt *AgentRuntime) CloseAOPSession(ctx context.Context, req *aop.CloseSessi
 	return response
 }
 
-// HandleServerFrame is the generated-message control loop shared by stdio and
-// other transports that host an AgentRuntime directly.
-func (rt *AgentRuntime) HandleServerFrame(ctx context.Context, frame *transport.ServerFrame, send func(*transport.AgentFrame)) bool {
-	if rt == nil || frame == nil || send == nil {
+var runtimeEnvelopeSequence atomic.Uint64
+
+func runtimeEnvelopeID() string {
+	return "runtime:" + strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + strconv.FormatUint(runtimeEnvelopeSequence.Add(1), 36)
+}
+
+// HandleEnvelope is the protobuf control loop shared by stdio and other direct
+// AgentRuntime hosts. The wire envelope is common; semantics remain in their
+// AOP or AIScan namespace ProtocolMessage.
+func (rt *AgentRuntime) HandleEnvelope(ctx context.Context, envelope *aop.Envelope, send func(*aop.Envelope)) bool {
+	if rt == nil || envelope == nil || send == nil {
 		return false
 	}
-	correlation := frame.CorrelationId
-	switch payload := frame.Payload.(type) {
-	case *transport.ServerFrame_OpenSession:
-		send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_OpenSession{OpenSession: rt.OpenAOPSession(payload.OpenSession)}})
-	case *transport.ServerFrame_RunTurn:
-		send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_RunTurn{RunTurn: rt.RunAOPTurn(ctx, payload.RunTurn)}})
-	case *transport.ServerFrame_CancelTurn:
-		send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_CancelTurn{CancelTurn: rt.CancelAOPTurn(payload.CancelTurn)}})
-	case *transport.ServerFrame_CloseSession:
-		send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_CloseSession{CloseSession: rt.CloseAOPSession(ctx, payload.CloseSession)}})
-	case *transport.ServerFrame_Command:
-		request := payload.Command
-		if request == nil || strings.TrimSpace(request.Line) == "" {
-			send(operationError(correlation, request.GetTaskId(), "command line is required"))
-			break
-		}
-		rt.operations.Add(1)
-		go func() {
-			defer rt.operations.Done()
-			result, err := rt.CommandSession(ctx, request.SessionId, request.Line)
-			if err != nil {
-				send(operationError(correlation, request.TaskId, err.Error()))
-				return
-			}
-			encoded, err := json.Marshal(result)
-			if err != nil {
-				send(operationError(correlation, request.TaskId, err.Error()))
-				return
-			}
-			send(&transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_CommandResult{CommandResult: &transport.CommandResult{TaskId: request.TaskId, Result: encoded, MediaType: "application/json"}}})
-		}()
+	if rt.namespaceMux == nil {
+		send(runtimeReply(envelope.Id, runtimeProtocolError("NAMESPACE_INIT_FAILED", "runtime namespaces are not initialized")))
+		return true
+	}
+	handled, err := rt.namespaceMux.Dispatch(ctx, envelope, func(value *aop.Envelope) error { send(value); return nil })
+	if err != nil {
+		send(runtimeReply(envelope.Id, runtimeProtocolError("INVALID_PAYLOAD", err.Error())))
+		return true
+	}
+	return handled
+}
+
+func newRuntimeNamespaceMux(rt *AgentRuntime) (*aop.NamespaceMux, error) {
+	mux := aop.NewNamespaceMux()
+	if err := mux.Register(&aop.ProtocolMessage{}, rt.handleCoreNamespace); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&commandpb.ProtocolMessage{}, rt.handleCommandNamespace); err != nil {
+		return nil, err
+	}
+	return mux, nil
+}
+
+func (rt *AgentRuntime) handleCoreNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+	value := message.(*aop.ProtocolMessage)
+	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
+	switch payload := value.Message.(type) {
+	case *aop.ProtocolMessage_OpenSessionRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: rt.OpenAOPSession(payload.OpenSessionRequest)}})
+	case *aop.ProtocolMessage_RunTurnRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: rt.RunAOPTurn(ctx, payload.RunTurnRequest)}})
+	case *aop.ProtocolMessage_CancelTurnRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: rt.CancelAOPTurn(payload.CancelTurnRequest)}})
+	case *aop.ProtocolMessage_CloseSessionRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: rt.CloseAOPSession(ctx, payload.CloseSessionRequest)}})
 	default:
-		return false
+		return fmt.Errorf("unsupported AOP core message")
 	}
-	return true
+}
+
+func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+	value := message.(*commandpb.ProtocolMessage)
+	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
+	request := value.GetRequest()
+	if request == nil || strings.TrimSpace(request.Line) == "" {
+		return reply(runtimeProtocolError("INVALID_ARGUMENT", "command line is required"))
+	}
+	rt.operations.Add(1)
+	go func() {
+		defer rt.operations.Done()
+		result, err := rt.CommandSession(ctx, request.SessionId, request.Line)
+		if err != nil {
+			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
+			return
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
+			return
+		}
+		_ = reply(&commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Result{Result: &commandpb.Result{Data: encoded, MediaType: aop.JSONMediaType}}})
+	}()
+	return nil
+}
+
+// ServeEnvelopeStream is the framing-independent runtime loop. WebSocket and
+// stdio decide only how an Envelope is read and written; protobuf dispatch and
+// reply correlation stay here.
+func (rt *AgentRuntime) ServeEnvelopeStream(ctx context.Context, stream aop.EnvelopeStream) error {
+	if rt == nil || stream == nil {
+		return fmt.Errorf("runtime envelope stream is required")
+	}
+	for {
+		envelope, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		handled := rt.HandleEnvelope(ctx, envelope, func(response *aop.Envelope) {
+			_ = stream.Send(response)
+		})
+		if !handled {
+			if err := stream.Send(runtimeReply(envelope.GetId(), runtimeProtocolError("UNSUPPORTED_MESSAGE", "unsupported protocol message"))); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func rejection(code, message string) *aop.Rejection {
 	return &aop.Rejection{Code: code, Message: message}
 }
 
-func operationError(correlation, taskID, message string) *transport.AgentFrame {
-	return &transport.AgentFrame{CorrelationId: correlation, Payload: &transport.AgentFrame_OperationError{OperationError: &transport.OperationError{TaskId: taskID, Code: "INVALID_ARGUMENT", Message: message}}}
+func runtimeReply(replyTo string, message protobuf.Message) *aop.Envelope {
+	envelope, err := aop.Wrap(runtimeEnvelopeID(), replyTo, message)
+	if err != nil {
+		panic(fmt.Sprintf("wrap runtime protocol message: %v", err))
+	}
+	return envelope
+}
+
+func runtimeProtocolError(code, message string) *aop.ProtocolMessage {
+	return &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{Code: code, Message: message}}}
 }

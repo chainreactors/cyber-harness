@@ -7,8 +7,9 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	providerpkg "github.com/chainreactors/aiscan/agent/provider"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,8 +37,8 @@ func WithTurnID(turnID string) RunOption {
 	}
 }
 
-func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Result, error) {
-	userMsg, err := input.chatMessage()
+func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) (*Result, error) {
+	userMsg, err := resolveInputMessage(input)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Resul
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
-	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
+	msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
 	if err := cfg.Inbox.Push(msg); err != nil {
 		return nil, fmt.Errorf("push prompt: %w", err)
 	}
@@ -249,7 +250,7 @@ func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ex
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state, namespace string, detail proto.Message, turnID ...string) {
+func (a *Agent) EmitStatus(state string, detail proto.Message, turnID ...string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
@@ -257,7 +258,7 @@ func (a *Agent) EmitStatus(state, namespace string, detail proto.Message, turnID
 		if len(turnID) > 0 && turnID[0] != "" {
 			em = em.turn(turnID[0])
 		}
-		em.status(state, namespace, detail)
+		em.status(state, detail)
 	}
 }
 
@@ -276,10 +277,10 @@ func (a *Agent) Reset() {
 	a.state.ErrorMessage = ""
 }
 
-func (a *Agent) LoadMessages(messages []ChatMessage) {
+func (a *Agent) LoadMessages(messages []*aop.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state.Messages = append([]ChatMessage(nil), messages...)
+	a.state.Messages = append([]*aop.Message(nil), messages...)
 }
 
 func (a *Agent) validateContinue() error {
@@ -316,10 +317,10 @@ func (a *Agent) finishRun() {
 	a.running = false
 }
 
-func (a *Agent) MessagesSnapshot() []ChatMessage {
+func (a *Agent) MessagesSnapshot() []*aop.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]ChatMessage(nil), a.state.Messages...)
+	return append([]*aop.Message(nil), a.state.Messages...)
 }
 
 func (a *Agent) saveState(result *Result, err error) {
@@ -330,6 +331,6 @@ func (a *Agent) saveState(result *Result, err error) {
 		a.state.ErrorMessage = err.Error()
 	}
 	if result != nil {
-		a.state.Messages = append([]ChatMessage(nil), result.Messages...)
+		a.state.Messages = append([]*aop.Message(nil), result.Messages...)
 	}
 }

@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"golang.org/x/term"
 )
 
@@ -63,8 +64,8 @@ type AgentOutput struct {
 	deltas        map[string]*deltaAccumulator
 	lastAssistant *aop.Message
 	hasAssistant  bool
-	turnUsage     *agent.Usage
-	totalUsage    agent.Usage
+	turnUsage     *aop.TokenUsage
+	totalUsage    *aop.TokenUsage
 	turnToolCalls int
 	contextTokens int
 	runCount      int
@@ -442,7 +443,7 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		o.runCount++
 		o.stream.NewTurn()
 		o.turnUsage = nil
-		o.totalUsage = agent.Usage{}
+		o.totalUsage = nil
 		o.turnToolCalls = 0
 		o.lastAssistant = nil
 		o.hasAssistant = false
@@ -581,20 +582,19 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		}
 
 	case *aop.Event_Usage:
-		data := payload.Usage
-		usage := agent.Usage{
-			PromptTokens:     int(data.InputTokens),
-			CompletionTokens: int(data.OutputTokens),
-			TotalTokens:      int(data.TotalTokens),
-			CacheReadTokens:  int(data.Detail["cache_read"]),
-			CacheWriteTokens: int(data.Detail["cache_write"]),
+		usage := payload.Usage
+		o.turnUsage = usage
+		if o.totalUsage == nil {
+			o.totalUsage = &aop.TokenUsage{}
 		}
-		o.turnUsage = &usage
-		o.totalUsage.PromptTokens += usage.PromptTokens
-		o.totalUsage.CompletionTokens += usage.CompletionTokens
+		o.totalUsage.InputTokens += usage.InputTokens
+		o.totalUsage.OutputTokens += usage.OutputTokens
 		o.totalUsage.TotalTokens += usage.TotalTokens
-		o.totalUsage.CacheReadTokens += usage.CacheReadTokens
-		o.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
+		if o.totalUsage.Detail == nil {
+			o.totalUsage.Detail = map[string]uint64{}
+		}
+		o.totalUsage.Detail["cache_read"] += usage.Detail["cache_read"]
+		o.totalUsage.Detail["cache_write"] += usage.Detail["cache_write"]
 		if o.policy.Usage {
 			o.live.SetTurnUsage(usage)
 		}
@@ -811,7 +811,7 @@ func (o *AgentOutput) beginRun() {
 	o.lastAssistant = nil
 	o.hasAssistant = false
 	o.turnUsage = nil
-	o.totalUsage = agent.Usage{}
+	o.totalUsage = nil
 	o.turnToolCalls = 0
 	o.contextTokens = 0
 }
@@ -868,14 +868,16 @@ func (o *AgentOutput) turnEnd(turn int) {
 		}
 		if o.turnUsage != nil {
 			cache := ""
-			if o.turnUsage.CacheReadTokens > 0 || o.turnUsage.CacheWriteTokens > 0 {
+			cacheRead := o.turnUsage.Detail["cache_read"]
+			cacheWrite := o.turnUsage.Detail["cache_write"]
+			if cacheRead > 0 || cacheWrite > 0 {
 				cache = fmt.Sprintf(" cache_read=%d cache_write=%d (%.0f%%)",
-					o.turnUsage.CacheReadTokens, o.turnUsage.CacheWriteTokens,
-					o.turnUsage.CacheHitRatio()*100)
+					cacheRead, cacheWrite,
+					provider.CacheHitRatio(o.turnUsage)*100)
 			}
 			fmt.Fprintf(w, "%s[debug] [turn %d] prompt=%d completion=%d total=%d context=%d%s%s\n",
 				o.color.Code(output.ANSIDim), turn,
-				o.turnUsage.PromptTokens, o.turnUsage.CompletionTokens, o.turnUsage.TotalTokens,
+				o.turnUsage.InputTokens, o.turnUsage.OutputTokens, o.turnUsage.TotalTokens,
 				o.contextTokens, cache, o.color.Code(output.ANSIReset))
 		}
 	}
@@ -896,8 +898,8 @@ func (o *AgentOutput) agentEnd(data *aop.TurnEnded) {
 			}
 			parts = append(parts, toolPart)
 		}
-		if usageTotal(&o.totalUsage) > 0 {
-			parts = append(parts, formatTokenUsage(&o.totalUsage))
+		if provider.UsageTotalTokens(o.totalUsage) > 0 {
+			parts = append(parts, formatTokenUsage(o.totalUsage))
 		}
 		parts = append(parts, util.FormatDuration(elapsed))
 		if data.Error != nil {
@@ -1077,9 +1079,6 @@ func flattenToolResult(content []*aop.Content) string {
 		if text := part.GetText().GetText(); text != "" {
 			parts = append(parts, text)
 			continue
-		}
-		if opaque := part.GetOpaque(); opaque != nil {
-			parts = append(parts, string(opaque.Value.GetData()))
 		}
 	}
 	return strings.Join(parts, "\n")

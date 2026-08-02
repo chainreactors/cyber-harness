@@ -9,35 +9,26 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 )
 
-// Re-export provider types so external consumers only import agent.
+// The agent loop operates on AOP protos directly. Vendored JSON shapes live
+// only inside the provider adapters.
 
-type ChatMessage = provider.ChatMessage
-type ChatMessageDelta = provider.ChatMessageDelta
-type ToolCall = provider.ToolCall
-type ToolCallDelta = provider.ToolCallDelta
-type FunctionCall = provider.FunctionCall
-type FunctionCallDelta = provider.FunctionCallDelta
-type ToolDefinition = provider.ToolDefinition
-type FunctionDefinition = provider.FunctionDefinition
-type ContentPart = provider.ContentPart
-type ImageURL = provider.ImageURL
+type ToolDefinition = aop.ToolDefinition
+type Provider = provider.Provider
+type StreamingProvider = provider.StreamingProvider
+type ProviderConfig = provider.ProviderConfig
 type ChatCompletionRequest = provider.ChatCompletionRequest
 type ChatCompletionResponse = provider.ChatCompletionResponse
 type ChatCompletionStreamEvent = provider.ChatCompletionStreamEvent
 type ProviderRawFrame = provider.RawFrame
 type Choice = provider.Choice
-type Usage = provider.Usage
 type APIError = provider.APIError
 type CacheRetention = provider.CacheRetention
-type Provider = provider.Provider
-type StreamingProvider = provider.StreamingProvider
-type ProviderConfig = provider.ProviderConfig
 
 const (
 	CacheNone  = provider.CacheNone
@@ -46,12 +37,7 @@ const (
 )
 
 var (
-	NewTextMessage       = provider.NewTextMessage
-	NewToolResultMessage = provider.NewToolResultMessage
-	NewMultimodalMessage = provider.NewMultimodalMessage
-	TextPart             = provider.TextPart
-	ImagePart            = provider.ImagePart
-	ParseDataURI         = provider.ParseDataURI
+	TextMessage = provider.TextMessage
 
 	NewProvider              = provider.NewProvider
 	NewProviderFromResolved  = provider.NewProviderFromResolved
@@ -80,13 +66,13 @@ const (
 	StopReasonCanceled   = hooks.StopReasonCanceled
 )
 
-type TransformContextFunc func([]ChatMessage) []ChatMessage
+type TransformContextFunc func([]*aop.Message) []*aop.Message
 
 type BeforeToolCallContext struct {
-	AssistantMessage ChatMessage
-	ToolCall         ToolCall
+	AssistantMessage *aop.Message
+	ToolCall         *aop.ToolCall
 	SystemPrompt     string
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 }
 
 type BeforeToolCallResult struct {
@@ -95,12 +81,12 @@ type BeforeToolCallResult struct {
 }
 
 type AfterToolCallContext struct {
-	AssistantMessage ChatMessage
-	ToolCall         ToolCall
+	AssistantMessage *aop.Message
+	ToolCall         *aop.ToolCall
 	Result           string
 	IsError          bool
 	SystemPrompt     string
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 }
 
 type ToolFlowDecision int
@@ -136,7 +122,7 @@ type Config struct {
 	Model            string
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
-	Messages         []ChatMessage
+	Messages         []*aop.Message
 	MaxTokens        int
 	ContextWindow    int
 	Compaction       CompactionSettings
@@ -185,7 +171,7 @@ func (c Config) WithProvider(p Provider) Config             { c.Provider = p; re
 func (c Config) WithTools(t tool.Executor) Config           { c.Tools = t; return c }
 func (c Config) WithModel(m string) Config                  { c.Model = m; return c }
 func (c Config) WithSystemPrompt(s string) Config           { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []ChatMessage) Config     { c.Messages = msgs; return c }
+func (c Config) WithMessages(msgs []*aop.Message) Config    { c.Messages = msgs; return c }
 func (c Config) WithStream(s bool) Config                   { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config            { c.Inbox = ib; return c }
 func (c Config) WithLogger(l telemetry.Logger) Config       { c.Logger = l; return c }
@@ -275,22 +261,14 @@ func NewAgent(cfg Config) *Agent {
 	}
 }
 
-type TurnUsage struct {
-	Turn             int `json:"turn"`
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
-}
-
 type Result struct {
-	Output         string
-	NewMessages    []ChatMessage
-	Messages       []ChatMessage
-	Turns          int
-	TotalUsage     Usage
-	TurnUsages     []TurnUsage
+	Output      string
+	NewMessages []*aop.Message
+	Messages    []*aop.Message
+	Turns       int
+	TotalUsage  *aop.TokenUsage
+	// TurnUsages holds per-turn usage; the turn number is the slice index + 1.
+	TurnUsages     []*aop.TokenUsage
 	ContextTokens  int
 	Stop           StopReason
 	Err            error
@@ -299,7 +277,7 @@ type Result struct {
 
 type State struct {
 	SystemPrompt string
-	Messages     []ChatMessage
+	Messages     []*aop.Message
 	Tools        tool.Executor
 	ErrorMessage string
 	LastError    error

@@ -10,9 +10,9 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"github.com/chainreactors/ioa/protocols"
 )
 

@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 )
 
 type syncedBuffer struct {
@@ -125,11 +126,7 @@ func TestRenderAgentMarkdownPlainFallback(t *testing.T) {
 }
 
 func TestFormatTokenUsageUsesCompactMarkers(t *testing.T) {
-	got := formatTokenUsage(&agent.Usage{
-		PromptTokens:     1832,
-		CompletionTokens: 63,
-		CacheReadTokens:  1026,
-	})
+	got := formatTokenUsage(provider.TokenUsage(1832, 63, 0, 1026, 0))
 	if got != "↑1,832 ↓63 ↻56%" {
 		t.Fatalf("formatTokenUsage() = %q", got)
 	}

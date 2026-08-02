@@ -1,28 +1,41 @@
 package agent
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // pngBytes is a minimal PNG header so http.DetectContentType sniffs image/png.
 var pngBytes = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52}
 
+func uriImageMessage(uri, mediaType string) *aop.Message {
+	return &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Media{Media: &aop.MediaContent{
+		Kind:     "image",
+		Resource: &aop.Resource{Source: &aop.Resource_Uri{Uri: uri}, MediaType: mediaType},
+	}}}}}
+}
+
+func dataImageMessage(data []byte, mediaType string) *aop.Message {
+	return &aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Media{Media: &aop.MediaContent{
+		Kind:     "image",
+		Resource: &aop.Resource{Source: &aop.Resource_Data{Data: data}, MediaType: mediaType},
+	}}}}}
+}
+
 func TestTextInputProducesPlainUserMessage(t *testing.T) {
-	msg, err := TextInput("hello").chatMessage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msg.Role != "user" || msg.Content == nil || *msg.Content != "hello" {
+	msg := TextInput("hello")
+	if msg.Role != "user" || provider.MessageText(msg) != "hello" {
 		t.Fatalf("message = %+v", msg)
 	}
-	if len(msg.ContentParts) != 0 {
-		t.Fatalf("text-only input must not become multimodal: %+v", msg.ContentParts)
+	for _, part := range msg.Content {
+		if part.GetMedia() != nil {
+			t.Fatalf("text-only input must not become multimodal: %+v", msg.Content)
+		}
 	}
 }
 
@@ -32,36 +45,33 @@ func TestInputImageFromPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, err := (Input{Parts: []InputPart{
-		{Text: "look"},
-		{Image: &InputImage{Path: path}},
-	}}).chatMessage()
+	msg, err := resolveInputMessage(&aop.Message{Role: "user", Content: []*aop.Content{
+		aop.Text("look"),
+		uriImageMessage(path, "").Content[0],
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msg.ContentParts) != 2 {
-		t.Fatalf("parts = %+v, want text+image", msg.ContentParts)
+	if len(msg.Content) != 2 {
+		t.Fatalf("parts = %+v, want text+image", msg.Content)
 	}
-	if msg.ContentParts[0].Type != "text" || msg.ContentParts[0].Text != "look" {
-		t.Fatalf("text part = %+v", msg.ContentParts[0])
+	if msg.Content[0].GetText().GetText() != "look" {
+		t.Fatalf("text part = %+v", msg.Content[0])
 	}
-	img := msg.ContentParts[1]
-	if img.Type != "image_url" || img.ImageURL == nil {
-		t.Fatalf("image part = %+v", img)
+	media := msg.Content[1].GetMedia()
+	if media == nil || media.Resource == nil {
+		t.Fatalf("image part = %+v", msg.Content[1])
 	}
-	mediaType, data := ParseDataURI(img.ImageURL.URL)
-	if mediaType != "image/png" {
-		t.Fatalf("sniffed media type = %q, want image/png", mediaType)
+	if media.Resource.MediaType != "image/png" {
+		t.Fatalf("sniffed media type = %q, want image/png", media.Resource.MediaType)
 	}
-	if data != base64.StdEncoding.EncodeToString(pngBytes) {
-		t.Fatal("image base64 does not round-trip the file bytes")
+	if string(media.Resource.GetData()) != string(pngBytes) {
+		t.Fatal("image data does not round-trip the file bytes")
 	}
 }
 
 func TestInputImagePathMissing(t *testing.T) {
-	_, err := (Input{Parts: []InputPart{
-		{Image: &InputImage{Path: filepath.Join(t.TempDir(), "nope.png")}},
-	}}).chatMessage()
+	_, err := resolveInputMessage(uriImageMessage(filepath.Join(t.TempDir(), "nope.png"), ""))
 	if err == nil || !strings.Contains(err.Error(), "read image") {
 		t.Fatalf("err = %v", err)
 	}
@@ -74,7 +84,7 @@ func TestInputImagePathExceedsSizeCap(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := (Input{Parts: []InputPart{{Image: &InputImage{Path: path}}}}).chatMessage()
+	_, err := resolveInputMessage(uriImageMessage(path, ""))
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("err = %v", err)
 	}
@@ -85,49 +95,54 @@ func TestInputImagePathMediaTypeOverride(t *testing.T) {
 	if err := os.WriteFile(path, pngBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mediaType, _, err := (&InputImage{Path: path, MediaType: "image/jpeg"}).load()
+	msg, err := resolveInputMessage(uriImageMessage(path, "image/jpeg"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mediaType != "image/jpeg" {
-		t.Fatalf("explicit media type overridden by sniffing: %q", mediaType)
+	if got := msg.Content[0].GetMedia().Resource.MediaType; got != "image/jpeg" {
+		t.Fatalf("explicit media type overridden by sniffing: %q", got)
 	}
 }
 
-func TestInputImageBase64RequiresMediaType(t *testing.T) {
-	_, _, err := (&InputImage{Base64: base64.StdEncoding.EncodeToString(pngBytes)}).load()
+func TestInputImageDataRequiresMediaType(t *testing.T) {
+	_, err := resolveInputMessage(dataImageMessage(pngBytes, ""))
 	if err == nil || !strings.Contains(err.Error(), "media_type") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestInputImageBase64Invalid(t *testing.T) {
-	_, _, err := (&InputImage{Base64: "!!!not-base64!!!", MediaType: "image/png"}).load()
-	if err == nil || !strings.Contains(err.Error(), "base64") {
+func TestInputImageDataExceedsSizeCap(t *testing.T) {
+	raw := make([]byte, maxInputImageBytes+1)
+	copy(raw, pngBytes)
+	_, err := resolveInputMessage(dataImageMessage(raw, "image/png"))
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestInputImageBase64Passthrough(t *testing.T) {
-	encoded := base64.StdEncoding.EncodeToString(pngBytes)
-	mediaType, data, err := (&InputImage{Base64: encoded, MediaType: "image/png"}).load()
+func TestInputImageDataPassthrough(t *testing.T) {
+	msg, err := resolveInputMessage(dataImageMessage(pngBytes, "image/png"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mediaType != "image/png" || data != encoded {
-		t.Fatalf("load = %q, %q", mediaType, data)
+	media := msg.Content[0].GetMedia()
+	if media.Resource.MediaType != "image/png" || string(media.Resource.GetData()) != string(pngBytes) {
+		t.Fatalf("load = %q, %d bytes", media.Resource.MediaType, len(media.Resource.GetData()))
 	}
 }
 
 func TestInputImageEmptySource(t *testing.T) {
-	_, _, err := (&InputImage{}).load()
-	if err == nil || !strings.Contains(err.Error(), "neither path nor base64") {
+	_, err := resolveInputMessage(&aop.Message{Role: "user", Content: []*aop.Content{{Value: &aop.Content_Media{Media: &aop.MediaContent{
+		Kind:     "image",
+		Resource: &aop.Resource{},
+	}}}}})
+	if err == nil || !strings.Contains(err.Error(), "neither data nor uri") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestInputFromAOPMessageMapsParts(t *testing.T) {
-	input := InputFromAOPMessage(&aop.Message{
+func TestResolveInputMessageKeepsTextAndInlineImages(t *testing.T) {
+	msg, err := resolveInputMessage(&aop.Message{
 		Id:   "m-1",
 		Role: "user",
 		Content: []*aop.Content{
@@ -135,10 +150,13 @@ func TestInputFromAOPMessageMapsParts(t *testing.T) {
 			aop.Image("image/png", []byte{0, 0, 0}),
 		},
 	})
-	if len(input.Parts) != 2 || input.Parts[0].Text != "hi" || input.Parts[1].Image == nil {
-		t.Fatalf("input = %+v", input)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if input.Parts[1].Image.Base64 != "AAAA" || input.Parts[1].Image.MediaType != "image/png" {
-		t.Fatalf("image = %+v", input.Parts[1].Image)
+	if msg.Id != "m-1" || len(msg.Content) != 2 {
+		t.Fatalf("message = %+v", msg)
+	}
+	if provider.MessageText(msg) != "hi" || msg.Content[1].GetMedia() == nil {
+		t.Fatalf("message = %+v", msg)
 	}
 }

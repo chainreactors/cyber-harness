@@ -24,19 +24,22 @@ func (p *fixedProvider) ChatCompletion(_ context.Context, request *provider.Chat
 
 func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing.T) {
 	agentProvider := &fixedProvider{response: &provider.ChatCompletionResponse{
-		Choices: []provider.Choice{{Message: provider.NewTextMessage("assistant", "done")}},
+		Choices: []provider.Choice{{Message: provider.TextMessage("assistant", "done")}},
 	}}
 	verdictProvider := &fixedProvider{response: &provider.ChatCompletionResponse{
-		Choices: []provider.Choice{{Message: provider.ChatMessage{
+		Choices: []provider.Choice{{Message: &aop.Message{
 			Role: "assistant",
-			ToolCalls: []provider.ToolCall{{
-				ID:   "verdict-1",
-				Type: "function",
-				Function: provider.FunctionCall{
-					Name:      "verdict",
-					Arguments: `{"pass":true,"reason":"done","feedback":"","inherit_context":true}`,
-				},
-			}},
+			Content: []*aop.Content{
+				{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+					Id:   "verdict-1",
+					Name: "verdict",
+					Kind: "function",
+					Arguments: &aop.EncodedValue{
+						Data:      []byte(`{"pass":true,"reason":"done","feedback":"","inherit_context":true}`),
+						MediaType: aop.JSONMediaType,
+					},
+				}}},
+			},
 		}}},
 	}}
 
@@ -49,10 +52,11 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 		Bus:       bus,
 		SessionID: "root-session",
 	})
-	input := agent.Input{
-		Parts: []agent.InputPart{
-			{Text: "inspect this"},
-			{Image: &agent.InputImage{Base64: "AA==", MediaType: "image/png"}},
+	input := &aop.Message{
+		Role: "user",
+		Content: []*aop.Content{
+			aop.Text("inspect this"),
+			aop.Image("image/png", []byte{0x00}),
 		},
 	}
 
@@ -78,17 +82,20 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 	if agentProvider.request == nil {
 		t.Fatal("agent provider received no request")
 	}
-	var userMessage *provider.ChatMessage
-	for i := range agentProvider.request.Messages {
-		if agentProvider.request.Messages[i].Role == "user" {
-			userMessage = &agentProvider.request.Messages[i]
+	var userMessage *aop.Message
+	for _, m := range agentProvider.request.Messages {
+		if m.Role == "user" {
+			userMessage = m
 			break
 		}
 	}
-	if userMessage == nil || len(userMessage.ContentParts) != 2 {
+	if userMessage == nil || len(userMessage.Content) != 2 {
 		t.Fatalf("agent user message = %+v, want text and image parts", userMessage)
 	}
-	if userMessage.ContentParts[0].Text != "inspect this" || userMessage.ContentParts[1].ImageURL == nil {
-		t.Fatalf("agent user parts = %+v, want original multimodal input", userMessage.ContentParts)
+	if text := userMessage.Content[0].GetText(); text == nil || text.Text != "inspect this" {
+		t.Fatalf("agent user part[0] = %+v, want original text", userMessage.Content[0])
+	}
+	if media := userMessage.Content[1].GetMedia(); media == nil || media.Kind != "image" {
+		t.Fatalf("agent user part[1] = %+v, want original image", userMessage.Content[1])
 	}
 }

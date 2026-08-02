@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/aiscan/agent/hooks"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // The kernel reaches the typed hook registry only through these helpers. Each
 // helper preserves the zero-handler fast path exposed by hooks.Registry.
 
-func runStartHook(ctx context.Context, cfg Config, systemPrompt string) (string, []ChatMessage) {
+func runStartHook(ctx context.Context, cfg Config, systemPrompt string) (string, []*aop.Message) {
 	if !cfg.Hooks.Has(hooks.BeforeRun.Kind) {
 		return systemPrompt, nil
 	}
@@ -35,12 +36,12 @@ func toolNames(cfg Config) []string {
 	definitions := cfg.Tools.ToolDefinitions()
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
-		names = append(names, definition.Function.Name)
+		names = append(names, definition.Name)
 	}
 	return names
 }
 
-func transformContextHook(ctx context.Context, cfg Config, messages []ChatMessage, turn int) []ChatMessage {
+func transformContextHook(ctx context.Context, cfg Config, messages []*aop.Message, turn int) []*aop.Message {
 	if !cfg.Hooks.Has(hooks.Context.Kind) {
 		return messages
 	}
@@ -57,7 +58,7 @@ func transformContextHook(ctx context.Context, cfg Config, messages []ChatMessag
 
 // beforeTypedToolCall is fail-closed: a handler error means the call was not
 // approved and is returned to the model as a tool error.
-func beforeTypedToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall) toolExecution {
+func beforeTypedToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall) toolExecution {
 	if !cfg.Hooks.Has(hooks.ToolCallHook.Kind) {
 		return toolExecution{}
 	}
@@ -82,7 +83,7 @@ func beforeTypedToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessa
 	return toolExecution{result: reason, isError: true}
 }
 
-func afterTypedToolCall(ctx context.Context, cfg Config, tc ToolCall, execution toolExecution, durationMs int) toolExecution {
+func afterTypedToolCall(ctx context.Context, cfg Config, tc *aop.ToolCall, execution toolExecution, durationMs int) toolExecution {
 	if !cfg.Hooks.Has(hooks.ToolResult.Kind) {
 		return execution
 	}

@@ -3,6 +3,7 @@ package commands
 import (
 	"testing"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/tool"
 )
 
@@ -86,17 +87,21 @@ func TestToolDef(t *testing.T) {
 	if def.Type != "function" {
 		t.Fatalf("expected type=function, got %s", def.Type)
 	}
-	if def.Function.Name != "read" {
-		t.Fatalf("expected name=read, got %s", def.Function.Name)
+	if def.Name != "read" {
+		t.Fatalf("expected name=read, got %s", def.Name)
 	}
-	if def.Function.Description != "Read a file" {
-		t.Fatalf("expected description='Read a file', got %s", def.Function.Description)
+	if def.Description != "Read a file" {
+		t.Fatalf("expected description='Read a file', got %s", def.Description)
 	}
-	if def.Function.Parameters == nil {
-		t.Fatal("expected non-nil parameters")
+	if def.InputSchema == nil {
+		t.Fatal("expected non-nil input schema")
 	}
-	if def.Function.Parameters["type"] != "object" {
-		t.Fatalf("expected parameters type=object, got %v", def.Function.Parameters["type"])
+	params, err := aop.DecodeJSON[map[string]any](def.InputSchema)
+	if err != nil {
+		t.Fatalf("decode input schema: %v", err)
+	}
+	if params["type"] != "object" {
+		t.Fatalf("expected parameters type=object, got %v", params["type"])
 	}
 }
 
@@ -125,8 +130,8 @@ func TestParseArgsInvalid(t *testing.T) {
 
 func TestToolResult(t *testing.T) {
 	r := tool.TextResult("hello world")
-	if r.Text() != "hello world" {
-		t.Fatalf("expected 'hello world', got %q", r.Text())
+	if tool.ResultText(r) != "hello world" {
+		t.Fatalf("expected 'hello world', got %q", tool.ResultText(r))
 	}
 	if r.IsError {
 		t.Fatal("expected IsError=false")
@@ -136,8 +141,8 @@ func TestToolResult(t *testing.T) {
 	if !e.IsError {
 		t.Fatal("expected IsError=true")
 	}
-	if e.Text() != "something broke" {
-		t.Fatalf("expected 'something broke', got %q", e.Text())
+	if tool.ResultText(e) != "something broke" {
+		t.Fatalf("expected 'something broke', got %q", tool.ResultText(e))
 	}
 
 	tr := tool.TerminateResult("done")

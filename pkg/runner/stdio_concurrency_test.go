@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
 // stdioGateProvider blocks every call until the gate closes, recording the
@@ -27,7 +27,7 @@ func newStdioGateProvider() *stdioGateProvider {
 
 func (p *stdioGateProvider) Name() string { return "stdio-gate" }
 
-func (p *stdioGateProvider) ChatCompletion(ctx context.Context, req *agent.ChatCompletionRequest) (*agent.ChatCompletionResponse, error) {
+func (p *stdioGateProvider) ChatCompletion(ctx context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 	p.mu.Lock()
 	p.prompts = append(p.prompts, lastUserText(req.Messages))
 	p.mu.Unlock()
@@ -36,8 +36,8 @@ func (p *stdioGateProvider) ChatCompletion(ctx context.Context, req *agent.ChatC
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return &agent.ChatCompletionResponse{
-		Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}},
+	return &provider.ChatCompletionResponse{
+		Choices: []provider.Choice{{Message: provider.TextMessage("assistant", "done")}},
 	}, nil
 }
 
@@ -53,10 +53,10 @@ func (p *stdioGateProvider) promptsSnapshot() []string {
 	return append([]string(nil), p.prompts...)
 }
 
-func lastUserText(messages []agent.ChatMessage) string {
+func lastUserText(messages []*aop.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" && messages[i].Content != nil {
-			return *messages[i].Content
+		if messages[i].Role == "user" {
+			return provider.MessageText(messages[i])
 		}
 	}
 	return ""
@@ -78,7 +78,7 @@ func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider
 	h.rt.config.Model = "test"
 	h.rt.config.MaxTurns = 4
 	h.rt.Subscribe(func(event *aop.Event) {
-		_ = h.emit(&transport.AgentFrame{CorrelationId: event.TurnId, Payload: &transport.AgentFrame_Event{Event: event}})
+		_ = h.emit(aop.MustWrap(runtimeEnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
 	})
 	return h
 }
@@ -136,7 +136,7 @@ func TestStdioSessionsRunConcurrently(t *testing.T) {
 
 	// Interleaved output must stay valid AOP: every line decodes, and both
 	// sessions produced their session brackets.
-	events := decodeAOPMessages(decodeAgentFrames(t, &output))
+	events := decodeAOPMessages(decodeEnvelopes(t, &output))
 	starts := map[string]bool{}
 	ends := map[string]bool{}
 	for _, e := range events {

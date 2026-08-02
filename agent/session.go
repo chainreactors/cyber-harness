@@ -6,17 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
+
+	aop "github.com/chainreactors/aiscan/aop"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type SessionData struct {
-	Version   int           `json:"version"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
-	Model     string        `json:"model,omitempty"`
-	Provider  string        `json:"provider,omitempty"`
-	Messages  []ChatMessage `json:"messages"`
+	Version   int            `json:"version"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	Model     string         `json:"model,omitempty"`
+	Provider  string         `json:"provider,omitempty"`
+	Messages  []*aop.Message `json:"messages"`
 	// MessageCounter resumes AOP message_id allocation ("m-<n>") after restore.
 	MessageCounter int64 `json:"message_counter,omitempty"`
 }
@@ -45,7 +47,15 @@ func SaveSession(dir string, data *SessionData) error {
 	data.Version = sessionVersion
 	data.Messages = sanitizeMessagesForSave(data.Messages)
 
-	raw, err := json.MarshalIndent(data, "", "  ")
+	raw, err := json.MarshalIndent(sessionJSON{
+		Version:        data.Version,
+		CreatedAt:      data.CreatedAt,
+		UpdatedAt:      data.UpdatedAt,
+		Model:          data.Model,
+		Provider:       data.Provider,
+		Messages:       marshalMessages(data.Messages),
+		MessageCounter: data.MessageCounter,
+	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}
@@ -64,11 +74,59 @@ func LoadSession(path string) (*SessionData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read session file: %w", err)
 	}
-	var data SessionData
+	var data sessionJSON
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, fmt.Errorf("parse session file: %w", err)
 	}
-	return &data, nil
+	messages, err := unmarshalMessages(data.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("parse session messages: %w", err)
+	}
+	return &SessionData{
+		Version:        data.Version,
+		CreatedAt:      data.CreatedAt,
+		UpdatedAt:      data.UpdatedAt,
+		Model:          data.Model,
+		Provider:       data.Provider,
+		Messages:       messages,
+		MessageCounter: data.MessageCounter,
+	}, nil
+}
+
+// sessionJSON is the on-disk envelope. Messages are stored as proto-JSON so
+// the file format mirrors the AOP truth instead of a vendor shape.
+type sessionJSON struct {
+	Version        int               `json:"version"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	Model          string            `json:"model,omitempty"`
+	Provider       string            `json:"provider,omitempty"`
+	Messages       []json.RawMessage `json:"messages"`
+	MessageCounter int64             `json:"message_counter,omitempty"`
+}
+
+func marshalMessages(messages []*aop.Message) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(messages))
+	for _, m := range messages {
+		raw, err := protojson.Marshal(m)
+		if err != nil {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
+}
+
+func unmarshalMessages(raw []json.RawMessage) ([]*aop.Message, error) {
+	out := make([]*aop.Message, 0, len(raw))
+	for _, data := range raw {
+		msg := new(aop.Message)
+		if err := protojson.Unmarshal(data, msg); err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, nil
 }
 
 type sessionMeta struct {
@@ -141,29 +199,32 @@ func (s SessionInfo) SortTime() time.Time {
 	}
 }
 
-func sanitizeMessagesForSave(messages []ChatMessage) []ChatMessage {
-	out := make([]ChatMessage, len(messages))
+// sanitizeMessagesForSave strips binary media parts before persisting: an
+// image is re-fetchable context, not history worth 20 MiB of JSON. Text and
+// tool call/result structure is preserved.
+func sanitizeMessagesForSave(messages []*aop.Message) []*aop.Message {
+	out := make([]*aop.Message, len(messages))
 	for i, m := range messages {
-		if len(m.ContentParts) > 0 {
-			var text strings.Builder
-			for _, p := range m.ContentParts {
-				if p.Type == "text" {
-					if text.Len() > 0 {
-						text.WriteString("\n")
-					}
-					text.WriteString(p.Text)
-				}
+		hasMedia := false
+		for _, part := range m.Content {
+			if part.GetMedia() != nil {
+				hasMedia = true
+				break
 			}
-			content := text.String()
-			out[i] = ChatMessage{
-				Role:       m.Role,
-				Content:    &content,
-				ToolCalls:  m.ToolCalls,
-				ToolCallID: m.ToolCallID,
-			}
-		} else {
-			out[i] = m
 		}
+		if !hasMedia {
+			out[i] = m
+			continue
+		}
+		filtered := make([]*aop.Content, 0, len(m.Content))
+		for _, part := range m.Content {
+			if part.GetMedia() == nil {
+				filtered = append(filtered, part)
+			}
+		}
+		cp := *m
+		cp.Content = filtered
+		out[i] = &cp
 	}
 	return out
 }

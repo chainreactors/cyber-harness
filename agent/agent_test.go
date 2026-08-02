@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -41,7 +42,7 @@ func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(requests))
 	}
-	if requests[0].Messages[0].Role != "system" || *requests[0].Messages[0].Content != "system" {
+	if requests[0].Messages[0].Role != "system" || provider.MessageText(requests[0].Messages[0]) != "system" {
 		t.Fatalf("system message not injected: %#v", requests[0].Messages)
 	}
 }
@@ -104,7 +105,7 @@ func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 		t.Fatalf("Continue() error = %v, want no messages", err)
 	}
 
-	a.state.Messages = []ChatMessage{NewTextMessage("assistant", "done")}
+	a.state.Messages = []*aop.Message{textMessage("assistant", "done")}
 	if _, err := a.Continue(context.Background()); err == nil || !strings.Contains(err.Error(), "assistant") {
 		t.Fatalf("Continue() error = %v, want assistant", err)
 	}
@@ -132,7 +133,7 @@ func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
 	if len(requests[1].Messages) != 3 {
 		t.Fatalf("second request messages = %d, want 3: %#v", len(requests[1].Messages), requests[1].Messages)
 	}
-	if *requests[1].Messages[0].Content != "one" || *requests[1].Messages[1].Content != "first" || *requests[1].Messages[2].Content != "two" {
+	if provider.MessageText(requests[1].Messages[0]) != "one" || provider.MessageText(requests[1].Messages[1]) != "first" || provider.MessageText(requests[1].Messages[2]) != "two" {
 		t.Fatalf("unexpected reused context: %#v", requests[1].Messages)
 	}
 }
@@ -145,7 +146,7 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 		},
 	}
 	ag := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
-	ag.state.Messages = []ChatMessage{NewTextMessage("user", "base")}
+	ag.state.Messages = []*aop.Message{textMessage("user", "base")}
 	result, err := ag.Run(context.Background(), TextInput("prompt"))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -277,7 +278,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 				return nil, fmt.Errorf("boom")
 			}
 			for _, msg := range req.Messages {
-				if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+				if msg.Role == "assistant" && messageContent(msg) == "" && len(provider.MessageToolCalls(msg)) == 0 {
 					t.Errorf("found empty assistant message in request on call %d", callCount)
 				}
 			}
@@ -296,7 +297,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 
 	a.mu.Lock()
 	for i, msg := range a.state.Messages {
-		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+		if msg.Role == "assistant" && messageContent(msg) == "" && len(provider.MessageToolCalls(msg)) == 0 {
 			t.Errorf("state.Messages[%d] is empty assistant message", i)
 		}
 	}
@@ -403,11 +404,11 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", len(requests))
 	}
 	system := requests[0].Messages[0]
-	if system.Role != "system" || system.Content == nil || !strings.Contains(*system.Content, "<available_skills>") {
+	if system.Role != "system" || !strings.Contains(provider.MessageText(system), "<available_skills>") {
 		t.Fatalf("system prompt missing skills")
 	}
 	user := requests[0].Messages[1]
-	if user.Role != "user" || user.Content == nil || !strings.Contains(*user.Content, `<skill name="scan"`) {
+	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="scan"`) {
 		t.Fatalf("user prompt missing expanded skill")
 	}
 }
@@ -998,13 +999,13 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 1 output: %s", result1.Output)
 	t.Logf("Turn 1 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result1.TotalUsage.PromptTokens, result1.TotalUsage.CompletionTokens,
-		result1.TotalUsage.CacheReadTokens, result1.TotalUsage.CacheWriteTokens)
+		result1.TotalUsage.InputTokens, result1.TotalUsage.OutputTokens,
+		result1.TotalUsage.Detail["cache_read"], result1.TotalUsage.Detail["cache_write"])
 
 	if result1.Turns < 1 {
 		t.Fatalf("expected at least 1 turn, got %d", result1.Turns)
 	}
-	if result1.TotalUsage.PromptTokens == 0 {
+	if result1.TotalUsage.InputTokens == 0 {
 		t.Fatal("expected non-zero prompt tokens")
 	}
 
@@ -1018,12 +1019,12 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 2 output: %s", result2.Output)
 	t.Logf("Turn 2 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result2.TotalUsage.PromptTokens, result2.TotalUsage.CompletionTokens,
-		result2.TotalUsage.CacheReadTokens, result2.TotalUsage.CacheWriteTokens)
+		result2.TotalUsage.InputTokens, result2.TotalUsage.OutputTokens,
+		result2.TotalUsage.Detail["cache_read"], result2.TotalUsage.Detail["cache_write"])
 
-	if result2.TotalUsage.PromptTokens <= result1.TotalUsage.PromptTokens {
+	if result2.TotalUsage.InputTokens <= result1.TotalUsage.InputTokens {
 		t.Errorf("turn 2 prompt tokens (%d) should exceed turn 1 (%d) due to accumulated context",
-			result2.TotalUsage.PromptTokens, result1.TotalUsage.PromptTokens)
+			result2.TotalUsage.InputTokens, result1.TotalUsage.InputTokens)
 	}
 
 	allMessages := append(result1.Messages, result2.NewMessages...)
@@ -1037,26 +1038,26 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 3 output: %s", result3.Output)
 	t.Logf("Turn 3 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result3.TotalUsage.PromptTokens, result3.TotalUsage.CompletionTokens,
-		result3.TotalUsage.CacheReadTokens, result3.TotalUsage.CacheWriteTokens)
+		result3.TotalUsage.InputTokens, result3.TotalUsage.OutputTokens,
+		result3.TotalUsage.Detail["cache_read"], result3.TotalUsage.Detail["cache_write"])
 
-	if result3.TotalUsage.PromptTokens <= result2.TotalUsage.PromptTokens {
+	if result3.TotalUsage.InputTokens <= result2.TotalUsage.InputTokens {
 		t.Errorf("turn 3 prompt tokens (%d) should exceed turn 2 (%d)",
-			result3.TotalUsage.PromptTokens, result2.TotalUsage.PromptTokens)
+			result3.TotalUsage.InputTokens, result2.TotalUsage.InputTokens)
 	}
 
 	t.Logf("\n=== Multi-Turn Cache Summary ===")
 	for i, r := range []*Result{result1, result2, result3} {
 		ratio := 0.0
-		if r.TotalUsage.PromptTokens > 0 {
-			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		if r.TotalUsage.InputTokens > 0 {
+			ratio = float64(r.TotalUsage.Detail["cache_read"]) / float64(r.TotalUsage.InputTokens) * 100
 		}
 		t.Logf("Turn %d: output=%q prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
 			i+1, truncateOutput(r.Output, 40),
-			r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+			r.TotalUsage.InputTokens, r.TotalUsage.Detail["cache_read"], r.TotalUsage.Detail["cache_write"], ratio)
 	}
 
-	totalCacheRead := result2.TotalUsage.CacheReadTokens + result3.TotalUsage.CacheReadTokens
+	totalCacheRead := result2.TotalUsage.Detail["cache_read"] + result3.TotalUsage.Detail["cache_read"]
 	if totalCacheRead == 0 {
 		t.Error("expected cache_read > 0 in turn 2 or 3, got 0 for both — caching may not be working")
 	}
@@ -1086,14 +1087,14 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		t.Fatalf("stream turn 1 failed: %v", err)
 	}
 	t.Logf("Stream Turn 1: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result1.Output, 40), result1.TotalUsage.PromptTokens, result1.TotalUsage.CacheReadTokens)
+		truncateOutput(result1.Output, 40), result1.TotalUsage.InputTokens, result1.TotalUsage.Detail["cache_read"])
 
 	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(context.Background(), TextInput("Goodbye"))
 	if err != nil {
 		t.Fatalf("stream turn 2 failed: %v", err)
 	}
 	t.Logf("Stream Turn 2: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result2.Output, 40), result2.TotalUsage.PromptTokens, result2.TotalUsage.CacheReadTokens)
+		truncateOutput(result2.Output, 40), result2.TotalUsage.InputTokens, result2.TotalUsage.Detail["cache_read"])
 
 	allMsgs := append(result1.Messages, result2.NewMessages...)
 	result3, err := NewAgent(agentCfg.WithMessages(allMsgs)).Run(context.Background(), TextInput("Thank you"))
@@ -1101,16 +1102,16 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		t.Fatalf("stream turn 3 failed: %v", err)
 	}
 	t.Logf("Stream Turn 3: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result3.Output, 40), result3.TotalUsage.PromptTokens, result3.TotalUsage.CacheReadTokens)
+		truncateOutput(result3.Output, 40), result3.TotalUsage.InputTokens, result3.TotalUsage.Detail["cache_read"])
 
 	t.Logf("\n=== Streaming Cache Summary ===")
 	for i, r := range []*Result{result1, result2, result3} {
 		ratio := 0.0
-		if r.TotalUsage.PromptTokens > 0 {
-			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		if r.TotalUsage.InputTokens > 0 {
+			ratio = float64(r.TotalUsage.Detail["cache_read"]) / float64(r.TotalUsage.InputTokens) * 100
 		}
 		t.Logf("Turn %d: prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
-			i+1, r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+			i+1, r.TotalUsage.InputTokens, r.TotalUsage.Detail["cache_read"], r.TotalUsage.Detail["cache_write"], ratio)
 	}
 }
 
@@ -1153,26 +1154,26 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	t.Logf("Tool calls recorded: %d", len(calcTool.callsSnapshot()))
 
 	t.Logf("\n=== Per-Turn Usage (with tool calls) ===")
-	for _, tu := range result.TurnUsages {
+	for i, tu := range result.TurnUsages {
 		ratio := 0.0
-		if tu.PromptTokens > 0 {
-			ratio = float64(tu.CacheReadTokens) / float64(tu.PromptTokens) * 100
+		if tu.InputTokens > 0 {
+			ratio = float64(tu.Detail["cache_read"]) / float64(tu.InputTokens) * 100
 		}
 		t.Logf("  turn %d: prompt=%d completion=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
-			tu.Turn, tu.PromptTokens, tu.CompletionTokens,
-			tu.CacheReadTokens, tu.CacheWriteTokens, ratio)
+			i+1, tu.InputTokens, tu.OutputTokens,
+			tu.Detail["cache_read"], tu.Detail["cache_write"], ratio)
 	}
 
 	t.Logf("Total usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result.TotalUsage.PromptTokens, result.TotalUsage.CompletionTokens,
-		result.TotalUsage.CacheReadTokens, result.TotalUsage.CacheWriteTokens)
+		result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens,
+		result.TotalUsage.Detail["cache_read"], result.TotalUsage.Detail["cache_write"])
 
 	if result.Turns < 2 {
 		t.Logf("WARNING: expected >= 2 turns for tool call flow, got %d (model may have answered without tool)", result.Turns)
 	}
 
 	if result.Turns >= 2 && len(result.TurnUsages) >= 2 {
-		laterCacheRead := result.TurnUsages[len(result.TurnUsages)-1].CacheReadTokens
+		laterCacheRead := result.TurnUsages[len(result.TurnUsages)-1].Detail["cache_read"]
 		if laterCacheRead == 0 {
 			t.Logf("WARNING: last turn cache_read=0 — provider may not support automatic prefix caching")
 		} else {

@@ -86,26 +86,26 @@ func (r *CommandRegistry) GetTool(name string) (tool.Tool, bool) {
 	return t, ok
 }
 
-func (r *CommandRegistry) ToolDefinitions() []tool.Definition {
+func (r *CommandRegistry) ToolDefinitions() []*tool.Definition {
 	tools := r.Tools()
-	defs := make([]tool.Definition, 0, len(tools))
+	defs := make([]*tool.Definition, 0, len(tools))
 	for _, t := range tools {
 		defs = append(defs, t.Definition())
 	}
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result tool.Result, err error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result *tool.Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result = tool.Result{}
+			result = nil
 			err = fmt.Errorf("tool %s panic: %v\n%s", name, recovered, debug.Stack())
 		}
 	}()
 
 	t, ok := r.GetTool(name)
 	if !ok {
-		return tool.Result{}, fmt.Errorf("unknown tool: %s", name)
+		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 	return t.Execute(ctx, arguments)
 }

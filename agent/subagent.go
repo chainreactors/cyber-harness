@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 )
 
 type AgentType struct {
@@ -63,14 +65,14 @@ type SubAgentArgs struct {
 	Timeout string `json:"timeout,omitempty" jsonschema:"description=Optional timeout for sync mode (e.g. 30s or 2m). Returns error on timeout."`
 }
 
-func (t *SubAgentTool) Definition() ToolDefinition {
+func (t *SubAgentTool) Definition() *aop.ToolDefinition {
 	return tool.Def(t.Name(), t.Description(), SubAgentArgs{})
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (tool.Result, error) {
+func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
 	args, err := tool.ParseArgs[SubAgentArgs](arguments)
 	if err != nil {
-		return tool.Result{}, err
+		return nil, err
 	}
 
 	switch args.Action {
@@ -79,23 +81,23 @@ func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (tool.Resu
 	case "kill":
 		output, err := t.kill(args.Name)
 		if err != nil {
-			return tool.Result{}, err
+			return nil, err
 		}
 		return tool.TextResult(output), nil
 	case "message":
 		output, err := t.sendMessage(args.Name, args.Message)
 		if err != nil {
-			return tool.Result{}, err
+			return nil, err
 		}
 		return tool.TextResult(output), nil
 	case "", "create":
 		output, err := t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout)
 		if err != nil {
-			return tool.Result{}, err
+			return nil, err
 		}
 		return tool.TextResult(output), nil
 	default:
-		return tool.Result{}, fmt.Errorf("unknown action: %s", args.Action)
+		return nil, fmt.Errorf("unknown action: %s", args.Action)
 	}
 }
 
@@ -269,7 +271,7 @@ func runDerivedSession(ctx context.Context, sub *Agent, prompt string) (*Result,
 	emitter.turnStart()
 	result, err := sub.Run(ctx, TextInput(prompt), WithTurnID(turnID))
 	stop := StopReasonError
-	usage := Usage{}
+	var usage *aop.TokenUsage
 	contextTokens := 0
 	if result != nil {
 		stop = result.Stop
@@ -406,14 +408,14 @@ func (t *SubAgentTool) uniqueName(base string) string {
 	return base + "-" + hex.EncodeToString(b)
 }
 
-func truncateToLastCompleteBoundary(messages []ChatMessage) []ChatMessage {
-	out := append([]ChatMessage(nil), messages...)
+func truncateToLastCompleteBoundary(messages []*aop.Message) []*aop.Message {
+	out := append([]*aop.Message(nil), messages...)
 	for i := len(out) - 1; i >= 0; i-- {
 		msg := out[i]
 		if msg.Role == "tool" || msg.Role == "user" {
 			return out[:i+1]
 		}
-		if msg.Role == "assistant" && len(msg.ToolCalls) == 0 {
+		if msg.Role == "assistant" && len(provider.MessageToolCalls(msg)) == 0 {
 			return out[:i+1]
 		}
 	}

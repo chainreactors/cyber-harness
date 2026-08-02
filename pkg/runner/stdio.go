@@ -9,13 +9,12 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// RunStdio carries generated ServerFrame/AgentFrame messages as protobuf JSONL.
+// RunStdio carries AOP Envelope messages as protobuf JSONL.
 func RunStdio(ctx context.Context, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) error {
 	host := newStdioHost(ctx, option, logger, output)
 	if err := host.init(); err != nil {
@@ -23,20 +22,54 @@ func RunStdio(ctx context.Context, option *cfg.Option, logger telemetry.Logger, 
 	}
 	defer host.close()
 
+	stream := newStdioEnvelopeStream(input, host.emit)
+	err := host.rt.ServeEnvelopeStream(ctx, stream)
+	host.drain()
+	if writeErr := host.err(); writeErr != nil {
+		return writeErr
+	}
+	if err != nil {
+		return fmt.Errorf("stdio protocol: %w", err)
+	}
+	return nil
+}
+
+// stdioEnvelopeStream is the stdio framing adapter: one protobuf-JSON Envelope
+// per line. It owns no runtime or namespace semantics.
+type stdioEnvelopeStream struct {
+	scanner *bufio.Scanner
+	send    func(*aop.Envelope) error
+}
+
+func newStdioEnvelopeStream(input io.Reader, send func(*aop.Envelope) error) *stdioEnvelopeStream {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 0, 1<<20), 64<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	return &stdioEnvelopeStream{scanner: scanner, send: send}
+}
+
+func (s *stdioEnvelopeStream) Recv() (*aop.Envelope, error) {
+	for s.scanner.Scan() {
+		line := strings.TrimSpace(s.scanner.Text())
 		if line == "" {
 			continue
 		}
-		host.accept(line)
+		envelope := new(aop.Envelope)
+		if err := protojson.Unmarshal([]byte(line), envelope); err != nil {
+			return nil, fmt.Errorf("decode stdio envelope: %w", err)
+		}
+		return envelope, nil
 	}
-	if err := scanner.Err(); err != nil {
-		host.emitError("", fmt.Errorf("read stdin: %w", err))
+	if err := s.scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read stdin: %w", err)
 	}
-	host.drain()
-	return host.err()
+	return nil, io.EOF
+}
+
+func (s *stdioEnvelopeStream) Send(envelope *aop.Envelope) error {
+	if s.send == nil {
+		return fmt.Errorf("stdio envelope sender is unavailable")
+	}
+	return s.send(envelope)
 }
 
 type stdioHost struct {
@@ -64,7 +97,10 @@ func (h *stdioHost) init() error {
 	}
 	h.rt = rt
 	rt.Subscribe(func(event *aop.Event) {
-		_ = h.emit(&transport.AgentFrame{CorrelationId: event.TurnId, Payload: &transport.AgentFrame_Event{Event: event}})
+		envelope, err := aop.Wrap(runtimeEnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
+		if err == nil {
+			_ = h.emit(envelope)
+		}
 	})
 	return nil
 }
@@ -75,7 +111,7 @@ func (h *stdioHost) close() {
 	}
 }
 
-func (h *stdioHost) emit(message *transport.AgentFrame) error {
+func (h *stdioHost) emit(message *aop.Envelope) error {
 	h.encMu.Lock()
 	defer h.encMu.Unlock()
 	if h.encErr != nil {
@@ -94,7 +130,7 @@ func (h *stdioHost) emit(message *transport.AgentFrame) error {
 }
 
 func (h *stdioHost) emitError(correlationID string, err error) {
-	_ = h.emit(operationError(correlationID, correlationID, err.Error()))
+	_ = h.emit(runtimeReply(correlationID, runtimeProtocolError("STDIO_PROTOCOL_ERROR", err.Error())))
 }
 
 func (h *stdioHost) err() error {
@@ -107,13 +143,13 @@ func (h *stdioHost) err() error {
 }
 
 func (h *stdioHost) accept(line string) {
-	message := new(transport.ServerFrame)
+	message := new(aop.Envelope)
 	if err := protojson.Unmarshal([]byte(line), message); err != nil {
 		h.emitError("", fmt.Errorf("decode frame: %w", err))
 		return
 	}
-	if h.rt == nil || !h.rt.HandleServerFrame(h.ctx, message, func(response *transport.AgentFrame) { _ = h.emit(response) }) {
-		h.emitError(message.CorrelationId, fmt.Errorf("unsupported server frame"))
+	if h.rt == nil || !h.rt.HandleEnvelope(h.ctx, message, func(response *aop.Envelope) { _ = h.emit(response) }) {
+		h.emitError(message.Id, fmt.Errorf("unsupported protocol message"))
 	}
 }
 
