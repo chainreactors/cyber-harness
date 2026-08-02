@@ -1,3 +1,13 @@
+---
+type: Tool Playbook
+title: arsenal
+description: Security tool package manager. Search, install, update, remove CLI tools from chainreactors, projectdiscovery, and any GitHub repo.
+tags: [runtime, package-manager]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
+---
 
 # arsenal
 

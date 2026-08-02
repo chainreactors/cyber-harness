@@ -1,6 +1,12 @@
 ---
-name: passive
+type: Tool Playbook
+title: passive
 description: Use passive to expand domains/ICPs into cyberspace assets like IPs, URLs, ports via uncover (FOFA, Hunter, Shodan, Censys, etc.). Run before active scanners (gogo, spray, katana).
+tags: [easm, recon]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Passive

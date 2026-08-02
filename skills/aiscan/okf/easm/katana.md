@@ -1,7 +1,12 @@
 ---
-name: katana
+type: Tool Playbook
+title: katana
 description: Use katana for deep web crawling with full parameter discovery. Produces URLs with query strings, form targets, and JS endpoints that spray crawl strips.
-internal: true
+tags: [easm, web, crawling]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Katana — Parameter-Aware Web Crawler

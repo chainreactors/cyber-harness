@@ -175,10 +175,9 @@ func scannerWithAgent(ctx context.Context, option *cfg.Option, application *runn
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {
 	var sections []string
-	skillName := scan.ScannerSkillName(command)
-	if skillName != "" && cfg.ScannerCommandAvailable(command) {
-		if skill, ok := store.ByName(skillName); ok {
-			sections = append(sections, store.FormatInvocation(skill, ""))
+	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && cfg.ScannerCommandAvailable(command) {
+		if body, ok, err := store.ReadVirtualBody(conceptURI); err == nil && ok && body != "" {
+			sections = append(sections, skills.FormatVirtualInvocation(command, conceptURI, body))
 		}
 	}
 

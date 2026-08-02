@@ -1,7 +1,12 @@
 ---
-name: proton
-description: Use this skill when working with proton for sensitive information scanning — detecting API keys, tokens, credentials, and secrets in files or piped data.
-internal: true
+type: Tool Playbook
+title: proton
+description: Use this playbook when working with proton for sensitive information scanning — detecting API keys, tokens, credentials, and secrets in files or piped data.
+tags: [easm, secrets]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Proton
