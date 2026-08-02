@@ -161,7 +161,7 @@ function messagesDiffer(a: ChatMessage[], b: ChatMessage[]): boolean {
 export function useChatSession() {
   const { t } = useTranslation('chat')
   const [agents, setAgents] = useState<AgentView[]>([])
-  const [selectedAgentID, setSelectedAgentID] = useState<string | null>(null)
+  const [selectedNodeURI, setSelectedNodeURI] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -177,7 +177,7 @@ export function useChatSession() {
   const activeSessionRef = useRef<string | null>(null)
   const activeTurnRef = useRef<string>('')
   // Latest roster mirrors `agents` for event handlers that run between renders.
-  // selectedAgentID is already the canonical node_uri; no second identity or
+  // selectedNodeURI is already the canonical node_uri; no second identity or
   // reconnect remapping state is needed.
   const agentsRef = useRef<AgentView[]>([])
   const sessionCacheRef = useRef<Map<string, SessionSnapshot>>(new Map())
@@ -204,7 +204,7 @@ export function useChatSession() {
       const list = sortAgentsByNode(await listAgents())
       agentsRef.current = list
       setAgents(list)
-      setSelectedAgentID((current) => {
+      setSelectedNodeURI((current) => {
         // node_uri survives reconnects. Keep an absent selection so a temporary
         // disconnect does not silently retarget the operator to another node.
         return current || list[0]?.nodeUri || null
@@ -452,10 +452,10 @@ export function useChatSession() {
     )
   }
 
-  async function handleCreateSession(agentID: string) {
+  async function handleCreateSession(nodeURI: string) {
     try {
-      const session = await createChatSession(agentID)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeURI)
+      setSelectedNodeURI(nodeURI)
       await refreshSessions()
       await activateSession(session.id, 'push')
     } catch (err: any) {
@@ -563,15 +563,15 @@ export function useChatSession() {
     if (activeSessionRef.current) return activeSessionRef.current
     // Prefer the selected node only while it's actually connected; a selection
     // left dangling by a node that went away falls back to the first agent.
-    const connected = agents.find((a) => a.nodeUri === selectedAgentID)
-    const agentID = connected?.nodeUri || agents[0]?.nodeUri
-    if (!agentID) {
+    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
+    const nodeURI = connected?.nodeUri || agents[0]?.nodeUri
+    if (!nodeURI) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(agentID)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeURI)
+      setSelectedNodeURI(nodeURI)
       await refreshSessions()
       await activateSession(session.id, 'push')
       return session.id
@@ -599,21 +599,21 @@ export function useChatSession() {
   async function quickDispatch(
     target: string,
     prompt: string,
-    agentID?: string,
+    nodeURI?: string,
     opts?: { activate?: boolean; skipRefresh?: boolean },
   ): Promise<AOPSession | null> {
-    const connected = agents.find((a) => a.nodeUri === selectedAgentID)
-    const aID = agentID || connected?.nodeUri || agents[0]?.nodeUri
-    if (!aID) {
+    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
+    const targetNodeURI = nodeURI || connected?.nodeUri || agents[0]?.nodeUri
+    if (!targetNodeURI) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(aID, target)
+      const session = await createChatSession(targetNodeURI, target)
       await sendChatMessage(session.id, prompt)
       if (!opts?.skipRefresh) await refreshSessions()
       if (opts?.activate) {
-        setSelectedAgentID(aID)
+        setSelectedNodeURI(targetNodeURI)
         await activateSession(session.id, 'push')
       }
       return session
@@ -634,15 +634,15 @@ export function useChatSession() {
     seedPrompt: string
     scanID?: string
   }): Promise<string | null> {
-    const connected = agents.find((a) => a.nodeUri === selectedAgentID)
-    const agentID = connected?.nodeUri || agents[0]?.nodeUri
-    if (!agentID) {
+    const connected = agents.find((a) => a.nodeUri === selectedNodeURI)
+    const nodeURI = connected?.nodeUri || agents[0]?.nodeUri
+    if (!nodeURI) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(agentID, args.title, args.scanID)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeURI, args.title, args.scanID)
+      setSelectedNodeURI(nodeURI)
       await refreshSessions()
       await activateSession(session.id, 'push')
       await handleSendMessage(args.seedPrompt)
@@ -714,7 +714,7 @@ export function useChatSession() {
 
   return {
     agents,
-    selectedAgentID,
+    selectedNodeURI,
     sessions,
     activeSessionID,
     timeline,
@@ -723,8 +723,8 @@ export function useChatSession() {
     isThinking,
     busy: pendingResponse || isThinking,
     error,
-    selectAgent: (id: string) => {
-      setSelectedAgentID(id)
+    selectNode: (nodeURI: string) => {
+      setSelectedNodeURI(nodeURI)
     },
     createSession: handleCreateSession,
     selectSession: (id: string) => activateSession(id, 'push'),
