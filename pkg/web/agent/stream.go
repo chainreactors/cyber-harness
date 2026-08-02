@@ -4,14 +4,13 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"google.golang.org/protobuf/proto"
 )
 
 // AgentStatsTracker tracks agent event statistics for the WebSocket connection.
 type AgentStatsTracker struct {
 	mu    sync.Mutex
-	stats transport.AgentStats
+	stats aop.AgentStats
 }
 
 // NewAgentStatsTracker creates a new stats tracker.
@@ -20,19 +19,19 @@ func NewAgentStatsTracker() *AgentStatsTracker {
 }
 
 // Snapshot returns the current stats snapshot.
-func (t *AgentStatsTracker) Snapshot() *transport.AgentStats {
+func (t *AgentStatsTracker) Snapshot() *aop.AgentStats {
 	if t == nil {
-		return &transport.AgentStats{}
+		return &aop.AgentStats{}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return proto.Clone(&t.stats).(*transport.AgentStats)
+	return proto.Clone(&t.stats).(*aop.AgentStats)
 }
 
 // Observe records an AOP event and returns updated stats if the stats changed.
-func (t *AgentStatsTracker) Observe(e *aop.Event) (*transport.AgentStats, bool) {
+func (t *AgentStatsTracker) Observe(e *aop.Event) (*aop.AgentStats, bool) {
 	if t == nil {
-		return &transport.AgentStats{}, false
+		return &aop.AgentStats{}, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -56,7 +55,7 @@ func (t *AgentStatsTracker) Observe(e *aop.Event) (*transport.AgentStats, bool) 
 			t.stats.RunningTools--
 		}
 	default:
-		return proto.Clone(&t.stats).(*transport.AgentStats), false
+		return proto.Clone(&t.stats).(*aop.AgentStats), false
 	}
-	return proto.Clone(&t.stats).(*transport.AgentStats), true
+	return proto.Clone(&t.stats).(*aop.AgentStats), true
 }

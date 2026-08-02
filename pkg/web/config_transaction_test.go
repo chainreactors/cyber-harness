@@ -7,27 +7,28 @@ import (
 	"testing"
 	"time"
 
-	proto "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 type transactionalConfigStore struct {
 	mu         sync.Mutex
-	cfg        proto.DistributeConfig
+	cfg        *configpb.DistributeConfig
 	commitErr  error
 	discarded  int
 	prepareLog []string
 }
 
-func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, proto.DistributeConfig, error) {
+func (s *transactionalConfigStore) GetDistributeConfig(context.Context) (string, bool, *configpb.DistributeConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return "config.yaml", true, s.cfg, nil
 }
 
-func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg proto.DistributeConfig) (*PreparedConfig, error) {
+func (s *transactionalConfigStore) PrepareDistributeConfig(_ context.Context, cfg *configpb.DistributeConfig) (*PreparedConfig, error) {
 	s.mu.Lock()
-	s.prepareLog = append(s.prepareLog, cfg.LLM.Active().Model)
+	s.prepareLog = append(s.prepareLog, activeModel(cfg))
 	s.mu.Unlock()
 	return &PreparedConfig{Config: cfg, TargetPath: "config.yaml"}, nil
 }
@@ -48,6 +49,13 @@ func (s *transactionalConfigStore) DiscardDistributeConfig(*PreparedConfig) {
 	s.mu.Unlock()
 }
 
+func activeModel(c *configpb.DistributeConfig) string {
+	if active := cfg.ActiveLLMProvider(c.GetLlm()); active != nil {
+		return active.Model
+	}
+	return ""
+}
+
 type recordingCloser struct {
 	once sync.Once
 	done chan struct{}
@@ -62,11 +70,11 @@ func (c *recordingCloser) Close() {
 	c.once.Do(func() { close(c.done) })
 }
 
-func configForModel(model string) proto.DistributeConfig {
-	var cfg proto.DistributeConfig
-	cfg.LLM.ActiveProfile = "primary"
-	cfg.LLM.Providers = []proto.LLMProviderConfig{{ID: "primary", Provider: "openai", Model: model}}
-	return cfg
+func configForModel(model string) *configpb.DistributeConfig {
+	return &configpb.DistributeConfig{Llm: &configpb.LLMConfig{
+		ActiveProfile: "primary",
+		Providers:     []*configpb.LLMProviderConfig{{Id: "primary", Provider: "openai", Model: model}},
+	}}
 }
 
 func TestSaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp(t *testing.T) {
@@ -75,7 +83,7 @@ func TestSaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp(t *testing.T) {
 	svc := NewService(ServiceConfig{
 		App: oldApp, ConfigStore: store,
 		AppFactory: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
-			if got := prepared.Config.LLM.Active().Model; got != "new-model" {
+			if got := activeModel(prepared.Config); got != "new-model" {
 				t.Fatalf("candidate model = %q", got)
 			}
 			return nil, errors.New("candidate build failed")
@@ -89,7 +97,7 @@ func TestSaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := committed.LLM.Active().Model; got != "old-model" {
+	if got := activeModel(committed); got != "old-model" {
 		t.Fatalf("committed model = %q, want old-model", got)
 	}
 	app, release := svc.acquireApp()
@@ -169,7 +177,7 @@ func TestSaveConfigSerializesConcurrentCandidates(t *testing.T) {
 	svc := NewService(ServiceConfig{
 		App: oldApp, ConfigStore: store,
 		AppFactory: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
-			model := prepared.Config.LLM.Active().Model
+			model := activeModel(prepared.Config)
 			entered <- model
 			if model == "first-model" {
 				<-releaseFirst
@@ -214,7 +222,7 @@ func TestSaveConfigSerializesConcurrentCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := committed.LLM.Active().Model; got != "second-model" {
+	if got := activeModel(committed); got != "second-model" {
 		t.Fatalf("final committed model = %q", got)
 	}
 }

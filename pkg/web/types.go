@@ -6,7 +6,9 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	config "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -16,168 +18,90 @@ var (
 	ErrTurnNotFound      = errors.New("turn not found")
 )
 
-type ScanStatus string
-
+// Session states stored in aop.Session.State. The SQLite status column uses
+// the same values; migrate() rewrites the legacy active/archived rows.
 const (
-	StatusQueued    ScanStatus = "queued"
-	StatusRunning   ScanStatus = "running"
-	StatusCompleted ScanStatus = "completed"
-	StatusFailed    ScanStatus = "failed"
-	StatusCanceled  ScanStatus = "canceled"
+	SessionStateOpen   = "open"
+	SessionStateClosed = "closed"
 )
 
-type ScanJob struct {
-	ID        string         `json:"id"`
-	Target    string         `json:"target"`
-	Mode      string         `json:"mode"`
-	Verify    bool           `json:"verify,omitempty"`
-	Sniper    bool           `json:"sniper,omitempty"`
-	Deep      bool           `json:"deep,omitempty"`
-	Status    ScanStatus     `json:"status"`
-	Progress  string         `json:"progress,omitempty"`
-	Report    string         `json:"report,omitempty"`
-	Result    *output.Result `json:"result,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+// scanStatusToDB maps the proto enum to the string stored in the scans.status
+// column. UNSPECIFIED and unknown values round-trip as "queued".
+func scanStatusToDB(value scanpb.ScanStatus) string {
+	switch value {
+	case scanpb.ScanStatus_SCAN_STATUS_RUNNING:
+		return "running"
+	case scanpb.ScanStatus_SCAN_STATUS_COMPLETED:
+		return "completed"
+	case scanpb.ScanStatus_SCAN_STATUS_FAILED:
+		return "failed"
+	case scanpb.ScanStatus_SCAN_STATUS_CANCELED:
+		return "canceled"
+	default:
+		return "queued"
+	}
 }
 
-type ServiceStatus struct {
-	Version             string `json:"version"`
-	LLMAvailable        bool   `json:"llm_available"`
-	LLMProvider         string `json:"llm_provider,omitempty"`
-	LLMModel            string `json:"llm_model,omitempty"`
-	LLMAPIKeyConfigured bool   `json:"llm_api_key_configured,omitempty"`
-	ConfigPath          string `json:"config_path,omitempty"`
-	ConfigLoaded        bool   `json:"config_loaded"`
-	Agents              int    `json:"agents"`
-	IOAURL              string `json:"ioa_url,omitempty"`
+func scanTerminal(value scanpb.ScanStatus) bool {
+	return value == scanpb.ScanStatus_SCAN_STATUS_COMPLETED ||
+		value == scanpb.ScanStatus_SCAN_STATUS_FAILED ||
+		value == scanpb.ScanStatus_SCAN_STATUS_CANCELED
 }
 
-// ConfigStatus is the response for GET /api/config — secrets masked,
-// *_configured booleans indicate whether a secret is set.
-type ConfigStatus struct {
-	ConfigPath   string `json:"config_path,omitempty"`
-	ConfigLoaded bool   `json:"config_loaded"`
-	LLM          struct {
-		Provider         string             `json:"provider"`
-		BaseURL          string             `json:"base_url"`
-		APIKeyConfigured bool               `json:"api_key_configured"`
-		Model            string             `json:"model"`
-		Proxy            string             `json:"proxy"`
-		MaxTokens        int                `json:"max_tokens,omitempty"`
-		ContextWindow    int                `json:"context_window,omitempty"`
-		ActiveProfile    string             `json:"active_profile,omitempty"`
-		Profiles         []LLMProfileStatus `json:"profiles,omitempty"`
-	} `json:"llm"`
-	Cyberhub struct {
-		URL           string `json:"url"`
-		KeyConfigured bool   `json:"key_configured"`
-		Mode          string `json:"mode"`
-		Proxy         string `json:"proxy"`
-	} `json:"cyberhub"`
-	Recon struct {
-		FofaEmail              string `json:"fofa_email"`
-		FofaKeyConfigured      bool   `json:"fofa_key_configured"`
-		HunterTokenConfigured  bool   `json:"hunter_token_configured"`
-		HunterAPIKeyConfigured bool   `json:"hunter_api_key_configured"`
-		Proxy                  string `json:"proxy"`
-		Limit                  *int   `json:"limit,omitempty"`
-	} `json:"recon"`
-	Scan struct {
-		Verify string `json:"verify"`
-	} `json:"scan"`
-	Search struct {
-		TavilyKeysConfigured bool `json:"tavily_keys_configured"`
-	} `json:"search"`
-	IOA struct {
-		URL             string `json:"url"`
-		TokenConfigured bool   `json:"token_configured"`
-		NodeName        string `json:"node_name"`
-		Space           string `json:"space"`
-	} `json:"ioa"`
-	Agent struct {
-		Tools       []string `json:"tools,omitempty"`
-		Timeout     int      `json:"timeout"`
-		SaveSession bool     `json:"save_session"`
-	} `json:"agent"`
-}
+func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
-type LLMProfileStatus struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Provider         string `json:"provider"`
-	BaseURL          string `json:"base_url"`
-	APIKeyConfigured bool   `json:"api_key_configured"`
-	Model            string `json:"model"`
-	Proxy            string `json:"proxy"`
-	MaxTokens        int    `json:"max_tokens,omitempty"`
-	ContextWindow    int    `json:"context_window,omitempty"`
-}
-
-// ConfigStatusFromDistribute builds a masked ConfigStatus from raw config.
-func ConfigStatusFromDistribute(d *config.DistributeConfig, path string, loaded bool) ConfigStatus {
-	var cs ConfigStatus
-	cs.ConfigPath = path
-	cs.ConfigLoaded = loaded
-	active := d.LLM.Active()
-	cs.LLM.Provider = active.Provider
-	cs.LLM.BaseURL = active.BaseURL
-	cs.LLM.APIKeyConfigured = active.APIKey != ""
-	cs.LLM.Model = active.Model
-	cs.LLM.Proxy = active.Proxy
-	cs.LLM.MaxTokens = active.MaxTokens
-	cs.LLM.ContextWindow = active.ContextWindow
-	cs.LLM.ActiveProfile = d.LLM.ActiveProfile
-	for _, profile := range d.LLM.Providers {
-		profile = config.NormalizeLLMProvider(profile)
-		cs.LLM.Profiles = append(cs.LLM.Profiles, LLMProfileStatus{
-			ID: profile.ID, Name: profile.Name, Provider: profile.Provider,
-			BaseURL: profile.BaseURL, APIKeyConfigured: profile.APIKey != "",
+// ConfigViewFromDistribute builds the secret-masked product view directly in
+// the schema owned by aiscan.config.
+func ConfigViewFromDistribute(d *configpb.DistributeConfig, path string, loaded bool) *configpb.ConfigView {
+	view := &configpb.ConfigView{Path: path, Loaded: loaded}
+	if d == nil {
+		return view
+	}
+	view.Llm = &configpb.LLMView{ActiveProfile: d.GetLlm().GetActiveProfile()}
+	for _, raw := range d.GetLlm().GetProviders() {
+		profile := config.NormalizeLLMProvider(raw)
+		if profile == nil {
+			continue
+		}
+		item := &configpb.LLMProviderView{
+			Id: profile.Id, Name: profile.Name, Provider: profile.Provider,
+			BaseUrl: profile.BaseUrl, ApiKeyConfigured: profile.ApiKey != "",
 			Model: profile.Model, Proxy: profile.Proxy,
 			MaxTokens: profile.MaxTokens, ContextWindow: profile.ContextWindow,
-		})
+		}
+		view.Llm.Providers = append(view.Llm.Providers, item)
+		if profile.Id == view.Llm.ActiveProfile {
+			view.Llm.Active = item
+		}
 	}
-	cs.Cyberhub.URL = d.Cyberhub.URL
-	cs.Cyberhub.KeyConfigured = d.Cyberhub.Key != ""
-	cs.Cyberhub.Mode = d.Cyberhub.Mode
-	cs.Cyberhub.Proxy = d.Cyberhub.Proxy
-	cs.Recon.FofaEmail = d.Recon.FofaEmail
-	cs.Recon.FofaKeyConfigured = d.Recon.FofaKey != ""
-	cs.Recon.HunterTokenConfigured = d.Recon.HunterToken != ""
-	cs.Recon.HunterAPIKeyConfigured = d.Recon.HunterAPIKey != ""
-	cs.Recon.Proxy = d.Recon.Proxy
-	cs.Recon.Limit = d.Recon.Limit
-	cs.Scan.Verify = d.Scan.Verify
-	cs.Search.TavilyKeysConfigured = d.Search.TavilyKeys != ""
-	cs.IOA.URL = d.IOA.URL
-	cs.IOA.TokenConfigured = d.IOA.Token != ""
-	cs.IOA.NodeName = d.IOA.NodeName
-	cs.IOA.Space = d.IOA.Space
-	cs.Agent.Tools = d.Agent.Tools
-	cs.Agent.Timeout = d.Agent.Timeout
-	cs.Agent.SaveSession = d.Agent.SaveSession
-	return cs
+	if view.Llm.Active == nil && len(view.Llm.Providers) > 0 {
+		view.Llm.Active = view.Llm.Providers[0]
+		view.Llm.ActiveProfile = view.Llm.Active.Id
+	}
+	view.Cyberhub = &configpb.CyberhubView{
+		Url: d.GetCyberhub().GetUrl(), KeyConfigured: d.GetCyberhub().GetKey() != "",
+		Mode: d.GetCyberhub().GetMode(), Proxy: d.GetCyberhub().GetProxy(),
+	}
+	view.Recon = &configpb.ReconView{
+		FofaEmail: d.GetRecon().GetFofaEmail(), FofaKeyConfigured: d.GetRecon().GetFofaKey() != "",
+		HunterTokenConfigured:  d.GetRecon().GetHunterToken() != "",
+		HunterApiKeyConfigured: d.GetRecon().GetHunterApiKey() != "",
+		Proxy:                  d.GetRecon().GetProxy(), Limit: d.GetRecon().GetLimit(),
+	}
+	view.Scan = &configpb.ScanConfig{Verify: d.GetScan().GetVerify()}
+	view.Search = &configpb.SearchView{TavilyKeysConfigured: d.GetSearch().GetTavilyKeys() != ""}
+	view.Ioa = &configpb.IOAView{
+		Url: d.GetIoa().GetUrl(), TokenConfigured: d.GetIoa().GetToken() != "",
+		NodeName: d.GetIoa().GetNodeName(), Space: d.GetIoa().GetSpace(),
+	}
+	view.Agent = &configpb.AgentConfig{
+		Tools:   append([]string(nil), d.GetAgent().GetTools()...),
+		Timeout: d.GetAgent().GetTimeout(), SaveSession: d.GetAgent().GetSaveSession(),
+	}
+	return view
 }
 
 // --- Chat types ---
-
-const (
-	SessionActive   = "active"
-	SessionArchived = "archived"
-)
-
-type ChatSession struct {
-	ID        string    `json:"id"`
-	AgentID   string    `json:"agent_id"`
-	AgentName string    `json:"agent_name,omitempty"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"`
-	TopicID   string    `json:"topic_id,omitempty"`
-	ScanIDs   []string  `json:"scan_ids,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
 
 type persistedAOPEvent struct {
 	Cursor int64

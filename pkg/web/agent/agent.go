@@ -7,35 +7,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	reloadpb "github.com/chainreactors/aiscan/pkg/types/reload"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
 
 func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, option, logger, false)
+	return runRemoteAgent(ctx, option, logger)
 }
 
-func RunGRPC(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, option, logger, true)
-}
-
-func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger, grpcTransport bool) error {
-	if option.WebURL != "" {
-		remoteOpt, err := fetchRemoteConfig(option.WebURL)
-		if err != nil {
-			logger.Warnf("fetch remote config from %s: %s (continuing with local config)", option.WebURL, err)
-		} else {
-			logger.Infof("fetched remote config from %s", option.WebURL)
-			cfg.MergeRemoteOption(option, remoteOpt)
-		}
-	}
+func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
 	if strings.TrimSpace(option.IOAURL) == "" {
 		return fmt.Errorf("ioa.url is required for web node identity")
 	}
@@ -63,25 +54,22 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	defer rt.Close()
 
 	chatHandler := &chatAgentHandler{
-		rt:        rt,
-		serverURL: option.WebURL,
-		app:       application,
-		option:    option,
-		logger:    logger,
+		rt:     rt,
+		app:    application,
+		option: option,
+		logger: logger,
+		ready:  make(chan struct{}),
 	}
 
 	connectionDone := make(chan struct{})
 	go func() {
 		defer close(connectionDone)
 		_ = application.WaitEngines(ctx)
-		transportName := "websocket"
-		if grpcTransport {
-			transportName = "grpc"
-		}
-		logger.Debugf("%s transport connection to %s", transportName, option.WebURL)
+		dialURL, _ := SplitAccessKey(option.ServerURL)
+		logger.Debugf("websocket transport connection to %s", dialURL)
 
 		connection := connectionConfig{
-			ServerURL:      option.WebURL,
+			ServerURL:      option.ServerURL,
 			Name:           runner.ResolveIOANodeName(option),
 			Registry:       application.Commands,
 			AgentSubscribe: rt.Subscribe,
@@ -91,17 +79,21 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 			Chat:           chatHandler,
 			Node:           identityRef,
 			Runtime:        DefaultRuntime(),
-			Status:         func() *transport.AgentStatus { return agentStatus(option, application) },
-			Menu:           func() []*transport.CommandSpec { return agentCommandCatalog(application) },
+			Status:         func() *aop.AgentStatus { return agentStatus(option, application) },
+			Menu:           func() []*commandpb.Spec { return agentCommandCatalog(application) },
 			PTYRouter:      func() (*pty.Router, error) { return NewPTYRouter(application.Commands), nil },
 		}
-		if grpcTransport {
-			_ = connectGenerated(ctx, connection, true)
-		} else {
-			_ = connect(ctx, connection)
-		}
+		_ = connect(ctx, connection)
 	}()
 
+	if application.Provider == nil {
+		select {
+		case <-chatHandler.ready:
+		case <-ctx.Done():
+			<-connectionDone
+			return nil
+		}
+	}
 	if application.Provider == nil {
 		logger.Warnf("no LLM provider configured; remote REPL and PTY are available, autonomous agent loop is disabled")
 		<-ctx.Done()
@@ -140,10 +132,11 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 type chatAgentHandler struct {
 	rt        *runner.AgentRuntime
-	serverURL string
 	app       *runner.App
 	option    *cfg.Option
 	logger    telemetry.Logger
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 func (h *chatAgentHandler) OpenSession(ctx context.Context, req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
@@ -162,7 +155,7 @@ func (h *chatAgentHandler) CloseSession(ctx context.Context, req *aop.CloseSessi
 	return h.rt.CloseAOPSession(ctx, req)
 }
 
-func (h *chatAgentHandler) Command(ctx context.Context, req *transport.CommandRequest) (*transport.CommandResult, error) {
+func (h *chatAgentHandler) Command(ctx context.Context, req *commandpb.Request) (*commandpb.Result, error) {
 	if h.rt == nil || req == nil || strings.TrimSpace(req.Line) == "" {
 		return nil, fmt.Errorf("command line is required")
 	}
@@ -174,10 +167,10 @@ func (h *chatAgentHandler) Command(ctx context.Context, req *transport.CommandRe
 	if err != nil {
 		return nil, err
 	}
-	return &transport.CommandResult{TaskId: req.TaskId, Result: encoded, MediaType: "application/json"}, nil
+	return &commandpb.Result{Data: encoded, MediaType: "application/json"}, nil
 }
 
-func (h *chatAgentHandler) Upload(req *transport.FileUploadRequest) (*transport.FileResult, error) {
+func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, error) {
 	if req == nil {
 		return nil, fmt.Errorf("upload request is required")
 	}
@@ -193,12 +186,17 @@ func (h *chatAgentHandler) Upload(req *transport.FileUploadRequest) (*transport.
 	if err := os.WriteFile(dest, req.Data, 0o644); err != nil {
 		return nil, err
 	}
-	return &transport.FileResult{TaskId: req.TaskId, Filename: filename, Path: dest, Size: int64(len(req.Data))}, nil
+	return &filepb.Result{Filename: filename, Path: dest, Size: int64(len(req.Data))}, nil
 }
 
-func (h *chatAgentHandler) ReloadConfig(serverURL string) (*transport.ConfigReloadResult, *transport.AgentStatus) {
-	provider, model, err := reloadAgentConfig(serverURL, h.rt, h.app, h.logger)
-	result := &transport.ConfigReloadResult{Ok: err == nil, Model: model}
+func (h *chatAgentHandler) ReloadConfig(config *configpb.DistributeConfig) (*reloadpb.Result, *aop.AgentStatus) {
+	defer h.readyOnce.Do(func() {
+		if h.ready != nil {
+			close(h.ready)
+		}
+	})
+	provider, model, err := reloadAgentConfig(config, h.rt, h.app, h.option, h.logger)
+	result := &reloadpb.Result{Ok: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
@@ -208,26 +206,22 @@ func (h *chatAgentHandler) ReloadConfig(serverURL string) (*transport.ConfigRelo
 }
 
 // ---------------------------------------------------------------------------
-// reloadAgentConfig re-fetches the hub config and hot-swaps the LLM provider so
-// a running agent picks up a Settings change without a restart. Best-effort: a
-// fetch/build failure leaves the current provider in place. serverURL is the hub
-// base the agent already dials. Returns the live provider, resolved model, and
-// true when the swap succeeded, so the caller can re-announce identity.
+// reloadAgentConfig hot-swaps the LLM provider from the protobuf config carried
+// by the application WebSocket. A build failure leaves the current provider in
+// place and is reported through the reload result and AgentStatus.
 // ---------------------------------------------------------------------------
 
-func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, app *runner.App, logger telemetry.Logger) (agent.Provider, string, error) {
+func reloadAgentConfig(distribute *configpb.DistributeConfig, rt *runner.AgentRuntime, app *runner.App, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
 	if rt == nil {
 		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	remoteOpt, err := fetchRemoteConfig(serverURL)
-	if err != nil {
-		logger.Warnf("config reload: fetch remote config: %s", err)
-		return nil, "", err
+	if distribute == nil {
+		return nil, "", fmt.Errorf("remote config is required")
 	}
-	providerConfig := runner.ProviderConfig(remoteOpt)
+	providerConfig := runner.ProviderConfigFromProto(distribute.GetLlm())
 	resolved, err := agent.ResolveProvider(&providerConfig)
 	if err != nil {
 		logger.Warnf("config reload: resolve provider: %s", err)
@@ -242,6 +236,9 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, app *runner.Ap
 	app.Provider = provider
 	app.ProviderConfig = *resolved
 	rt.SetProvider(provider, *resolved)
+	if option != nil {
+		runner.ApplyResolvedProviderOptions(option, *resolved)
+	}
 	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
 	return provider, model, nil
 }
@@ -254,7 +251,7 @@ func reloadAgentConfig(serverURL string, rt *runner.AgentRuntime, app *runner.Ap
 // hub on register: the static agent-scope menu commands plus one per loaded (and
 // non-internal) skill. The hub merges it with its hub-scope commands to build
 // the web "/" menu and /help, so the menu reflects what this agent can run.
-func agentCommandCatalog(app *runner.App) []*transport.CommandSpec {
+func agentCommandCatalog(app *runner.App) []*commandpb.Spec {
 	specs := runner.RuntimeCommandSpecs()
 	if app == nil || app.Skills == nil {
 		return specs
@@ -263,7 +260,7 @@ func agentCommandCatalog(app *runner.App) []*transport.CommandSpec {
 		if strings.TrimSpace(sk.Name) == "" || sk.Internal {
 			continue
 		}
-		specs = append(specs, &transport.CommandSpec{
+		specs = append(specs, &commandpb.Spec{
 			Name:        "/skill:" + strings.TrimPrefix(strings.TrimSpace(sk.Name), "/"),
 			Description: sk.Description,
 		})
@@ -271,8 +268,8 @@ func agentCommandCatalog(app *runner.App) []*transport.CommandSpec {
 	return specs
 }
 
-func agentStatus(option *cfg.Option, app *runner.App) *transport.AgentStatus {
-	status := new(transport.AgentStatus)
+func agentStatus(option *cfg.Option, app *runner.App) *aop.AgentStatus {
+	status := new(aop.AgentStatus)
 	if option != nil {
 		status.Space = option.Space
 	}
@@ -318,7 +315,7 @@ func webNodeRef(option *cfg.Option) (protocols.NodeRef, error) {
 	if option == nil {
 		return protocols.NodeRef{}, fmt.Errorf("web node configuration is required")
 	}
-	authority, err := protocols.CanonicalAuthority(option.WebURL)
+	authority, err := protocols.CanonicalAuthority(option.ServerURL)
 	if err != nil {
 		return protocols.NodeRef{}, fmt.Errorf("web node authority: %w", err)
 	}

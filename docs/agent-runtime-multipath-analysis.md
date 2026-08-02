@@ -50,21 +50,24 @@ session.end
 
 ## Transport
 
-stdio 与 WebSocket 共用生成的 `aiscan.transport.ServerFrame/AgentFrame`，
-分别以标准 protobuf JSON 传输；gRPC 使用同一消息的 protobuf binary：
+stdio 与 WebSocket 共用 `aop.Envelope` 和同一个 Runtime protobuf loop：
+
+- WebSocket 使用 protobuf binary；
+- stdio 使用 protobuf JSONL；
+- ConnectRPC 只处理管理/query，不进入 Agent Runtime。
 
 ```text
 open_session / close_session
 run_turn / cancel_turn
 command / command_result
 event
-operation_error
+protocol_error
 ```
 
 - Web Run API 只使用 `turn_id` 关联；协议中不存在独立的 `run_id`；
-- Runner 身份使用注册消息中的 `NodeRef.ID`；它是节点路由身份，不进入 `Session → Run` 领域模型，也不与 `turn_id` 混用；
+- Runner 注册携带本地 `agent_id + authority`；组合后的 `node_uri` 是唯一节点路由身份，不进入 `Session → Run` 领域模型，也不与 `turn_id` 混用；
 - direct structured tool execution 使用 `tool_call` / AOP `tool_result`；
-- PTY、file RPC、node status/config 仍属于各自控制或终端平面，不伪装成 Agent Turn。
+- PTY、file、exec、tool 属于 AOP namespace，不伪装成 Agent Turn，也不创建独立传输。
 
 ## 并发与异步输入
 
@@ -80,6 +83,6 @@ operation_error
 这是一次性 breaking cutover：
 
 - 不双读、双写旧协议；
-- SQLite 保留 sessions、messages、assets、records；
-- `chat_aop_events.event_json` 只存标准 protobuf JSON；迁移保留已有历史，不做双读写；
-- SQLite delivery 列统一为 `cursor`，旧 `hub_seq` 仅执行一次列重命名。
+- SQLite 保存 protobuf Session/Scan 与 AOP Event ProtoJSON；
+- Scanner 输出只保存 libcstx SCO JSONL；
+- 不保留 assets、records 或旧协议双读写。

@@ -4,47 +4,38 @@ import (
 	"context"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
 	"github.com/chainreactors/ioa/protocols"
 	"github.com/chainreactors/utils/pty"
 )
 
-const DefaultWSPath = "/api/agent/ws"
+const DefaultWSPath = "/api/aop/ws"
 
 type connectionConfig struct {
-	ServerURL string
-	WSPath    string
-	Name      string
-	Token     string
+	ServerURL    string
+	WSPath       string
+	Name         string
+	Token        string
+	Capabilities []string
 
 	Registry       *commands.CommandRegistry
 	AgentSubscribe func(func(*aop.Event)) func()
 	DataBus        *eventbus.Bus[output.ToolDataEvent]
 	SCO            *output.SCOSidecar
 	Logger         telemetry.Logger
-	Chat           chatHandler
+	Chat           *chatAgentHandler
 	Node           protocols.NodeRef
-	Runtime        *transport.AgentRuntimeInfo
-	Status         func() *transport.AgentStatus
-	Menu           func() []*transport.CommandSpec
+	Runtime        *aop.AgentRuntimeInfo
+	Status         func() *aop.AgentStatus
+	Menu           func() []*commandpb.Spec
 	RunnerFileRPC  bool
 	PTYRouter      func() (*pty.Router, error)
 }
 
-type chatHandler interface {
-	OpenSession(context.Context, *aop.OpenSessionRequest) *aop.OpenSessionResponse
-	RunTurn(context.Context, *aop.RunTurnRequest) *aop.RunTurnResponse
-	CancelTurn(*aop.CancelTurnRequest) *aop.CancelTurnResponse
-	CloseSession(context.Context, *aop.CloseSessionRequest) *aop.CloseSessionResponse
-	Command(context.Context, *transport.CommandRequest) (*transport.CommandResult, error)
-	Upload(*transport.FileUploadRequest) (*transport.FileResult, error)
-	ReloadConfig(string) (*transport.ConfigReloadResult, *transport.AgentStatus)
-}
-
 func connect(ctx context.Context, config connectionConfig) error {
-	return connectGenerated(ctx, config, false)
+	return connectGenerated(ctx, config)
 }

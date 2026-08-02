@@ -13,14 +13,14 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 	"github.com/chainreactors/aiscan/pkg/web"
-	"gopkg.in/yaml.v3"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aiscan.yaml")
 	old := configForWebStore("old-model", "secret-key")
-	oldBytes, err := yaml.Marshal(&old)
+	oldBytes, err := cfg.MarshalDistributeConfigYAML(old)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0600 {
 		t.Fatalf("candidate permissions = %o, want 600", perm)
 	}
-	if got := prepared.Config.LLM.Active().APIKey; got != "secret-key" {
+	if got := cfg.ActiveLLMProvider(prepared.Config.GetLlm()).GetApiKey(); got != "secret-key" {
 		t.Fatalf("prepared API key = %q, want preserved secret", got)
 	}
 
@@ -64,8 +64,9 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded || committed.LLM.Active().Model != "new-model" || committed.LLM.Active().APIKey != "secret-key" {
-		t.Fatalf("committed config = %+v", committed.LLM)
+	active := cfg.ActiveLLMProvider(committed.GetLlm())
+	if !loaded || active.GetModel() != "new-model" || active.GetApiKey() != "secret-key" {
+		t.Fatalf("committed config = %+v", committed.Llm)
 	}
 }
 
@@ -82,7 +83,7 @@ func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
 		t.Fatal("reloaded app SCO sidecar callback was not bound")
 	}
 	application.SCOSidecar.OnNodes("scan-1", []json.RawMessage{
-		json.RawMessage(`{"cstx_id":"node-1","cstx_type":"asset","data":{}}`),
+		json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","ip":"127.0.0.1"}`),
 	})
 	nodes, err := store.ListSCONodesByScanID(context.Background(), "scan-1", "", 10)
 	if err != nil {
@@ -93,11 +94,13 @@ func TestWireWebAppBindsSCONodesForReloadedApp(t *testing.T) {
 	}
 }
 
-func configForWebStore(model, apiKey string) cfg.DistributeConfig {
-	var value cfg.DistributeConfig
-	value.LLM.ActiveProfile = "primary"
-	value.LLM.Providers = []cfg.LLMProviderConfig{{
-		ID: "primary", Provider: "openai", Model: model, APIKey: apiKey,
-	}}
-	return value
+func configForWebStore(model, apiKey string) *configpb.DistributeConfig {
+	return &configpb.DistributeConfig{
+		Llm: &configpb.LLMConfig{
+			ActiveProfile: "primary",
+			Providers: []*configpb.LLMProviderConfig{{
+				Id: "primary", Provider: "openai", Model: model, ApiKey: apiKey,
+			}},
+		},
+	}
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
-	scanpb "github.com/chainreactors/aiscan/aop/aiscan/scan"
-	"github.com/chainreactors/aiscan/aop/aiscan/scan/scanconnect"
+	"github.com/chainreactors/aiscan/pkg/rpc/scan/scanconnect"
+	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
 )
 
 type connectScanServer struct {
@@ -47,10 +47,6 @@ func (s *connectScanServer) CancelScan(ctx context.Context, req *connect.Request
 		return nil, asConnectScanError(err)
 	}
 	return connect.NewResponse(response), nil
-}
-
-func (s *connectScanServer) WatchScanEvents(ctx context.Context, req *connect.Request[scanpb.WatchScanEventsRequest], stream *connect.ServerStream[scanpb.WatchScanEventsResponse]) error {
-	return asConnectScanError(s.core.WatchScanEvents(req.Msg, ctx, stream.Send))
 }
 
 func (s *connectScanServer) GetScanReport(ctx context.Context, req *connect.Request[scanpb.GetScanReportRequest]) (*connect.Response[scanpb.GetScanReportResponse], error) {

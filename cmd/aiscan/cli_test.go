@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/runner"
 
@@ -33,11 +34,11 @@ type fakeConsoleProvider struct {
 
 func (p *fakeConsoleProvider) Name() string { return "fake" }
 
-func (p *fakeConsoleProvider) ChatCompletion(_ context.Context, req *agent.ChatCompletionRequest) (*agent.ChatCompletionResponse, error) {
+func (p *fakeConsoleProvider) ChatCompletion(_ context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 	p.requests++
-	return &agent.ChatCompletionResponse{
-		Choices: []agent.Choice{{
-			Message: agent.NewTextMessage("assistant", "ok"),
+	return &provider.ChatCompletionResponse{
+		Choices: []provider.Choice{{
+			Message: provider.TextMessage("assistant", "ok"),
 		}},
 	}, nil
 }
@@ -556,11 +557,11 @@ func TestParseCLIAgentIOAFlag(t *testing.T) {
 	}
 }
 
-func TestParseCLIAgentWebURL(t *testing.T) {
+func TestParseCLIAgentServerURL(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"agent",
-		"--web-url", "http://127.0.0.1:8080",
-		"--server-url", "http://token@127.0.0.1:8080/ioa",
+		"--server-url", "http://token@127.0.0.1:8080",
+		"--ioa-url", "http://ioa-token@ioa.example:8765",
 		"--space", "case-1",
 		"--node-name", "worker-1",
 	})
@@ -571,7 +572,7 @@ func TestParseCLIAgentWebURL(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeAgent)
 	}
 	opt := parsed.Option
-	if opt.WebURL != "http://127.0.0.1:8080" || opt.IOAURL != "http://token@127.0.0.1:8080/ioa" || opt.Space != "case-1" || opt.IOANodeName != "worker-1" {
+	if opt.ServerURL != "http://token@127.0.0.1:8080" || opt.IOAURL != "http://ioa-token@ioa.example:8765" || opt.Space != "case-1" || opt.IOANodeName != "worker-1" {
 		t.Fatalf("option = %#v", opt)
 	}
 }

@@ -5,7 +5,8 @@ import (
 	"runtime"
 	"testing"
 
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	execpb "github.com/chainreactors/aiscan/aop/exec"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 func TestExecRequestCompletesWithOutput(t *testing.T) {
@@ -13,10 +14,14 @@ func TestExecRequestCompletesWithOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		command = "echo|set /p=hello"
 	}
-	var frames []*transport.AgentFrame
-	handleExecRequest(context.Background(), &transport.ExecRequest{TaskId: "exec-1", Command: command, TimeoutSeconds: 5}, t.TempDir(), func(frame *transport.AgentFrame) { frames = append(frames, frame) })
-	if len(frames) != 2 || string(frames[0].GetExecOutput().Data) != "hello" || frames[1].GetExecResult().State != "completed" {
-		t.Fatalf("unexpected frames: %#v", frames)
+	var messages []*execpb.ProtocolMessage
+	handleExecRequest(context.Background(), &execpb.Request{Command: command, TimeoutSeconds: 5}, t.TempDir(), "exec-1", func(_ string, message protobuf.Message) {
+		if value, ok := message.(*execpb.ProtocolMessage); ok {
+			messages = append(messages, value)
+		}
+	})
+	if len(messages) != 2 || string(messages[0].GetOutput().Data) != "hello" || messages[1].GetResult().State != "completed" {
+		t.Fatalf("unexpected messages: %#v", messages)
 	}
 }
 
@@ -25,10 +30,10 @@ func TestExecRequestReportsExitCode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		command = "exit /b 7"
 	}
-	var result *transport.ExecResult
-	handleExecRequest(context.Background(), &transport.ExecRequest{TaskId: "exec-2", Command: command, TimeoutSeconds: 5}, t.TempDir(), func(frame *transport.AgentFrame) {
-		if frame.GetExecResult() != nil {
-			result = frame.GetExecResult()
+	var result *execpb.Result
+	handleExecRequest(context.Background(), &execpb.Request{Command: command, TimeoutSeconds: 5}, t.TempDir(), "exec-2", func(_ string, message protobuf.Message) {
+		if value, ok := message.(*execpb.ProtocolMessage); ok && value.GetResult() != nil {
+			result = value.GetResult()
 		}
 	})
 	if result == nil || result.ExitCode != 7 {

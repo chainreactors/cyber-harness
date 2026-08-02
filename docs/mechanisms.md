@@ -8,7 +8,7 @@
 
 **问题**: hub 原来每次 WS 连接都 `generateID()` 生成随机 key。chat session 在创建时冻结 `agent_id`，agent 断连重连后 id 变化，session 绑定的旧 id 解析到空，消息被拒为 "not connected"。
 
-**机制**: `agentKey()` 从生成的 `transport.AgentHello` 中提取稳定标识，作为 pool 的唯一 key。重连的 agent 覆盖旧 slot 而非新建。
+**机制**: `agentKey()` 从生成的 `aop.AgentHello` 中提取稳定标识，作为 pool 的唯一 key。重连的 agent 覆盖旧 slot 而非新建。
 
 **守卫**:
 - `register()` 检测旧连接并 Close，触发旧 read loop 退出
@@ -29,7 +29,7 @@
 
 持久化重放由 `chat_aop_events` 和 Scan snapshot 负责，live protobuf 不经过 JSON envelope。
 
-**文件**: `pkg/web/broker.go`, `pkg/web/aop_grpc.go`, `pkg/web/scan_rpc.go`
+**文件**: `pkg/web/broker.go`, `pkg/web/aop_ws.go`, `pkg/web/scan_rpc.go`
 
 ---
 
@@ -67,17 +67,18 @@ Settings UI 保存
 ## 4. Goal 模式 AOP 扩展
 
 Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；AIScan 专属字段编码为
-`aiscan.transport.RunOptions` 的标准 protobuf JSON，并放入 namespace
-`io.chainreactors.aiscan.run`。普通对话和 evaluator 复用同一 Run/Turn 生命周期。
+`Any<aiscan.agent.RunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
+`type.googleapis.com/aiscan.agent.RunOptions` 表达。普通对话和 evaluator 复用同一
+Run/Turn 生命周期。
 
-**文件**: `proto/aiscan/transport/operation.proto`, `pkg/runner/runtime_protocol.go`, `pkg/web/service.go`
+**文件**: `proto/aiscan/types/agent.proto`, `pkg/runner/runtime_protocol.go`, `pkg/web/service.go`
 
 ---
 
 ## 5. Eval 事件透传与持久化
 
-agent 在 producer 边缘生成 `aop.Event`；hub 通过生成的 `AgentFrame.event` 原样转发。
-评估字段使用 `aiscan.transport.EvalDetail` protobuf JSON 扩展，不做 flatten。
+agent 在 producer 边缘生成 `aop.Event`；hub 通过 `aop.Envelope` 原样转发。
+评估字段使用 `aiscan.agent.EvalDetail` protobuf `Any` 扩展，不做 flatten。
 
 eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事件，但不会再投影成另一套 agent 事件或 system message。会话正文只持久化到 `chat_aop_events`，刷新后从同一 AOP 源重建。
 
@@ -185,7 +186,7 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 - `fallback`: 英文文本，供非 i18n 消费者 / 日志 / 测试使用
 
 AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
-`aiscan.transport.WebMessageExtension`，通过标准 protobuf JSON 放入扩展。通用 reducer
+`Any<aiscan.agent.WebMessageMetadata>` 放入 Event extension。通用 reducer
 保留该扩展，因此实时流和重放使用同一参数来源。
 
 已定义的 code:
@@ -223,8 +224,8 @@ AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
 
 **机制**: Runtime 产生的 typed AOP event 是 Agent 消息、工具调用和 turn 状态的唯一语义来源。Web 层直接转发和持久化这些事件，不再合成第二套 assistant 完成事件，也不再为中间轮次维护独立的聊天事件协议。
 
-AIScan 产品事件使用 typed AOP `ExtensionEvent`；例如 scan 完成通过
-`io.chainreactors.aiscan.scan` 携带 `scan.SessionScanEvent`。不再维护 `DomainEvent`。
+AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
+`Event.extension = Any<aiscan.scan.SessionScanEvent>` 表达。`Any.type_url` 是唯一类型身份，不再维护 `ExtensionEvent`、namespace 字符串或 `DomainEvent`。
 
 **文件**: `pkg/runner/`, `aop/`, `pkg/web/service.go`
 
@@ -252,7 +253,7 @@ AIScan 产品事件使用 typed AOP `ExtensionEvent`；例如 scan 完成通过
 
 跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web timeline 在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不再处理 Markdown 或终端格式。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `aop/aiscan/extensions/extensions.go`, `core/output/timeline.go`
+**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/types/extensions/extensions.go`, `core/output/timeline.go`
 
 ---
 

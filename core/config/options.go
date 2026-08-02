@@ -83,8 +83,9 @@ type AgentOptions struct {
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries        int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
-	WebURL                string   `long:"web-url" config:"web_url" description:"AIScan web server URL for remote REPL and PTY access"`
-	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, grpc, or stdio" default:"auto"`
+	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
+	WebURL                string   `long:"web-url" config:"web_url" description:"Deprecated alias for --server-url" hidden:"true"`
+	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `long:"resume" description:"Resume session from a saved session file path"`
 	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
@@ -96,7 +97,6 @@ const (
 	AgentTransportAuto  AgentTransport = "auto"
 	AgentTransportLocal AgentTransport = "local"
 	AgentTransportWeb   AgentTransport = "web"
-	AgentTransportGRPC  AgentTransport = "grpc"
 	AgentTransportStdio AgentTransport = "stdio"
 )
 
@@ -107,24 +107,27 @@ func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
 	}
 	switch value {
 	case AgentTransportAuto:
-		if strings.TrimSpace(opt.WebURL) != "" {
+		if strings.TrimSpace(opt.ServerURL) != "" || strings.TrimSpace(opt.WebURL) != "" {
+			if err := ResolveAgentServerURLs(opt); err != nil {
+				return "", err
+			}
 			return AgentTransportWeb, nil
 		}
 		return AgentTransportLocal, nil
 	case AgentTransportLocal, AgentTransportStdio:
 		return value, nil
-	case AgentTransportWeb, AgentTransportGRPC:
-		if strings.TrimSpace(opt.WebURL) == "" {
-			return "", fmt.Errorf("--transport %s requires --web-url", value)
+	case AgentTransportWeb:
+		if err := ResolveAgentServerURLs(opt); err != nil {
+			return "", err
 		}
 		return value, nil
 	default:
-		return "", fmt.Errorf("unsupported agent transport %q: use auto, local, web, grpc, or stdio", opt.Transport)
+		return "", fmt.Errorf("unsupported agent transport %q: use auto, local, web, or stdio", opt.Transport)
 	}
 }
 
 type IOAOptions struct {
-	IOAURL      string `long:"server-url" config:"url" description:"Server URL for agent connection (supports http://token@host:port)"`
+	IOAURL      string `long:"ioa-url" config:"url" description:"Optional independent IOA URL (defaults to <server-url>/ioa for Web agents)"`
 	IOAToken    string `long:"server-token" config:"token" description:"Server access key (auto-generated if empty)"`
 	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
 	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`

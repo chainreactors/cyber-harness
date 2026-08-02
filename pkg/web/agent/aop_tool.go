@@ -14,7 +14,7 @@ import (
 )
 
 type aopToolExecutor interface {
-	ExecuteTool(context.Context, string, string) (tool.Result, error)
+	ExecuteTool(context.Context, string, string) (*tool.Result, error)
 }
 
 // toolResolver is an optional executor capability exposing the concrete tool
@@ -27,13 +27,13 @@ type toolResolver interface {
 // foregroundTool is implemented by tools that run a command in the foreground
 // with streaming output, bypassing the agent-facing auto-background behavior.
 type foregroundTool interface {
-	RunForegroundTool(context.Context, string, commands.BashExecOptions) (tool.Result, error)
+	RunForegroundTool(context.Context, string, commands.BashExecOptions) (*tool.Result, error)
 }
 
 // executeCall runs the tool call. Tools with foreground capability stream
 // stdout lines as tool.data progress events on dataBus while running; all
 // other tools take the plain ExecuteTool path.
-func executeCall(ctx context.Context, executor aopToolExecutor, call *aop.ToolCall, dataBus *eventbus.Bus[output.ToolDataEvent], callID string) (tool.Result, error) {
+func executeCall(ctx context.Context, executor aopToolExecutor, call *aop.ToolCall, dataBus *eventbus.Bus[output.ToolDataEvent], callID string) (*tool.Result, error) {
 	arguments := call.GetArguments().GetData()
 	if len(arguments) == 0 {
 		arguments = []byte("{}")
@@ -43,7 +43,7 @@ func executeCall(ctx context.Context, executor aopToolExecutor, call *aop.ToolCa
 			if fg, ok := resolved.(foregroundTool); ok {
 				args, err := tool.ParseArgs[commands.BashArgs](string(arguments))
 				if err != nil {
-					return tool.Result{}, err
+					return nil, err
 				}
 				progress := newProgressStreamer(dataBus, call.Name, callID)
 				result, err := fg.RunForegroundTool(ctx, args.Command, commands.BashExecOptions{

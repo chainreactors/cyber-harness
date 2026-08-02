@@ -19,13 +19,11 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 	"github.com/chainreactors/aiscan/pkg/web"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -65,7 +63,16 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
-			candidate, err := initWebApp(ctx, &candidateOption, logger)
+			// The candidate app runs exactly the proto config being committed —
+			// no second parse of the staged YAML through cfg.Option.
+			appCfg := runner.AppConfigFromDistribute(prepared.Config, runner.RuntimeFeatures{
+				ProviderEnabled:  true,
+				ProviderOptional: true,
+				ToolsEnabled:     true,
+				AIEnabled:        true,
+			}, logger)
+			appCfg = runner.MergeOptionExtras(appCfg, &candidateOption)
+			candidate, err := initWebAppFromConfig(ctx, appCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -85,7 +92,6 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	} else {
 		pool = web.NewAgentPool(service.Hub())
 	}
-	pool.SetRecordStore(store)
 	pool.SetSCOStore(store)
 	service.SetAgentPool(pool)
 
@@ -99,7 +105,20 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		accessKey = protocols.NewToken()
 	}
 	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
-	ioaHandler := ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc))
+	ioaWebIdentity, err := ioaSvc.AuthRegister(ctx, protocols.AuthRegister{
+		Name:        "aiscan.web",
+		Description: "AIScan Web console",
+		AccessKey:   accessKey,
+		Meta:        map[string]any{"role": "web"},
+	})
+	if err != nil {
+		return fmt.Errorf("register IOA web identity: %w", err)
+	}
+	ioaHandler := web.ShareWebAuthWithIOA(
+		accessKey,
+		ioaWebIdentity.Token,
+		ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc)),
+	)
 
 	listener, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
@@ -119,28 +138,15 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		localAgents.StopAll()
 	}()
 
-	httpHandler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
-	grpcServer := web.NewGRPCServer(accessKey, service, pool)
-	handler := h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/aop.ChatService/") || strings.HasPrefix(r.URL.Path, "/aiscan.chat.SessionService/") {
-			httpHandler.ServeHTTP(w, r)
-			return
-		}
-		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-			grpcServer.ServeHTTP(w, r)
-			return
-		}
-		httpHandler.ServeHTTP(w, r)
-	}), &http2.Server{})
+	httpHandler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey)
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
-		Handler: handler,
+		Handler: httpHandler,
 	}
 
 	go func() {
 		<-ctx.Done()
-		grpcServer.Stop()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutCancel()
 		_ = srv.Shutdown(shutCtx)
@@ -148,11 +154,11 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 
 	logger.Infof("aiscan server listening on http://%s", listenAddr)
 	logger.Infof("  web access token: %s", accessKey)
-	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, listenAddr)
+	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
 	if localAgent, err := localAgents.Launch(ctx); err != nil {
 		logger.Warnf("auto-start local agent: %s", err)
 	} else {
-		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.PID)
+		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.Pid)
 	}
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
@@ -165,11 +171,7 @@ func wireWebApp(application *runner.App, store *web.SQLiteStore) {
 		return
 	}
 	application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
-		scanID := callID
-		if scanID == "" {
-			scanID = "standalone"
-		}
-		_ = store.UpsertSCONodes(context.Background(), scanID, nodes)
+		_ = store.UpsertSCONodes(context.Background(), callID, nodes)
 	}
 }
 
@@ -217,6 +219,10 @@ func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Lo
 		ToolsEnabled:     true,
 		AIEnabled:        true,
 	}, logger)
+	return initWebAppFromConfig(ctx, appCfg)
+}
+
+func initWebAppFromConfig(ctx context.Context, appCfg runner.ApplicationConfig) (*runner.App, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
@@ -240,37 +246,36 @@ type webConfigStore struct {
 	mu       sync.Mutex
 }
 
-func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, cfg.DistributeConfig, error) {
+func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *configpb.DistributeConfig, error) {
 	if err := ctx.Err(); err != nil {
-		return "", false, cfg.DistributeConfig{}, err
+		return "", false, nil, err
 	}
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, cfg.DistributeConfig{}, nil
+		return p, false, &configpb.DistributeConfig{}, nil
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return p, false, cfg.DistributeConfig{}, err
+		return p, false, nil, err
 	}
 	dc := parseDistributeConfig(data)
 	return p, true, dc, nil
 }
 
-// parseDistributeConfig decodes the YAML settings file and migrates a legacy
-// flat llm section into the provider profile list — the only place the flat
-// representation is still accepted.
-func parseDistributeConfig(data []byte) cfg.DistributeConfig {
-	var dc cfg.DistributeConfig
-	_ = yaml.Unmarshal(data, &dc)
-	var legacy struct {
-		LLM cfg.LLMProviderConfig `yaml:"llm"`
+// parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
+func parseDistributeConfig(data []byte) *configpb.DistributeConfig {
+	dc, err := cfg.LoadDistributeConfigYAML(data)
+	if err != nil || dc == nil {
+		dc = &configpb.DistributeConfig{}
 	}
-	_ = yaml.Unmarshal(data, &legacy)
-	cfg.MigrateLLMConfig(&dc.LLM, legacy.LLM)
+	if dc.Llm == nil {
+		dc.Llm = &configpb.LLMConfig{}
+	}
+	cfg.NormalizeLLMConfig(dc.Llm)
 	return dc
 }
 
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming cfg.DistributeConfig) (*web.PreparedConfig, error) {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *configpb.DistributeConfig) (*web.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -278,26 +283,36 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming c
 	defer s.mu.Unlock()
 
 	p, loaded := s.resolveConfigPath()
-	var current cfg.DistributeConfig
+	var current *configpb.DistributeConfig
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
 		current = parseDistributeConfig(data)
+	} else {
+		current = &configpb.DistributeConfig{}
 	}
-	cfg.MigrateLLMConfig(&incoming.LLM, cfg.LLMProviderConfig{})
+	if incoming == nil {
+		incoming = &configpb.DistributeConfig{}
+	}
+	if incoming.Llm == nil {
+		incoming.Llm = &configpb.LLMConfig{}
+	}
+	cfg.NormalizeLLMConfig(incoming.Llm)
 
 	// Preserve existing secrets when incoming value is empty.
-	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
-	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
-	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
-	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)
-	preserveSecret(&incoming.Recon.HunterAPIKey, current.Recon.HunterAPIKey)
-	preserveSecret(&incoming.Search.TavilyKeys, current.Search.TavilyKeys)
-	preserveSecret(&incoming.IOA.Token, current.IOA.Token)
+	preserveLLMProfileSecrets(incoming.Llm, current.GetLlm())
+	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *configpb.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
+	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *configpb.ReconConfig) {
+		preserveSecret(&c.FofaKey, current.GetRecon().GetFofaKey())
+		preserveSecret(&c.HunterToken, current.GetRecon().GetHunterToken())
+		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
+	})
+	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *configpb.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
+	incoming.Ioa = preserveConfigSection(incoming.Ioa, current.GetIoa(), func(c *configpb.IOAConfig) { preserveSecret(&c.Token, current.GetIoa().GetToken()) })
 
-	next, err := yaml.Marshal(&incoming)
+	next, err := cfg.MarshalDistributeConfigYAML(incoming)
 	if err != nil {
 		return nil, err
 	}
@@ -374,23 +389,45 @@ func preserveSecret(incoming *string, existing string) {
 	}
 }
 
-func preserveLLMProfileSecrets(incoming *cfg.LLMConfig, existing cfg.LLMConfig) {
-	byID := make(map[string]cfg.LLMProviderConfig, len(existing.Providers))
-	for _, profile := range existing.Providers {
-		if profile.ID != "" {
-			byID[profile.ID] = profile
+// preserveConfigSection ensures section is non-nil, then applies fn to it.
+// current is the on-disk value used to backfill empty secrets.
+func preserveConfigSection[T any](incoming *T, current *T, fn func(*T)) *T {
+	if incoming == nil {
+		if current != nil {
+			return current
+		}
+		return new(T)
+	}
+	fn(incoming)
+	return incoming
+}
+
+func preserveLLMProfileSecrets(incoming *configpb.LLMConfig, existing *configpb.LLMConfig) {
+	if incoming == nil {
+		return
+	}
+	byID := make(map[string]*configpb.LLMProviderConfig)
+	if existing != nil {
+		for _, profile := range existing.Providers {
+			if profile.Id != "" {
+				byID[profile.Id] = profile
+			}
 		}
 	}
-	for i := range incoming.Providers {
-		if strings.TrimSpace(incoming.Providers[i].APIKey) != "" {
+	var existingProviders []*configpb.LLMProviderConfig
+	if existing != nil {
+		existingProviders = existing.Providers
+	}
+	for i, profile := range incoming.Providers {
+		if profile == nil || strings.TrimSpace(profile.ApiKey) != "" {
 			continue
 		}
-		if current, ok := byID[incoming.Providers[i].ID]; ok {
-			incoming.Providers[i].APIKey = current.APIKey
+		if current, ok := byID[profile.Id]; ok {
+			profile.ApiKey = current.ApiKey
 			continue
 		}
-		if i < len(existing.Providers) {
-			incoming.Providers[i].APIKey = existing.Providers[i].APIKey
+		if i < len(existingProviders) {
+			profile.ApiKey = existingProviders[i].GetApiKey()
 		}
 	}
 }

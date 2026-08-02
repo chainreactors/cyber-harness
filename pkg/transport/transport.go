@@ -20,8 +20,6 @@ func Run(ctx context.Context, option *cfg.Option, logger telemetry.Logger, input
 	switch selected {
 	case cfg.AgentTransportWeb:
 		return webagent.RunWebSocket(ctx, option, logger)
-	case cfg.AgentTransportGRPC:
-		return webagent.RunGRPC(ctx, option, logger)
 	case cfg.AgentTransportStdio:
 		return runner.RunStdio(ctx, option, logger, input, output)
 	default:

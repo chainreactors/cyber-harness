@@ -8,18 +8,20 @@ import (
 	"strings"
 	"testing"
 
-	proto "github.com/chainreactors/aiscan/core/config"
+	"connectrpc.com/connect"
 	"github.com/chainreactors/aiscan/pkg/probe"
+	"github.com/chainreactors/aiscan/pkg/rpc/config/configconnect"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
-type cfgT = proto.DistributeConfig
+type cfgT = *configpb.DistributeConfig
 
 // configWith builds a DistributeConfig, letting each test set only the fields
 // it cares about. Pass nil for an empty config.
-func configWith(fn func(*cfgT)) cfgT {
-	var c cfgT
+func configWith(fn func(*configpb.DistributeConfig)) cfgT {
+	c := &configpb.DistributeConfig{}
 	if fn != nil {
-		fn(&c)
+		fn(c)
 	}
 	return c
 }
@@ -62,7 +64,9 @@ func TestProbeCyberhubSuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	cfg := configWith(func(c *cfgT) { c.Cyberhub.URL = srv.URL; c.Cyberhub.Key = "hub-key" })
+	cfg := configWith(func(c *configpb.DistributeConfig) {
+		c.Cyberhub = &configpb.CyberhubConfig{Url: srv.URL, Key: "hub-key"}
+	})
 	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -80,7 +84,9 @@ func TestProbeCyberhubAuthError(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	cfg := configWith(func(c *cfgT) { c.Cyberhub.URL = srv.URL; c.Cyberhub.Key = "nope" })
+	cfg := configWith(func(c *configpb.DistributeConfig) {
+		c.Cyberhub = &configpb.CyberhubConfig{Url: srv.URL, Key: "nope"}
+	})
 	resp, err := svc.TestConn(context.Background(), "cyberhub", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -105,7 +111,7 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
-	store.cfg.Recon.FofaKey = "stored-fofa"
+	store.cfg = &configpb.DistributeConfig{Recon: &configpb.ReconConfig{FofaKey: "stored-fofa"}}
 	svc := newService(store)
 
 	resp, err := svc.TestConn(context.Background(), "recon", configWith(nil))
@@ -134,7 +140,9 @@ func TestProbeFofaError(t *testing.T) {
 	defer func() { probe.FofaInfoEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *cfgT) { c.Recon.FofaKey = "bad" }))
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
+		c.Recon = &configpb.ReconConfig{FofaKey: "bad"}
+	}))
 	c, ok := findCheck(resp, "fofa")
 	if !ok || c.OK {
 		t.Fatalf("expected fofa failure, got %+v", resp)
@@ -160,7 +168,9 @@ func TestProbeHunterSuccess(t *testing.T) {
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *cfgT) { c.Recon.HunterAPIKey = "hk" }))
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
+		c.Recon = &configpb.ReconConfig{HunterApiKey: "hk"}
+	}))
 	if c, ok := findCheck(resp, "hunter"); !ok || !c.OK {
 		t.Fatalf("expected hunter ok, got %+v", resp)
 	}
@@ -176,7 +186,9 @@ func TestProbeHunterError(t *testing.T) {
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
 	svc := newService(&fakeConfigStore{})
-	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *cfgT) { c.Recon.HunterToken = "bad" }))
+	resp, _ := svc.TestConn(context.Background(), "recon", configWith(func(c *configpb.DistributeConfig) {
+		c.Recon = &configpb.ReconConfig{HunterToken: "bad"}
+	}))
 	c, ok := findCheck(resp, "hunter")
 	if !ok || c.OK {
 		t.Fatalf("expected hunter failure, got %+v", resp)
@@ -198,34 +210,23 @@ func TestHandlerTestConnRouting(t *testing.T) {
 	svc := newService(&fakeConfigStore{})
 	srv := httptest.NewServer(NewHandler(svc, nil, nil, nil, nil, ""))
 	defer srv.Close()
+	client := configconnect.NewConfigServiceClient(srv.Client(), srv.URL)
 
-	// The {section} wildcard must coexist with the static /llm/test route and
-	// dispatch to testConn. Empty config yields a failing check but a 200
-	// response, proving routing + dispatch worked.
-	resp, err := http.Post(srv.URL+"/api/config/cyberhub/test", "application/json", strings.NewReader("{}"))
+	response, err := client.TestConnection(context.Background(), connect.NewRequest(&configpb.TestConnectionRequest{
+		Section: "cyberhub", Config: &configpb.DistributeConfig{},
+	}))
 	if err != nil {
-		t.Fatalf("post: %v", err)
+		t.Fatalf("TestConnection: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-	var out []probe.ConnCheck
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(out) != 1 || out[0].Name != "cyberhub" {
-		t.Fatalf("expected one cyberhub check, got %+v", out)
+	if len(response.Msg.Checks) != 1 || response.Msg.Checks[0].Name != "cyberhub" {
+		t.Fatalf("expected one cyberhub check, got %+v", response.Msg.Checks)
 	}
 
-	// An untestable section is rejected with 400.
-	resp2, err := http.Post(srv.URL+"/api/config/agent/test", "application/json", strings.NewReader("{}"))
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for untestable section, got %d", resp2.StatusCode)
+	_, err = client.TestConnection(context.Background(), connect.NewRequest(&configpb.TestConnectionRequest{
+		Section: "agent", Config: &configpb.DistributeConfig{},
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid_argument for untestable section, got %v", err)
 	}
 }
 
@@ -240,7 +241,9 @@ func TestProbeIOASuccess(t *testing.T) {
 	defer srv.Close()
 
 	svc := newService(&fakeConfigStore{})
-	resp, err := svc.TestConn(context.Background(), "ioa", configWith(func(c *cfgT) { c.IOA.URL = srv.URL; c.IOA.Token = "t" }))
+	resp, err := svc.TestConn(context.Background(), "ioa", configWith(func(c *configpb.DistributeConfig) {
+		c.Ioa = &configpb.IOAConfig{Url: srv.URL, Token: "t"}
+	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

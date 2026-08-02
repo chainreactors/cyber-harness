@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	scanpb "github.com/chainreactors/aiscan/aop/aiscan/scan"
+	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 )
 
 func sessionEvent(t *testing.T, sessionID string, event *aop.Event) *aop.Event {
@@ -163,16 +162,21 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	remote := &remoteAgent{
-		id: "agent-1", name: "agent-1", sendCh: make(chan *transport.ServerFrame, 2), controlCh: make(chan *transport.ServerFrame, 2),
+		id: "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 2),
 		tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: make(map[string]struct{}),
 		childSessions: make(map[string]map[string]struct{}), done: make(chan struct{}),
 	}
 	pool.agents[remote.id] = remote
-	if _, err := store.db.Exec(`UPDATE chat_sessions SET agent_id = ? WHERE id = ?`, remote.id, "session-1"); err != nil {
-		t.Fatal(err)
+	session, _ := store.GetSession(context.Background(), "session-1")
+	if session != nil {
+		if session.Session == nil {
+			session.Session = &aop.Session{}
+		}
+		session.Session.Participant = remote.id
+		_ = store.UpdateSession(context.Background(), session)
 	}
 	service.handleAgentRun("session-1", &aop.RunTurnRequest{
-		RequestId: "run-1", SessionId: "session-1", TurnId: "turn-1",
+		SessionId: "session-1", TurnId: "turn-1",
 		Input: &aop.Message{Role: "user", Content: []*aop.Content{aop.Text("hello")}},
 	})
 	pool.unregister(remote)

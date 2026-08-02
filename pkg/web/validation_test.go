@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	config "github.com/chainreactors/aiscan/core/config"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 func TestValidateLLMConfigRejectsUnsupportedProvider(t *testing.T) {
-	cfg := config.LLMConfig{Providers: []config.LLMProviderConfig{{
+	cfg := &configpb.LLMConfig{Providers: []*configpb.LLMProviderConfig{{
 		Provider: "deepseek",
 		Model:    "deepseek-chat",
 	}}}

@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,28 +16,33 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
-	scanpb "github.com/chainreactors/aiscan/aop/aiscan/scan"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/tui"
-	scantool "github.com/chainreactors/aiscan/tools/scan"
+	chatpb "github.com/chainreactors/aiscan/pkg/types/chat"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
+	scanpb "github.com/chainreactors/aiscan/pkg/types/scan"
+	systempb "github.com/chainreactors/aiscan/pkg/types/system"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ConfigStore interface {
-	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg config.DistributeConfig, err error)
-	PrepareDistributeConfig(ctx context.Context, cfg config.DistributeConfig) (*PreparedConfig, error)
+	GetDistributeConfig(ctx context.Context) (path string, loaded bool, cfg *configpb.DistributeConfig, err error)
+	PrepareDistributeConfig(ctx context.Context, cfg *configpb.DistributeConfig) (*PreparedConfig, error)
 	CommitDistributeConfig(ctx context.Context, prepared *PreparedConfig) error
 	DiscardDistributeConfig(prepared *PreparedConfig)
 }
 
 type PreparedConfig struct {
-	Config      config.DistributeConfig
+	Config      *configpb.DistributeConfig
 	RuntimePath string
 	TargetPath  string
 }
@@ -121,6 +125,7 @@ func (s *Service) Hub() *Hub { return s.hub }
 func (s *Service) SetAgentPool(pool *AgentPool) {
 	s.agents = pool
 	pool.SetSessionLookup(s)
+	pool.config = s.GetDistributeConfig
 }
 
 func (s *Service) Close() {
@@ -146,58 +151,59 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) Status() ServiceStatus {
+func (s *Service) Status() *systempb.Status {
 	app, release := s.acquireApp()
-	status := ServiceStatus{
+	status := &systempb.Status{
 		Version:      config.Version,
-		LLMAvailable: app != nil && app.Provider != nil,
+		LlmAvailable: app != nil && app.Provider != nil,
 	}
 	if app != nil {
-		status.LLMProvider = app.ProviderConfig.Provider
-		status.LLMModel = app.ProviderConfig.Model
-		status.LLMAPIKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
+		status.LlmProvider = app.ProviderConfig.Provider
+		status.LlmModel = app.ProviderConfig.Model
+		status.LlmApiKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
 	}
 	release()
 	if s.config != nil {
 		if path, loaded, dc, err := s.config.GetDistributeConfig(context.Background()); err == nil {
 			status.ConfigPath = path
 			status.ConfigLoaded = loaded
-			active := dc.LLM.Active()
-			if status.LLMProvider == "" {
-				status.LLMProvider = active.Provider
+			if active := config.ActiveLLMProvider(dc.GetLlm()); active != nil {
+				if status.LlmProvider == "" {
+					status.LlmProvider = active.Provider
+				}
+				if status.LlmModel == "" {
+					status.LlmModel = active.Model
+				}
+				status.LlmApiKeyConfigured = status.LlmApiKeyConfigured || active.ApiKey != ""
 			}
-			if status.LLMModel == "" {
-				status.LLMModel = active.Model
-			}
-			status.LLMAPIKeyConfigured = status.LLMAPIKeyConfigured || active.APIKey != ""
 		}
 	}
 	return status
 }
 
-func (s *Service) GetConfigStatus(ctx context.Context) (ConfigStatus, error) {
+func (s *Service) GetConfigView(ctx context.Context) (*configpb.ConfigView, error) {
 	if s.config == nil {
-		return ConfigStatus{}, fmt.Errorf("config store is not configured")
+		return nil, fmt.Errorf("config store is not configured")
 	}
 	path, loaded, dc, err := s.config.GetDistributeConfig(ctx)
 	if err != nil {
-		return ConfigStatus{}, err
+		return nil, err
 	}
-	return ConfigStatusFromDistribute(&dc, path, loaded), nil
+	return ConfigViewFromDistribute(dc, path, loaded), nil
 }
 
-func (s *Service) SaveConfig(ctx context.Context, cfg config.DistributeConfig) (ConfigStatus, error) {
+func (s *Service) SaveConfig(ctx context.Context, cfg *configpb.DistributeConfig) (*configpb.ConfigView, error) {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	if s.config == nil {
-		return ConfigStatus{}, fmt.Errorf("config store is not configured")
+		return nil, fmt.Errorf("config store is not configured")
 	}
-	if err := ValidateLLMConfig(cfg.LLM); err != nil {
-		return ConfigStatus{}, err
+	if err := ValidateLLMConfig(cfg.GetLlm()); err != nil {
+		return nil, err
 	}
 	prepared, err := s.config.PrepareDistributeConfig(ctx, cfg)
 	if err != nil {
-		return ConfigStatus{}, err
+		return nil, err
 	}
 	committed := false
 	defer func() {
@@ -206,28 +212,28 @@ func (s *Service) SaveConfig(ctx context.Context, cfg config.DistributeConfig) (
 		}
 	}()
 	if prepared == nil {
-		return ConfigStatus{}, fmt.Errorf("config store returned no prepared config")
+		return nil, fmt.Errorf("config store returned no prepared config")
 	}
-	if err := ValidateLLMConfig(prepared.Config.LLM); err != nil {
-		return ConfigStatus{}, err
+	if err := ValidateLLMConfig(prepared.Config.GetLlm()); err != nil {
+		return nil, err
 	}
 
 	var nextApp *runner.App
 	if s.reload != nil {
 		nextApp, err = s.reload(ctx, prepared)
 		if err != nil {
-			cs, _ := s.GetConfigStatus(ctx)
-			return cs, fmt.Errorf("reload aiscan runtime: %w", err)
+			view, _ := s.GetConfigView(ctx)
+			return view, fmt.Errorf("reload aiscan runtime: %w", err)
 		}
 		if nextApp == nil {
-			return ConfigStatus{}, fmt.Errorf("reload aiscan runtime returned no app")
+			return nil, fmt.Errorf("reload aiscan runtime returned no app")
 		}
 	}
 	if err := s.config.CommitDistributeConfig(ctx, prepared); err != nil {
 		if nextApp != nil {
 			nextApp.Close()
 		}
-		return ConfigStatus{}, err
+		return nil, err
 	}
 	committed = true
 	if nextApp != nil {
@@ -236,45 +242,49 @@ func (s *Service) SaveConfig(ctx context.Context, cfg config.DistributeConfig) (
 	// Tell connected agents to hot-swap their own provider too — the hub reload
 	// above only refreshes the hub's in-process runtime, not the agent subprocesses.
 	if s.agents != nil {
-		s.agents.BroadcastConfigReload()
+		s.agents.BroadcastConfigReload(prepared.Config)
 	}
-	return s.GetConfigStatus(ctx)
+	return s.GetConfigView(ctx)
 }
 
-func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (ConfigStatus, error) {
+func (s *Service) ActivateLLMProfile(ctx context.Context, id string) (*configpb.ConfigView, error) {
 	if strings.TrimSpace(id) == "" {
-		return ConfigStatus{}, fmt.Errorf("LLM profile id is required")
+		return nil, fmt.Errorf("LLM profile id is required")
 	}
 	if s.config == nil {
-		return ConfigStatus{}, fmt.Errorf("config store is not configured")
+		return nil, fmt.Errorf("config store is not configured")
 	}
-	_, _, cfg, err := s.config.GetDistributeConfig(ctx)
+	_, _, stored, err := s.config.GetDistributeConfig(ctx)
 	if err != nil {
-		return ConfigStatus{}, err
+		return nil, err
 	}
 	found := false
-	for _, profile := range cfg.LLM.Providers {
-		if profile.ID == id {
+	for _, profile := range stored.GetLlm().GetProviders() {
+		if profile.Id == id {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return ConfigStatus{}, fmt.Errorf("LLM profile %q was not found", id)
+		return nil, fmt.Errorf("LLM profile %q was not found", id)
 	}
-	cfg.LLM.ActiveProfile = id
+	cfg := proto.Clone(stored).(*configpb.DistributeConfig)
+	if cfg.Llm == nil {
+		cfg.Llm = &configpb.LLMConfig{}
+	}
+	cfg.Llm.ActiveProfile = id
 	return s.SaveConfig(ctx, cfg)
 }
 
-func (s *Service) GetDistributeConfig(ctx context.Context) (config.DistributeConfig, error) {
+func (s *Service) GetDistributeConfig(ctx context.Context) (*configpb.DistributeConfig, error) {
 	if s.config == nil {
-		return config.DistributeConfig{}, fmt.Errorf("config store is not configured")
+		return nil, fmt.Errorf("config store is not configured")
 	}
 	_, _, dc, err := s.config.GetDistributeConfig(ctx)
 	return dc, err
 }
 
-func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*ScanJob, error) {
+func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*scanpb.Scan, error) {
 	target, err := ValidateTarget(target)
 	if err != nil {
 		return nil, err
@@ -287,79 +297,67 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		return nil, fmt.Errorf("selected analysis options require an LLM provider")
 	}
 
-	now := time.Now()
-	job := &ScanJob{
-		ID:        generateID(),
+	now := nowProto()
+	scan := &scanpb.Scan{
+		Id:        generateID(),
 		Target:    target,
 		Mode:      mode,
-		Verify:    verify,
-		Sniper:    sniper,
-		Deep:      deep,
-		Status:    StatusQueued,
+		Options:   &scanpb.ScanOptions{Verify: verify, Sniper: sniper, Deep: deep},
+		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
-	if err := s.store.Create(ctx, job); err != nil {
+	if err := s.store.Create(ctx, scan); err != nil {
 		return nil, fmt.Errorf("store create: %w", err)
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.cancels[job.ID] = cancel
+	s.cancels[scan.Id] = cancel
 	s.mu.Unlock()
 	go func() { //nolint:gosec // G118: background scan intentionally outlives the request
 		defer cancel()
-		s.runScan(runCtx, job.ID)
+		s.runScan(runCtx, scan.Id)
 	}()
 
-	return job, nil
+	return scan, nil
 }
 
-func (s *Service) GetScan(ctx context.Context, id string) (*ScanJob, error) {
-	job, err := s.store.Get(ctx, id)
+func (s *Service) GetScan(ctx context.Context, id string) (*scanpb.Scan, error) {
+	scan, err := s.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	refreshStructuredAssets(job)
-	return job, nil
+	return scan, nil
 }
 
-func (s *Service) ListScans(ctx context.Context) ([]*ScanJob, error) {
-	jobs, err := s.store.List(ctx, 100)
+func (s *Service) ListScans(ctx context.Context) ([]*scanpb.Scan, error) {
+	scans, err := s.store.List(ctx, 100)
 	if err != nil {
 		return nil, err
 	}
-	for _, job := range jobs {
-		refreshStructuredAssets(job)
-	}
-	return jobs, nil
-}
-
-func refreshStructuredAssets(job *ScanJob) {
-	if job != nil && job.Result != nil && (len(job.Result.Services) > 0 || len(job.Result.WebProbes) > 0) {
-		job.Result.Assets = scantool.AggregateStructuredResult(job.Result)
-	}
+	return scans, nil
 }
 
 func (s *Service) CancelScan(id string) error {
 	ctx := context.Background()
-	job, err := s.store.Get(ctx, id)
+	scan, err := s.store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: %s", ErrScanNotFound, id)
 		}
 		return err
 	}
-	if job.Status == StatusCanceled {
+	if scan.Status == scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 		return nil
 	}
-	if job.Status != StatusRunning && job.Status != StatusQueued {
-		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, job.Status)
+	if scan.Status != scanpb.ScanStatus_SCAN_STATUS_RUNNING && scan.Status != scanpb.ScanStatus_SCAN_STATUS_QUEUED {
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, scanStatusToDB(scan.Status))
 	}
-	job.Status = StatusCanceled
-	job.UpdatedAt = time.Now()
-	changed, err := s.store.TransitionScan(ctx, job, StatusRunning, StatusQueued)
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
+	scan.UpdatedAt = nowProto()
+	changed, err := s.store.TransitionScan(ctx, scan, scanpb.ScanStatus_SCAN_STATUS_RUNNING, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil {
 		return err
 	}
@@ -371,10 +369,10 @@ func (s *Service) CancelScan(id string) error {
 			}
 			return err
 		}
-		if current.Status == StatusCanceled {
+		if current.Status == scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 			return nil
 		}
-		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, current.Status)
+		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, scanStatusToDB(current.Status))
 	}
 
 	s.mu.Lock()
@@ -391,32 +389,28 @@ func (s *Service) CancelScan(id string) error {
 	return nil
 }
 
-// GetReport re-renders the report in the requested language from the stored
-// structured result, so a zh user gets a zh report even though the scan ran
-// once. It falls back to the report frozen at scan time when the structured
-// result is no longer around.
+// GetReport returns the report frozen when the scan completed. Canonical scan
+// artifacts live in the libcstx SCO store, not inside Scan.
 func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error) {
-	job, err := s.GetScan(ctx, id)
+	_ = lang
+	scan, err := s.GetScan(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	if job.Result != nil {
-		return buildMarkdownReport(job.Target, job.Mode, job.Result, lang), nil
-	}
-	return job.Report, nil
+	return scan.Report, nil
 }
 
-func (s *Service) runScan(runCtx context.Context, jobID string) {
+func (s *Service) runScan(runCtx context.Context, scanID string) {
 	defer func() {
 		s.mu.Lock()
-		delete(s.cancels, jobID)
-		delete(s.scanAgents, jobID)
+		delete(s.cancels, scanID)
+		delete(s.scanAgents, scanID)
 		s.mu.Unlock()
 	}()
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			if job, err := s.store.Get(context.Background(), jobID); err == nil {
-				_, _ = s.failJob(job, fmt.Sprintf("scan runtime panic: %v", recovered))
+			if scan, err := s.store.Get(context.Background(), scanID); err == nil {
+				_, _ = s.failScan(scan, fmt.Sprintf("scan runtime panic: %v", recovered))
 			}
 		}
 	}()
@@ -431,48 +425,48 @@ func (s *Service) runScan(runCtx context.Context, jobID string) {
 	ctx, cancel := context.WithTimeout(runCtx, s.timeout)
 	defer cancel()
 
-	job, err := s.store.Get(ctx, jobID)
+	scan, err := s.store.Get(ctx, scanID)
 	if err != nil {
 		return
 	}
-	job.Status = StatusRunning
-	job.UpdatedAt = time.Now()
-	changed, err := s.store.TransitionScan(context.Background(), job, StatusQueued)
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_RUNNING
+	scan.UpdatedAt = nowProto()
+	changed, err := s.store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil || !changed {
 		return
 	}
 
-	s.hub.BroadcastScan(scanStatusEvent(jobID, StatusRunning), false)
+	s.hub.BroadcastScan(scanStatusEvent(scanID, scanpb.ScanStatus_SCAN_STATUS_RUNNING), false)
 
 	// Try agent dispatch first, fall back to local execution.
 	if s.agents != nil && s.agents.Count() > 0 {
-		s.runScanViaAgent(ctx, job)
+		s.runScanViaAgent(ctx, scan)
 		return
 	}
-	s.runScanLocally(ctx, job)
+	s.runScanLocally(ctx, scan)
 }
 
-func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
+func (s *Service) runScanViaAgent(ctx context.Context, scan *scanpb.Scan) {
 	agent := s.agents.Pick()
 	if agent == nil {
-		_, _ = s.failJob(job, "no agents available")
+		_, _ = s.failScan(scan, "no agents available")
 		return
 	}
 	s.mu.Lock()
-	s.scanAgents[job.ID] = agent.id
+	s.scanAgents[scan.Id] = agent.id
 	s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		s.finishScanContext(job, err)
+		s.finishScanContext(scan, err)
 		return
 	}
 
-	cmd := "scan " + strings.Join(scanArgsForJob(job), " ")
+	cmd := "scan " + strings.Join(scanArgsForScan(scan), " ")
 	args, _ := aop.JSONValue(map[string]any{"command": cmd})
-	resultCh, err := s.agents.DispatchToolCall(agent.id, job.ID, &aop.ToolCall{
-		Id: job.ID, Name: "bash", Kind: "function", Arguments: args,
+	resultCh, err := s.agents.DispatchToolCall(agent.id, scan.Id, &aop.ToolCall{
+		Id: scan.Id, Name: "bash", Kind: "function", Arguments: args,
 	})
 	if err != nil {
-		_, _ = s.failJob(job, err.Error())
+		_, _ = s.failScan(scan, err.Error())
 		return
 	}
 
@@ -483,136 +477,106 @@ func (s *Service) runScanViaAgent(ctx context.Context, job *ScanJob) {
 	var ok bool
 	select {
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(agent.id, job.ID)
-		s.finishScanContext(job, ctx.Err())
+		_ = s.agents.CancelTask(agent.id, scan.Id)
+		s.finishScanContext(scan, ctx.Err())
 		return
 	case res, ok = <-resultCh:
 	}
 	if ctx.Err() != nil {
-		_ = s.agents.CancelTask(agent.id, job.ID)
-		s.finishScanContext(job, ctx.Err())
+		_ = s.agents.CancelTask(agent.id, scan.Id)
+		s.finishScanContext(scan, ctx.Err())
 		return
 	}
 	if !ok {
-		_, _ = s.failJob(job, "agent disconnected")
+		_, _ = s.failScan(scan, "agent disconnected")
 		return
 	}
 	if res.Err != "" {
-		_, _ = s.failJob(job, res.Err)
+		_, _ = s.failScan(scan, res.Err)
 		return
 	}
 	if progress := lastOutputLine(res.Output); progress != "" {
-		job.Progress = progress
+		scan.Progress = progress
 	}
 
-	result, err := decodeScanResult(res.Result)
-	if err != nil {
-		_, _ = s.failJob(job, err.Error())
-		return
-	}
-
-	_, _ = s.completeJob(context.Background(), job, agent.id, result)
+	_, _ = s.completeScan(context.Background(), scan)
 }
 
-func (s *Service) runScanLocally(ctx context.Context, job *ScanJob) {
+func (s *Service) runScanLocally(ctx context.Context, scan *scanpb.Scan) {
+	ctx = output.ContextWithCallID(ctx, scan.Id)
 	streamWriter := &scanStreamWriter{
 		hub:    s.hub,
-		scanID: job.ID,
+		scanID: scan.Id,
 		store:  s.store,
-		job:    job,
+		scan:   scan,
 		ctx:    ctx,
 	}
 
-	args := scanArgsForJob(job)
-	_, result, err := s.executeScan(ctx, args, streamWriter)
+	args := scanArgsForScan(scan)
+	_, err := s.executeScan(ctx, args, streamWriter)
 	if err != nil {
-		s.finishScanContext(job, ctx.Err())
+		s.finishScanContext(scan, ctx.Err())
 		if ctx.Err() == nil {
-			_, _ = s.failJob(job, err.Error())
+			_, _ = s.failScan(scan, err.Error())
 		}
 		return
 	}
-	if streamWriter.job != nil {
-		job = streamWriter.job
+	if streamWriter.scan != nil {
+		scan = streamWriter.scan
 	}
 	if ctx.Err() != nil {
-		s.finishScanContext(job, ctx.Err())
+		s.finishScanContext(scan, ctx.Err())
 		return
 	}
 
-	_, _ = s.completeJob(context.Background(), job, "", result)
+	_, _ = s.completeScan(context.Background(), scan)
 }
 
-func decodeScanResult(raw json.RawMessage) (*output.Result, error) {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, fmt.Errorf("agent scan returned an empty result envelope")
-	}
-	var result *output.Result
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("decode agent scan result: %w", err)
-	}
-	if result == nil {
-		return nil, fmt.Errorf("agent scan returned a null result envelope")
-	}
-	return result, nil
-}
-
-func (s *Service) finishScanContext(job *ScanJob, err error) {
+func (s *Service) finishScanContext(scan *scanpb.Scan, err error) {
 	if err == nil {
 		return
 	}
 	if err == context.DeadlineExceeded {
-		_, _ = s.failJob(job, "scan timed out")
+		_, _ = s.failScan(scan, "scan timed out")
 		return
 	}
-	next := *job
-	next.Status = StatusCanceled
-	next.UpdatedAt = time.Now()
-	_, _ = s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
+	next := proto.Clone(scan).(*scanpb.Scan)
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
+	next.UpdatedAt = nowProto()
+	_, _ = s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 }
 
-func (s *Service) persistResultRecords(scanID, agentID string, result *output.Result) {
-	recs := resultToRecords(scanID, agentID, result)
-	if len(recs) > 0 {
-		_ = s.store.InsertRecords(context.Background(), recs)
+func (s *Service) completeScan(ctx context.Context, scan *scanpb.Scan) (bool, error) {
+	nodes, err := s.store.ListSCONodesByScanID(ctx, scan.Id, "", 100000)
+	if err != nil {
+		return false, fmt.Errorf("load scan SCO facts: %w", err)
 	}
-}
-
-func (s *Service) completeJob(ctx context.Context, job *ScanJob, agentID string, result *output.Result) (bool, error) {
-	if result == nil {
-		return false, fmt.Errorf("scan result is required")
-	}
-	next := *job
-	next.Status = StatusCompleted
-	next.Report = buildMarkdownReport(job.Target, job.Mode, result, defaultReportLang)
-	next.Result = result
+	next := proto.Clone(scan).(*scanpb.Scan)
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_COMPLETED
+	next.Report = buildMarkdownReport(scan.Target, scan.Mode, nodes, defaultReportLang)
 	next.Error = ""
-	next.UpdatedAt = time.Now()
-	changed, err := s.store.TransitionScan(ctx, &next, StatusRunning)
+	next.UpdatedAt = nowProto()
+	changed, err := s.store.TransitionScan(ctx, next, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err
 	}
-	*job = next
-	s.persistResultRecords(job.ID, agentID, result)
-	if len(result.Nodes) > 0 {
-		_ = s.store.UpsertSCONodes(ctx, job.ID, result.Nodes)
-	}
-	s.hub.BroadcastScan(scanCompletedEvent(job.ID, result), true)
-	s.broadcastScanComplete(job.ID)
+	proto.Merge(scan, next)
+	s.hub.BroadcastScan(scanCompletedEvent(scan.Id), true)
+	s.broadcastScanComplete(scan.Id)
 	return true, nil
 }
 
-func (s *Service) failJob(job *ScanJob, errMsg string) (bool, error) {
-	next := *job
-	next.Status = StatusFailed
+func (s *Service) failScan(scan *scanpb.Scan, errMsg string) (bool, error) {
+	next := proto.Clone(scan).(*scanpb.Scan)
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_FAILED
 	next.Error = errMsg
-	next.UpdatedAt = time.Now()
-	changed, err := s.store.TransitionScan(context.Background(), &next, StatusQueued, StatusRunning)
+	next.UpdatedAt = nowProto()
+	changed, err := s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err
 	}
-	*job = next
-	s.hub.BroadcastScan(scanFailedEvent(job.ID, errMsg, false), true)
+	proto.Merge(scan, next)
+	s.hub.BroadcastScan(scanFailedEvent(scan.Id, errMsg, false), true)
 	return true, nil
 }
 
@@ -691,58 +655,54 @@ func (s *Service) swapApp(next *runner.App) {
 	}
 }
 
-func scanArgsForJob(job *ScanJob) []string {
-	args := []string{"-i", job.Target, "--mode", job.Mode}
-	if job.Verify {
+func scanArgsForScan(scan *scanpb.Scan) []string {
+	args := []string{"-i", scan.Target, "--mode", scan.Mode}
+	options := scan.GetOptions()
+	if options.GetVerify() {
 		args = append(args, "--verify=high")
 	}
-	if job.Sniper {
+	if options.GetSniper() {
 		args = append(args, "--sniper")
 	}
-	if job.Deep {
+	if options.GetDeep() {
 		args = append(args, "--deep")
 	}
 	return args
 }
 
-func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
+func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, error) {
 	app, release := s.acquireApp()
 	defer release()
 	if app == nil || app.Commands == nil {
-		return "", nil, fmt.Errorf("aiscan runtime is not ready")
+		return "", fmt.Errorf("aiscan runtime is not ready")
 	}
 	tool, ok := app.Commands.GetTool("bash")
 	if !ok {
-		return "", nil, fmt.Errorf("bash tool is not registered")
+		return "", fmt.Errorf("bash tool is not registered")
 	}
 	bash, ok := tool.(*commands.BashTool)
 	if !ok {
-		return "", nil, fmt.Errorf("registered bash tool has unexpected type")
+		return "", fmt.Errorf("registered bash tool has unexpected type")
 	}
 	var text strings.Builder
-	execution, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
+	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
 		OnOutput: func(data []byte) {
 			_, _ = text.Write(data)
 			if stream != nil {
 				_, _ = stream.Write(data)
 			}
 		},
-	})
-	if err != nil {
-		return text.String(), nil, err
+	}); err != nil {
+		return text.String(), err
 	}
-	result, ok := execution.Details.(*output.Result)
-	if !ok || result == nil {
-		return text.String(), nil, fmt.Errorf("scan execution returned no structured result")
-	}
-	return text.String(), result, nil
+	return text.String(), nil
 }
 
 type scanStreamWriter struct {
 	hub    *Hub
 	scanID string
 	store  *SQLiteStore
-	job    *ScanJob
+	scan   *scanpb.Scan
 	ctx    context.Context
 	buf    []byte
 }
@@ -775,19 +735,19 @@ func (w *scanStreamWriter) Write(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if current.Status == StatusCanceled {
+		if current.Status == scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 			return 0, context.Canceled
 		}
 		current.Progress = line
-		current.UpdatedAt = time.Now()
-		changed, err := w.store.TransitionScan(context.Background(), current, StatusRunning)
+		current.UpdatedAt = nowProto()
+		changed, err := w.store.TransitionScan(context.Background(), current, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 		if err != nil {
 			return 0, err
 		}
 		if !changed {
 			return 0, context.Canceled
 		}
-		w.job = current
+		w.scan = current
 
 		w.hub.BroadcastScan(scanProgressEvent(w.scanID, line), false)
 	}
@@ -907,7 +867,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	return nil
 }
 
-func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*transport.FileResult, error) {
+func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename string, data []byte) (*filepb.Result, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -918,19 +878,15 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 	if s.agents == nil {
 		return nil, fmt.Errorf("no agent pool available")
 	}
-	agentID := session.AgentID
+	agentID := session.GetSession().GetParticipant()
 	if agentID == "" {
 		return nil, fmt.Errorf("session has no assigned agent")
 	}
 
 	taskID := generateID()
-	resultCh, err := s.agents.dispatchFrame(agentID, taskID, &transport.ServerFrame{
-		CorrelationId: taskID,
-		Payload: &transport.ServerFrame_FileUpload{FileUpload: &transport.FileUploadRequest{
-			TaskId: taskID, SessionId: sessionID, Filename: filename,
-			MediaType: http.DetectContentType(data), Data: data,
-		}},
-	})
+	resultCh, err := s.agents.dispatchMessage(agentID, taskID, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_UploadRequest{UploadRequest: &filepb.UploadRequest{
+		SessionId: sessionID, Filename: filename, MediaType: http.DetectContentType(data), Data: data,
+	}}})
 	if err != nil {
 		return nil, fmt.Errorf("agent dispatch failed: %w", err)
 	}
@@ -954,20 +910,17 @@ func (s *Service) HandleFileUpload(ctx context.Context, sessionID, filename stri
 	}
 }
 
-func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*ChatSession, error) {
+func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*chatpb.SessionRecord, error) {
 	var agentName string
 	if s.agents != nil {
 		if info := s.agents.get(agentID); info != nil {
 			agentName = info.name
 		}
 	}
-	now := time.Now()
-	session := &ChatSession{
-		ID:        generateID(),
-		AgentID:   agentID,
+	now := nowProto()
+	session := &chatpb.SessionRecord{
+		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, Participant: agentID, Title: title},
 		AgentName: agentName,
-		Title:     title,
-		Status:    SessionActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -977,11 +930,11 @@ func (s *Service) CreateSession(ctx context.Context, agentID, title string) (*Ch
 	return session, nil
 }
 
-func (s *Service) GetSession(ctx context.Context, id string) (*ChatSession, error) {
+func (s *Service) GetSession(ctx context.Context, id string) (*chatpb.SessionRecord, error) {
 	return s.store.GetSession(ctx, id)
 }
 
-func (s *Service) ListSessions(ctx context.Context) ([]*ChatSession, error) {
+func (s *Service) ListSessions(ctx context.Context) ([]*chatpb.SessionRecord, error) {
 	return s.store.ListSessions(ctx, 100)
 }
 
@@ -1006,6 +959,23 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 		cursor = storedCursor
 	}
 	s.broadcastAOPEvent(sessionID, event, cursor)
+}
+
+func (s *Service) broadcastUserMessage(sessionID, turnID string, message *aop.Message) {
+	if message == nil || len(message.Content) == 0 {
+		return
+	}
+	canonical := proto.Clone(message).(*aop.Message)
+	if canonical.Id == "" {
+		canonical.Id = generateID()
+	}
+	canonical.Role = "user"
+	s.BroadcastAOPEvent(sessionID, &aop.Event{
+		SessionId: sessionID,
+		TurnId:    turnID,
+		Emitter:   "aiscan.web",
+		Payload:   &aop.Event_Message{Message: canonical},
+	})
 }
 
 func (s *Service) prepareAOPEvent(sessionID string, event *aop.Event) bool {
@@ -1160,8 +1130,8 @@ func (s *Service) handleHelpCommand(sessionID string) {
 // included). It falls back to the static agent-scope menu when no agent is
 // bound, so the menu is populated even before an agent connects. This is the
 // single source both SessionService/ListCommands and /help render from.
-func (s *Service) SessionMenu(sessionID string) []*transport.CommandSpec {
-	hubSpecs := []*transport.CommandSpec{
+func (s *Service) SessionMenu(sessionID string) []*commandpb.Spec {
+	hubSpecs := []*commandpb.Spec{
 		{Name: "/help", Description: "查看命令面板"},
 		{Name: "/agents", Description: "列出已连接的 agent"},
 	}
@@ -1183,17 +1153,23 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 	list := make([]map[string]any, 0, len(agents))
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%d agent(s) connected:\n", len(agents)))
-	for _, a := range agents {
+	for _, agentView := range agents {
+		hello := agentView.GetHello()
+		statusView := agentView.GetStatus()
 		status := "idle"
-		if a.Busy {
+		if agentView.GetBusy() {
 			status = "busy"
 		}
-		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", a.Name, a.ID[:8], status))
-		entry := map[string]any{"name": a.Name, "id": a.ID[:8], "busy": a.Busy}
-		if a.Status.Model != "" {
-			sb.WriteString(fmt.Sprintf(" — %s/%s", a.Status.Provider, a.Status.Model))
-			entry["provider"] = a.Status.Provider
-			entry["model"] = a.Status.Model
+		shortID := hello.GetAgentId()
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s", hello.GetName(), shortID, status))
+		entry := map[string]any{"name": hello.GetName(), "id": shortID, "busy": agentView.GetBusy()}
+		if statusView.GetModel() != "" {
+			sb.WriteString(fmt.Sprintf(" — %s/%s", statusView.GetProvider(), statusView.GetModel()))
+			entry["provider"] = statusView.GetProvider()
+			entry["model"] = statusView.GetModel()
 		}
 		sb.WriteString("\n")
 		list = append(list, entry)
@@ -1204,13 +1180,13 @@ func (s *Service) handleAgentsCommand(sessionID string) {
 
 func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 	session, err := s.store.GetSession(context.Background(), sessionID)
-	if err != nil || session.AgentID == "" {
+	if err != nil || session.GetSession().GetParticipant() == "" {
 		return nil
 	}
 	if s.agents == nil {
 		return nil
 	}
-	return s.agents.get(session.AgentID)
+	return s.agents.get(session.GetSession().GetParticipant())
 }
 
 func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) {
@@ -1224,9 +1200,6 @@ func (s *Service) handleAgentRun(sessionID string, request *aop.RunTurnRequest) 
 	taskID := strings.TrimSpace(request.TurnId)
 	if taskID == "" {
 		taskID = generateID()
-	}
-	if request.RequestId == "" {
-		request.RequestId = taskID
 	}
 	request.TurnId = taskID
 	request.SessionId = sessionID
@@ -1273,6 +1246,7 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		}
 		return "", err
 	}
+	s.broadcastUserMessage(sessionID, "", &aop.Message{Role: "user", Content: []*aop.Content{aop.Text(line)}})
 	if verb, args, ok := parseCommand(line); ok {
 		switch verb {
 		case "help", "agents":
@@ -1297,7 +1271,7 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 	}
 	taskID := generateID()
 	s.registerSessionTask(taskID, sessionID, agent.id)
-	resultCh, err := s.agents.DispatchCommand(agent.id, &transport.CommandRequest{TaskId: taskID, SessionId: sessionID, Line: line})
+	resultCh, err := s.agents.DispatchCommand(agent.id, taskID, &commandpb.Request{SessionId: sessionID, Line: line})
 	if err != nil {
 		s.finishSessionTask(taskID)
 		return "", err
@@ -1317,16 +1291,13 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 
 func (s *Service) closeRemoteSession(sessionID string) {
 	session, err := s.store.GetSession(context.Background(), sessionID)
-	if err != nil || s.agents == nil || session.AgentID == "" {
+	if err != nil || s.agents == nil || session.GetSession().GetParticipant() == "" {
 		return
 	}
 	requestID := "close:" + sessionID
-	_ = s.agents.sendAgentFrame(session.AgentID, &transport.ServerFrame{
-		CorrelationId: requestID,
-		Payload: &transport.ServerFrame_CloseSession{CloseSession: &aop.CloseSessionRequest{
-			RequestId: requestID, SessionId: sessionID, Reason: "completed",
-		}},
-	})
+	_ = s.agents.sendAgentMessage(session.GetSession().GetParticipant(), requestID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: &aop.CloseSessionRequest{
+		SessionId: sessionID, Reason: "completed",
+	}}})
 }
 
 // broadcastSystemMessage persists + broadcasts a system message. code names a
@@ -1342,8 +1313,8 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 		}},
 	}
 	if code != "" {
-		metadata, _ := json.Marshal(map[string]any{"code": code, "params": params})
-		_ = ext.SetWebMessage(event, ext.WebMessageExtension{Metadata: metadata})
+		encodedParams, _ := structpb.NewStruct(params)
+		_ = ext.SetWebMessage(event, ext.WebMessageExtension{Code: code, Params: encodedParams})
 	}
 	s.BroadcastAOPEvent(sessionID, event)
 }
@@ -1359,15 +1330,13 @@ func (s *Service) broadcastScanComplete(scanID string) {
 		return
 	}
 	_ = s.store.LinkScanToSession(context.Background(), sid, scanID)
-	value, err := aop.ProtoJSONValue(&scanpb.SessionScanEvent{ScanId: scanID, Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED})
+	value, err := anypb.New(&scanpb.SessionScanEvent{ScanId: scanID, Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED})
 	if err != nil {
 		return
 	}
 	s.BroadcastAOPEvent(sid, &aop.Event{
 		SessionId: sid,
 		Emitter:   "aiscan.web",
-		Payload: &aop.Event_Extension{Extension: &aop.ExtensionEvent{
-			Type: "io.chainreactors.aiscan.scan", Value: value,
-		}},
+		Payload:   &aop.Event_Extension{Extension: value},
 	})
 }
