@@ -3,6 +3,7 @@ package skills
 import (
 	"embed"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -128,7 +129,11 @@ func LoadEmbedded() ([]Skill, []Diagnostic) {
 		filePath := path.Join(entry.Name(), "SKILL.md")
 		raw, err := embeddedFS.ReadFile(filePath)
 		if err != nil {
-			diagnostics = append(diagnostics, Diagnostic{Path: filePath, Message: err.Error()})
+			// Directories without a SKILL.md (e.g. scan/ workflow docs) are
+			// plain embedded content, not skills.
+			if !errors.Is(err, fs.ErrNotExist) {
+				diagnostics = append(diagnostics, Diagnostic{Path: filePath, Message: err.Error()})
+			}
 			continue
 		}
 		skill, skillDiagnostics, ok := parseSkill(filePath, entry.Name(), string(raw), SourceEmbedded)
@@ -406,6 +411,16 @@ func normalizeEmbedPath(location string) string {
 	return ""
 }
 
+// ReadVirtualBody reads a virtual file and returns its body with frontmatter stripped.
+func (s *Store) ReadVirtualBody(location string) (string, bool, error) {
+	raw, ok, err := s.ReadVirtual(location)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	_, body := splitRaw(raw)
+	return strings.TrimSpace(body), true, nil
+}
+
 func skillNameFromEmbedPath(embedPath string) string {
 	embedPath = path.Clean(strings.TrimSpace(embedPath))
 	if embedPath == "." || strings.HasPrefix(embedPath, "..") {
@@ -458,6 +473,12 @@ func appendEscapedXML(sb *strings.Builder, value string) {
 func (s *Store) FormatInvocation(skill Skill, args string) string {
 	body := s.ReadBody(skill.Name)
 	return formatInvocationBody(skill, body, args)
+}
+
+// FormatVirtualInvocation formats an embedded virtual document (e.g. an OKF
+// tool concept) for prompt injection with the same wrapper as skill invocations.
+func FormatVirtualInvocation(name, location, body string) string {
+	return formatInvocationBody(Skill{Name: name, Location: location, BaseDir: path.Dir(location)}, body, "")
 }
 
 func formatInvocationBody(skill Skill, body string, args string) string {

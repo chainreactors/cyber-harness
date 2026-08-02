@@ -1,7 +1,12 @@
 ---
-name: zombie
-description: Use this skill when working with zombie for authorized weak credential checks and authentication result analysis.
-internal: true
+type: Tool Playbook
+title: zombie
+description: Use this playbook when working with zombie for authorized weak credential checks and authentication result analysis.
+tags: [easm, weakpass]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Zombie

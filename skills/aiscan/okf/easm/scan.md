@@ -1,7 +1,12 @@
 ---
-name: scan
-description: Use this skill when working with scan for the multi-stage aiscan pipeline across discovery, web probing, weak credentials, POC checks, and verification.
-internal: true
+type: Tool Playbook
+title: scan
+description: Use this playbook when working with scan for the multi-stage aiscan pipeline across discovery, web probing, weak credentials, POC checks, and verification.
+tags: [easm, pipeline]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Scan

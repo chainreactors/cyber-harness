@@ -1,3 +1,13 @@
+---
+type: Tool Playbook
+title: ioa
+description: IOA shared message spaces for agent coordination via ioa_space, ioa_send, ioa_read pseudo-commands.
+tags: [runtime, collaboration]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
+---
 
 # IOA — Inter-Operator Async Collaboration
 

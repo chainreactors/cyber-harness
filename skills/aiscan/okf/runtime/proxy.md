@@ -1,3 +1,14 @@
+---
+type: Tool Playbook
+title: proxy
+description: Pseudo-command for managing proxy nodes and proxied command execution. Supports direct proxy URLs, Clash subscription feeds, and adaptive load balancing.
+tags: [runtime, proxy]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
+---
+
 # proxy - Proxy Node Management
 
 `proxy` is a pseudo-command for managing proxy nodes and proxied command execution. It supports direct proxy URLs, Clash subscription feeds, and adaptive load balancing.

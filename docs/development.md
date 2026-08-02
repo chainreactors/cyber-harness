@@ -590,8 +590,8 @@ subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.
 
 ```
 aiscan://skills/aiscan/SKILL.md
-aiscan://skills/aiscan/reference/arsenal.md
-aiscan://skills/gogo/SKILL.md
+aiscan://skills/aiscan/okf/runtime/arsenal.md
+aiscan://skills/aiscan/okf/easm/gogo.md
 ```
 
 AI 使用 `read` 工具加载这些 URI，由 `Store.ReadVirtual()` 处理。
@@ -601,7 +601,7 @@ AI 使用 `read` 工具加载这些 URI，由 `Store.ReadVirtual()` 处理。
 Skill 正文中可以引用其他 Skill 的参考文档：
 
 ```markdown
-详细用法参见 `aiscan://skills/aiscan/reference/tmux.md`。
+详细用法参见 `aiscan://skills/aiscan/okf/runtime/tmux.md`。
 ```
 
 **VirtualFileReader / VirtualGlobber：**

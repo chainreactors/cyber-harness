@@ -1,7 +1,12 @@
 ---
-name: neutron
-description: Use this skill when working with neutron for template-based POC execution, template filtering, and POC result analysis.
-internal: true
+type: Tool Playbook
+title: neutron
+description: Use this playbook when working with neutron for template-based POC execution, template filtering, and POC result analysis.
+tags: [easm, poc]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
 ---
 
 # Neutron

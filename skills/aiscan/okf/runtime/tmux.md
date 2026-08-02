@@ -1,3 +1,14 @@
+---
+type: Tool Playbook
+title: tmux
+description: PTY session manager built into aiscan. All bash commands run inside tmux sessions; long commands auto-background with inbox delivery.
+tags: [runtime, session]
+status: stable
+generated:
+  actor: process:okf-migration
+  at: 2026-08-02
+---
+
 # tmux - Session Manager
 
 tmux is the PTY session manager built into aiscan. All `bash` commands run inside tmux sessions. Commands completing within 15 seconds return output inline; longer commands are auto-backgrounded with incremental output delivered to the agent inbox automatically.

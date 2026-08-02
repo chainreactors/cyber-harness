@@ -51,7 +51,9 @@ All pseudo-commands run through `bash`. They are **not** system binaries.
 - `neutron`: template-based POC execution.
 - `proton`: sensitive information scanning — API keys, tokens, credentials, secrets in files or piped data.
 
-Each scanner has an internal skill with detailed flags. These load automatically on invocation.
+Each scanner's detailed flags live in an OKF-style tool concept under `aiscan://skills/aiscan/okf/easm/<command>.md`, loaded automatically on invocation.
+
+aiscan organizes externally produced markdown (tool docs, reports, findings) by referencing mechanisms from [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md): concept files with YAML frontmatter (`type`, `title`, `tags`, `status`, `verified`, `sources`), per-bundle `index.md` listings, and bundle-relative links. It borrows the mechanism only — full OKF spec compliance is not required.
 
 ### Scanners (full-build only)
 
@@ -59,15 +61,15 @@ Available only when they appear in the runtime pseudo-command list:
 
 - `passive`: domain/ICP seed → IPs, CIDRs, domains via cyberspace search (FOFA/Hunter/Shodan/etc.)
 - `katana`: deep web crawling with full parameter discovery
-- `playwright`: headless Chromium browser for JS-rendered pages, screenshots, network capture, and interactive verification. Reference: `aiscan://skills/playwright/SKILL.md`. Key commands: `playwright goto <url>`, `playwright screenshot <url>`, `playwright open <url> --session s1`, `playwright discover s1`, `playwright close s1`.
+- `playwright`: headless Chromium browser for JS-rendered pages, screenshots, network capture, and interactive verification. Reference: `aiscan://skills/aiscan/okf/easm/playwright.md`. Key commands: `playwright goto <url>`, `playwright screenshot <url>`, `playwright open <url> --session s1`, `playwright discover s1`, `playwright close s1`.
 
 ### Utilities
 
-- `arsenal`: security tool package manager (22+ tools from chainreactors & projectdiscovery). Run `arsenal list` first. Reference: `aiscan://skills/aiscan/reference/arsenal.md`.
-- `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `aiscan://skills/aiscan/reference/search.md`.
-- `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `aiscan://skills/aiscan/reference/tmux.md`.
-- `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/reference/proxy.md`.
-- `ioa_space` / `ioa_send` / `ioa_read`: multi-agent collaboration via shared message spaces. Supports `ioa_send checkpoint`. Reference: `aiscan://skills/aiscan/reference/ioa.md`.
+- `arsenal`: security tool package manager (22+ tools from chainreactors & projectdiscovery). Run `arsenal list` first. Reference: `aiscan://skills/aiscan/okf/runtime/arsenal.md`.
+- `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `aiscan://skills/aiscan/okf/runtime/search.md`.
+- `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `aiscan://skills/aiscan/okf/runtime/tmux.md`.
+- `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/okf/runtime/proxy.md`.
+- `ioa_space` / `ioa_send` / `ioa_read`: multi-agent collaboration via shared message spaces. Supports `ioa_send checkpoint`. Reference: `aiscan://skills/aiscan/okf/runtime/ioa.md`.
 
 ## Fingerprint → POC Workflow
 
