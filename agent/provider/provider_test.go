@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 func TestResolveProviderPresets(t *testing.T) {
@@ -192,17 +194,16 @@ func TestAnthropicProviderChatCompletion(t *testing.T) {
 
 	resp, err := p.ChatCompletion(context.Background(), &ChatCompletionRequest{
 		Model: "claude-test",
-		Messages: []ChatMessage{
-			NewTextMessage("system", "system prompt"),
-			NewTextMessage("user", "scan localhost"),
+		Messages: []*aop.Message{
+			TextMessage("system", "system prompt"),
+			TextMessage("user", "scan localhost"),
 		},
-		Tools: []ToolDefinition{{
+		Tools: []*aop.ToolDefinition{{
 			Type: "function",
-			Function: FunctionDefinition{
-				Name: "bash",
-				Parameters: map[string]interface{}{
-					"type": "object",
-				},
+			Name: "bash",
+			InputSchema: &aop.EncodedValue{
+				Data:      []byte(`{"type":"object"}`),
+				MediaType: aop.JSONMediaType,
 			},
 		}},
 	})
@@ -213,13 +214,14 @@ func TestAnthropicProviderChatCompletion(t *testing.T) {
 		t.Fatalf("choices = %d, want 1", len(resp.Choices))
 	}
 	msg := resp.Choices[0].Message
-	if msg.Role != "assistant" || msg.Content == nil || *msg.Content != "scan ready" {
+	if msg.Role != "assistant" || MessageText(msg) != "scan ready" {
 		t.Fatalf("message = %#v, want assistant text", msg)
 	}
-	if len(msg.ToolCalls) != 1 {
-		t.Fatalf("tool calls = %d, want 1", len(msg.ToolCalls))
+	calls := MessageToolCalls(msg)
+	if len(calls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(calls))
 	}
-	if got := msg.ToolCalls[0].Function.Arguments; got != `{"command":"id"}` {
+	if got := string(calls[0].Arguments.Data); got != `{"command":"id"}` {
 		t.Fatalf("tool arguments = %q, want command JSON", got)
 	}
 	if resp.Usage == nil || resp.Usage.TotalTokens != 15 {
@@ -246,17 +248,17 @@ func TestAnthropicProviderParsesThinkingBlock(t *testing.T) {
 
 	resp, err := p.ChatCompletion(context.Background(), &ChatCompletionRequest{
 		Model:    "claude-test",
-		Messages: []ChatMessage{NewTextMessage("user", "think hard")},
+		Messages: []*aop.Message{TextMessage("user", "think hard")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
 	}
 	msg := resp.Choices[0].Message
-	if msg.Content == nil || *msg.Content != "visible answer" {
-		t.Fatalf("content = %v, want 'visible answer'", msg.Content)
+	if got := MessageText(msg); got != "visible answer" {
+		t.Fatalf("content = %q, want 'visible answer'", got)
 	}
-	if msg.ReasoningContent == nil || *msg.ReasoningContent != "internal reasoning" {
-		t.Fatalf("reasoning = %v, want 'internal reasoning'", msg.ReasoningContent)
+	if got := MessageReasoning(msg); got != "internal reasoning" {
+		t.Fatalf("reasoning = %q, want 'internal reasoning'", got)
 	}
 }
 
@@ -294,11 +296,9 @@ func TestOpenAIProviderChatCompletionStream(t *testing.T) {
 		if event.Err != nil {
 			t.Fatalf("stream error = %v", event.Err)
 		}
-		if event.Delta.Content != nil {
-			text += *event.Delta.Content
-		}
-		if event.Delta.ReasoningContent != nil {
-			reasoning += *event.Delta.ReasoningContent
+		if delta := event.MessageDelta; delta != nil {
+			text += delta.GetText()
+			reasoning += delta.GetReasoning()
 		}
 		if event.Done {
 			done = true
@@ -363,7 +363,7 @@ func TestAnthropicProviderChatCompletionStream(t *testing.T) {
 
 	ch, err := p.ChatCompletionStream(context.Background(), &ChatCompletionRequest{
 		Model:    "claude-test",
-		Messages: []ChatMessage{NewTextMessage("user", "scan localhost")},
+		Messages: []*aop.Message{TextMessage("user", "scan localhost")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream() error = %v", err)
@@ -373,33 +373,36 @@ func TestAnthropicProviderChatCompletionStream(t *testing.T) {
 	var text string
 	var done bool
 	var finishReason string
-	var usage *Usage
-	toolCalls := make(map[int]ToolCall)
+	var usage *aop.TokenUsage
+	type toolCallAcc struct {
+		id        string
+		name      string
+		arguments string
+	}
+	toolCalls := make(map[uint32]*toolCallAcc)
 	for event := range ch {
 		if event.Err != nil {
 			t.Fatalf("stream error = %v", event.Err)
 		}
-		if event.Delta.Role != "" {
-			role = event.Delta.Role
+		if event.Role != "" {
+			role = event.Role
 		}
-		if event.Delta.Content != nil {
-			text += *event.Delta.Content
+		if delta := event.MessageDelta; delta != nil {
+			text += delta.GetText()
 		}
-		for _, delta := range event.Delta.ToolCalls {
+		for _, delta := range event.ToolDeltas {
 			tc := toolCalls[delta.Index]
-			if delta.ID != "" {
-				tc.ID = delta.ID
+			if tc == nil {
+				tc = &toolCallAcc{}
+				toolCalls[delta.Index] = tc
 			}
-			if delta.Type != "" {
-				tc.Type = delta.Type
+			if delta.CallId != "" {
+				tc.id = delta.CallId
 			}
-			if delta.Function.Name != "" {
-				tc.Function.Name = delta.Function.Name
+			if delta.Name != "" {
+				tc.name = delta.Name
 			}
-			if delta.Function.Arguments != "" {
-				tc.Function.Arguments += delta.Function.Arguments
-			}
-			toolCalls[delta.Index] = tc
+			tc.arguments += string(delta.Arguments)
 		}
 		if event.FinishReason != "" {
 			finishReason = event.FinishReason
@@ -421,11 +424,11 @@ func TestAnthropicProviderChatCompletionStream(t *testing.T) {
 		t.Fatalf("finish reason = %q, want tool_calls", finishReason)
 	}
 	tc := toolCalls[1]
-	if tc.ID != "toolu_1" || tc.Type != "function" || tc.Function.Name != "bash" {
+	if tc == nil || tc.id != "toolu_1" || tc.name != "bash" {
 		t.Fatalf("tool call = %#v, want bash tool call", tc)
 	}
-	if tc.Function.Arguments != `{"command":"id"}` {
-		t.Fatalf("tool call arguments = %q, want command JSON", tc.Function.Arguments)
+	if tc.arguments != `{"command":"id"}` {
+		t.Fatalf("tool call arguments = %q, want command JSON", tc.arguments)
 	}
 	if usage == nil || usage.TotalTokens != 12 {
 		t.Fatalf("usage = %#v, want total 12", usage)
@@ -473,15 +476,24 @@ func TestAnthropicProviderStreamRejectsPrematureEOF(t *testing.T) {
 
 func TestAnthropicErrorToolResultIsMarkedOnWire(t *testing.T) {
 	p := &AnthropicProvider{config: &ProviderConfig{BaseURL: "https://api.anthropic.com/v1"}}
-	result := NewToolResultMessage("call-truncated", truncatedToolResultForTest)
-	result.ToolResultIsError = true
+	result := ToolResultMessage("call-truncated", &aop.ToolResult{
+		Output:  []*aop.Content{aop.Text(truncatedToolResultForTest)},
+		IsError: true,
+	})
 	body, err := p.marshalRequest(&ChatCompletionRequest{
 		Model: "test",
-		Messages: []ChatMessage{
-			{Role: "assistant", ToolCalls: []ToolCall{{
-				ID: "call-truncated", Type: "function",
-				Function: FunctionCall{Name: "write", Arguments: "{}"},
-			}}},
+		Messages: []*aop.Message{
+			{Role: "assistant", Content: []*aop.Content{
+				{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+					Id:   "call-truncated",
+					Name: "write",
+					Kind: "function",
+					Arguments: &aop.EncodedValue{
+						Data:      []byte(`{}`),
+						MediaType: aop.JSONMediaType,
+					},
+				}}},
+			}},
 			result,
 		},
 	})

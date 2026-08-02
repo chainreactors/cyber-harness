@@ -21,11 +21,11 @@ type finishArgs struct {
 	Summary string `json:"summary" jsonschema:"description=Brief summary of what was accomplished"`
 }
 
-func (t *FinishTool) Definition() ToolDefinition {
+func (t *FinishTool) Definition() *ToolDefinition {
 	return tool.Def("finish", t.Description(), finishArgs{})
 }
 
-func (t *FinishTool) Execute(_ context.Context, arguments string) (tool.Result, error) {
+func (t *FinishTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
 	args, _ := tool.ParseArgs[finishArgs](arguments)
 	summary := strings.TrimSpace(args.Summary)
 	if summary == "" {

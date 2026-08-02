@@ -7,8 +7,8 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"github.com/chainreactors/ioa/protocols"
 )
 

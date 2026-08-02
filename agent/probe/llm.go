@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // LLMProbeRequest carries the connection parameters the user wants to verify
@@ -148,7 +150,7 @@ func TestLLM(ctx context.Context, req LLMProbeRequest, storedAPIKey string) (LLM
 	start := time.Now()
 	resp, err := prov.ChatCompletion(probeCtx, &agent.ChatCompletionRequest{
 		Model:     cfg.Model,
-		Messages:  []agent.ChatMessage{agent.NewTextMessage("user", "ping")},
+		Messages:  []*aop.Message{provider.TextMessage("user", "ping")},
 		MaxTokens: maxTokens,
 	})
 	result.LatencyMs = time.Since(start).Milliseconds()
@@ -162,8 +164,6 @@ func TestLLM(ctx context.Context, req LLMProbeRequest, storedAPIKey string) (LLM
 	}
 
 	result.OK = true
-	if msg := resp.Choices[0].Message; msg.Content != nil {
-		result.Reply = strings.TrimSpace(*msg.Content)
-	}
+	result.Reply = strings.TrimSpace(provider.MessageText(resp.Choices[0].Message))
 	return result, nil
 }

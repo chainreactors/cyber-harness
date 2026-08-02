@@ -31,6 +31,11 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 		bus: publicBus, kernelBus: kernelBus, sessionEvents: events,
 		config: agent.Config{Provider: provider, Tools: reg, Bus: kernelBus, Logger: telemetry.NopLogger()},
 	}
+	mux, err := newRuntimeNamespaceMux(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.namespaceMux = mux
 	t.Cleanup(rt.Close)
 	return rt
 }

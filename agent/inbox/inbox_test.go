@@ -17,11 +17,11 @@ func TestBufferedPushDrain(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
 	}
-	if *msgs[0].ChatMessage.Content != "a" {
-		t.Errorf("expected 'a', got %q", *msgs[0].ChatMessage.Content)
+	if messageText(msgs[0].Message) != "a" {
+		t.Errorf("expected 'a', got %q", messageText(msgs[0].Message))
 	}
-	if *msgs[1].ChatMessage.Content != "b" {
-		t.Errorf("expected 'b', got %q", *msgs[1].ChatMessage.Content)
+	if messageText(msgs[1].Message) != "b" {
+		t.Errorf("expected 'b', got %q", messageText(msgs[1].Message))
 	}
 	if b.Drain() != nil {
 		t.Error("drain on empty buffer should return nil")
@@ -66,7 +66,7 @@ func TestBufferedPriorityOrdering(t *testing.T) {
 	}
 	expected := []string{"high", "normal-1", "normal-2", "low"}
 	for i, want := range expected {
-		got := *msgs[i].ChatMessage.Content
+		got := messageText(msgs[i].Message)
 		if got != want {
 			t.Errorf("position %d: expected %q, got %q", i, want, got)
 		}
@@ -81,7 +81,7 @@ func TestBufferedStableOrderWithinPriority(t *testing.T) {
 
 	msgs := b.Drain()
 	for i, want := range []string{"a", "b", "c"} {
-		got := *msgs[i].ChatMessage.Content
+		got := messageText(msgs[i].Message)
 		if got != want {
 			t.Errorf("position %d: expected %q, got %q", i, want, got)
 		}

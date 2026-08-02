@@ -8,10 +8,11 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 )
 
 func TestSubAgentSyncReturnsResult(t *testing.T) {
@@ -28,7 +29,7 @@ func TestSubAgentSyncReturnsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got := result.Text(); got != `<subagent_result name="worker" type="" status="completed">
+	if got := coretool.ResultText(result); got != `<subagent_result name="worker" type="" status="completed">
 child result
 </subagent_result>` {
 		t.Fatalf("result = %q", got)
@@ -129,13 +130,15 @@ func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
 	bus.Subscribe(func(event *aop.Event) { events <- event })
 	em := newAOPEmitter(bus, "aiscan", "parent-session", "", "", nil, 0)
 
-	em.toolCall("spawn-1", "subagent", map[string]any{
-		"action": "create",
-		"prompt": "inspect the repository",
-		"name":   "explorer",
-		"type":   "reviewer",
-		"mode":   "fork",
-	}, "")
+	em.toolCall(&aop.ToolCall{
+		Id:   "spawn-1",
+		Name: "subagent",
+		Kind: "function",
+		Arguments: &aop.EncodedValue{
+			Data:      []byte(`{"action":"create","prompt":"inspect the repository","name":"explorer","type":"reviewer","mode":"fork"}`),
+			MediaType: aop.JSONMediaType,
+		},
+	})
 
 	event := <-events
 	detail, ok, err := ext.GetDelegation(event)

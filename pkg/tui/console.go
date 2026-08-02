@@ -21,6 +21,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -1512,7 +1513,7 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 		if err != nil {
 			return err
 		}
-		if text := result.Text(); text != "" {
+		if text := coretool.ResultText(result); text != "" {
 			fmt.Fprint(r.stdout, text)
 			if !strings.HasSuffix(text, "\n") {
 				fmt.Fprintln(r.stdout)

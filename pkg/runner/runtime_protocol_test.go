@@ -7,65 +7,55 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
-func TestServerFrameErrorsKeepDistinctCorrelationIDs(t *testing.T) {
+func handleRuntimeMessage(t *testing.T, rt *AgentRuntime, id string, message protobuf.Message) *aop.Envelope {
+	t.Helper()
+	request := aop.MustWrap(id, "", message)
+	var response *aop.Envelope
+	if !rt.HandleEnvelope(context.Background(), request, func(envelope *aop.Envelope) { response = envelope }) {
+		t.Fatal("message was not handled")
+	}
+	return response
+}
+
+func TestEnvelopeErrorsKeepDistinctReplyIDs(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 
-	var runResponse *transport.AgentFrame
-	if !rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
-		CorrelationId: "turn-correlation",
-		Payload:       &transport.ServerFrame_RunTurn{RunTurn: &aop.RunTurnRequest{RequestId: "run-1"}},
-	}, func(frame *transport.AgentFrame) { runResponse = frame }) {
-		t.Fatal("run frame was not handled")
-	}
-	if runResponse.CorrelationId != "turn-correlation" || runResponse.GetRunTurn().GetRejected() == nil {
+	runResponse := handleRuntimeMessage(t, rt, "turn-correlation", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnRequest{RunTurnRequest: &aop.RunTurnRequest{}}})
+	runMessage, _ := aop.Unwrap(runResponse)
+	if runResponse.ReplyTo != "turn-correlation" || runMessage.(*aop.ProtocolMessage).GetRunTurnResponse().GetRejected() == nil {
 		t.Fatalf("run response = %+v", runResponse)
 	}
 
-	var commandResponse *transport.AgentFrame
-	if !rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
-		CorrelationId: "command-correlation",
-		Payload: &transport.ServerFrame_Command{Command: &transport.CommandRequest{
-			TaskId: "command-1",
-		}},
-	}, func(frame *transport.AgentFrame) { commandResponse = frame }) {
-		t.Fatal("command frame was not handled")
-	}
-	if commandResponse.CorrelationId != "command-correlation" || commandResponse.GetOperationError().GetTaskId() != "command-1" {
+	commandResponse := handleRuntimeMessage(t, rt, "command-correlation", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Request{Request: &commandpb.Request{}}})
+	commandMessage, _ := aop.Unwrap(commandResponse)
+	if commandResponse.ReplyTo != "command-correlation" || commandMessage.(*aop.ProtocolMessage).GetProtocolError() == nil {
 		t.Fatalf("command response = %+v", commandResponse)
 	}
 }
 
-func TestServerFrameRequiresTurnID(t *testing.T) {
+func TestEnvelopeRequiresTurnID(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	var response *transport.AgentFrame
-	rt.HandleServerFrame(context.Background(), &transport.ServerFrame{
-		Payload: &transport.ServerFrame_RunTurn{RunTurn: &aop.RunTurnRequest{
-			RequestId: "run-1", SessionId: "session-1", Input: &aop.Message{Role: "user"},
-		}},
-	}, func(frame *transport.AgentFrame) { response = frame })
-	rejected := response.GetRunTurn().GetRejected()
+	response := handleRuntimeMessage(t, rt, "run-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnRequest{RunTurnRequest: &aop.RunTurnRequest{
+		SessionId: "session-1", Input: &aop.Message{Role: "user"},
+	}}})
+	message, _ := aop.Unwrap(response)
+	rejected := message.(*aop.ProtocolMessage).GetRunTurnResponse().GetRejected()
 	if rejected == nil || !strings.Contains(rejected.Message, "turn_id") {
 		t.Fatalf("response = %+v", response)
 	}
 }
 
-func TestServerFrameSessionOpenIsIdempotent(t *testing.T) {
+func TestEnvelopeSessionOpenIsIdempotent(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	request := &transport.ServerFrame{
-		CorrelationId: "open-1",
-		Payload: &transport.ServerFrame_OpenSession{OpenSession: &aop.OpenSessionRequest{
-			RequestId: "open-1", SessionId: "session-1",
-		}},
-	}
+	message := &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "session-1"}}}
 	for i := 0; i < 2; i++ {
-		var response *transport.AgentFrame
-		if !rt.HandleServerFrame(context.Background(), request, func(frame *transport.AgentFrame) { response = frame }) {
-			t.Fatal("session open was not handled")
-		}
-		if response.GetOpenSession().GetAccepted().GetId() != "session-1" {
+		response := handleRuntimeMessage(t, rt, "open-1", message)
+		decoded, _ := aop.Unwrap(response)
+		if decoded.(*aop.ProtocolMessage).GetOpenSessionResponse().GetAccepted().GetId() != "session-1" {
 			t.Fatalf("open %d response = %+v", i, response)
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
 func TestWriteNewFile(t *testing.T) {
@@ -16,8 +18,8 @@ func TestWriteNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "wrote") {
-		t.Fatalf("expected write confirmation, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "wrote") {
+		t.Fatalf("expected write confirmation, got: %s", coretool.ResultText(res))
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "new.txt"))
@@ -52,8 +54,8 @@ func TestEditSingleReplace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "edited") {
-		t.Fatalf("expected edit confirmation, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "edited") {
+		t.Fatalf("expected edit confirmation, got: %s", coretool.ResultText(res))
 	}
 
 	data, _ := os.ReadFile(path)
@@ -76,8 +78,8 @@ func TestEditMultipleEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "2 edit(s)") {
-		t.Fatalf("expected 2 edits confirmation, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "2 edit(s)") {
+		t.Fatalf("expected 2 edits confirmation, got: %s", coretool.ResultText(res))
 	}
 
 	data, _ := os.ReadFile(path)
@@ -101,8 +103,8 @@ func TestEditNotFound(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true for old_text not found")
 	}
-	if !strings.Contains(res.Text(), "not found") {
-		t.Fatalf("expected not found message, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "not found") {
+		t.Fatalf("expected not found message, got: %s", coretool.ResultText(res))
 	}
 }
 
@@ -120,8 +122,8 @@ func TestEditAmbiguousWithoutReplaceAll(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true for ambiguous match")
 	}
-	if !strings.Contains(res.Text(), "2 locations") {
-		t.Fatalf("expected ambiguity message, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "2 locations") {
+		t.Fatalf("expected ambiguity message, got: %s", coretool.ResultText(res))
 	}
 }
 
@@ -145,8 +147,8 @@ func TestEditReplaceAll(t *testing.T) {
 	if strings.Count(content, "x = 99") != 2 {
 		t.Fatalf("expected 2 replacements, got: %s", content)
 	}
-	if !strings.Contains(res.Text(), "2 occurrences") {
-		t.Fatalf("expected occurrence count in summary, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "2 occurrences") {
+		t.Fatalf("expected occurrence count in summary, got: %s", coretool.ResultText(res))
 	}
 }
 
@@ -164,8 +166,8 @@ func TestEditOverlapDetection(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true for overlapping edits")
 	}
-	if !strings.Contains(res.Text(), "overlap") {
-		t.Fatalf("expected overlap message, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "overlap") {
+		t.Fatalf("expected overlap message, got: %s", coretool.ResultText(res))
 	}
 }
 
@@ -180,8 +182,8 @@ func TestEditReportsLineNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "line 3") {
-		t.Fatalf("expected edit at line 3, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "line 3") {
+		t.Fatalf("expected edit at line 3, got: %s", coretool.ResultText(res))
 	}
 }
 

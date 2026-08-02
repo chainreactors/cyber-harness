@@ -11,12 +11,100 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
+
+// --- Legacy message construction shims -------------------------------------
+// These mirror the pre-proto ChatMessage shape so the many construction sites
+// in the tests stay readable; chatResponse converts them to *aop.Message.
+
+type FunctionCall struct {
+	Name      string
+	Arguments string
+}
+
+type ToolCall struct {
+	ID       string
+	Type     string
+	Function FunctionCall
+}
+
+type ChatMessage struct {
+	Role      string
+	Content   *string
+	ToolCalls []ToolCall
+}
+
+func (m ChatMessage) toAOP() *aop.Message {
+	msg := &aop.Message{Role: m.Role}
+	if m.Content != nil {
+		msg.Content = append(msg.Content, aop.Text(*m.Content))
+	}
+	for _, c := range m.ToolCalls {
+		msg.Content = append(msg.Content, toolCallContent(c.ID, c.Function.Name, c.Function.Arguments))
+	}
+	return msg
+}
+
+func toolCallContent(id, name, args string) *aop.Content {
+	return &aop.Content{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+		Id:   id,
+		Name: name,
+		Kind: "function",
+		Arguments: &aop.EncodedValue{
+			Data:      []byte(args),
+			MediaType: aop.JSONMediaType,
+		},
+	}}}
+}
+
+func NewTextMessage(role, text string) ChatMessage {
+	return ChatMessage{Role: role, Content: &text}
+}
+
+func textMessage(role, text string) *aop.Message {
+	return provider.TextMessage(role, text)
+}
+
+func toolResultMessage(callID, output string) *aop.Message {
+	return provider.ToolResultMessage(callID, tool.TextResult(output))
+}
+
+func imageMessage(role string, parts ...*aop.Content) *aop.Message {
+	return &aop.Message{Role: role, Content: parts}
+}
+
+// --- Streaming event shims --------------------------------------------------
+
+func roleDelta(role string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{Role: role}
+}
+
+func textDelta(s string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+		Value: &aop.MessageDelta_Text{Text: s},
+	}}
+}
+
+func reasoningDelta(s string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+		Value: &aop.MessageDelta_Reasoning{Reasoning: s},
+	}}
+}
+
+func toolCallDelta(index uint32, id, name, args string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{ToolDeltas: []*aop.ToolCallDelta{{
+		Index:     index,
+		CallId:    id,
+		Name:      name,
+		Arguments: []byte(args),
+	}}}
+}
 
 func testBus(handler func(*aop.Event)) *eventbus.Bus[*aop.Event] {
 	b := eventbus.New[*aop.Event]()
@@ -38,23 +126,16 @@ func (t *recordingTool) Name() string { return t.name }
 
 func (t *recordingTool) Description() string { return "recording tool" }
 
-func (t *recordingTool) Definition() ToolDefinition {
-	return ToolDefinition{
-		Type: "function",
-		Function: FunctionDefinition{
-			Name:        t.name,
-			Description: t.Description(),
-			Parameters:  map[string]any{"type": "object"},
-		},
-	}
+func (t *recordingTool) Definition() *aop.ToolDefinition {
+	return tool.Def(t.name, t.Description(), struct{}{})
 }
 
-func (t *recordingTool) Execute(_ context.Context, arguments string) (tool.Result, error) {
+func (t *recordingTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, arguments)
 	if strings.Contains(arguments, "fail") {
-		return tool.Result{}, fmt.Errorf("failed")
+		return nil, fmt.Errorf("failed")
 	}
 	return tool.TextResult(t.output), nil
 }
@@ -184,11 +265,18 @@ func (p *imageErrorProvider) ChatCompletion(_ context.Context, req *ChatCompleti
 	return nil, &APIError{StatusCode: 400, Message: "Invalid parameter: messages[5].content[1].type is not supported, unknown type: image_url"}
 }
 
-func messagesContainImages(msgs []ChatMessage) bool {
+func messagesContainImages(msgs []*aop.Message) bool {
 	for _, m := range msgs {
-		for _, p := range m.ContentParts {
-			if p.Type == "image_url" {
+		for _, p := range m.Content {
+			if p.GetMedia() != nil {
 				return true
+			}
+			if r := p.GetToolResult(); r != nil {
+				for _, block := range r.Output {
+					if block.GetMedia() != nil {
+						return true
+					}
+				}
 			}
 		}
 	}
@@ -226,23 +314,27 @@ func (c *stubPseudoCommand) Run(_ context.Context, execution *commands.Execution
 
 func chatResponse(msg ChatMessage) *ChatCompletionResponse {
 	return &ChatCompletionResponse{
-		Choices: []Choice{{Message: msg}},
+		Choices: []Choice{{Message: msg.toAOP()}},
 	}
 }
 
 func cloneRequest(req *ChatCompletionRequest) *ChatCompletionRequest {
 	cloned := *req
-	cloned.Messages = append([]ChatMessage(nil), req.Messages...)
-	cloned.Tools = append([]ToolDefinition(nil), req.Tools...)
+	cloned.Messages = append([]*aop.Message(nil), req.Messages...)
+	cloned.Tools = append([]*aop.ToolDefinition(nil), req.Tools...)
 	return &cloned
 }
 
-func hasToolMessage(messages []ChatMessage, toolCallID, contains string) bool {
+func hasToolMessage(messages []*aop.Message, toolCallID, contains string) bool {
 	for _, msg := range messages {
-		if msg.Role != "tool" || msg.ToolCallID != toolCallID || msg.Content == nil {
+		if msg.Role != "tool" {
 			continue
 		}
-		if strings.Contains(*msg.Content, contains) {
+		r := provider.MessageToolResult(msg)
+		if r == nil || r.CallId != toolCallID {
+			continue
+		}
+		if strings.Contains(tool.ResultText(r), contains) {
 			return true
 		}
 	}
@@ -279,11 +371,12 @@ func strPtr(s string) *string {
 	return &s
 }
 
-func contentOf(m ChatMessage) string {
-	if m.Content == nil {
-		return ""
-	}
-	return *m.Content
+func messageContent(m *aop.Message) string {
+	return provider.MessageText(m)
+}
+
+func contentOf(m *aop.Message) string {
+	return provider.MessageText(m)
 }
 
 func envOr(key, fallback string) string {
@@ -308,8 +401,11 @@ func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, cont
 	if !hasToolMessage(req.Messages, toolCallID, contains) {
 		var actual string
 		for _, msg := range req.Messages {
-			if msg.Role == "tool" && msg.ToolCallID == toolCallID && msg.Content != nil {
-				actual = *msg.Content
+			if msg.Role != "tool" {
+				continue
+			}
+			if r := provider.MessageToolResult(msg); r != nil && r.CallId == toolCallID {
+				actual = tool.ResultText(r)
 				break
 			}
 		}

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -15,18 +14,18 @@ import (
 
 const (
 	maxDimension    = 2000
-	maxPayloadBytes = 4_500_000 // 4.5MB base64, below Anthropic's 5MB limit
+	maxPayloadBytes = 3_400_000 // raw bytes; ~4.5MB base64, below Anthropic's 5MB limit
 )
 
 var jpegQualities = []int{85, 70, 55, 40}
 
 type optimizedImage struct {
-	MimeType   string
-	Base64Data string
-	OrigW      int
-	OrigH      int
-	FinalW     int
-	FinalH     int
+	MimeType string
+	Data     []byte
+	OrigW    int
+	OrigH    int
+	FinalW   int
+	FinalH   int
 }
 
 func optimizeImage(r io.Reader, srcMime string) (*optimizedImage, error) {
@@ -52,29 +51,28 @@ func optimizeImage(r io.Reader, srcMime string) (*optimizedImage, error) {
 	finalBounds := img.Bounds()
 	finalW, finalH := finalBounds.Dx(), finalBounds.Dy()
 
-	b64, mime, err := pickSmallestEncoding(img)
+	data, mime, err := pickSmallestEncoding(img)
 	if err != nil {
 		return nil, err
 	}
 
 	return &optimizedImage{
-		MimeType:   mime,
-		Base64Data: b64,
-		OrigW:      origW,
-		OrigH:      origH,
-		FinalW:     finalW,
-		FinalH:     finalH,
+		MimeType: mime,
+		Data:     data,
+		OrigW:    origW,
+		OrigH:    origH,
+		FinalW:   finalW,
+		FinalH:   finalH,
 	}, nil
 }
 
 func passthrough(raw []byte, mime string) (*optimizedImage, error) {
-	b64 := base64.StdEncoding.EncodeToString(raw)
-	if base64Len(len(raw)) > maxPayloadBytes {
-		return nil, fmt.Errorf("image too large after encoding (%d bytes, max %d)", base64Len(len(raw)), maxPayloadBytes)
+	if len(raw) > maxPayloadBytes {
+		return nil, fmt.Errorf("image too large after encoding (%d bytes, max %d)", len(raw), maxPayloadBytes)
 	}
 	return &optimizedImage{
-		MimeType:   mime,
-		Base64Data: b64,
+		MimeType: mime,
+		Data:     raw,
 	}, nil
 }
 
@@ -105,7 +103,7 @@ func resizeIfNeeded(img image.Image, w, h int) image.Image {
 
 // pickSmallestEncoding tries PNG and multiple JPEG quality levels,
 // returning the smallest encoding that fits under maxPayloadBytes.
-func pickSmallestEncoding(img image.Image) (b64 string, mime string, err error) {
+func pickSmallestEncoding(img image.Image) (data []byte, mime string, err error) {
 	pngData := encodePNG(img)
 	jpegData := encodeJPEG(img, jpegQualities[0])
 
@@ -117,15 +115,15 @@ func pickSmallestEncoding(img image.Image) (b64 string, mime string, err error) 
 		bestMime = "image/jpeg"
 	}
 
-	if base64Len(len(best)) <= maxPayloadBytes {
-		return base64.StdEncoding.EncodeToString(best), bestMime, nil
+	if len(best) <= maxPayloadBytes {
+		return best, bestMime, nil
 	}
 
 	// Too large — try lower JPEG qualities
 	for _, q := range jpegQualities[1:] {
 		jpegData = encodeJPEG(img, q)
-		if base64Len(len(jpegData)) <= maxPayloadBytes {
-			return base64.StdEncoding.EncodeToString(jpegData), "image/jpeg", nil
+		if len(jpegData) <= maxPayloadBytes {
+			return jpegData, "image/jpeg", nil
 		}
 	}
 
@@ -144,12 +142,12 @@ func pickSmallestEncoding(img image.Image) (b64 string, mime string, err error) 
 		dst := image.NewRGBA(image.Rect(0, 0, w, h))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
 		jpegData = encodeJPEG(dst, jpegQualities[0])
-		if base64Len(len(jpegData)) <= maxPayloadBytes {
-			return base64.StdEncoding.EncodeToString(jpegData), "image/jpeg", nil
+		if len(jpegData) <= maxPayloadBytes {
+			return jpegData, "image/jpeg", nil
 		}
 	}
 
-	return "", "", fmt.Errorf("cannot compress image to fit %d byte limit", maxPayloadBytes)
+	return nil, "", fmt.Errorf("cannot compress image to fit %d byte limit", maxPayloadBytes)
 }
 
 func encodePNG(img image.Image) []byte {
@@ -163,8 +161,4 @@ func encodeJPEG(img image.Image, quality int) []byte {
 	var buf bytes.Buffer
 	_ = jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
 	return buf.Bytes()
-}
-
-func base64Len(n int) int {
-	return (n + 2) / 3 * 4
 }

@@ -1,58 +1,47 @@
 package tool
 
-import "strings"
+import (
+	"strings"
 
-// ContentBlock represents one piece of a tool result (text or image).
-type ContentBlock struct {
-	Type       string `json:"type"`
-	Text       string `json:"text,omitempty"`
-	MimeType   string `json:"mime_type,omitempty"`
-	Base64Data string `json:"base64_data,omitempty"`
-}
+	aop "github.com/chainreactors/aiscan/aop"
+)
 
-func TextBlock(text string) ContentBlock {
-	return ContentBlock{Type: "text", Text: text}
-}
+// Result is the value returned by Tool.Execute — the AOP tool result proto.
+type Result = aop.ToolResult
 
-func ImageBlock(mimeType, base64Data string) ContentBlock {
-	return ContentBlock{Type: "image", MimeType: mimeType, Base64Data: base64Data}
-}
-
-// Result is the value returned by Tool.Execute.
-type Result struct {
-	Content   []ContentBlock
-	Details   any
-	IsError   bool
-	Terminate bool
-}
-
-func (r Result) Text() string {
+func ResultText(r *Result) string {
+	if r == nil {
+		return ""
+	}
 	var sb strings.Builder
-	for _, block := range r.Content {
-		if block.Type == "text" {
-			sb.WriteString(block.Text)
+	for _, block := range r.Output {
+		if text := block.GetText(); text != nil {
+			sb.WriteString(text.Text)
 		}
 	}
 	return sb.String()
 }
 
-func (r Result) HasImages() bool {
-	for _, block := range r.Content {
-		if block.Type == "image" {
+func ResultHasImages(r *Result) bool {
+	if r == nil {
+		return false
+	}
+	for _, block := range r.Output {
+		if media := block.GetMedia(); media != nil && media.Kind == "image" {
 			return true
 		}
 	}
 	return false
 }
 
-func TextResult(s string) Result {
-	return Result{Content: []ContentBlock{TextBlock(s)}}
+func TextResult(s string) *Result {
+	return &Result{Output: []*aop.Content{aop.Text(s)}}
 }
 
-func ErrorResult(msg string) Result {
-	return Result{Content: []ContentBlock{TextBlock(msg)}, IsError: true}
+func ErrorResult(msg string) *Result {
+	return &Result{Output: []*aop.Content{aop.Text(msg)}, IsError: true}
 }
 
-func TerminateResult(s string) Result {
-	return Result{Content: []ContentBlock{TextBlock(s)}, Terminate: true}
+func TerminateResult(s string) *Result {
+	return &Result{Output: []*aop.Content{aop.Text(s)}, Terminate: true}
 }

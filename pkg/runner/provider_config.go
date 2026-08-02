@@ -5,6 +5,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	configpb "github.com/chainreactors/aiscan/pkg/types/config"
 )
 
 func defaultProviderConfig() agent.ProviderConfig {
@@ -122,4 +123,51 @@ func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig agent.Provi
 	option.Model = providerConfig.Model
 	option.MaxTokens = providerConfig.MaxTokens
 	option.ContextWindow = providerConfig.ContextWindow
+}
+
+// ProviderConfigFromProto resolves the active LLM profile directly from the
+// canonical config proto. This is the only provider-config path used when a
+// DistributeConfig is already in hand (remote agents, hub reload).
+func ProviderConfigFromProto(llm *configpb.LLMConfig) agent.ProviderConfig {
+	active := cfg.ActiveLLMProvider(llm)
+	if active == nil {
+		return defaultProviderConfig()
+	}
+	return providerConfigFromProto(active)
+}
+
+// FallbackProviderConfigsFromProto returns every non-active profile in order.
+func FallbackProviderConfigsFromProto(llm *configpb.LLMConfig) []agent.ProviderConfig {
+	if llm == nil {
+		return nil
+	}
+	active := cfg.ActiveLLMProvider(llm)
+	var configs []agent.ProviderConfig
+	for _, profile := range llm.Providers {
+		if active != nil && profile.Id == active.Id {
+			continue
+		}
+		configs = append(configs, providerConfigFromProto(profile))
+	}
+	return configs
+}
+
+func providerConfigFromProto(profile *configpb.LLMProviderConfig) agent.ProviderConfig {
+	profile = cfg.NormalizeLLMProvider(profile)
+	providerName := strings.TrimSpace(profile.Provider)
+	if providerName == "" {
+		providerName = agent.InferProviderFromBaseURL(profile.BaseUrl)
+	} else {
+		providerName = agent.NormalizeProvider(providerName)
+	}
+	return agent.ProviderConfig{
+		Provider:      providerName,
+		BaseURL:       profile.BaseUrl,
+		APIKey:        profile.ApiKey,
+		Model:         profile.Model,
+		Proxy:         profile.Proxy,
+		Timeout:       120,
+		MaxTokens:     int(profile.MaxTokens),
+		ContextWindow: int(profile.ContextWindow),
+	}
 }

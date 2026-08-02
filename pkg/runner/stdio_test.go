@@ -10,18 +10,19 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	transport "github.com/chainreactors/aiscan/aop/aiscan/transport"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	commandpb "github.com/chainreactors/aiscan/pkg/types/command"
 	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 func newTestStdioHost(output io.Writer) *stdioHost {
 	return newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
 }
 
-func protocolLine(t *testing.T, frame *transport.ServerFrame) string {
+func protocolLine(t *testing.T, id string, message protobuf.Message) string {
 	t.Helper()
-	data, err := protojson.Marshal(frame)
+	data, err := protojson.Marshal(aop.MustWrap(id, "", message))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,53 +30,44 @@ func protocolLine(t *testing.T, frame *transport.ServerFrame) string {
 }
 
 func openSessionLine(t *testing.T, sessionID string) string {
-	return protocolLine(t, &transport.ServerFrame{
-		CorrelationId: "open-" + sessionID,
-		Payload: &transport.ServerFrame_OpenSession{OpenSession: &aop.OpenSessionRequest{
-			RequestId: "open-" + sessionID, SessionId: sessionID,
-		}},
-	})
+	id := "open-" + sessionID
+	return protocolLine(t, id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{OpenSessionRequest: &aop.OpenSessionRequest{
+		SessionId: sessionID,
+	}}})
 }
 
 func runLine(t *testing.T, sessionID, turnID, text string) string {
-	return protocolLine(t, &transport.ServerFrame{
-		CorrelationId: turnID,
-		Payload: &transport.ServerFrame_RunTurn{RunTurn: &aop.RunTurnRequest{
-			RequestId: turnID, SessionId: sessionID, TurnId: turnID,
-			Input: &aop.Message{Id: "input-" + turnID, Role: "user", Content: []*aop.Content{aop.Text(text)}},
-		}},
-	})
+	return protocolLine(t, turnID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnRequest{RunTurnRequest: &aop.RunTurnRequest{
+		SessionId: sessionID, TurnId: turnID,
+		Input: &aop.Message{Id: "input-" + turnID, Role: "user", Content: []*aop.Content{aop.Text(text)}},
+	}}})
 }
 
 func closeSessionLine(t *testing.T, sessionID, reason string) string {
-	return protocolLine(t, &transport.ServerFrame{
-		CorrelationId: "close-" + sessionID,
-		Payload: &transport.ServerFrame_CloseSession{CloseSession: &aop.CloseSessionRequest{
-			RequestId: "close-" + sessionID, SessionId: sessionID, Reason: reason,
-		}},
-	})
+	id := "close-" + sessionID
+	return protocolLine(t, id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: &aop.CloseSessionRequest{
+		SessionId: sessionID, Reason: reason,
+	}}})
 }
 
 func TestStdioAcceptRejectsMalformedJSON(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
 	h.accept("not json")
-	frames := decodeAgentFrames(t, &output)
-	if len(frames) != 1 || frames[0].GetOperationError() == nil {
-		t.Fatalf("frames = %#v", frames)
-	}
-	if !strings.Contains(frames[0].GetOperationError().Message, "decode frame") {
-		t.Fatalf("error = %+v", frames[0].GetOperationError())
+	envelopes := decodeEnvelopes(t, &output)
+	message := unwrapCore(t, envelopes[0])
+	if len(envelopes) != 1 || message.GetProtocolError() == nil || !strings.Contains(message.GetProtocolError().Message, "decode frame") {
+		t.Fatalf("envelopes = %#v", envelopes)
 	}
 }
 
 func TestStdioAcceptRejectsUnsupportedFrame(t *testing.T) {
 	var output bytes.Buffer
 	h := newTestStdioHost(&output)
-	h.accept(protocolLine(t, &transport.ServerFrame{CorrelationId: "future"}))
-	frames := decodeAgentFrames(t, &output)
-	if len(frames) != 1 || frames[0].GetOperationError() == nil || frames[0].CorrelationId != "future" {
-		t.Fatalf("frames = %#v", frames)
+	h.accept(protocolLine(t, "future", &aop.ProtocolMessage{}))
+	envelopes := decodeEnvelopes(t, &output)
+	if len(envelopes) != 1 || unwrapCore(t, envelopes[0]).GetProtocolError() == nil || envelopes[0].ReplyTo != "future" {
+		t.Fatalf("envelopes = %#v", envelopes)
 	}
 }
 
@@ -84,9 +76,9 @@ func TestStdioRunRequiresOpenSession(t *testing.T) {
 	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
 	h.accept(runLine(t, "s1", "turn-1", "hello"))
-	frames := decodeAgentFrames(t, &output)
-	if len(frames) != 1 || frames[0].GetRunTurn().GetRejected() == nil {
-		t.Fatalf("frames = %#v", frames)
+	envelopes := decodeEnvelopes(t, &output)
+	if len(envelopes) != 1 || unwrapCore(t, envelopes[0]).GetRunTurnResponse().GetRejected() == nil {
+		t.Fatalf("envelopes = %#v", envelopes)
 	}
 }
 
@@ -97,9 +89,18 @@ func TestStdioRunRejectsEmptyPrompt(t *testing.T) {
 	h.accept(openSessionLine(t, "s1"))
 	h.accept(runLine(t, "s1", "turn-1", "   "))
 	h.drain()
-	frames := decodeAgentFrames(t, &output)
-	if frames[len(frames)-1].GetRunTurn().GetRejected() == nil {
-		t.Fatalf("frames = %#v", frames)
+	envelopes := decodeEnvelopes(t, &output)
+	var rejected bool
+	for _, envelope := range envelopes {
+		message, err := aop.Unwrap(envelope)
+		if err == nil {
+			if core, ok := message.(*aop.ProtocolMessage); ok && core.GetRunTurnResponse().GetRejected() != nil {
+				rejected = true
+			}
+		}
+	}
+	if !rejected {
+		t.Fatalf("envelopes = %#v", envelopes)
 	}
 }
 
@@ -108,19 +109,18 @@ func TestStdioCommandUsesIndependentCorrelationID(t *testing.T) {
 	h := newRuntimeStdioHost(t, &output, nil)
 	defer h.rt.Close()
 	h.accept(openSessionLine(t, "s1"))
-	h.accept(protocolLine(t, &transport.ServerFrame{
-		CorrelationId: "command-correlation",
-		Payload: &transport.ServerFrame_Command{Command: &transport.CommandRequest{
-			TaskId: "command-1", SessionId: "s1", Line: "/help",
-		}},
-	}))
+	h.accept(protocolLine(t, "command-correlation", &commandpb.ProtocolMessage{Message: &commandpb.ProtocolMessage_Request{Request: &commandpb.Request{
+		SessionId: "s1", Line: "/help",
+	}}}))
 	h.drain()
-	for _, frame := range decodeAgentFrames(t, &output) {
-		if frame.GetCommandResult() == nil {
+	for _, envelope := range decodeEnvelopes(t, &output) {
+		message, err := aop.Unwrap(envelope)
+		command, ok := message.(*commandpb.ProtocolMessage)
+		if err != nil || !ok || command.GetResult() == nil {
 			continue
 		}
-		if frame.CorrelationId != "command-correlation" || frame.GetCommandResult().TaskId != "command-1" {
-			t.Fatalf("command result correlation = %+v", frame)
+		if envelope.ReplyTo != "command-correlation" {
+			t.Fatalf("command result correlation = %+v", envelope)
 		}
 		return
 	}
@@ -140,28 +140,45 @@ func TestStdioDrainWithoutRuns(t *testing.T) {
 	newTestStdioHost(&output).drain()
 }
 
-func decodeAgentFrames(t *testing.T, input *bytes.Buffer) []*transport.AgentFrame {
+func decodeEnvelopes(t *testing.T, input *bytes.Buffer) []*aop.Envelope {
 	t.Helper()
-	var frames []*transport.AgentFrame
+	var envelopes []*aop.Envelope
 	scanner := bufio.NewScanner(bytes.NewReader(input.Bytes()))
 	for scanner.Scan() {
-		frame := new(transport.AgentFrame)
-		if err := protojson.Unmarshal(scanner.Bytes(), frame); err != nil {
+		envelope := new(aop.Envelope)
+		if err := protojson.Unmarshal(scanner.Bytes(), envelope); err != nil {
 			t.Fatal(err)
 		}
-		frames = append(frames, frame)
+		envelopes = append(envelopes, envelope)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	return frames
+	return envelopes
 }
 
-func decodeAOPMessages(frames []*transport.AgentFrame) []*aop.Event {
+func unwrapCore(t *testing.T, envelope *aop.Envelope) *aop.ProtocolMessage {
+	t.Helper()
+	message, err := aop.Unwrap(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	core, ok := message.(*aop.ProtocolMessage)
+	if !ok {
+		t.Fatalf("message = %T", message)
+	}
+	return core
+}
+
+func decodeAOPMessages(envelopes []*aop.Envelope) []*aop.Event {
 	var events []*aop.Event
-	for _, frame := range frames {
-		if event := frame.GetEvent(); event != nil {
-			events = append(events, event)
+	for _, envelope := range envelopes {
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			continue
+		}
+		if core, ok := message.(*aop.ProtocolMessage); ok && core.GetEvent() != nil {
+			events = append(events, core.GetEvent())
 		}
 	}
 	return events

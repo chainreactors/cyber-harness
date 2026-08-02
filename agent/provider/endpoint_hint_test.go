@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // A 404 on the chat endpoint must surface as an actionable protocol-mismatch
@@ -34,7 +36,7 @@ func TestChatCompletion404GivesProtocolHint(t *testing.T) {
 				t.Fatalf("NewProvider: %v", err)
 			}
 			_, err = p.ChatCompletion(context.Background(), &ChatCompletionRequest{
-				Messages: []ChatMessage{NewTextMessage("user", "hi")},
+				Messages: []*aop.Message{TextMessage("user", "hi")},
 			})
 			if err == nil {
 				t.Fatal("expected a 404 error")

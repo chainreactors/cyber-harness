@@ -40,7 +40,7 @@ type AgentRuntime struct {
 	sessionEvents  *sessionEmitter
 	output         *tui.AgentOutput
 	configFile     string
-	resumeMessages []agent.ChatMessage
+	resumeMessages []*aop.Message
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
@@ -50,6 +50,7 @@ type AgentRuntime struct {
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
 	operations     sync.WaitGroup
+	namespaceMux   *aop.NamespaceMux
 	ptyManager     *tmuxpkg.Manager
 	replMode       REPLMode
 	maxPending     int
@@ -93,6 +94,12 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		sessions: make(map[string]*sessionState),
 		runs:     make(map[string]*Run),
 	}
+	namespaceMux, err := newRuntimeNamespaceMux(rt)
+	if err != nil {
+		runtimeCancel()
+		return nil, fmt.Errorf("init runtime namespaces: %w", err)
+	}
+	rt.namespaceMux = namespaceMux
 	if rc != nil {
 		rt.replMode = rc.REPLMode
 		rt.maxPending = rc.MaxPending

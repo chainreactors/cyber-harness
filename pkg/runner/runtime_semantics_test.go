@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -23,12 +23,12 @@ type runtimeSemanticProvider struct {
 	calls   int
 	started chan struct{}
 	release chan struct{}
-	usage   *agent.Usage
+	usage   *aop.TokenUsage
 }
 
 func (p *runtimeSemanticProvider) Name() string { return "runtime-semantic" }
 
-func (p *runtimeSemanticProvider) ChatCompletion(ctx context.Context, _ *agent.ChatCompletionRequest) (*agent.ChatCompletionResponse, error) {
+func (p *runtimeSemanticProvider) ChatCompletion(ctx context.Context, _ *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls
@@ -41,8 +41,8 @@ func (p *runtimeSemanticProvider) ChatCompletion(ctx context.Context, _ *agent.C
 			return nil, ctx.Err()
 		}
 	}
-	return &agent.ChatCompletionResponse{
-		Choices: []agent.Choice{{Message: agent.NewTextMessage("assistant", "done")}},
+	return &provider.ChatCompletionResponse{
+		Choices: []provider.Choice{{Message: provider.TextMessage("assistant", "done")}},
 		Usage:   p.usage,
 	}, nil
 }
@@ -114,7 +114,7 @@ func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 	unsubscribe := rt.Subscribe(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) })
 	defer unsubscribe()
 
-	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{RequestId: "open-1", SessionId: "session-1"})
+	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{SessionId: "session-1"})
 	if opened.GetAccepted() == nil {
 		t.Fatalf("OpenAOPSession = %v", opened)
 	}
@@ -123,7 +123,7 @@ func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 		Content: []*aop.Content{aop.Text("preserve my identity")},
 	}
 	run := rt.RunAOPTurn(context.Background(), &aop.RunTurnRequest{
-		RequestId: "run-1", SessionId: "session-1", TurnId: "turn-1", Input: input,
+		SessionId: "session-1", TurnId: "turn-1", Input: input,
 	})
 	if run.GetAccepted() == nil {
 		t.Fatalf("RunAOPTurn = %v", run)
@@ -150,10 +150,7 @@ func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 }
 
 func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
-	provider := &runtimeSemanticProvider{usage: &agent.Usage{
-		PromptTokens: 8192,
-		TotalTokens:  8200,
-	}}
+	provider := &runtimeSemanticProvider{usage: provider.TokenUsage(8192, 0, 8200, 0, 0)}
 	rt := newBareRuntime(t, nil, provider)
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {

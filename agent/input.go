@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 )
@@ -14,145 +12,59 @@ import (
 // provider limits.
 const maxInputImageBytes = 20 << 20
 
-// InputImage is a user-supplied image, either by local path (read and encoded
-// by the agent) or inline base64 with an explicit media type.
-type InputImage struct {
-	Path      string
-	Base64    string
-	MediaType string
+// TextInput builds a plain user message from text.
+func TextInput(text string) *aop.Message {
+	return &aop.Message{Role: "user", Content: []*aop.Content{aop.Text(text)}}
 }
 
-// InputPart is one part of a user input: text or image.
-type InputPart struct {
-	Text  string
-	Image *InputImage
-}
-
-// Input is the agent's inbound unit. A text-only input becomes a plain user
-// message; inputs with images become a multimodal message.
-type Input struct {
-	MessageID string
-	Role      string
-	Name      string
-	Parts     []InputPart
-}
-
-func TextInput(text string) Input {
-	return Input{Parts: []InputPart{{Text: text}}}
-}
-
-// InputFromAOPMessage maps the protocol's typed message parts into the Agent's
-// provider input. Session.Run is the only runtime entry point that calls it.
-func InputFromAOPMessage(message *aop.Message) Input {
-	input := Input{MessageID: message.GetId(), Role: message.GetRole(), Name: message.GetName()}
+// resolveInputMessage prepares a user-supplied aop message for the provider:
+// image parts referenced by file URI are read from disk and inlined as data,
+// enforcing the size cap.
+func resolveInputMessage(message *aop.Message) (*aop.Message, error) {
 	if message == nil {
-		return input
+		return nil, fmt.Errorf("input message is required")
 	}
+	resolved := *message
+	resolved.Content = make([]*aop.Content, 0, len(message.Content))
 	for _, content := range message.Content {
-		switch value := content.Value.(type) {
-		case *aop.Content_Text:
-			input.Parts = append(input.Parts, InputPart{Text: value.Text.Text})
-		case *aop.Content_Media:
-			if value.Media.Kind != "image" || value.Media.Resource == nil {
-				continue
-			}
-			image := &InputImage{MediaType: value.Media.Resource.MediaType}
-			switch source := value.Media.Resource.Source.(type) {
-			case *aop.Resource_Data:
-				image.Base64 = base64.StdEncoding.EncodeToString(source.Data)
-			case *aop.Resource_Uri:
-				image.Path = source.Uri
-			}
-			input.Parts = append(input.Parts, InputPart{Image: image})
-		}
-	}
-	return input
-}
-
-// Text returns the textual parts joined in their original order. Image parts
-// are intentionally omitted; callers use Parts when they need the full input.
-func (in Input) Text() string {
-	var sb strings.Builder
-	for _, p := range in.Parts {
-		if p.Text == "" {
+		media := content.GetMedia()
+		if media == nil || media.Kind != "image" || media.Resource == nil {
+			resolved.Content = append(resolved.Content, content)
 			continue
 		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(p.Text)
-	}
-	return sb.String()
-}
-
-// chatMessage validates the input and converts it to an LLM message.
-func (in Input) chatMessage() (ChatMessage, error) {
-	role := in.Role
-	if role == "" {
-		role = "user"
-	}
-	hasImage := false
-	for _, p := range in.Parts {
-		if p.Image != nil {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
-		message := NewTextMessage(role, in.Text())
-		message.AOPMessageID = in.MessageID
-		message.Name = in.Name
-		return message, nil
-	}
-	parts := make([]ContentPart, 0, len(in.Parts))
-	for _, p := range in.Parts {
-		if p.Text != "" {
-			parts = append(parts, TextPart(p.Text))
-		}
-		if p.Image == nil {
+		resource := media.Resource
+		if data := resource.GetData(); len(data) > 0 {
+			if len(data) > maxInputImageBytes {
+				return nil, fmt.Errorf("image exceeds %d MiB limit", maxInputImageBytes>>20)
+			}
+			if resource.MediaType == "" {
+				return nil, fmt.Errorf("base64 image requires media_type")
+			}
+			resolved.Content = append(resolved.Content, content)
 			continue
 		}
-		mediaType, data, err := p.Image.load()
-		if err != nil {
-			return ChatMessage{}, err
+		uri := resource.GetUri()
+		if uri == "" {
+			return nil, fmt.Errorf("image part has neither data nor uri")
 		}
-		parts = append(parts, ImagePart(mediaType, data, "high"))
-	}
-	message := NewMultimodalMessage(role, parts)
-	message.AOPMessageID = in.MessageID
-	message.Name = in.Name
-	return message, nil
-}
-
-// load resolves the image to (mediaType, base64Data), enforcing the size cap.
-func (im *InputImage) load() (string, string, error) {
-	if im.Path != "" {
-		raw, err := os.ReadFile(im.Path)
+		raw, err := os.ReadFile(uri)
 		if err != nil {
-			return "", "", fmt.Errorf("read image %s: %w", im.Path, err)
+			return nil, fmt.Errorf("read image %s: %w", uri, err)
 		}
 		if len(raw) > maxInputImageBytes {
-			return "", "", fmt.Errorf("image %s exceeds %d MiB limit", im.Path, maxInputImageBytes>>20)
+			return nil, fmt.Errorf("image %s exceeds %d MiB limit", uri, maxInputImageBytes>>20)
 		}
-		mediaType := im.MediaType
+		mediaType := resource.MediaType
 		if mediaType == "" {
 			mediaType = http.DetectContentType(raw)
 		}
-		return mediaType, base64.StdEncoding.EncodeToString(raw), nil
+		resolved.Content = append(resolved.Content, &aop.Content{Value: &aop.Content_Media{Media: &aop.MediaContent{
+			Kind: "image",
+			Resource: &aop.Resource{
+				Source:    &aop.Resource_Data{Data: raw},
+				MediaType: mediaType,
+			},
+		}}})
 	}
-	if im.Base64 == "" {
-		return "", "", fmt.Errorf("image part has neither path nor base64 data")
-	}
-	raw, err := base64.StdEncoding.DecodeString(im.Base64)
-	if err != nil {
-		return "", "", fmt.Errorf("decode image base64: %w", err)
-	}
-	if len(raw) > maxInputImageBytes {
-		return "", "", fmt.Errorf("image exceeds %d MiB limit", maxInputImageBytes>>20)
-	}
-	mediaType := im.MediaType
-	if mediaType == "" {
-		return "", "", fmt.Errorf("base64 image requires media_type")
-	}
-	return mediaType, im.Base64, nil
+	return &resolved, nil
 }

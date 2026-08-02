@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	ext "github.com/chainreactors/aiscan/aop/aiscan/extensions"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/tool"
+	ext "github.com/chainreactors/aiscan/pkg/types/extensions"
 )
 
 // streamEventCollector records message/message.delta events from the bus.
@@ -49,11 +50,11 @@ func (c *streamEventCollector) assistantMessages() []*aop.Message {
 
 func reasoningStreamEvents() []ChatCompletionStreamEvent {
 	return []ChatCompletionStreamEvent{
-		{Delta: ChatMessageDelta{Role: "assistant"}},
-		{Delta: ChatMessageDelta{ReasoningContent: strPtr("think-")}},
-		{Delta: ChatMessageDelta{ReasoningContent: strPtr("hard")}},
-		{Delta: ChatMessageDelta{Content: strPtr("ans-")}},
-		{Delta: ChatMessageDelta{Content: strPtr("wer")}},
+		roleDelta("assistant"),
+		reasoningDelta("think-"),
+		reasoningDelta("hard"),
+		textDelta("ans-"),
+		textDelta("wer"),
 		{Done: true},
 	}
 }
@@ -182,12 +183,12 @@ func TestMessageIDStableAcrossStreamRetry(t *testing.T) {
 	}
 }
 
-func TestStatusPreservesTypedExtensionNamespace(t *testing.T) {
+func TestStatusPreservesTypedExtension(t *testing.T) {
 	bus := eventbus.New[*aop.Event]()
 	var emitted *aop.Event
 	bus.Subscribe(func(event *aop.Event) { emitted = event })
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0)
-	emitter.status(ext.CompactStateEnd, ext.CompactNamespace, &ext.CompactDetail{
+	emitter.status(ext.CompactStateEnd, &ext.CompactDetail{
 		TokensBefore: 1000,
 		TokensAfter:  400,
 		KeptMessages: 8,
@@ -200,9 +201,6 @@ func TestStatusPreservesTypedExtensionNamespace(t *testing.T) {
 	if err != nil || !ok || detail.TokensBefore != 1000 || detail.TokensAfter != 400 || detail.KeptMessages != 8 {
 		t.Fatalf("compact detail = %+v, ok=%v, err=%v", detail, ok, err)
 	}
-	if emitted.GetStatus().Detail != nil {
-		t.Fatal("status detail must have one canonical representation in event.extensions")
-	}
 }
 
 func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
@@ -210,10 +208,10 @@ func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
 	var emitted *aop.Event
 	bus.Subscribe(func(event *aop.Event) { emitted = event })
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0).turn("turn-1")
-	emitter.toolResult("call-1", "scan", []*aop.Content{
+	emitter.toolResult(&aop.ToolCall{Id: "call-1", Name: "scan"}, []*aop.Content{
 		aop.Text("done"),
 		aop.Image("image/png", []byte("image")),
-	}, map[string]any{"ports": 3}, true, true, 12)
+	}, &tool.Result{}, true, true, 12)
 
 	result := emitted.GetToolResult()
 	if result == nil || result.CallId != "call-1" || result.Name != "scan" || !result.Terminate || !result.IsError || result.DurationMs != 12 {
@@ -221,9 +219,5 @@ func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
 	}
 	if len(result.Output) != 2 || result.Output[0].GetText().GetText() != "done" || string(result.Output[1].GetMedia().GetResource().GetData()) != "image" {
 		t.Fatalf("tool result output = %+v", result.Output)
-	}
-	detail, err := aop.DecodeJSON[map[string]int](result.Detail)
-	if err != nil || detail["ports"] != 3 {
-		t.Fatalf("tool result detail = %+v, err=%v", detail, err)
 	}
 }

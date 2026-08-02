@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
 )
@@ -44,21 +45,21 @@ type ReadArgs struct {
 	Limit  int    `json:"limit,omitempty"  jsonschema:"description=Maximum number of lines to read (default: 2000)"`
 }
 
-func (t *ReadTool) Definition() coretool.Definition {
+func (t *ReadTool) Definition() *coretool.Definition {
 	return coretool.Def("read", t.Description(), ReadArgs{})
 }
 
-func (t *ReadTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+func (t *ReadTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	effective := *t
 	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
 	t = &effective
 	args, err := coretool.ParseArgs[ReadArgs](arguments)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 
 	if args.Path == "" {
-		return coretool.Result{}, fmt.Errorf("path is required")
+		return nil, fmt.Errorf("path is required")
 	}
 
 	// Virtual file reads (aiscan://..., embedded skills, etc.)
@@ -75,11 +76,11 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (coretool.Resu
 		if result, ok := t.tryVirtualFallback(args.Path); ok {
 			return result, nil
 		}
-		return coretool.Result{}, fmt.Errorf("file not found: %s", args.Path)
+		return nil, fmt.Errorf("file not found: %s", args.Path)
 	}
 
 	if info.IsDir() {
-		return coretool.Result{}, fmt.Errorf("%s is a directory, not a file", args.Path)
+		return nil, fmt.Errorf("%s is a directory, not a file", args.Path)
 	}
 
 	if mime := detectImageMime(resolved); mime != "" {
@@ -93,10 +94,10 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (coretool.Resu
 	return t.readFileLines(resolved, args.Path, args.Offset, args.Limit)
 }
 
-func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int) (coretool.Result, error) {
+func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int) (*coretool.Result, error) {
 	f, err := os.Open(resolved)
 	if err != nil {
-		return coretool.Result{}, fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
@@ -145,7 +146,7 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 	}
 
 	if err := scanner.Err(); err != nil {
-		return coretool.Result{}, fmt.Errorf("read file: %w", err)
+		return nil, fmt.Errorf("read file: %w", err)
 	}
 
 	content := sb.String()
@@ -161,7 +162,7 @@ func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int
 	return coretool.TextResult(content), nil
 }
 
-func (t *ReadTool) readVirtual(args ReadArgs) (coretool.Result, error) {
+func (t *ReadTool) readVirtual(args ReadArgs) (*coretool.Result, error) {
 	for _, reader := range t.readers {
 		if reader == nil {
 			continue
@@ -171,14 +172,14 @@ func (t *ReadTool) readVirtual(args ReadArgs) (coretool.Result, error) {
 			continue
 		}
 		if err != nil {
-			return coretool.Result{}, err
+			return nil, err
 		}
 		return t.paginateString(content, args.Path, args.Offset, args.Limit), nil
 	}
-	return coretool.Result{}, fmt.Errorf("virtual file not found: %s", args.Path)
+	return nil, fmt.Errorf("virtual file not found: %s", args.Path)
 }
 
-func (t *ReadTool) tryVirtualFallback(path string) (coretool.Result, bool) {
+func (t *ReadTool) tryVirtualFallback(path string) (*coretool.Result, bool) {
 	for _, reader := range t.readers {
 		if reader == nil {
 			continue
@@ -192,10 +193,10 @@ func (t *ReadTool) tryVirtualFallback(path string) (coretool.Result, bool) {
 		}
 		return t.paginateString(content, path, 0, 0), true
 	}
-	return coretool.Result{}, false
+	return nil, false
 }
 
-func (t *ReadTool) paginateString(content, displayPath string, offset, limit int) coretool.Result {
+func (t *ReadTool) paginateString(content, displayPath string, offset, limit int) *coretool.Result {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
@@ -279,31 +280,31 @@ func detectImageMime(path string) string {
 	return ""
 }
 
-func readImageFile(resolved, displayPath, mime string, size int64) (coretool.Result, error) {
+func readImageFile(resolved, displayPath, mime string, size int64) (*coretool.Result, error) {
 	if size > maxImageSize {
 		return coretool.TextResult(fmt.Sprintf("[image too large: %s (%d bytes, max %d)]", displayPath, size, maxImageSize)), nil
 	}
 	f, err := os.Open(resolved)
 	if err != nil {
-		return coretool.Result{}, fmt.Errorf("open image: %w", err)
+		return nil, fmt.Errorf("open image: %w", err)
 	}
 	defer f.Close()
 
 	opt, err := optimizeImage(f, mime)
 	if err != nil {
-		return coretool.Result{}, fmt.Errorf("optimize image: %w", err)
+		return nil, fmt.Errorf("optimize image: %w", err)
 	}
 
-	desc := fmt.Sprintf("Read image file [%s] (%d bytes)", opt.MimeType, len(opt.Base64Data)*3/4)
+	desc := fmt.Sprintf("Read image file [%s] (%d bytes)", opt.MimeType, len(opt.Data))
 	if opt.OrigW > 0 && (opt.OrigW != opt.FinalW || opt.OrigH != opt.FinalH) {
 		desc = fmt.Sprintf("Read image file [%s] (original %dx%d, resized to %dx%d)",
 			opt.MimeType, opt.OrigW, opt.OrigH, opt.FinalW, opt.FinalH)
 	}
 
-	return coretool.Result{
-		Content: []coretool.ContentBlock{
-			coretool.TextBlock(desc),
-			coretool.ImageBlock(opt.MimeType, opt.Base64Data),
+	return &coretool.Result{
+		Output: []*aop.Content{
+			aop.Text(desc),
+			aop.Image(opt.MimeType, opt.Data),
 		},
 	}, nil
 }
