@@ -1,15 +1,21 @@
 module github.com/chainreactors/aiscan
 
-go 1.25.7
+go 1.26
+
+tool (
+	connectrpc.com/connect/cmd/protoc-gen-connect-go
+	google.golang.org/protobuf/cmd/protoc-gen-go
+)
 
 require (
+	connectrpc.com/connect v1.20.0
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
 	github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744
-	github.com/chainreactors/ioa v0.1.2-0.20260720012101-ee17a402fc18
-	github.com/chainreactors/libcstx/go v0.0.0-20260716111447-af6771384af7
+	github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186
+	github.com/chainreactors/libcstx/go v0.3.2
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6
 	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
@@ -23,7 +29,7 @@ require (
 	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
 	github.com/chainreactors/tui/readline v0.0.0-20260723062039-ed89e758c21b
 	github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d
-	github.com/chainreactors/utils/mitmproxy v0.0.0-20260707181750-8aa6ca296863
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260722180147-5b1816060721
 	github.com/chainreactors/utils/parsers v0.0.3
 	github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721
 	github.com/chainreactors/zombie v1.3.0
@@ -43,12 +49,23 @@ require (
 	github.com/projectdiscovery/uncover v1.2.1
 	github.com/projectdiscovery/utils v0.10.1
 	github.com/spf13/cobra v1.10.2
+	github.com/uptrace/bun v1.2.18
+	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	github.com/ysmood/gson v0.7.3
 	golang.org/x/image v0.42.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
+)
+
+require (
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
+	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 )
 
 require (
@@ -94,10 +111,11 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
+	github.com/chainreactors/aiscan/aop v0.0.0
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
-	github.com/chainreactors/utils/cert v0.0.0-20260707181750-8aa6ca296863 // indirect
+	github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721 // indirect
 	github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 // indirect
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -184,7 +202,7 @@ require (
 	github.com/lukasbob/srcset v0.0.0-20190730101422-86b742e617f3 // indirect
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
 	github.com/mark3labs/mcp-go v0.45.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/metacubex/utls v1.7.3 // indirect
@@ -236,7 +254,7 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sijms/go-ora/v2 v2.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -312,3 +330,5 @@ require (
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320
+
+replace github.com/chainreactors/aiscan/aop => ./aop

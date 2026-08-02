@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
 func TestReadSmallFile(t *testing.T) {
@@ -19,7 +21,7 @@ func TestReadSmallFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := res.Text()
+	out := coretool.ResultText(res)
 	if !strings.Contains(out, "line1") {
 		t.Fatalf("expected line1 in output, got: %s", out)
 	}
@@ -42,7 +44,7 @@ func TestReadWithOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := res.Text()
+	out := coretool.ResultText(res)
 	if !strings.Contains(out, "line number 50") {
 		t.Fatalf("expected line 50 at start, got: %s", out)
 	}
@@ -73,7 +75,7 @@ func TestReadLargeFileDoesNotOOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := res.Text()
+	out := coretool.ResultText(res)
 	// Should stop at default limit (2000 lines) and provide continuation hint
 	if !strings.Contains(out, "of 5000 total") {
 		t.Fatalf("expected total line count in output, got: %s", out[len(out)-200:])
@@ -93,8 +95,8 @@ func TestReadBinaryFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "[binary file") {
-		t.Fatalf("expected binary file detection, got: %s", res.Text())
+	if !strings.Contains(coretool.ResultText(res), "[binary file") {
+		t.Fatalf("expected binary file detection, got: %s", coretool.ResultText(res))
 	}
 }
 
@@ -143,11 +145,11 @@ func TestReadImageFileByMagicBytes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
-		if !res.HasImages() {
+		if !coretool.ResultHasImages(res) {
 			t.Fatalf("%s: expected image content", tt.name)
 		}
-		if !strings.Contains(res.Text(), tt.mime) {
-			t.Fatalf("%s: expected mime %s in text, got: %s", tt.name, tt.mime, res.Text())
+		if !strings.Contains(coretool.ResultText(res), tt.mime) {
+			t.Fatalf("%s: expected mime %s in text, got: %s", tt.name, tt.mime, coretool.ResultText(res))
 		}
 	}
 }
@@ -162,7 +164,7 @@ func TestReadNonImageBinaryNotDetectedAsImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.HasImages() {
+	if coretool.ResultHasImages(res) {
 		t.Fatal("non-image binary should not be detected as image")
 	}
 }

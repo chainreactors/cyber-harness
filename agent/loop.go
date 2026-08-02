@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop"
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func runLoop(ctx context.Context, cfg Config) (*Result, error) {
@@ -61,7 +62,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 
 	for turn = 1; ; turn++ {
 		if err := ctx.Err(); err != nil {
-			failure := NewTextMessage("assistant", "")
+			failure := &aop.Message{Role: "assistant"}
 			transcript.append(failure)
 			return end(nil, err, StopReasonCanceled)
 		}
@@ -71,11 +72,14 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				if cfg.Expander != nil {
 					inboxMsgs[i] = cfg.Expander.Expand(msg)
 				}
-				for _, cm := range inboxMsgs[i].ToChatMessages() {
+				for _, cm := range inboxMsgs[i].ToMessages() {
 					transcript.append(cm)
-					noEcho, _ := inboxMsgs[i].Meta["no_echo"].(bool)
-					if inboxMsgs[i].Origin == inbox.OriginUser && !noEcho {
-						em.message("user", messagePartsFromChat(cm))
+					if inboxMsgs[i].Origin == inbox.OriginUser {
+						if cm.Id != "" {
+							em.messageWithIdentity(cm.Id, cm.Role, cm.Name, cm.Content)
+						} else {
+							em.message(cm.Role, cm.Content)
+						}
 					}
 				}
 			}
@@ -103,7 +107,7 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		}
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistantMsg, usage, err := requestWithRetry(ctx, cfg, em, reqMessages, toolDefinitions, turn)
+		assistant, usage, err := requestWithRetry(ctx, cfg, em, reqMessages, toolDefinitions, turn)
 		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -122,8 +126,8 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			transcript.completedTurns = turn
 			return end(nil, err, StopReasonError)
 		}
-		assistantMsg = normalizeToolCalls(assistantMsg)
-		if isLengthContextOverflow(assistantMsg.FinishReason, usage, cfg.ContextWindow) {
+		assistant.normalize()
+		if isLengthContextOverflow(assistant.finishReason, usage, cfg.ContextWindow) {
 			if !overflowRecoveryAttempted {
 				compacted, compactErr := runAutoCompaction(ctx, cfg, em, transcript, "overflow", transcript.contextTokens)
 				if compactErr != nil {
@@ -136,37 +140,39 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 			}
 			promptTokens := 0
 			if usage != nil {
-				promptTokens = usage.PromptTokens
+				promptTokens = int(usage.InputTokens)
 			}
 			overflowErr := fmt.Errorf("LLM context overflow at turn %d (finish_reason=%s, prompt_tokens=%d)",
-				turn, assistantMsg.FinishReason, promptTokens)
+				turn, assistant.finishReason, promptTokens)
 			transcript.completedTurns = turn
 			return end(nil, overflowErr, StopReasonError)
 		}
 		overflowRecoveryAttempted = false
-		if cfg.TokenBudget > 0 && transcript.totalUsage.TotalTokens >= cfg.TokenBudget && len(assistantMsg.ToolCalls) > 0 {
-			cfg.Logger.Warnf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
-			result := transcript.result(messageContent(assistantMsg), turn, fmt.Errorf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget))
+		if cfg.TokenBudget > 0 && transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget) && len(assistant.toolCalls) > 0 {
+			cfg.Logger.Warnf("token budget exhausted: %d/%d", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget)
+			result := transcript.result(provider.MessageText(assistant.message), turn, fmt.Errorf("token budget exhausted: %d/%d", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget))
 			return end(result, result.Err, StopReasonBudget)
 		}
-		transcript.append(assistantMsg)
+		transcript.append(assistant.message)
 
 		if cfg.TokenBudget > 0 {
-			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget {
-				cfg.Logger.Warnf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
-				result := transcript.result(messageContent(assistantMsg), turn, fmt.Errorf("token budget exhausted: %d/%d", transcript.totalUsage.TotalTokens, cfg.TokenBudget))
+			if transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget) {
+				cfg.Logger.Warnf("token budget exhausted: %d/%d", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget)
+				result := transcript.result(provider.MessageText(assistant.message), turn, fmt.Errorf("token budget exhausted: %d/%d", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget))
 				return end(result, result.Err, StopReasonBudget)
 			}
-			if transcript.totalUsage.TotalTokens >= cfg.TokenBudget*DefaultTokenBudgetWarningPct/100 {
-				em.status(aop.StatusTokenBudgetWarning, aop.NSAOP, aop.BudgetWarning{ContextTokens: transcript.contextTokens, TokenBudget: cfg.TokenBudget})
-				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.TotalTokens, cfg.TokenBudget)
+			if transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget)*DefaultTokenBudgetWarningPct/100 {
+				em.status(statusTokenBudgetWarning, &types.BudgetWarning{
+					ContextTokens: uint64(max(transcript.contextTokens, 0)), TokenBudget: uint64(max(cfg.TokenBudget, 0)),
+				})
+				cfg.Logger.Warnf("token budget warning: %d/%d (80%%)", transcript.totalUsage.GetTotalTokens(), cfg.TokenBudget)
 			}
 		}
-		var toolResults []ChatMessage
+		var toolResults []*aop.Message
 		terminate := false
-		if len(assistantMsg.ToolCalls) > 0 {
-			cfg.Messages = append([]ChatMessage(nil), transcript.messages...)
-			batch, err := executeToolCalls(ctx, cfg, em, assistantMsg, turn)
+		if len(assistant.toolCalls) > 0 {
+			cfg.Messages = append([]*aop.Message(nil), transcript.messages...)
+			batch, err := executeToolCalls(ctx, cfg, em, assistant, turn)
 			if err != nil {
 				if ctx.Err() != nil {
 					return end(nil, ctx.Err(), StopReasonCanceled)
@@ -182,17 +188,17 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 		transcript.completedTurns = turn
 
 		if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
-			cfg.Logger.Debugf("agent status=stopped turns=%d/%d tokens=%d", turn, cfg.MaxTurns, transcript.totalUsage.TotalTokens)
-			result := transcript.result(messageContent(assistantMsg), turn, nil)
+			cfg.Logger.Debugf("agent status=stopped turns=%d/%d tokens=%d", turn, cfg.MaxTurns, transcript.totalUsage.GetTotalTokens())
+			result := transcript.result(provider.MessageText(assistant.message), turn, nil)
 			return end(result, nil, StopReasonStopped)
 		}
 
 		if terminate {
-			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
-			result := transcript.result(messageContent(assistantMsg), turn, nil)
+			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.GetTotalTokens())
+			result := transcript.result(provider.MessageText(assistant.message), turn, nil)
 			return end(result, nil, StopReasonTerminated)
 		}
-		if len(assistantMsg.ToolCalls) == 0 {
+		if len(assistant.toolCalls) == 0 {
 			if ib != nil && ib.Len() > 0 {
 				cfg.Logger.Debugf("[turn %d] continuing for pending inbox message(s)", turn)
 				continue
@@ -210,38 +216,107 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				}
 			}
 
-			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.TotalTokens)
-			result := transcript.result(messageContent(assistantMsg), turn, nil)
+			cfg.Logger.Debugf("agent status=completed turns=%d tokens=%d", turn, transcript.totalUsage.GetTotalTokens())
+			result := transcript.result(provider.MessageText(assistant.message), turn, nil)
 			return end(result, nil, StopReasonCompleted)
 		}
 	}
 
 }
 
+// assistantTurn carries one model response: the aop message, its tool calls in
+// execution order, and response metadata that has no place in the proto.
+type assistantTurn struct {
+	message      *aop.Message
+	toolCalls    []*aop.ToolCall
+	finishReason string
+	rejected     map[int]string // tool call index → rejection reason
+}
+
+func (a *assistantTurn) normalize() {
+	if a.message == nil {
+		a.message = &aop.Message{Role: "assistant"}
+	}
+	if a.message.Role == "" {
+		a.message.Role = "assistant"
+	}
+	a.toolCalls = provider.MessageToolCalls(a.message)
+	a.rejected = nil
+	if len(a.toolCalls) == 0 {
+		return
+	}
+	truncated := isOutputLimitFinishReason(a.finishReason)
+	for i, call := range a.toolCalls {
+		rejected := truncated
+		reason := truncatedToolCallError
+		call.Id = strings.TrimSpace(call.Id)
+		call.Name = strings.TrimSpace(call.Name)
+		arguments := ""
+		if call.Arguments != nil {
+			arguments = strings.TrimSpace(string(call.Arguments.Data))
+		}
+		if arguments == "" {
+			arguments = "{}"
+		}
+		call.Arguments = &aop.EncodedValue{Data: []byte(arguments), MediaType: aop.JSONMediaType}
+		if !rejected {
+			var args map[string]any
+			if call.Id == "" || call.Name == "" ||
+				json.Unmarshal([]byte(arguments), &args) != nil || args == nil {
+				rejected = true
+				reason = invalidToolCallError
+			}
+		}
+		if !rejected {
+			if call.Kind == "" {
+				call.Kind = "function"
+			}
+			continue
+		}
+		if call.Id == "" {
+			call.Id = fmt.Sprintf("rejected_tool_call_%d", i+1)
+		}
+		if call.Kind == "" {
+			call.Kind = "function"
+		}
+		if call.Name == "" {
+			call.Name = "unknown_tool"
+		}
+		// Invalid JSON would poison the next Anthropic request during history
+		// serialization. Rejected arguments are never safe to execute or retain.
+		call.Arguments = &aop.EncodedValue{Data: []byte("{}"), MediaType: aop.JSONMediaType}
+		if a.rejected == nil {
+			a.rejected = make(map[int]string)
+		}
+		a.rejected[i] = reason
+	}
+}
+
 type transcript struct {
-	messages          []ChatMessage
-	newMessages       []ChatMessage
+	messages          []*aop.Message
+	newMessages       []*aop.Message
 	completedTurns    int
-	turnUsages        []TurnUsage
-	totalUsage        Usage
+	turnUsages        []*aop.TokenUsage
+	totalUsage        *aop.TokenUsage
 	contextTokens     int
 	usageMessageCount int
 }
 
-func newTranscript(base []ChatMessage, newCapacity int) *transcript {
+func newTranscript(base []*aop.Message, newCapacity int) *transcript {
 	return &transcript{
-		messages:    append([]ChatMessage(nil), base...),
-		newMessages: make([]ChatMessage, 0, newCapacity),
+		messages:    append([]*aop.Message(nil), base...),
+		newMessages: make([]*aop.Message, 0, newCapacity),
+		totalUsage:  &aop.TokenUsage{Detail: map[string]uint64{}},
 	}
 }
 
-func (t *transcript) append(messages ...ChatMessage) {
+func (t *transcript) append(messages ...*aop.Message) {
 	t.messages = append(t.messages, messages...)
 	t.newMessages = append(t.newMessages, messages...)
 }
 
-func (t *transcript) replace(messages []ChatMessage, contextTokens int) {
-	t.messages = append([]ChatMessage(nil), messages...)
+func (t *transcript) replace(messages []*aop.Message, contextTokens int) {
+	t.messages = append([]*aop.Message(nil), messages...)
 	t.contextTokens = contextTokens
 	t.usageMessageCount = len(messages)
 }
@@ -280,7 +355,7 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		return false, nil
 	}
 
-	em.status(xcompact.StateStart, "", nil)
+	em.status(types.CompactStateStart, nil)
 	newMessages, result, err := compactHistory(ctx, CompactConfig{
 		Provider:         cfg.Provider,
 		Model:            cfg.Model,
@@ -289,14 +364,14 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		MaxTokens:        cfg.MaxTokens,
 	}, transcript.messages)
 	if err != nil {
-		em.status(xcompact.StateError, xcompact.NS, xcompact.Detail{Error: err.Error()})
+		em.status(types.CompactStateError, &types.CompactDetail{Error: err.Error()})
 		return false, err
 	}
 	transcript.replace(newMessages, result.TokensAfter)
-	em.status(xcompact.StateEnd, xcompact.NS, xcompact.Detail{
-		TokensBefore: result.TokensBefore,
-		TokensAfter:  result.TokensAfter,
-		KeptMessages: result.KeptMessages,
+	em.status(types.CompactStateEnd, &types.CompactDetail{
+		TokensBefore: uint64(max(result.TokensBefore, 0)),
+		TokensAfter:  uint64(max(result.TokensAfter, 0)),
+		KeptMessages: uint64(max(result.KeptMessages, 0)),
 	})
 	cfg.Logger.Importantf("context compacted reason=%s tokens=%d->%d kept_messages=%d",
 		reason, result.TokensBefore, result.TokensAfter, result.KeptMessages)
@@ -324,31 +399,24 @@ func effectiveCompactionLimits(contextWindow int, settings CompactionSettings) (
 	return reserve, keepRecent
 }
 
-func (t *transcript) recordTurnUsage(turn int, usage *Usage) {
+func (t *transcript) recordTurnUsage(turn int, usage *aop.TokenUsage) {
 	if usage == nil {
 		return
 	}
-	t.turnUsages = append(t.turnUsages, TurnUsage{
-		Turn:             turn,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usageTotalTokens(usage),
-		CacheReadTokens:  usage.CacheReadTokens,
-		CacheWriteTokens: usage.CacheWriteTokens,
-	})
-	t.totalUsage.PromptTokens += usage.PromptTokens
-	t.totalUsage.CompletionTokens += usage.CompletionTokens
-	t.totalUsage.TotalTokens += usageTotalTokens(usage)
-	t.totalUsage.CacheReadTokens += usage.CacheReadTokens
-	t.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
-	t.contextTokens = usageTotalTokens(usage)
+	t.turnUsages = append(t.turnUsages, usage)
+	t.totalUsage.InputTokens += usage.InputTokens
+	t.totalUsage.OutputTokens += usage.OutputTokens
+	t.totalUsage.TotalTokens += usage.TotalTokens
+	t.totalUsage.Detail["cache_read"] += usage.Detail["cache_read"]
+	t.totalUsage.Detail["cache_write"] += usage.Detail["cache_write"]
+	t.contextTokens = provider.UsageTotalTokens(usage)
 	// Provider usage covers the request plus the assistant response that will be
 	// appended immediately after this call.
 	t.usageMessageCount = len(t.messages) + 1
 }
 
-func (t *transcript) snapshot() ([]ChatMessage, []ChatMessage) {
-	return append([]ChatMessage(nil), t.messages...), append([]ChatMessage(nil), t.newMessages...)
+func (t *transcript) snapshot() ([]*aop.Message, []*aop.Message) {
+	return append([]*aop.Message(nil), t.messages...), append([]*aop.Message(nil), t.newMessages...)
 }
 
 func (t *transcript) result(output string, turns int, err error) *Result {
@@ -359,38 +427,38 @@ func (t *transcript) result(output string, turns int, err error) *Result {
 		Messages:      messages,
 		Turns:         turns,
 		TotalUsage:    t.totalUsage,
-		TurnUsages:    append([]TurnUsage(nil), t.turnUsages...),
+		TurnUsages:    append([]*aop.TokenUsage(nil), t.turnUsages...),
 		ContextTokens: t.contextTokens,
 		Err:           err,
 	}
 }
 
 type toolBatchResult struct {
-	messages  []ChatMessage
+	messages  []*aop.Message
 	terminate bool
 }
 
-func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistantMsg ChatMessage, turn int) (toolBatchResult, error) {
-	toolCalls := assistantMsg.ToolCalls
+func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant *assistantTurn, turn int) (toolBatchResult, error) {
+	toolCalls := assistant.toolCalls
 	slots := make([]toolCallSlot, len(toolCalls))
 
 	for i, tc := range toolCalls {
-		slots[i] = toolCallSlot{tc: tc}
+		slots[i] = toolCallSlot{tc: tc, rejectedReason: assistant.rejected[i]}
 	}
 	for _, tc := range toolCalls {
-		em.toolCall(tc.ID, tc.Function.Name, parseToolArgs(tc.Function.Arguments), "")
+		em.toolCall(tc)
 	}
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
 	var wg sync.WaitGroup
 	for i := range slots {
-		if slots[i].tc.RejectedReason != "" {
+		if slots[i].rejectedReason != "" {
 			slots[i].startedAt = time.Now()
 			slots[i].result = toolExecution{
-				result: slots[i].tc.RejectedReason, rawResult: slots[i].tc.RejectedReason, isError: true,
+				result: slots[i].rejectedReason, rawResult: slots[i].rejectedReason, isError: true,
 			}
 			cfg.Logger.Warnf("[turn %d] rejected unsafe tool call name=%s reason=%s",
-				turn, slots[i].tc.Function.Name, slots[i].tc.RejectedReason)
+				turn, slots[i].tc.Name, slots[i].rejectedReason)
 			continue
 		}
 		wg.Add(1)
@@ -399,25 +467,19 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 			defer wg.Done()
 			defer func() { <-sem }()
 			slots[i].startedAt = time.Now()
-			slots[i].result = runToolCall(ctx, cfg, assistantMsg, slots[i].tc, turn)
+			slots[i].result = runToolCall(ctx, cfg, assistant.message, slots[i].tc, turn)
 		}()
 	}
 	wg.Wait()
 
 	// Emit results in original order.
-	messages := make([]ChatMessage, 0, len(slots))
+	messages := make([]*aop.Message, 0, len(slots))
 	terminations := 0
 	for _, s := range slots {
-		var details any
-		if s.result.fullResult != nil {
-			details = s.result.fullResult.Details
-		}
-		em.toolResult(s.tc.ID, s.tc.Function.Name, s.result.eventContent(), details, s.result.flow == ToolFlowTerminate, s.result.isError,
+		em.toolResult(s.tc, s.result.eventContent(), s.result.fullResult, s.result.flow == ToolFlowTerminate, s.result.isError,
 			int(time.Since(s.startedAt).Milliseconds()))
-		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Function.Name, len(s.result.result))
-		toolMsg := toolResultToMessage(s.tc.ID, s.result)
-		toolMsg.ToolResultIsError = s.tc.RejectedReason != ""
-		messages = append(messages, toolMsg)
+		cfg.Logger.Debugf("[turn %d] tool_result name=%s bytes=%d", turn, s.tc.Name, len(s.result.result))
+		messages = append(messages, s.result.toMessage(s.tc.Id))
 		if s.result.flow == ToolFlowTerminate {
 			terminations++
 		}
@@ -441,62 +503,11 @@ func isOutputLimitFinishReason(reason string) bool {
 	}
 }
 
-func normalizeToolCalls(msg ChatMessage) ChatMessage {
-	if len(msg.ToolCalls) == 0 {
-		return msg
-	}
-	msg.ToolCalls = append([]ToolCall(nil), msg.ToolCalls...)
-	truncated := isOutputLimitFinishReason(msg.FinishReason)
-	for i := range msg.ToolCalls {
-		tc := &msg.ToolCalls[i]
-		rejected := truncated
-		reason := truncatedToolCallError
-		if tc.RejectedReason != "" {
-			rejected = true
-			reason = tc.RejectedReason
-		}
-		tc.ID = strings.TrimSpace(tc.ID)
-		tc.Function.Name = strings.TrimSpace(tc.Function.Name)
-		arguments := strings.TrimSpace(tc.Function.Arguments)
-		if arguments == "" {
-			arguments = "{}"
-		}
-		tc.Function.Arguments = arguments
-		if !rejected {
-			var args map[string]any
-			if tc.ID == "" || tc.Function.Name == "" ||
-				json.Unmarshal([]byte(arguments), &args) != nil || args == nil {
-				rejected = true
-				reason = invalidToolCallError
-			}
-		}
-		if !rejected {
-			if tc.Type == "" {
-				tc.Type = "function"
-			}
-			continue
-		}
-		if tc.ID == "" {
-			tc.ID = fmt.Sprintf("rejected_tool_call_%d", i+1)
-		}
-		if tc.Type == "" {
-			tc.Type = "function"
-		}
-		if tc.Function.Name == "" {
-			tc.Function.Name = "unknown_tool"
-		}
-		// Invalid JSON would poison the next Anthropic request during history
-		// serialization. Rejected arguments are never safe to execute or retain.
-		tc.Function.Arguments = "{}"
-		tc.RejectedReason = reason
-	}
-	return msg
-}
-
 type toolCallSlot struct {
-	tc        ToolCall
-	result    toolExecution
-	startedAt time.Time
+	tc             *aop.ToolCall
+	rejectedReason string
+	result         toolExecution
+	startedAt      time.Time
 }
 
 type toolExecution struct {
@@ -508,26 +519,33 @@ type toolExecution struct {
 	flow       ToolFlowDecision
 }
 
-func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, turn int) toolExecution {
+func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, turn int) toolExecution {
 	startedAt := time.Now()
-	toolCtx := output.ContextWithCallID(ctx, tc.ID)
+	toolCtx := output.ContextWithCallID(ctx, tc.Id)
 	toolCtx = withToolAgentConfig(toolCtx, cfg)
 	toolCtx = inbox.ContextWithInbox(toolCtx, cfg.Inbox)
 	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
 	if execution.result == "" && !execution.isError {
-		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Function.Name, tc.Function.Arguments)
-		execution.result = toolResult.Text()
+		arguments := ""
+		if tc.Arguments != nil {
+			arguments = string(tc.Arguments.Data)
+		}
+		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Name, arguments)
+		if toolResult == nil {
+			toolResult = &tool.Result{}
+		}
+		execution.result = tool.ResultText(toolResult)
 		execution.err = execErr
 		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
 			execution.result = fmt.Sprintf("error: %s", execErr.Error())
-			cfg.Logger.Warnf("[turn %d] tool_error name=%s error=%q", turn, tc.Function.Name, execErr.Error())
+			cfg.Logger.Warnf("[turn %d] tool_error name=%s error=%q", turn, tc.Name, execErr.Error())
 		}
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
-		if toolResult.HasImages() || toolResult.Details != nil || toolResult.Terminate {
-			execution.fullResult = &toolResult
+		if tool.ResultHasImages(toolResult) || toolResult.Terminate {
+			execution.fullResult = toolResult
 		}
 	}
 	if execution.rawResult == "" {
@@ -541,13 +559,21 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc T
 	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution, time.Since(startedAt).Milliseconds())
 }
 
-// eventContent returns the AOP tool.result payload: a plain string, or the
-// {content, images} variant when the tool returned images.
-func (e toolExecution) eventContent() any {
-	if e.fullResult != nil {
-		return aop.ToolResultContentFromResult(*e.fullResult, e.eventResultText())
+func (e toolExecution) eventContent() []*aop.Content {
+	content := []*aop.Content{aop.Text(e.eventResultText())}
+	if e.fullResult == nil {
+		return content
 	}
-	return e.eventResultText()
+	for _, block := range e.fullResult.Output {
+		media := block.GetMedia()
+		if media == nil || media.Kind != "image" || media.Resource == nil {
+			continue
+		}
+		if data := media.Resource.GetData(); len(data) > 0 {
+			content = append(content, aop.Image(media.Resource.MediaType, data))
+		}
+	}
+	return content
 }
 
 func (e toolExecution) eventResultText() string {
@@ -557,34 +583,31 @@ func (e toolExecution) eventResultText() string {
 	return e.result
 }
 
-func parseToolArgs(raw string) any {
-	if raw == "" {
-		return map[string]any{}
+// toMessage converts the execution into the tool-role message appended to the
+// transcript. Image outputs ride along as media parts; the result text is
+// always present so text-only providers keep working.
+func (e toolExecution) toMessage(toolCallID string) *aop.Message {
+	result := &aop.ToolResult{
+		CallId:    toolCallID,
+		IsError:   e.isError,
+		Terminate: e.flow == ToolFlowTerminate,
 	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err == nil {
-		return m
-	}
-	return raw
-}
-
-func toolResultToMessage(toolCallID string, exec toolExecution) ChatMessage {
-	if exec.fullResult != nil && exec.fullResult.HasImages() {
-		parts := make([]ContentPart, 0, len(exec.fullResult.Content))
-		for _, block := range exec.fullResult.Content {
-			switch block.Type {
-			case "text":
-				parts = append(parts, TextPart(block.Text))
-			case "image":
-				parts = append(parts, ImagePart(block.MimeType, block.Base64Data, "high"))
+	if e.fullResult != nil && tool.ResultHasImages(e.fullResult) {
+		for _, block := range e.fullResult.Output {
+			if text := block.GetText(); text != nil {
+				result.Output = append(result.Output, aop.Text(text.Text))
+			}
+			if media := block.GetMedia(); media != nil && media.Kind == "image" && media.Resource != nil {
+				result.Output = append(result.Output, block)
 			}
 		}
-		return ChatMessage{Role: "tool", ToolCallID: toolCallID, ContentParts: parts}
+	} else {
+		result.Output = []*aop.Content{aop.Text(e.result)}
 	}
-	return NewToolResultMessage(toolCallID, exec.result)
+	return &aop.Message{Role: "tool", Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: result}}}}
 }
 
-func beforeToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall) toolExecution {
+func beforeToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall) toolExecution {
 	if cfg.BeforeToolCall != nil {
 		before, err := cfg.BeforeToolCall(ctx, BeforeToolCallContext{
 			AssistantMessage: assistantMsg,
@@ -606,7 +629,7 @@ func beforeToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, t
 	return beforeTypedToolCall(ctx, cfg, assistantMsg, tc)
 }
 
-func afterToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc ToolCall, execution toolExecution, durationMs int64) toolExecution {
+func afterToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, execution toolExecution, durationMs int64) toolExecution {
 	if cfg.AfterToolCall != nil {
 		after, err := cfg.AfterToolCall(ctx, AfterToolCallContext{
 			AssistantMessage: assistantMsg,
@@ -638,24 +661,23 @@ func afterToolCall(ctx context.Context, cfg Config, assistantMsg ChatMessage, tc
 	return afterTypedToolCall(ctx, cfg, tc, execution, int(durationMs))
 }
 
-func requestMessages(ctx context.Context, cfg Config, systemPrompt string, messages []ChatMessage, turn int) []ChatMessage {
-	out := sanitizeMessages(append([]ChatMessage(nil), messages...))
+func requestMessages(ctx context.Context, cfg Config, systemPrompt string, messages []*aop.Message, turn int) []*aop.Message {
+	out := sanitizeMessages(append([]*aop.Message(nil), messages...))
 	if cfg.TransformContext != nil {
 		out = cfg.TransformContext(out)
 	}
 	out = transformContextHook(ctx, cfg, out, turn)
 	if systemPrompt != "" {
-		out = append([]ChatMessage{NewTextMessage("system", systemPrompt)}, out...)
+		out = append([]*aop.Message{provider.TextMessage("system", systemPrompt)}, out...)
 	}
 	return out
 }
 
-func sanitizeMessages(msgs []ChatMessage) []ChatMessage {
-	out := make([]ChatMessage, 0, len(msgs))
+func sanitizeMessages(msgs []*aop.Message) []*aop.Message {
+	out := make([]*aop.Message, 0, len(msgs))
 	for _, m := range msgs {
-		if m.Role == "assistant" && len(m.ToolCalls) == 0 &&
-			messageContent(m) == "" && len(m.ContentParts) == 0 &&
-			(m.ReasoningContent == nil || *m.ReasoningContent == "") {
+		if m.Role == "assistant" && len(provider.MessageToolCalls(m)) == 0 &&
+			provider.MessageText(m) == "" && provider.MessageReasoning(m) == "" {
 			continue
 		}
 		out = append(out, m)
@@ -663,22 +685,16 @@ func sanitizeMessages(msgs []ChatMessage) []ChatMessage {
 	return out
 }
 
-func messageContent(msg ChatMessage) string {
-	if msg.Content == nil {
-		return ""
-	}
-	return *msg.Content
-}
-
-func logUsage(logger telemetry.Logger, usage *Usage) {
+func logUsage(logger telemetry.Logger, usage *aop.TokenUsage) {
 	if usage != nil {
-		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+		cacheRead := usage.Detail["cache_read"]
+		cacheWrite := usage.Detail["cache_write"]
+		if cacheRead > 0 || cacheWrite > 0 {
 			logger.Debugf("usage prompt=%d completion=%d total=%d cache_read=%d cache_write=%d",
-				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
-				usage.CacheReadTokens, usage.CacheWriteTokens)
+				usage.InputTokens, usage.OutputTokens, usage.TotalTokens, cacheRead, cacheWrite)
 		} else {
 			logger.Debugf("usage prompt=%d completion=%d total=%d",
-				usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+				usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 		}
 	}
 }
@@ -690,60 +706,66 @@ func schedulerActive(s *LoopScheduler) int {
 	return s.Active()
 }
 
+// messageBuilder accumulates streamed deltas into one assistant message.
 type messageBuilder struct {
-	role             string
-	content          strings.Builder
-	reasoningContent strings.Builder
-	toolCalls        map[int]*ToolCall
+	role      string
+	content   strings.Builder
+	reasoning strings.Builder
+	toolCalls map[int]*streamedToolCall
+}
+
+type streamedToolCall struct {
+	id        string
+	kind      string
+	name      string
+	arguments strings.Builder
 }
 
 func newMessageBuilder() *messageBuilder {
 	return &messageBuilder{
 		role:      "assistant",
-		toolCalls: make(map[int]*ToolCall),
+		toolCalls: make(map[int]*streamedToolCall),
 	}
 }
 
-func (b *messageBuilder) Apply(delta ChatMessageDelta) ChatMessage {
-	if delta.Role != "" {
-		b.role = delta.Role
+func (b *messageBuilder) Apply(event ChatCompletionStreamEvent) {
+	if event.Role != "" {
+		b.role = event.Role
 	}
-	if delta.Content != nil {
-		b.content.WriteString(*delta.Content)
+	if delta := event.MessageDelta; delta != nil {
+		switch value := delta.Value.(type) {
+		case *aop.MessageDelta_Text:
+			b.content.WriteString(value.Text)
+		case *aop.MessageDelta_Reasoning:
+			b.reasoning.WriteString(value.Reasoning)
+		}
 	}
-	if delta.ReasoningContent != nil {
-		b.reasoningContent.WriteString(*delta.ReasoningContent)
-	}
-	for _, tcDelta := range delta.ToolCalls {
-		tc := b.toolCalls[tcDelta.Index]
+	for _, tcDelta := range event.ToolDeltas {
+		index := int(tcDelta.Index)
+		tc := b.toolCalls[index]
 		if tc == nil {
-			tc = &ToolCall{Type: "function"}
-			b.toolCalls[tcDelta.Index] = tc
+			tc = &streamedToolCall{kind: "function"}
+			b.toolCalls[index] = tc
 		}
-		if tcDelta.ID != "" {
-			tc.ID = tcDelta.ID
+		if tcDelta.CallId != "" {
+			tc.id = tcDelta.CallId
 		}
-		if tcDelta.Type != "" {
-			tc.Type = tcDelta.Type
+		if tcDelta.Name != "" {
+			tc.name = tcDelta.Name
 		}
-		if tcDelta.Function.Name != "" {
-			tc.Function.Name = tcDelta.Function.Name
-		}
-		if tcDelta.Function.Arguments != "" {
-			tc.Function.Arguments += tcDelta.Function.Arguments
+		if len(tcDelta.Arguments) > 0 {
+			tc.arguments.Write(tcDelta.Arguments)
 		}
 	}
-	return b.Message()
 }
 
-func (b *messageBuilder) Message() ChatMessage {
-	content := b.content.String()
-	msg := ChatMessage{Role: b.role}
-	if content != "" {
-		msg.Content = &content
+func (b *messageBuilder) Message() *aop.Message {
+	msg := &aop.Message{Role: b.role}
+	if reasoning := b.reasoning.String(); reasoning != "" {
+		msg.Content = append(msg.Content, aop.Reasoning(reasoning))
 	}
-	if reasoningContent := b.reasoningContent.String(); reasoningContent != "" {
-		msg.ReasoningContent = &reasoningContent
+	if content := b.content.String(); content != "" {
+		msg.Content = append(msg.Content, aop.Text(content))
 	}
 	if len(b.toolCalls) > 0 {
 		indexes := make([]int, 0, len(b.toolCalls))
@@ -751,10 +773,35 @@ func (b *messageBuilder) Message() ChatMessage {
 			indexes = append(indexes, index)
 		}
 		sort.Ints(indexes)
-		msg.ToolCalls = make([]ToolCall, 0, len(indexes))
 		for _, index := range indexes {
-			msg.ToolCalls = append(msg.ToolCalls, *b.toolCalls[index])
+			tc := b.toolCalls[index]
+			kind := tc.kind
+			if kind == "" {
+				kind = "function"
+			}
+			msg.Content = append(msg.Content, &aop.Content{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+				Id:   tc.id,
+				Name: tc.name,
+				Kind: kind,
+				Arguments: &aop.EncodedValue{
+					Data:      []byte(tc.arguments.String()),
+					MediaType: aop.JSONMediaType,
+				},
+			}}})
 		}
 	}
 	return msg
+}
+
+// decodeToolArguments renders a tool call's arguments as a JSON value for
+// event payloads.
+func decodeToolArguments(call *aop.ToolCall) any {
+	if call == nil || call.Arguments == nil || len(call.Arguments.Data) == 0 {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(call.Arguments.Data, &m); err == nil {
+		return m
+	}
+	return string(call.Arguments.Data)
 }

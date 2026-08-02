@@ -126,7 +126,7 @@ func BuildGroup(group string, deps *Deps, reg *CommandRegistry)    // 构建指�
 | `scanner` | 引擎就绪后加载 | scan, gogo, spray, zombie, neutron |
 | `search` | 可选（默认加载） | web_search, fetch, cyberhub |
 | `browser` | 可选 + `full` 构建标签 | playwright |
-| `ioa` | IOA 连接后加载 | ioa_space, ioa_send, ioa_read |
+| `ioa` | IOA 连接后加载 | ioa (space/send/read 子命令) |
 | `proxy` | 始终加载 | proxy |
 
 **Deps 依赖注入：**
@@ -590,8 +590,8 @@ subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.
 
 ```
 aiscan://skills/aiscan/SKILL.md
-aiscan://skills/aiscan/reference/arsenal.md
-aiscan://skills/gogo/SKILL.md
+aiscan://skills/aiscan/okf/runtime/arsenal.md
+aiscan://skills/aiscan/okf/easm/gogo.md
 ```
 
 AI 使用 `read` 工具加载这些 URI，由 `Store.ReadVirtual()` 处理。
@@ -601,7 +601,7 @@ AI 使用 `read` 工具加载这些 URI，由 `Store.ReadVirtual()` 处理。
 Skill 正文中可以引用其他 Skill 的参考文档：
 
 ```markdown
-详细用法参见 `aiscan://skills/aiscan/reference/tmux.md`。
+详细用法参见 `aiscan://skills/aiscan/okf/runtime/tmux.md`。
 ```
 
 **VirtualFileReader / VirtualGlobber：**

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
 func TestGlobBasic(t *testing.T) {
@@ -19,7 +21,7 @@ func TestGlobBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := res.Text()
+	out := coretool.ResultText(res)
 	if !strings.Contains(out, "a.go") || !strings.Contains(out, "b.go") {
 		t.Fatalf("expected go files, got: %s", out)
 	}
@@ -41,7 +43,7 @@ func TestGlobRecursive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := res.Text()
+	out := coretool.ResultText(res)
 	if !strings.Contains(out, "main.go") {
 		t.Fatalf("expected src/main.go in recursive match, got: %s", out)
 	}

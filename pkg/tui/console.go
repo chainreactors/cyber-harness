@@ -21,7 +21,9 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -1160,7 +1162,7 @@ func (r *AgentConsole) resumeSession(path string) error {
 	if err != nil {
 		return err
 	}
-	data, err := agent.LoadSession(path)
+	data, err := agent.LoadCheckpoint(path)
 	if err != nil {
 		return err
 	}
@@ -1190,12 +1192,12 @@ func (r *AgentConsole) renderSessions() (string, error) {
 	return r.renderPanel("sessions", renderHelpRows(rows, colorEnabled), colorEnabled), nil
 }
 
-func (r *AgentConsole) listSavedSessions() ([]agent.SessionInfo, error) {
+func (r *AgentConsole) listSavedSessions() ([]agent.CheckpointInfo, error) {
 	dir := r.sessionDir
 	if dir == "" {
 		dir = cfg.DataSubDir("sessions")
 	}
-	return agent.ListSessions(dir)
+	return agent.ListCheckpoints(dir)
 }
 
 func (r *AgentConsole) resumeSessionInteractive() error {
@@ -1260,7 +1262,7 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 	return selector, nil
 }
 
-func sessionDetail(session agent.SessionInfo) string {
+func sessionDetail(session agent.CheckpointInfo) string {
 	parts := make([]string, 0, 4)
 	if ts := session.SortTime(); !ts.IsZero() {
 		parts = append(parts, ts.Local().Format("2006-01-02 15:04:05"))
@@ -1364,10 +1366,10 @@ func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error)
 	if strings.TrimSpace(pc.Provider) == "" && strings.TrimSpace(pc.BaseURL) == "" {
 		return nil, fmt.Errorf("provider not configured")
 	}
-	req := probe.LLMProbeRequest{
+	req := &types.LLMProbeRequest{
 		Provider: pc.Provider,
-		BaseURL:  pc.BaseURL,
-		APIKey:   pc.APIKey,
+		BaseUrl:  pc.BaseURL,
+		ApiKey:   pc.APIKey,
 		Proxy:    pc.Proxy,
 	}
 	listCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
@@ -1376,7 +1378,7 @@ func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	if !result.OK {
+	if !result.Ok {
 		if strings.TrimSpace(result.Error) == "" {
 			return nil, fmt.Errorf("list models failed")
 		}
@@ -1512,7 +1514,7 @@ func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) er
 		if err != nil {
 			return err
 		}
-		if text := result.Text(); text != "" {
+		if text := coretool.ResultText(result); text != "" {
 			fmt.Fprint(r.stdout, text)
 			if !strings.HasSuffix(text, "\n") {
 				fmt.Fprintln(r.stdout)

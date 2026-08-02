@@ -24,8 +24,8 @@ func TestListToolReturnsStructuredDirectoryEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	var listing ListResult
-	if err := json.Unmarshal([]byte(result.Text()), &listing); err != nil {
-		t.Fatalf("result is not structured JSON: %v\n%s", err, result.Text())
+	if err := json.Unmarshal([]byte(coretool.ResultText(result)), &listing); err != nil {
+		t.Fatalf("result is not structured JSON: %v\n%s", err, coretool.ResultText(result))
 	}
 	if listing.Path != "." || len(listing.Entries) != 2 {
 		t.Fatalf("listing = %+v", listing)
@@ -55,7 +55,7 @@ func TestListToolUsesInvocationWorkdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	var listing ListResult
-	if err := json.Unmarshal([]byte(result.Text()), &listing); err != nil {
+	if err := json.Unmarshal([]byte(coretool.ResultText(result)), &listing); err != nil {
 		t.Fatal(err)
 	}
 	if len(listing.Entries) != 1 || listing.Entries[0].Name != "proof.txt" {

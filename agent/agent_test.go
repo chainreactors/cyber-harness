@@ -9,11 +9,17 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/aop"
+	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
@@ -42,7 +48,7 @@ func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(requests))
 	}
-	if requests[0].Messages[0].Role != "system" || *requests[0].Messages[0].Content != "system" {
+	if requests[0].Messages[0].Role != "system" || provider.MessageText(requests[0].Messages[0]) != "system" {
 		t.Fatalf("system message not injected: %#v", requests[0].Messages)
 	}
 }
@@ -73,7 +79,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus:      testBus(func(e aop.Event) { events = append(events, e.Type) }),
+		Bus:      testBus(func(e *aop.Event) { events = append(events, eventKind(e)) }),
 	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -91,7 +97,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	if !hasToolMessage(requests[1].Messages, "call-1", "tool output") {
 		t.Fatalf("second request missing tool result: %#v", requests[1].Messages)
 	}
-	if !containsEvent(events, aop.TypeToolCall) || !containsEvent(events, aop.TypeToolResult) {
+	if !containsEvent(events, "tool.call") || !containsEvent(events, "tool.result") {
 		t.Fatalf("tool events missing: %#v", events)
 	}
 }
@@ -105,7 +111,7 @@ func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 		t.Fatalf("Continue() error = %v, want no messages", err)
 	}
 
-	a.state.Messages = []ChatMessage{NewTextMessage("assistant", "done")}
+	a.state.Messages = []*aop.Message{textMessage("assistant", "done")}
 	if _, err := a.Continue(context.Background()); err == nil || !strings.Contains(err.Error(), "assistant") {
 		t.Fatalf("Continue() error = %v, want assistant", err)
 	}
@@ -133,7 +139,7 @@ func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
 	if len(requests[1].Messages) != 3 {
 		t.Fatalf("second request messages = %d, want 3: %#v", len(requests[1].Messages), requests[1].Messages)
 	}
-	if *requests[1].Messages[0].Content != "one" || *requests[1].Messages[1].Content != "first" || *requests[1].Messages[2].Content != "two" {
+	if provider.MessageText(requests[1].Messages[0]) != "one" || provider.MessageText(requests[1].Messages[1]) != "first" || provider.MessageText(requests[1].Messages[2]) != "two" {
 		t.Fatalf("unexpected reused context: %#v", requests[1].Messages)
 	}
 }
@@ -146,7 +152,7 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 		},
 	}
 	ag := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
-	ag.state.Messages = []ChatMessage{NewTextMessage("user", "base")}
+	ag.state.Messages = []*aop.Message{textMessage("user", "base")}
 	result, err := ag.Run(context.Background(), TextInput("prompt"))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
@@ -162,12 +168,12 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
-	var events []aop.Event
+	var events []*aop.Event
 	a := NewAgent(Config{
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		Bus: testBus(func(event aop.Event) {
+		Bus: testBus(func(event *aop.Event) {
 			events = append(events, event)
 		}),
 	})
@@ -180,9 +186,9 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("result = %#v, want result with Err", result)
 	}
 	if got := eventTypes(events); !reflect.DeepEqual(got, []string{
-		aop.TypeMessage,
-		aop.TypeStatus,
-		aop.TypeError,
+		"message",
+		"status",
+		"error",
 	}) {
 		t.Fatalf("events = %#v", got)
 	}
@@ -190,12 +196,12 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 		t.Fatalf("turns = %d, want 1", result.Turns)
 	}
 	last := lastEvent(events)
-	if last.Type != aop.TypeError {
+	if eventKind(last) != "error" {
 		t.Fatalf("last event = %#v, want error", last)
 	}
-	var endData aop.ErrorData
-	if err := json.Unmarshal(last.Data, &endData); err != nil {
-		t.Fatal(err)
+	endData := last.GetError()
+	if endData == nil {
+		t.Fatal("error event missing payload")
 	}
 	if endData.Message == "" {
 		t.Fatalf("error event missing message: %+v", endData)
@@ -278,7 +284,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 				return nil, fmt.Errorf("boom")
 			}
 			for _, msg := range req.Messages {
-				if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+				if msg.Role == "assistant" && messageContent(msg) == "" && len(provider.MessageToolCalls(msg)) == 0 {
 					t.Errorf("found empty assistant message in request on call %d", callCount)
 				}
 			}
@@ -297,7 +303,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 
 	a.mu.Lock()
 	for i, msg := range a.state.Messages {
-		if msg.Role == "assistant" && messageContent(msg) == "" && len(msg.ToolCalls) == 0 {
+		if msg.Role == "assistant" && messageContent(msg) == "" && len(provider.MessageToolCalls(msg)) == 0 {
 			t.Errorf("state.Messages[%d] is empty assistant message", i)
 		}
 	}
@@ -385,7 +391,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		},
 	}
 	systemPrompt := buildTestSystemPrompt(registry, store.Skills)
-	task := skills.ExpandCommand("/skill:scan scan 127.0.0.1", store)
+	task := skills.ExpandCommand("/skill:aiscan scan 127.0.0.1", store)
 
 	result, err := (NewAgent(Config{
 		Provider:     llm,
@@ -404,11 +410,11 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", len(requests))
 	}
 	system := requests[0].Messages[0]
-	if system.Role != "system" || system.Content == nil || !strings.Contains(*system.Content, "<available_skills>") {
+	if system.Role != "system" || !strings.Contains(provider.MessageText(system), "<available_skills>") {
 		t.Fatalf("system prompt missing skills")
 	}
 	user := requests[0].Messages[1]
-	if user.Role != "user" || user.Content == nil || !strings.Contains(*user.Content, `<skill name="scan"`) {
+	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="aiscan"`) {
 		t.Fatalf("user prompt missing expanded skill")
 	}
 }
@@ -824,18 +830,15 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	systemPrompt := buildTmuxTestPrompt(registry)
 
 	var events []string
-	handleEvent := func(event aop.Event) {
-		switch event.Type {
-		case aop.TypeToolCall:
-			var data aop.ToolCallData
-			if json.Unmarshal(event.Data, &data) == nil {
-				args, _ := json.Marshal(data.Args)
-				events = append(events, fmt.Sprintf("[TOOL] %s → %s", data.ToolName, args))
+	handleEvent := func(event *aop.Event) {
+		switch eventKind(event) {
+		case "tool.call":
+			if data := event.GetToolCall(); data != nil {
+				events = append(events, fmt.Sprintf("[TOOL] %s → %s", data.Name, data.GetArguments().GetData()))
 			}
-		case aop.TypeToolResult:
-			var data aop.ToolResultData
-			if json.Unmarshal(event.Data, &data) == nil {
-				result := fmt.Sprintf("%v", data.Content)
+		case "tool.result":
+			if data := event.GetToolResult(); data != nil {
+				result := fmt.Sprintf("%v", data.Output)
 				if len(result) > 300 {
 					result = result[:300] + "..."
 				}
@@ -978,8 +981,8 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	systemPrompt := "You are a math tutor. " +
 		strings.Repeat("You always answer arithmetic questions with just the numeric result. ", 30)
 
-	var events []aop.Event
-	handler := func(e aop.Event) {
+	var events []*aop.Event
+	handler := func(e *aop.Event) {
 		events = append(events, e)
 	}
 
@@ -991,7 +994,7 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e aop.Event) { handler(e) }),
+		Bus:            testBus(func(e *aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
@@ -1002,13 +1005,13 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 1 output: %s", result1.Output)
 	t.Logf("Turn 1 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result1.TotalUsage.PromptTokens, result1.TotalUsage.CompletionTokens,
-		result1.TotalUsage.CacheReadTokens, result1.TotalUsage.CacheWriteTokens)
+		result1.TotalUsage.InputTokens, result1.TotalUsage.OutputTokens,
+		result1.TotalUsage.Detail["cache_read"], result1.TotalUsage.Detail["cache_write"])
 
 	if result1.Turns < 1 {
 		t.Fatalf("expected at least 1 turn, got %d", result1.Turns)
 	}
-	if result1.TotalUsage.PromptTokens == 0 {
+	if result1.TotalUsage.InputTokens == 0 {
 		t.Fatal("expected non-zero prompt tokens")
 	}
 
@@ -1022,12 +1025,12 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 2 output: %s", result2.Output)
 	t.Logf("Turn 2 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result2.TotalUsage.PromptTokens, result2.TotalUsage.CompletionTokens,
-		result2.TotalUsage.CacheReadTokens, result2.TotalUsage.CacheWriteTokens)
+		result2.TotalUsage.InputTokens, result2.TotalUsage.OutputTokens,
+		result2.TotalUsage.Detail["cache_read"], result2.TotalUsage.Detail["cache_write"])
 
-	if result2.TotalUsage.PromptTokens <= result1.TotalUsage.PromptTokens {
+	if result2.TotalUsage.InputTokens <= result1.TotalUsage.InputTokens {
 		t.Errorf("turn 2 prompt tokens (%d) should exceed turn 1 (%d) due to accumulated context",
-			result2.TotalUsage.PromptTokens, result1.TotalUsage.PromptTokens)
+			result2.TotalUsage.InputTokens, result1.TotalUsage.InputTokens)
 	}
 
 	allMessages := append(result1.Messages, result2.NewMessages...)
@@ -1041,26 +1044,26 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 	}
 	t.Logf("Turn 3 output: %s", result3.Output)
 	t.Logf("Turn 3 usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result3.TotalUsage.PromptTokens, result3.TotalUsage.CompletionTokens,
-		result3.TotalUsage.CacheReadTokens, result3.TotalUsage.CacheWriteTokens)
+		result3.TotalUsage.InputTokens, result3.TotalUsage.OutputTokens,
+		result3.TotalUsage.Detail["cache_read"], result3.TotalUsage.Detail["cache_write"])
 
-	if result3.TotalUsage.PromptTokens <= result2.TotalUsage.PromptTokens {
+	if result3.TotalUsage.InputTokens <= result2.TotalUsage.InputTokens {
 		t.Errorf("turn 3 prompt tokens (%d) should exceed turn 2 (%d)",
-			result3.TotalUsage.PromptTokens, result2.TotalUsage.PromptTokens)
+			result3.TotalUsage.InputTokens, result2.TotalUsage.InputTokens)
 	}
 
 	t.Logf("\n=== Multi-Turn Cache Summary ===")
 	for i, r := range []*Result{result1, result2, result3} {
 		ratio := 0.0
-		if r.TotalUsage.PromptTokens > 0 {
-			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		if r.TotalUsage.InputTokens > 0 {
+			ratio = float64(r.TotalUsage.Detail["cache_read"]) / float64(r.TotalUsage.InputTokens) * 100
 		}
 		t.Logf("Turn %d: output=%q prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
 			i+1, truncateOutput(r.Output, 40),
-			r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+			r.TotalUsage.InputTokens, r.TotalUsage.Detail["cache_read"], r.TotalUsage.Detail["cache_write"], ratio)
 	}
 
-	totalCacheRead := result2.TotalUsage.CacheReadTokens + result3.TotalUsage.CacheReadTokens
+	totalCacheRead := result2.TotalUsage.Detail["cache_read"] + result3.TotalUsage.Detail["cache_read"]
 	if totalCacheRead == 0 {
 		t.Error("expected cache_read > 0 in turn 2 or 3, got 0 for both — caching may not be working")
 	}
@@ -1090,14 +1093,14 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		t.Fatalf("stream turn 1 failed: %v", err)
 	}
 	t.Logf("Stream Turn 1: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result1.Output, 40), result1.TotalUsage.PromptTokens, result1.TotalUsage.CacheReadTokens)
+		truncateOutput(result1.Output, 40), result1.TotalUsage.InputTokens, result1.TotalUsage.Detail["cache_read"])
 
 	result2, err := NewAgent(agentCfg.WithMessages(result1.Messages)).Run(context.Background(), TextInput("Goodbye"))
 	if err != nil {
 		t.Fatalf("stream turn 2 failed: %v", err)
 	}
 	t.Logf("Stream Turn 2: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result2.Output, 40), result2.TotalUsage.PromptTokens, result2.TotalUsage.CacheReadTokens)
+		truncateOutput(result2.Output, 40), result2.TotalUsage.InputTokens, result2.TotalUsage.Detail["cache_read"])
 
 	allMsgs := append(result1.Messages, result2.NewMessages...)
 	result3, err := NewAgent(agentCfg.WithMessages(allMsgs)).Run(context.Background(), TextInput("Thank you"))
@@ -1105,16 +1108,16 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 		t.Fatalf("stream turn 3 failed: %v", err)
 	}
 	t.Logf("Stream Turn 3: output=%q prompt=%d cache_read=%d",
-		truncateOutput(result3.Output, 40), result3.TotalUsage.PromptTokens, result3.TotalUsage.CacheReadTokens)
+		truncateOutput(result3.Output, 40), result3.TotalUsage.InputTokens, result3.TotalUsage.Detail["cache_read"])
 
 	t.Logf("\n=== Streaming Cache Summary ===")
 	for i, r := range []*Result{result1, result2, result3} {
 		ratio := 0.0
-		if r.TotalUsage.PromptTokens > 0 {
-			ratio = float64(r.TotalUsage.CacheReadTokens) / float64(r.TotalUsage.PromptTokens) * 100
+		if r.TotalUsage.InputTokens > 0 {
+			ratio = float64(r.TotalUsage.Detail["cache_read"]) / float64(r.TotalUsage.InputTokens) * 100
 		}
 		t.Logf("Turn %d: prompt=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
-			i+1, r.TotalUsage.PromptTokens, r.TotalUsage.CacheReadTokens, r.TotalUsage.CacheWriteTokens, ratio)
+			i+1, r.TotalUsage.InputTokens, r.TotalUsage.Detail["cache_read"], r.TotalUsage.Detail["cache_write"], ratio)
 	}
 }
 
@@ -1128,9 +1131,9 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	calcTool := &recordingTool{name: "calculate", output: "42"}
 	tools.RegisterTool(calcTool)
 
-	var usageEvents []aop.Event
-	handler := func(e aop.Event) {
-		if e.Type == aop.TypeUsage {
+	var usageEvents []*aop.Event
+	handler := func(e *aop.Event) {
+		if eventKind(e) == "usage" {
 			usageEvents = append(usageEvents, e)
 		}
 	}
@@ -1141,7 +1144,7 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 		Model:          cfg.Model,
 		SystemPrompt:   systemPrompt,
 		CacheRetention: CacheShort,
-		Bus:            testBus(func(e aop.Event) { handler(e) }),
+		Bus:            testBus(func(e *aop.Event) { handler(e) }),
 		Logger:         telemetry.NopLogger(),
 		MaxRetries:     1,
 	}
@@ -1157,26 +1160,26 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	t.Logf("Tool calls recorded: %d", len(calcTool.callsSnapshot()))
 
 	t.Logf("\n=== Per-Turn Usage (with tool calls) ===")
-	for _, tu := range result.TurnUsages {
+	for i, tu := range result.TurnUsages {
 		ratio := 0.0
-		if tu.PromptTokens > 0 {
-			ratio = float64(tu.CacheReadTokens) / float64(tu.PromptTokens) * 100
+		if tu.InputTokens > 0 {
+			ratio = float64(tu.Detail["cache_read"]) / float64(tu.InputTokens) * 100
 		}
 		t.Logf("  turn %d: prompt=%d completion=%d cache_read=%d cache_write=%d hit_ratio=%.1f%%",
-			tu.Turn, tu.PromptTokens, tu.CompletionTokens,
-			tu.CacheReadTokens, tu.CacheWriteTokens, ratio)
+			i+1, tu.InputTokens, tu.OutputTokens,
+			tu.Detail["cache_read"], tu.Detail["cache_write"], ratio)
 	}
 
 	t.Logf("Total usage: prompt=%d completion=%d cache_read=%d cache_write=%d",
-		result.TotalUsage.PromptTokens, result.TotalUsage.CompletionTokens,
-		result.TotalUsage.CacheReadTokens, result.TotalUsage.CacheWriteTokens)
+		result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens,
+		result.TotalUsage.Detail["cache_read"], result.TotalUsage.Detail["cache_write"])
 
 	if result.Turns < 2 {
 		t.Logf("WARNING: expected >= 2 turns for tool call flow, got %d (model may have answered without tool)", result.Turns)
 	}
 
 	if result.Turns >= 2 && len(result.TurnUsages) >= 2 {
-		laterCacheRead := result.TurnUsages[len(result.TurnUsages)-1].CacheReadTokens
+		laterCacheRead := result.TurnUsages[len(result.TurnUsages)-1].Detail["cache_read"]
 		if laterCacheRead == 0 {
 			t.Logf("WARNING: last turn cache_read=0 — provider may not support automatic prefix caching")
 		} else {
@@ -1185,10 +1188,551 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	}
 
 	for i, e := range usageEvents {
-		var data aop.UsageData
-		if json.Unmarshal(e.Data, &data) == nil {
+		if data := e.GetUsage(); data != nil {
 			t.Logf("Usage event %d: prompt=%d cache_read=%d cache_write=%d",
-				i, data.InputTokens, data.CacheReadTokens, data.CacheWriteTokens)
+				i, data.InputTokens, data.Detail["cache_read"], data.Detail["cache_write"])
 		}
 	}
+}
+
+// TestSetProviderHotSwapsNextRun verifies a mid-conversation provider swap takes
+// effect on the next run (an in-flight run keeps its snapshotted provider).
+func TestSetProviderHotSwapsNextRun(t *testing.T) {
+	provA := &callbackProvider{fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		return chatResponse(NewTextMessage("assistant", "from-A")), nil
+	}}
+	provB := &callbackProvider{fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		return chatResponse(NewTextMessage("assistant", "from-B")), nil
+	}}
+
+	ag := NewAgent(Config{Provider: provA, Model: "model-a"})
+
+	res, err := ag.Run(context.Background(), TextInput("hi"))
+	if err != nil {
+		t.Fatalf("run A: %v", err)
+	}
+	if res.Output != "from-A" {
+		t.Fatalf("run A output = %q, want from-A", res.Output)
+	}
+
+	ag.SetProvider(provB, "model-b")
+
+	res, err = ag.Run(context.Background(), TextInput("hi again"))
+	if err != nil {
+		t.Fatalf("run B: %v", err)
+	}
+	if res.Output != "from-B" {
+		t.Fatalf("run B output = %q, want from-B", res.Output)
+	}
+	if ag.Cfg.Model != "model-b" {
+		t.Fatalf("model = %q, want model-b", ag.Cfg.Model)
+	}
+
+	// Empty model must not blank the current one (provider-only swap).
+	ag.SetProvider(provA, "")
+	if ag.Cfg.Model != "model-b" {
+		t.Fatalf("empty-model swap changed model to %q, want model-b", ag.Cfg.Model)
+	}
+}
+
+func TestSetProviderConfigHotSwapsModelLimits(t *testing.T) {
+	provider := &scriptedProvider{}
+	ag := NewAgent(Config{MaxTokens: 1024, ContextWindow: 8192})
+	ag.SetProviderConfig(provider, ProviderConfig{
+		Model: "glm-5.2[1m]", MaxTokens: 32768, ContextWindow: 1000000,
+	})
+	cfg := ag.configSnapshot()
+	if cfg.Provider != provider || cfg.Model != "glm-5.2[1m]" || cfg.MaxTokens != 32768 || cfg.ContextWindow != 1000000 {
+		t.Fatalf("hot-swapped config = %+v", cfg)
+	}
+}
+
+// TestSetProviderRaceWithRun exercises a config push swapping the provider while
+// runs execute; run under -race it proves the Cfg read/write are serialized.
+func TestSetProviderRaceWithRun(t *testing.T) {
+	prov := &callbackProvider{fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		return chatResponse(NewTextMessage("assistant", "ok")), nil
+	}}
+	ag := NewAgent(Config{Provider: prov, Model: "m"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			ag.SetProvider(prov, fmt.Sprintf("m-%d", i))
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		if _, err := ag.Run(context.Background(), TextInput("hi")); err != nil {
+			t.Errorf("run %d: %v", i, err)
+		}
+	}
+	<-done
+}
+
+// --- Legacy message construction shims -------------------------------------
+// These mirror the pre-proto ChatMessage shape so the many construction sites
+// in the tests stay readable; chatResponse converts them to *aop.Message.
+
+type FunctionCall struct {
+	Name      string
+	Arguments string
+}
+
+type ToolCall struct {
+	ID       string
+	Type     string
+	Function FunctionCall
+}
+
+type ChatMessage struct {
+	Role      string
+	Content   *string
+	ToolCalls []ToolCall
+}
+
+func (m ChatMessage) toAOP() *aop.Message {
+	msg := &aop.Message{Role: m.Role}
+	if m.Content != nil {
+		msg.Content = append(msg.Content, aop.Text(*m.Content))
+	}
+	for _, c := range m.ToolCalls {
+		msg.Content = append(msg.Content, toolCallContent(c.ID, c.Function.Name, c.Function.Arguments))
+	}
+	return msg
+}
+
+func toolCallContent(id, name, args string) *aop.Content {
+	return &aop.Content{Value: &aop.Content_ToolCall{ToolCall: &aop.ToolCall{
+		Id:   id,
+		Name: name,
+		Kind: "function",
+		Arguments: &aop.EncodedValue{
+			Data:      []byte(args),
+			MediaType: aop.JSONMediaType,
+		},
+	}}}
+}
+
+func NewTextMessage(role, text string) ChatMessage {
+	return ChatMessage{Role: role, Content: &text}
+}
+
+func textMessage(role, text string) *aop.Message {
+	return provider.TextMessage(role, text)
+}
+
+func toolResultMessage(callID, output string) *aop.Message {
+	return provider.ToolResultMessage(callID, tool.TextResult(output))
+}
+
+func imageMessage(role string, parts ...*aop.Content) *aop.Message {
+	return &aop.Message{Role: role, Content: parts}
+}
+
+// --- Streaming event shims --------------------------------------------------
+
+func roleDelta(role string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{Role: role}
+}
+
+func textDelta(s string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+		Value: &aop.MessageDelta_Text{Text: s},
+	}}
+}
+
+func reasoningDelta(s string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+		Value: &aop.MessageDelta_Reasoning{Reasoning: s},
+	}}
+}
+
+func toolCallDelta(index uint32, id, name, args string) ChatCompletionStreamEvent {
+	return ChatCompletionStreamEvent{ToolDeltas: []*aop.ToolCallDelta{{
+		Index:     index,
+		CallId:    id,
+		Name:      name,
+		Arguments: []byte(args),
+	}}}
+}
+
+func testBus(handler func(*aop.Event)) *eventbus.Bus[*aop.Event] {
+	b := eventbus.New[*aop.Event]()
+	if handler != nil {
+		b.Subscribe(handler)
+	}
+	return b
+}
+
+type recordingTool struct {
+	name   string
+	output string
+
+	mu    sync.Mutex
+	calls []string
+}
+
+func (t *recordingTool) Name() string { return t.name }
+
+func (t *recordingTool) Description() string { return "recording tool" }
+
+func (t *recordingTool) Definition() *aop.ToolDefinition {
+	return tool.Def(t.name, t.Description(), struct{}{})
+}
+
+func (t *recordingTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, arguments)
+	if strings.Contains(arguments, "fail") {
+		return nil, fmt.Errorf("failed")
+	}
+	return tool.TextResult(t.output), nil
+}
+
+func (t *recordingTool) callsSnapshot() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.calls...)
+}
+
+type scriptedProvider struct {
+	mu                 sync.Mutex
+	responses          []*ChatCompletionResponse
+	err                error
+	streamEvents       []ChatCompletionStreamEvent
+	streamEventBatches [][]ChatCompletionStreamEvent
+	requests           []*ChatCompletionRequest
+}
+
+func (p *scriptedProvider) Name() string { return "scripted" }
+
+func (p *scriptedProvider) ChatCompletion(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requests = append(p.requests, cloneRequest(req))
+	if p.err != nil {
+		return nil, p.err
+	}
+	if len(p.responses) == 0 {
+		return nil, fmt.Errorf("no scripted response left")
+	}
+	resp := p.responses[0]
+	p.responses = p.responses[1:]
+	return resp, nil
+}
+
+func (p *scriptedProvider) ChatCompletionStream(ctx context.Context, req *ChatCompletionRequest) (<-chan ChatCompletionStreamEvent, error) {
+	p.mu.Lock()
+	p.requests = append(p.requests, cloneRequest(req))
+	events := append([]ChatCompletionStreamEvent(nil), p.streamEvents...)
+	if len(p.streamEventBatches) > 0 {
+		events = append([]ChatCompletionStreamEvent(nil), p.streamEventBatches[0]...)
+		p.streamEventBatches = p.streamEventBatches[1:]
+	}
+	p.mu.Unlock()
+
+	ch := make(chan ChatCompletionStreamEvent)
+	go func() {
+		defer close(ch)
+		for _, event := range events {
+			select {
+			case ch <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
+}
+
+func (p *scriptedProvider) requestsSnapshot() []*ChatCompletionRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]*ChatCompletionRequest, 0, len(p.requests))
+	for _, req := range p.requests {
+		out = append(out, cloneRequest(req))
+	}
+	return out
+}
+
+type blockingProvider struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+
+	mu       sync.Mutex
+	requests []*ChatCompletionRequest
+}
+
+func (p *blockingProvider) Name() string { return "blocking" }
+
+func (p *blockingProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	p.mu.Lock()
+	p.requests = append(p.requests, cloneRequest(req))
+	p.mu.Unlock()
+	p.once.Do(func() { close(p.started) })
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return chatResponse(NewTextMessage("assistant", "done")), nil
+}
+
+type callbackProvider struct {
+	fn func(context.Context, *ChatCompletionRequest) (*ChatCompletionResponse, error)
+}
+
+func (p *callbackProvider) Name() string { return "callback" }
+
+func (p *callbackProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	return p.fn(ctx, req)
+}
+
+type retryableTimeoutError struct{}
+
+func (retryableTimeoutError) Error() string   { return "timeout awaiting response headers" }
+func (retryableTimeoutError) Timeout() bool   { return true }
+func (retryableTimeoutError) Temporary() bool { return true }
+
+type imageErrorProvider struct {
+	imagesDisabled atomic.Bool
+	callCount      atomic.Int32
+}
+
+func (p *imageErrorProvider) Name() string { return "image-error" }
+
+func (p *imageErrorProvider) DisableImages() {
+	p.imagesDisabled.Store(true)
+}
+
+func (p *imageErrorProvider) ChatCompletion(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	p.callCount.Add(1)
+	if p.imagesDisabled.Load() || !messagesContainImages(req.Messages) {
+		return chatResponse(NewTextMessage("assistant", "success without images")), nil
+	}
+	return nil, &APIError{StatusCode: 400, Message: "Invalid parameter: messages[5].content[1].type is not supported, unknown type: image_url"}
+}
+
+func messagesContainImages(msgs []*aop.Message) bool {
+	for _, m := range msgs {
+		for _, p := range m.Content {
+			if p.GetMedia() != nil {
+				return true
+			}
+			if r := p.GetToolResult(); r != nil {
+				for _, block := range r.Output {
+					if block.GetMedia() != nil {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+type pushingProvider struct {
+	inner  Provider
+	inbox  *inbox.Buffered
+	pushed bool
+	push   inbox.Message
+}
+
+func (p *pushingProvider) Name() string { return "pushing" }
+
+func (p *pushingProvider) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	if !p.pushed {
+		p.pushed = true
+		p.inbox.Push(p.push)
+	}
+	return p.inner.ChatCompletion(ctx, req)
+}
+
+type stubPseudoCommand struct {
+	name   string
+	output string
+}
+
+func (c *stubPseudoCommand) Name() string  { return c.name }
+func (c *stubPseudoCommand) Usage() string { return c.name }
+func (c *stubPseudoCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+	fmt.Fprint(execution.Stdout, c.output)
+	return nil, nil
+}
+
+func chatResponse(msg ChatMessage) *ChatCompletionResponse {
+	return &ChatCompletionResponse{
+		Choices: []Choice{{Message: msg.toAOP()}},
+	}
+}
+
+func cloneRequest(req *ChatCompletionRequest) *ChatCompletionRequest {
+	cloned := *req
+	cloned.Messages = append([]*aop.Message(nil), req.Messages...)
+	cloned.Tools = append([]*aop.ToolDefinition(nil), req.Tools...)
+	return &cloned
+}
+
+func hasToolMessage(messages []*aop.Message, toolCallID, contains string) bool {
+	for _, msg := range messages {
+		if msg.Role != "tool" {
+			continue
+		}
+		r := provider.MessageToolResult(msg)
+		if r == nil || r.CallId != toolCallID {
+			continue
+		}
+		if strings.Contains(tool.ResultText(r), contains) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEvent(events []string, want string) bool {
+	for _, event := range events {
+		if event == want {
+			return true
+		}
+	}
+	return false
+}
+
+func eventTypes(events []*aop.Event) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		out = append(out, aop.Kind(event))
+	}
+	return out
+}
+
+func eventKind(event *aop.Event) string { return aop.Kind(event) }
+
+func lastEvent(events []*aop.Event) *aop.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	return events[len(events)-1]
+}
+
+func messageContent(m *aop.Message) string {
+	return provider.MessageText(m)
+}
+
+func contentOf(m *aop.Message) string {
+	return provider.MessageText(m)
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func bashArgs(cmd string) string {
+	data, _ := json.Marshal(map[string]string{"command": cmd})
+	return string(data)
+}
+
+func scannerBashArgs(cmd string) string {
+	data, _ := json.Marshal(map[string]string{"command": cmd})
+	return string(data)
+}
+
+func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, contains string) {
+	t.Helper()
+	if !hasToolMessage(req.Messages, toolCallID, contains) {
+		var actual string
+		for _, msg := range req.Messages {
+			if msg.Role != "tool" {
+				continue
+			}
+			if r := provider.MessageToolResult(msg); r != nil && r.CallId == toolCallID {
+				actual = tool.ResultText(r)
+				break
+			}
+		}
+		t.Fatalf("tool result for %s missing %q, got: %q", toolCallID, contains, actual)
+	}
+}
+
+func buildTestSystemPrompt(tools *commands.CommandRegistry, ss []skills.Skill) string {
+	var sb strings.Builder
+	sb.WriteString("You are a test agent.\n\n## Available Tools\n\n")
+	if tools != nil {
+		for _, t := range tools.Tools() {
+			sb.WriteString("### " + t.Name() + "\n" + t.Description() + "\n\n")
+		}
+		if docs := tools.UsageDocs(); docs != "" {
+			sb.WriteString("## Pseudo-Commands\n\n" + docs + "\n\n")
+		}
+	}
+	if skillPrompt := skills.FormatForPrompt(ss); skillPrompt != "" {
+		sb.WriteString(skillPrompt)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
+}
+
+func buildTmuxTestPrompt(registry *commands.CommandRegistry) string {
+	var sb strings.Builder
+	sb.WriteString("You are a test agent. You have one tool: bash.\n\n## Tool: bash\n")
+	for _, tool := range registry.Tools() {
+		sb.WriteString(tool.Description())
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("## Pseudo-Commands (use via bash tool)\n\ntmux is a pseudo-command built into the bash tool. Call it like:\n  bash tool call with {\"command\": \"tmux new -d -s myname \\\"sh\\\"\"}\n  bash tool call with {\"command\": \"tmux send -t myname \\\"echo hi\\\" Enter\"}\n  bash tool call with {\"command\": \"tmux capture-pane -t myname --new\"}\n  bash tool call with {\"command\": \"tmux ls\"}\n  bash tool call with {\"command\": \"tmux kill -t myname\"}\n\ntmux usage:\n")
+	sb.WriteString(registry.UsageDocs())
+
+	sb.WriteString("\n## Rules\n\n1. Execute ONE bash call per step. Do not combine multiple steps.\n2. After send-keys, always sleep briefly (sleep 0.3) before capture-pane.\n3. Use capture-pane with --new for incremental output.\n4. Report observations at the end.\n")
+	return sb.String()
+}
+
+func skipUnlessLive(t *testing.T) (*ProviderConfig, Provider) {
+	t.Helper()
+	apiKey := os.Getenv("TEST_API_KEY")
+	baseURL := os.Getenv("TEST_BASE_URL")
+	model := os.Getenv("TEST_MODEL")
+	if apiKey == "" || baseURL == "" || model == "" {
+		t.Skip("set TEST_API_KEY, TEST_BASE_URL, TEST_MODEL to run live tests")
+	}
+	cfg := &ProviderConfig{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Model:   model,
+		Timeout: 60,
+	}
+	cfg, err := ResolveProvider(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov, err := NewProviderFromResolved(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, prov
+}
+
+func truncateOutput(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+func TestRootAgentPublicImport(t *testing.T) {
+	config := Config{}.
+		WithModel("example-model").
+		WithMaxTokens(256).
+		WithContextWindow(4096)
+	if config.Model != "example-model" || config.MaxTokens != 256 || config.ContextWindow != 4096 {
+		t.Fatalf("root agent config aliases/builders are not externally usable: %#v", config)
+	}
+	_ = ProviderConfig{Model: "example-model"}
 }

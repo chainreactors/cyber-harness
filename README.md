@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="180" alt="aiscan logo">
+  <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
   <p align="center">AI-driven single-binary pentest agent with a built-in multi-engine arsenal, ready to go</p>
   <p align="center"><strong>Preview — APIs and features may change between releases</strong></p>

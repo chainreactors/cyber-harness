@@ -5,6 +5,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 type RuntimeFeatures struct {
@@ -14,6 +15,55 @@ type RuntimeFeatures struct {
 	AIEnabled        bool
 	ScannerAI        bool
 	Warning          string
+}
+
+// AppConfigFromDistribute builds the runner configuration directly from the
+// canonical config proto. Fields that have no proto representation (playwright
+// session, uncover credentials, CLI skill paths) stay at their defaults; the
+// startup path layers them from cfg.Option via MergeOptionExtras.
+func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeatures, logger telemetry.Logger) ApplicationConfig {
+	return ApplicationConfig{
+		Provider: ApplicationProviderConfig{
+			Enabled:   features.ProviderEnabled,
+			Config:    ProviderConfigFromProto(dc.GetLlm()),
+			Fallbacks: FallbackProviderConfigsFromProto(dc.GetLlm()),
+			Optional:  features.ProviderOptional,
+		},
+		Scanner: ScannerConfig{
+			CyberhubURL:  dc.GetCyberhub().GetUrl(),
+			CyberhubKey:  dc.GetCyberhub().GetKey(),
+			CyberhubMode: dc.GetCyberhub().GetMode(),
+			AIEnabled:    features.AIEnabled,
+			VerifyMode:   cfg.ResolveString(dc.GetScan().GetVerify(), cfg.DefaultVerify),
+			Proxy:        dc.GetCyberhub().GetProxy(),
+			FofaEmail:    dc.GetRecon().GetFofaEmail(),
+			FofaKey:      dc.GetRecon().GetFofaKey(),
+			HunterToken:  dc.GetRecon().GetHunterToken(),
+			HunterAPIKey: dc.GetRecon().GetHunterApiKey(),
+			ReconProxy:   dc.GetRecon().GetProxy(),
+			ReconLimit:   int(dc.GetRecon().GetLimit()),
+		},
+		Tools: ToolConfig{
+			Enabled:       features.ToolsEnabled,
+			BashTimeout:   300,
+			TavilyKeys:    dc.GetSearch().GetTavilyKeys(),
+			OptionalTools: append([]string(nil), dc.GetAgent().GetTools()...),
+		},
+		Logger: logger,
+	}
+}
+
+// MergeOptionExtras layers the fields DistributeConfig does not model onto a
+// proto-built ApplicationConfig: playwright session, uncover credentials, and
+// CLI skill paths.
+func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConfig {
+	if option == nil {
+		return rc
+	}
+	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
+	rc.Tools.PlaywrightSession = option.PlaywrightSession
+	rc.CLISkillPaths = skillPathsFromOptions(option)
+	return rc
 }
 
 func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Logger) ApplicationConfig {

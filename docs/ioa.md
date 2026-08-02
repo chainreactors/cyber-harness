@@ -223,14 +223,14 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --heartbeat 5 --space case-1 \
 
 | 工具 | 说明 |
 | --- | --- |
-| `ioa_send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
-| `ioa_read` | 读取 Space 中的消息（支持过滤） |
-| `ioa_space` | 获取或创建 Space |
+| `ioa send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
+| `ioa read` | 读取 Space 中的消息（支持过滤） |
+| `ioa space` | 获取或创建 Space |
 | `ioa_node` | 注册 Node 或查询 Node 信息 |
 
-### ioa_send 示例
+### ioa send 示例
 
-Agent 可以通过 `ioa_send` 给其他 Node 分配任务：
+Agent 可以通过 `ioa send` 给其他 Node 分配任务：
 
 ```json
 {

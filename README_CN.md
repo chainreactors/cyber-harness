@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="180" alt="aiscan logo">
+  <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
   <p align="center">AI 驱动的面向实战的单文件渗透 agent，内置多引擎武器库开箱即用</p>
   <p align="center"><strong>Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
@@ -209,6 +209,7 @@ llm:
 | [Scan 模式详解](docs/scan.md) | 扫描流水线、AI 增强、输出格式 |
 | [Agent 模式详解](docs/agent.md) | Agent 工具集、Goal Evaluation、REPL |
 | [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
+| [协议与传输架构](docs/protocol-architecture.md) | AOP WebSocket、Connect 管理平面、namespace 与身份边界 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
 | [Changelog](docs/changelog.md) | 版本变更记录 |
 

@@ -43,21 +43,21 @@ type WriteArgs struct {
 	Edits   []EditPatch `json:"edits,omitempty"   jsonschema:"description=One or more targeted replacements. Each edit is matched against the original file. Do not include overlapping edits."`
 }
 
-func (t *WriteTool) Definition() coretool.Definition {
+func (t *WriteTool) Definition() *coretool.Definition {
 	return coretool.Def("write", t.Description(), WriteArgs{})
 }
 
-func (t *WriteTool) Execute(ctx context.Context, arguments string) (coretool.Result, error) {
+func (t *WriteTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	effective := *t
 	effective.workDir = coretool.WorkDirFromContext(ctx, t.workDir)
 	t = &effective
 	args, err := coretool.ParseArgs[WriteArgs](arguments)
 	if err != nil {
-		return coretool.Result{}, err
+		return nil, err
 	}
 
 	if args.Path == "" {
-		return coretool.Result{}, fmt.Errorf("path is required")
+		return nil, fmt.Errorf("path is required")
 	}
 
 	if len(args.Edits) > 0 {
@@ -67,16 +67,16 @@ func (t *WriteTool) Execute(ctx context.Context, arguments string) (coretool.Res
 	return t.writeFile(args)
 }
 
-func (t *WriteTool) writeFile(args WriteArgs) (coretool.Result, error) {
+func (t *WriteTool) writeFile(args WriteArgs) (*coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return coretool.Result{}, fmt.Errorf("create directory: %w", err)
+		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
 	if err := os.WriteFile(path, []byte(args.Content), 0644); err != nil {
-		return coretool.Result{}, fmt.Errorf("write file: %w", err)
+		return nil, fmt.Errorf("write file: %w", err)
 	}
 
 	lineCount := strings.Count(args.Content, "\n") + 1
@@ -90,12 +90,12 @@ type editMatch struct {
 	newText    string
 }
 
-func (t *WriteTool) editFile(args WriteArgs) (coretool.Result, error) {
+func (t *WriteTool) editFile(args WriteArgs) (*coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return coretool.Result{}, fmt.Errorf("read file for edit: %w", err)
+		return nil, fmt.Errorf("read file for edit: %w", err)
 	}
 	original := string(data)
 
@@ -203,7 +203,7 @@ func (t *WriteTool) editFile(args WriteArgs) (coretool.Result, error) {
 	}
 
 	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
-		return coretool.Result{}, fmt.Errorf("write edited file: %w", err)
+		return nil, fmt.Errorf("write edited file: %w", err)
 	}
 
 	// Build summary

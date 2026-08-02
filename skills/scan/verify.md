@@ -18,6 +18,21 @@ A finding can be `confirmed` only when the evidence shows:
 - the result is not explained by a default page, login redirect, WAF block, CDN/shared-host response, intended public endpoint, or documented behavior
 - severity matches the demonstrated impact rather than a theoretical chain
 
+## Preferred Evidence (recommended, exceptions allowed)
+
+For HTTP/HTTPS targets, prefer this evidence shape when practical:
+
+1. **Captured traffic via `mitm`**: run the verification through the MITM wrapper so the exact request/response is on record, e.g. `mitm curl -s http://target/...` or `mitm neutron -u <target> -t ./poc.yaml`. Reference the record with `mitm flows` / `mitm flow <id>` and cite the flow id in the finding.
+2. **PoC as a nuclei template**: express the reproduction as a nuclei-format template saved to a file (e.g. `findings/poc/<finding-id>.yaml`), then actually execute it against the target with `neutron -u <target> -t <file>` (or nuclei itself) and keep the execution output. A template that was written but not executed does not count as reproduction. Browser-dependent flows can be recorded with `playwright record` into nuclei headless YAML and replayed with `playwright template`.
+
+Allowed exceptions — fall back to curl/protocol commands or browser replay when:
+
+- the protocol is not HTTP/HTTPS (SSH, MySQL, Redis, etc.)
+- the check is a multi-step interactive flow that templates cannot express
+- re-sending traffic carries disproportionate risk to a fragile target
+
+When using an exception, note the evidence form and the reason in the finding. Sufficient non-mitm/non-template evidence can still reach `confirmed`; the preference is about making evidence replayable, not a hard gate.
+
 For claims based on behavior differences, compare against a baseline. For injection-style claims, use a unique canary or otherwise measurable signal; do not rely on generic payload strings, status code alone, or one-off anomalies.
 
 For authorization and IDOR claims, one changed ID is a lead. Test 3-5 observed, adjacent, or cross-account identifiers when available, and compare owner, non-owner, anonymous, and baseline responses before marking impact.
@@ -63,4 +78,4 @@ Followed by concise markdown with the exact evidence used for the decision.
 - **status**: confirmed, not_confirmed, info, or inconclusive
 - **target**: host:port or URL verified
 
-In IOA collaboration mode, use `ioa_send checkpoint` instead of `finish`.
+In IOA collaboration mode, use `ioa send checkpoint` instead of `finish`.

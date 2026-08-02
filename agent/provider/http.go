@@ -118,9 +118,12 @@ func streamSSE(
 	endpoint string,
 	body []byte,
 	setHeaders func(*http.Request),
+	providerName string,
+	protocol string,
 	acceptDoneMarker bool,
 	parse func(eventType string, data []byte) (ChatCompletionStreamEvent, error),
 ) (<-chan ChatCompletionStreamEvent, error) {
+	captureFrame(ctx, RawFrame{Provider: providerName, Protocol: protocol, Direction: "request", Transport: "http", Payload: body, MediaType: "application/json"})
 	reqCtx, reqCancel := context.WithCancel(ctx)
 
 	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewReader(body))
@@ -147,6 +150,7 @@ func streamSSE(
 		if readErr != nil {
 			return nil, wrapReadError(ctx, timedOut, timeout, "read response", readErr)
 		}
+		captureFrame(ctx, RawFrame{Provider: providerName, Protocol: protocol, EventType: "error", Direction: "response", Transport: "sse", Payload: respBody, MediaType: "application/json"})
 		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody), Header: resp.Header.Clone()}
 	}
 
@@ -182,7 +186,14 @@ func streamSSE(
 			if !strings.HasPrefix(line, "data:") {
 				continue
 			}
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			rawLine := scanner.Bytes()
+			colon := bytes.Index(rawLine, []byte("data:"))
+			rawData := rawLine[colon+len("data:"):]
+			if len(rawData) > 0 && rawData[0] == ' ' {
+				rawData = rawData[1:]
+			}
+			captureFrame(ctx, RawFrame{Provider: providerName, Protocol: protocol, EventType: sseEvent, Direction: "response", Transport: "sse", Payload: rawData, MediaType: "application/json"})
+			data := strings.TrimSpace(string(rawData))
 			if data == "[DONE]" {
 				if !acceptDoneMarker {
 					sseSend(ctx, events, ChatCompletionStreamEvent{Err: ErrStreamIncomplete})
@@ -202,8 +213,8 @@ func streamSSE(
 				sseSend(ctx, events, event)
 				return
 			}
-			if event.Delta.Role != "" || event.Delta.Content != nil ||
-				event.Delta.ReasoningContent != nil || len(event.Delta.ToolCalls) > 0 ||
+			if event.Role != "" || event.MessageDelta != nil ||
+				len(event.ToolDeltas) > 0 ||
 				event.FinishReason != "" || event.Usage != nil {
 				select {
 				case events <- event:
@@ -232,6 +243,17 @@ func streamSSE(
 	return events, nil
 }
 
+func captureAPIErrorFrame(ctx context.Context, providerName, protocol string, err error) {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return
+	}
+	captureFrame(ctx, RawFrame{
+		Provider: providerName, Protocol: protocol, EventType: "error", Direction: "response",
+		Transport: "http", Payload: []byte(apiErr.Message), MediaType: "application/json",
+	})
+}
+
 func sseSend(ctx context.Context, ch chan<- ChatCompletionStreamEvent, event ChatCompletionStreamEvent) {
 	select {
 	case ch <- event:
@@ -258,13 +280,6 @@ func readAllWithCancelTimeout(r io.Reader, cancel context.CancelFunc, timeout ti
 	defer timer.Stop()
 	body, err := io.ReadAll(r)
 	return body, timedOut.Load(), err
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 func clampInt(v, min, max, fallback int) int {

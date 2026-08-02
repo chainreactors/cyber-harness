@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, FileUp, MessageSquare, Monitor, Network } from 'lucide-react'
 import { CSTXTable } from '@cyber/cstx'
 import { Button } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import type { SCONode } from '@cyber/cstx-easm'
-import type { MentionPopupApi } from '@/viewer'
+import type { MentionPopupApi, PopupNavigationKey } from '@/viewer'
 import type { IOAMessage, IOANode } from '../api'
 
 // The @-mention popup, Cursor-style: a category rail (CSTX assets / IOA nodes +
@@ -61,6 +61,7 @@ export default function MentionPicker({
   nodes,
   ioaNodes,
   ioaMessages,
+  navigation,
 }: MentionPickerProps) {
   const { t } = useTranslation('chat')
   const q = query.trim().toLowerCase()
@@ -83,18 +84,23 @@ export default function MentionPicker({
   const cstxCount = filteredNodes.length
   const ioaCount = filteredIoaNodes.length + filteredIoaMessages.length
 
-  // A category is offered when it has something to show: assets present, any IOA
-  // node/message present, or (File) the host composer accepts attachments.
+  // CSTX is always present so "@" consistently opens the asset table even before
+  // the first scan. IOA and File remain capability-driven categories.
   const categories = useMemo(() => {
-    const list: { id: Category; label: string; icon: typeof Box; count?: number }[] = []
-    if (nodes.length) list.push({ id: 'cstx', label: t('mention.cstx'), icon: Box, count: cstxCount })
+    const list: { id: Category; label: string; icon: typeof Box; count?: number }[] = [
+      { id: 'cstx', label: t('mention.cstx'), icon: Box, count: cstxCount },
+    ]
     if (ioaNodes.length || ioaMessages.length) list.push({ id: 'ioa', label: t('mention.ioa'), icon: Network, count: ioaCount })
     if (onAttach) list.push({ id: 'file', label: t('mention.file'), icon: FileUp })
     return list
-  }, [nodes.length, ioaNodes.length, ioaMessages.length, onAttach, cstxCount, ioaCount, t])
+  }, [ioaNodes.length, ioaMessages.length, onAttach, cstxCount, ioaCount, t])
 
   const [active, setActive] = useState<Category>(() => categories[0]?.id ?? 'cstx')
   const [userPicked, setUserPicked] = useState(false)
+  const [cursor, setCursor] = useState(-1)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const handledNavigationSequenceRef = useRef(navigation?.sequence ?? 0)
 
   // Keep the active tab valid as availability shifts (e.g. IOA drains).
   useEffect(() => {
@@ -117,7 +123,84 @@ export default function MentionPicker({
   const pickTab = useCallback((id: Category) => {
     setActive(id)
     setUserPicked(true)
+    setCursor(-1)
   }, [])
+
+  const optionElements = useCallback((category: Category = active): HTMLElement[] => {
+    const root = rootRef.current
+    if (!root) return []
+    const content = root.querySelector<HTMLElement>(`[data-mention-content="${category}"]`)
+    if (!content) return []
+    if (category === 'cstx') {
+      const cards = Array.from(content.querySelectorAll<HTMLElement>('[role="button"][tabindex="0"]'))
+      const insert = Array.from(content.querySelectorAll<HTMLButtonElement>('button')).filter(
+        (button) => button.textContent?.trim() === t('mention.insert'),
+      )
+      return [...cards, ...insert]
+    }
+    return Array.from(content.querySelectorAll<HTMLElement>('[data-mention-option="true"]'))
+  }, [active, t])
+
+  const focusOption = useCallback((index: number, category: Category = active) => {
+    requestAnimationFrame(() => {
+      const options = optionElements(category)
+      if (!options.length) return
+      const resolved = Math.max(0, Math.min(index, options.length - 1))
+      const option = options[resolved]
+      option?.focus({ preventScroll: true })
+      const scroller = scrollRef.current
+      if (!option || !scroller) return
+      const scrollRect = scroller.getBoundingClientRect()
+      const optionRect = option.getBoundingClientRect()
+      if (optionRect.top < scrollRect.top) {
+        scroller.scrollTop -= scrollRect.top - optionRect.top
+      } else if (optionRect.bottom > scrollRect.bottom) {
+        scroller.scrollTop += optionRect.bottom - scrollRect.bottom
+      }
+    })
+  }, [active, optionElements])
+
+  const moveCategory = useCallback((delta: number) => {
+    if (!categories.length) return
+    const current = Math.max(0, categories.findIndex((category) => category.id === active))
+    const next = categories[(current + delta + categories.length) % categories.length].id
+    setActive(next)
+    setUserPicked(true)
+    setCursor(0)
+    focusOption(0, next)
+  }, [active, categories, focusOption])
+
+  const handleNavigation = useCallback((key: PopupNavigationKey) => {
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+      moveCategory(key === 'ArrowLeft' ? -1 : 1)
+      return
+    }
+    const options = optionElements()
+    if (!options.length) return
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+      const delta = key === 'ArrowUp' ? -1 : 1
+      const start = cursor < 0 ? (delta > 0 ? -1 : 0) : cursor
+      const next = (start + delta + options.length) % options.length
+      setCursor(next)
+      focusOption(next)
+      return
+    }
+    if (key === 'Enter') {
+      const index = cursor < 0 ? 0 : Math.min(cursor, options.length - 1)
+      options[index]?.click()
+      focusOption(index)
+    }
+  }, [cursor, focusOption, moveCategory, optionElements])
+
+  useEffect(() => {
+    if (!navigation || navigation.sequence === handledNavigationSequenceRef.current) return
+    handledNavigationSequenceRef.current = navigation.sequence
+    handleNavigation(navigation.key)
+  }, [navigation, handleNavigation])
+
+  useEffect(() => {
+    setCursor(-1)
+  }, [q])
 
   const rows = useMemo(() => filteredNodes.map(flatten), [filteredNodes])
 
@@ -132,17 +215,31 @@ export default function MentionPicker({
 
   return (
     <div
+      ref={rootRef}
       className="flex max-h-[52vh] flex-col overflow-hidden"
       onMouseDown={(e) => e.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onDismiss()
+          return
+        }
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          event.preventDefault()
+          handleNavigation(event.key as PopupNavigationKey)
+        }
+      }}
     >
-      <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1.5">
+      <div className="flex items-center gap-1 border-b border-border/60 px-2 py-2">
         {categories.map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
             type="button"
             onClick={() => pickTab(id)}
+            data-mention-tab="true"
+            aria-selected={id === active}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+              'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30',
               id === active
                 ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -157,61 +254,66 @@ export default function MentionPicker({
             )}
           </button>
         ))}
+        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">← → {t('mention.switchCategory')} · ↑ ↓ {t('mention.navigate')} · Enter</span>
         <Button
           variant="ghost"
           size="xs"
           onClick={onDismiss}
-          className="ml-auto text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground"
         >
           Esc
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         {active === 'cstx' && (
-          <CSTXTable
-            data={{ rows, total: rows.length }}
-            loading={{ rows: false }}
-            errors={{ rows: null }}
-            colSpan={4}
-            config={{
-              enableSearch: false,
-              enableSorting: true,
-              // No pager: list every match in one scrollable view (the popup body
-              // already caps height and scrolls). This is a quick pick-and-insert
-              // surface, so an operator scans and selects without clicking through
-              // pages. `layout: 'cards'` renders each asset as a card of all its
-              // populated fields — every field readable in the narrow popup, no
-              // horizontal scroll, nothing traded away to fit.
-              layout: 'cards',
-              enablePagination: false,
-              enableRowSelection: true,
-              enableColoredTypes: true,
-              typeFilterKey: 'cstx_type',
-              rowIdKey: 'cstx_id',
-              compact: true,
-              columnsExclude: EXCLUDE,
-              batchActions: [{ id: 'confirm', label: t('mention.insert'), icon: 'Check' }],
-            }}
-            onAction={handleCstxAction}
-          />
+          <div data-mention-content="cstx">
+            <CSTXTable
+              data={{ rows, total: rows.length }}
+              loading={{ rows: false }}
+              errors={{ rows: null }}
+              colSpan={4}
+              config={{
+                enableSearch: false,
+                enableSorting: true,
+                // No pager: list every match in one scrollable view (the popup body
+                // already caps height and scrolls). This is a quick pick-and-insert
+                // surface, so an operator scans and selects without clicking through
+                // pages. `layout: 'cards'` renders each asset as a card of all its
+                // populated fields — every field readable in the narrow popup, no
+                // horizontal scroll, nothing traded away to fit.
+                layout: 'cards',
+                enablePagination: false,
+                enableRowSelection: true,
+                enableColoredTypes: true,
+                typeFilterKey: 'cstx_type',
+                rowIdKey: 'cstx_id',
+                compact: true,
+                columnsExclude: EXCLUDE,
+                batchActions: [{ id: 'confirm', label: t('mention.insert'), icon: 'Check' }],
+              }}
+              onAction={handleCstxAction}
+            />
+          </div>
         )}
 
         {active === 'ioa' && (
-          <IoaList
-            nodes={filteredIoaNodes}
-            messages={filteredIoaMessages}
-            onSelect={(target) => onSelect([target])}
-          />
+          <div data-mention-content="ioa">
+            <IoaList
+              nodes={filteredIoaNodes}
+              messages={filteredIoaMessages}
+              onSelect={(target) => onSelect([target])}
+            />
+          </div>
         )}
 
         {active === 'file' && onAttach && (
-          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+          <div data-mention-content="file" className="flex flex-col items-center gap-3 px-4 py-8 text-center">
             <span className="grid h-11 w-11 place-items-center rounded-full bg-accent text-primary">
               <FileUp className="h-5 w-5" aria-hidden="true" />
             </span>
             <p className="max-w-xs text-xs text-muted-foreground">{t('mention.fileHint')}</p>
-            <Button size="sm" variant="outline" onClick={onAttach} className="gap-1.5">
+            <Button data-mention-option="true" size="sm" variant="outline" onClick={onAttach} className="gap-1.5">
               <FileUp className="h-3.5 w-3.5" />
               {t('mention.chooseFile')}
             </Button>
@@ -291,7 +393,8 @@ function IoaRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+      data-mention-option="true"
+      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs outline-none transition-colors hover:bg-accent focus:bg-accent focus:ring-2 focus:ring-primary/20"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate font-medium text-foreground">{label}</span>

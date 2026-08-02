@@ -6,8 +6,11 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/aop/x/delegation"
+	providerpkg "github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	types "github.com/chainreactors/aiscan/pkg/types"
+	"google.golang.org/protobuf/proto"
 )
 
 type Agent struct {
@@ -34,8 +37,8 @@ func WithTurnID(turnID string) RunOption {
 	}
 }
 
-func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Result, error) {
-	userMsg, err := input.chatMessage()
+func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) (*Result, error) {
+	userMsg, err := resolveInputMessage(input)
 	if err != nil {
 		return nil, err
 	}
@@ -57,14 +60,14 @@ func (a *Agent) Run(ctx context.Context, input Input, opts ...RunOption) (*Resul
 		cfg.TurnID = randomID()
 		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
 	}
+	if cfg.CaptureProviderFrames {
+		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
+	}
 	cfg.Messages = a.MessagesSnapshot()
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
-	msg := inbox.FromChatMessage(userMsg, inbox.OriginUser)
-	if input.NoEcho {
-		msg.Meta = map[string]any{"no_echo": true}
-	}
+	msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
 	if err := cfg.Inbox.Push(msg); err != nil {
 		return nil, fmt.Errorf("push prompt: %w", err)
 	}
@@ -115,6 +118,9 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 	if cfg.TurnID == "" {
 		cfg.TurnID = randomID()
 		cfg.emitter = cfg.emitter.turn(cfg.TurnID)
+	}
+	if cfg.CaptureProviderFrames {
+		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
 	}
 	cfg.Messages = a.MessagesSnapshot()
 	result, runErr := runLoop(runCtx, cfg)
@@ -215,35 +221,36 @@ func (a *Agent) DeriveNamed(name string) *Agent {
 	return a.deriveNamed(name, "", nil)
 }
 
-func (a *Agent) deriveNamed(name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
+func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
 }
 
-func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *delegation.DelegationDetail) *Agent {
+func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return NewAgent(Config{
-		Provider:         cfg.Provider,
-		Tools:            cfg.Tools,
-		Model:            cfg.Model,
-		MaxTokens:        cfg.MaxTokens,
-		ContextWindow:    cfg.ContextWindow,
-		Logger:           cfg.Logger,
-		MaxRetries:       cfg.MaxRetries,
-		MaxParallelTools: cfg.MaxParallelTools,
-		Stream:           cfg.Stream,
-		Temperature:      cfg.Temperature,
-		CacheRetention:   cfg.CacheRetention,
-		Bus:              cfg.Bus,
-		Hooks:            cfg.Hooks,
-		AgentName:        name,
-		ParentSessionID:  cfg.SessionID,
-		ParentToolCallID: parentToolCallID,
-		Delegation:       detail,
+		Provider:              cfg.Provider,
+		Tools:                 cfg.Tools,
+		Model:                 cfg.Model,
+		MaxTokens:             cfg.MaxTokens,
+		ContextWindow:         cfg.ContextWindow,
+		Logger:                cfg.Logger,
+		MaxRetries:            cfg.MaxRetries,
+		MaxParallelTools:      cfg.MaxParallelTools,
+		Stream:                cfg.Stream,
+		Temperature:           cfg.Temperature,
+		CacheRetention:        cfg.CacheRetention,
+		CaptureProviderFrames: cfg.CaptureProviderFrames,
+		Bus:                   cfg.Bus,
+		Hooks:                 cfg.Hooks,
+		AgentName:             name,
+		ParentSessionID:       cfg.SessionID,
+		ParentToolCallID:      parentToolCallID,
+		Delegation:            detail,
 	})
 }
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state, namespace string, detail any, turnID ...string) {
+func (a *Agent) EmitStatus(state string, detail proto.Message, turnID ...string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
@@ -251,7 +258,7 @@ func (a *Agent) EmitStatus(state, namespace string, detail any, turnID ...string
 		if len(turnID) > 0 && turnID[0] != "" {
 			em = em.turn(turnID[0])
 		}
-		em.status(state, namespace, detail)
+		em.status(state, detail)
 	}
 }
 
@@ -270,10 +277,10 @@ func (a *Agent) Reset() {
 	a.state.ErrorMessage = ""
 }
 
-func (a *Agent) LoadMessages(messages []ChatMessage) {
+func (a *Agent) LoadMessages(messages []*aop.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state.Messages = append([]ChatMessage(nil), messages...)
+	a.state.Messages = append([]*aop.Message(nil), messages...)
 }
 
 func (a *Agent) validateContinue() error {
@@ -310,10 +317,10 @@ func (a *Agent) finishRun() {
 	a.running = false
 }
 
-func (a *Agent) MessagesSnapshot() []ChatMessage {
+func (a *Agent) MessagesSnapshot() []*aop.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]ChatMessage(nil), a.state.Messages...)
+	return append([]*aop.Message(nil), a.state.Messages...)
 }
 
 func (a *Agent) saveState(result *Result, err error) {
@@ -324,6 +331,6 @@ func (a *Agent) saveState(result *Result, err error) {
 		a.state.ErrorMessage = err.Error()
 	}
 	if result != nil {
-		a.state.Messages = append([]ChatMessage(nil), result.Messages...)
+		a.state.Messages = append([]*aop.Message(nil), result.Messages...)
 	}
 }

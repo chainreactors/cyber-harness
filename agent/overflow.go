@@ -1,6 +1,10 @@
 package agent
 
-import "strings"
+import (
+	"strings"
+
+	aop "github.com/chainreactors/aiscan/aop"
+)
 
 var contextOverflowPatterns = []string{
 	"prompt is too long",
@@ -45,12 +49,12 @@ func isContextOverflowError(err error) bool {
 	return false
 }
 
-func isLengthContextOverflow(finishReason string, usage *Usage, contextWindow int) bool {
+func isLengthContextOverflow(finishReason string, usage *aop.TokenUsage, contextWindow int) bool {
 	if !isOutputLimitFinishReason(finishReason) || usage == nil || contextWindow <= 0 {
 		return false
 	}
-	if usage.CompletionTokens != 0 {
+	if usage.OutputTokens != 0 {
 		return false
 	}
-	return usage.PromptTokens >= contextWindow*99/100
+	return usage.InputTokens >= uint64(contextWindow)*99/100
 }

@@ -23,6 +23,7 @@ type MitmCommand struct {
 	store       *FlowStore
 	execCommand CommandExecutor
 	registry    *commands.CommandRegistry
+	execMu      sync.Mutex
 }
 
 func NewMitmCommand(reg *commands.CommandRegistry) *MitmCommand {
@@ -45,7 +46,7 @@ Usage:
   mitm <command> [args...]               Run command with traffic interception
   mitm flows [--host X] [--last N]       List captured flows from last run
   mitm flow <id>                         Show full flow details
-  mitm analyze [--host X] [--last N]     Format flows for AI security analysis
+  mitm analyze [--host X] [--last N]     Summarize captured functional traffic
   mitm clear                             Clear captured flows
 
 Examples:
@@ -94,6 +95,11 @@ func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execut
 		return nil, fmt.Errorf("mitm: command executor not available")
 	}
 
+	// Scanner commands share mutable proxy configuration. Serialize captured
+	// executions so one run cannot steal another run's proxy or flows.
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
+
 	state := &mitmState{store: c.store}
 	if err := state.start(); err != nil {
 		return nil, err
@@ -115,10 +121,18 @@ func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execut
 
 	details, err := c.execCommand(ctx, args, execution)
 
-	flowCount := c.store.Count()
-	summary := fmt.Sprintf("\n[mitm] %d flows captured. Use 'mitm flows' or 'mitm analyze' to inspect.", flowCount)
+	flowCount := len(state.Records())
+	summary := fmt.Sprintf("\n[mitm] %d flows captured.", flowCount)
 	fmt.Fprint(execution.Stdout, summary)
-	return details, err
+	return &CaptureResult{Command: details, Flows: state.Records()}, err
+}
+
+// CaptureResult is returned as tool-result details. FlowRecord is the canonical
+// immutable traffic snapshot from utils/mitmproxy; callers should persist it
+// directly instead of translating it through another flow DTO.
+type CaptureResult struct {
+	Command any                     `json:"command,omitempty"`
+	Flows   []*mitmproxy.FlowRecord `json:"flows"`
 }
 
 type flowQueryFlags struct {
@@ -169,9 +183,11 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 // ---------------------------------------------------------------------------
 
 type mitmState struct {
-	server *mitmproxy.Proxy
-	addr   string
-	store  *FlowStore
+	server   *mitmproxy.Proxy
+	addr     string
+	store    *FlowStore
+	recordMu sync.Mutex
+	records  []*mitmproxy.FlowRecord
 }
 
 func (s *mitmState) start() error {
@@ -183,7 +199,7 @@ func (s *mitmState) start() error {
 	if err != nil {
 		return fmt.Errorf("create MITM proxy: %w", err)
 	}
-	p.AddAddon(&captureAddon{store: s.store})
+	p.AddAddon(&captureAddon{store: s.store, record: s.addRecord})
 	listenAddr, _, err := p.StartAsync()
 	if err != nil {
 		return fmt.Errorf("start MITM proxy: %w", err)
@@ -191,6 +207,21 @@ func (s *mitmState) start() error {
 	s.server = p
 	s.addr = listenAddr.String()
 	return nil
+}
+
+func (s *mitmState) addRecord(record *mitmproxy.FlowRecord) {
+	if record == nil {
+		return
+	}
+	s.recordMu.Lock()
+	s.records = append(s.records, record)
+	s.recordMu.Unlock()
+}
+
+func (s *mitmState) Records() []*mitmproxy.FlowRecord {
+	s.recordMu.Lock()
+	defer s.recordMu.Unlock()
+	return append([]*mitmproxy.FlowRecord(nil), s.records...)
 }
 
 func (s *mitmState) stop() {
@@ -215,6 +246,7 @@ const maxBodySnip = 4096
 type captureAddon struct {
 	mitmproxy.BaseAddon
 	store   *FlowStore
+	record  func(*mitmproxy.FlowRecord)
 	pending sync.Map
 }
 
@@ -223,6 +255,9 @@ func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
 }
 
 func (a *captureAddon) Response(f *mitmproxy.Flow) {
+	if a.record != nil {
+		a.record(mitmproxy.NewFlowRecord(f, 0))
+	}
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
 		if t, ok := start.(time.Time); ok {
@@ -253,6 +288,11 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 }
 
 func (a *captureAddon) RequestError(f *mitmproxy.Flow, err error) {
+	if a.record != nil {
+		record := mitmproxy.NewFlowRecord(f, 0)
+		record.Error = err.Error()
+		a.record(record)
+	}
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
 		if t, ok := start.(time.Time); ok {
@@ -460,7 +500,7 @@ func formatFlowAnalysis(flows []Flow) string {
 		return "[mitm] no flows to analyze"
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== MITM Traffic Analysis (%d flows) ===\n\n", len(flows)))
+	sb.WriteString(fmt.Sprintf("=== Captured Traffic Summary (%d flows) ===\n\n", len(flows)))
 
 	hostCounts := map[string]int{}
 	statusCounts := map[int]int{}

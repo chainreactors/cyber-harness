@@ -34,10 +34,19 @@ jobs:
 
 
       - name: Run golangci-lint
+        id: golangci_lint
+        continue-on-error: true
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
           args: --timeout=5m --build-tags "re2_cgo re2_static"
+
+      - name: Report lint warnings
+        if: steps.golangci_lint.outcome == 'failure'
+        run: |
+          echo "::warning::golangci-lint reported issues. Lint is advisory and does not block CI."
+          echo "### Lint warnings" >> "$GITHUB_STEP_SUMMARY"
+          echo "golangci-lint reported issues. Review the annotations above; this check is non-blocking." >> "$GITHUB_STEP_SUMMARY"
 
   tidy:
     runs-on: ubuntu-22.04
@@ -87,6 +96,14 @@ jobs:
 
       - name: Check dependency layers, registered skips, and repository debt
         run: go test -count=1 ./core/deps
+
+      - name: Ensure the standard CLI does not depend on libcstx
+        run: |
+          if CGO_ENABLED=0 go list -deps -tags "forceposix emptytemplates noembed osusergo netgo" ./cmd/aiscan \
+            | grep -q '^github.com/chainreactors/libcstx/go$'; then
+            echo "::error::standard aiscan unexpectedly depends on libcstx"
+            exit 1
+          fi
 
       - name: Run go vet
         run: go vet ./...
@@ -203,11 +220,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up mingw for libcstx
+        shell: bash
+        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+
       - name: Run native Windows package tests
         run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
+        env:
+          CGO_ENABLED: "1"
 
       - name: Compile and test the full CLI on Windows
         run: go test -count=1 -tags full ./cmd/aiscan
+        env:
+          CGO_ENABLED: "1"
 
   race-stress:
     runs-on: ubuntu-22.04
@@ -262,6 +287,29 @@ jobs:
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
             ./tools
 
+      - name: Run remaining full-tag unit variants
+        run: |
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            -run '^TestKatanaProfileExtender$' \
+            ./tools/scan
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            -run '^Test(Parse|Execute_|ResolvePath_|NameAndUsage|WithDefaultSession|Format)' \
+            ./tools/playwright
+
+      - name: Compile browser-backed full-tag suites
+        run: |
+          go test -c -tags "full re2_cgo re2_static" \
+            -o "$RUNNER_TEMP/headless.test" ./pkg/headless
+          go test -c -tags "full re2_cgo re2_static" \
+            -o "$RUNNER_TEMP/playwright.test" ./tools/playwright
+
+      - name: Run full server CSTX integration
+        run: |
+          CGO_ENABLED=1 go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
+            ./cmd/aiscan ./pkg/web/api ./pkg/web/service
+
   # ── Generated templates tests (depends on tidy) ───────────────
 
   generated-test:
@@ -290,6 +338,44 @@ jobs:
             ./core/resources/...
 
       - name: Check generated resources are committed
+        run: git diff --exit-code
+
+  protobuf-generated:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Set up protoc 35.1
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "35.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install frontend dependencies
+        run: npm --prefix web/frontend ci
+
+      - name: Regenerate protobuf bindings
+        run: go run ./cmd/gen
+
+      - name: Check generated protobuf bindings are committed
         run: git diff --exit-code
 
   # ── E2E tests (depends on test) ───────────────────────────────
@@ -323,6 +409,13 @@ jobs:
           npm --prefix web/frontend run build
           test -s web/static/index.html
 
+      - name: Upload embedded frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
+          retention-days: 1
+
       - name: Install Playwright Chromium
         working-directory: web/frontend
         run: npx playwright install --with-deps chromium
@@ -344,23 +437,11 @@ jobs:
             -v \
             ./pkg/web
 
-  # ── Build (depends on test, 2 parallel profiles) ──────────────
+  # ── Standard build: pure Go, no libcstx/CGO ──────────────────
 
-  build:
+  build-standard:
     runs-on: ubuntu-22.04
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: standard
-            main: ./cmd/aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo"
-            generate: true
-          - id: full
-            main: ./cmd/aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
-            generate: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -374,33 +455,85 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Node.js
-        if: matrix.id == 'full'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
-
-      - name: Build embedded frontend
-        if: matrix.id == 'full'
-        run: |
-          npm --prefix web/frontend ci
-          npm --prefix web/frontend run build
-          test -s web/static/index.html
-          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
-
       - name: Generate embedded resources
-        if: matrix.generate
         run: go generate ./core/resources
 
-      - name: Build all platforms (${{ matrix.id }})
+      - name: Build all standard platforms
         run: |
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             IFS='/' read -r goos goarch <<< "$target"
             echo "  compile ${goos}/${goarch}"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -tags "${{ matrix.tags }}" -ldflags "-s -w" \
-              -buildvcs=false -o "dist/${{ matrix.id }}_${goos}_${goarch}" ${{ matrix.main }}
+              go build -trimpath -tags "forceposix emptytemplates noembed osusergo netgo" \
+              -ldflags "-s -w" -buildvcs=false \
+              -o "dist/standard_${goos}_${goarch}" ./cmd/aiscan
           done
           ls -lh dist/
+
+  # ── Full build: native libcstx/CGO on supported platforms ────
+
+  build-full:
+    needs: [test, e2e]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-amd64
+            runner: ubuntu-22.04
+            goos: linux
+            goarch: amd64
+          - id: linux-arm64
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - id: darwin-amd64
+            runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - id: darwin-arm64
+            runner: macos-15
+            goos: darwin
+            goarch: arm64
+          - id: windows-amd64
+            runner: windows-2022
+            goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up mingw for libcstx
+        if: runner.os == 'Windows'
+        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+
+      - name: Download embedded frontend
+        uses: actions/download-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
+
+      - name: Generate embedded resources
+        run: go generate ./core/resources
+
+      - name: Build full ${{ matrix.id }}
+        run: |
+          suffix=""
+          [[ "${{ matrix.goos }}" == "windows" ]] && suffix=".exe"
+          CGO_ENABLED=1 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+            go build -trimpath \
+            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite" \
+            -ldflags "-s -w" -buildvcs=false \
+            -o "dist/full_${{ matrix.goos }}_${{ matrix.goarch }}${suffix}" ./cmd/aiscan

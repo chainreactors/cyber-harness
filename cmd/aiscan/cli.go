@@ -32,6 +32,7 @@ type webCommand struct {
 	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
 	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
 	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	NoAgent            bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
 	cfg.LLMOptions     `group:"LLM Options"`
 	cfg.ScannerOptions `group:"Scanner Options"`
 	cfg.IOAOptions     `group:"Server Options"`
@@ -64,12 +65,13 @@ type serveCommand struct {
 }
 
 type ioaCommand struct {
-	cfg.IOAOptions `group:"Server Options"`
-	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
-	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
-	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context        ioaContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes          ioaNodesCmd    `command:"nodes" description:"List nodes"`
+	cfg.IOAOptions  `group:"Server Options"`
+	LegacyServerURL string         `long:"server-url" description:"Deprecated alias for --ioa-url" hidden:"true"`
+	Serve           struct{}       `command:"serve" description:"Run the standalone agent server"`
+	Spaces          struct{}       `command:"spaces" description:"List all spaces"`
+	Messages        ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
+	Context         ioaContextCmd  `command:"context" description:"View message thread/context"`
+	Nodes           ioaNodesCmd    `command:"nodes" description:"List nodes"`
 }
 
 type ioaMessagesCmd struct {
@@ -371,6 +373,9 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 		opt.ReconOptions = cli.Web.ReconOptions
 	case "ioa":
 		opt.IOAOptions = cli.IOA.IOAOptions
+		if opt.IOAURL == "" {
+			opt.IOAURL = cli.IOA.LegacyServerURL
+		}
 	}
 
 	return opt

@@ -28,7 +28,7 @@ export default {
   quickConnectOnly: '仅上线',
   quickConnectGlobal: '全球',
   quickConnectChina: '中国',
-  quickConnectHint: '在远程机器上执行此命令，即可接入一个 Agent 到本服务器。',
+  quickConnectHint: '执行前请替换 ACCESS_TOKEN 与 NODE_NAME；同一个 server-url 会派生 WebSocket 接入与同源 IOA 空间。',
   // 顶栏 LLM 健康指示
   llmUnconfigured: 'LLM 未配置',
   llmChecking: '检测中…',

@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
-	xcompact "github.com/chainreactors/aiscan/core/aop/x/compact"
-	xeval "github.com/chainreactors/aiscan/core/aop/x/eval"
+	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/core/util"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"golang.org/x/term"
 )
 
@@ -62,10 +62,10 @@ type AgentOutput struct {
 	// to StreamWriter), the current turn's last complete assistant message,
 	// and usage totals for the turn-end / session-end stat lines.
 	deltas        map[string]*deltaAccumulator
-	lastAssistant aop.MessageData
+	lastAssistant *aop.Message
 	hasAssistant  bool
-	turnUsage     *agent.Usage
-	totalUsage    agent.Usage
+	turnUsage     *aop.TokenUsage
+	totalUsage    *aop.TokenUsage
 	turnToolCalls int
 	contextTokens int
 	runCount      int
@@ -425,7 +425,7 @@ func (o *AgentOutput) SetInteractiveInputActive(active bool) {
 // Event handling
 // ---------------------------------------------------------------------------
 
-func (o *AgentOutput) HandleEvent(event aop.Event) {
+func (o *AgentOutput) HandleEvent(event *aop.Event) {
 	if o == nil {
 		return
 	}
@@ -434,37 +434,38 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 	if o.aborted {
 		return
 	}
-	switch event.Type {
-	case aop.TypeSessionStart:
+	switch payload := event.Payload.(type) {
+	case *aop.Event_SessionStarted:
 		o.agentStart = time.Now()
 
-	case aop.TypeTurnStart:
+	case *aop.Event_TurnStarted:
 		o.agentStart = time.Now()
 		o.runCount++
 		o.stream.NewTurn()
 		o.turnUsage = nil
-		o.totalUsage = agent.Usage{}
+		o.totalUsage = nil
 		o.turnToolCalls = 0
-		o.lastAssistant = aop.MessageData{}
+		o.lastAssistant = nil
 		o.hasAssistant = false
 		if o.canAnimate() {
 			o.live.BeginTurn(o.runCount)
 		}
 
-	case aop.TypeMessageDelta:
-		data, err := aop.DecodeData[aop.MessageDeltaData](event)
-		if err != nil || data.MessageID == "" {
+	case *aop.Event_MessageDelta:
+		data := payload.MessageDelta
+		if data.MessageId == "" {
 			return
 		}
-		acc := o.deltas[data.MessageID]
+		acc := o.deltas[data.MessageId]
 		if acc == nil {
 			acc = &deltaAccumulator{}
-			o.deltas[data.MessageID] = acc
+			o.deltas[data.MessageId] = acc
 		}
-		if data.PartType == aop.PartReasoning {
-			acc.reasoning += data.Delta
-		} else {
-			acc.text += data.Delta
+		switch value := data.Value.(type) {
+		case *aop.MessageDelta_Reasoning:
+			acc.reasoning += value.Reasoning
+		case *aop.MessageDelta_Text:
+			acc.text += value.Text
 		}
 		o.live.SetOutputEstimate(estimateStreamTokens(acc.text, acc.reasoning))
 		contentDelta := o.stream.WouldPrintContentDelta(&acc.text)
@@ -491,17 +492,14 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			o.live.NoteDelta(contentDelta)
 		}
 
-	case aop.TypeMessage:
-		data, err := aop.DecodeData[aop.MessageData](event)
-		if err != nil {
-			return
-		}
-		delete(o.deltas, data.MessageID)
+	case *aop.Event_Message:
+		data := payload.Message
+		delete(o.deltas, data.Id)
 		if data.Role == "assistant" {
 			o.lastAssistant = data
 			o.hasAssistant = true
-			if event.TurnID == "" {
-				if content := strings.TrimSpace(messagePartText(data, aop.PartText)); content != "" {
+			if event.TurnId == "" {
+				if content := strings.TrimSpace(messagePartText(data, false)); content != "" {
 					if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
 						fmt.Fprintln(o.Stdout(), rendered)
 					}
@@ -509,20 +507,18 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			}
 		}
 
-	case aop.TypeToolCall:
-		data, err := aop.DecodeData[aop.ToolCallData](event)
-		if err != nil {
-			return
-		}
+	case *aop.Event_ToolCall:
+		data := payload.ToolCall
+		args, _ := aop.DecodeJSON[any](data.Arguments)
 		o.turnToolCalls++
 		o.live.SetTurnToolCalls(o.turnToolCalls)
 		if o.policy.ToolCalls == cfg.OutputCallsHidden || o.quiet() {
 			return
 		}
 		ev := &toolEvent{
-			id:        data.ToolCallID,
-			name:      data.ToolName,
-			args:      marshalToolArgs(data.Args),
+			id:        data.Id,
+			name:      data.Name,
+			args:      marshalToolArgs(args),
 			startedAt: time.Now(),
 		}
 		if o.canAnimate() {
@@ -552,11 +548,8 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			}
 		}
 
-	case aop.TypeToolResult:
-		data, err := aop.DecodeData[aop.ToolResultData](event)
-		if err != nil {
-			return
-		}
+	case *aop.Event_ToolResult:
+		data := payload.ToolResult
 		o.toolCallCount++
 		if data.IsError {
 			o.toolErrorCount++
@@ -565,9 +558,9 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			return
 		}
 		ev := &toolEvent{
-			id:      data.ToolCallID,
-			name:    data.ToolName,
-			result:  flattenToolResult(data.Content),
+			id:      data.CallId,
+			name:    data.Name,
+			result:  flattenToolResult(data.Output),
 			isError: data.IsError,
 			done:    true,
 			elapsed: time.Duration(data.DurationMs) * time.Millisecond,
@@ -588,24 +581,20 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			}
 		}
 
-	case aop.TypeUsage:
-		data, err := aop.DecodeData[aop.UsageData](event)
-		if err != nil {
-			return
+	case *aop.Event_Usage:
+		usage := payload.Usage
+		o.turnUsage = usage
+		if o.totalUsage == nil {
+			o.totalUsage = &aop.TokenUsage{}
 		}
-		usage := agent.Usage{
-			PromptTokens:     data.InputTokens,
-			CompletionTokens: data.OutputTokens,
-			TotalTokens:      data.TotalTokens,
-			CacheReadTokens:  data.CacheReadTokens,
-			CacheWriteTokens: data.CacheWriteTokens,
-		}
-		o.turnUsage = &usage
-		o.totalUsage.PromptTokens += usage.PromptTokens
-		o.totalUsage.CompletionTokens += usage.CompletionTokens
+		o.totalUsage.InputTokens += usage.InputTokens
+		o.totalUsage.OutputTokens += usage.OutputTokens
 		o.totalUsage.TotalTokens += usage.TotalTokens
-		o.totalUsage.CacheReadTokens += usage.CacheReadTokens
-		o.totalUsage.CacheWriteTokens += usage.CacheWriteTokens
+		if o.totalUsage.Detail == nil {
+			o.totalUsage.Detail = map[string]uint64{}
+		}
+		o.totalUsage.Detail["cache_read"] += usage.Detail["cache_read"]
+		o.totalUsage.Detail["cache_write"] += usage.Detail["cache_write"]
 		if o.policy.Usage {
 			o.live.SetTurnUsage(usage)
 		}
@@ -613,44 +602,38 @@ func (o *AgentOutput) HandleEvent(event aop.Event) {
 			o.live.Render()
 		}
 
-	case aop.TypeTurnEnd:
-		data, err := aop.DecodeData[aop.TurnEndData](event)
-		if err != nil {
-			return
-		}
-		o.contextTokens = data.ContextTokens
+	case *aop.Event_TurnEnded:
+		data := payload.TurnEnded
+		o.contextTokens = int(data.ContextTokens)
 		o.live.FinishTurn(o.contextTokens)
 		o.stopLive()
 		o.turnEnd(o.runCount)
 		o.agentEnd(data)
-	case aop.TypeSessionEnd:
+	case *aop.Event_SessionEnded:
 		o.stopLive()
-	case aop.TypeStatus:
-		data, err := aop.DecodeData[aop.StatusData](event)
-		if err != nil {
-			return
-		}
+	case *aop.Event_Status:
+		data := payload.Status
 		switch data.State {
-		case xeval.StateStart:
-			detail, _, _ := xeval.GetDetail(event)
+		case types.EvalStateStart:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
-			o.evalStart(detail.Round)
-		case xeval.StateEnd:
-			detail, _, _ := xeval.GetDetail(event)
+			o.evalStart(int(detail.Round))
+		case types.EvalStateEnd:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
-			o.evalEnd(detail.Round, detail.Pass, detail.Reason)
-		case xeval.StateError:
-			detail, _, _ := xeval.GetDetail(event)
+			o.evalEnd(int(detail.Round), detail.Pass, detail.Reason)
+		case types.EvalStateError:
+			detail, _, _ := types.GetEvalDetail(event)
 			o.stopLive()
-			o.evalError(detail.Round, detail.Error)
-		case xcompact.StateStart:
+			o.evalError(int(detail.Round), detail.Error)
+		case types.CompactStateStart:
 			o.stopLive()
 			o.compactStart()
-		case xcompact.StateEnd:
-			detail, _, _ := xcompact.GetDetail(event)
+		case types.CompactStateEnd:
+			detail, _, _ := types.GetCompactDetail(event)
 			o.stopLive()
-			o.compactEnd(detail.TokensBefore, detail.TokensAfter, detail.KeptMessages)
-		case xcompact.StateError:
+			o.compactEnd(int(detail.TokensBefore), int(detail.TokensAfter), int(detail.KeptMessages))
+		case types.CompactStateError:
 			o.stopLive()
 			o.compactError()
 		}
@@ -825,10 +808,10 @@ func (o *AgentOutput) beginRun() {
 	o.toolCallCount = 0
 	o.toolErrorCount = 0
 	o.deltas = make(map[string]*deltaAccumulator)
-	o.lastAssistant = aop.MessageData{}
+	o.lastAssistant = nil
 	o.hasAssistant = false
 	o.turnUsage = nil
-	o.totalUsage = agent.Usage{}
+	o.totalUsage = nil
 	o.turnToolCalls = 0
 	o.contextTokens = 0
 }
@@ -864,12 +847,12 @@ func (o *AgentOutput) turnEnd(turn int) {
 	w := o.Stderr()
 
 	if o.policy.ShowReasoning() && o.stream.ReasoningPrinted() == 0 {
-		if reasoning := strings.TrimSpace(messagePartText(o.lastAssistant, aop.PartReasoning)); reasoning != "" {
+		if reasoning := strings.TrimSpace(messagePartText(o.lastAssistant, true)); reasoning != "" {
 			o.renderThinkingBlock(w, reasoning)
 		}
 	}
 	if o.stream.ContentPrinted() == 0 {
-		if content := strings.TrimSpace(messagePartText(o.lastAssistant, aop.PartText)); content != "" {
+		if content := strings.TrimSpace(messagePartText(o.lastAssistant, false)); content != "" {
 			if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
 				fmt.Fprintln(o.Stdout(), rendered)
 			}
@@ -885,26 +868,28 @@ func (o *AgentOutput) turnEnd(turn int) {
 		}
 		if o.turnUsage != nil {
 			cache := ""
-			if o.turnUsage.CacheReadTokens > 0 || o.turnUsage.CacheWriteTokens > 0 {
+			cacheRead := o.turnUsage.Detail["cache_read"]
+			cacheWrite := o.turnUsage.Detail["cache_write"]
+			if cacheRead > 0 || cacheWrite > 0 {
 				cache = fmt.Sprintf(" cache_read=%d cache_write=%d (%.0f%%)",
-					o.turnUsage.CacheReadTokens, o.turnUsage.CacheWriteTokens,
-					o.turnUsage.CacheHitRatio()*100)
+					cacheRead, cacheWrite,
+					provider.CacheHitRatio(o.turnUsage)*100)
 			}
 			fmt.Fprintf(w, "%s[debug] [turn %d] prompt=%d completion=%d total=%d context=%d%s%s\n",
 				o.color.Code(output.ANSIDim), turn,
-				o.turnUsage.PromptTokens, o.turnUsage.CompletionTokens, o.turnUsage.TotalTokens,
+				o.turnUsage.InputTokens, o.turnUsage.OutputTokens, o.turnUsage.TotalTokens,
 				o.contextTokens, cache, o.color.Code(output.ANSIReset))
 		}
 	}
 }
 
-func (o *AgentOutput) agentEnd(data aop.TurnEndData) {
+func (o *AgentOutput) agentEnd(data *aop.TurnEnded) {
 	o.stream.EnsureNewline()
 	w := o.Stderr()
 	if w != nil && o.debug {
 		elapsed := time.Since(o.agentStart)
 		parts := []string{
-			fmt.Sprintf("agent %s", data.Stop),
+			fmt.Sprintf("agent %s", data.StopReason),
 		}
 		if o.toolCallCount > 0 {
 			toolPart := fmt.Sprintf("tools=%d", o.toolCallCount)
@@ -913,12 +898,12 @@ func (o *AgentOutput) agentEnd(data aop.TurnEndData) {
 			}
 			parts = append(parts, toolPart)
 		}
-		if usageTotal(&o.totalUsage) > 0 {
-			parts = append(parts, formatTokenUsage(&o.totalUsage))
+		if provider.UsageTotalTokens(o.totalUsage) > 0 {
+			parts = append(parts, formatTokenUsage(o.totalUsage))
 		}
 		parts = append(parts, util.FormatDuration(elapsed))
-		if data.Error != "" {
-			parts = append(parts, fmt.Sprintf("err=%q", data.Error))
+		if data.Error != nil {
+			parts = append(parts, fmt.Sprintf("err=%q", data.Error.Message))
 		}
 		fmt.Fprintln(w, o.dim("  ["+strings.Join(parts, " | ")+"]"))
 	}
@@ -927,15 +912,15 @@ func (o *AgentOutput) agentEnd(data aop.TurnEndData) {
 	}
 	lastRole, lastContentLen, lastReasoningLen, lastPreview := summarizeMessageData(o.lastAssistant)
 	hint := ""
-	if data.Stop == string(agent.StopReasonCompleted) && lastRole == "assistant" {
+	if data.StopReason == string(agent.StopReasonCompleted) && lastRole == "assistant" {
 		hint = " hint=no_tool_calls_no_pending_work"
 	}
 	errText := ""
-	if data.Error != "" {
-		errText = fmt.Sprintf(" err=%q", data.Error)
+	if data.Error != nil {
+		errText = fmt.Sprintf(" err=%q", data.Error.Message)
 	}
 	fmt.Fprintf(w, "%s[debug] [agent] stop=%s last_role=%s content=%d reasoning=%d tools=%d preview=%q%s%s%s\n",
-		o.color.Code(output.ANSIDim), data.Stop,
+		o.color.Code(output.ANSIDim), data.StopReason,
 		lastRole, lastContentLen, lastReasoningLen, o.turnToolCalls,
 		lastPreview, hint, errText, o.color.Code(output.ANSIReset))
 }
@@ -1088,36 +1073,35 @@ func marshalToolArgs(args any) string {
 
 // flattenToolResult reduces a tool.result Content variant (plain string or
 // ToolResultContent) to its display text; images are not rendered in the TUI.
-func flattenToolResult(content any) string {
-	switch v := content.(type) {
-	case nil:
-		return ""
-	case string:
-		return v
-	case aop.ToolResultContent:
-		return v.Content
-	case *aop.ToolResultContent:
-		return v.Content
-	default:
-		data, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprint(v)
+func flattenToolResult(content []*aop.Content) string {
+	var parts []string
+	for _, part := range content {
+		if text := part.GetText().GetText(); text != "" {
+			parts = append(parts, text)
+			continue
 		}
-		return string(data)
 	}
+	return strings.Join(parts, "\n")
 }
 
 // messagePartText joins the text of all parts of one type in a message.
-func messagePartText(msg aop.MessageData, partType string) string {
+func messagePartText(msg *aop.Message, reasoning bool) string {
+	if msg == nil {
+		return ""
+	}
 	var sb strings.Builder
-	for _, p := range msg.Parts {
-		if p.Type != partType || p.Text == "" {
+	for _, part := range msg.Content {
+		text := part.GetText().GetText()
+		if reasoning {
+			text = part.GetReasoning().GetText()
+		}
+		if text == "" {
 			continue
 		}
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(p.Text)
+		sb.WriteString(text)
 	}
 	return sb.String()
 }

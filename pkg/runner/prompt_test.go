@@ -98,7 +98,6 @@ func TestAgentRuntimePreloadsBaseSkillOnce(t *testing.T) {
 			option.Skills = tc.skills
 			rt, err := NewAgentRuntime(context.Background(), option, telemetry.NopLogger(), &RuntimeConfig{
 				ProviderOptional: true,
-				NoOutput:         true,
 			})
 			if err != nil {
 				t.Fatalf("NewAgentRuntime() error = %v", err)

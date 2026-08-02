@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -37,9 +36,7 @@ type flags struct {
 	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
 	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
-	Report          bool     `long:"report" description:"Output a concise final markdown report"`
-	OutputFile      string   `short:"f" long:"file" description:"Write output to file without ANSI colors"`
-	AssetReportFile string   `short:"F" long:"format" description:"Write aggregated asset report to file"`
+	OutputFile      string   `short:"f" long:"file" description:"Write raw scanner records as JSON Lines"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
 	Threads         int      // derived from Thread; not a CLI flag
@@ -90,17 +87,20 @@ func Usage() string {
 
 func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("scan", &err)
-	out, result, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
+	out, _, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
 	if err != nil {
 		return nil, err
 	}
 	if out != "" {
 		fmt.Fprint(execution.Stdout, out)
 	}
-	return result, nil
+	// Structured scanner records are emitted through the artifact stream.
+	// Returning the collector's private aggregation here would leak a second
+	// result schema through AOP tool.result.
+	return nil, nil
 }
 
-func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.Result, error) {
+func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.ScanResult, error) {
 	var flags flags
 	parser := toolargs.NewGoFlagsParser("scan", &flags)
 	if _, err := parser.ParseArgs(args); err != nil {
@@ -134,13 +134,10 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		return "", nil, err
 	}
 	if len(rawInputs) == 0 {
-		if flags.AssetReportFile != "" {
-			return output.RenderRecordFileAsAsset(flags.AssetReportFile, !flags.NoColor, AggregateStructuredResult)
-		}
 		return "", nil, fmt.Errorf("scan: no input targets")
 	}
 
-	if flags.JSON || flags.Report {
+	if flags.JSON {
 		stream = nil
 	}
 
@@ -148,23 +145,6 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	pipelineBus := eventbus.New[pipeline.Observation]()
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
 	subscribePipeline(pipelineBus, coll, trace, stream)
-
-	var scanWriter *scanJSONLWriter
-	if flags.OutputFile != "" {
-		var agentBus *eventbus.Bus[aop.Event]
-		if c.parent != nil {
-			agentBus = c.parent.Cfg.Bus
-		}
-		w, wErr := newScanJSONLWriter(flags.OutputFile, pipelineBus, agentBus)
-		if wErr != nil {
-			return "", nil, fmt.Errorf("scan: open record file: %w", wErr)
-		}
-		scanWriter = w
-		defer scanWriter.Close()
-		scanWriter.WriteRecord(output.NewRecord(output.TypeScanStart, output.ScanStart{
-			Targets: rawInputs, Mode: flags.Mode, Flags: args,
-		}))
-	}
 
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
 		pipelineBus.Emit(pipeline.Observation{
@@ -201,55 +181,32 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		if err != nil {
 			return "", nil, fmt.Errorf("scan json output: %w", err)
 		}
-	} else if flags.Report {
-		out = coll.ReportMarkdown()
 	} else {
 		out = coll.TerminalString(stream != nil && !flags.NoColor)
 	}
-	if scanWriter != nil {
-		coll.mu.Lock()
-		stats := coll.statsSnapshotLocked()
-		gogoCount := len(coll.gogoResults)
-		webCount := len(coll.seenWeb)
-		lootCount := len(coll.loots)
-		errCount := len(coll.errors)
-		coll.mu.Unlock()
-		scanWriter.WriteRecord(output.NewRecord(output.TypeScanEnd, output.ScanEnd{
-			Duration: stats.Duration().Seconds(),
-			Targets:  stats.Inputs,
-			Services: gogoCount,
-			Webs:     webCount,
-			Loots:    lootCount,
-			Errors:   errCount,
-		}))
-	}
-	if flags.OutputFile != "" && !flags.JSON {
-		plainOut := coll.PlainText()
-		if err := writeOutputFile(flags.OutputFile, plainOut); err != nil {
-			c.Logger.Errorf("%s", err.Error())
-		}
-	}
-	if flags.AssetReportFile != "" {
-		assetOut := coll.AssetReport()
-		if err := writeOutputFile(flags.AssetReportFile, assetOut); err != nil {
-			c.Logger.Errorf("%s", err.Error())
-		}
-	}
 	result := coll.StructuredResult()
 	c.emitStructuredData(ctx, result)
+	if flags.OutputFile != "" {
+		raw, outputErr := coll.JSONLines()
+		if outputErr != nil {
+			c.Logger.Errorf("scan output file: %s", outputErr)
+		} else if err := writeOutputFile(flags.OutputFile, raw); err != nil {
+			c.Logger.Errorf("%s", err.Error())
+		}
+	}
 	return out, result, nil
 }
 
-func (c *Command) emitStructuredData(ctx context.Context, result *output.Result) {
+func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanResult) {
 	if result == nil || c.DataBus == nil {
 		return
 	}
-	for _, service := range result.Services {
+	for _, service := range result.GOGO {
 		if service != nil {
 			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, service.GetTarget(), service)
 		}
 	}
-	for _, probe := range result.WebProbes {
+	for _, probe := range result.Spray {
 		if probe != nil {
 			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, probe.UrlString, probe)
 		}
@@ -259,7 +216,6 @@ func (c *Command) emitStructuredData(ctx context.Context, result *output.Result)
 var scanFileFlags = map[string]bool{
 	"-l": true, "--list": true,
 	"-f": true, "--file": true,
-	"-F": true, "--format": true,
 	"--dict": true, "--rule": true,
 }
 

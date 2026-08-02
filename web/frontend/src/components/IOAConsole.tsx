@@ -22,7 +22,7 @@ import { cn } from '@cyber/theme'
 import { getIOAOverview, type IOAMessage, type IOAOverview, type IOASpace } from '../api'
 import { usePolling } from '../hooks/usePolling'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
-import { ConsoleDrawer } from './layout/ConsoleDrawer'
+import { ToolDrawer } from './layout/ToolDrawer'
 
 interface IOAConsoleProps {
   open: boolean
@@ -117,7 +117,7 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
   const sender = selectedMessage ? overview.nodes.find(node => node.id === selectedMessage.sender) : undefined
 
   return (
-    <ConsoleDrawer
+    <ToolDrawer
       open={open}
       onClose={onClose}
       icon={Network}
@@ -223,7 +223,7 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
             onSelectMessage={setSelectedMessageID}
           />
         </main>
-    </ConsoleDrawer>
+    </ToolDrawer>
   )
 }
 

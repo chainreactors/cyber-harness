@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -17,14 +16,16 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
-	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -32,11 +33,16 @@ func init() {
 }
 
 func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) error {
-	store, err := web.NewSQLiteStore(opts.DB)
+	store, err := webservice.NewSQLiteStore(opts.DB)
 	if err != nil {
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
+	ingestor, err := webservice.NewArtifactIngestor(store)
+	if err != nil {
+		return fmt.Errorf("init artifact normalization: %w", err)
+	}
+	defer ingestor.Close()
 
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
@@ -51,11 +57,17 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	}
 
 	configFile := option.ConfigFile
-	service := web.NewService(web.ServiceConfig{
+	accessKey := opts.Token
+	if accessKey == "" {
+		accessKey = protocols.NewToken()
+	}
+	service := webservice.NewService(webservice.ServiceConfig{
 		Store:       store,
 		App:         application,
+		Artifacts:   ingestor,
+		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		AppFactory: func(ctx context.Context, prepared *web.PreparedConfig) (*runner.App, error) {
+		AppFactory: func(ctx context.Context, prepared *webservice.PreparedConfig) (*runner.App, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -64,11 +76,20 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
-			candidate, err := initWebApp(ctx, &candidateOption, logger)
+			// The candidate app runs exactly the proto config being committed —
+			// no second parse of the staged YAML through cfg.Option.
+			appCfg := runner.AppConfigFromDistribute(prepared.Config, runner.RuntimeFeatures{
+				ProviderEnabled:  true,
+				ProviderOptional: true,
+				ToolsEnabled:     true,
+				AIEnabled:        true,
+			}, logger)
+			appCfg = runner.MergeOptionExtras(appCfg, &candidateOption)
+			candidate, err := initWebAppFromConfig(ctx, appCfg)
 			if err != nil {
 				return nil, err
 			}
-			wireWebApp(candidate, store)
+			wireWebApp(candidate, ingestor)
 			return candidate, nil
 		},
 		MaxConcurrent: opts.MaxScans,
@@ -76,16 +97,15 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	})
 	defer service.Close()
 
-	wireWebApp(application, store)
+	wireWebApp(application, ingestor)
 
-	var pool *web.AgentPool
+	var pool *webservice.AgentPool
 	if option.Debug {
-		pool = web.NewAgentPool(service.Hub(), "*")
+		pool = webservice.NewAgentPool(service.Hub(), "*")
 	} else {
-		pool = web.NewAgentPool(service.Hub())
+		pool = webservice.NewAgentPool(service.Hub())
 	}
-	pool.SetRecordStore(store)
-	pool.SetSCOStore(store)
+	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
@@ -93,12 +113,20 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	accessKey := opts.Token
-	if accessKey == "" {
-		accessKey = protocols.NewToken()
-	}
 	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
-	ioaHandler := ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc))
+	ioaWebIdentity, err := ioaSvc.AuthRegister(ctx, protocols.AuthRegister{
+		Name:        "aiscan.web",
+		Description: "AIScan Web console",
+		AccessKey:   accessKey,
+		Meta:        map[string]any{"role": "web"},
+	})
+	if err != nil {
+		return fmt.Errorf("register IOA web identity: %w", err)
+	}
+	ioaHandler := service.Auth().ShareWithIOA(
+		ioaWebIdentity.Token,
+		ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc)),
+	)
 
 	listener, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
@@ -107,22 +135,11 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	// Local agents: the hub can spawn `aiscan agent` children on its own host
-	// (one-click launch/stop from the UI). Each child dials the hub's loopback
-	// web + IOA endpoints — the IOA access key is embedded into the IOA URL — and
-	// registers in the pool like any node. The hub holds the only handle to them,
-	// so they are all killed on shutdown.
-	localAgents := web.NewLocalAgents(hubLocalURL(listenAddr), accessKey, configFile, pool)
-	go func() {
-		<-ctx.Done()
-		localAgents.StopAll()
-	}()
-
-	handler := web.NewHandler(service, pool, localAgents, ioaHandler, newSPAFileServer(staticSub), accessKey, ioaSvc)
+	httpHandler := web.NewHandler(service, ioaHandler, newSPAFileServer(staticSub))
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
-		Handler: handler,
+		Handler: httpHandler,
 	}
 
 	go func() {
@@ -134,11 +151,21 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 
 	logger.Infof("aiscan server listening on http://%s", listenAddr)
 	logger.Infof("  web access token: %s", accessKey)
-	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s/ioa", accessKey, listenAddr)
-	if localAgent, err := localAgents.Launch(ctx); err != nil {
-		logger.Warnf("auto-start local agent: %s", err)
-	} else {
-		logger.Infof("auto-started local agent name=%s pid=%d", localAgent.Name, localAgent.PID)
+	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
+	if !opts.NoAgent {
+		// The hub's own agent comes online exactly like any node: an
+		// `aiscan agent` dialed into this server over loopback WebSocket,
+		// just in-process. The pool never sees a special "local" kind.
+		agentOption := *option
+		agentOption.ServerURL = "http://" + accessKey + "@" + listenAddr
+		if agentOption.IOANodeID == "" && agentOption.IOANodeName == "" {
+			agentOption.IOANodeName = "local"
+		}
+		go func() {
+			if err := node.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
+				logger.Warnf("embedded agent stopped: %s", err)
+			}
+		}()
 	}
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
@@ -146,17 +173,13 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	return nil
 }
 
-func wireWebApp(application *runner.App, store *web.SQLiteStore) {
-	if application == nil || store == nil || application.SCOSidecar == nil {
+func wireWebApp(application *runner.App, ingestor webservice.ArtifactIngestor) {
+	if application == nil || ingestor == nil || application.Artifacts == nil {
 		return
 	}
-	application.SCOSidecar.OnNodes = func(callID string, nodes []json.RawMessage) {
-		scanID := callID
-		if scanID == "" {
-			scanID = "standalone"
-		}
-		_ = store.UpsertSCONodes(context.Background(), scanID, nodes)
-	}
+	application.Artifacts.SetHandler(func(artifact output.ToolArtifact) {
+		_ = ingestor.IngestArtifact(context.Background(), artifact.CallID, artifact)
+	})
 }
 
 func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
@@ -203,6 +226,10 @@ func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Lo
 		ToolsEnabled:     true,
 		AIEnabled:        true,
 	}, logger)
+	return initWebAppFromConfig(ctx, appCfg)
+}
+
+func initWebAppFromConfig(ctx context.Context, appCfg runner.ApplicationConfig) (*runner.App, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
@@ -226,37 +253,36 @@ type webConfigStore struct {
 	mu       sync.Mutex
 }
 
-func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, webproto.DistributeConfig, error) {
+func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
 	if err := ctx.Err(); err != nil {
-		return "", false, webproto.DistributeConfig{}, err
+		return "", false, nil, err
 	}
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, webproto.DistributeConfig{}, nil
+		return p, false, &types.DistributeConfig{}, nil
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return p, false, webproto.DistributeConfig{}, err
+		return p, false, nil, err
 	}
 	dc := parseDistributeConfig(data)
 	return p, true, dc, nil
 }
 
-// parseDistributeConfig decodes the YAML settings file and migrates a legacy
-// flat llm section into the provider profile list — the only place the flat
-// representation is still accepted.
-func parseDistributeConfig(data []byte) webproto.DistributeConfig {
-	var dc webproto.DistributeConfig
-	_ = yaml.Unmarshal(data, &dc)
-	var legacy struct {
-		LLM webproto.LLMProviderConfig `yaml:"llm"`
+// parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
+func parseDistributeConfig(data []byte) *types.DistributeConfig {
+	dc, err := cfg.LoadDistributeConfigYAML(data)
+	if err != nil || dc == nil {
+		dc = &types.DistributeConfig{}
 	}
-	_ = yaml.Unmarshal(data, &legacy)
-	webproto.MigrateLLMConfig(&dc.LLM, legacy.LLM)
+	if dc.Llm == nil {
+		dc.Llm = &types.LLMConfig{}
+	}
+	cfg.NormalizeLLMConfig(dc.Llm)
 	return dc
 }
 
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming webproto.DistributeConfig) (*web.PreparedConfig, error) {
+func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*webservice.PreparedConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -264,26 +290,36 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming w
 	defer s.mu.Unlock()
 
 	p, loaded := s.resolveConfigPath()
-	var current webproto.DistributeConfig
+	var current *types.DistributeConfig
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
 		current = parseDistributeConfig(data)
+	} else {
+		current = &types.DistributeConfig{}
 	}
-	webproto.MigrateLLMConfig(&incoming.LLM, webproto.LLMProviderConfig{})
+	if incoming == nil {
+		incoming = &types.DistributeConfig{}
+	}
+	if incoming.Llm == nil {
+		incoming.Llm = &types.LLMConfig{}
+	}
+	cfg.NormalizeLLMConfig(incoming.Llm)
 
 	// Preserve existing secrets when incoming value is empty.
-	preserveLLMProfileSecrets(&incoming.LLM, current.LLM)
-	preserveSecret(&incoming.Cyberhub.Key, current.Cyberhub.Key)
-	preserveSecret(&incoming.Recon.FofaKey, current.Recon.FofaKey)
-	preserveSecret(&incoming.Recon.HunterToken, current.Recon.HunterToken)
-	preserveSecret(&incoming.Recon.HunterAPIKey, current.Recon.HunterAPIKey)
-	preserveSecret(&incoming.Search.TavilyKeys, current.Search.TavilyKeys)
-	preserveSecret(&incoming.IOA.Token, current.IOA.Token)
+	preserveLLMProfileSecrets(incoming.Llm, current.GetLlm())
+	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *types.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
+	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *types.ReconConfig) {
+		preserveSecret(&c.FofaKey, current.GetRecon().GetFofaKey())
+		preserveSecret(&c.HunterToken, current.GetRecon().GetHunterToken())
+		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
+	})
+	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
+	incoming.Ioa = preserveConfigSection(incoming.Ioa, current.GetIoa(), func(c *types.IOAConfig) { preserveSecret(&c.Token, current.GetIoa().GetToken()) })
 
-	next, err := yaml.Marshal(&incoming)
+	next, err := cfg.MarshalDistributeConfigYAML(incoming)
 	if err != nil {
 		return nil, err
 	}
@@ -321,12 +357,12 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming w
 		_ = os.Remove(tmpPath)
 		return nil, err
 	}
-	return &web.PreparedConfig{
+	return &webservice.PreparedConfig{
 		Config: incoming, RuntimePath: tmpPath, TargetPath: p,
 	}, nil
 }
 
-func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *web.PreparedConfig) error {
+func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *webservice.PreparedConfig) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -346,7 +382,7 @@ func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, prepared *w
 	return nil
 }
 
-func (s *webConfigStore) DiscardDistributeConfig(prepared *web.PreparedConfig) {
+func (s *webConfigStore) DiscardDistributeConfig(prepared *webservice.PreparedConfig) {
 	if prepared == nil || prepared.RuntimePath == "" {
 		return
 	}
@@ -360,23 +396,45 @@ func preserveSecret(incoming *string, existing string) {
 	}
 }
 
-func preserveLLMProfileSecrets(incoming *webproto.LLMConfig, existing webproto.LLMConfig) {
-	byID := make(map[string]webproto.LLMProviderConfig, len(existing.Providers))
-	for _, profile := range existing.Providers {
-		if profile.ID != "" {
-			byID[profile.ID] = profile
+// preserveConfigSection ensures section is non-nil, then applies fn to it.
+// current is the on-disk value used to backfill empty secrets.
+func preserveConfigSection[T any](incoming *T, current *T, fn func(*T)) *T {
+	if incoming == nil {
+		if current != nil {
+			return current
+		}
+		return new(T)
+	}
+	fn(incoming)
+	return incoming
+}
+
+func preserveLLMProfileSecrets(incoming *types.LLMConfig, existing *types.LLMConfig) {
+	if incoming == nil {
+		return
+	}
+	byID := make(map[string]*types.LLMProviderConfig)
+	if existing != nil {
+		for _, profile := range existing.Providers {
+			if profile.Id != "" {
+				byID[profile.Id] = profile
+			}
 		}
 	}
-	for i := range incoming.Providers {
-		if strings.TrimSpace(incoming.Providers[i].APIKey) != "" {
+	var existingProviders []*types.LLMProviderConfig
+	if existing != nil {
+		existingProviders = existing.Providers
+	}
+	for i, profile := range incoming.Providers {
+		if profile == nil || strings.TrimSpace(profile.ApiKey) != "" {
 			continue
 		}
-		if current, ok := byID[incoming.Providers[i].ID]; ok {
-			incoming.Providers[i].APIKey = current.APIKey
+		if current, ok := byID[profile.Id]; ok {
+			profile.ApiKey = current.ApiKey
 			continue
 		}
-		if i < len(existing.Providers) {
-			incoming.Providers[i].APIKey = existing.Providers[i].APIKey
+		if i < len(existingProviders) {
+			profile.ApiKey = existingProviders[i].GetApiKey()
 		}
 	}
 }

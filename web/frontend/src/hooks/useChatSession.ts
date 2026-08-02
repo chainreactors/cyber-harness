@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { anyUnpack } from '@bufbuild/protobuf/wkt'
+import { ScanStatus, SessionScanEventSchema, WebMessageMetadataSchema } from '../aiscan-proto'
 import { usePolling } from './usePolling'
 import {
   cancelChatSession,
+  closeChatSession,
   createChatSession,
   deleteChatSession,
+  executeChatCommand,
   getChatSession,
   listAgents,
   listChatMessages,
   listChatSessions,
+  listSCONodes,
+  resetChatSession,
   sendChatMessage,
-  subscribeDomainEvents,
-  getScan,
+  subscribeAOPEvents,
 } from '../api'
-import type { AgentInfo, AOPEvent, DomainEvent, ChatMessage, ChatSession, ScanResult } from '../api'
+import type { AgentView, AOPEvent, AOPSession, EventDelivery, SCONode, SessionRecord } from '../api'
 import {
   isRootPath,
   parseRoute,
@@ -44,7 +49,72 @@ function safeUUID(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+function aopExtension(event: AOPEvent): Record<string, unknown> | undefined {
+  for (const extension of event.extensions) {
+    const value = anyUnpack(extension, WebMessageMetadataSchema)
+    if (value) return { nodeId: value.nodeId, code: value.code, params: value.params, agentList: value.agentList }
+  }
+  return undefined
+}
+
 export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking'
+
+// ChatMessage is the flat render model the chat UI projects from the AOP event
+// log (listChatMessages returns raw EventDelivery records). It is a view model
+// owned by this hook, not an API wire type — the wire truth is aop.Event +
+// EventDelivery + the aiscan.web extension.
+export interface ChatMessage {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant' | 'system'
+  node_id?: string
+  agent_name?: string
+  content: string
+  metadata?: Record<string, unknown>
+  created_at: string
+  cursor?: number
+  turn_id?: string
+}
+
+function timestampToISOString(value?: { seconds: bigint; nanos: number }): string {
+  if (!value) return new Date(0).toISOString()
+  return new Date(Number(value.seconds) * 1000 + Math.floor(value.nanos / 1_000_000)).toISOString()
+}
+
+// Project one AOP delivery into the flat render model. Non-message payloads
+// (turn lifecycle, tool calls, …) return null — the AOP stream renders those.
+function deliveryToChatMessage(delivery: EventDelivery): ChatMessage | null {
+  const event = delivery.event
+  if (!event || event.payload.case !== 'message') return null
+  const message = event.payload.value
+  const text = message.content
+    .filter((part) => part.value.case === 'text')
+    .map((part) => part.value.case === 'text' ? part.value.value.text : '')
+    .join('\n')
+  let metadata: Record<string, unknown> | undefined
+  let nodeID: string | undefined
+  for (const extension of event.extensions) {
+    const decoded = anyUnpack(extension, WebMessageMetadataSchema)
+    if (decoded) {
+      nodeID = decoded.nodeId || undefined
+      metadata = { code: decoded.code, params: decoded.params, agentList: decoded.agentList }
+      break
+    }
+  }
+  const role = message.role === 'assistant' || message.role === 'system' ? message.role : 'user'
+  return {
+    id: message.id,
+    session_id: event.sessionId,
+    role,
+    node_id: nodeID,
+    agent_name: event.emitter,
+    content: text,
+    metadata,
+    created_at: timestampToISOString(event.emittedAt),
+    cursor: delivery.cursor ? Number(delivery.cursor) : undefined,
+    turn_id: event.turnId || undefined,
+  }
+}
 
 export interface TimelineItem {
   id: string
@@ -52,7 +122,7 @@ export interface TimelineItem {
   timestamp: number
   message?: ChatMessage
   scanID?: string
-  scanResult?: ScanResult
+  scanNodes?: SCONode[]
   scanLines?: string[]
   agentName?: string
   content?: string
@@ -64,20 +134,15 @@ export interface TimelineItem {
 interface SessionSnapshot {
   messages: ChatMessage[]
   timeline: TimelineItem[]
-  scanResults: Map<string, ScanResult>
-}
-
-// A node's canonical IOA identity across transports and reconnects.
-export function agentNodeKey(a: AgentInfo): string {
-  return a.id // backend canonicalizes NodeRef.URI()
+  scanResults: Map<string, SCONode[]>
 }
 
 // Deterministic roster order. The hub returns agents in Go-map iteration order,
 // which is randomized per request; without a stable sort the sidebar reshuffles
-// on every 5s poll. Ordering by node key keeps the list — and any "first agent"
+// on every 5s poll. Ordering by node URI keeps the list — and any "first agent"
 // auto-pick — put across refreshes.
-function sortAgentsByNode(list: AgentInfo[]): AgentInfo[] {
-  return [...list].sort((a, b) => agentNodeKey(a).localeCompare(agentNodeKey(b)))
+function sortAgentsByNode(list: AgentView[]): AgentView[] {
+  return [...list].sort((a, b) => (a.hello?.nodeId || '').localeCompare(b.hello?.nodeId || ''))
 }
 
 // Cheap staleness probe for the cache revalidation fast-path. Persisted history
@@ -95,28 +160,26 @@ function messagesDiffer(a: ChatMessage[], b: ChatMessage[]): boolean {
 
 export function useChatSession() {
   const { t } = useTranslation('chat')
-  const [agents, setAgents] = useState<AgentInfo[]>([])
-  const [selectedAgentID, setSelectedAgentID] = useState<string | null>(null)
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [agents, setAgents] = useState<AgentView[]>([])
+  const [selectedNodeID, setSelectedNodeID] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [aopEvents, setAOPEvents] = useState<AOPEvent[]>([])
   const timelineRef = useRef<TimelineItem[]>([])
-  const [scanResults, setScanResults] = useState<Map<string, ScanResult>>(() => new Map())
+  const [scanResults, setScanResults] = useState<Map<string, SCONode[]>>(() => new Map())
   const [isThinking, setIsThinking] = useState(false)
   const [pendingResponse, setPendingResponse] = useState(false)
   const [error, setError] = useState('')
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
-  const scanLinesRef = useRef<Map<string, string[]>>(new Map())
   const activeSessionRef = useRef<string | null>(null)
-  // Latest roster (mirrors `agents`) so click handlers can resolve an id → node
-  // key without waiting for a re-render, and the stable key of the node the user
-  // last chose. Selection is tracked by this key, not the transient id, so the
-  // 5s agent poll can re-home it across reconnects instead of snapping to list[0].
-  const agentsRef = useRef<AgentInfo[]>([])
-  const selectedNodeKeyRef = useRef<string | null>(null)
+  const activeTurnRef = useRef<string>('')
+  // Latest roster mirrors `agents` for event handlers that run between renders.
+  // selectedNodeID is the Web-scoped node_id; no second identity or
+  // reconnect remapping state is needed.
+  const agentsRef = useRef<AgentView[]>([])
   const sessionCacheRef = useRef<Map<string, SessionSnapshot>>(new Map())
 
   useEffect(() => {
@@ -127,7 +190,7 @@ export function useChatSession() {
   // session id. activateSession repaints this snapshot synchronously on
   // re-entry, so switching back to a session jumps straight to its conversation
   // instead of blanking for a round-trip. Writing on every durable change (vs.
-  // snapshotting on leave) keeps the cache live with streamed SSE updates
+  // snapshotting on leave) keeps the cache live with streamed Connect updates
   // without threading cache writes through every setMessages call site — and
   // because each render's id and messages are captured together, a switch can
   // never file the incoming session's state under the outgoing session's key.
@@ -141,23 +204,10 @@ export function useChatSession() {
       const list = sortAgentsByNode(await listAgents())
       agentsRef.current = list
       setAgents(list)
-      setSelectedAgentID((current) => {
-        // Follow the user's chosen node by its stable key rather than its
-        // transient id: a reconnect changes the id but not the key, so the
-        // selection re-homes onto the same node instead of jumping to whichever
-        // node happens to sort first this poll.
-        const key = selectedNodeKeyRef.current
-        if (key) {
-          const match = list.find((a) => agentNodeKey(a) === key)
-          if (match) return match.id
-          // Node is momentarily absent (mid-reconnect) — keep the selection put;
-          // it re-homes above once the node comes back. Don't yank it elsewhere.
-          return current
-        }
-        // Nothing chosen yet → auto-select the first node and remember it.
-        const first = list[0]
-        if (first) selectedNodeKeyRef.current = agentNodeKey(first)
-        return first?.id || null
+      setSelectedNodeID((current) => {
+        // node_id survives reconnects. Keep an absent selection so a temporary
+        // disconnect does not silently retarget the operator to another node.
+        return current || list[0]?.hello?.nodeId || null
       })
     } catch {}
   }, [])
@@ -173,7 +223,7 @@ export function useChatSession() {
     refreshSessions()
   }, [refreshAgents, refreshSessions])
   // Roster poll — paused while the tab is hidden (this runs for the whole app
-  // lifetime, so a backgrounded tab would otherwise keep hitting /api/agents
+  // lifetime, so a backgrounded tab would otherwise keep issuing AgentService queries
   // every 5s forever).
   usePolling(refreshAgents, 5000)
 
@@ -189,10 +239,10 @@ export function useChatSession() {
   // Both a cold open and a cache restore want this cleared — only their handling
   // of the durable state (messages/timeline/scans) differs.
   function resetTransientState() {
+	activeTurnRef.current = ''
     setIsThinking(false)
     setPendingResponse(false)
     setError('')
-    scanLinesRef.current = new Map()
   }
 
   function resetSessionState() {
@@ -211,9 +261,8 @@ export function useChatSession() {
     setMessages(snap.messages)
     timelineRef.current = snap.timeline
     setTimeline(snap.timeline)
-    // The SSE endpoint replays the complete AOP history on every connection.
-    // Restoring a cached copy here would append that history again each time
-    // the user reopens this session.
+    // A new WatchEvents subscription starts at cursor zero and replays the
+    // complete AOP history. Avoid restoring another AOP copy from the cache.
     setAOPEvents([])
     setScanResults(snap.scanResults)
     resetTransientState()
@@ -235,114 +284,79 @@ export function useChatSession() {
     setTimelineItems((prev) => prev.map((item) => item.id === id ? updater(item) : item))
   }
 
-  // A Run converges only on turn.end. Session lifecycle is independent and a
-  // turn-scoped error is diagnostic until its terminal turn.end arrives.
+  // A Run converges only on turn_ended. Session lifecycle is independent and a
+  // turn-scoped error is diagnostic until its terminal turn_ended arrives.
   function finalizeRun() {
+	activeTurnRef.current = ''
     setIsThinking(false)
     setPendingResponse(false)
   }
 
-  function handleDomainEvent(event: DomainEvent) {
-    const now = Date.now()
-
-    switch (event.type) {
-      case 'session_cleared':
-        // Web /clear wiped this session's transcript server-side; mirror it in the
-        // UI. resetSessionState() empties messages+timeline — and since the timeline
-        // is a projection of messages, a page reload re-derives an empty view too.
-        resetSessionState()
-        break
-
-      case 'scan_started':
-        if (event.scan_id) {
-          scanLinesRef.current.set(event.scan_id, [])
-          appendTimeline({
-            id: `scan-${event.scan_id}`,
-            kind: 'scan_started',
-            timestamp: now,
-            scanID: event.scan_id,
-            scanLines: [],
-            content: event.data,
-          })
-        }
-        break
-
-      case 'scan_progress':
-        if (event.scan_id && event.data) {
-          const lines = scanLinesRef.current.get(event.scan_id) || []
-          lines.push(event.data)
-          scanLinesRef.current.set(event.scan_id, lines)
-          updateTimelineItem(`scan-${event.scan_id}`, (item) => ({
-            ...item,
-            scanLines: [...lines],
-          }))
-        }
-        break
-
-      case 'scan_complete':
-        if (event.scan_id && event.result) {
-          setScanResults((prev) => {
-            const next = new Map(prev)
-            next.set(event.scan_id!, event.result!)
-            return next
-          })
-          appendTimeline({
-            id: `scanres-${event.scan_id}`,
-            kind: 'scan_complete',
-            timestamp: now,
-            scanID: event.scan_id,
-            scanResult: event.result,
-          })
-        }
-        setPendingResponse(false)
-        break
-
-      case 'agent_joined':
-        break
-    }
-  }
-
   function handleAOPEvent(event: AOPEvent) {
     setAOPEvents((previous) => {
-      if (event.seq !== undefined && previous.some(
-        (item) => item.session_id === event.session_id
-          && item.agent === event.agent
-          && item.seq === event.seq
-          && item.type === event.type
-          && item.ts === event.ts,
-      )) return previous
+      if (event.id && previous.some((item) => item.id === event.id)) return previous
       return [...previous, event]
     })
-    switch (event.type) {
-      case 'turn.start':
+    switch (event.payload.case) {
+      case 'turnStarted':
+		activeTurnRef.current = event.turnId
         setPendingResponse(true)
         setIsThinking(true)
         break
-      case 'message.delta':
-      case 'tool.call':
+      case 'messageDelta':
+        setPendingResponse(true)
+        setIsThinking(event.payload.value.value.case === 'reasoning')
+        break
+      case 'toolCall':
         setPendingResponse(true)
         setIsThinking(false)
         break
-      case 'turn.end':
+      case 'message':
+        if (event.payload.value.role === 'assistant') {
+          setPendingResponse(true)
+          setIsThinking(false)
+        }
+        break
+      case 'turnEnded':
         finalizeRun()
         break
-      case 'session.end':
+      case 'sessionEnded':
         break
+      case 'extension': {
+        const extension = event.payload.value
+        try {
+          const scan = anyUnpack(extension, SessionScanEventSchema)
+          if (!scan) break
+          if (!scan.scanId || scan.status !== ScanStatus.COMPLETED) break
+          const timelineID = `scanres-${scan.scanId}`
+          setTimelineItems((previous) => previous.some((item) => item.id === timelineID)
+            ? previous
+            : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
+          // A completed scan's result is the SCO node set persisted under its
+          // scan_id — load it so the timeline card can render.
+          void listSCONodes({ scanId: scan.scanId, limit: 2000 }).then((nodes) => {
+            setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
+            updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
+          }).catch(() => {})        } catch {
+          // Ignore malformed product extensions; the AOP stream remains usable.
+        }
+        break
+      }
       case 'error': {
-        const data = event.data as { code?: string; message?: string }
+        const data = event.payload.value
         // Hub-originated failures carry a translatable code plus i18n params
         // in the aiscan.web extension; agent errors are plain text.
-        const params = event.ext?.['aiscan.web']?.params as Record<string, unknown> | undefined
+        const params = aopExtension(event)?.params as Record<string, unknown> | undefined
         if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
         else setError(String(data.message ?? 'Agent error'))
-        if (!event.turn_id) finalizeRun()
+        if (!event.turnId) finalizeRun()
         break
       }
     }
   }
 
   // Rebuild the platform timeline from persisted messages. Assistant content is
-  // NOT rebuilt here — the SSE AOP replay is the sole source of agent history
+  // NOT rebuilt here — WatchEvents replay is the sole source of agent history
   // (it carries the complete message/tool/status stream); this only restores the
   // platform artifacts the AOP stream doesn't render: scan-result cards
   // (persisted as system markers) and the user/system conversation shell shown
@@ -351,41 +365,21 @@ export function useChatSession() {
     const built: TimelineItem[] = []
     for (const msg of msgs) {
       const timestamp = new Date(msg.created_at).getTime()
-      if (metadataString(msg.metadata, 'event_type') === 'scan_complete') {
-        const scanID = metadataString(msg.metadata, 'scan_id')
-        if (!scanID) continue
-        // The heavy Result isn't persisted in the marker — the card pulls it from
-        // the scanResults map (loaded from the session's scan_ids on activation).
-        // Same id as the live append so a rebuild that races the live event
-        // upserts instead of duplicating.
-        built.push({
-          id: `scanres-${scanID}`,
-          kind: 'scan_complete',
-          timestamp,
-          scanID,
-        })
-        continue
-      }
       if (msg.role === 'assistant') continue
       built.push({ id: msg.id, kind: 'message', timestamp, message: msg })
     }
     return built
   }
 
-  // Chat SSE has no server-side backlog, so a terminal event lost during an
-  // EventSource reconnect would strand the composer as "busy" forever. On each
-  // SSE connection error, reconcile against persisted truth: if the run's
-  // aggregate assistant reply is already the tail, the turn ended during the gap
-  // — rebuild the timeline from messages (which clears streaming) and release the
-  // composer. If the tail is still the user's message (or a mid-run tool step),
-  // the run is in flight; leave it for the reconnected stream to finish. This is
-  // conservative by design — it never finalizes a turn that hasn't persisted its
-  // reply — and it's idempotent, so firing on every reconnect attempt is safe.
+  // WatchEvents reconnects from its last durable cursor. This extra reconciliation
+  // is a conservative UI fallback when transport failure and component state
+  // updates cross: a persisted assistant tail proves the run progressed far enough
+  // to rebuild the visible message projection while cursor replay catches up.
   async function reconcileAfterReconnect(id: string) {
     if (id !== activeSessionRef.current) return
     const activation = activationRef.current
     try {
-      const msgs = await listChatMessages(id)
+      const msgs = (await listChatMessages(id)).flatMap((delivery) => deliveryToChatMessage(delivery) || [])
       if (activation !== activationRef.current || id !== activeSessionRef.current) return
       const last = msgs[msgs.length - 1]
       if (!last || last.role !== 'assistant') return
@@ -416,7 +410,7 @@ export function useChatSession() {
     setSessionRoute(id, route)
 
     try {
-      const msgs = await listChatMessages(id)
+      const msgs = (await listChatMessages(id)).flatMap((delivery) => deliveryToChatMessage(delivery) || [])
       if (activation !== activationRef.current) return
       // On a cache hit the painted messages are almost always still current;
       // skip the setState + timeline rebuild (main-thread work that grows with
@@ -430,17 +424,17 @@ export function useChatSession() {
 
       const session = await getChatSession(id)
       if (activation !== activationRef.current) return
-      if (session.scan_ids && session.scan_ids.length) {
-        // Fetch every linked scan at once instead of awaiting them one after
-        // another — a session with N scans used to cost N serial round-trips
-        // before its results deck filled in.
+      if (session.scanIds.length) {
+        // Fetch every linked scan's SCO nodes at once instead of awaiting them
+        // one after another — a session with N scans used to cost N serial
+        // round-trips before its results deck filled in.
         const loaded = await Promise.all(
-          session.scan_ids.map(async (scanID) => {
+          session.scanIds.map(async (scanID) => {
             try {
-              const scan = await getScan(scanID)
-              return { scanID, result: scan.result }
+              const nodes = await listSCONodes({ scanId: scanID, limit: 2000 })
+              return { scanID, nodes }
             } catch {
-              return { scanID, result: undefined as ScanResult | undefined }
+              return { scanID, nodes: undefined as SCONode[] | undefined }
             }
           }),
         )
@@ -448,11 +442,11 @@ export function useChatSession() {
         // these stale results instead of writing them into the new session's
         // scanResults map.
         if (activation !== activationRef.current) return
-        const withResult = loaded.filter((e) => e.result)
+        const withResult = loaded.filter((e) => e.nodes?.length)
         if (withResult.length) {
           setScanResults((prev) => {
             const next = new Map(prev)
-            for (const e of withResult) next.set(e.scanID, e.result!)
+            for (const e of withResult) next.set(e.scanID, e.nodes!)
             return next
           })
         }
@@ -460,25 +454,17 @@ export function useChatSession() {
     } catch {}
 
     if (activation !== activationRef.current) return
-    unsubRef.current = subscribeDomainEvents(
+    unsubRef.current = subscribeAOPEvents(
       id,
-      handleDomainEvent,
-      () => reconcileAfterReconnect(id),
       handleAOPEvent,
-      () => {
-        // Reconnects also replay the complete history, so each connection is a
-        // replacement snapshot rather than an incremental continuation.
-        if (id === activeSessionRef.current) setAOPEvents([])
-      },
+      () => reconcileAfterReconnect(id),
     )
   }
 
-  async function handleCreateSession(agentID: string) {
+  async function handleCreateSession(nodeID: string) {
     try {
-      const session = await createChatSession(agentID)
-      const a = agentsRef.current.find((x) => x.id === agentID)
-      if (a) selectedNodeKeyRef.current = agentNodeKey(a)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
     } catch (err: any) {
@@ -508,28 +494,68 @@ export function useChatSession() {
     if (!sessionID) return
     const trimmed = content.trim()
     if (!trimmed) return
+	const lower = trimmed.toLowerCase()
+	if (lower === '/clear') {
+		try {
+			const next = await resetChatSession(sessionID)
+			await refreshSessions()
+			const nextID = next.session?.id
+			if (nextID) await activateSession(nextID, 'push')
+		} catch (err: any) {
+			setError(err.message || 'Failed to reset session')
+		}
+		return
+	}
+	if (lower === '/stop') {
+		await handleCancelMessage()
+		return
+	}
+	if (lower === '/exit' || lower === '/quit') {
+		try {
+			await closeChatSession(sessionID)
+			await refreshSessions()
+		} catch (err: any) {
+			setError(err.message || 'Failed to close session')
+		}
+		return
+	}
+	const continueSession = lower === '/continue'
+	let runContent = trimmed
+	if (lower.startsWith('/followup ')) runContent = trimmed.slice(trimmed.indexOf(' ') + 1).trim()
+	const command = !continueSession
+		&& (runContent.startsWith('!') || (runContent.startsWith('/') && !runContent.startsWith('/skill:') && !lower.startsWith('/followup ')))
+	if (command) {
+		const msgID = safeUUID()
+		const optimistic: ChatMessage = { id: msgID, session_id: sessionID, role: 'user', content: runContent, created_at: new Date().toISOString() }
+		setMessages((prev) => [...prev, optimistic])
+		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
+		try {
+			await executeChatCommand(sessionID, runContent)
+		} catch (err: any) {
+			setError(err.message || 'Failed to execute command')
+		}
+		return
+	}
 
     const msgID = safeUUID()
 
-    const optimistic: ChatMessage = {
+	const optimistic: ChatMessage = {
       id: msgID,
       session_id: sessionID,
       role: 'user',
-      content: trimmed,
+		content: runContent,
       created_at: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, optimistic])
-    appendTimeline({
-      id: msgID,
-      kind: 'message',
-      timestamp: Date.now(),
-      message: optimistic,
-    })
+	if (!continueSession) {
+		setMessages((prev) => [...prev, optimistic])
+		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
+	}
     setError('')
     setPendingResponse(true)
 
     try {
-      await sendChatMessage(sessionID, trimmed, opts)
+		const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
+		activeTurnRef.current = sent.turnId || ''
       await refreshSessions()
     } catch (err: any) {
       setPendingResponse(false)
@@ -546,15 +572,15 @@ export function useChatSession() {
     if (activeSessionRef.current) return activeSessionRef.current
     // Prefer the selected node only while it's actually connected; a selection
     // left dangling by a node that went away falls back to the first agent.
-    const connected = agents.find((a) => a.id === selectedAgentID)
-    const agentID = connected?.id || agents[0]?.id
-    if (!agentID) {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const nodeID = connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!nodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(agentID)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
       return session.id
@@ -582,21 +608,21 @@ export function useChatSession() {
   async function quickDispatch(
     target: string,
     prompt: string,
-    agentID?: string,
+    nodeID?: string,
     opts?: { activate?: boolean; skipRefresh?: boolean },
-  ): Promise<ChatSession | null> {
-    const connected = agents.find((a) => a.id === selectedAgentID)
-    const aID = agentID || connected?.id || agents[0]?.id
-    if (!aID) {
+  ): Promise<AOPSession | null> {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const targetNodeID = nodeID || connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!targetNodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(aID, target)
+      const session = await createChatSession(targetNodeID, target)
       await sendChatMessage(session.id, prompt)
       if (!opts?.skipRefresh) await refreshSessions()
       if (opts?.activate) {
-        setSelectedAgentID(aID)
+        setSelectedNodeID(targetNodeID)
         await activateSession(session.id, 'push')
       }
       return session
@@ -617,15 +643,15 @@ export function useChatSession() {
     seedPrompt: string
     scanID?: string
   }): Promise<string | null> {
-    const connected = agents.find((a) => a.id === selectedAgentID)
-    const agentID = connected?.id || agents[0]?.id
-    if (!agentID) {
+    const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
+    const nodeID = connected?.hello?.nodeId || agents[0]?.hello?.nodeId
+    if (!nodeID) {
       setError('No node connected — launch a local agent or connect one first.')
       return null
     }
     try {
-      const session = await createChatSession(agentID, args.title, args.scanID)
-      setSelectedAgentID(agentID)
+      const session = await createChatSession(nodeID, args.title, args.scanID)
+      setSelectedNodeID(nodeID)
       await refreshSessions()
       await activateSession(session.id, 'push')
       await handleSendMessage(args.seedPrompt)
@@ -651,7 +677,7 @@ export function useChatSession() {
       const batch = items.slice(i, i + CONCURRENCY)
       await Promise.all(
         batch.map((it, j) =>
-          quickDispatch(it.target, it.prompt, fleet[(i + j) % fleet.length].id, { skipRefresh: true }),
+          quickDispatch(it.target, it.prompt, fleet[(i + j) % fleet.length].hello?.nodeId, { skipRefresh: true }),
         ),
       )
     }
@@ -661,9 +687,9 @@ export function useChatSession() {
   async function handleCancelMessage() {
     const sessionID = activeSessionRef.current
     if (!sessionID) return
-    finalizeRun()
     try {
-      await cancelChatSession(sessionID)
+		await cancelChatSession(sessionID, activeTurnRef.current)
+		finalizeRun()
       await refreshSessions()
     } catch (err: any) {
       setError(err.message || 'Failed to pause response')
@@ -697,7 +723,7 @@ export function useChatSession() {
 
   return {
     agents,
-    selectedAgentID,
+    selectedNodeID,
     sessions,
     activeSessionID,
     timeline,
@@ -706,10 +732,8 @@ export function useChatSession() {
     isThinking,
     busy: pendingResponse || isThinking,
     error,
-    selectAgent: (id: string) => {
-      const a = agentsRef.current.find((x) => x.id === id)
-      selectedNodeKeyRef.current = a ? agentNodeKey(a) : null
-      setSelectedAgentID(id)
+    selectNode: (nodeID: string) => {
+      setSelectedNodeID(nodeID)
     },
     createSession: handleCreateSession,
     selectSession: (id: string) => activateSession(id, 'push'),
@@ -723,9 +747,4 @@ export function useChatSession() {
     cancelMessage: handleCancelMessage,
     clearError,
   }
-}
-
-function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
-  const value = metadata?.[key]
-  return typeof value === 'string' ? value : ''
 }

@@ -28,21 +28,22 @@ export default function LLMHealth({ onOpenSettings, reloadSignal }: Props) {
     setDetail('')
     try {
       const cfg = await getConfigStatus()
-      if (!cfg.llm.api_key_configured) {
+	  const active = cfg.llm?.active
+	  if (!active?.apiKeyConfigured) {
         setPhase('unconfigured')
         return
       }
       const res = await testLLM({
-        provider: cfg.llm.provider,
-        base_url: cfg.llm.base_url,
-        api_key: '', // reuse the key already stored server-side
-        model: cfg.llm.model,
-        proxy: cfg.llm.proxy,
+		provider: active.provider,
+		baseUrl: active.baseUrl,
+        apiKey: '', // reuse the key already stored server-side
+		model: active.model,
+		proxy: active.proxy,
       })
       if (res.ok) {
         setPhase('ok')
-        const label = res.model || cfg.llm.model
-        setDetail(res.latency_ms ? `${label} · ${res.latency_ms}ms` : label)
+		const label = res.model || active.model
+        setDetail(res.latencyMs ? `${label} · ${res.latencyMs}ms` : label)
       } else {
         setPhase('error')
         setDetail(res.error || '')

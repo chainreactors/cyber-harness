@@ -1,12 +1,11 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/aiscan/aop"
 )
 
 // CacheRetention controls prompt caching behavior across providers.
@@ -18,209 +17,44 @@ const (
 	CacheLong  CacheRetention = "long"  // Anthropic ephemeral+TTL / OpenAI 24h retention
 )
 
-type ContentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *ImageURL `json:"image_url,omitempty"`
-}
-
-type ImageURL struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"`
-}
-
-func TextPart(text string) ContentPart {
-	return ContentPart{Type: "text", Text: text}
-}
-
-func ImagePart(mimeType, base64Data, detail string) ContentPart {
-	return ContentPart{
-		Type:     "image_url",
-		ImageURL: &ImageURL{URL: "data:" + mimeType + ";base64," + base64Data, Detail: detail},
-	}
-}
-
-type ChatMessage struct {
-	Role             string        `json:"role"`
-	Content          *string       `json:"content,omitempty"`
-	ContentParts     []ContentPart `json:"-"`
-	ReasoningContent *string       `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID       string        `json:"tool_call_id,omitempty"`
-	// FinishReason is response metadata used by the agent loop. It must not be
-	// sent back as part of an OpenAI-compatible message.
-	FinishReason      string `json:"-"`
-	ToolResultIsError bool   `json:"-"`
-}
-
-func (m ChatMessage) MarshalJSON() ([]byte, error) {
-	if len(m.ContentParts) == 0 {
-		type plain ChatMessage
-		return json.Marshal(plain(m))
-	}
-	obj := map[string]interface{}{"role": m.Role, "content": m.ContentParts}
-	if m.ReasoningContent != nil {
-		obj["reasoning_content"] = *m.ReasoningContent
-	}
-	if len(m.ToolCalls) > 0 {
-		obj["tool_calls"] = m.ToolCalls
-	}
-	if m.ToolCallID != "" {
-		obj["tool_call_id"] = m.ToolCallID
-	}
-	return json.Marshal(obj)
-}
-
-func NewMultimodalMessage(role string, parts []ContentPart) ChatMessage {
-	return ChatMessage{Role: role, ContentParts: parts}
-}
-
-func ParseDataURI(dataURI string) (mediaType, base64Data string) {
-	rest, ok := strings.CutPrefix(dataURI, "data:")
-	if !ok {
-		return "", dataURI
-	}
-	parts := strings.SplitN(rest, ";base64,", 2)
-	if len(parts) != 2 {
-		return "", dataURI
-	}
-	return parts[0], parts[1]
-}
-
-func StripImageParts(msgs []ChatMessage) []ChatMessage {
-	out := make([]ChatMessage, len(msgs))
-	for i, m := range msgs {
-		if len(m.ContentParts) == 0 {
-			out[i] = m
-			continue
-		}
-		hasImage := false
-		for _, p := range m.ContentParts {
-			if p.Type == "image_url" {
-				hasImage = true
-				break
-			}
-		}
-		if !hasImage {
-			out[i] = m
-			continue
-		}
-		filtered := make([]ContentPart, 0, len(m.ContentParts))
-		for _, p := range m.ContentParts {
-			if p.Type != "image_url" {
-				filtered = append(filtered, p)
-			}
-		}
-		filtered = append(filtered, TextPart("[image omitted: model does not support images]"))
-		cp := m
-		cp.ContentParts = filtered
-		out[i] = cp
-	}
-	return out
-}
-
-type ChatMessageDelta struct {
-	Role             string          `json:"role,omitempty"`
-	Content          *string         `json:"content,omitempty"`
-	ReasoningContent *string         `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-type ToolCall struct {
-	ID             string       `json:"id"`
-	Type           string       `json:"type"`
-	Function       FunctionCall `json:"function"`
-	RejectedReason string       `json:"-"`
-}
-
-type ToolCallDelta struct {
-	Index    int               `json:"index,omitempty"`
-	ID       string            `json:"id,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Function FunctionCallDelta `json:"function,omitempty"`
-}
-
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-type FunctionCallDelta struct {
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-}
-
-type ToolDefinition = tool.Definition
-
-type FunctionDefinition = tool.FuncDef
+// The provider boundary speaks AOP protos. Adapters (openai.go, anthropic.go)
+// serialize []*aop.Message into the vendor wire format and parse responses
+// back into aop types; nothing upstream of this package sees vendor JSON.
 
 type ChatCompletionRequest struct {
-	Model          string           `json:"model"`
-	Messages       []ChatMessage    `json:"messages"`
-	Tools          []ToolDefinition `json:"tools,omitempty"`
-	MaxTokens      int              `json:"max_tokens,omitempty"`
-	Temperature    *float64         `json:"temperature,omitempty"`
-	Stream         bool             `json:"stream,omitempty"`
-	CacheRetention CacheRetention   `json:"-"`
-	SessionID      string           `json:"-"`
+	Model          string
+	Messages       []*aop.Message
+	Tools          []*aop.ToolDefinition
+	MaxTokens      int
+	Temperature    *float64
+	Stream         bool
+	CacheRetention CacheRetention
+	SessionID      string
 }
 
 type ChatCompletionResponse struct {
-	ID      string    `json:"id"`
-	Choices []Choice  `json:"choices"`
-	Usage   *Usage    `json:"usage,omitempty"`
-	Error   *APIError `json:"error,omitempty"`
+	ID      string
+	Choices []Choice
+	Usage   *aop.TokenUsage
+	Error   *APIError
 }
 
 type Choice struct {
-	Message      ChatMessage `json:"message"`
-	FinishReason string      `json:"finish_reason"`
+	Message      *aop.Message
+	FinishReason string
 }
 
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
-}
-
-// CacheHitRatio returns the proportion of prompt tokens served from cache,
-// based on the API response. Returns 0 when no cache data is available.
-func (u *Usage) CacheHitRatio() float64 {
-	if u == nil || u.PromptTokens == 0 {
-		return 0
-	}
-	return float64(u.CacheReadTokens) / float64(u.PromptTokens)
-}
-
-func (u *Usage) UnmarshalJSON(data []byte) error {
-	type plain Usage
-	var raw struct {
-		plain
-		// OpenAI format
-		PromptTokensDetails *struct {
-			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"`
-		} `json:"prompt_tokens_details,omitempty"`
-		// DeepSeek format
-		PromptCacheHitTokens  *int `json:"prompt_cache_hit_tokens,omitempty"`
-		PromptCacheMissTokens *int `json:"prompt_cache_miss_tokens,omitempty"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	*u = Usage(raw.plain)
-	if raw.PromptTokensDetails != nil {
-		u.CacheReadTokens = raw.PromptTokensDetails.CachedTokens
-		u.CacheWriteTokens = raw.PromptTokensDetails.CacheWriteTokens
-	} else if raw.PromptCacheHitTokens != nil {
-		u.CacheReadTokens = *raw.PromptCacheHitTokens
-		if raw.PromptCacheMissTokens != nil {
-			u.CacheWriteTokens = *raw.PromptCacheMissTokens
-		}
-	}
-	return nil
+// ChatCompletionStreamEvent is one parsed SSE chunk. A chunk may carry a text
+// or reasoning delta and/or tool-call deltas; Role is set on the first chunk
+// of a message.
+type ChatCompletionStreamEvent struct {
+	Role         string
+	MessageDelta *aop.MessageDelta
+	ToolDeltas   []*aop.ToolCallDelta
+	FinishReason string
+	Usage        *aop.TokenUsage
+	Done         bool
+	Err          error
 }
 
 type APIError struct {
@@ -260,18 +94,132 @@ func IsImageUnsupportedError(err error) bool {
 		(strings.Contains(msg, "image") && strings.Contains(msg, "not support"))
 }
 
-type ChatCompletionStreamEvent struct {
-	Delta        ChatMessageDelta
-	FinishReason string
-	Usage        *Usage
-	Done         bool
-	Err          error
+// --- aop.Message constructors used across the agent ---
+
+func TextMessage(role, content string) *aop.Message {
+	return &aop.Message{Role: role, Content: []*aop.Content{aop.Text(content)}}
 }
 
-func NewTextMessage(role, content string) ChatMessage {
-	return ChatMessage{Role: role, Content: &content}
+func ToolResultMessage(callID string, result *aop.ToolResult) *aop.Message {
+	result.CallId = callID
+	return &aop.Message{Role: "tool", Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: result}}}}
 }
 
-func NewToolResultMessage(toolCallID, content string) ChatMessage {
-	return ChatMessage{Role: "tool", Content: &content, ToolCallID: toolCallID}
+// MessageText joins the text parts of an aop message.
+func MessageText(msg *aop.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, part := range msg.Content {
+		if text := part.GetText(); text != nil {
+			sb.WriteString(text.Text)
+		}
+	}
+	return sb.String()
+}
+
+// MessageReasoning joins the reasoning parts of an aop message.
+func MessageReasoning(msg *aop.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, part := range msg.Content {
+		if reasoning := part.GetReasoning(); reasoning != nil {
+			sb.WriteString(reasoning.Text)
+		}
+	}
+	return sb.String()
+}
+
+// MessageToolCalls extracts the tool calls carried by an assistant message.
+func MessageToolCalls(msg *aop.Message) []*aop.ToolCall {
+	if msg == nil {
+		return nil
+	}
+	var calls []*aop.ToolCall
+	for _, part := range msg.Content {
+		if call := part.GetToolCall(); call != nil {
+			calls = append(calls, call)
+		}
+	}
+	return calls
+}
+
+// MessageToolResult returns the tool result carried by a tool-role message.
+func MessageToolResult(msg *aop.Message) *aop.ToolResult {
+	if msg == nil {
+		return nil
+	}
+	for _, part := range msg.Content {
+		if result := part.GetToolResult(); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
+// StripImageParts rewrites media parts into a placeholder note for models
+// without image support.
+func StripImageParts(msgs []*aop.Message) []*aop.Message {
+	out := make([]*aop.Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = m
+		hasImage := false
+		for _, part := range m.Content {
+			if part.GetMedia() != nil {
+				hasImage = true
+				break
+			}
+		}
+		if !hasImage {
+			continue
+		}
+		filtered := make([]*aop.Content, 0, len(m.Content)+1)
+		for _, part := range m.Content {
+			if part.GetMedia() == nil {
+				filtered = append(filtered, part)
+			}
+		}
+		filtered = append(filtered, aop.Text("[image omitted: model does not support images]"))
+		out[i] = &aop.Message{Id: m.Id, Role: m.Role, Name: m.Name, Content: filtered}
+	}
+	return out
+}
+
+// TokenUsage builds the canonical usage proto from vendor-reported counters.
+func TokenUsage(promptTokens, completionTokens, totalTokens, cacheRead, cacheWrite int) *aop.TokenUsage {
+	if totalTokens <= 0 {
+		totalTokens = promptTokens + completionTokens
+	}
+	return &aop.TokenUsage{
+		InputTokens:  uint64(max(promptTokens, 0)),
+		OutputTokens: uint64(max(completionTokens, 0)),
+		TotalTokens:  uint64(max(totalTokens, 0)),
+		Detail: map[string]uint64{
+			"cache_read":  uint64(max(cacheRead, 0)),
+			"cache_write": uint64(max(cacheWrite, 0)),
+		},
+	}
+}
+
+// CacheHitRatio returns the proportion of prompt tokens served from cache.
+func CacheHitRatio(usage *aop.TokenUsage) float64 {
+	if usage == nil || usage.InputTokens == 0 {
+		return 0
+	}
+	return float64(usage.Detail["cache_read"]) / float64(usage.InputTokens)
+}
+
+// UsageTotalTokens prefers the vendor-reported total and falls back to the
+// sum of input and output tokens.
+func UsageTotalTokens(usage *aop.TokenUsage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.TotalTokens > 0 {
+		return int(usage.TotalTokens)
+	}
+	return int(usage.InputTokens + usage.OutputTokens)
 }

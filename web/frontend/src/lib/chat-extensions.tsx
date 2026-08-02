@@ -1,13 +1,13 @@
 import { Activity, Bot, CheckCircle2 } from 'lucide-react'
 import { registerTimelineRenderer } from '@/viewer'
-import type { ScanResult } from '../api'
+import type { SCONode } from '../api'
 import ScanProgressInline from '../components/chat/ScanProgressInline'
 import ScanSummaryCard from '../components/chat/ScanSummaryCard'
 
 export function registerChatExtensions() {
   registerTimelineRenderer('scan_started', {
     renderer: ({ item, context }) => {
-      const scanResults = context.scanResults as Map<string, ScanResult> | undefined
+      const scanResults = context.scanResults as Map<string, SCONode[]> | undefined
       return (
         <ScanProgressInline
           scanID={item.data.scanID as string}
@@ -26,18 +26,19 @@ export function registerChatExtensions() {
   registerTimelineRenderer('scan_complete', {
     renderer: ({ item, context }) => {
       const scanID = item.data.scanID as string
-      // A live scan_complete event carries the Result inline; a card rebuilt from
-      // a persisted marker (page reload / session switch) does not, so fall back to
-      // the scanResults map the session loads from its scan_ids. Until that map
-      // resolves the result is absent — render nothing rather than an empty card;
-      // the row re-renders and the card appears once the map fills.
-      const scanResults = context.scanResults as Map<string, ScanResult> | undefined
-      const result = (item.data.result as ScanResult) ?? scanResults?.get(scanID)
-      if (!result) return null
+      // The hub persists a completed scan as SCO nodes keyed by scan_id; a live
+      // scan_complete event carries them inline, a card rebuilt from a persisted
+      // marker (page reload / session switch) falls back to the scanResults map
+      // the session loads from its scan_ids. Until that map resolves the nodes
+      // are absent — render nothing rather than an empty card; the row
+      // re-renders and the card appears once the map fills.
+      const scanResults = context.scanResults as Map<string, SCONode[]> | undefined
+      const nodes = (item.data.nodes as SCONode[]) ?? scanResults?.get(scanID)
+      if (!nodes) return null
       return (
         <ScanSummaryCard
           scanID={scanID}
-          result={result}
+          nodes={nodes}
         />
       )
     },

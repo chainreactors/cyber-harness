@@ -44,8 +44,8 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
-import type { ChatMessage, ScanResult, SlashCommandSpec } from '../api'
-import type { TimelineItem } from '../hooks/useChatSession'
+import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
+import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
@@ -70,7 +70,7 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
         kind: 'extension',
         timestamp: item.timestamp,
         extensionType: 'scan_complete',
-        data: { scanID: item.scanID || '', result: item.scanResult },
+        data: { scanID: item.scanID || '', nodes: item.scanNodes },
       }
     default:
       return null
@@ -82,16 +82,6 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
 // already renders them as scan cards. Drop them from the stream handed to the
 // AOP reducer so they don't also appear as bare "scan complete" bubbles.
 function isPlatformMarkerEvent(event: AOPEvent): boolean {
-  if (event.type !== 'message') return false
-  const data = event.data as { role?: string } | undefined
-  if (data?.role !== 'system') return false
-  const ext = event.ext
-  if (!ext) return false
-  for (const value of Object.values(ext)) {
-    if (!value || typeof value !== 'object') continue
-    const meta = (value as Record<string, unknown>).metadata
-    if (meta && typeof meta === 'object' && (meta as Record<string, unknown>).event_type) return true
-  }
   return false
 }
 
@@ -99,50 +89,30 @@ function isPlatformMarkerEvent(event: AOPEvent): boolean {
 // execution inputs, not operator-authored chat messages. The hub is the sole
 // author of user messages on this surface, so keep only its canonical copy.
 function isInternalUserEvent(event: AOPEvent): boolean {
-  if (event.type !== 'message' || event.agent === webUserAgent) return false
-  const data = event.data as { role?: string } | undefined
-  return data?.role === 'user'
+  return event.payload.case === 'message'
+    && event.emitter !== webUserAgent
+    && event.payload.value.role === 'user'
 }
 
 function eventText(event: AOPEvent): string {
-  const data = event.data as {
-    content?: string
-    parts?: Array<{ type?: string; text?: string }>
-  } | undefined
-  if (typeof data?.content === 'string') return data.content
-  return (data?.parts ?? [])
-    .filter((part) => part.type === 'text' && part.text)
-    .map((part) => part.text as string)
+  if (event.payload.case !== 'message') return ''
+  return event.payload.value.content
+    .filter((part) => part.value.case === 'text')
+    .map((part) => part.value.case === 'text' ? part.value.value.text : '')
     .join('\n')
 }
 
-function markdownCodeFence(text: string): string {
-  let fence = '```'
-  while (text.includes(fence)) fence += '`'
-  return `${fence}\n${text}\n${fence}`
-}
-
 function presentAOPEvent(event: AOPEvent): AOPEvent {
-  if (event.type !== 'message') return event
-  const command = event.ext?.command as { presentation?: string } | undefined
-  if (command?.presentation !== 'preformatted') return event
-  const data = event.data as { parts?: Array<{ type?: string; text?: string }> }
-  return {
-    ...event,
-    data: {
-      ...data,
-      parts: (data.parts ?? []).map((part) => (
-        part.type === 'text' && part.text ? { ...part, text: markdownCodeFence(part.text) } : part
-      )),
-    },
-  }
+  return event
 }
 
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
-  for (const value of Object.values(event.ext ?? {})) {
-    if (value && typeof value === 'object') return value as Record<string, unknown>
-  }
-  return {}
+  return Object.fromEntries(event.extensions.map((extension) => [extension.typeUrl, extension.typeUrl]))
+}
+
+function eventTimestamp(event: AOPEvent): number {
+  if (!event.emittedAt) return 0
+  return Number(event.emittedAt.seconds) * 1000 + event.emittedAt.nanos / 1_000_000
 }
 
 function reduceConversationAOP(
@@ -151,39 +121,39 @@ function reduceConversationAOP(
   streaming: boolean,
 ): ViewerTimelineItem[] {
   const childStarts = new Map<string, AOPEvent>()
-  const visibleSessionIDs = new Set(events.map((event) => event.session_id))
+  const visibleSessionIDs = new Set(events.map((event) => event.sessionId))
   for (const event of events) {
-    if (event.type !== 'session.start') continue
-    const data = event.data as { parent_session_id?: string; parent_tool_call_id?: string }
+    if (event.payload.case !== 'sessionStarted') continue
+    const data = event.payload.value
     const ext = extensionBlock(event)
-    const delegated = !!data.parent_tool_call_id
+    const delegated = !!data.parentToolCallId
       || (ext.delegation !== null && typeof ext.delegation === 'object')
     // The root agent also points at the platform chat session, which is not an
     // AOP stream. Only fold a run when its parent is another visible AOP session.
-    if (delegated && data.parent_session_id && visibleSessionIDs.has(data.parent_session_id)) {
-      childStarts.set(event.session_id, event)
+    if (delegated && data.parentSessionId && visibleSessionIDs.has(data.parentSessionId)) {
+      childStarts.set(event.sessionId, event)
     }
   }
 
   const childIDs = new Set(childStarts.keys())
   const topLevel = reduceAOPToTimeline(
-    events.filter((event) => !childIDs.has(event.session_id)).map(presentAOPEvent),
+    events.filter((event) => !childIDs.has(event.sessionId)).map(presentAOPEvent),
     { streaming, lifecycle: 'errors' },
   ) as ViewerTimelineItem[]
 
   const childRuns: ViewerTimelineItem[] = []
   for (const [sessionID, start] of childStarts) {
-    const childEvents = events.filter((event) => event.session_id === sessionID)
-    const end = [...childEvents].reverse().find((event) => event.type === 'session.end')
-    const endData = end?.data as { stop?: string; error?: string } | undefined
+    const childEvents = events.filter((event) => event.sessionId === sessionID)
+    const end = [...childEvents].reverse().find((event) => event.payload.case === 'sessionEnded')
+    const endReason = end?.payload.case === 'sessionEnded' ? end.payload.value.reason : undefined
     const ext = extensionBlock(start)
     const delegation = ext.delegation && typeof ext.delegation === 'object'
       ? ext.delegation as Record<string, unknown>
       : ext
     const promptEvent = sourceEvents.find(
-      (event) => event.session_id === sessionID && isInternalUserEvent(event),
+      (event) => event.sessionId === sessionID && isInternalUserEvent(event),
     )
-    const stop = endData?.stop
+    const stop = endReason
     const status = !end
       ? 'running'
       : stop === 'error'
@@ -191,7 +161,7 @@ function reduceConversationAOP(
         : stop === 'canceled' || stop === 'terminated' || stop === 'stopped'
           ? 'canceled'
           : 'completed'
-    const timestamp = Date.parse(start.ts)
+    const timestamp = eventTimestamp(start)
     const items = reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
       streaming: streaming && !end,
       lifecycle: 'errors',
@@ -201,8 +171,8 @@ function reduceConversationAOP(
       id: `subagent:${sessionID}`,
       kind: 'subagent_run',
       timestamp: Number.isFinite(timestamp) ? timestamp : 0,
-      actorName: start.agent,
-      name: typeof delegation.agent_name === 'string' ? delegation.agent_name : start.agent || 'Sub-agent',
+      actorName: start.emitter,
+      name: typeof delegation.agent_name === 'string' ? delegation.agent_name : start.emitter || 'Sub-agent',
       prompt: typeof delegation.task === 'string' ? delegation.task : (promptEvent ? eventText(promptEvent) : ''),
       mode: typeof delegation.run_mode === 'string' ? delegation.run_mode : undefined,
       sessionID,
@@ -224,7 +194,7 @@ function isUserMessageItem(
 
 function toViewerTimelineItem(
   item: TimelineItem,
-  scanResults: Map<string, ScanResult>,
+  scanResults: Map<string, SCONode[]>,
 ): ViewerTimelineItem | null {
   switch (item.kind) {
     case 'message': {
@@ -272,7 +242,7 @@ const threadOffsetClass = 'lg:mr-[10.75rem] xl:mr-[11.75rem] 2xl:mr-[14.75rem]'
 interface Props {
   timeline: TimelineItem[]
   aopEvents?: AOPEvent[]
-  scanResults: Map<string, ScanResult>
+  scanResults: Map<string, SCONode[]>
   isThinking: boolean
   isBusy: boolean
   error: string
@@ -283,9 +253,9 @@ interface Props {
   injectText?: { text: string; nonce: number }
   agentOffline?: boolean
   agentName?: string
-  agents?: { id: string; name?: string }[]
-  onCreateSession?: (agentID: string) => void
-  onOpenTerminal?: (agentID: string) => void
+  agents?: { nodeID: string; name?: string }[]
+  onCreateSession?: (nodeID: string) => void
+  onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
   onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
   onPause: () => void
@@ -414,30 +384,38 @@ export default function ChatPanel({
     setEvalMaxRounds(3)
   }
 
-  // The "/" command menu is served by the hub (GET .../commands): hub-scope
-  // commands merged with the bound agent's reported commands (skills included),
-  // so it always mirrors the real command set instead of a hardcoded list.
+  // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
+  // commands merged with the bound node's reported runtime, skill, and registry
+  // commands, so both menus mirror what that AIScan node can actually run.
   // Descriptions prefer the local i18n string (keyed cmd<Name>) and fall back to
   // the server's (used for dynamic skill commands that have no i18n key).
   const [chatCommands, setChatCommands] = useState<CommandHint[]>([])
+  const [toolCommands, setToolCommands] = useState<CommandHint[]>([])
   useEffect(() => {
     if (!activeSessionID) {
       setChatCommands([])
+      setToolCommands([])
       return
     }
     let cancelled = false
-    const toHint = (spec: SlashCommandSpec): CommandHint => {
-      const base = spec.name.replace(/^\//, '')
+    const toHint = (spec: CommandSpec): CommandHint => {
+      const base = spec.name.startsWith('/') ? spec.name.slice(1) : ''
       const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
       const localized = key ? t(key, { defaultValue: '' }) : ''
       return { cmd: spec.name, desc: localized || spec.description || '', usage: spec.usage }
     }
     fetchSessionCommands(activeSessionID)
       .then((specs) => {
-        if (!cancelled) setChatCommands(specs.map(toHint))
+        if (cancelled) return
+        const hints = specs.map(toHint)
+        setChatCommands(hints.filter((hint) => hint.cmd.startsWith('/')))
+        setToolCommands(hints.filter((hint) => hint.cmd.startsWith('!')))
       })
       .catch(() => {
-        if (!cancelled) setChatCommands([])
+        if (!cancelled) {
+          setChatCommands([])
+          setToolCommands([])
+        }
       })
     return () => {
       cancelled = true
@@ -474,6 +452,11 @@ export default function ChatPanel({
     wasActiveRef.current = active
   }, [isBusy, isThinking, t])
 
+  const activeThinkingResponseID = useMemo(
+    () => isThinking ? latestStreamingResponseID(viewerTimeline) : null,
+    [isThinking, viewerTimeline],
+  )
+
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
     const opts = sendOpts()
     const hadGoal = persist
@@ -490,7 +473,7 @@ export default function ChatPanel({
       } else if (a.mode === 'upload' && activeSessionID) {
         try {
           await uploadChatFile(activeSessionID, a.file)
-        } catch { /* upload error shown via SSE system message */ }
+        } catch { /* upload error is surfaced by the Connect call */ }
       }
     }
     const fullContent = contextParts.length > 0
@@ -501,8 +484,8 @@ export default function ChatPanel({
   }
 
   const renderViewerItem = useCallback(
-    (item: ViewerTimelineItem) => timelineContent(item, scanResults),
-    [scanResults],
+    (item: ViewerTimelineItem) => timelineContent(item, scanResults, activeThinkingResponseID),
+    [activeThinkingResponseID, scanResults],
   )
   const renderViewerMark = useCallback(
     (item: ViewerTimelineItem) => <TimelineMark item={item} />,
@@ -564,17 +547,17 @@ export default function ChatPanel({
                 // surface with a hairline divider, so the pair no longer looks like
                 // a solid chip next to a stray bare link.
                 <div
-                  key={agent.id}
+                  key={agent.nodeID}
                   className="inline-flex items-stretch divide-x divide-border overflow-hidden rounded-md border border-border bg-card shadow-soft"
                 >
                   {onCreateSession && (
-                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.id)} className="gap-1.5 rounded-none shadow-none">
+                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.nodeID)} className="gap-1.5 rounded-none shadow-none">
                       <MessageSquare className="h-3.5 w-3.5 text-primary" />
                       {agent.name || t('chat')}
                     </Button>
                   )}
                   {onOpenTerminal && (
-                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.id)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
+                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.nodeID)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
                       <Terminal className="h-3.5 w-3.5" />
                       {t('terminal')}
                     </Button>
@@ -715,6 +698,7 @@ export default function ChatPanel({
                   onPause={onPause}
                   busy={isBusy}
                   commands={chatCommands}
+                  toolCommands={toolCommands}
                   mentionables={mentionables}
                   renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
@@ -731,7 +715,8 @@ export default function ChatPanel({
 
 function timelineContent(
   item: ViewerTimelineItem,
-  scanResults: Map<string, ScanResult>,
+  scanResults: Map<string, SCONode[]>,
+  activeThinkingResponseID: string | null,
 ): ReactNode {
   switch (item.kind) {
     case 'message': {
@@ -760,7 +745,7 @@ function timelineContent(
     }
 
     case 'assistant_response':
-      return <AssistantResponseEntry response={item} />
+      return <AssistantResponseEntry response={item} activeThinking={item.id === activeThinkingResponseID} />
 
     case 'tool_call':
       return (
@@ -778,7 +763,7 @@ function timelineContent(
       return (
         <SubagentRunCard run={item}>
           {item.items.map((child) => (
-            <div key={child.id}>{timelineContent(child, scanResults)}</div>
+            <div key={child.id}>{timelineContent(child, scanResults, activeThinkingResponseID)}</div>
           ))}
         </SubagentRunCard>
       )
@@ -852,22 +837,19 @@ function SystemMessageContent({ metadata, fallback }: { metadata: Record<string,
   const { t } = useTranslation('chat')
   const code = systemCode(metadata)
   const params = systemParams(metadata)
-  if (code === 'agents_list') return <AgentsListContent params={params} fallback={fallback} />
+  if (code === 'agents_list') return <AgentsListContent agentList={metadata.agentList as AgentListMetadata | undefined} fallback={fallback} />
   const text = t(`sys.${code}`, { ...params, defaultValue: fallback })
   return <MarkdownContent content={trimDisplayContent(text)} />
 }
 
-type AgentListEntry = { name?: string; id?: string; busy?: boolean; provider?: string; model?: string }
-
-function AgentsListContent({ params, fallback }: { params: Record<string, unknown>; fallback: string }) {
+function AgentsListContent({ agentList, fallback }: { agentList?: AgentListMetadata; fallback: string }) {
   const { t } = useTranslation('chat')
-  const agents = Array.isArray(params.agents) ? (params.agents as AgentListEntry[]) : null
+  const agents = agentList?.agents
   if (!agents) return <MarkdownContent content={trimDisplayContent(fallback)} />
-  const count = typeof params.count === 'number' ? params.count : agents.length
-  const lines = [t('sys.agents_connected', { n: count })]
+  const lines = [t('sys.agents_connected', { n: agents.length })]
   for (const a of agents) {
     const status = a.busy ? t('sys.agent_status_busy') : t('sys.agent_status_idle')
-    let line = `- **${a.name}** (${a.id}) — ${status}`
+    let line = `- **${a.name}** (${a.nodeId}) — ${status}`
     if (a.model) line += ` — ${a.provider}/${a.model}`
     lines.push(line)
   }
@@ -920,13 +902,22 @@ function TokenBudgetNote({ context, budget }: { context?: number; budget?: numbe
 
 function AssistantResponseEntry({
   response,
+  activeThinking,
 }: {
   response: Extract<ViewerTimelineItem, { kind: 'assistant_response' }>
+  activeThinking: boolean
 }) {
   const { t } = useTranslation('chat')
   const message = response.response
   const hasThinking = !!response.thinking?.trim()
   const hasResponse = !!message?.content.trim()
+  const [thinkingExpanded, setThinkingExpanded] = useState(activeThinking && hasThinking)
+  const wasThinkingRef = useRef(activeThinking)
+  useEffect(() => {
+    if (activeThinking && hasThinking) setThinkingExpanded(true)
+    else if (wasThinkingRef.current && !activeThinking) setThinkingExpanded(false)
+    wasThinkingRef.current = activeThinking
+  }, [activeThinking, hasThinking])
   // Fold the whole turn's tool calls under one disclosure so a long scan run
   // doesn't sprawl the transcript. The header keeps a collapsed group legible:
   // the tool count, plus a spinner while any call is still running.
@@ -945,6 +936,8 @@ function AssistantResponseEntry({
       timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
       thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
+      thinkingExpanded={thinkingExpanded}
+      onThinkingToggle={setThinkingExpanded}
       tools={toolCount > 0 ? (
         <div className="space-y-2">
           {response.tools.map((tool) => (
@@ -967,6 +960,23 @@ function AssistantResponseEntry({
       showResponseLabel={false}
     />
   )
+}
+
+function latestStreamingResponseID(items: ViewerTimelineItem[]): string | null {
+  let latestID: string | null = null
+  let latestTimestamp = Number.NEGATIVE_INFINITY
+  const visit = (item: ViewerTimelineItem) => {
+    if (item.kind === 'assistant_response' && item.streaming && item.thinking?.trim()) {
+      if (item.timestamp >= latestTimestamp) {
+        latestID = item.id
+        latestTimestamp = item.timestamp
+      }
+      return
+    }
+    if (item.kind === 'subagent_run') item.items.forEach(visit)
+  }
+  items.forEach(visit)
+  return latestID
 }
 
 function TimelineMark({ item }: { item: ViewerTimelineItem }) {

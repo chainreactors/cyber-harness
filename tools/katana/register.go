@@ -14,7 +14,11 @@ func init() {
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger := deps.GetLogger()
 			impl := New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
-			reg.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run, SetProxy: impl.SetProxy, GetProxy: func() string { return impl.Proxy }}, "scanner")
+			reg.Register(commands.Command{
+				Name: impl.Name(), Usage: impl.Usage(),
+				DescriptionPath: "aiscan://skills/aiscan/okf/easm/katana.md",
+				Run:             impl.Run, SetProxy: impl.SetProxy, GetProxy: func() string { return impl.Proxy },
+			}, "scanner")
 		},
 	})
 }

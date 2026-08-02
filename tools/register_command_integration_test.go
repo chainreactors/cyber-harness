@@ -1,99 +1,119 @@
-//go:build full && integration
+//go:build integration
 
-//	Run with: AISCAN_INTEGRATION=1 FOFA_EMAIL=... FOFA_KEY=... \
-//	  go test -tags 'full integration' ./tools/... -run TestIntegration -v
 package tools
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	passivecmd "github.com/chainreactors/aiscan/tools/passive"
+	_ "github.com/chainreactors/aiscan/tools/gogo"
+	_ "github.com/chainreactors/aiscan/tools/neutron"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
+	_ "github.com/chainreactors/aiscan/tools/spray"
+	"github.com/chainreactors/utils/parsers"
 )
 
-func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
-	t.Helper()
-	var output bytes.Buffer
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
-		t.Fatalf("Execute(%v) error = %v", args, err)
+func TestScannerPublicIntegration(t *testing.T) {
+	if os.Getenv("AISCAN_INTEGRATION") != "1" {
+		t.Skip("set AISCAN_INTEGRATION=1 to run public network regression tests")
 	}
-	return output.String()
-}
 
-func TestIntegrationPassiveFofa(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") == "" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run")
-	}
-	email := os.Getenv("FOFA_EMAIL")
-	key := os.Getenv("FOFA_KEY")
-	if email == "" || key == "" {
-		t.Skip("FOFA_EMAIL / FOFA_KEY required")
-	}
-	set := &engine.Set{}
-	set.SetupUncover(engine.ReconOptions{FofaEmail: email, FofaKey: key, Limit: 5}, telemetry.NopLogger())
-	if set.Uncover == nil {
-		t.Fatal("expected Uncover engine to be initialized")
-	}
-	cmd := passivecmd.New(set.Uncover)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	out := passiveExecString(t, cmd, ctx, []string{"-s", "fofa", `domain="anthropic.com"`})
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		t.Fatalf("no assets returned: %q", out)
+	engineSet, err := engine.InitWithOptions(ctx, resources.Options{}, telemetry.NopLogger())
+	if err != nil {
+		t.Fatalf("initialize scanner engines: %v", err)
 	}
-	var got []map[string]any
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("not JSON array: %v\n%s", err, out)
-	}
-	if got[0]["ip"] == "" {
-		t.Errorf("missing ip: %+v", got[0])
-	}
-	t.Logf("passive/fofa returned %d assets, first=%v", len(got), got[0])
-}
+	defer engineSet.Close()
 
-func TestIntegrationPassiveHunter(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") == "" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run")
+	bus := eventbus.New[output.ToolDataEvent]()
+	recorder := newFunctionalRecorder(bus)
+	registry := commands.NewRegistry()
+	deps := &commands.Deps{
+		WorkDir: t.TempDir(),
+		DataBus: bus, Logger: telemetry.NopLogger(),
 	}
-	token := os.Getenv("HUNTER_TOKEN")
-	apikey := os.Getenv("HUNTER_API_KEY")
-	if token == "" && apikey == "" {
-		t.Skip("HUNTER_TOKEN or HUNTER_API_KEY required")
-	}
-	set := &engine.Set{}
-	set.SetupUncover(engine.ReconOptions{
-		HunterToken:  token,
-		HunterAPIKey: apikey,
-		IngressProxy: os.Getenv("RECON_PROXY"),
-		Limit:        3,
-	}, telemetry.NopLogger())
-	if set.Uncover == nil {
-		t.Fatal("expected Uncover engine to be initialized")
-	}
-	cmd := passivecmd.New(set.Uncover)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	out := passiveExecString(t, cmd, ctx, []string{"-s", "hunter", `domain.suffix="anthropic.com"`})
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		t.Logf("hunter returned empty (may be quota/WAF); output: %q", out)
-		return
-	}
-	t.Logf("passive/hunter output (first 500 bytes): %s", truncForTest(out, 500))
-}
+	commands.Provide(deps, engine.SetKey, engineSet)
+	commands.Provide(deps, resources.SetKey, engineSet.Resources)
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
+	templateFile := filepath.Join(t.TempDir(), "redhaze-marker.yaml")
+	writeTestFile(t, templateFile, `id: redhaze-public-marker
+info:
+  name: RedHaze public regression marker
+  severity: info
+  tags: regression
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}'
+    matchers:
+      - type: word
+        words:
+          - 'RedHaze Group'
+`)
 
-func truncForTest(s string, n int) string {
-	if len(s) <= n {
-		return s
+	cases := []functionalCase{
+		{
+			Name: "gogo/redhaze-http-https-fingerprint", Tool: "gogo",
+			Args:    []string{"-i", "redhaze.top", "-p", "80,443", "-v", "-o", "jl", "-t", "2"},
+			Timeout: 45 * time.Second,
+			Check: func(t *testing.T, result functionalResult) {
+				requireOutputContains(t, result, `"port":"80"`, `"port":"443"`, "nginx")
+				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
+					item, ok := data.(*parsers.GOGOResult)
+					return ok && item != nil && item.Port == "443" && item.Protocol == "https"
+				})
+			},
+		},
+		{
+			Name: "spray/redhaze-explicit-https", Tool: "spray",
+			Args:    []string{"-u", "https://redhaze.top", "-j", "--limit", "1", "--timeout", "10"},
+			Timeout: 30 * time.Second,
+			Check: func(t *testing.T, result functionalResult) {
+				requireOutputContains(t, result, `"url":"https://redhaze.top`, `"status":301`, "nginx")
+				if strings.Contains(result.Stdout, `"url":"http://redhaze.top`) {
+					t.Fatalf("spray downgraded explicit HTTPS target:\n%s", result.Stdout)
+				}
+			},
+		},
+		{
+			Name: "neutron/redhaze-benign-template", Tool: "neutron",
+			Args: []string{
+				"-i", "https://id.redhaze.top/home", "-t", templateFile,
+				"--tags", "regression", "-s", "info", "--concurrency", "1",
+				"--rate-limit", "1", "--timeout", "20", "-j",
+			},
+			Timeout: 30 * time.Second,
+			Check: func(t *testing.T, result functionalResult) {
+				requireOutputContains(t, result, `"matched":true`, `"template":"redhaze-public-marker"`)
+				requireEvent(t, result, "neutron", output.ToolDataVuln, nil)
+			},
+		},
+		{
+			Name: "scan/redhaze-limited-pipeline", Tool: "scan",
+			Args: []string{
+				"-i", "redhaze.top", "--ports", "80,443", "--mode", "quick",
+				"--verify=off", "--timeout", "8", "--no-color",
+			},
+			Timeout: 90 * time.Second,
+			Check: func(t *testing.T, result functionalResult) {
+				requireOutputContains(t, result, "[summary] completed", "443", "nginx")
+				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
+					item, ok := data.(*parsers.GOGOResult)
+					return ok && item != nil && item.Port == "443" && item.Protocol == "https"
+				})
+			},
+		},
 	}
-	return s[:n] + "..."
+	runFunctionalCases(t, registry, recorder, cases)
 }

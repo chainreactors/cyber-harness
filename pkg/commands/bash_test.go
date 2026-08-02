@@ -1,4 +1,4 @@
-package commands_test
+package commands
 
 import (
 	"bytes"
@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent/inbox"
 	tmux "github.com/chainreactors/aiscan/agent/tmux"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ type simpleCommand struct{ name string }
 
 func (c *simpleCommand) Name() string  { return c.name }
 func (c *simpleCommand) Usage() string { return c.name }
-func (c *simpleCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *simpleCommand) Run(_ context.Context, execution *Execution) (any, error) {
 	fmt.Fprint(execution.Stdout, "ok")
 	return nil, nil
 }
@@ -42,7 +42,7 @@ type argsCapture struct {
 
 func (c *argsCapture) Name() string  { return c.name }
 func (c *argsCapture) Usage() string { return c.name }
-func (c *argsCapture) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *argsCapture) Run(_ context.Context, execution *Execution) (any, error) {
 	c.got = append([]string(nil), execution.Args...)
 	fmt.Fprint(execution.Stdout, strings.Join(execution.Args, " "))
 	return nil, nil
@@ -61,7 +61,7 @@ type stagedOutputCommand struct {
 
 func (c *stagedOutputCommand) Name() string  { return c.name }
 func (c *stagedOutputCommand) Usage() string { return c.name }
-func (c *stagedOutputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *stagedOutputCommand) Run(_ context.Context, execution *Execution) (any, error) {
 	fmt.Fprint(execution.Stdout, c.value+"-first\n")
 	time.Sleep(75 * time.Millisecond)
 	fmt.Fprint(execution.Stdout, c.value+"-second\n")
@@ -70,7 +70,7 @@ func (c *stagedOutputCommand) Run(_ context.Context, execution *commands.Executi
 
 func (c *outputCommand) Name() string  { return c.name }
 func (c *outputCommand) Usage() string { return c.name + " — test command" }
-func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *outputCommand) Run(_ context.Context, execution *Execution) (any, error) {
 	_, err := execution.Stdout.Write([]byte(c.output))
 	return nil, err
 }
@@ -78,20 +78,20 @@ func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (a
 // panicTool is a test tool that always panics.
 type panicTool struct{ msg string }
 
-func (t *panicTool) Name() string                { return "panic_tool" }
-func (t *panicTool) Description() string         { return "always panics" }
-func (t *panicTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *panicTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *panicTool) Name() string                 { return "panic_tool" }
+func (t *panicTool) Description() string          { return "always panics" }
+func (t *panicTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *panicTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	panic(t.msg)
 }
 
 // normalTool returns a result without panicking.
 type normalTool struct{}
 
-func (t *normalTool) Name() string                { return "normal_tool" }
-func (t *normalTool) Description() string         { return "works fine" }
-func (t *normalTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *normalTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *normalTool) Name() string                 { return "normal_tool" }
+func (t *normalTool) Description() string          { return "works fine" }
+func (t *normalTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *normalTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	return tool.TextResult("hello"), nil
 }
 
@@ -108,10 +108,10 @@ type loggerAwareTool struct {
 	logger telemetry.Logger
 }
 
-func (t *loggerAwareTool) Name() string                { return t.name }
-func (t *loggerAwareTool) Description() string         { return t.name }
-func (t *loggerAwareTool) Definition() tool.Definition { return tool.Definition{} }
-func (t *loggerAwareTool) Execute(_ context.Context, _ string) (tool.Result, error) {
+func (t *loggerAwareTool) Name() string                 { return t.name }
+func (t *loggerAwareTool) Description() string          { return t.name }
+func (t *loggerAwareTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *loggerAwareTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
 	return tool.TextResult("ok"), nil
 }
 func (t *loggerAwareTool) InitLogger(logger telemetry.Logger) {
@@ -123,18 +123,18 @@ func bashArgs(cmd string) string {
 	return string(data)
 }
 
-func newBashWithPseudo(dir string, cmds ...*outputCommand) *commands.BashTool {
-	registry := commands.NewRegistry()
+func newBashWithPseudo(dir string, cmds ...*outputCommand) *BashTool {
+	registry := NewRegistry()
 	for _, c := range cmds {
-		registry.Register(commands.Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run}, "")
+		registry.Register(Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run}, "")
 	}
-	bash := commands.NewBashTool(dir, 10)
+	bash := NewBashTool(dir, 10)
 	bash.SetCommandResolver(registry.Get)
 	return bash
 }
 
 func TestCommandRegistrySetLoggerRebindsTools(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	tool := &loggerAwareTool{name: "sample_tool"}
 	logger := &testLogger{}
 
@@ -151,10 +151,10 @@ func TestCommandRegistrySetLoggerRebindsTools(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
-	registry := commands.NewRegistry()
+	registry := NewRegistry()
 	impl := &simpleCommand{name: "spray"}
-	registry.Register(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "")
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	registry.Register(Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "")
+	bash := NewBashTool(t.TempDir(), 5)
 	bash.SetCommandResolver(registry.Get)
 
 	// Single pipe (|) is now supported — pseudo-command output is piped
@@ -178,7 +178,7 @@ func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
 			if err == nil {
-				t.Fatalf("expected error, got output %q", res.Text())
+				t.Fatalf("expected error, got output %q", tool.ResultText(res))
 			}
 			if !strings.Contains(err.Error(), tt.wantHint) {
 				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
@@ -192,7 +192,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 		t.Skip("unix-only test")
 	}
 	proxy := "socks5://127.0.0.1:1080"
-	bash := commands.NewBashTool(t.TempDir(), 5).WithScannerProxy(proxy)
+	bash := NewBashTool(t.TempDir(), 5).WithScannerProxy(proxy)
 
 	res, err := bash.Execute(context.Background(), bashArgs(
 		`env | grep -E '^(ALL_PROXY|all_proxy|HTTP_PROXY|http_proxy|HTTPS_PROXY|https_proxy)='`,
@@ -200,7 +200,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	out := res.Text()
+	out := tool.ResultText(res)
 	for _, envVar := range []string{"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
 		if !strings.Contains(out, envVar+"="+proxy) {
 			t.Errorf("env output missing %s", envVar)
@@ -212,13 +212,13 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only test")
 	}
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 
 	res, err := bash.Execute(context.Background(), bashArgs("env"))
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	if strings.Contains(res.Text(), "ALL_PROXY=socks5://") {
+	if strings.Contains(tool.ResultText(res), "ALL_PROXY=socks5://") {
 		t.Errorf("should not inject proxy when empty")
 	}
 }
@@ -228,12 +228,12 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNormalizeNoColorInjectForScan(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -246,12 +246,12 @@ func TestNormalizeNoColorInjectForScan(t *testing.T) {
 }
 
 func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -267,12 +267,12 @@ func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 }
 
 func TestNormalizeNoColorSkipsNonScan(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	cmd := &argsCapture{name: "gogo"}
-	reg.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestPseudoPipeGrep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -328,7 +328,7 @@ func TestPseudoPipeHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -347,7 +347,7 @@ func TestPseudoPipeWc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "5" {
@@ -365,7 +365,7 @@ func TestPseudoPipeChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "3" {
@@ -383,7 +383,7 @@ func TestPseudoPipeAwk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	if !strings.Contains(out, "[critical]") {
@@ -406,7 +406,7 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -452,8 +452,8 @@ func TestNoPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "all findings here") {
-		t.Errorf("output %q should contain expected text", res.Text())
+	if !strings.Contains(tool.ResultText(res), "all findings here") {
+		t.Errorf("output %q should contain expected text", tool.ResultText(res))
 	}
 }
 
@@ -468,10 +468,10 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bash := commands.NewBashTool(root, 5)
+	bash := NewBashTool(root, 5)
 	defer bash.Close()
 
-	results := make([]*commands.Execution, 2)
+	results := make([]*Execution, 2)
 	outputs := make([]bytes.Buffer, 2)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -479,7 +479,7 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd`, commands.BashExecOptions{
+			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd`, BashExecOptions{
 				WorkDir: dirs[i],
 				Env:     map[string]string{"AISCAN_RUN_VALUE": fmt.Sprintf("value-%d", i)},
 				OnOutput: func(data []byte) {
@@ -502,12 +502,12 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 
 func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 	root := t.TempDir()
-	commandsByName := map[string]commands.Command{
+	commandsByName := map[string]Command{
 		"one": {Name: "one", Usage: "one", Run: (&stagedOutputCommand{name: "one", value: "one"}).Run},
 		"two": {Name: "two", Usage: "two", Run: (&stagedOutputCommand{name: "two", value: "two"}).Run},
 	}
-	bash := commands.NewBashTool(root, 5)
-	bash.SetCommandResolver(func(name string) (commands.Command, bool) {
+	bash := NewBashTool(root, 5)
+	bash.SetCommandResolver(func(name string) (Command, bool) {
 		command, ok := commandsByName[name]
 		return command, ok
 	})
@@ -520,7 +520,7 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
-			_, errs[i] = bash.RunForeground(context.Background(), name, commands.BashExecOptions{
+			_, errs[i] = bash.RunForeground(context.Background(), name, BashExecOptions{
 				OnOutput: func(data []byte) { _, _ = outputs[i].Write(data) },
 			})
 		}(i, name)
@@ -538,21 +538,21 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 }
 
 func TestBuiltinExecutionReturnsDetails(t *testing.T) {
-	registry := commands.NewRegistry()
+	registry := NewRegistry()
 	want := map[string]any{"targets": 2}
-	registry.Register(commands.Command{
+	registry.Register(Command{
 		Name:  "details",
 		Usage: "details",
-		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		Run: func(_ context.Context, execution *Execution) (any, error) {
 			fmt.Fprint(execution.Stdout, "done")
 			return want, nil
 		},
 	}, "")
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 	bash.SetCommandResolver(registry.Get)
 	defer bash.Close()
 
-	execution, err := bash.RunForeground(context.Background(), "details", commands.BashExecOptions{})
+	execution, err := bash.RunForeground(context.Background(), "details", BashExecOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,11 +569,11 @@ func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 }
 
 func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
-	registry := commands.NewRegistry()
-	registry.Register(commands.Command{
+	registry := NewRegistry()
+	registry.Register(Command{
 		Name:  "consume",
 		Usage: "consume",
-		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		Run: func(_ context.Context, execution *Execution) (any, error) {
 			data, err := io.ReadAll(execution.Stdin)
 			if err != nil {
 				return nil, err
@@ -582,12 +582,12 @@ func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
 			return nil, err
 		},
 	}, "")
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 	bash.SetCommandResolver(registry.Get)
 	defer bash.Close()
 
 	var output bytes.Buffer
-	_, err := bash.RunForeground(context.Background(), "printf 'hello stdin' | consume", commands.BashExecOptions{
+	_, err := bash.RunForeground(context.Background(), "printf 'hello stdin' | consume", BashExecOptions{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {
@@ -602,10 +602,10 @@ func TestBashRunForegroundStreams(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 	defer bash.Close()
 	var stream bytes.Buffer
-	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, commands.BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, BashExecOptions{
 		OnOutput: func(data []byte) { _, _ = stream.Write(data) },
 	})
 	if err != nil {
@@ -623,7 +623,7 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := commands.NewBashTool(t.TempDir(), 300)
+	bash := NewBashTool(t.TempDir(), 300)
 	defer bash.Close()
 	started := time.Now()
 	res, err := bash.Execute(context.Background(), `{"command": "sleep 30", "timeout": 1}`)
@@ -633,8 +633,8 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("timeout arg not enforced promptly, took %s", elapsed)
 	}
-	if !strings.Contains(res.Text(), "timeout after 1s") {
-		t.Fatalf("result = %q", res.Text())
+	if !strings.Contains(tool.ResultText(res), "timeout after 1s") {
+		t.Fatalf("result = %q", tool.ResultText(res))
 	}
 }
 
@@ -642,10 +642,10 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 	defer bash.Close()
 	started := time.Now()
-	result, err := bash.RunForeground(context.Background(), "sleep 5", commands.BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), "sleep 5", BashExecOptions{
 		Timeout: 100 * time.Millisecond,
 	})
 	if err != nil {
@@ -663,10 +663,10 @@ func TestBashRunReportsNonZeroExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := commands.NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5)
 	defer bash.Close()
 	var output bytes.Buffer
-	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, commands.BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, BashExecOptions{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {
@@ -687,7 +687,7 @@ func TestShellPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(res.Text())
+	out := strings.TrimSpace(tool.ResultText(res))
 	if out != "3" {
 		t.Errorf("expected 3, got %q", out)
 	}
@@ -706,8 +706,8 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(res.Text(), "match") {
-		t.Errorf("output %q should contain 'match'", res.Text())
+	if !strings.Contains(tool.ResultText(res), "match") {
+		t.Errorf("output %q should contain 'match'", tool.ResultText(res))
 	}
 }
 
@@ -716,7 +716,7 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExecuteTool_RecoversPanic(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	reg.RegisterTool(&panicTool{msg: "boom"})
 
 	result, err := reg.ExecuteTool(context.Background(), "panic_tool", "{}")
@@ -729,26 +729,26 @@ func TestExecuteTool_RecoversPanic(t *testing.T) {
 	if !strings.Contains(err.Error(), "tool panic_tool panic") {
 		t.Fatalf("error should identify the tool, got: %s", err.Error())
 	}
-	if result.Text() != "" {
-		t.Fatalf("result should be empty on panic, got: %s", result.Text())
+	if tool.ResultText(result) != "" {
+		t.Fatalf("result should be empty on panic, got: %s", tool.ResultText(result))
 	}
 }
 
 func TestExecuteTool_NormalToolUnaffected(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	reg.RegisterTool(&normalTool{})
 
 	result, err := reg.ExecuteTool(context.Background(), "normal_tool", "{}")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Text() != "hello" {
-		t.Fatalf("expected 'hello', got: %s", result.Text())
+	if tool.ResultText(result) != "hello" {
+		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
 	}
 }
 
 func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
-	reg := commands.NewRegistry()
+	reg := NewRegistry()
 	reg.RegisterTool(&panicTool{msg: "crash"})
 	reg.RegisterTool(&normalTool{})
 
@@ -764,10 +764,10 @@ func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normal tool failed after panic recovery: %v", err)
 	}
-	if result.Text() != "hello" {
-		t.Fatalf("expected 'hello', got: %s", result.Text())
+	if tool.ResultText(result) != "hello" {
+		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
 	}
-	t.Logf("call 2 (normal_tool): succeeded after panic → result=%q", result.Text())
+	t.Logf("call 2 (normal_tool): succeeded after panic → result=%q", tool.ResultText(result))
 
 	// Call 3: panic again — still recoverable.
 	_, err = reg.ExecuteTool(context.Background(), "panic_tool", "{}")
@@ -781,5 +781,36 @@ func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normal tool failed after second panic: %v", err)
 	}
-	t.Logf("call 4 (normal_tool): still works → result=%q", result.Text())
+	t.Logf("call 4 (normal_tool): still works → result=%q", tool.ResultText(result))
+}
+
+func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
+	tool := NewBashTool(t.TempDir(), 5)
+	defer tool.Close()
+	scoped := inbox.NewBuffered(8)
+	defer scoped.Close()
+
+	release := make(chan struct{})
+	info, err := tool.tasks.CreateFunc(context.Background(), "scoped-inbox", 5*time.Second, func(context.Context, io.Writer) error {
+		<-release
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool.startMonitor(info, scoped)
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	received := false
+	for time.Now().Before(deadline) {
+		if len(scoped.Drain()) > 0 {
+			received = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !received {
+		t.Fatal("scoped inbox did not receive background completion")
+	}
 }

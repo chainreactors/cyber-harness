@@ -2,108 +2,219 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
-	"github.com/chainreactors/aiscan/pkg/webproto"
+	aop "github.com/chainreactors/aiscan/aop"
+	types "github.com/chainreactors/aiscan/pkg/types"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
-func RuntimeCommandSpecs() []webproto.CommandSpec {
-	return []webproto.CommandSpec{
+func RuntimeCommandSpecs() []*types.CommandSpec {
+	return []*types.CommandSpec{
 		{Name: "/status", Description: "Show Runtime session and provider status"},
 		{Name: "/clear", Description: "Clear the current Agent context"},
 		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
 	}
 }
 
-// HandleProtocol handles the transport-neutral Agent Runtime control frames.
-// The caller owns framing and I/O; AgentRuntime owns all Session and Run state.
-func (rt *AgentRuntime) HandleProtocol(ctx context.Context, msg webproto.Message, send func(webproto.Message)) bool {
-	if rt == nil || send == nil {
+func (rt *AgentRuntime) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
+	response := &aop.OpenSessionResponse{}
+	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
+		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
+		return response
+	}
+	session, err := rt.EnsureSession(SessionOptions{ID: req.SessionId, ParentSessionID: req.ParentSessionId, ParentToolCallID: req.ParentToolCallId})
+	if err != nil {
+		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
+		return response
+	}
+	response.Outcome = &aop.OpenSessionResponse_Accepted{Accepted: &aop.Session{Id: session.ID(), State: "open", NodeId: req.NodeId, Title: req.Title}}
+	return response
+}
+
+func (rt *AgentRuntime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop.RunTurnResponse {
+	response := &aop.RunTurnResponse{}
+	if rt == nil || req == nil || (!req.ContinueSession && req.Input == nil) || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
+		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id, turn_id, and input are required unless continue_session is true")}
+		return response
+	}
+	options := new(types.AgentRunOptions)
+	for _, extension := range req.Extensions {
+		if extension != nil && extension.MessageIs(options) {
+			if err := extension.UnmarshalTo(options); err != nil {
+				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid AIScan run options: "+err.Error())}
+				return response
+			}
+			break
+		}
+	}
+	var message *aop.Message
+	if req.Input != nil {
+		message = protobuf.CloneOf(req.Input)
+	}
+	_, err := rt.RunSession(ctx, req.SessionId, RunInput{
+		TurnID: req.TurnId, Message: message, Continue: req.ContinueSession,
+		MaxTurns: int(req.MaxTurns), EvalCriteria: options.EvalCriteria, EvalMaxRounds: int(options.EvalMaxRounds),
+	})
+	if err != nil {
+		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
+		return response
+	}
+	response.Outcome = &aop.RunTurnResponse_Accepted{Accepted: &aop.TurnReceipt{SessionId: req.SessionId, TurnId: req.TurnId, State: "running"}}
+	return response
+}
+
+func (rt *AgentRuntime) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResponse {
+	response := &aop.CancelTurnResponse{}
+	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
+		response.Outcome = &aop.CancelTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id and turn_id are required")}
+		return response
+	}
+	if err := rt.CancelSessionRun(req.SessionId, req.TurnId); err != nil {
+		response.Outcome = &aop.CancelTurnResponse_Rejected{Rejected: rejection("NOT_FOUND", err.Error())}
+		return response
+	}
+	response.Outcome = &aop.CancelTurnResponse_Accepted{Accepted: &aop.TurnReceipt{SessionId: req.SessionId, TurnId: req.TurnId, State: "canceled"}}
+	return response
+}
+
+func (rt *AgentRuntime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionRequest) *aop.CloseSessionResponse {
+	response := &aop.CloseSessionResponse{}
+	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
+		response.Outcome = &aop.CloseSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
+		return response
+	}
+	if err := rt.CloseSession(ctx, req.SessionId, SessionCloseReason(req.Reason)); err != nil {
+		response.Outcome = &aop.CloseSessionResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
+		return response
+	}
+	response.Outcome = &aop.CloseSessionResponse_Accepted{Accepted: &aop.Session{Id: req.SessionId, State: "closed"}}
+	return response
+}
+
+var runtimeEnvelopeSequence atomic.Uint64
+
+func runtimeEnvelopeID() string {
+	return "runtime:" + strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + strconv.FormatUint(runtimeEnvelopeSequence.Add(1), 36)
+}
+
+// HandleEnvelope is the protobuf control loop shared by stdio and other direct
+// AgentRuntime hosts. The wire envelope is common; semantics remain in their
+// AOP or AIScan namespace ProtocolMessage.
+func (rt *AgentRuntime) HandleEnvelope(ctx context.Context, envelope *aop.Envelope, send func(*aop.Envelope)) bool {
+	if rt == nil || envelope == nil || send == nil {
 		return false
 	}
-	sendError := func(turnID, taskID string, err error) {
-		payload, _ := json.Marshal(webproto.ErrorPayload{Message: err.Error()})
-		send(webproto.Message{Type: webproto.TypeError, TurnID: turnID, TaskID: taskID, Payload: payload})
+	if rt.namespaceMux == nil {
+		send(runtimeReply(envelope.Id, runtimeProtocolError("NAMESPACE_INIT_FAILED", "runtime namespaces are not initialized")))
+		return true
 	}
+	handled, err := rt.namespaceMux.Dispatch(ctx, envelope, func(value *aop.Envelope) error { send(value); return nil })
+	if err != nil {
+		send(runtimeReply(envelope.Id, runtimeProtocolError("INVALID_PAYLOAD", err.Error())))
+		return true
+	}
+	return handled
+}
 
-	switch msg.Type {
-	case webproto.TypeSessionOpen:
-		var payload webproto.SessionOpenPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			sendError("", "", err)
-			return true
-		}
-		session, err := rt.EnsureSession(SessionOptions{
-			ID: payload.SessionID, ParentSessionID: payload.ParentSessionID, ParentToolCallID: payload.ParentToolCallID,
-		})
+func newRuntimeNamespaceMux(rt *AgentRuntime) (*aop.NamespaceMux, error) {
+	mux := aop.NewNamespaceMux()
+	if err := mux.Register(&aop.ProtocolMessage{}, rt.handleCoreNamespace); err != nil {
+		return nil, err
+	}
+	if err := mux.Register(&types.CommandProtocolMessage{}, rt.handleCommandNamespace); err != nil {
+		return nil, err
+	}
+	return mux, nil
+}
+
+func (rt *AgentRuntime) handleCoreNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+	value, ok := message.(*aop.ProtocolMessage)
+	if !ok {
+		return fmt.Errorf("unexpected core namespace message %T", message)
+	}
+	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
+	switch payload := value.Message.(type) {
+	case *aop.ProtocolMessage_OpenSessionRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: rt.OpenAOPSession(payload.OpenSessionRequest)}})
+	case *aop.ProtocolMessage_RunTurnRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: rt.RunAOPTurn(ctx, payload.RunTurnRequest)}})
+	case *aop.ProtocolMessage_CancelTurnRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: rt.CancelAOPTurn(payload.CancelTurnRequest)}})
+	case *aop.ProtocolMessage_CloseSessionRequest:
+		return reply(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: rt.CloseAOPSession(ctx, payload.CloseSessionRequest)}})
+	default:
+		return fmt.Errorf("unsupported AOP core message")
+	}
+}
+
+func (rt *AgentRuntime) handleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+	value, ok := message.(*types.CommandProtocolMessage)
+	if !ok {
+		return fmt.Errorf("unexpected command namespace message %T", message)
+	}
+	reply := func(message protobuf.Message) error { return send(runtimeReply(envelope.Id, message)) }
+	request := value.GetRequest()
+	if request == nil || strings.TrimSpace(request.Line) == "" {
+		return reply(runtimeProtocolError("INVALID_ARGUMENT", "command line is required"))
+	}
+	rt.operations.Add(1)
+	go func() {
+		defer rt.operations.Done()
+		result, err := rt.CommandSession(ctx, request.SessionId, request.Line)
 		if err != nil {
-			sendError("", "", err)
-			return true
+			_ = reply(runtimeProtocolError("COMMAND_FAILED", err.Error()))
+			return
 		}
-		encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: session.ID()})
-		send(webproto.Message{Type: webproto.TypeSessionOpened, Payload: encoded})
-		return true
+		_ = reply(&types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Result{Result: result}})
+	}()
+	return nil
+}
 
-	case webproto.TypeSessionClose:
-		var payload webproto.SessionLifecyclePayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			sendError("", "", err)
-			return true
+// ServeEnvelopeStream is the framing-independent runtime loop. WebSocket and
+// stdio decide only how an Envelope is read and written; protobuf dispatch and
+// reply correlation stay here.
+func (rt *AgentRuntime) ServeEnvelopeStream(ctx context.Context, stream aop.EnvelopeStream) error {
+	if rt == nil || stream == nil {
+		return fmt.Errorf("runtime envelope stream is required")
+	}
+	for {
+		envelope, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
 		}
-		reason := SessionCloseReason(payload.Reason)
-		if err := rt.CloseSession(ctx, payload.SessionID, reason); err != nil {
-			sendError("", "", err)
-			return true
-		}
-		encoded, _ := json.Marshal(webproto.SessionLifecyclePayload{SessionID: payload.SessionID, Reason: string(reason)})
-		send(webproto.Message{Type: webproto.TypeSessionClosed, Payload: encoded})
-		return true
-
-	case webproto.TypeRun:
-		if strings.TrimSpace(msg.TurnID) == "" {
-			sendError("", "", fmt.Errorf("run turn_id is required"))
-			return true
-		}
-		var payload webproto.RunPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			sendError(msg.TurnID, "", err)
-			return true
-		}
-		_, err := rt.RunSession(ctx, payload.SessionID, RunInput{
-			TurnID: msg.TurnID, Parts: payload.Parts, NoEcho: payload.NoEcho, MaxTurns: payload.MaxTurns,
-			EvalCriteria: payload.EvalCriteria, EvalMaxRounds: payload.EvalMaxRounds, Continue: payload.Continue,
-		})
 		if err != nil {
-			sendError(msg.TurnID, "", err)
+			return err
 		}
-		return true
-
-	case webproto.TypeRunCancel:
-		if err := rt.CancelRun(msg.TurnID); err != nil {
-			sendError(msg.TurnID, "", err)
-		}
-		return true
-
-	case webproto.TypeCommand:
-		var payload webproto.CommandPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			sendError("", msg.TaskID, err)
-			return true
-		}
-		rt.operations.Add(1)
-		go func() {
-			defer rt.operations.Done()
-			result, err := rt.CommandSession(ctx, payload.SessionID, payload.Line)
-			if err != nil {
-				sendError("", msg.TaskID, err)
-				return
+		handled := rt.HandleEnvelope(ctx, envelope, func(response *aop.Envelope) {
+			_ = stream.Send(response)
+		})
+		if !handled {
+			if err := stream.Send(runtimeReply(envelope.GetId(), runtimeProtocolError("UNSUPPORTED_MESSAGE", "unsupported protocol message"))); err != nil {
+				return err
 			}
-			encoded, _ := json.Marshal(result)
-			send(webproto.Message{Type: webproto.TypeCommandResult, TaskID: msg.TaskID, Payload: encoded})
-		}()
-		return true
+		}
 	}
-	return false
+}
+
+func rejection(code, message string) *aop.Rejection {
+	return &aop.Rejection{Code: code, Message: message}
+}
+
+func runtimeReply(replyTo string, message protobuf.Message) *aop.Envelope {
+	envelope, err := aop.Wrap(runtimeEnvelopeID(), replyTo, message)
+	if err != nil {
+		panic(fmt.Sprintf("wrap runtime protocol message: %v", err))
+	}
+	return envelope
+}
+
+func runtimeProtocolError(code, message string) *aop.ProtocolMessage {
+	return &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{Code: code, Message: message}}}
 }

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { create } from '@bufbuild/protobuf'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { Info, Plus, RefreshCw, Square } from 'lucide-react'
-import { agentTerminalWebSocketURL } from '../../api'
-import type { AgentInfo } from '../../api'
+import { PtyProtocolMessageSchema, type PtyProtocolMessage } from '@cyber/aop'
+import { aopClient, type AgentView } from '../../api'
 import { Button, Tooltip, TooltipTrigger, TooltipContent } from '@cyber/ui'
 import {
   type PTYSession,
@@ -13,23 +14,22 @@ import {
   compareSessionsByActivity,
   encodeTerminalData,
   mergeSession,
-  parsePTYFrame,
   sessionFromFrame,
   sessionsFromFrame,
   sessionTitle,
   upsertSession,
   writeTerminalData,
+  TerminalView,
+  TerminalHeader,
+  SessionNavigator,
+  SessionButton,
+  sessionDetails,
 } from '@cyber/terminal'
-import { TerminalView, TerminalHeader, SessionNavigator, SessionButton, sessionDetails } from '@cyber/terminal'
 import { TerminalDetails } from './TerminalDetails'
 
 const REPL_NAME = 'main-repl'
 
-interface AgentTerminalProps {
-  agent: AgentInfo
-}
-
-export default function AgentTerminal({ agent }: AgentTerminalProps) {
+export default function AgentTerminal({ agent }: { agent: AgentView }) {
   const { t } = useTranslation('agent')
   const [status, setStatus] = useState<TerminalStatus>('connecting')
   const [sessions, setSessions] = useState<PTYSession[]>([])
@@ -40,34 +40,16 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
   const sessionsRef = useRef<PTYSession[]>([])
   const seenActivityRef = useRef<Record<string, number>>({})
   const activityReadyRef = useRef(false)
-  const wsRef = useRef<WebSocket | null>(null)
+  const streamIDRef = useRef('')
   const cleanupRef = useRef<(() => void) | null>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
-  const desiredSessionIDRef = useRef('')
   const [terminalReadySeq, setTerminalReadySeq] = useState(0)
 
-  const replSession = useMemo(() => {
-    return sessions.find((s) => s.kind === 'repl' && (s.name === REPL_NAME || !s.name))
-      || sessions.find((s) => s.kind === 'repl')
-      || null
-  }, [sessions])
-
-  const taskSessions = useMemo(() => {
-    return sessions.filter((s) => s.kind !== 'repl').slice().sort(compareSessionsByActivity)
-  }, [sessions])
-
-  const taskSummary = useMemo(() => {
-    let running = 0
-    let updates = 0
-    for (const s of taskSessions) {
-      if (s.state === 'running') running += 1
-      if (s.id !== activeID && unreadIDs.has(s.id)) updates += 1
-    }
-    return { running, updates }
-  }, [activeID, taskSessions, unreadIDs])
-
+  const replSession = useMemo(() => sessions.find((s) => s.kind === 'repl' && (s.name === REPL_NAME || !s.name)) || sessions.find((s) => s.kind === 'repl') || null, [sessions])
+  const taskSessions = useMemo(() => sessions.filter((s) => s.kind !== 'repl').slice().sort(compareSessionsByActivity), [sessions])
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeID) || null, [activeID, sessions])
+  const taskSummary = useMemo(() => ({ running: taskSessions.filter((s) => s.state === 'running').length, updates: taskSessions.filter((s) => s.id !== activeID && unreadIDs.has(s.id)).length }), [activeID, taskSessions, unreadIDs])
 
   useEffect(() => { activeRef.current = activeID }, [activeID])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
@@ -78,331 +60,122 @@ export default function AgentTerminal({ agent }: AgentTerminalProps) {
     setTerminalReadySeq((seq) => seq + 1)
   }, [])
 
-  function connectWebSocket(term: XTerm, fit: FitAddon) {
+  const sendFrame = useCallback((message: PtyProtocolMessage) => {
+    aopClient.send(PtyProtocolMessageSchema, message)
+  }, [])
+
+  const sendList = useCallback(() => {
+    const streamId = streamIDRef.current
+    if (!streamId) return
+    sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId, nodeId: agent.hello?.nodeId || '' } } }))
+  }, [agent.hello?.nodeId, sendFrame])
+
+  useEffect(() => {
+    if (!terminalReadySeq || !termRef.current || !fitRef.current) return
+    const term = termRef.current
+    const fit = fitRef.current
     term.reset()
     setStatus('connecting')
     setSessions([])
     setActiveID('')
-    setUnreadIDs(new Set())
-    activeRef.current = ''
-    sessionsRef.current = []
-    seenActivityRef.current = {}
-    activityReadyRef.current = false
-    desiredSessionIDRef.current = ''
-
-    const ws = new WebSocket(agentTerminalWebSocketURL(agent.id))
-    wsRef.current = ws
-    const size = () => ({ cols: term.cols, rows: term.rows })
-    const fitTerminal = () => {
-      try { fit.fit() } catch {}
-    }
-    const sendTo = (message: Record<string, unknown>) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message))
-    }
-    const requestDesiredSession = (knownSessions: PTYSession[] = sessionsRef.current) => {
-      if (ws.readyState !== WebSocket.OPEN) return
-      const desiredID = desiredSessionIDRef.current
-      const desired = desiredID
-        ? knownSessions.find((s) => s.id === desiredID && (!s.state || s.state === 'running'))
-        : null
-      fitTerminal()
-      term.reset()
-      if (desired?.id) {
-        sendTo({ type: 'attach', session_id: desired.id, ...size() })
-        return
-      }
-      desiredSessionIDRef.current = ''
-      const repl = knownSessions.find((s) => s.state === 'running' && s.kind === 'repl' && (s.name === REPL_NAME || !s.name))
-        || knownSessions.find((s) => s.state === 'running' && s.kind === 'repl')
-      if (repl?.id) {
-        sendTo({ type: 'attach', session_id: repl.id, ...size() })
-      }
-    }
-
-    const dataDisposable = term.onData((data) => {
-      if (!activeRef.current) return
-      sendTo({ type: 'input', session_id: activeRef.current, data: encodeTerminalData(data) })
-    })
-    const resizeDisposable = term.onResize(({ cols, rows }) => {
-      if (!activeRef.current) return
-      sendTo({ type: 'resize', session_id: activeRef.current, cols, rows })
-    })
-
-    ws.onopen = () => {
-      setStatus('connected')
-      sendTo({ type: 'list' })
-    }
-    ws.onmessage = (event) => {
-      const msg = parsePTYFrame(event.data)
-      if (!msg) return
-      switch (msg.type) {
+    const streamID = globalThis.crypto?.randomUUID?.() ?? `pty-${Date.now().toString(36)}`
+    streamIDRef.current = streamID
+    const list = create(PtyProtocolMessageSchema, { message: { case: 'list', value: { streamId: streamID, nodeId: agent.hello?.nodeId || '' } } })
+    const unsubscribe = aopClient.subscribe(PtyProtocolMessageSchema, list, (payload) => {
+      if (payload.$typeName !== 'aop.pty.ProtocolMessage') return
+      const frame = payload as PtyProtocolMessage
+      switch (frame.message.case) {
         case 'sessions': {
-          const next = sessionsFromFrame(msg)
+          const next = sessionsFromFrame(frame)
           applySessions(next)
-          if (!activeRef.current) requestDesiredSession(next)
+          setStatus('connected')
+          if (!activeRef.current) {
+            const repl = next.find((session) => session.state === 'running' && session.kind === 'repl' && (session.name === REPL_NAME || !session.name))
+              || next.find((session) => session.state === 'running' && session.kind === 'repl')
+            if (repl?.id) {
+              term.reset()
+              activeRef.current = repl.id
+              setActiveID(repl.id)
+              markSessionRead(repl.id, repl)
+              sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'attach', value: { streamId: streamID, sessionId: repl.id, cols: term.cols, rows: term.rows } } }))
+            }
+          }
           break
         }
         case 'opened':
         case 'attached': {
-          const session = sessionFromFrame(msg)
-          const id = msg.session_id || session?.id || ''
-          if (session) rememberSession(session)
-          if (id) {
-            activeRef.current = id
-            desiredSessionIDRef.current = id
-            setActiveID(id)
-            markSessionRead(id, session)
+          const session = sessionFromFrame(frame)
+          if (session) {
+            rememberSession(session)
+            activeRef.current = session.id
+            setActiveID(session.id)
+            markSessionRead(session.id, session)
           }
           setStatus('connected')
-          fitTerminal()
-          if (id) sendTo({ type: 'resize', session_id: id, ...size() })
-          sendTo({ type: 'list' })
+          try { fit.fit() } catch {}
           term.focus()
           break
         }
-        case 'output': {
-          const id = msg.session_id || ''
-          if (id && activeRef.current && id !== activeRef.current) { markSessionUnread(id); break }
-          writeTerminalData(term, msg)
-          markSessionRead(id || activeRef.current)
+        case 'output': writeTerminalData(term, frame); markSessionRead(activeRef.current); break
+        case 'state': {
+          const session = sessionFromFrame(frame)
+          if (session) rememberSession(session)
           break
         }
         case 'closed': {
-          const session = sessionFromFrame(msg)
-          const id = msg.session_id || session?.id || ''
-          const known = sessionsRef.current.find((s) => s.id === id) || null
-          const current = session ? { ...known, ...session } : known
+          const session = sessionFromFrame(frame)
           if (session) rememberSession(session)
-          if (id === activeRef.current) {
-            markSessionRead(id, current)
-            activeRef.current = ''
-            setActiveID('')
-            desiredSessionIDRef.current = ''
-            requestDesiredSession()
-          }
-          sendTo({ type: 'list' })
-          break
-        }
-        case 'detached':
           activeRef.current = ''
           setActiveID('')
-          setStatus('connecting')
+          sendList()
           break
-        case 'error':
-          if (/no such session/i.test(msg.error || '')) {
-            desiredSessionIDRef.current = ''
-            requestDesiredSession()
-            break
-          }
-          setStatus('error')
-          term.write(`\r\n[pty error] ${msg.error || 'unknown error'}\r\n`)
-          break
+        }
+        case 'detached': activeRef.current = ''; setActiveID(''); setStatus('closed'); break
+        case 'error': setStatus('error'); term.write(`\r\n[pty error] ${frame.message.value.message}\r\n`); break
       }
-    }
-    ws.onerror = () => setStatus('error')
-    ws.onclose = () => setStatus((current) => current === 'error' ? current : 'closed')
-
-    return () => {
-      ws.onmessage = null
-      ws.onclose = null
-      ws.onerror = null
-      ws.onopen = null
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'detach' }))
-      ws.close()
-      resizeDisposable.dispose()
+    }, { id: streamID })
+    const dataDisposable = term.onData((data) => sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'input', value: { streamId: streamID, data: encodeTerminalData(data) } } })))
+    const resizeDisposable = term.onResize(({ cols, rows }) => sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'resize', value: { streamId: streamID, cols, rows } } })))
+    cleanupRef.current = () => {
+      sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'detach', value: { streamId: streamID } } }))
+      unsubscribe()
       dataDisposable.dispose()
-      if (wsRef.current === ws) wsRef.current = null
+      resizeDisposable.dispose()
+      if (streamIDRef.current === streamID) streamIDRef.current = ''
     }
-  }
-
-  useEffect(() => {
-    if (terminalReadySeq === 0) return
-    const term = termRef.current
-    const fit = fitRef.current
-    if (!term || !fit) return
-
-    cleanupRef.current?.()
-    const cleanup = connectWebSocket(term, fit)
-    cleanupRef.current = cleanup
-
-    return () => {
-      if (cleanupRef.current === cleanup) {
-        cleanupRef.current = null
-        cleanup()
-      }
-    }
-  }, [agent.id, terminalReadySeq])
-
-  function send(message: Record<string, unknown>) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(message))
-  }
-
-  function terminalSize() {
-    const term = termRef.current
-    return term ? { cols: term.cols, rows: term.rows } : { cols: 80, rows: 24 }
-  }
+    return () => { cleanupRef.current?.(); cleanupRef.current = null }
+  }, [agent.hello?.nodeId, sendFrame, sendList, terminalReadySeq])
 
   function applySessions(next: PTYSession[]) {
     sessionsRef.current = next
     setSessions(next)
     setUnreadIDs((current) => {
       const unread = new Set(current)
-      const ids = new Set(next.map((s) => s.id))
-      for (const id of unread) { if (!ids.has(id)) unread.delete(id) }
-      for (const s of next) {
-        const seq = activitySeq(s)
-        const seen = seenActivityRef.current[s.id]
-        if (!activityReadyRef.current) { seenActivityRef.current[s.id] = seq; unread.delete(s.id); continue }
-        if (s.id === activeRef.current) { seenActivityRef.current[s.id] = seq; unread.delete(s.id); continue }
-        if (seen === undefined) { seenActivityRef.current[s.id] = seq; if (seq > 0) unread.add(s.id); continue }
-        if (seq > seen) { seenActivityRef.current[s.id] = seq; unread.add(s.id) }
+      for (const session of next) {
+        const seq = activitySeq(session)
+        const seen = seenActivityRef.current[session.id]
+        if (!activityReadyRef.current || session.id === activeRef.current) unread.delete(session.id)
+        else if (seen !== undefined && seq > seen) unread.add(session.id)
+        seenActivityRef.current[session.id] = seq
       }
       activityReadyRef.current = true
       return unread
     })
   }
 
-  function markSessionRead(id: string, session?: PTYSession | null) {
-    if (!id) return
-    const c = session || sessionsRef.current.find((s) => s.id === id)
-    if (c) seenActivityRef.current[id] = activitySeq(c)
-    setUnreadIDs((items) => { if (!items.has(id)) return items; const next = new Set(items); next.delete(id); return next })
-  }
-
-  function markSessionUnread(id: string) {
-    if (!id) return
-    setUnreadIDs((items) => { if (items.has(id)) return items; const next = new Set(items); next.add(id); return next })
-  }
-
-  function rememberSession(session: PTYSession) {
-    sessionsRef.current = mergeSession(sessionsRef.current, session)
-    upsertSession(setSessions, session)
-  }
-
-  function attachSession(session: PTYSession) {
-    if (!session.id) return
-    desiredSessionIDRef.current = session.id
-    termRef.current?.reset()
-    activeRef.current = session.id
-    setActiveID(session.id)
-    markSessionRead(session.id, session)
-    send({ type: 'attach', session_id: session.id, ...terminalSize() })
-  }
-
-  function attachRepl() {
-    if (replSession) { attachSession(replSession); return }
-    desiredSessionIDRef.current = ''
-    send({ type: 'list' })
-  }
-
-  function openShell() {
-    desiredSessionIDRef.current = ''
-    termRef.current?.reset()
-    activeRef.current = ''
-    setActiveID('')
-    send({ type: 'detach' })
-    send({ type: 'open', kind: 'shell', name: `shell-${agent.name}`, ...terminalSize() })
-  }
-
-  function stopActiveSession() {
-    if (!activeID || activeSession?.kind === 'repl') return
-    send({ type: 'kill', session_id: activeID })
-  }
+  function markSessionRead(id: string, session?: PTYSession | null) { if (!id) return; const value = session || sessionsRef.current.find((s) => s.id === id); if (value) seenActivityRef.current[id] = activitySeq(value); setUnreadIDs((items) => { const next = new Set(items); next.delete(id); return next }) }
+  function rememberSession(session: PTYSession) { sessionsRef.current = mergeSession(sessionsRef.current, session); upsertSession(setSessions, session) }
+  function terminalSize() { const term = termRef.current; return term ? { cols: term.cols, rows: term.rows } : { cols: 80, rows: 24 } }
+  function attachSession(session: PTYSession) { const streamId = streamIDRef.current; if (!streamId || !session.id) return; termRef.current?.reset(); activeRef.current = session.id; setActiveID(session.id); markSessionRead(session.id, session); sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'attach', value: { streamId, sessionId: session.id, ...terminalSize() } } })) }
+  function attachRepl() { if (replSession) attachSession(replSession); else sendList() }
+  function openShell() { const streamId = streamIDRef.current; if (!streamId) return; termRef.current?.reset(); sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'open', value: { streamId, nodeId: agent.hello?.nodeId || '', kind: 'shell', name: `shell-${agent.hello?.name || 'agent'}`, ...terminalSize() } } })) }
+  function stopActiveSession() { const streamId = streamIDRef.current; if (!streamId || !activeID || activeSession?.kind === 'repl') return; sendFrame(create(PtyProtocolMessageSchema, { message: { case: 'kill', value: { streamId } } })) }
 
   const activeTitle = activeSession ? sessionTitle(activeSession) : activeID
-  const canStopActive = activeSession?.kind !== 'repl' && activeSession?.state === 'running'
-  const detailsSession = activeSession || replSession
-  const summaryText = taskSummary.updates
-    ? `${t('summaryRunning', { count: taskSummary.running })} · ${t('summaryNew', { count: taskSummary.updates })}`
-    : t('summaryRunning', { count: taskSummary.running })
-
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <TerminalHeader
-        status={status}
-        title={activeTitle || t('console')}
-        actions={
-          <>
-            <IconButton label={t('newShellPty')} onClick={openShell}><Plus className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label={t('refreshSessions')} onClick={() => send({ type: 'list' })}><RefreshCw className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label={t('stopActiveTask')} onClick={stopActiveSession} disabled={!canStopActive}><Square className="h-3.5 w-3.5" /></IconButton>
-            <IconButton label={detailsOpen ? t('hideDetails') : t('showDetails')} onClick={() => setDetailsOpen((v) => !v)} active={detailsOpen}><Info className="h-3.5 w-3.5" /></IconButton>
-          </>
-        }
-      />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-        <SessionNavigator
-          activeID={activeID}
-          sessions={taskSessions}
-          unreadIDs={unreadIDs}
-          onSelect={attachSession}
-          listLabel={t('tasks')}
-          summary={summaryText}
-          emptyText={t('noTasksYet')}
-          header={
-            <SessionNavigatorReplButton
-              active={!!replSession && replSession.id === activeID}
-              replSession={replSession}
-              unread={replSession ? replSession.id !== activeID && unreadIDs.has(replSession.id) : false}
-              onClick={attachRepl}
-            />
-          }
-        />
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <TerminalView onReady={handleTerminalReady} />
-        </section>
-        {detailsOpen && (
-          <TerminalDetails
-            agent={agent}
-            session={detailsSession}
-            status={status}
-            taskSessions={taskSessions}
-            onClose={() => setDetailsOpen(false)}
-          />
-        )}
-      </div>
-    </div>
-  )
+  const summaryText = taskSummary.updates ? `${t('summaryRunning', { count: taskSummary.running })} · ${t('summaryNew', { count: taskSummary.updates })}` : t('summaryRunning', { count: taskSummary.running })
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col"><TerminalHeader status={status} title={activeTitle || t('console')} actions={<><IconButton label={t('newShellPty')} onClick={openShell}><Plus className="h-3.5 w-3.5" /></IconButton><IconButton label={t('refreshSessions')} onClick={sendList}><RefreshCw className="h-3.5 w-3.5" /></IconButton><IconButton label={t('stopActiveTask')} onClick={stopActiveSession} disabled={activeSession?.kind === 'repl' || activeSession?.state !== 'running'}><Square className="h-3.5 w-3.5" /></IconButton><IconButton label={detailsOpen ? t('hideDetails') : t('showDetails')} onClick={() => setDetailsOpen((v) => !v)} active={detailsOpen}><Info className="h-3.5 w-3.5" /></IconButton></>} /><div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row"><SessionNavigator activeID={activeID} sessions={taskSessions} unreadIDs={unreadIDs} onSelect={attachSession} listLabel={t('tasks')} summary={summaryText} emptyText={t('noTasksYet')} header={<SessionButton active={!!replSession && replSession.id === activeID} title={t('mainRepl')} meta={replSession ? t('alwaysOn') : t('starting')} state={replSession?.state || 'running'} details={replSession ? sessionDetails(replSession) : t('mainReplStarting')} unread={!!replSession && replSession.id !== activeID && unreadIDs.has(replSession.id)} onClick={attachRepl} />} /><section className="flex min-h-0 min-w-0 flex-1 flex-col"><TerminalView onReady={handleTerminalReady} /></section>{detailsOpen && <TerminalDetails agent={agent} session={activeSession || replSession} status={status} taskSessions={taskSessions} onClose={() => setDetailsOpen(false)} />}</div></div>
 }
 
-function SessionNavigatorReplButton({ active, replSession, unread, onClick }: {
-  active: boolean; replSession: PTYSession | null; unread: boolean; onClick: () => void
-}) {
-  const { t } = useTranslation('agent')
-  return (
-    <SessionButton
-      active={active}
-      title={t('mainRepl')}
-      meta={replSession ? t('alwaysOn') : t('starting')}
-      state={replSession?.state || 'running'}
-      details={replSession ? sessionDetails(replSession) : t('mainReplStarting')}
-      unread={unread}
-      onClick={onClick}
-    />
-  )
-}
-
-function IconButton({ children, active, disabled, label, onClick }: {
-  children: ReactNode; active?: boolean; disabled?: boolean; label: string; onClick: () => void
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          active={active}
-          aria-label={label}
-          title={label}
-          disabled={disabled}
-          onClick={onClick}
-          className="text-muted-foreground"
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
-  )
+function IconButton({ children, active, disabled, label, onClick }: { children: ReactNode; active?: boolean; disabled?: boolean; label: string; onClick: () => void }) {
+  return <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-xs" active={active} aria-label={label} title={label} disabled={disabled} onClick={onClick} className="text-muted-foreground">{children}</Button></TooltipTrigger><TooltipContent side="bottom">{label}</TooltipContent></Tooltip>
 }

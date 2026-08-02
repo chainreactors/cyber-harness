@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Box, LogOut, Menu, Monitor, Network, Settings } from 'lucide-react'
+import { Box, LogOut, Menu, Monitor, Network, Settings, Wrench } from 'lucide-react'
 import SessionList from './components/SessionList'
 import ChatPanel from './components/ChatPanel'
 import ConfigPanel from './components/ConfigPanel'
 import AgentPanel from './components/AgentPanel'
+import ToolRegistryPanel from './components/ToolRegistryPanel'
 import AssetPanel, { assetMentionables } from './components/AssetPanel'
 import MentionPicker from './components/MentionPicker'
 import LLMHealth from './components/LLMHealth'
@@ -14,7 +15,7 @@ const IOAConsole = lazy(() => import('./components/IOAConsole'))
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider } from '@cyber/theme'
 import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, listSCONodes, logout } from './api'
-import type { IOAMessage, IOANode, LLMProfileStatus, ServerStatus } from './api'
+import type { IOAMessage, IOANode, LLMProviderView, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
 import type { MentionPopupApi } from './viewer'
 import { useChatSession } from './hooks/useChatSession'
@@ -26,6 +27,7 @@ import { cn } from '@cyber/theme'
 const sidebarStorageKey = 'aiscan-sidebar-open'
 
 const EMPTY_SEED = { text: '', nonce: 0 }
+type ToolPanel = 'assets' | 'ioa' | 'agents' | 'tools' | 'settings'
 
 // Respect a previously-chosen theme on boot. ThemeProvider's own initializer is
 // short-circuited by the `initial` prop (it returns `initial` before ever reading
@@ -51,31 +53,32 @@ export default function App() {
   const confirm = useConfirm()
   const chat = useChatSession()
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
-  const [llmProfiles, setLLMProfiles] = useState<LLMProfileStatus[]>([])
+  const [llmProfiles, setLLMProfiles] = useState<LLMProviderView[]>([])
   const [activeLLMProfile, setActiveLLMProfile] = useState('')
   const [switchingLLM, setSwitchingLLM] = useState(false)
-  const [configOpen, setConfigOpen] = useState(false)
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false)
-  const [assetPanelOpen, setAssetPanelOpen] = useState(false)
-  const [ioaConsoleOpen, setIOAConsoleOpen] = useState(false)
+  const [activeToolPanel, setActiveToolPanel] = useState<ToolPanel | null>(null)
   const [ioaConsoleTarget, setIOAConsoleTarget] = useState<IOAConsoleTarget | null>(null)
-  const [agentPanelFocusID, setAgentPanelFocusID] = useState<string | null>(null)
+  const [agentPanelFocusNodeID, setAgentPanelFocusNodeID] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   // Bumped after a settings save so the header LLM health dot re-probes.
   const [healthNonce, setHealthNonce] = useState(0)
 
+  const toggleToolPanel = useCallback((panel: ToolPanel) => {
+    setActiveToolPanel((current) => current === panel ? null : panel)
+  }, [])
+
   const openIOAConsole = useCallback((target?: IOAConsoleTarget) => {
     setIOAConsoleTarget(target ?? null)
-    setIOAConsoleOpen(true)
+    setActiveToolPanel('ioa')
   }, [])
 
   const refreshStatus = useCallback(async () => {
     const [statusResult, configResult] = await Promise.allSettled([getStatus(), getConfigStatus()])
     if (statusResult.status === 'fulfilled') setServerStatus(statusResult.value)
     if (configResult.status === 'fulfilled') {
-      const profiles = configResult.value.llm.profiles ?? []
+      const profiles = configResult.value.llm?.providers ?? []
       setLLMProfiles(profiles)
-      setActiveLLMProfile(configResult.value.llm.active_profile || profiles[0]?.id || '')
+      setActiveLLMProfile(configResult.value.llm?.activeProfile || profiles[0]?.id || '')
     }
   }, [])
 
@@ -133,24 +136,28 @@ export default function App() {
     [scoNodes, ioaNodes, ioaMessages],
   )
 
-  const model = serverStatus?.llm_model || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  const model = serverStatus?.llmModel || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  const bashToolCount = useMemo(() => chat.agents.reduce(
+    (total, agent) => total + agent.commands.filter((command) => command.name.startsWith('!')).length,
+    0,
+  ), [chat.agents])
 
   const handleSwitchLLM = useCallback(async (profileID: string) => {
     if (!profileID || profileID === activeLLMProfile) return
     setSwitchingLLM(true)
     try {
       const next = await activateLLMProfile(profileID)
-      setLLMProfiles(next.llm.profiles ?? [])
-      setActiveLLMProfile(next.llm.active_profile || profileID)
+      setLLMProfiles(next.llm?.providers ?? [])
+      setActiveLLMProfile(next.llm?.activeProfile || profileID)
       await refreshStatus()
       setHealthNonce((nonce) => nonce + 1)
     } catch {
-      setConfigOpen(true)
+      setActiveToolPanel('settings')
     } finally {
       setSwitchingLLM(false)
     }
   }, [activeLLMProfile, refreshStatus])
-  const activeSession = chat.sessions.find((s) => s.id === chat.activeSessionID) || null
+  const activeSession = chat.sessions.find((s) => s.session?.id === chat.activeSessionID) || null
   // The open session's bound agent has dropped off the live roster (its node
   // exited / the hub restarted). The transcript still shows, but a new turn
   // can't be dispatched until it reconnects — surface that in the chat panel.
@@ -165,22 +172,22 @@ export default function App() {
     }
   }
 
-  function handleOpenTerminal(agentID: string) {
-    setAgentPanelFocusID(agentID)
-    setAgentPanelOpen(true)
-    chat.selectAgent(agentID)
+  function handleOpenTerminal(nodeID: string) {
+    setAgentPanelFocusNodeID(nodeID)
+    setActiveToolPanel('agents')
+    chat.selectNode(nodeID)
     closeSidebarOnMobile()
   }
 
   function handleSelectSession(id: string) {
-    setAgentPanelOpen(false)
+    setActiveToolPanel((current) => current === 'agents' ? null : current)
     chat.selectSession(id)
     closeSidebarOnMobile()
   }
 
-  function handleCreateSession(agentID: string) {
-    setAgentPanelOpen(false)
-    chat.createSession(agentID)
+  function handleCreateSession(nodeID: string) {
+    setActiveToolPanel((current) => current === 'agents' ? null : current)
+    chat.createSession(nodeID)
     closeSidebarOnMobile()
   }
 
@@ -193,21 +200,21 @@ export default function App() {
 
   // Agent node clicked (roster / terminal open) → open the agent console focused
   // on that node.
-  function handleOpenNode(agentID: string) {
-    setAgentPanelFocusID(agentID)
-    setAgentPanelOpen(true)
+  function handleOpenNode(nodeID: string) {
+    setAgentPanelFocusNodeID(nodeID)
+    setActiveToolPanel('agents')
   }
 
   function handleOpenAgentPanel() {
-    setAgentPanelFocusID(null)
-    setAgentPanelOpen(true)
+    setAgentPanelFocusNodeID(null)
+    toggleToolPanel('agents')
   }
 
   return (
     <ThemeProvider initial={getInitialTheme()} storageKey="aiscan-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
     <TooltipProvider delayDuration={300}>
       <div className="flex h-[100dvh] flex-col overflow-hidden">
-        <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 pt-safe sm:px-4">
+        <header className="relative z-[60] flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 pt-safe sm:px-4">
           <div className="flex min-w-0 items-center gap-2">
             {/* Phone-only drawer opener — the collapsed sidebar is hidden below md,
                 so the session history opens from here (Doubao-style). */}
@@ -229,17 +236,21 @@ export default function App() {
               disabled={switchingLLM}
               onChange={handleSwitchLLM}
             />
-            <LLMHealth onOpenSettings={() => setConfigOpen(true)} reloadSignal={healthNonce} />
+            <LLMHealth onOpenSettings={() => setActiveToolPanel('settings')} reloadSignal={healthNonce} />
           </div>
           <div className="flex items-center gap-2">
-            <AssetPoolButton count={scoNodes.length} onClick={() => setAssetPanelOpen(true)} />
-            <IOAConsoleButton onClick={() => openIOAConsole()} />
-            <AgentsButton count={chat.agents.length} onClick={handleOpenAgentPanel} />
-            <QuickConnect ioaURL={serverStatus?.ioa_url} version={serverStatus?.version} />
+            <AssetPoolButton count={scoNodes.length} open={activeToolPanel === 'assets'} onClick={() => toggleToolPanel('assets')} />
+            <IOAConsoleButton open={activeToolPanel === 'ioa'} onClick={() => {
+              setIOAConsoleTarget(null)
+              toggleToolPanel('ioa')
+            }} />
+            <AgentsButton count={chat.agents.length} open={activeToolPanel === 'agents'} onClick={handleOpenAgentPanel} />
+            <ToolsButton count={bashToolCount} open={activeToolPanel === 'tools'} onClick={() => toggleToolPanel('tools')} />
+            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} />
             {/* Separate workspace nav (assets / IOA / agents / connect) from the
                 account utilities (settings / logout) so the row reads as two groups. */}
             <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
-            <HeaderIconButton label={t('openSettings')} onClick={() => setConfigOpen(true)}>
+            <HeaderIconButton label={t('openSettings')} active={activeToolPanel === 'settings'} toolDrawerTrigger onClick={() => toggleToolPanel('settings')}>
               <Settings className="h-3.5 w-3.5" />
             </HeaderIconButton>
             <HeaderIconButton label={t('logout')} onClick={() => { void logout() }}>
@@ -255,9 +266,9 @@ export default function App() {
             agents={chat.agents}
             sessions={chat.sessions}
             activeSessionID={chat.activeSessionID}
-            selectedAgentID={chat.selectedAgentID}
-            terminalAgentID={agentPanelOpen ? agentPanelFocusID : null}
-            onSelectAgent={chat.selectAgent}
+            selectedNodeID={chat.selectedNodeID}
+            terminalNodeID={activeToolPanel === 'agents' ? agentPanelFocusNodeID : null}
+            onSelectNode={chat.selectNode}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}
@@ -274,8 +285,8 @@ export default function App() {
             activeSessionID={chat.activeSessionID}
             hasActiveSession={chat.activeSessionID !== null}
             agentOffline={activeAgentOffline}
-            agentName={activeSession?.agent_name}
-            agents={chat.agents.map((a) => ({ id: a.id, name: a.name }))}
+            agentName={activeSession?.agentName}
+            agents={chat.agents.map((a) => ({ nodeID: a.hello?.nodeId || '', name: a.hello?.name || '' }))}
             onCreateSession={handleCreateSession}
             onOpenTerminal={handleOpenTerminal}
             onOpenIOA={openIOAConsole}
@@ -290,33 +301,39 @@ export default function App() {
       </div>
 
       <ConfigPanel
-        open={configOpen}
+        open={activeToolPanel === 'settings'}
         status={serverStatus}
-        onClose={() => setConfigOpen(false)}
+        onClose={() => setActiveToolPanel(null)}
         onSaved={() => { refreshStatus(); setHealthNonce((n) => n + 1) }}
       />
 
       <AgentPanel
-        open={agentPanelOpen}
+        open={activeToolPanel === 'agents'}
         agents={chat.agents}
-        focusAgentID={agentPanelFocusID ?? undefined}
-        onClose={() => setAgentPanelOpen(false)}
+        focusNodeID={agentPanelFocusNodeID ?? undefined}
+        onClose={() => setActiveToolPanel(null)}
+      />
+
+      <ToolRegistryPanel
+        open={activeToolPanel === 'tools'}
+        agents={chat.agents}
+        onClose={() => setActiveToolPanel(null)}
       />
 
       <AssetPanel
-        open={assetPanelOpen}
-        onClose={() => setAssetPanelOpen(false)}
+        open={activeToolPanel === 'assets'}
+        onClose={() => setActiveToolPanel(null)}
         onSendToChat={handleAssetSendToChat}
       />
 
-      {ioaConsoleOpen && (
+      {activeToolPanel === 'ioa' && (
         <Suspense fallback={null}>
           <IOAConsole
-            open={ioaConsoleOpen}
+            open
             initialSpaceID={ioaConsoleTarget?.spaceID}
             initialMessageID={ioaConsoleTarget?.messageID}
             onClose={() => {
-              setIOAConsoleOpen(false)
+              setActiveToolPanel(null)
               setIOAConsoleTarget(null)
             }}
           />
@@ -334,7 +351,7 @@ function LLMProfileSwitcher({
   disabled,
   onChange,
 }: {
-  profiles: LLMProfileStatus[]
+  profiles: LLMProviderView[]
   activeProfileID: string
   fallbackModel: string
   disabled: boolean
@@ -364,7 +381,7 @@ function LLMProfileSwitcher({
   )
 }
 
-function AssetPoolButton({ count, onClick }: { count: number; onClick: () => void }) {
+function AssetPoolButton({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
   const { t } = useTranslation('assets')
   const active = count > 0
   return (
@@ -374,7 +391,8 @@ function AssetPoolButton({ count, onClick }: { count: number; onClick: () => voi
           type="button"
           variant="ghost"
           size="xs"
-          active={active}
+          active={open}
+          data-tool-drawer-trigger
           onClick={onClick}
           aria-label={t('openAssets')}
           className={cn(
@@ -393,7 +411,7 @@ function AssetPoolButton({ count, onClick }: { count: number; onClick: () => voi
   )
 }
 
-function AgentsButton({ count, onClick }: { count: number; onClick: () => void }) {
+function AgentsButton({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
   const { t } = useTranslation('app')
   const active = count > 0
   return (
@@ -403,7 +421,8 @@ function AgentsButton({ count, onClick }: { count: number; onClick: () => void }
           type="button"
           variant="ghost"
           size="xs"
-          active={active}
+          active={open}
+          data-tool-drawer-trigger
           onClick={onClick}
           aria-label={active ? t('agentsConnected', { count }) : t('noAgents')}
           className={cn(
@@ -424,7 +443,37 @@ function AgentsButton({ count, onClick }: { count: number; onClick: () => void }
   )
 }
 
-function IOAConsoleButton({ onClick }: { onClick: () => void }) {
+function ToolsButton({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
+  const { t } = useTranslation('tools')
+  const active = count > 0
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          active={open}
+          data-tool-drawer-trigger
+          onClick={onClick}
+          aria-label={active ? t('toolsAvailable', { count }) : t('noTools')}
+          className={cn(
+            'h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border hover:opacity-80',
+            active
+              ? 'border-primary/30'
+              : 'border-border bg-secondary/50 text-muted-foreground hover:bg-secondary/50 hover:text-muted-foreground',
+          )}
+        >
+          <Wrench className="h-3 w-3" aria-hidden="true" />
+          <span className="font-mono" aria-hidden="true">{count}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t('openTools')}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function IOAConsoleButton({ open, onClick }: { open: boolean; onClick: () => void }) {
   const { t } = useTranslation('ioa')
   return (
     <Tooltip>
@@ -433,6 +482,8 @@ function IOAConsoleButton({ onClick }: { onClick: () => void }) {
           type="button"
           variant="ghost"
           size="xs"
+          active={open}
+          data-tool-drawer-trigger
           onClick={onClick}
           aria-label={t('openConsole')}
           className="h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border border-border bg-secondary/50 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
@@ -446,7 +497,7 @@ function IOAConsoleButton({ onClick }: { onClick: () => void }) {
   )
 }
 
-function HeaderIconButton({ children, label, onClick, active }: { children: ReactNode; label: string; onClick: () => void; active?: boolean }) {
+function HeaderIconButton({ children, label, onClick, active, toolDrawerTrigger }: { children: ReactNode; label: string; onClick: () => void; active?: boolean; toolDrawerTrigger?: boolean }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -455,6 +506,7 @@ function HeaderIconButton({ children, label, onClick, active }: { children: Reac
           variant="ghost"
           size="icon-xs"
           active={active}
+          data-tool-drawer-trigger={toolDrawerTrigger ? '' : undefined}
           aria-label={label}
           onClick={onClick}
           className={cn('hover:text-foreground', !active && 'text-muted-foreground')}

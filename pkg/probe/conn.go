@@ -19,19 +19,9 @@ import (
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/tools/search"
 )
-
-// ConnCheck is the outcome of probing one external dependency. A single
-// settings section may run more than one check (Recon probes FOFA and Hunter
-// independently), so callers always receive a list and the UI renders each row.
-type ConnCheck struct {
-	Name      string `json:"name"` // fofa, hunter, cyberhub, tavily, ioa
-	OK        bool   `json:"ok"`
-	LatencyMs int64  `json:"latency_ms"`
-	Detail    string `json:"detail,omitempty"`
-	Error     string `json:"error,omitempty"`
-}
 
 // connProbeTimeout bounds a single connectivity check so an unreachable or
 // misconfigured endpoint fails fast instead of hanging the settings dialog.
@@ -50,7 +40,7 @@ var (
 // convention where a configured secret is left empty to keep it unchanged. Like
 // TestLLM, probe failures are reported inside ConnCheck rather than as a
 // returned error; a non-nil error only signals an unknown/untestable section.
-func TestConn(ctx context.Context, section string, in, stored ProbeConfig) ([]ConnCheck, error) {
+func TestConn(ctx context.Context, section string, in, stored *types.DistributeConfig) ([]*types.ConnectionCheck, error) {
 	switch strings.ToLower(strings.TrimSpace(section)) {
 	case "cyberhub":
 		return testCyberhub(ctx, in, stored), nil
@@ -67,10 +57,10 @@ func TestConn(ctx context.Context, section string, in, stored ProbeConfig) ([]Co
 
 // --- section probes ---
 
-func testCyberhub(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
-	hubURL := fallbackStr(in.Cyberhub.URL, stored.Cyberhub.URL)
-	key := fallbackStr(in.Cyberhub.Key, stored.Cyberhub.Key)
-	return []ConnCheck{runCheck("cyberhub", func() (string, error) {
+func testCyberhub(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	hubURL := fallbackStr(in.GetCyberhub().GetUrl(), stored.GetCyberhub().GetUrl())
+	key := fallbackStr(in.GetCyberhub().GetKey(), stored.GetCyberhub().GetKey())
+	return []*types.ConnectionCheck{runCheck("cyberhub", func() (string, error) {
 		if strings.TrimSpace(hubURL) == "" {
 			return "", fmt.Errorf("cyberhub url is empty")
 		}
@@ -87,11 +77,11 @@ func testCyberhub(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	})}
 }
 
-func testRecon(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
-	proxy := fallbackStr(in.Recon.Proxy, stored.Recon.Proxy)
-	var checks []ConnCheck
+func testRecon(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	proxy := fallbackStr(in.GetRecon().GetProxy(), stored.GetRecon().GetProxy())
+	var checks []*types.ConnectionCheck
 
-	if fofaKey := fallbackStr(in.Recon.FofaKey, stored.Recon.FofaKey); strings.TrimSpace(fofaKey) != "" {
+	if fofaKey := fallbackStr(in.GetRecon().GetFofaKey(), stored.GetRecon().GetFofaKey()); strings.TrimSpace(fofaKey) != "" {
 		checks = append(checks, runCheck("fofa", func() (string, error) {
 			return probeFofa(ctx, fofaKey, proxy)
 		}))
@@ -99,9 +89,9 @@ func testRecon(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 
 	// Hunter accepts either an API key or a (legacy, rarely used) web token; the
 	// API key takes precedence, matching the recon engine's credential order.
-	hunterKey := fallbackStr(in.Recon.HunterAPIKey, stored.Recon.HunterAPIKey)
+	hunterKey := fallbackStr(in.GetRecon().GetHunterApiKey(), stored.GetRecon().GetHunterApiKey())
 	if strings.TrimSpace(hunterKey) == "" {
-		hunterKey = fallbackStr(in.Recon.HunterToken, stored.Recon.HunterToken)
+		hunterKey = fallbackStr(in.GetRecon().GetHunterToken(), stored.GetRecon().GetHunterToken())
 	}
 	if strings.TrimSpace(hunterKey) != "" {
 		checks = append(checks, runCheck("hunter", func() (string, error) {
@@ -110,14 +100,14 @@ func testRecon(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	}
 
 	if len(checks) == 0 {
-		checks = append(checks, ConnCheck{Name: "recon", Error: "no FOFA or Hunter credentials configured"})
+		checks = append(checks, &types.ConnectionCheck{Name: "recon", Error: "no FOFA or Hunter credentials configured"})
 	}
 	return checks
 }
 
-func testSearch(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
-	keys := fallbackStr(in.Search.TavilyKeys, stored.Search.TavilyKeys)
-	return []ConnCheck{runCheck("tavily", func() (string, error) {
+func testSearch(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	keys := fallbackStr(in.GetSearch().GetTavilyKeys(), stored.GetSearch().GetTavilyKeys())
+	return []*types.ConnectionCheck{runCheck("tavily", func() (string, error) {
 		first := firstCSV(keys)
 		if first == "" {
 			return "", fmt.Errorf("no tavily api key configured")
@@ -128,10 +118,10 @@ func testSearch(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
 	})}
 }
 
-func testIOA(ctx context.Context, in, stored ProbeConfig) []ConnCheck {
-	ioaURL := fallbackStr(in.IOA.URL, stored.IOA.URL)
-	token := fallbackStr(in.IOA.Token, stored.IOA.Token)
-	return []ConnCheck{runCheck("ioa", func() (string, error) {
+func testIOA(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	ioaURL := fallbackStr(in.GetIoa().GetUrl(), stored.GetIoa().GetUrl())
+	token := fallbackStr(in.GetIoa().GetToken(), stored.GetIoa().GetToken())
+	return []*types.ConnectionCheck{runCheck("ioa", func() (string, error) {
 		if strings.TrimSpace(ioaURL) == "" {
 			return "", fmt.Errorf("ioa url is empty")
 		}
@@ -291,16 +281,16 @@ func newIOAProbeClient(rawURL, token string) (*ioaclient.Client, error) {
 
 // --- helpers ---
 
-// runCheck times fn and folds its outcome into a ConnCheck.
-func runCheck(name string, fn func() (string, error)) ConnCheck {
+// runCheck times fn and folds its outcome into a ConnectionCheck.
+func runCheck(name string, fn func() (string, error)) *types.ConnectionCheck {
 	start := time.Now()
 	detail, err := fn()
-	c := ConnCheck{Name: name, LatencyMs: time.Since(start).Milliseconds()}
+	c := &types.ConnectionCheck{Name: name, LatencyMs: time.Since(start).Milliseconds()}
 	if err != nil {
 		c.Error = err.Error()
 		return c
 	}
-	c.OK = true
+	c.Ok = true
 	c.Detail = detail
 	return c
 }

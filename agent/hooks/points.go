@@ -1,15 +1,16 @@
 package hooks
 
 import (
-	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/tool"
 )
 
 // Aliases keep event definitions readable without pulling agent in (that
 // would be an import cycle).
 type (
-	Msg      = provider.ChatMessage
-	ToolCall = provider.ToolCall
+	Msg      = aop.Message
+	ToolCall = aop.ToolCall
+	Usage    = aop.TokenUsage
 )
 
 // StopReason lives here rather than in agent because run_end events carry
@@ -41,7 +42,7 @@ type RunStartEvent struct {
 // to the turn.
 type RunStartResult struct {
 	SystemPrompt *string
-	Prepend      []Msg
+	Prepend      []*Msg
 }
 
 var BeforeRun = Point[RunStartEvent, RunStartResult]{
@@ -59,12 +60,12 @@ var BeforeRun = Point[RunStartEvent, RunStartResult]{
 type ContextEvent struct {
 	SessionID string
 	Turn      int
-	Messages  []Msg
+	Messages  []*Msg
 }
 
 // ContextResult replaces the whole message list; nil means unchanged.
 type ContextResult struct {
-	Messages []Msg
+	Messages []*Msg
 }
 
 var Context = Point[ContextEvent, ContextResult]{
@@ -81,10 +82,10 @@ var Context = Point[ContextEvent, ContextResult]{
 type ToolCallEvent struct {
 	SessionID        string
 	TurnID           string
-	AssistantMessage Msg
-	Call             ToolCall
+	AssistantMessage *Msg
+	Call             *ToolCall
 	SystemPrompt     string
-	Messages         []Msg
+	Messages         []*Msg
 }
 
 type ToolCallResult struct {
@@ -103,7 +104,7 @@ var ToolCallHook = Point[ToolCallEvent, ToolCallResult]{
 type ToolResultEvent struct {
 	SessionID  string
 	TurnID     string
-	Call       ToolCall
+	Call       *ToolCall
 	Content    string
 	IsError    bool
 	Terminate  bool
@@ -143,9 +144,9 @@ type RunEndEvent struct {
 	TurnID         string
 	Stop           StopReason
 	Output         string
-	Messages       []Msg
+	Messages       []*Msg
 	MessageCounter int64
-	Usage          provider.Usage
+	Usage          *Usage
 	Err            error
 }
 
