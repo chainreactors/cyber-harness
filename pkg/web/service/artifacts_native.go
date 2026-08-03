@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/output"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cstx "github.com/chainreactors/libcstx/go"
 )
 
@@ -38,8 +38,11 @@ func NewArtifactIngestor(store SCOStore) (ArtifactIngestor, error) {
 	return &cstxArtifactIngestor{store: store, runtime: runtime, artifacts: artifacts}, nil
 }
 
-func (i *cstxArtifactIngestor) IngestArtifact(ctx context.Context, operationID string, artifact output.ToolArtifact) error {
-	_, _, err := i.NormalizeArtifact(ctx, operationID, artifact.Tool, artifact.Data)
+func (i *cstxArtifactIngestor) IngestArtifact(ctx context.Context, artifact *toolpb.Artifact) error {
+	if artifact == nil {
+		return nil
+	}
+	_, _, err := i.NormalizeArtifact(ctx, artifact.CallId, artifact.Tool, artifact.Data)
 	return err
 }
 

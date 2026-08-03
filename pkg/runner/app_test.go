@@ -1,16 +1,24 @@
 package runner
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/utils/parsers"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestLogLLMProbeStatusReady(t *testing.T) {
@@ -89,5 +97,84 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 	}
 	if !strings.Contains(second.String(), "after") {
 		t.Fatalf("retargeted logger missing: %q", second.String())
+	}
+}
+
+func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	app, err := NewApp(context.Background(), ApplicationConfig{
+		RecordFile: path, SkipEngines: true, Logger: telemetry.NopLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+
+	app.Events.Emit(&aop.Event{
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "call-1", Name: "gogo"}},
+	})
+	app.Progress.Emit(&toolpb.Progress{Tool: "gogo", Text: "raw PTY bytes", CallId: "call-1"})
+	gogoResult := parsers.NewGOGOResult("127.0.0.1", "443")
+	gogoResult.Protocol = "https"
+	raw, err := json.Marshal(gogoResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension, err := anypb.New(&toolpb.Artifact{
+		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: gogoResult.GetTarget(), Data: raw,
+		MediaType: aop.JSONMediaType, CallId: "call-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.Events.Emit(&aop.Event{
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		Payload: &aop.Event_Extension{Extension: extension},
+	})
+	app.Events.Emit(&aop.Event{
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
+	})
+	app.Close()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open JSONL: %v", err)
+	}
+	defer file.Close()
+	counts := map[string]int{}
+	var artifact toolpb.Artifact
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			t.Fatal("JSONL contains a blank line")
+		}
+		event := new(aop.Event)
+		if err := protojson.Unmarshal(line, event); err != nil {
+			t.Fatalf("JSONL line is not an AOP event: %s", err)
+		}
+		counts[aop.Kind(event)]++
+		if extension := event.GetExtension(); extension != nil && extension.MessageIs(&artifact) {
+			if err := extension.UnmarshalTo(&artifact); err != nil {
+				t.Fatalf("decode artifact: %v", err)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("read JSONL: %v", err)
+	}
+	if counts["tool.call"] != 1 || counts["tool.result"] != 1 || counts["aop.tool.Artifact"] != 1 {
+		t.Fatalf("event counts = %#v", counts)
+	}
+	if artifact.Tool != "gogo" || artifact.Kind != toolpb.ArtifactKindService || artifact.Target != "127.0.0.1:443" || artifact.CallId != "call-1" {
+		t.Fatalf("artifact = %#v", &artifact)
+	}
+	var decoded parsers.GOGOResult
+	if err := json.Unmarshal(artifact.Data, &decoded); err != nil {
+		t.Fatalf("decode gogo result: %v", err)
+	}
+	if decoded.Ip != "127.0.0.1" || decoded.Port != "443" || decoded.Protocol != "https" {
+		t.Fatalf("gogo result = %#v", decoded)
 	}
 }

@@ -6,12 +6,10 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -19,7 +17,6 @@ import (
 	"github.com/chainreactors/aiscan/skills"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ToolNodeConfig configures a tool-only runner: an outbound WebSocket
@@ -30,13 +27,13 @@ type ToolNodeConfig struct {
 	ServerURL string
 	WSPath    string
 	// ID is the stable node identity used by Cairn as the runner primary key.
-	ID        string
-	Token     string
-	Registry  *commands.CommandRegistry
-	DataBus   *eventbus.Bus[output.ToolDataEvent]
-	Artifacts *output.ArtifactStream
-	Logger    telemetry.Logger
-	Version   string
+	ID       string
+	Token    string
+	Registry *commands.CommandRegistry
+	Events   *eventbus.Bus[*aop.Event]
+	Progress *eventbus.Bus[*toolpb.Progress]
+	Logger   telemetry.Logger
+	Version  string
 	// JSONFrames switches the hub wire to standard ProtoJSON text frames;
 	// hubs expecting binary protobuf (AIScan) leave it false.
 	JSONFrames bool
@@ -77,67 +74,40 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		skillStore, _ := skills.LoadEmbeddedStore()
 		menu = func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) }
 	}
-	artifacts := cfg.Artifacts
-	if artifacts == nil && cfg.DataBus != nil {
-		artifacts = output.NewArtifactStream(cfg.DataBus)
-		defer artifacts.Close()
+	var subscribe func(func(*aop.Event)) func()
+	if cfg.Events != nil {
+		subscribe = cfg.Events.Subscribe
 	}
 	return connect(ctx, connectionConfig{
-		ServerURL:     cfg.ServerURL,
-		WSPath:        cfg.WSPath,
-		Name:          runnerID,
-		Token:         cfg.Token,
-		Registry:      cfg.Registry,
-		DataBus:       cfg.DataBus,
-		Artifacts:     artifacts,
-		Logger:        logger,
-		NodeID:        runnerID,
-		Runtime:       runnerRuntime,
-		Capabilities:  []string{"pty", "file", "exec", "tool", "artifact"},
-		Menu:          menu,
-		RunnerFileRPC: true,
-		JSONFrames:    cfg.JSONFrames,
+		ServerURL:      cfg.ServerURL,
+		WSPath:         cfg.WSPath,
+		Name:           runnerID,
+		Token:          cfg.Token,
+		Registry:       cfg.Registry,
+		AgentSubscribe: subscribe,
+		Progress:       cfg.Progress,
+		Logger:         logger,
+		NodeID:         runnerID,
+		Runtime:        runnerRuntime,
+		Capabilities:   []string{"pty", "file", "exec", "tool", "artifact"},
+		Menu:           menu,
+		RunnerFileRPC:  true,
+		JSONFrames:     cfg.JSONFrames,
 	})
 }
 
-// attachToolEvents forwards progress and scanner-native artifacts onto the hub
-// connection. Nodes never normalize artifacts into SCO.
-func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], artifacts *output.ArtifactStream, send func(string, protobuf.Message)) func() {
-	if dataBus == nil && artifacts == nil {
+// attachToolProgress forwards ephemeral progress onto the tool protocol. Raw
+// artifacts travel as canonical AOP extension events through AgentSubscribe.
+func attachToolProgress(progressBus *eventbus.Bus[*toolpb.Progress], send func(string, protobuf.Message)) func() {
+	if progressBus == nil {
 		return nil
 	}
-	var unsub func()
-	if dataBus != nil {
-		unsub = dataBus.Subscribe(func(event output.ToolDataEvent) {
-			if event.Kind != output.ToolDataProgress {
-				return
-			}
-			text, ok := event.Data.(string)
-			if !ok || text == "" {
-				return
-			}
-			timestamp := event.Timestamp
-			if timestamp.IsZero() {
-				timestamp = time.Now()
-			}
-			send(event.CallID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: &toolpb.Progress{
-				Tool: event.Tool, Target: event.Target, Text: text, Timestamp: timestamppb.New(timestamp),
-			}}})
-		})
-	}
-	if artifacts != nil {
-		artifacts.SetHandler(func(artifact output.ToolArtifact) {
-			timestamp := artifact.Timestamp
-			if timestamp.IsZero() {
-				timestamp = time.Now()
-			}
-			send(artifact.CallID, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Artifact{Artifact: &toolpb.Artifact{
-				Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target,
-				Data: append([]byte(nil), artifact.Data...), MediaType: aop.JSONMediaType,
-				Timestamp: timestamppb.New(timestamp),
-			}}})
-		})
-	}
+	unsub := progressBus.Subscribe(func(progress *toolpb.Progress) {
+		if progress == nil || progress.Text == "" {
+			return
+		}
+		send(progress.CallId, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: protobuf.CloneOf(progress)}})
+	})
 	var once bool
 	return func() {
 		if once {
@@ -146,9 +116,6 @@ func attachToolEvents(dataBus *eventbus.Bus[output.ToolDataEvent], artifacts *ou
 		once = true
 		if unsub != nil {
 			unsub()
-		}
-		if artifacts != nil {
-			artifacts.SetHandler(nil)
 		}
 	}
 }

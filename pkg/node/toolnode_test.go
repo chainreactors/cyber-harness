@@ -13,13 +13,13 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -127,8 +127,15 @@ func (h *hubScript) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		switch value := message.(type) {
 		case *aop.ProtocolMessage:
-			if result := value.GetEvent().GetToolResult(); result != nil {
+			event := value.GetEvent()
+			if result := event.GetToolResult(); result != nil {
 				h.toolResult <- result
+			}
+			if extension := event.GetExtension(); extension != nil {
+				artifact := new(toolpb.Artifact)
+				if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
+					h.artifact <- artifact
+				}
 			}
 		case *toolpb.ProtocolMessage:
 			if progress := value.GetProgress(); progress != nil {
@@ -179,7 +186,8 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 		Name: "gogo", Usage: "gogo [OPTIONS]",
 		DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
 	}, "scanner")
-	dataBus := eventbus.New[output.ToolDataEvent]()
+	events := eventbus.New[*aop.Event]()
+	progress := eventbus.New[*toolpb.Progress]()
 	hub := newHubScript(t)
 	server := httptest.NewServer(http.HandlerFunc(hub.serveHTTP))
 	defer server.Close()
@@ -187,7 +195,7 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- RunToolNode(ctx, ToolNodeConfig{ServerURL: server.URL, WSPath: "/ws/runner", ID: "runner-1", Token: "test-token", Registry: registry, DataBus: dataBus, Version: "test"})
+		errCh <- RunToolNode(ctx, ToolNodeConfig{ServerURL: server.URL, WSPath: "/ws/runner", ID: "runner-1", Token: "test-token", Registry: registry, Events: events, Progress: progress, Version: "test"})
 	}()
 	hello := wait(t, hub.registered, "hello")
 	if hello.Name != "runner-1" || hello.NodeId != "runner-1" {
@@ -217,12 +225,16 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	if got := catalog.Commands[0].GetDescription(); got != "Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery." {
 		t.Fatalf("gogo description = %q", got)
 	}
-	dataBus.Emit(output.ToolDataEvent{
-		Tool: "gogo", Kind: output.ToolDataService, Target: "192.0.2.1:80",
-		Data: map[string]string{"ip": "192.0.2.1", "port": "80"}, CallID: "exec-1",
+	extension, err := anypb.New(&toolpb.Artifact{
+		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: "192.0.2.1:80",
+		Data: []byte(`{"ip":"192.0.2.1","port":"80"}`), CallId: "exec-1", MediaType: aop.JSONMediaType,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events.Emit(&aop.Event{SessionId: "session-1", TurnId: "turn-1", Emitter: "gogo", Payload: &aop.Event_Extension{Extension: extension}})
 	artifact := wait(t, hub.artifact, "tool artifact")
-	if artifact.Tool != "gogo" || artifact.Kind != output.ToolDataService || string(artifact.Data) != `{"ip":"192.0.2.1","port":"80"}` {
+	if artifact.Tool != "gogo" || artifact.Kind != toolpb.ArtifactKindService || artifact.CallId != "exec-1" || string(artifact.Data) != `{"ip":"192.0.2.1","port":"80"}` {
 		t.Fatalf("artifact = %+v data=%s", artifact, artifact.Data)
 	}
 	if line := wait(t, hub.progress, "tool progress"); line != "streamed" {

@@ -16,7 +16,7 @@ func init() {
 	commands.RegisterFactory(commands.Factory{
 		Capability: "proton",
 		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
-			cmd := New().WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithDataBus(d.DataBus)
+			cmd := New().WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithEvents(d.Events)
 			if rs, ok := deps.Get(d.Bag, resources.SetKey); ok && rs != nil {
 				cmd.WithResourceProvider(rs.ProtonConfig)
 			} else {

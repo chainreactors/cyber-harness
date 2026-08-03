@@ -13,8 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -30,9 +31,15 @@ func newHeadlessHandler(store *webservice.SQLiteStore, app *runner.App, ingestor
 	pool := webservice.NewAgentPool(service.Hub())
 	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
-	if app != nil && app.Artifacts != nil && ingestor != nil {
-		app.Artifacts.SetHandler(func(artifact output.ToolArtifact) {
-			_ = ingestor.IngestArtifact(context.Background(), artifact.CallID, artifact)
+	if app != nil && app.EventBus != nil && ingestor != nil {
+		app.EventBus.Subscribe(func(event *aop.Event) {
+			if event == nil || event.GetExtension() == nil {
+				return
+			}
+			artifact := new(toolpb.Artifact)
+			if event.GetExtension().MessageIs(artifact) && event.GetExtension().UnmarshalTo(artifact) == nil {
+				_ = ingestor.IngestArtifact(context.Background(), artifact)
+			}
 		})
 	}
 	return service, pool, web.NewHandler(service, nil, nil)

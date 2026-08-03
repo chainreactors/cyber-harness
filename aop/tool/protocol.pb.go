@@ -89,6 +89,7 @@ type Progress struct {
 	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Text          string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
+	CallId        string                 `protobuf:"bytes,7,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -151,6 +152,13 @@ func (x *Progress) GetText() string {
 	return ""
 }
 
+func (x *Progress) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
 // Artifact carries one scanner-native structured record. Nodes remain thin:
 // only the server normalizes these records into canonical SCO documents.
 type Artifact struct {
@@ -161,6 +169,7 @@ type Artifact struct {
 	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
 	MediaType     string                 `protobuf:"bytes,5,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	CallId        string                 `protobuf:"bytes,7,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,6 +244,13 @@ func (x *Artifact) GetTimestamp() *timestamppb.Timestamp {
 		return x.Timestamp
 	}
 	return nil
+}
+
+func (x *Artifact) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
 }
 
 type ProtocolMessage struct {
@@ -344,12 +360,13 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
 	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x12!\n" +
-	"\x04call\x18\x03 \x01(\v2\r.aop.ToolCallR\x04call\"\x90\x01\n" +
+	"\x04call\x18\x03 \x01(\v2\r.aop.ToolCallR\x04call\"\xa9\x01\n" +
 	"\bProgress\x12\x12\n" +
 	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x16\n" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x128\n" +
 	"\ttimestamp\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x12\n" +
-	"\x04text\x18\x06 \x01(\tR\x04textJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"\xb7\x01\n" +
+	"\x04text\x18\x06 \x01(\tR\x04text\x12\x17\n" +
+	"\acall_id\x18\a \x01(\tR\x06callIdJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"\xd0\x01\n" +
 	"\bArtifact\x12\x12\n" +
 	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x16\n" +
@@ -357,7 +374,8 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
 	"media_type\x18\x05 \x01(\tR\tmediaType\x128\n" +
-	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\xa6\x01\n" +
+	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x17\n" +
+	"\acall_id\x18\a \x01(\tR\x06callId\"\xa6\x01\n" +
 	"\x0fProtocolMessage\x120\n" +
 	"\bprogress\x18\n" +
 	" \x01(\v2\x12.aop.tool.ProgressH\x00R\bprogress\x12$\n" +

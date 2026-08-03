@@ -4,6 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
@@ -15,10 +21,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
-	"strings"
-	"sync"
-	"testing"
-	"time"
 )
 
 type runtimeSemanticProvider struct {
@@ -380,5 +382,63 @@ func TestRuntimeSessionRejectsRequestsPastPendingLimit(t *testing.T) {
 		t.Fatal("request past pending limit was admitted")
 	} else if got := err.Error(); got == "" {
 		t.Fatal(fmt.Errorf("empty overflow error"))
+	}
+}
+
+func TestResolveJSONLRecordPathSemantics(t *testing.T) {
+	option := &cfg.Option{}
+	if got := resolveJSONLRecordPath(option, REPLDisabled); got != "" {
+		t.Fatalf("one-shot path = %q, want empty", got)
+	}
+
+	option.SaveSession = true
+	if got := resolveJSONLRecordPath(option, REPLDisabled); !strings.HasSuffix(got, ".jsonl") || !strings.Contains(got, "sessions") {
+		t.Fatalf("save-session path = %q", got)
+	}
+
+	option = &cfg.Option{}
+	if got := resolveJSONLRecordPath(option, REPLEphemeral); !strings.HasSuffix(got, ".jsonl") || !strings.Contains(got, "sessions") {
+		t.Fatalf("REPL path = %q", got)
+	}
+
+	option.Resume = "old.jsonl"
+	option.SaveSession = true
+	if got := resolveJSONLRecordPath(option, REPLDisabled); got != "old.jsonl" {
+		t.Fatalf("resume path = %q", got)
+	}
+}
+
+func TestRotationCommandsRejectActiveRunWithoutSwitchingSession(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "target.jsonl")
+	writePersistenceSession(t, target)
+	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
+	runtime := newBareRuntime(t, nil, provider)
+	session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: MainREPLName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := session.Run(context.Background(), RunInput{Content: []*aop.Content{aop.Text("running")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-provider.started
+	originalID := session.ID()
+	for _, command := range []string{"/clear", "/compact"} {
+		if _, err := session.rotateCommand(context.Background(), command); err == nil || !strings.Contains(err.Error(), "task is running") {
+			t.Fatalf("%s error = %v", command, err)
+		}
+		if session.ID() != originalID {
+			t.Fatalf("session switched during %s: %q -> %q", command, originalID, session.ID())
+		}
+	}
+	if _, err := session.Resume(context.Background(), target); err == nil || !strings.Contains(err.Error(), "task is running") {
+		t.Fatalf("Resume error = %v", err)
+	}
+	if session.ID() != originalID {
+		t.Fatalf("session switched while active: %q -> %q", originalID, session.ID())
+	}
+	close(provider.release)
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }

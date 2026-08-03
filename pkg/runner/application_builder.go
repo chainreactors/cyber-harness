@@ -53,9 +53,8 @@ func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeature
 	}
 }
 
-// MergeOptionExtras layers the fields DistributeConfig does not model onto a
-// proto-built ApplicationConfig: playwright session, uncover credentials, and
-// CLI skill paths.
+// MergeOptionExtras layers fields DistributeConfig does not model onto a
+// proto-built ApplicationConfig.
 func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConfig {
 	if option == nil {
 		return rc
@@ -63,6 +62,7 @@ func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConf
 	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
 	rc.Tools.PlaywrightSession = option.PlaywrightSession
 	rc.CLISkillPaths = skillPathsFromOptions(option)
+	rc.RecordFile = option.OutputFile
 	return rc
 }
 
@@ -98,6 +98,7 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),
+		RecordFile:    option.OutputFile,
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/hooks"
 	"github.com/chainreactors/aiscan/agent/probe"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -35,8 +37,12 @@ type App struct {
 	SkillDiagnostics  []skills.Diagnostic
 	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
-	DataBus           *eventbus.Bus[output.ToolDataEvent]
-	Artifacts         *output.ArtifactStream
+	EventBus          *eventbus.Bus[*aop.Event]
+	Events            *sessionEmitter
+	Progress          *eventbus.Bus[*toolpb.Progress]
+	Recorder          *output.JSONLRecorder
+	recorderMu        sync.Mutex
+	closeOnce         sync.Once
 	enginesReady      chan struct{}
 	loggerMu          sync.RWMutex
 	logger            telemetry.Logger
@@ -55,8 +61,9 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		a.Logger().Warnf("hook failed kind=%s source=%s error=%q", he.Kind, he.Source, he.Err)
 	})
 
-	a.DataBus = eventbus.New[output.ToolDataEvent]()
-	a.Artifacts = output.NewArtifactStream(a.DataBus)
+	a.EventBus = eventbus.New[*aop.Event]()
+	a.Events = newSessionEmitter(a.EventBus)
+	a.Progress = eventbus.New[*toolpb.Progress]()
 
 	store, diagnostics := skills.LoadAll(rc.CLISkillPaths)
 	a.Skills = store
@@ -88,7 +95,13 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		}
 	}
 
-	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, logger)
+	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, logger)
+	if rc.RecordFile != "" {
+		if err := a.StartRecording(rc.RecordFile); err != nil {
+			a.Close()
+			return nil, err
+		}
+	}
 
 	a.enginesReady = make(chan struct{})
 	go func() {
@@ -168,24 +181,71 @@ func (a *App) Close() {
 	if a == nil {
 		return
 	}
-	if a.Artifacts != nil {
-		a.Artifacts.Close()
-	}
-	if a.Commands != nil {
-		for _, t := range a.Commands.Tools() {
-			if closer, ok := t.(interface{ Close() }); ok {
-				closer.Close()
+	a.closeOnce.Do(func() {
+		a.recorderMu.Lock()
+		if a.Recorder != nil {
+			if err := a.Recorder.Close(); err != nil {
+				a.Logger().Warnf("close AOP JSONL recorder: %s", err)
+			}
+			a.Recorder = nil
+		}
+		a.recorderMu.Unlock()
+		if a.Commands != nil {
+			for _, t := range a.Commands.Tools() {
+				if closer, ok := t.(interface{ Close() }); ok {
+					closer.Close()
+				}
+			}
+			for _, cmd := range a.Commands.All() {
+				if cmd.Close != nil {
+					cmd.Close()
+				}
 			}
 		}
-		for _, cmd := range a.Commands.All() {
-			if cmd.Close != nil {
-				cmd.Close()
-			}
+		if closer, ok := a.Engines.(interface{ Close() }); ok {
+			closer.Close()
 		}
+	})
+}
+
+func (a *App) StartRecording(path string) error {
+	if a == nil || strings.TrimSpace(path) == "" {
+		return nil
 	}
-	if closer, ok := a.Engines.(interface{ Close() }); ok {
-		closer.Close()
+	a.recorderMu.Lock()
+	defer a.recorderMu.Unlock()
+	if a.Recorder != nil {
+		if !samePath(a.Recorder.Path(), path) {
+			return fmt.Errorf("AOP JSONL already records to %s", a.Recorder.Path())
+		}
+		return nil
 	}
+	recorder, err := output.NewJSONLRecorder(a.EventBus, path)
+	if err != nil {
+		return err
+	}
+	a.Recorder = recorder
+	return nil
+}
+
+func (a *App) SwitchRecording(path string) error {
+	if a == nil || strings.TrimSpace(path) == "" {
+		return fmt.Errorf("AOP JSONL path is required")
+	}
+	a.recorderMu.Lock()
+	defer a.recorderMu.Unlock()
+	if a.Recorder == nil {
+		recorder, err := output.NewJSONLRecorder(a.EventBus, path)
+		if err != nil {
+			return err
+		}
+		a.Recorder = recorder
+		return nil
+	}
+	if samePath(a.Recorder.Path(), path) {
+		return nil
+	}
+	return a.Recorder.Switch(path)
 }
 
 func initProvider(provCfg agent.ProviderConfig, logger telemetry.Logger) (agent.Provider, *agent.ProviderConfig, error) {
@@ -241,7 +301,7 @@ func llmConfigLabel(providerName, model string) string {
 	return providerName + "/" + model
 }
 
-func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, logger telemetry.Logger) *commands.CommandRegistry {
+func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, logger telemetry.Logger) *commands.CommandRegistry {
 	cmdReg := commands.NewRegistry()
 	workDir, _ := os.Getwd()
 	deps := &commands.Deps{
@@ -253,6 +313,7 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		TavilyKeys:        rc.Tools.TavilyKeys,
 		PlaywrightSession: rc.Tools.PlaywrightSession,
 		Hooks:             hookRegistry,
+		Events:            events,
 	}
 	plan := capability.Select(capability.Options{
 		Groups:        []string{"core", "arsenal", "search", "browser"},
