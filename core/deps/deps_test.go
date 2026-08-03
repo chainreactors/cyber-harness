@@ -453,6 +453,61 @@ func TestAgentExampleIsNotMaintainedBuildTarget(t *testing.T) {
 	}
 }
 
+func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
+	root := repositoryRoot(t)
+
+	makefile := readRepositoryFile(t, root, "Makefile")
+	for _, required := range []string{
+		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build",
+		"full: frontend prepare\n\tCGO_ENABLED=1 $(GO) build",
+		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
+		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite",
+	} {
+		if !strings.Contains(makefile, required) {
+			t.Errorf("Makefile missing build profile contract %q", required)
+		}
+	}
+	for _, obsolete := range []string{"cstx_native", "RE2_TAGS_DEFAULT"} {
+		if strings.Contains(makefile, obsolete) {
+			t.Errorf("Makefile still contains obsolete default %q", obsolete)
+		}
+	}
+
+	buildScript := readRepositoryFile(t, root, "build.sh")
+	for _, required := range []string{
+		"CGO_MODE=0",
+		"CGO_MODE=1",
+		`CGO_ENABLED="$CGO_MODE"`,
+		`OSARCH="${HOST_OS}/${HOST_ARCH}"`,
+	} {
+		if !strings.Contains(buildScript, required) {
+			t.Errorf("build.sh missing build profile contract %q", required)
+		}
+	}
+
+	goreleaser := readRepositoryFile(t, root, ".goreleaser.yml")
+	fullStart := strings.Index(goreleaser, "  - id: aiscan-full\n")
+	if fullStart < 0 {
+		t.Fatal(".goreleaser.yml missing aiscan-full build")
+	}
+	fullConfig := goreleaser[fullStart:]
+	if next := strings.Index(fullConfig[1:], "\n  - id:"); next >= 0 {
+		fullConfig = fullConfig[:next+1]
+	}
+	if !strings.Contains(fullConfig, "CGO_ENABLED=1") {
+		t.Error(".goreleaser.yml aiscan-full must enable CGO")
+	}
+}
+
+func readRepositoryFile(t *testing.T, root, rel string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return strings.ReplaceAll(string(content), "\r\n", "\n")
+}
+
 func assertNoFirstPartyImports(t *testing.T, tree string, forbidden map[string]bool) {
 	t.Helper()
 	root := repositoryRoot(t)
