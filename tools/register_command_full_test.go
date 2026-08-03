@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	_ "github.com/chainreactors/aiscan/tools/katana"
@@ -51,13 +52,13 @@ func TestRegisterAllRegistersPassiveWithUncover(t *testing.T) {
 
 func TestFullScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
-	bus := eventbus.New[output.ToolDataEvent]()
+	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
 	engineSet := &engine.Set{}
 	deps := &commands.Deps{
 		WorkDir: t.TempDir(),
-		DataBus: bus,
+		Events:  bus,
 		Logger:  telemetry.NopLogger(),
 	}
 	commands.Provide(deps, engine.SetKey, engineSet)
@@ -80,7 +81,7 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 			Timeout: 30 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "/admin", "/app.js", "/api/status")
-				requireEvent(t, result, "katana", output.ToolDataWeb, func(data any) bool {
+				requireEvent(t, result, "katana", toolpb.ArtifactKindWeb, func(data any) bool {
 					encoded, err := json.Marshal(data)
 					return err == nil && strings.Contains(string(encoded), "/admin")
 				})

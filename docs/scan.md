@@ -121,8 +121,8 @@ scan 提供 `quick` 和 `full` 两种预设模式，通过 `--mode` 参数选择
 | `--deep` | 对发现的 Web 资产进行 AI 动态测试 | |
 | `-j, --json` | JSON Lines 输出 | |
 | `--report` | Markdown 报告输出 | |
-| `-f, --file` | 输出写入文件（自动去除 ANSI 颜色） | |
-| `-F, --view` | 回放之前保存的 JSONL 扫描记录 | |
+| `-f, --file` | 将 scan、agent 与结构化 tool artifact 事件流式追加为 AOP ProtoJSONL | |
+| `-F, --view` | 按需格式化同一份 AOP ProtoJSONL（`-o terminal\|markdown`，可用 `-f` 指定展示输出文件） | |
 | `--trace` | 显示内部 pipeline 事件流（调试用） | |
 | `--no-color` | 禁用终端颜色 | |
 | `--debug` | 启用 trace + 底层扫描器 debug 日志 | |

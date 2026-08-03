@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -36,12 +38,12 @@ func TestScannerPublicIntegration(t *testing.T) {
 	}
 	defer engineSet.Close()
 
-	bus := eventbus.New[output.ToolDataEvent]()
+	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
 	deps := &commands.Deps{
 		WorkDir: t.TempDir(),
-		DataBus: bus, Logger: telemetry.NopLogger(),
+		Events:  bus, Logger: telemetry.NopLogger(),
 	}
 	commands.Provide(deps, engine.SetKey, engineSet)
 	commands.Provide(deps, resources.SetKey, engineSet.Resources)
@@ -69,7 +71,7 @@ http:
 			Timeout: 45 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"80"`, `"port":"443"`, "nginx")
-				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
+				requireEvent(t, result, "gogo", toolpb.ArtifactKindService, func(data any) bool {
 					item, ok := data.(*parsers.GOGOResult)
 					return ok && item != nil && item.Port == "443" && item.Protocol == "https"
 				})
@@ -96,7 +98,7 @@ http:
 			Timeout: 30 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"matched":true`, `"template":"redhaze-public-marker"`)
-				requireEvent(t, result, "neutron", output.ToolDataVuln, nil)
+				requireEvent(t, result, "neutron", toolpb.ArtifactKindVuln, nil)
 			},
 		},
 		{
@@ -108,7 +110,7 @@ http:
 			Timeout: 90 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "[summary] completed", "443", "nginx")
-				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
+				requireEvent(t, result, "gogo", toolpb.ArtifactKindService, func(data any) bool {
 					item, ok := data.(*parsers.GOGOResult)
 					return ok && item != nil && item.Port == "443" && item.Protocol == "https"
 				})

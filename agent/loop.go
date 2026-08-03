@@ -12,7 +12,6 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
@@ -49,9 +48,6 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				em.errorEvt(result.Err, isRetryableError(result.Err))
 			}
 			emitRunEnd(ctx, cfg, result)
-			if cfg.OnRunEnd != nil {
-				cfg.OnRunEnd(result)
-			}
 		}
 		return result, err
 	}
@@ -521,7 +517,9 @@ type toolExecution struct {
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, turn int) toolExecution {
 	startedAt := time.Now()
-	toolCtx := output.ContextWithCallID(ctx, tc.Id)
+	toolCtx := tool.ContextWithInvocation(ctx, tool.Invocation{
+		CallID: tc.Id, SessionID: cfg.SessionID, TurnID: cfg.TurnID, Emitter: cfg.AgentName,
+	})
 	toolCtx = withToolAgentConfig(toolCtx, cfg)
 	toolCtx = inbox.ContextWithInbox(toolCtx, cfg.Inbox)
 	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)

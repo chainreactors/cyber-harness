@@ -6,7 +6,6 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/output"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/go-rod/rod"
@@ -122,12 +121,11 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 }
 
 type recordingArtifactSink struct {
-	operationID string
-	artifact    output.ToolArtifact
+	artifact *toolpb.Artifact
 }
 
-func (s *recordingArtifactSink) IngestArtifact(_ context.Context, operationID string, artifact output.ToolArtifact) error {
-	s.operationID, s.artifact = operationID, artifact
+func (s *recordingArtifactSink) IngestArtifact(_ context.Context, artifact *toolpb.Artifact) error {
+	s.artifact = protobuf.CloneOf(artifact)
 	return nil
 }
 
@@ -144,11 +142,11 @@ func TestAgentPoolForwardsRawToolArtifact(t *testing.T) {
 	pool.SetArtifactIngestor(sink)
 	raw := []byte(`{"ip":"127.0.0.1","port":"80"}`)
 	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Artifact{Artifact: &toolpb.Artifact{
-		Tool: "gogo", Kind: output.ToolDataService, Data: raw, MediaType: aop.JSONMediaType,
+		Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: raw, MediaType: aop.JSONMediaType,
 	}}}))
 
-	if sink.operationID != "call-gogo-1" {
-		t.Fatalf("operation id = %q, want tool call id", sink.operationID)
+	if sink.artifact.CallId != "call-gogo-1" {
+		t.Fatalf("operation id = %q, want tool call id", sink.artifact.CallId)
 	}
 	if sink.artifact.Tool != "gogo" || string(sink.artifact.Data) != string(raw) {
 		t.Fatalf("forwarded artifact = %+v", sink.artifact)

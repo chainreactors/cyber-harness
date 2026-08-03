@@ -5,10 +5,9 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/hooks"
 	"github.com/chainreactors/aiscan/agent/provider"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/deps"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
@@ -42,7 +41,7 @@ type Deps struct {
 	NodeMeta          map[string]any
 	TavilyKeys        string // comma-separated Tavily API keys
 	PlaywrightSession string
-	DataBus           *eventbus.Bus[output.ToolDataEvent]
+	Events            aop.EventEmitter
 	Hooks             *hooks.Registry
 }
 

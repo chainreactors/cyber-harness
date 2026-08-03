@@ -7,7 +7,7 @@ import (
 )
 
 // ScanResult is private collector state. Scanner-native records leave a node
-// only as ToolArtifact messages; the server owns normalization and persistence.
+// only as canonical aop.tool.Artifact messages.
 type ScanResult struct {
 	Summary Summary                `json:"summary"`
 	GOGO    []*parsers.GOGOResult  `json:"gogo,omitempty"`

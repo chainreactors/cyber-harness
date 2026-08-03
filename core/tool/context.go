@@ -7,7 +7,11 @@ type invocationContextKey struct{}
 // Invocation carries executor-owned context that must not become model-facing
 // tool arguments.
 type Invocation struct {
-	WorkDir string
+	WorkDir   string
+	CallID    string
+	SessionID string
+	TurnID    string
+	Emitter   string
 }
 
 func ContextWithInvocation(ctx context.Context, invocation Invocation) context.Context {

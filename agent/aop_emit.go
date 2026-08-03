@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	aop "github.com/chainreactors/aiscan/aop"
@@ -18,15 +20,8 @@ const (
 	statusLLMRequest         = "llm_request"
 )
 
-// EventEmitter is the narrow event sink an agent needs — callers may wrap a
-// bus with stamping/routing middleware (e.g. the runner's sessionEmitter)
-// instead of handing over a raw *eventbus.Bus.
-type EventEmitter interface {
-	Emit(*aop.Event)
-}
-
 type aopEmitter struct {
-	bus              EventEmitter
+	bus              aop.EventEmitter
 	agentName        string
 	sessionID        string
 	turnID           string
@@ -41,7 +36,7 @@ type emitState struct {
 	messageSeq atomic.Int64
 }
 
-func newAOPEmitter(bus EventEmitter, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
+func newAOPEmitter(bus aop.EventEmitter, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
 	em := &aopEmitter{
 		bus: bus, agentName: agentName, sessionID: sessionID,
 		parentSessionID: parentSessionID, parentToolCallID: parentToolCallID,
@@ -81,6 +76,27 @@ func (e *aopEmitter) allocMessageID() string {
 }
 
 func (e *aopEmitter) messageCounter() int64 { return e.state.messageSeq.Load() }
+
+func (e *aopEmitter) observeMessages(messages []*aop.Message) {
+	if e == nil || e.state == nil {
+		return
+	}
+	var observed int64
+	for _, message := range messages {
+		if message == nil || !strings.HasPrefix(message.Id, "m-") {
+			continue
+		}
+		sequence, err := strconv.ParseInt(strings.TrimPrefix(message.Id, "m-"), 10, 64)
+		if err == nil && sequence > observed {
+			observed = sequence
+		}
+	}
+	for current := e.state.messageSeq.Load(); observed > current; current = e.state.messageSeq.Load() {
+		if e.state.messageSeq.CompareAndSwap(current, observed) {
+			return
+		}
+	}
+}
 
 func (e *aopEmitter) sessionStart(model string) {
 	event := &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{

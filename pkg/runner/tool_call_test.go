@@ -10,7 +10,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
@@ -115,21 +114,19 @@ func TestExecuteToolRequestForeground(t *testing.T) {
 	registry := commands.NewRegistry()
 	bash := &recordingBash{}
 	registry.RegisterTool(bash)
-	dataBus := eventbus.New[output.ToolDataEvent]()
-	var progress []output.ToolDataEvent
-	dataBus.Subscribe(func(event output.ToolDataEvent) {
-		if event.Kind == output.ToolDataProgress {
-			progress = append(progress, event)
-		}
+	progressBus := eventbus.New[*toolpb.Progress]()
+	var progress []*toolpb.Progress
+	progressBus.Subscribe(func(event *toolpb.Progress) {
+		progress = append(progress, event)
 	})
-	event, err := ExecuteToolRequest(context.Background(), "task-1", toolRequest(t, "task-1", "bash", map[string]any{"command": "echo test", "timeout": 7}), registry, dataBus)
+	event, err := ExecuteToolRequest(context.Background(), "task-1", toolRequest(t, "task-1", "bash", map[string]any{"command": "echo test", "timeout": 7}), registry, progressBus)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bash.command != "echo test" || bash.options.Timeout != 7*time.Second {
 		t.Fatalf("bash options = %+v", bash.options)
 	}
-	if len(progress) != 1 || progress[0].Data != "streamed" || progress[0].CallID != "task-1" {
+	if len(progress) != 1 || progress[0].Text != "streamed" || progress[0].CallId != "task-1" {
 		t.Fatalf("progress = %+v", progress)
 	}
 	result := event.GetToolResult()

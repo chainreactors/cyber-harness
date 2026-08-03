@@ -222,12 +222,17 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			replyTo := ""
 			if event.GetToolResult() != nil {
 				replyTo = event.GetToolResult().GetCallId()
+			} else if extension := event.GetExtension(); extension != nil {
+				artifact := new(toolpb.Artifact)
+				if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
+					replyTo = artifact.CallId
+				}
 			}
 			send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
 		})
 		defer unsubscribe()
 	}
-	if detach := attachToolEvents(cc.DataBus, cc.Artifacts, send); detach != nil {
+	if detach := attachToolProgress(cc.Progress, send); detach != nil {
 		defer detach()
 	}
 	if cc.Status != nil {
@@ -435,14 +440,26 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 		return
 	}
 	operationID := envelope.GetId()
+	if request.Call.Id == "" {
+		request.Call.Id = operationID
+	}
+	if cc.AgentRuntime != nil && request.Call.Id == operationID && strings.TrimSpace(request.Call.Name) != "" {
+		cc.AgentRuntime.EmitEvent(&aop.Event{
+			SessionId: request.SessionId, TurnId: request.TurnId, Emitter: "aiscan.agent",
+			Payload: &aop.Event_ToolCall{ToolCall: protobuf.CloneOf(request.Call)},
+		})
+	}
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	trackOperation(operationsMu, operations, operationID, taskCancel)
 	go func() {
 		defer finishOperation(operationsMu, operations, operationID, taskCancel)
-		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.DataBus)
+		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.Progress)
 		if err != nil {
 			fail(err.Error())
 			return
+		}
+		if cc.AgentRuntime != nil {
+			cc.AgentRuntime.EmitEvent(event)
 		}
 		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
 	}()
