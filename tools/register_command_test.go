@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -19,9 +20,10 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -255,7 +257,7 @@ func TestNeutronSetProxyUpdatesDefault(t *testing.T) {
 type functionalResult struct {
 	Stdout string
 	Stderr string
-	Events []output.ToolDataEvent
+	Events []functionalEvent
 }
 
 type functionalCase struct {
@@ -269,17 +271,54 @@ type functionalCase struct {
 
 type functionalRecorder struct {
 	mu     sync.Mutex
-	events []output.ToolDataEvent
+	events []functionalEvent
 }
 
-func newFunctionalRecorder(bus *eventbus.Bus[output.ToolDataEvent]) *functionalRecorder {
+type functionalEvent struct {
+	Tool, Kind, Target, CallID string
+	Data                       any
+}
+
+func newFunctionalRecorder(bus *eventbus.Bus[*aop.Event]) *functionalRecorder {
 	recorder := &functionalRecorder{}
-	bus.Subscribe(func(event output.ToolDataEvent) {
+	bus.Subscribe(func(event *aop.Event) {
+		if event == nil || event.GetExtension() == nil {
+			return
+		}
+		artifact := new(toolpb.Artifact)
+		if event.GetExtension().UnmarshalTo(artifact) != nil {
+			return
+		}
+		decoded := decodeFunctionalArtifact(artifact)
 		recorder.mu.Lock()
-		recorder.events = append(recorder.events, event)
+		recorder.events = append(recorder.events, functionalEvent{
+			Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target, CallID: artifact.CallId, Data: decoded,
+		})
 		recorder.mu.Unlock()
 	})
 	return recorder
+}
+
+func decodeFunctionalArtifact(artifact *toolpb.Artifact) any {
+	if artifact == nil {
+		return nil
+	}
+	var value any
+	switch artifact.Tool {
+	case "gogo":
+		value = new(parsers.GOGOResult)
+	case "spray":
+		value = new(parsers.SprayResult)
+	default:
+		value = new(any)
+	}
+	if json.Unmarshal(artifact.Data, value) != nil {
+		return nil
+	}
+	if holder, ok := value.(*any); ok {
+		return *holder
+	}
+	return value
 }
 
 func (r *functionalRecorder) mark() int {
@@ -288,10 +327,10 @@ func (r *functionalRecorder) mark() int {
 	return len(r.events)
 }
 
-func (r *functionalRecorder) since(mark int) []output.ToolDataEvent {
+func (r *functionalRecorder) since(mark int) []functionalEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]output.ToolDataEvent(nil), r.events[mark:]...)
+	return append([]functionalEvent(nil), r.events[mark:]...)
 }
 
 func runFunctionalCases(t *testing.T, registry *commands.CommandRegistry, recorder *functionalRecorder, cases []functionalCase) {
@@ -358,7 +397,7 @@ func requireOutputContains(t *testing.T, result functionalResult, values ...stri
 	}
 }
 
-func requireEvent(t *testing.T, result functionalResult, tool, kind string, match func(any) bool) output.ToolDataEvent {
+func requireEvent(t *testing.T, result functionalResult, tool, kind string, match func(any) bool) functionalEvent {
 	t.Helper()
 	for _, event := range result.Events {
 		if event.Tool == tool && event.Kind == kind && (match == nil || match(event.Data)) {
@@ -366,10 +405,10 @@ func requireEvent(t *testing.T, result functionalResult, tool, kind string, matc
 		}
 	}
 	t.Fatalf("missing event tool=%s kind=%s in %s", tool, kind, formatFunctionalEvents(result.Events))
-	return output.ToolDataEvent{}
+	return functionalEvent{}
 }
 
-func formatFunctionalEvents(events []output.ToolDataEvent) string {
+func formatFunctionalEvents(events []functionalEvent) string {
 	var b strings.Builder
 	for _, event := range events {
 		fmt.Fprintf(&b, "{%s %s %s %T} ", event.Tool, event.Kind, event.Target, event.Data)
@@ -414,12 +453,12 @@ func TestScannerFunctionalRegression(t *testing.T) {
 	defer engineSet.Close()
 
 	workDir := t.TempDir()
-	bus := eventbus.New[output.ToolDataEvent]()
+	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
 	deps := &commands.Deps{
 		WorkDir: workDir,
-		DataBus: bus,
+		Events:  bus,
 		Logger:  telemetry.NopLogger(),
 	}
 	commands.Provide(deps, engine.SetKey, engineSet)
@@ -459,7 +498,7 @@ http:
 			Args: []string{"-i", host, "-p", port, "-v", "-o", "jl", "-t", "20"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"port":"`+port+`"`, "nginx")
-				requireEvent(t, result, "gogo", output.ToolDataService, func(data any) bool {
+				requireEvent(t, result, "gogo", toolpb.ArtifactKindService, func(data any) bool {
 					item, ok := data.(*parsers.GOGOResult)
 					if !ok || item == nil || item.Port != port {
 						return false
@@ -481,7 +520,7 @@ http:
 			Args: []string{"-u", httpServer.URL, "--finger", "-j", "--limit", "5"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, httpServer.URL, "nginx")
-				requireEvent(t, result, "spray", output.ToolDataWeb, func(data any) bool {
+				requireEvent(t, result, "spray", toolpb.ArtifactKindWeb, func(data any) bool {
 					item, ok := data.(*parsers.SprayResult)
 					if !ok || item == nil || item.Status != http.StatusOK {
 						return false
@@ -496,7 +535,7 @@ http:
 			Args: []string{"-u", tlsServer.URL, "-j", "--limit", "1"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"url":"`+tlsServer.URL+`"`, `"status":200`)
-				requireEvent(t, result, "spray", output.ToolDataWeb, func(data any) bool {
+				requireEvent(t, result, "spray", toolpb.ArtifactKindWeb, func(data any) bool {
 					item, ok := data.(*parsers.SprayResult)
 					return ok && item != nil && item.Status == http.StatusOK && strings.HasPrefix(item.UrlString, "https://")
 				})
@@ -533,7 +572,7 @@ http:
 			Args: []string{"-i", httpServer.URL, "-t", templateFile, "--tags", "regression", "-s", "high", "-j"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, `"matched":true`, `"template":"regression-marker"`)
-				requireEvent(t, result, "neutron", output.ToolDataVuln, nil)
+				requireEvent(t, result, "neutron", toolpb.ArtifactKindVuln, nil)
 			},
 		},
 		{
@@ -541,7 +580,7 @@ http:
 			Args: []string{"-i", secretFile, "-j"},
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "AKIAIOSFODNN7EXAMPLE")
-				requireEvent(t, result, "proton", output.ToolDataVuln, nil)
+				requireEvent(t, result, "proton", toolpb.ArtifactKindVuln, nil)
 			},
 		},
 		{
@@ -557,7 +596,7 @@ http:
 			Timeout: 30 * time.Second,
 			Check: func(t *testing.T, result functionalResult) {
 				requireOutputContains(t, result, "[summary] completed", port)
-				requireEvent(t, result, "gogo", output.ToolDataService, nil)
+				requireEvent(t, result, "gogo", toolpb.ArtifactKindService, nil)
 			},
 		},
 	}

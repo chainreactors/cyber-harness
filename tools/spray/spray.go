@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -38,8 +38,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
-	c.DataBus = bus
+func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+	c.Events = events
 	return c
 }
 
@@ -110,7 +110,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 			return nil
 		},
 		OnResult: func(r *parsers.SprayResult) {
-			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, r.UrlString, r)
+			c.EmitArtifactCtx(ctx, "spray", toolpb.ArtifactKindWeb, r.UrlString, r)
 			if debug {
 				// spray core prints results itself when not quiet
 				return

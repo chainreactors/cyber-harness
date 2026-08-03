@@ -13,6 +13,7 @@ type ApplicationConfig struct {
 	IOA           *IOAConfig
 	Logger        telemetry.Logger
 	CLISkillPaths []string
+	RecordFile    string
 	SkipEngines   bool
 }
 

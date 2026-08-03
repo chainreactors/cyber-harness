@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
@@ -267,14 +265,11 @@ func (p *AgentPool) handleToolArtifact(ctx context.Context, envelope *aop.Envelo
 	if operationID == "" {
 		operationID = envelope.Id
 	}
-	artifact := output.ToolArtifact{
-		Tool: value.Tool, Kind: value.Kind, Target: value.Target,
-		Data: append(json.RawMessage(nil), value.Data...), CallID: operationID,
+	if value.CallId == "" {
+		value = protobuf.CloneOf(value)
+		value.CallId = operationID
 	}
-	if value.Timestamp != nil {
-		artifact.Timestamp = value.Timestamp.AsTime()
-	}
-	_ = p.artifacts.IngestArtifact(ctx, operationID, artifact)
+	_ = p.artifacts.IngestArtifact(ctx, value)
 }
 
 func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result taskResult) {
@@ -316,6 +311,15 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 			p.sessions.BroadcastAOPEvent(sessionID, event)
 		}
 	}
+	if extension := event.GetExtension(); extension != nil && p.artifacts != nil {
+		artifact := new(toolpb.Artifact)
+		if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
+			if artifact.CallId == "" {
+				artifact.CallId = correlationID
+			}
+			_ = p.artifacts.IngestArtifact(context.Background(), artifact)
+		}
+	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:
 		agent.state().convergeOnTurnEnd(event.TurnId, event)
@@ -325,25 +329,18 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 }
 
 func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progress) {
-	if value == nil {
+	if value == nil || p.hub == nil {
 		return
 	}
-	event := output.ToolDataEvent{Kind: output.ToolDataProgress, Data: value.Text, CallID: operationID}
-	if value.Timestamp != nil {
-		event.Timestamp = value.Timestamp.AsTime()
-	} else {
-		event.Timestamp = time.Now()
+	if value.CallId != "" {
+		operationID = value.CallId
 	}
-	if event.Kind != output.ToolDataProgress || p.hub == nil || event.CallID == "" {
+	if operationID == "" {
 		return
 	}
-	line, ok := event.Data.(string)
-	if !ok {
-		return
-	}
-	line = output.StripANSI(line)
+	line := output.StripANSI(value.Text)
 	if line != "" {
-		p.hub.BroadcastScan(managementapi.ScanProgressEvent(event.CallID, line), false)
+		p.hub.BroadcastScan(managementapi.ScanProgressEvent(operationID, line), false)
 	}
 }
 

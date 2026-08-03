@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestIsLocalAgentTerminal(t *testing.T) {
@@ -217,6 +219,41 @@ func TestReadlineDoesNotSuppressLiveStatusWhileTaskRuns(t *testing.T) {
 	}
 }
 
+func TestAgentConsoleRefreshesAgentAfterRuntimeResumeAndClear(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	oldAgent := agent.NewAgent(agent.Config{SessionID: "old"})
+	resumedAgent := agent.NewAgent(agent.Config{SessionID: "resumed"})
+	clearedAgent := agent.NewAgent(agent.Config{SessionID: "cleared"})
+	active := oldAgent
+	info := AppInfo{
+		Run: func(context.Context, string, bool) (*agent.Result, error) { return &agent.Result{}, nil },
+		Command: func(_ context.Context, line string) error {
+			if line == "/clear" {
+				active = clearedAgent
+			}
+			return nil
+		},
+		Resume: func(context.Context, string) (int, error) {
+			active = resumedAgent
+			return 2, nil
+		},
+		ActiveAgent: func() *agent.Agent { return active },
+	}
+	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, info, oldAgent, &stdout, &stderr)
+	if _, err := repl.ExecuteLineAndWait("/resume session.jsonl"); err != nil {
+		t.Fatalf("runtime /resume: %v", err)
+	}
+	if repl.agent != resumedAgent || repl.controller.session != resumedAgent {
+		t.Fatal("console did not switch to the resumed runtime agent")
+	}
+	if _, err := repl.ExecuteLineAndWait("/clear"); err != nil {
+		t.Fatalf("runtime /clear: %v", err)
+	}
+	if repl.agent != clearedAgent || repl.controller.session != clearedAgent {
+		t.Fatal("console did not switch to the cleared continuation agent")
+	}
+}
+
 func TestAgentConsoleCtrlCWarnsAndClearsInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{}, nil, &stdout, &stderr)
@@ -299,29 +336,22 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	dir := t.TempDir()
-	if err := agent.SaveCheckpoint(dir, &agent.CheckpointData{
-		Model:    "test-model",
-		Provider: "capture",
-		Messages: []*aop.Message{
-			agent.TextMessage("user", "previous user"),
-			agent.TextMessage("assistant", "previous assistant"),
-		},
-	}); err != nil {
-		t.Fatalf("SaveSession: %v", err)
-	}
-	sessions, err := agent.ListCheckpoints(dir)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("sessions len = %d, want 1", len(sessions))
-	}
-	path := sessions[0].Path
-
+	path := filepath.Join(dir, "session-resume.jsonl")
+	writeConsoleSession(t, path, "test-model", time.Now(),
+		agent.TextMessage("user", "previous user"),
+		agent.TextMessage("assistant", "previous assistant"),
+	)
 	var stdout, stderr bytes.Buffer
 	prov := &captureConsoleProvider{}
 	session := agent.NewAgent(agent.Config{Provider: prov, Model: "test-model"})
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{}, session, &stdout, &stderr)
+	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{
+		Resume: func(context.Context, string) (int, error) {
+			session.LoadMessages([]*aop.Message{
+				agent.TextMessage("user", "previous user"), agent.TextMessage("assistant", "previous assistant"),
+			})
+			return 2, nil
+		},
+	}, session, &stdout, &stderr)
 
 	if _, err := repl.ExecuteLineAndWait("/resume " + path); err != nil {
 		t.Fatalf("/resume: %v\nstderr=%s", err, stderr.String())
@@ -348,28 +378,69 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 			t.Fatalf("request messages missing %q:\n%s", want, joined)
 		}
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if _, err := repl.ExecuteLineAndWait("/clear"); err != nil {
+		t.Fatalf("/clear: %v\nstderr=%s", err, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "Context cleared.") {
+		t.Fatalf("clear output = %q", out)
+	}
+	if messages := session.MessagesSnapshot(); len(messages) != 0 {
+		t.Fatalf("messages after clear = %d, want 0", len(messages))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if _, err := repl.ExecuteLineAndWait("after clear"); err != nil {
+		t.Fatalf("prompt after clear: %v\nstderr=%s", err, stderr.String())
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(prov.requests))
+	}
+	var afterClear []string
+	for _, msg := range prov.requests[1].Messages {
+		afterClear = append(afterClear, provider.MessageText(msg))
+	}
+	afterClearText := strings.Join(afterClear, "\n")
+	if !strings.Contains(afterClearText, "after clear") {
+		t.Fatalf("request after clear missing new prompt:\n%s", afterClearText)
+	}
+	for _, stale := range []string{"previous user", "previous assistant", "new prompt"} {
+		if strings.Contains(afterClearText, stale) {
+			t.Fatalf("request after clear retained %q:\n%s", stale, afterClearText)
+		}
+	}
 }
 
 func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 	dir := t.TempDir()
-	oldPath := filepath.Join(dir, "session-old.json")
-	newPath := filepath.Join(dir, "session-new.json")
-	writeConsoleSession(t, oldPath, "old-model", "old message", time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC))
-	writeConsoleSession(t, newPath, "new-model", "new message", time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
+	oldPath := filepath.Join(dir, "session-old.jsonl")
+	newPath := filepath.Join(dir, "session-new.jsonl")
+	writeConsoleSession(t, oldPath, "old-model", time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC), agent.TextMessage("user", "old message"))
+	writeConsoleSession(t, newPath, "new-model", time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC), agent.TextMessage("user", "new message"))
 
 	var stdout, stderr bytes.Buffer
 	session := agent.NewAgent(agent.Config{})
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{}, session, &stdout, &stderr)
+	saved := []SavedSession{
+		{Path: newPath, Model: "new-model", Messages: 1, UpdatedAt: time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)},
+		{Path: oldPath, Model: "old-model", Messages: 1, UpdatedAt: time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)},
+	}
+	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{
+		ListSessions: func() ([]SavedSession, error) { return saved, nil },
+		Resume:       func(context.Context, string) (int, error) { return 1, nil },
+	}, session, &stdout, &stderr)
 	repl.sessionDir = dir
 
 	if _, err := repl.ExecuteLineAndWait("/resume list"); err != nil {
 		t.Fatalf("/resume list: %v\nstderr=%s", err, stderr.String())
 	}
 	listOut := stdout.String()
-	if !strings.Contains(listOut, "session-new.json") || !strings.Contains(listOut, "session-old.json") {
+	if !strings.Contains(listOut, "session-new.jsonl") || !strings.Contains(listOut, "session-old.jsonl") {
 		t.Fatalf("resume list missing sessions:\n%s", listOut)
 	}
-	if strings.Index(listOut, "session-new.json") > strings.Index(listOut, "session-old.json") {
+	if strings.Index(listOut, "session-new.jsonl") > strings.Index(listOut, "session-old.jsonl") {
 		t.Fatalf("sessions not sorted newest first:\n%s", listOut)
 	}
 
@@ -383,22 +454,33 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 	}
 }
 
-func writeConsoleSession(t *testing.T, path, model, content string, updatedAt time.Time) {
+func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, messages ...*aop.Message) {
 	t.Helper()
-	msgRaw, err := protojson.Marshal(agent.TextMessage("user", content))
-	if err != nil {
-		t.Fatalf("marshal message: %v", err)
+	events := []*aop.Event{{
+		Id: "e-1", SessionId: "console-session", Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: model}},
+	}}
+	for i, message := range messages {
+		message.Id = fmt.Sprintf("m-%d", i+1)
+		events = append(events, &aop.Event{
+			Id: fmt.Sprintf("e-%d", i+2), SessionId: "console-session", TurnId: "turn-1",
+			Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+			Payload: &aop.Event_Message{Message: message},
+		})
 	}
-	raw, err := json.Marshal(map[string]any{
-		"version":    1,
-		"updated_at": updatedAt,
-		"model":      model,
-		"messages":   []json.RawMessage{msgRaw},
-	})
-	if err != nil {
-		t.Fatalf("marshal session: %v", err)
+	var lines strings.Builder
+	for _, event := range events {
+		raw, err := protojson.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshal session event: %v", err)
+		}
+		lines.Write(raw)
+		lines.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(lines.String()), 0o644); err != nil {
 		t.Fatalf("write session: %v", err)
+	}
+	if err := os.Chtimes(path, updatedAt, updatedAt); err != nil {
+		t.Fatalf("set session time: %v", err)
 	}
 }

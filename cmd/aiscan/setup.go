@@ -11,8 +11,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -42,7 +40,7 @@ func scannerInit(ctx context.Context, a *runner.App, rc runner.ApplicationConfig
 	es := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = es
 	registerScannerCommands(a.Commands, es, rc.Scanner, rc.Tools,
-		a.Provider, a.ProviderConfig, a.Skills, a.DataBus, logger)
+		a.Provider, a.ProviderConfig, a.Skills, a.Events, logger)
 }
 
 func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -69,7 +67,7 @@ func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.
 	return engineSet
 }
 
-func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg runner.ScannerConfig, toolCfg runner.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, dataBus *eventbus.Bus[output.ToolDataEvent], logger telemetry.Logger) {
+func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine.Set, scanCfg runner.ScannerConfig, toolCfg runner.ToolConfig, llmProvider agent.Provider, providerConfig agent.ProviderConfig, skillStore *skills.Store, agentEvents aop.EventEmitter, logger telemetry.Logger) {
 	var scanOpts []scan.Option
 	if scanCfg.AIEnabled && llmProvider != nil {
 		scannerParent := agent.NewAgent(agent.Config{
@@ -79,6 +77,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 			MaxTokens:     providerConfig.MaxTokens,
 			ContextWindow: providerConfig.ContextWindow,
 			Logger:        logger,
+			Bus:           agentEvents,
 		})
 		scanOpts = append(scanOpts, scan.WithParent(scannerParent))
 		scanOpts = append(scanOpts, scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
@@ -105,7 +104,7 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 		Logger:            logger,
 		TavilyKeys:        toolCfg.TavilyKeys,
 		PlaywrightSession: toolCfg.PlaywrightSession,
-		DataBus:           dataBus,
+		Events:            agentEvents,
 	}
 	commands.Provide(deps, scan.OptsKey, scanOpts)
 	if engineSet != nil {

@@ -14,6 +14,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -260,7 +261,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
 }
 
 func (s *Service) runScanLocally(ctx context.Context, scan *types.Scan) {
-	ctx = output.ContextWithCallID(ctx, scan.Id)
+	ctx = coretool.ContextWithInvocation(ctx, coretool.Invocation{CallID: scan.Id, Emitter: "scan"})
 	streamWriter := &scanStreamWriter{
 		hub:    s.hub,
 		scanID: scan.Id,
