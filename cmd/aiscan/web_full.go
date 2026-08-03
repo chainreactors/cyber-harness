@@ -15,8 +15,9 @@ import (
 	"sync"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -174,11 +175,17 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 }
 
 func wireWebApp(application *runner.App, ingestor webservice.ArtifactIngestor) {
-	if application == nil || ingestor == nil || application.Artifacts == nil {
+	if application == nil || ingestor == nil || application.EventBus == nil {
 		return
 	}
-	application.Artifacts.SetHandler(func(artifact output.ToolArtifact) {
-		_ = ingestor.IngestArtifact(context.Background(), artifact.CallID, artifact)
+	application.EventBus.Subscribe(func(event *aop.Event) {
+		if event == nil || event.GetExtension() == nil {
+			return
+		}
+		artifact := new(toolpb.Artifact)
+		if event.GetExtension().MessageIs(artifact) && event.GetExtension().UnmarshalTo(artifact) == nil {
+			_ = ingestor.IngestArtifact(context.Background(), artifact)
+		}
 	})
 }
 

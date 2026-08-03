@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
@@ -25,7 +26,21 @@ type AppInfo struct {
 	OnLoggerChange    func(telemetry.Logger)
 	Run               func(context.Context, string, bool) (*agent.Result, error)
 	Command           func(context.Context, string) error
+	Resume            func(context.Context, string) (int, error)
+	ListSessions      func() ([]SavedSession, error)
+	ActiveAgent       func() *agent.Agent
+	ActiveSessionID   func() string
 }
+
+type SavedSession struct {
+	Path      string
+	SessionID string
+	Model     string
+	Messages  int
+	UpdatedAt time.Time
+}
+
+func (s SavedSession) SortTime() time.Time { return s.UpdatedAt }
 
 // Session holds the dependencies commands need to operate on.
 type Session struct {

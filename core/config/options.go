@@ -17,7 +17,7 @@ type Option struct {
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	IOAOptions     `group:"Server Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
-	OutputOptions  `group:"Agent Output Options" config:"output"`
+	OutputOptions  `group:"Output Options" config:"output"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
 	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
 	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
@@ -86,8 +86,8 @@ type AgentOptions struct {
 	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
 	WebURL                string   `long:"web-url" config:"web_url" description:"Deprecated alias for --server-url" hidden:"true"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
-	Resume                string   `long:"resume" description:"Resume session from a saved session file path"`
-	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-save conversation to .aiscan/sessions/ after each agent run (default: off)"`
+	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
+	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-select a .aiscan/sessions/*.jsonl recording path"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
 }
 
@@ -139,9 +139,9 @@ type MiscOptions struct {
 	ConfigFile string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
 	DataDir    string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
 	InitConfig bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
-	ViewFile   string `short:"F" long:"view" description:"View a scan record JSONL file"`
+	ViewFile   string `short:"F" long:"view" description:"View an AOP event JSONL file"`
 	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
-	ViewOutput string `short:"f" long:"file" description:"Write -F output to file instead of stdout"`
+	OutputFile string `short:"f" long:"file" description:"Write scan and agent events to a streaming JSONL file (with -F: write rendered output)"`
 	Debug      bool   `long:"debug" config:"debug" description:"Enable debug logging"`
 	Verbose    []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
 	Quiet      bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`

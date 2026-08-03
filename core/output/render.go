@@ -1,7 +1,6 @@
 package output
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,74 +13,24 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
-	"google.golang.org/protobuf/encoding/protojson"
 )
-
-// ---------------------------------------------------------------------------
-// Core types
-// ---------------------------------------------------------------------------
-
-type TimelineEntry struct {
-	Timestamp time.Time
-	Type      string
-	Data      any
-}
-
-// ---------------------------------------------------------------------------
-// Parse
-// ---------------------------------------------------------------------------
-
-func ParseTimelineFile(path string) ([]TimelineEntry, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var entries []TimelineEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 || line[0] != '{' {
-			continue
-		}
-		if e, ok := parseLine(line); ok {
-			entries = append(entries, e)
-		}
-	}
-	return entries, scanner.Err()
-}
-
-func parseLine(line []byte) (TimelineEntry, bool) {
-	event := new(aop.Event)
-	if protojson.Unmarshal(line, event) == nil && event.SessionId != "" && event.Payload != nil {
-		timestamp := time.Time{}
-		if event.EmittedAt != nil {
-			timestamp = event.EmittedAt.AsTime()
-		}
-		return TimelineEntry{Timestamp: timestamp, Type: aop.Kind(event), Data: event}, true
-	}
-	return TimelineEntry{}, false
-}
 
 // ---------------------------------------------------------------------------
 // Render entry points
 // ---------------------------------------------------------------------------
 
-func RenderTimeline(w io.Writer, entries []TimelineEntry) error {
-	_, err := io.WriteString(w, renderMD(BuildTimelineMarkdown(entries)))
+func RenderEvents(w io.Writer, events []*aop.Event) error {
+	_, err := io.WriteString(w, renderMD(BuildEventMarkdown(events)))
 	return err
 }
 
-func RenderTimelineMarkdown(w io.Writer, entries []TimelineEntry) error {
-	_, err := io.WriteString(w, BuildTimelineMarkdown(entries))
+func RenderEventsMarkdown(w io.Writer, events []*aop.Event) error {
+	_, err := io.WriteString(w, BuildEventMarkdown(events))
 	return err
 }
 
-// RenderFile renders an AOP Event ProtoJSONL file. Raw scanner JSONL files are
-// intentionally not accepted as agent timelines.
-func RenderFile(path, format, outputPath string) error {
+// RenderEventFile renders an AOP Event ProtoJSONL file.
+func RenderEventFile(path, format, outputPath string) error {
 	var writer io.Writer = os.Stdout
 	if outputPath != "" {
 		file, err := os.Create(outputPath)
@@ -91,26 +40,30 @@ func RenderFile(path, format, outputPath string) error {
 		defer file.Close()
 		writer = file
 	}
-	entries, err := ParseTimelineFile(path)
+	events, err := ReadJSONL(path)
 	if err != nil {
 		return err
 	}
 	if strings.EqualFold(format, "markdown") || strings.EqualFold(format, "md") {
-		return RenderTimelineMarkdown(writer, entries)
+		return RenderEventsMarkdown(writer, events)
 	}
-	return RenderTimeline(writer, entries)
+	return RenderEvents(writer, events)
 }
 
-func BuildTimelineMarkdown(entries []TimelineEntry) string {
+func BuildEventMarkdown(events []*aop.Event) string {
 	var sb strings.Builder
-	sess := collectSessionMeta(entries)
-	writeHeader(&sb, &sess)
+	sessions := collectSessionMeta(events)
+	writtenHeaders := make(map[string]bool)
 
-	for _, e := range entries {
-		switch d := e.Data.(type) {
-		case *aop.Event:
-			writeAOPMarkdown(&sb, d)
+	for _, event := range events {
+		if event != nil && event.SessionId != "" && !writtenHeaders[event.SessionId] {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			writeHeader(&sb, sessions[event.SessionId])
+			writtenHeaders[event.SessionId] = true
 		}
+		writeAOPMarkdown(&sb, event)
 	}
 	return sb.String()
 }
@@ -161,39 +114,45 @@ func (s *sessionMeta) duration() time.Duration {
 	return s.endTS.Sub(s.startTS)
 }
 
-func collectSessionMeta(entries []TimelineEntry) sessionMeta {
-	var m sessionMeta
-	for _, e := range entries {
-		switch d := e.Data.(type) {
-		case *aop.Event:
-			if m.id == "" {
-				m.id = d.SessionId
+func collectSessionMeta(events []*aop.Event) map[string]*sessionMeta {
+	sessions := make(map[string]*sessionMeta)
+	for _, event := range events {
+		if event == nil || event.SessionId == "" {
+			continue
+		}
+		m := sessions[event.SessionId]
+		if m == nil {
+			m = &sessionMeta{id: event.SessionId}
+			sessions[event.SessionId] = m
+		}
+		timestamp := time.Time{}
+		if event.EmittedAt != nil {
+			timestamp = event.EmittedAt.AsTime()
+		}
+		switch payload := event.Payload.(type) {
+		case *aop.Event_SessionStarted:
+			m.startTS = timestamp
+			m.parentID = payload.SessionStarted.ParentSessionId
+			if payload.SessionStarted.Model != "" && m.model == "" {
+				m.model = payload.SessionStarted.Model
 			}
-			switch payload := d.Payload.(type) {
-			case *aop.Event_SessionStarted:
-				m.startTS = e.Timestamp
-				m.parentID = payload.SessionStarted.ParentSessionId
-				if payload.SessionStarted.Model != "" && m.model == "" {
-					m.model = payload.SessionStarted.Model
-				}
-			case *aop.Event_SessionEnded:
-				m.endTS = e.Timestamp
-			case *aop.Event_TurnStarted:
-				m.turns++
-			case *aop.Event_TurnEnded:
-				m.endTS = e.Timestamp
-				m.stop = payload.TurnEnded.StopReason
-				if payload.TurnEnded.Usage != nil && payload.TurnEnded.Usage.TotalTokens > 0 {
-					m.totalTokens = int(payload.TurnEnded.Usage.TotalTokens)
-				}
-			case *aop.Event_Usage:
-				if payload.Usage.TotalTokens > 0 {
-					m.totalTokens = int(payload.Usage.TotalTokens)
-				}
+		case *aop.Event_SessionEnded:
+			m.endTS = timestamp
+		case *aop.Event_TurnStarted:
+			m.turns++
+		case *aop.Event_TurnEnded:
+			m.endTS = timestamp
+			m.stop = payload.TurnEnded.StopReason
+			if payload.TurnEnded.Usage != nil && payload.TurnEnded.Usage.TotalTokens > 0 {
+				m.totalTokens = int(payload.TurnEnded.Usage.TotalTokens)
+			}
+		case *aop.Event_Usage:
+			if payload.Usage.TotalTokens > 0 {
+				m.totalTokens = int(payload.Usage.TotalTokens)
 			}
 		}
 	}
-	return m
+	return sessions
 }
 
 // ---------------------------------------------------------------------------
@@ -201,25 +160,25 @@ func collectSessionMeta(entries []TimelineEntry) sessionMeta {
 // ---------------------------------------------------------------------------
 
 var (
-	timelineRenderer     *glamour.TermRenderer
-	timelineRendererErr  error
-	timelineRendererOnce sync.Once
+	eventRenderer     *glamour.TermRenderer
+	eventRendererErr  error
+	eventRendererOnce sync.Once
 )
 
-func getTimelineRenderer() (*glamour.TermRenderer, error) {
-	timelineRendererOnce.Do(func() {
-		timelineRenderer, timelineRendererErr = glamour.NewTermRenderer(
+func getEventRenderer() (*glamour.TermRenderer, error) {
+	eventRendererOnce.Do(func() {
+		eventRenderer, eventRendererErr = glamour.NewTermRenderer(
 			glamour.WithAutoStyle(),
 			glamour.WithColorProfile(termenv.ANSI),
 			glamour.WithEmoji(),
 			glamour.WithWordWrap(120),
 		)
 	})
-	return timelineRenderer, timelineRendererErr
+	return eventRenderer, eventRendererErr
 }
 
 func renderMD(md string) string {
-	r, err := getTimelineRenderer()
+	r, err := getEventRenderer()
 	if err != nil {
 		return md
 	}

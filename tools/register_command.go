@@ -29,8 +29,8 @@ func init() {
 			if d.ScannerProxy != "" {
 				scanOpts = append(scanOpts, scan.WithProxy(d.ScannerProxy))
 			}
-			if d.DataBus != nil {
-				scanOpts = append(scanOpts, scan.WithDataBus(d.DataBus))
+			if d.Events != nil {
+				scanOpts = append(scanOpts, scan.WithEvents(d.Events))
 			}
 
 			impl := scan.New(es, scanOpts...)

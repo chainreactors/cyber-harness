@@ -31,7 +31,7 @@ func (rt *AgentRuntime) AttachLocalREPL(ctx context.Context) error {
 		ctx,
 		option,
 		rt.consoleAppInfoForSession(sess),
-		sess.state.agent,
+		sess.Agent(),
 		rlterm.Local(),
 		rt.Subscribe,
 	)

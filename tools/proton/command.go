@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -48,8 +48,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
-	c.DataBus = bus
+func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+	c.Events = events
 	return c
 }
 
@@ -257,7 +257,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		if uf.Class == "extract" {
 			atomic.AddInt64(&extractCount, 1)
 		}
-		c.EmitDataCtx(ctx, "proton", output.ToolDataVuln, uf.FilePath, &uf)
+		c.EmitArtifactCtx(ctx, "proton", toolpb.ArtifactKindVuln, uf.FilePath, &uf)
 		writeFinding(execution.Stdout, uf, flags.JSON, inputs[0])
 		if fileOut != nil {
 			writeFinding(fileOut, uf, flags.JSON, inputs[0])

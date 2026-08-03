@@ -10,7 +10,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -37,7 +36,7 @@ type foregroundTool interface {
 
 // ExecuteToolRequest runs one canonical AOP tool call against the executor
 // and wraps the outcome as a ToolResult event correlated to operationID.
-func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor ToolExecutor, dataBus *eventbus.Bus[output.ToolDataEvent]) (*aop.Event, error) {
+func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor ToolExecutor, progressBus *eventbus.Bus[*toolpb.Progress]) (*aop.Event, error) {
 	if request == nil || request.Call == nil || operationID == "" {
 		return nil, fmt.Errorf("tool call correlation is invalid")
 	}
@@ -51,12 +50,12 @@ func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb
 	if strings.TrimSpace(call.Name) == "" {
 		return nil, fmt.Errorf("tool name is required")
 	}
-	if call.WorkingDirectory != "" {
-		ctx = tool.ContextWithInvocation(ctx, tool.Invocation{WorkDir: call.WorkingDirectory})
-	}
-	ctx = output.ContextWithCallID(ctx, operationID)
+	ctx = tool.ContextWithInvocation(ctx, tool.Invocation{
+		WorkDir: call.WorkingDirectory, CallID: operationID,
+		SessionID: request.SessionId, TurnID: request.TurnId, Emitter: "aiscan.agent",
+	})
 	started := time.Now()
-	result, execErr := executeCall(ctx, executor, call, dataBus, operationID)
+	result, execErr := executeCall(ctx, executor, call, progressBus, operationID)
 	if result == nil {
 		result = &aop.ToolResult{}
 	}
@@ -73,10 +72,9 @@ func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb
 	}, nil
 }
 
-// executeCall runs the tool call. Tools with foreground capability stream
-// stdout lines as tool.data progress events on dataBus while running; all
-// other tools take the plain ExecuteTool path.
-func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall, dataBus *eventbus.Bus[output.ToolDataEvent], callID string) (*tool.Result, error) {
+// executeCall runs the tool call. Tools with foreground capability publish
+// ephemeral progress while running; all other tools take the plain ExecuteTool path.
+func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall, progressBus *eventbus.Bus[*toolpb.Progress], callID string) (*tool.Result, error) {
 	arguments := call.GetArguments().GetData()
 	if len(arguments) == 0 {
 		arguments = []byte("{}")
@@ -88,7 +86,7 @@ func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall,
 				if err != nil {
 					return nil, err
 				}
-				progress := newProgressStreamer(dataBus, call.Name, callID)
+				progress := newProgressStreamer(progressBus, call.Name, callID)
 				result, err := fg.RunForegroundTool(ctx, args.Command, commands.BashExecOptions{
 					Timeout:  time.Duration(args.Timeout) * time.Second,
 					OnOutput: progress.Write,
@@ -102,9 +100,9 @@ func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall,
 }
 
 // progressStreamer splits raw command output into lines and publishes each
-// non-blank line as a tool.data progress event.
+// non-blank line as ephemeral tool progress.
 type progressStreamer struct {
-	bus    *eventbus.Bus[output.ToolDataEvent]
+	bus    *eventbus.Bus[*toolpb.Progress]
 	tool   string
 	callID string
 	buf    []byte
@@ -113,7 +111,7 @@ type progressStreamer struct {
 // maxProgressBuf is the maximum buffer size before a progressStreamer flushes.
 const maxProgressBuf = 64 << 10
 
-func newProgressStreamer(bus *eventbus.Bus[output.ToolDataEvent], tool, callID string) *progressStreamer {
+func newProgressStreamer(bus *eventbus.Bus[*toolpb.Progress], tool, callID string) *progressStreamer {
 	return &progressStreamer{bus: bus, tool: tool, callID: callID}
 }
 
@@ -149,11 +147,7 @@ func (s *progressStreamer) emit(line string) {
 	if strings.TrimSpace(line) == "" {
 		return
 	}
-	s.bus.Emit(output.ToolDataEvent{
-		Tool:      s.tool,
-		Kind:      output.ToolDataProgress,
-		Data:      line,
-		CallID:    s.callID,
-		Timestamp: time.Now(),
+	s.bus.Emit(&toolpb.Progress{
+		Tool: s.tool, Text: line, CallId: s.callID, Timestamp: timestamppb.New(time.Now()),
 	})
 }

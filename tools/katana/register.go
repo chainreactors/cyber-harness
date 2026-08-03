@@ -13,7 +13,7 @@ func init() {
 		Capability: "katana",
 		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
 			logger := deps.GetLogger()
-			impl := New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithDataBus(deps.DataBus)
+			impl := New().WithLogger(logger).WithProxy(deps.ScannerProxy).WithEvents(deps.Events)
 			reg.Register(commands.Command{
 				Name: impl.Name(), Usage: impl.Usage(),
 				DescriptionPath: "aiscan://skills/aiscan/okf/easm/katana.md",

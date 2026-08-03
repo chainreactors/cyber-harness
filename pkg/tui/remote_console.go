@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/chainreactors/aiscan/agent"
@@ -35,7 +36,7 @@ func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 		return fmt.Errorf("terminal is nil")
 	}
 	agentOutput := NewAgentOutputWithWriters(option, terminal.Out, terminal.Err, terminal.Control == nil || terminal.Control.IsTerminal())
-	unsubscribe := subscribeAgentOutput(agentOutput, session, subscribers...)
+	unsubscribe := subscribeAgentOutput(agentOutput, appInfo, session, subscribers...)
 	defer unsubscribe()
 	repl := NewAgentConsoleWithTerminal(ctx, option, appInfo, session, agentOutput, terminal)
 	return repl.Start()
@@ -43,16 +44,29 @@ func RunAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 
 // subscribeAgentOutput filters the shared runtime bus by session ID so a
 // remote or local REPL cannot render sibling/subagent events accidentally.
-func subscribeAgentOutput(output *AgentOutput, session *agent.Agent, subscribers ...AOPEventSubscriber) func() {
+func subscribeAgentOutput(output *AgentOutput, appInfo AppInfo, session *agent.Agent, subscribers ...AOPEventSubscriber) func() {
 	if output == nil || session == nil || len(subscribers) == 0 || subscribers[0] == nil {
 		return func() {}
 	}
-	sessionID := session.SessionID()
 	return subscribers[0](func(event *aop.Event) {
-		if sessionID == "" || event.SessionId == sessionID {
+		sessionID := session.SessionID()
+		if appInfo.ActiveSessionID != nil {
+			sessionID = appInfo.ActiveSessionID()
+		}
+		if (sessionID == "" || event.SessionId == sessionID) && !isSessionBootstrapEvent(event) {
 			output.HandleEvent(event)
 		}
 	})
+}
+
+func isSessionBootstrapEvent(event *aop.Event) bool {
+	if event == nil || event.TurnId != "" {
+		return false
+	}
+	if message := event.GetMessage(); message != nil {
+		return strings.HasPrefix(message.Id, "m-")
+	}
+	return event.GetToolResult() != nil
 }
 
 type remoteTerminalWriter struct {

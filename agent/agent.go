@@ -281,6 +281,9 @@ func (a *Agent) LoadMessages(messages []*aop.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state.Messages = append([]*aop.Message(nil), messages...)
+	if a.Cfg.emitter != nil {
+		a.Cfg.emitter.observeMessages(messages)
+	}
 }
 
 func (a *Agent) validateContinue() error {
