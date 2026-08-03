@@ -542,7 +542,7 @@ jobs:
           [[ "${{ matrix.goos }}" == "windows" ]] && suffix=".exe"
           CGO_ENABLED=1 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
             go build -trimpath \
-            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite" \
+            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static" \
             -ldflags "-s -w" -buildvcs=false \
             -o "dist/full_${{ matrix.goos }}_${{ matrix.goarch }}${suffix}" ./cmd/aiscan
 

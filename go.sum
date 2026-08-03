@@ -175,8 +175,8 @@ github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 h1:cU3sGEODXZs
 github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0/go.mod h1:NSxGNMRWryAyrDzZpVwmujI22wbGw6c52bQOd5zEvyU=
 github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45 h1:wIKAvAPjQUXqAKDYG0UnpLTwn/+fwT7ipwFgNPxz88M=
 github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45/go.mod h1:ba7u/7/I9yV7TvuWj+VV9QYz9NmlLdh6UK9kxRRft+E=
-github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320 h1:gkcY9PramU2ZQZ9NWisdog4oMKaeNsd30er6Nr1pKvE=
-github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320/go.mod h1:4qC68vqWSuPTct3spuTrWBqCpm00mQ707JKLS1izVjI=
+github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6 h1:FwRFQILG9Q7N4pQ6uSSKEKwMNbea5WcOIscGfj3qaUY=
+github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6/go.mod h1:4qC68vqWSuPTct3spuTrWBqCpm00mQ707JKLS1izVjI=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744 h1:5Bj73ddSftvWEgjo3dEOUis1CuwPaX8JsSAIZCujfxE=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744/go.mod h1:Em8DiV1Rh59FCd9zN4RQBi3RnUt9yPWD/oxPEPTyXIk=
 github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186 h1:oKM8D7wYAl8k9zEpFVb7TOyeHmVvvxhKZE7qxvGd39U=
