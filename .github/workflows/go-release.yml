@@ -277,16 +277,16 @@ jobs:
             -o "${archive}"
           echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
           tar -xJf "${archive}" -C "${RUNNER_TEMP}"
-          echo "UPX=${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux/upx" >> "${GITHUB_ENV}"
+          echo "UPX_BIN=${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux/upx" >> "${GITHUB_ENV}"
 
       - name: Compress Windows amd64 binaries with UPX
         run: |
           set -euo pipefail
-          "${UPX}" --version
+          "${UPX_BIN}" --version
           for f in dist/build/*_windows_amd64.exe; do
             [ -f "$f" ] || continue
-            "${UPX}" "$f"
-            "${UPX}" -t "$f"
+            "${UPX_BIN}" "$f"
+            "${UPX_BIN}" -t "$f"
           done
 
       - name: Package archives
