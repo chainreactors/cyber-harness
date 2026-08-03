@@ -43,7 +43,9 @@ builds:
     main: ./cmd/aiscan
     binary: "{{ .ProjectName }}-full"
     env:
-      - CGO_ENABLED=0
+      # Full links the native libcstx runtime. The official release workflow
+      # builds each target on a matching native runner.
+      - CGO_ENABLED=1
     goos:
       - linux
       - darwin

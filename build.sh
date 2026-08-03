@@ -2,7 +2,7 @@
 
 # aiscan 构建脚本
 # 用法:
-#   ./build.sh                                  # 读取 aiscan.yaml，编译多平台可执行文件
+#   ./build.sh                                  # standard: 编译全部纯 Go 平台
 #   ./build.sh -g                               # 仅打印生成的 ldflags，不编译
 #   ./build.sh -o linux/amd64                   # 快速编译单一平台
 #   ./build.sh -o "linux/amd64 darwin/arm64"    # 编译指定平台
@@ -101,7 +101,7 @@ aiscan 构建脚本
   -g, --ldflags         仅打印生成的 ldflags，不编译
 
 构建:
-  -o OSARCH             目标平台，空格分隔 (默认: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64)
+  -o OSARCH             目标平台，空格分隔 (standard 默认全部平台，full 默认当前平台)
   --tags TAGS           额外 build tags，逗号分隔
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
@@ -133,14 +133,14 @@ Web Search:
   --verify-timeout SEC
 
 示例:
-  ./build.sh                                    # 读取 aiscan.yaml 编译全平台
+  ./build.sh                                    # standard: 编译全部纯 Go 平台
   ./build.sh -o linux/amd64                     # 快速编译单平台
   ./build.sh --config prod.yaml -o linux/amd64  # 使用生产配置编译
   ./build.sh --cyberhub-url http://10.0.0.1:9000 --cyberhub-key mykey
   ./build.sh --llm-provider openai --llm-base-url https://api.deepseek.com/v1 --llm-model deepseek-chat
   ./build.sh --embed                            # 嵌入资源的完整构建
   ./build.sh -g                                 # 打印 ldflags（用于自定义构建命令）
-  ./build.sh --profile full -o linux/amd64      # full 构建 (全部扫描器 + browser + recon + ioa)
+  ./build.sh --profile full                     # full: 为当前平台启用 CGO 构建
 HELP
             exit 0
             ;;
@@ -246,6 +246,7 @@ echo "profile:  $PROFILE"
 # ─── Profile ────────────────────────────────────────────────────
 
 AISCAN_MAIN="./cmd/aiscan"
+CGO_MODE=0
 
 case "$PROFILE" in
     mini) ;;
@@ -253,6 +254,7 @@ case "$PROFILE" in
         EXTRA_TAGS="full${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
         AISCAN_BIN="aiscan-full"
+        CGO_MODE=1
         ;;
 esac
 
@@ -279,10 +281,17 @@ fi
 
 # ─── 目标平台 ────────────────────────────────────────────────────
 
+HOST_OS=$(go env GOOS)
+HOST_ARCH=$(go env GOARCH)
 if [ -z "$OSARCH" ]; then
-    OSARCH="$DEFAULT_OSARCH"
+    if [ "$PROFILE" = "full" ]; then
+        OSARCH="${HOST_OS}/${HOST_ARCH}"
+    else
+        OSARCH="$DEFAULT_OSARCH"
+    fi
 fi
 echo "targets:  $OSARCH"
+echo "cgo:      $CGO_MODE"
 echo "output:   $OUTPUT_DIR"
 echo ""
 
@@ -296,8 +305,14 @@ build_one() {
     [ "$goos" = "windows" ] && suffix=".exe"
     local output="${OUTPUT_DIR}/${name}_${goos}_${goarch}${suffix}"
 
+    if [ "$CGO_MODE" = "1" ] && { [ "$goos" != "$HOST_OS" ] || [ "$goarch" != "$HOST_ARCH" ]; }; then
+        echo "full builds use native libcstx and must run on the target platform: requested ${goos}/${goarch}, host ${HOST_OS}/${HOST_ARCH}" >&2
+        echo "build each full target on a matching runner, as done by .github/workflows/go-release.yml" >&2
+        return 1
+    fi
+
     echo "  ${goos}/${goarch} -> ${output}"
-    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+    CGO_ENABLED="$CGO_MODE" GOOS="$goos" GOARCH="$goarch" \
         go build -trimpath -tags "$TAGS" -ldflags "$LDFLAGS" -buildvcs=false -o "$output" "$main_pkg"
 }
 
