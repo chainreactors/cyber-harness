@@ -1,5 +1,215 @@
 # Changelog
 
+## v0.4.0 — Web 控制台升级 + Agent 上下文管理 + SCO 标准化输出 + 统一接入 API
+
+### New Features
+
+**Web 工作台（首次正式发布）**
+
+v0.4.0 是 Web 工作台的首个正式版本。它不是单独的扫描结果页面，而是 aiscan 的浏览器入口：用户可以在同一个界面中选择 Agent、发起自然语言任务、观察工具执行、查看扫描资产与漏洞证据，并继续围绕已有结果追问。界面支持中英文、明暗主题和移动端访问，会话、扫描、配置和资产统一持久化到 SQLite，刷新页面或重启服务后仍可继续工作。
+
+- 集成 Agent 对话、会话管理、扫描结果、资产中心、发现列表和配置中心
+- 支持中英文切换、明暗主题和移动端布局
+- 会话、扫描、配置和资产通过 SQLite 持久化
+- 默认启动内嵌本地 Agent，并自动生成 access key
+
+Full 版默认同时启动 Web 服务和一个本地 Agent，并自动生成 access key。最小启动命令只有一条：
+
+```bash
+aiscan-full web
+```
+
+**远程 Node 接入**
+
+当扫描需要在其他主机、网络区域或专用执行环境中运行时，Web 可以作为统一 Hub 接收远程 Node。Node 上线后会向 Web 注册自己的 scanner、runtime command 和 skill，用户可在页面中选择执行节点；工具输出、PTY 终端、上传文件和扫描结果仍回到当前会话。下面是一个最小的远程接入示例：
+
+- 自动发现远程 Node，并展示名称、版本、在线状态和忙闲状态
+- 动态同步 Node 可用的 scanner、runtime command 和 skill
+- 支持在页面中选择任务执行节点
+- 自动挂载远程 Runtime REPL 和 PTY 终端
+- QuickConnect 可生成不同系统、架构和下载线路的安装接入命令
+- `--no-agent` 可让 Web 只作为 Hub 运行，不启动本地 Agent
+
+```bash
+# Web 所在主机
+aiscan-full web --addr 0.0.0.0:8080 --token demo
+
+# Node 所在主机
+aiscan-full agent --server-url http://demo@server.example:8080 --node-name worker-01
+```
+
+**Agent 会话与执行过程**
+
+Web 会把 Agent 的回答、thinking、工具参数、工具结果、Goal Evaluation、上下文压缩和 token 用量组织成一条可恢复的时间线。用户可以创建和切换会话、停止正在运行的任务、上传任务文件，并直接执行 `/status`、`/compact`、`/eval`、`/loop` 等 Runtime 命令。远程 Node 被发现后，其 Runtime REPL 和 PTY 终端会自动挂载到页面，不需要额外建立终端连接。
+
+- 创建、切换、重置和删除 Agent 会话
+- 流式展示回答、thinking、工具调用、工具结果和 token 用量
+- 展示 Goal Evaluation、上下文压缩、子 Agent 和扫描进度等专用事件
+- 支持停止运行中的任务，以及断线后的历史恢复和事件续传
+- 支持上传文件并交给 Agent 使用
+- 支持在 Web 中执行 Runtime slash command 和终端命令
+
+**扫描、资产与报告**
+
+扫描任务在对话中直接显示进度和结果，不再跳转到独立扫描页面。每次扫描提供资产、发现和报告三个视图：资产视图按主机、端口、应用和 URL 展示攻击面；发现视图集中展示漏洞、弱口令和敏感信息；报告视图根据结构化结果生成中文或英文侦察报告。gogo、spray、neutron、katana、proton 等独立工具调用也会转换为同一套 SCO 数据，因此可以继续通过分类 `@` 选择器把某个资产或漏洞引用到后续对话中。
+
+- 在聊天时间线中展示扫描进度、完成状态和结构化结果
+- 按主机、端口、服务、应用、URL 和漏洞展示 SCO 资产关系
+- 分离同一主机的 HTTP/HTTPS 资产，并显示内容类型和重定向地址
+- 独立 scanner 工具调用同样生成结构化资产视图
+- 支持导入外部 SCO 数据，以及按类型浏览和统计资产
+- 支持通过分类 `@` 选择器在对话中引用资产或漏洞
+- 支持按当前界面语言生成中文或英文侦察报告
+
+**配置与协作**
+
+Web 配置中心用于管理多个 LLM profile，并显式选择当前模型。Provider、Base URL、API key、模型、代理、上下文窗口和最大输出可以在页面中修改和探活，更新后热重载到已连接的 Agent。Web 同时提供 IOA Console，用于查看协作空间、在线节点、消息和线程；如果只需要轻量 IOA 服务，也可以使用顶层 `aiscan serve` 启动。
+
+- 创建和管理多个 LLM profile，并显式切换当前 profile
+- 提供常用 Provider 预设及自定义 OpenAI/Anthropic 兼容端点
+- 配置模型、代理、上下文窗口和最大输出，并执行真实连通性检查
+- 配置变更事务化保存并热重载到在线 Agent
+- IOA Console 支持查看空间、节点、消息和上下文线程
+- Web 与 IOA 共用 access key，也可为 Agent 指定独立 IOA 地址
+
+**Agent 上下文与输出控制**
+
+这组功能面向长时间、跨多轮的安全评估任务。AIScan 会根据模型的真实上下文窗口管理输入与输出预算，在接近上限时压缩历史，避免任务因为 context overflow 中断；同时允许用户控制终端中展示多少 thinking 和工具细节，在交互可见性与输出噪声之间取得平衡。
+
+- 新增 `context_window` 和 `max_tokens` 配置；请求会根据剩余上下文动态收紧输出上限，避免无效请求和上下文溢出
+- 新增 `/compact [focus]` 手动压缩会话；上下文接近上限时自动压缩，使用率超过 80% 时提示用户
+- `-p/--prompt` 现在可直接传入已有文件路径并读取文件内容
+- 新增 `output` 配置，可分别控制 reasoning、工具参数、工具结果、实时状态和 token 用量的展示；继续兼容 `-q`、`-v`、`-vv` 与 `Ctrl+O`
+
+```bash
+# 从文件读取任务描述
+aiscan agent -p ./assessment.md -i https://target.example
+
+# 交互模式中压缩上下文，并指定摘要重点
+/compact 保留已确认漏洞、凭据和待验证目标
+```
+
+```yaml
+llm:
+  context_window: 128000
+  max_tokens: 16384
+
+output:
+  preset: verbose       # default、verbose、full
+  tool_results: preview # hidden、preview、full
+```
+
+**标准化扫描结果**
+
+SCO 标准化输出用于解决不同 scanner 各自返回独立格式、结果难以关联和复用的问题。无论结果来自完整 scan 流水线还是单独执行某个 scanner，AIScan 都会把主机、端口、应用、URL 和漏洞转换为统一资产节点，供 Web 展示、报告生成、外部查询和后续 Agent 分析共同使用。
+
+- 扫描流水线及 gogo、spray、neutron、katana、proton 等独立工具输出接入 SCO 标准化资产模型
+- Web 端可按主机、端口、应用、URL 和漏洞关联展示结果，独立 scanner 工具调用不再只显示原始文本
+- 新增 SCO 数据导入、查询和统计能力，便于复用外部扫描结果
+
+**OKF 知识文档与报告结构**
+
+OKF 风格文档用于组织 Agent 的工具知识和最终交付物。工具说明不再作为大量独立 skill 一次性注入上下文，而是形成带索引和元数据的知识包，在真正调用某个工具时按需加载；扫描报告也使用相同思路，把总览、单个 Finding 和证据来源组织成可以追踪和继续处理的文档集合。
+
+- 原有分散的 scanner/runtime skill 收敛为单一 `aiscan` skill，工具文档按 OKF 风格拆分为可按需加载的 concept 文件
+- 知识包分为 `easm` 和 `runtime` 两个 domain，每个目录包含 `index.md` 和带 YAML frontmatter 的工具 playbook
+- Agent 调用工具时可通过 `aiscan://skills/aiscan/okf/...` 按需读取对应文档，避免启动时加载全部工具说明
+- 安全报告改为 OKF 风格目录：`index.md` 提供摘要，每个确认漏洞或重要线索写入独立的 `findings/<id>.md`
+- Finding frontmatter 记录 `status`、`severity`、`verified`、`sources` 和 `tags`，确认漏洞优先引用 MITM 请求/响应与实际执行过的 nuclei/neutron PoC
+
+```text
+skills/aiscan/
+├── SKILL.md
+├── okf/
+│   ├── index.md
+│   ├── easm/
+│   │   ├── index.md
+│   │   ├── scan.md
+│   │   ├── gogo.md
+│   │   ├── spray.md
+│   │   └── neutron.md
+│   └── runtime/
+│       ├── index.md
+│       ├── tmux.md
+│       ├── proxy.md
+│       ├── mitm.md
+│       └── search.md
+└── reference/
+    └── report.md
+```
+
+生成的报告目录示例：
+
+```text
+report/
+├── index.md
+└── findings/
+    ├── shiro-rce.md
+    └── exposed-credential.md
+```
+
+**外部接入 API**
+
+外部接入 API 面向需要把 aiscan 嵌入其他平台、桌面客户端或自动化系统的开发者。实时对话和工具事件使用长连接 Application WebSocket，管理查询使用 ConnectRPC，两者共享 protobuf 类型和 access key，避免第三方系统依赖 Web 页面或解析终端文本。
+
+- 实时 Agent 会话统一提供基于 protobuf 的 Application WebSocket，支持 Session/Turn、流式消息、工具调用、文件、PTY、取消与断线续传
+- 会话历史、扫描、配置、Agent、系统状态和 SCO 管理统一提供 ConnectRPC API
+- 新增 protobuf 字段文档、跨语言代码生成说明，以及 ACP client/server、ConnectRPC 和 RMCP 工具节点示例
+
+```bash
+# 启动带内嵌 Agent 的服务
+aiscan-full web --addr 127.0.0.1:8080 --token demo
+
+# Application WebSocket：创建会话、发送消息并消费流式事件
+go run ./examples/acp/client --server http://127.0.0.1:8080 --token demo --node local -p "检查当前可用工具"
+
+# ConnectRPC：查询会话与持久化事件
+go run ./examples/acp/connectrpc --server http://127.0.0.1:8080 --token demo
+```
+
+### Improvements
+
+**LLM 配置与可靠性**
+
+- Web 配置页支持多个 LLM profile、显式选择当前 profile、Provider 预设、上下文窗口和最大输出设置
+- 配置优先级与 Provider 协议推断更加明确，环境变量不会再意外覆盖已保存的 Base URL 或模型
+- LLM 重试、退避和上下文溢出恢复更加稳定；无剩余输出空间时返回包含窗口和用量信息的明确错误
+
+**扫描与 Agent 体验**
+
+- Agent 默认加载人工安全评估规则，减少只给出扫描结论而缺少证据验证的情况
+- Proton 文本输出新增 `[match:<name>]` / `[extract]` 分级标签，并分别统计 match 与 extract 数量
+- `bash` 工具支持为单次调用指定 timeout
+- CLI 各子命令独立展示所属参数，减少 scanner 参数与全局参数混淆
+- Web 服务启动更快，远程 Agent 上线后会自动挂载 Runtime REPL；终端重连、会话恢复、扫描取消和事件续传更加稳定
+
+### Bug Fixes
+
+- 修复 Proton 预过滤导致 private key、JWT、Stripe、数据库连接串等大量规则漏报的问题
+- 修复 Proton JSON 输出字段不一致，统一为 `template-id`、`template-name` 等 nuclei 风格字段
+- 修复 Neutron JSON 结果缺少实际请求和响应，漏洞复现现在可展示完整证据
+- 修复同一主机的 HTTP/HTTPS 资产被错误合并，并补充 `content_type`、`redirect_url` 信息
+- 修复 gogo 向 neutron 注入模板后缺少 ChainExec，导致开放主机上的 exploit 扫描 panic 并提前终止的问题
+- 为 scanner 和工具执行增加统一 panic recovery，单个工具异常不再直接中断整个 Agent 或扫描流程
+- 修复代理处理 HTTP CONNECT 时可能丢失隧道首批数据的问题
+- 修复 Web 配置热重载部分生效、无效 LLM profile 可保存、扫描取消状态不完整等问题
+- 修复 Web 会话事件订阅间隙、历史回放覆盖实时消息、终端重连状态竞争和多行命令输出折叠问题
+- 统一会话持久化为 AOP JSONL，并在 `/clear`、`/compact` 和恢复会话时创建可追踪的 continuation，避免覆盖已有记录
+- 修复 Web Runtime 命令和 Turn 健康状态不同步，并扩展 `/status` 的 LLM、工具、扫描器和 Skill 健康信息
+- 修复 TUI 补全、滚动区域、运行日志和双击 Ctrl+C 退出不稳定的问题
+
+### Breaking Changes
+
+- `llm.providers` 现在是可手动切换的 profile 列表，不再在请求失败后自动切换 Provider；使用 `llm.active_profile`、Web 设置页或 `/provider set` 显式选择
+- Agent 连接 AIScan Web/AOP 统一使用 `--server-url`；旧 `--web-url` 仅作为隐藏兼容别名。IOA 仍可通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
+- 官方 Release 不再单独发布 `aiscan-agent`，请统一使用 `aiscan agent`
+- 独立的 gogo、spray、neutron、proton 等顶层 tool skill 已收敛到 `aiscan` skill；工具细节改为调用时加载 `okf/easm` 或 `okf/runtime` concept
+- 报告输出由单一 Markdown 内容调整为 `index.md` + `findings/<id>.md` 的 OKF 风格 bundle
+- 外部 Web/Agent 接入迁移到 protobuf Application WebSocket 与 ConnectRPC；依赖旧 JSON WebSocket、管理 REST 或旧 endpoint 的客户端需要迁移
+- Proton JSON 字段从下划线命名迁移为连字符命名，例如 `template_id` → `template-id`
+
+---
+
 ## v0.2.8 — 外部 API 工具错误治理 + 文件上传 + Agent 提示优化
 
 ### New Features
