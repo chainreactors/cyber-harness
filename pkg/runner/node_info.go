@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/user"
@@ -145,6 +146,10 @@ func AgentStatus(option *cfg.Option, app *App) *aop.AgentStatus {
 		status.Provider = app.ProviderConfig.Provider
 		status.Model = app.ProviderConfig.Model
 		status.Bound = app.IOAClient != nil && app.IOAClient.Bound()
+		health := app.LLMHealth()
+		if health.State == LLMHealthFailed || (health.State == LLMHealthNotConfigured && health.Error != "") {
+			status.ConfigError = statusOneLine(health.Error, 240)
+		}
 	}
 	return status
 }
@@ -174,9 +179,8 @@ func ReloadRuntimeConfig(distribute *types.DistributeConfig, rt *AgentRuntime, a
 		return nil, "", err
 	}
 	model := resolved.Model
-	app.Provider = provider
-	app.ProviderConfig = *resolved
 	rt.SetProvider(provider, *resolved)
+	app.setLLMHealth(logLLMProbeStatus(context.Background(), *resolved, logger))
 	if option != nil {
 		ApplyResolvedProviderOptions(option, *resolved)
 	}

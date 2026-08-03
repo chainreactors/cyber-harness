@@ -245,6 +245,7 @@ interface Props {
   scanResults: Map<string, SCONode[]>
   isThinking: boolean
   isBusy: boolean
+  canPause: boolean
   error: string
   hasActiveSession: boolean
   activeSessionID: string | null
@@ -268,6 +269,7 @@ export default function ChatPanel({
   scanResults,
   isThinking,
   isBusy,
+  canPause,
   error,
   activeSessionID,
   hasActiveSession,
@@ -696,7 +698,8 @@ export default function ChatPanel({
                   }
                   onSend={handleSendWithAttachments}
                   onPause={onPause}
-                  busy={isBusy}
+                  busy={canPause}
+                  disabled={isBusy && !canPause}
                   commands={chatCommands}
                   toolCommands={toolCommands}
                   mentionables={mentionables}
