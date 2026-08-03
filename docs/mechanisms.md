@@ -243,9 +243,11 @@ AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通�
 
 ### 命令展示边界
 
-跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web timeline 在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不再处理 Markdown 或终端格式。
+跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web 展示层和 `-F` 格式化入口只在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不处理 Markdown 或终端格式。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/types/extensions.go`, `core/output/timeline.go`
+Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，经同一个 EventBus 流式追加到 ProtoJSONL。`-r` 从该文件恢复上下文并继续追加；`/resume` 关闭旧 session 后切换到目标文件；`/clear` 和 `/compact` 仅在当前文件内创建 continuation session。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
+
+**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/runner/session_jsonl.go`
 
 ---
 

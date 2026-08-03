@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/output"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 )
 
 type artifactTestStore struct {
@@ -27,9 +27,9 @@ func TestCSTXArtifactIngestorNormalizesOnServer(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 
-	err = ingestor.IngestArtifact(context.Background(), "scan-1", output.ToolArtifact{
-		Tool: "gogo",
-		Data: json.RawMessage(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`),
+	err = ingestor.IngestArtifact(context.Background(), &toolpb.Artifact{
+		CallId: "scan-1", Tool: "gogo",
+		Data: []byte(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`),
 	})
 	if err != nil {
 		t.Fatal(err)

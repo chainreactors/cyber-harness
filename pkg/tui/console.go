@@ -461,7 +461,9 @@ func (r *AgentConsole) handleRuntimeInputLine(line string) (bool, error) {
 			return r.appInfo.Run(ctx, prompt, false)
 		})
 	}
-	return false, r.appInfo.Command(r.ctx, text)
+	err := r.appInfo.Command(r.ctx, text)
+	r.refreshRuntimeSession()
+	return false, err
 }
 
 func runtimeTUICommand(line string) bool {
@@ -945,6 +947,20 @@ func (r *AgentConsole) ensureController() *interactiveRunController {
 	return r.controller
 }
 
+func (r *AgentConsole) refreshRuntimeSession() {
+	if r == nil || r.appInfo.ActiveAgent == nil {
+		return
+	}
+	active := r.appInfo.ActiveAgent()
+	if active == nil || active == r.agent {
+		return
+	}
+	r.agent = active
+	if r.controller != nil {
+		r.controller.SetSession(active)
+	}
+}
+
 func (r *AgentConsole) syncEvalToController() {
 	if r.controller == nil {
 		return
@@ -1162,12 +1178,15 @@ func (r *AgentConsole) resumeSession(path string) error {
 	if err != nil {
 		return err
 	}
-	data, err := agent.LoadCheckpoint(path)
+	if r.appInfo.Resume == nil {
+		return fmt.Errorf("session resume is unavailable")
+	}
+	messages, err := r.appInfo.Resume(r.ctx, path)
 	if err != nil {
 		return err
 	}
-	r.agent.LoadMessages(data.Messages)
-	fmt.Fprintf(r.stdout, "Resumed %d messages from %s\n", len(data.Messages), path)
+	r.refreshRuntimeSession()
+	fmt.Fprintf(r.stdout, "Resumed %d messages from %s\n", messages, path)
 	return nil
 }
 
@@ -1192,12 +1211,11 @@ func (r *AgentConsole) renderSessions() (string, error) {
 	return r.renderPanel("sessions", renderHelpRows(rows, colorEnabled), colorEnabled), nil
 }
 
-func (r *AgentConsole) listSavedSessions() ([]agent.CheckpointInfo, error) {
-	dir := r.sessionDir
-	if dir == "" {
-		dir = cfg.DataSubDir("sessions")
+func (r *AgentConsole) listSavedSessions() ([]SavedSession, error) {
+	if r.appInfo.ListSessions == nil {
+		return nil, fmt.Errorf("session listing is unavailable")
 	}
-	return agent.ListCheckpoints(dir)
+	return r.appInfo.ListSessions()
 }
 
 func (r *AgentConsole) resumeSessionInteractive() error {
@@ -1244,15 +1262,25 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 	if selector == "" {
 		return "", fmt.Errorf("usage: /resume [list|<path>|#index]")
 	}
-	sessions, err := r.listSavedSessions()
-	if err != nil {
-		return "", err
+	if strings.ContainsAny(selector, `/\`) || strings.EqualFold(filepath.Ext(selector), ".jsonl") {
+		return selector, nil
 	}
 	if idx, err := strconv.Atoi(selector); err == nil {
+		sessions, listErr := r.listSavedSessions()
+		if listErr != nil {
+			return "", listErr
+		}
 		if idx < 1 || idx > len(sessions) {
 			return "", fmt.Errorf("session index out of range: %d", idx)
 		}
 		return sessions[idx-1].Path, nil
+	}
+	sessions, err := r.listSavedSessions()
+	if err != nil {
+		if r.appInfo.ListSessions == nil {
+			return selector, nil
+		}
+		return "", err
 	}
 	for _, session := range sessions {
 		if selector == session.Path || selector == filepath.Base(session.Path) {
@@ -1262,12 +1290,12 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 	return selector, nil
 }
 
-func sessionDetail(session agent.CheckpointInfo) string {
+func sessionDetail(session SavedSession) string {
 	parts := make([]string, 0, 4)
 	if ts := session.SortTime(); !ts.IsZero() {
 		parts = append(parts, ts.Local().Format("2006-01-02 15:04:05"))
 	}
-	model := strings.Trim(strings.TrimSpace(session.Provider)+"/"+strings.TrimSpace(session.Model), "/")
+	model := strings.TrimSpace(session.Model)
 	if model != "" {
 		parts = append(parts, model)
 	}

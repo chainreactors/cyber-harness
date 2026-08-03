@@ -14,9 +14,12 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/aiscan/tools/scan/pipeline"
@@ -1438,43 +1441,10 @@ func TestStructuredResultKeepsScannerValuesInsideCollector(t *testing.T) {
 	}
 }
 
-func TestScanOutputFileContainsRawRecordsWithoutChangingStdout(t *testing.T) {
-	sprayEng, _ := spray.NewEngine(nil)
-	cmd := New(&engine.Set{Spray: sprayEng})
-	file := filepath.Join(t.TempDir(), "scan.txt")
-	var stdout bytes.Buffer
-	details, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1", "-f", file}, Stdout: &stdout, Stderr: &stdout})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	// Structured scan records flow through the artifact stream; Run no longer
-	// returns a second result envelope.
-	if details != nil {
-		t.Fatalf("Run() returned unexpected details: %#v", details)
-	}
-	out := stdout.String()
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("read output file: %v", err)
-	}
-	fileOut := string(data)
-	if hasANSI(fileOut) {
-		t.Fatalf("file output contains ANSI: %q", fileOut)
-	}
-	if strings.Contains(fileOut, "[summary]") || strings.Contains(fileOut, "scan_start") || strings.Contains(fileOut, "scan_end") {
-		t.Fatalf("raw record file contains presentation data: %q", fileOut)
-	}
-	if !strings.Contains(output.StripANSI(out), "[summary] completed") {
-		t.Fatalf("stdout output missing summary: %q", out)
-	}
-	if strings.Contains(out, "[scan.web] ") {
-		t.Fatalf("stdout output should not repeat streamed events: %q", out)
-	}
-	if !strings.Contains(output.StripANSI(out), "http://127.0.0.1:1") {
-		t.Fatalf("stdout missing event line: %q", out)
-	}
-	if strings.Contains(output.StripANSI(out), "type=web") {
-		t.Fatalf("stdout contains key/value pollution: %q", out)
+func TestScanCommandDoesNotExposeIndependentFileWriter(t *testing.T) {
+	usage := Usage()
+	if strings.Contains(usage, "--file") || strings.Contains(usage, "/file") || strings.Contains(usage, "Write raw scanner records") {
+		t.Fatalf("scan usage still exposes a side-channel file writer:\n%s", usage)
 	}
 }
 
@@ -1684,16 +1654,18 @@ func TestCleanupGogoTempFilesIgnoresMissingFile(t *testing.T) {
 }
 
 func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
-	bus := eventbus.New[output.ToolDataEvent]()
-	cmd := New(&engine.Set{}, WithDataBus(bus))
+	bus := eventbus.New[*aop.Event]()
+	cmd := New(&engine.Set{}, WithEvents(bus))
 
-	var events []output.ToolDataEvent
-	unsub := bus.Subscribe(func(event output.ToolDataEvent) {
+	var events []*aop.Event
+	unsub := bus.Subscribe(func(event *aop.Event) {
 		events = append(events, event)
 	})
 	defer unsub()
 
-	ctx := output.ContextWithCallID(context.Background(), "scan-call-1")
+	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{
+		CallID: "scan-call-1", SessionID: "scan-session", TurnID: "scan-turn", Emitter: "scan",
+	})
 	cmd.emitStructuredData(ctx, &output.ScanResult{
 		GOGO: []*parsers.GOGOResult{{Ip: "127.0.0.1", Port: "8080", Protocol: "http"}},
 		Spray: []*parsers.SprayResult{{
@@ -1701,18 +1673,19 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 		}},
 	})
 
-	if len(events) != 2 {
-		t.Fatalf("events = %d, want 2: %#v", len(events), events)
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3: %#v", len(events), events)
 	}
-	if events[0].Tool != "gogo" || events[0].Kind != output.ToolDataService {
-		t.Fatalf("service event = %#v", events[0])
+	wants := []struct{ tool, kind string }{
+		{"gogo", toolpb.ArtifactKindService}, {"spray", toolpb.ArtifactKindWeb}, {"scan", toolpb.ArtifactKindSummary},
 	}
-	if events[1].Tool != "spray" || events[1].Kind != output.ToolDataWeb {
-		t.Fatalf("web event = %#v", events[1])
-	}
-	for _, event := range events {
-		if event.CallID != "scan-call-1" {
-			t.Fatalf("call id = %q, want scan-call-1", event.CallID)
+	for index, event := range events {
+		artifact := new(toolpb.Artifact)
+		if event.GetExtension() == nil || event.GetExtension().UnmarshalTo(artifact) != nil {
+			t.Fatalf("artifact event = %#v", event)
+		}
+		if artifact.Tool != wants[index].tool || artifact.Kind != wants[index].kind || artifact.CallId != "scan-call-1" {
+			t.Fatalf("artifact = %#v, want %#v", artifact, wants[index])
 		}
 	}
 }

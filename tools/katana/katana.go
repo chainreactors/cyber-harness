@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -51,8 +51,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
-	c.DataBus = bus
+func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+	c.Events = events
 	return c
 }
 
@@ -162,7 +162,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	options.OnResult = func(r katanaoutput.Result) {
 		collector.collect(&r)
 		if r.Request != nil && r.Request.URL != "" {
-			c.EmitDataCtx(ctx, "katana", output.ToolDataWeb, r.Request.URL, &r)
+			c.EmitArtifactCtx(ctx, "katana", toolpb.ArtifactKindWeb, r.Request.URL, &r)
 		}
 	}
 

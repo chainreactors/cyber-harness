@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/chainreactors/aiscan/agent"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -36,7 +35,6 @@ type flags struct {
 	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
 	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
-	OutputFile      string   `short:"f" long:"file" description:"Write raw scanner records as JSON Lines"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
 	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
 	Threads         int      // derived from Thread; not a CLI flag
@@ -186,31 +184,36 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	result := coll.StructuredResult()
 	c.emitStructuredData(ctx, result)
-	if flags.OutputFile != "" {
-		raw, outputErr := coll.JSONLines()
-		if outputErr != nil {
-			c.Logger.Errorf("scan output file: %s", outputErr)
-		} else if err := writeOutputFile(flags.OutputFile, raw); err != nil {
-			c.Logger.Errorf("%s", err.Error())
-		}
-	}
 	return out, result, nil
 }
 
 func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanResult) {
-	if result == nil || c.DataBus == nil {
+	if result == nil || c.Events == nil {
 		return
 	}
 	for _, service := range result.GOGO {
 		if service != nil {
-			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, service.GetTarget(), service)
+			c.EmitArtifactCtx(ctx, "gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
 		}
 	}
 	for _, probe := range result.Spray {
 		if probe != nil {
-			c.EmitDataCtx(ctx, "spray", output.ToolDataWeb, probe.UrlString, probe)
+			c.EmitArtifactCtx(ctx, "spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
 		}
 	}
+	for i := range result.Loots {
+		loot := result.Loots[i]
+		kind := loot.Kind
+		if kind == "" {
+			kind = toolpb.ArtifactKindVuln
+		}
+		c.EmitArtifactCtx(ctx, "scan", kind, loot.Target, &loot)
+	}
+	for i := range result.Errors {
+		scanErr := result.Errors[i]
+		c.EmitArtifactCtx(ctx, "scan", toolpb.ArtifactKindError, scanErr.Source, &scanErr)
+	}
+	c.EmitArtifactCtx(ctx, "scan", toolpb.ArtifactKindSummary, "", &result.Summary)
 }
 
 var scanFileFlags = map[string]bool{
@@ -221,29 +224,4 @@ var scanFileFlags = map[string]bool{
 
 func (c *Command) resolveRelativePaths(args []string) []string {
 	return toolargs.ResolveRelativePaths(args, scanFileFlags, c.WorkDir)
-}
-
-func writeOutputFile(path, content string) error {
-	path = filepath.Clean(path)
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("scan output file: create directory: %w", err)
-		}
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("scan output file: %w", err)
-	}
-	if _, err := io.WriteString(f, content); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("scan output file: write: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("scan output file: sync: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("scan output file: close: %w", err)
-	}
-	return nil
 }

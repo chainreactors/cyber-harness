@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -38,8 +38,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
-	c.DataBus = bus
+func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+	c.Events = events
 	return c
 }
 
@@ -92,7 +92,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 			return c.engine.Init()
 		},
 		OnResult: func(r *parsers.GOGOResult) {
-			c.EmitDataCtx(ctx, "gogo", output.ToolDataService, r.GetTarget(), r)
+			c.EmitArtifactCtx(ctx, "gogo", toolpb.ArtifactKindService, r.GetTarget(), r)
 		},
 	}
 	if err := gogocore.RunWithArgs(ctx, args, opts); err != nil {

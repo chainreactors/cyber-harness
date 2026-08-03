@@ -132,13 +132,10 @@ type Config struct {
 	TokenBudget      int
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              EventEmitter
+	Bus              aop.EventEmitter
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
-	Hooks *hooks.Registry
-	// OnRunEnd fires once per run with the final result — replaces the old
-	// EventAgentEnd Messages subscription for session persistence.
-	OnRunEnd         func(*Result)
+	Hooks            *hooks.Registry
 	BeforeToolCall   func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
 	AfterToolCall    func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
 	MaxTurns         int
@@ -167,21 +164,21 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config             { c.Provider = p; return c }
-func (c Config) WithTools(t tool.Executor) Config           { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config                  { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config           { c.SystemPrompt = s; return c }
-func (c Config) WithMessages(msgs []*aop.Message) Config    { c.Messages = msgs; return c }
-func (c Config) WithStream(s bool) Config                   { c.Stream = s; return c }
-func (c Config) WithInbox(ib inbox.Inbox) Config            { c.Inbox = ib; return c }
-func (c Config) WithLogger(l telemetry.Logger) Config       { c.Logger = l; return c }
-func (c Config) WithBus(b EventEmitter) Config { c.Bus = b; return c }
-func (c Config) WithMaxTokens(n int) Config                 { c.MaxTokens = n; return c }
-func (c Config) WithContextWindow(n int) Config             { c.ContextWindow = n; return c }
-func (c Config) WithTemperature(t float64) Config           { c.Temperature = &t; return c }
-func (c Config) WithMaxRetries(n int) Config                { c.MaxRetries = n; return c }
-func (c Config) WithTokenBudget(n int) Config               { c.TokenBudget = n; return c }
-func (c Config) WithExpander(e *inbox.Expander) Config      { c.Expander = e; return c }
+func (c Config) WithProvider(p Provider) Config          { c.Provider = p; return c }
+func (c Config) WithTools(t tool.Executor) Config        { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config               { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config        { c.SystemPrompt = s; return c }
+func (c Config) WithMessages(msgs []*aop.Message) Config { c.Messages = msgs; return c }
+func (c Config) WithStream(s bool) Config                { c.Stream = s; return c }
+func (c Config) WithInbox(ib inbox.Inbox) Config         { c.Inbox = ib; return c }
+func (c Config) WithLogger(l telemetry.Logger) Config    { c.Logger = l; return c }
+func (c Config) WithBus(b aop.EventEmitter) Config       { c.Bus = b; return c }
+func (c Config) WithMaxTokens(n int) Config              { c.MaxTokens = n; return c }
+func (c Config) WithContextWindow(n int) Config          { c.ContextWindow = n; return c }
+func (c Config) WithTemperature(t float64) Config        { c.Temperature = &t; return c }
+func (c Config) WithMaxRetries(n int) Config             { c.MaxRetries = n; return c }
+func (c Config) WithTokenBudget(n int) Config            { c.TokenBudget = n; return c }
+func (c Config) WithExpander(e *inbox.Expander) Config   { c.Expander = e; return c }
 func (c Config) WithTransformContext(fn TransformContextFunc) Config {
 	c.TransformContext = fn
 	return c
@@ -191,7 +188,6 @@ func (c Config) WithSessionID(id string) Config             { c.SessionID = id; 
 func (c Config) WithTurnID(id string) Config                { c.TurnID = id; return c }
 func (c Config) WithAgentName(name string) Config           { c.AgentName = name; return c }
 func (c Config) WithHooks(r *hooks.Registry) Config         { c.Hooks = r; return c }
-func (c Config) WithOnRunEnd(fn func(*Result)) Config       { c.OnRunEnd = fn; return c }
 func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
 	c.LoopScheduler = s
 	return c

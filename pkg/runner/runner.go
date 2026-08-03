@@ -3,8 +3,11 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -30,31 +33,33 @@ import (
 // ---------------------------------------------------------------------------
 
 type AgentRuntime struct {
-	app            *App
-	nodeName       string
-	systemPrompt   string
-	option         *cfg.Option
-	config         agent.Config
-	bus            *eventbus.Bus[*aop.Event]
-	sessionEvents  *sessionEmitter
-	output         RunOutput
-	configFile     string
-	resumeMessages []*aop.Message
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.RWMutex
-	sessions       map[string]*sessionState
-	runs           map[string]*Run
-	requestSeq     uint64
-	closeOnce      sync.Once
-	wg             sync.WaitGroup
-	operations     sync.WaitGroup
-	namespaceMux   *aop.NamespaceMux
-	ptyManager     *tmuxpkg.Manager
-	replMode       REPLMode
-	maxPending     int
-	ownsApp        bool
-	cleanup        func()
+	app             *App
+	nodeName        string
+	systemPrompt    string
+	option          *cfg.Option
+	config          agent.Config
+	bus             *eventbus.Bus[*aop.Event]
+	sessionEvents   *sessionEmitter
+	output          RunOutput
+	configFile      string
+	resumeMessages  []*aop.Message
+	resumeSessionID string
+	recordPath      string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.RWMutex
+	sessions        map[string]*sessionState
+	runs            map[string]*Run
+	requestSeq      uint64
+	closeOnce       sync.Once
+	wg              sync.WaitGroup
+	operations      sync.WaitGroup
+	namespaceMux    *aop.NamespaceMux
+	ptyManager      *tmuxpkg.Manager
+	replMode        REPLMode
+	maxPending      int
+	ownsApp         bool
+	cleanup         func()
 }
 
 type REPLMode uint8
@@ -64,6 +69,37 @@ const (
 	REPLEphemeral
 	REPLPersistent
 )
+
+func resolveJSONLRecordPath(option *cfg.Option, replMode REPLMode) string {
+	if option == nil {
+		return ""
+	}
+	if path := strings.TrimSpace(option.Resume); path != "" {
+		return path
+	}
+	if path := strings.TrimSpace(option.OutputFile); path != "" {
+		return path
+	}
+	if !option.SaveSession && replMode == REPLDisabled {
+		return ""
+	}
+	name := "session-" + time.Now().Format("20060102-150405.000000000") + ".jsonl"
+	return filepath.Join(cfg.DataSubDir("sessions"), name)
+}
+
+func samePath(left, right string) bool {
+	leftAbs, leftErr := filepath.Abs(left)
+	rightAbs, rightErr := filepath.Abs(right)
+	if leftErr == nil && rightErr == nil {
+		left, right = filepath.Clean(leftAbs), filepath.Clean(rightAbs)
+	} else {
+		left, right = filepath.Clean(left), filepath.Clean(right)
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
+}
 
 // RunOutput is the presentation sink an entry point may attach to a runtime.
 // The runtime never constructs one — CLI/TUI hosts inject it; headless hosts
@@ -117,6 +153,12 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		rt.option = &optCopy
 		rt.configFile = option.ConfigFile
 	}
+	recordPath := resolveJSONLRecordPath(option, rt.replMode)
+	if recordPath != "" {
+		option.OutputFile = recordPath
+		rt.option.OutputFile = recordPath
+		rt.recordPath = recordPath
+	}
 
 	if rc != nil && rc.ExistingApp != nil {
 		rt.app = rc.ExistingApp
@@ -161,6 +203,35 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		rt.app.SetLogger(logger)
 		logger = rt.app.Logger()
 	}
+	publicBus := rt.app.EventBus
+	if publicBus == nil {
+		publicBus = eventbus.New[*aop.Event]()
+		rt.app.EventBus = publicBus
+	}
+	rt.sessionEvents = rt.app.Events
+	if rt.sessionEvents == nil {
+		rt.sessionEvents = newSessionEmitter(publicBus)
+		rt.app.Events = rt.sessionEvents
+	}
+	if recordPath != "" {
+		if err := rt.app.StartRecording(recordPath); err != nil {
+			rt.Close()
+			return nil, fmt.Errorf("open JSONL recorder: %w", err)
+		}
+		logger.Importantf("recording session JSONL to %s", recordPath)
+	}
+	var resumeCounter int64
+	if option.Resume != "" {
+		data, err := loadResumeState(option.Resume)
+		if err != nil {
+			rt.Close()
+			return nil, fmt.Errorf("resume session: %w", err)
+		}
+		rt.resumeMessages = data.Messages
+		rt.resumeSessionID = data.SessionID
+		resumeCounter = data.MessageCounter
+		logger.Importantf("resumed %d messages from %s", len(data.Messages), option.Resume)
+	}
 
 	nodeName := ResolveIOANodeName(option)
 	rt.nodeName = nodeName
@@ -203,12 +274,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		rt.output = rc.Output
 	}
 
-	publicBus := eventbus.New[*aop.Event]()
 	if rt.output != nil {
 		publicBus.Subscribe(rt.output.HandleEvent)
 	}
 	rt.bus = publicBus
-	rt.sessionEvents = newSessionEmitter(publicBus)
 
 	var ioaCancel func()
 	var handoffCancel func()
@@ -238,23 +307,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		Bus:                   rt.sessionEvents,
 		Hooks:                 rt.app.Hooks,
 		CaptureProviderFrames: option.CaptureProviderFrames,
-	}
-
-	if option.SaveSession {
-		sessDir := cfg.DataSubDir("sessions")
-		rt.config = rt.config.WithOnRunEnd(func(result *agent.Result) {
-			if result == nil || len(result.Messages) == 0 {
-				return
-			}
-			if err := agent.SaveCheckpoint(sessDir, &agent.CheckpointData{
-				Model:          option.Model,
-				Provider:       option.Provider,
-				Messages:       result.Messages,
-				MessageCounter: result.MessageCounter,
-			}); err != nil {
-				logger.Warnf("save session: %s", err)
-			}
-		})
+		MessageCounter:        resumeCounter,
 	}
 
 	subAgentTool := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
@@ -286,17 +339,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
 		Run:             loop.Run,
 	}, "loop")
-
-	if option.Resume != "" {
-		path := option.Resume
-		data, err := agent.LoadCheckpoint(path)
-		if err != nil {
-			rt.Close()
-			return nil, fmt.Errorf("resume session: %w", err)
-		}
-		rt.resumeMessages = data.Messages
-		logger.Importantf("resumed %d messages from %s", len(data.Messages), path)
-	}
 
 	if rt.app.IOAStreamClient != nil && option.Space != "" {
 		nodeID := ""
@@ -528,7 +570,7 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 // Scanner direct execution
 // ---------------------------------------------------------------------------
 
-func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string, logger telemetry.Logger) error {
+func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
 	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
 	features, scannerArgs, err := DirectScannerRuntimeFeaturesWithDefault(rest, defaultVerify)
 	if err != nil {
@@ -551,6 +593,9 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 			}
 			return nil
 		}
+	}
+	if recordPath := resolveJSONLRecordPath(option, REPLDisabled); recordPath != "" {
+		option.OutputFile = recordPath
 	}
 
 	scannerLogger := logger
@@ -587,6 +632,9 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	if option.NoColor && scannerArgs[0] == "scan" && !HasScannerFlag(scannerArgs[1:], "--no-color") {
 		scannerArgs = append(scannerArgs, "--no-color")
 	}
+	sessionID := fmt.Sprintf("scan-%d", time.Now().UnixNano())
+	turnID := sessionID + "-run"
+	emitter := scannerArgs[0]
 	tool, ok := application.Commands.GetTool("bash")
 	if !ok {
 		return fmt.Errorf("bash tool is not registered")
@@ -594,6 +642,53 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	bash, ok := tool.(*cmdpkg.BashTool)
 	if !ok {
 		return fmt.Errorf("registered bash tool has unexpected type")
+	}
+	callID := turnID + "-call"
+	ctx = coretool.ContextWithInvocation(ctx, coretool.Invocation{
+		CallID: callID, SessionID: sessionID, TurnID: turnID, Emitter: emitter,
+	})
+	arguments, err := aop.JSONValue(map[string]any{"args": scannerArgs[1:]})
+	if err != nil {
+		return fmt.Errorf("encode scanner arguments: %w", err)
+	}
+	startedAt := time.Now()
+	if application.Events != nil {
+		application.Events.sessionStarted(sessionID, emitter, &aop.SessionStarted{})
+		application.Events.Emit(&aop.Event{
+			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+			Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}},
+		})
+		application.Events.Emit(&aop.Event{
+			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: callID, Name: emitter, Arguments: arguments}},
+		})
+		defer func() {
+			isCanceled := errors.Is(runErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)
+			result := &aop.ToolResult{
+				CallId: callID, Name: emitter, IsError: runErr != nil,
+				DurationMs: uint64(time.Since(startedAt).Milliseconds()),
+			}
+			stopReason := string(agent.StopReasonCompleted)
+			closeReason := SessionCloseCompleted
+			if runErr != nil {
+				result.Output = []*aop.Content{aop.Text(runErr.Error())}
+				stopReason = string(agent.StopReasonError)
+				closeReason = SessionCloseError
+			}
+			if isCanceled {
+				stopReason = string(agent.StopReasonCanceled)
+				closeReason = SessionCloseCanceled
+			}
+			application.Events.Emit(&aop.Event{
+				SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+				Payload: &aop.Event_ToolResult{ToolResult: result},
+			})
+			application.Events.Emit(&aop.Event{
+				SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+				Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stopReason}},
+			})
+			application.Events.sessionEnded(sessionID, emitter, string(closeReason))
+		}()
 	}
 	streaming := ShouldStreamScannerOutput(scannerArgs)
 	var captured strings.Builder
@@ -608,6 +703,9 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	})
 	if err != nil {
 		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if !streaming {
 		fmt.Print(captured.String())

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	scanengine "github.com/chainreactors/aiscan/tools/scan/engine"
@@ -101,8 +101,8 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) *Command {
-	c.DataBus = bus
+func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+	c.Events = events
 	return c
 }
 
@@ -249,7 +249,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 			results = append(results, result.TemplateResult(target))
 			if record.Matched {
 				summary.Matched++
-				c.EmitDataCtx(ctx, "neutron", output.ToolDataVuln, target, &record)
+				c.EmitArtifactCtx(ctx, "neutron", toolpb.ArtifactKindVuln, target, &record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
 				line := formatNeutronResult(record, jsonOutput)

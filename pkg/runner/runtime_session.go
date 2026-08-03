@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/chainreactors/aiscan/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	toolpkg "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -29,6 +32,7 @@ const DefaultSessionPendingLimit = 64
 
 type SessionOptions struct {
 	ID               string
+	LogicalID        string
 	ParentSessionID  string
 	ParentToolCallID string
 	AgentName        string
@@ -40,6 +44,10 @@ type SessionCloseReason string
 const (
 	SessionCloseCompleted SessionCloseReason = "completed"
 	SessionCloseCanceled  SessionCloseReason = "canceled"
+	SessionCloseError     SessionCloseReason = "error"
+	SessionCloseCleared   SessionCloseReason = "cleared"
+	SessionCloseCompacted SessionCloseReason = "compacted"
+	SessionCloseResumed   SessionCloseReason = "resumed"
 	SessionCloseRuntime   SessionCloseReason = "runtime_closed"
 )
 
@@ -68,7 +76,9 @@ const (
 )
 
 type Session struct {
-	state *sessionState
+	mu        sync.RWMutex
+	state     *sessionState
+	logicalID string
 }
 
 type Run struct {
@@ -129,7 +139,7 @@ func newSessionEmitter(bus *eventbus.Bus[*aop.Event]) *sessionEmitter {
 
 // Emit stamps the event with runtime metadata (timestamp, per-session
 // sequence, fallback id) and forwards it to the runtime's single public bus.
-// It satisfies agent.EventEmitter so session agents emit through it directly.
+// It satisfies aop.EventEmitter so session agents and tools emit through it directly.
 func (e *sessionEmitter) Emit(event *aop.Event) {
 	if event.EmittedAt == nil {
 		event.EmittedAt = timestamppb.Now()
@@ -524,6 +534,7 @@ func (m *sessionMailbox) ActiveProducers() int { return m.base.ActiveProducers()
 type sessionState struct {
 	runtime          *AgentRuntime
 	id               string
+	logicalID        string
 	agentName        string
 	parentSessionID  string
 	parentToolCallID string
@@ -552,6 +563,19 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 	if id == "" {
 		id = rt.nextRuntimeID("session")
 	}
+	logicalID := strings.TrimSpace(options.LogicalID)
+	if logicalID == "" {
+		logicalID = id
+	}
+	if rt.resumeSessionID != "" && options.LogicalID == "" && (logicalID == MainREPLName || logicalID == "task") {
+		id = rt.nextContinuationID(logicalID)
+		if options.ParentSessionID == "" {
+			options.ParentSessionID = rt.resumeSessionID
+		}
+		if len(options.Messages) == 0 {
+			options.Messages = rt.resumeMessages
+		}
+	}
 	agentName := strings.TrimSpace(options.AgentName)
 	if agentName == "" {
 		agentName = rt.nodeName
@@ -565,9 +589,9 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		rt.mu.Unlock()
 		return nil, rt.ctx.Err()
 	}
-	if _, exists := rt.sessions[id]; exists {
+	if _, exists := rt.sessions[logicalID]; exists {
 		rt.mu.Unlock()
-		return nil, fmt.Errorf("session %q already exists", id)
+		return nil, fmt.Errorf("session %q already exists", logicalID)
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
@@ -590,20 +614,20 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		ag.LoadMessages(rt.resumeMessages)
 	}
 	state := &sessionState{
-		runtime: rt, id: id, agentName: agentName,
+		runtime: rt, id: id, logicalID: logicalID, agentName: agentName,
 		parentSessionID: options.ParentSessionID, parentToolCallID: options.ParentToolCallID,
 		agent: ag, inbox: mailbox,
 		scheduler: scheduler, ctx: sessionCtx, cancel: cancel,
 		ops: make(chan *sessionOperation, rt.pendingLimit()), done: make(chan struct{}),
 	}
-	public := &Session{state: state}
+	public := &Session{state: state, logicalID: logicalID}
 	state.commands = &commandSession{state: state}
 	mailbox.automatic = func() { state.startAutomaticRun() }
-	rt.sessions[id] = state
+	rt.sessions[logicalID] = state
 	rt.wg.Add(1)
 	rt.mu.Unlock()
 
-	if id == MainREPLName && rt.option != nil && rt.option.Heartbeat > 0 {
+	if logicalID == MainREPLName && rt.option != nil && rt.option.Heartbeat > 0 {
 		_, _ = scheduler.Add(sessionCtx, agent.LoopEntry{
 			Name: "heartbeat", Interval: time.Duration(rt.option.Heartbeat) * time.Minute,
 			Mode:   agent.ModeInbox,
@@ -614,6 +638,9 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 	rt.sessionEvents.sessionStarted(id, agentName, &aop.SessionStarted{
 		Model: rt.config.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	})
+	if options.ParentSessionID != "" && options.ParentToolCallID == "" && len(options.Messages) > 0 {
+		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
+	}
 	return public, nil
 }
 
@@ -625,22 +652,26 @@ func (rt *AgentRuntime) EnsureSession(options SessionOptions) (*Session, error) 
 		return nil, fmt.Errorf("agent runtime is not configured")
 	}
 	id := strings.TrimSpace(options.ID)
-	if id != "" {
+	logicalID := strings.TrimSpace(options.LogicalID)
+	if logicalID == "" {
+		logicalID = id
+	}
+	if logicalID != "" {
 		rt.mu.RLock()
-		state := rt.sessions[id]
+		state := rt.sessions[logicalID]
 		rt.mu.RUnlock()
 		if state != nil {
 			return ensuredSession(state, options)
 		}
 	}
 	session, err := rt.OpenSession(rt.ctx, options)
-	if err == nil || id == "" {
+	if err == nil || logicalID == "" {
 		return session, err
 	}
 	// Concurrent reconnects may both observe the Session as absent. The strict
 	// OpenSession call admits one; the loser re-reads and validates that Session.
 	rt.mu.RLock()
-	state := rt.sessions[id]
+	state := rt.sessions[logicalID]
 	rt.mu.RUnlock()
 	if state == nil {
 		return nil, err
@@ -658,7 +689,7 @@ func ensuredSession(state *sessionState, options SessionOptions) (*Session, erro
 	if options.AgentName != "" && options.AgentName != state.agentName {
 		return nil, fmt.Errorf("session %q agent name conflicts with open session", state.id)
 	}
-	return &Session{state: state}, nil
+	return &Session{state: state, logicalID: state.logicalID}, nil
 }
 
 func (rt *AgentRuntime) CloseSession(ctx context.Context, sessionID string, reason SessionCloseReason) error {
@@ -669,9 +700,9 @@ func (rt *AgentRuntime) CloseSession(ctx context.Context, sessionID string, reas
 		reason = SessionCloseCompleted
 	}
 	rt.mu.Lock()
-	state := rt.sessions[sessionID]
+	logicalID, state := rt.findSessionLocked(sessionID)
 	if state != nil {
-		delete(rt.sessions, sessionID)
+		delete(rt.sessions, logicalID)
 	}
 	rt.mu.Unlock()
 	if state == nil {
@@ -695,6 +726,19 @@ func (rt *AgentRuntime) CloseSession(ctx context.Context, sessionID string, reas
 	return nil
 }
 
+func (rt *AgentRuntime) findSessionLocked(sessionID string) (string, *sessionState) {
+	sessionID = strings.TrimSpace(sessionID)
+	if state := rt.sessions[sessionID]; state != nil {
+		return sessionID, state
+	}
+	for logicalID, state := range rt.sessions {
+		if state != nil && state.id == sessionID {
+			return logicalID, state
+		}
+	}
+	return "", nil
+}
+
 func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) func() {
 	if rt == nil || rt.bus == nil || fn == nil {
 		return func() {}
@@ -702,17 +746,26 @@ func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) func() {
 	return rt.bus.Subscribe(fn)
 }
 
+// EmitEvent publishes an already-formed runtime event through the App-owned
+// AOP bus, applying the same timestamp and sequence stamping as agent events.
+func (rt *AgentRuntime) EmitEvent(event *aop.Event) {
+	if rt == nil || rt.sessionEvents == nil || event == nil {
+		return
+	}
+	rt.sessionEvents.Emit(event)
+}
+
 func (rt *AgentRuntime) session(sessionID string) (*Session, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("agent runtime is not configured")
 	}
 	rt.mu.RLock()
-	state := rt.sessions[strings.TrimSpace(sessionID)]
+	logicalID, state := rt.findSessionLocked(sessionID)
 	rt.mu.RUnlock()
 	if state == nil {
 		return nil, fmt.Errorf("session %q is not open", sessionID)
 	}
-	return &Session{state: state}, nil
+	return &Session{state: state, logicalID: logicalID}, nil
 }
 
 func (rt *AgentRuntime) RunSession(ctx context.Context, sessionID string, input RunInput) (*Run, error) {
@@ -754,8 +807,13 @@ func (rt *AgentRuntime) CancelSessionRun(sessionID, turnID string) error {
 	turnID = strings.TrimSpace(turnID)
 	rt.mu.RLock()
 	run := rt.runs[turnID]
+	_, state := rt.findSessionLocked(sessionID)
 	rt.mu.RUnlock()
-	if run == nil || run.sessionID != sessionID {
+	actualID := sessionID
+	if state != nil {
+		actualID = state.id
+	}
+	if run == nil || run.sessionID != actualID {
 		return fmt.Errorf("turn %q is not active in session %q", turnID, sessionID)
 	}
 	run.cancel()
@@ -771,28 +829,33 @@ func (rt *AgentRuntime) WaitOperations() {
 }
 
 func (s *Session) Run(ctx context.Context, input RunInput) (*Run, error) {
-	if s == nil || s.state == nil {
+	state := s.currentState()
+	if state == nil {
 		return nil, fmt.Errorf("session is not configured")
 	}
-	return s.state.startRun(ctx, input)
+	return state.startRun(ctx, input)
 }
 
 func (s *Session) Command(ctx context.Context, line string) (*types.CommandResult, error) {
-	if s == nil || s.state == nil {
+	state := s.currentState()
+	if state == nil {
 		return nil, fmt.Errorf("session is not configured")
+	}
+	if name := commandName(line); name == "/clear" || name == "/compact" {
+		return s.rotateCommand(ctx, line)
 	}
 	done := make(chan commandOutcome, 1)
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
-			outcome := s.state.commands.execute(runCtx, line)
+			outcome := state.commands.execute(runCtx, line)
 			if outcome.err == nil && len(outcome.result.GetContent()) > 0 {
-				s.state.emitCommandResult(outcome.result)
+				state.emitCommandResult(outcome.result)
 			}
 			done <- outcome
 		},
 		reject: func(err error) { done <- commandOutcome{err: err} },
 	}
-	if err := s.state.admit(ctx, op); err != nil {
+	if err := state.admit(ctx, op); err != nil {
 		return nil, err
 	}
 	outcome := <-done
@@ -800,18 +863,246 @@ func (s *Session) Command(ctx context.Context, line string) (*types.CommandResul
 }
 
 func (s *Session) ID() string {
-	if s == nil || s.state == nil {
+	state := s.currentState()
+	if state == nil {
+		state = s.baseState()
+	}
+	if state == nil {
 		return ""
 	}
-	return s.state.id
+	return state.id
 
 }
 
 func (s *Session) MessagesSnapshot() []*aop.Message {
-	if s == nil || s.state == nil {
+	state := s.currentState()
+	if state == nil {
 		return nil
 	}
-	return s.state.agent.MessagesSnapshot()
+	return state.agent.MessagesSnapshot()
+}
+
+func (s *Session) Agent() *agent.Agent {
+	state := s.currentState()
+	if state == nil {
+		state = s.baseState()
+	}
+	if state == nil {
+		return nil
+	}
+	return state.agent
+}
+
+func (s *Session) currentState() *sessionState {
+	base := s.baseState()
+	if base == nil || base.runtime == nil {
+		return nil
+	}
+	s.mu.RLock()
+	logicalID := s.logicalID
+	s.mu.RUnlock()
+	if logicalID == "" {
+		logicalID = base.logicalID
+	}
+	base.runtime.mu.RLock()
+	state := base.runtime.sessions[logicalID]
+	base.runtime.mu.RUnlock()
+	return state
+}
+
+func (s *Session) baseState() *sessionState {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	state := s.state
+	s.mu.RUnlock()
+	return state
+}
+
+func commandName(line string) string {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func (s *Session) rotateCommand(ctx context.Context, line string) (*types.CommandResult, error) {
+	state := s.currentState()
+	if state == nil {
+		return nil, fmt.Errorf("session is not configured")
+	}
+	if state.runtime.sessionRunActive(state.id) {
+		return nil, fmt.Errorf("task is running — use /stop first")
+	}
+	name := commandName(line)
+	switch name {
+	case "/clear":
+		newState, err := s.rotate(ctx, SessionCloseCleared, state.id, nil, "")
+		if err != nil {
+			return nil, err
+		}
+		outcome := commandText(line, CommandPresentationPlain, "Context cleared.")
+		newState.emitCommandResult(outcome.result)
+		return outcome.result, nil
+	case "/compact":
+		messages := state.agent.MessagesSnapshot()
+		if len(messages) < 4 {
+			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).").result, nil
+		}
+		values, err := commands.SplitCommandLine(line)
+		if err != nil {
+			return nil, err
+		}
+		instructions := ""
+		if len(values) > 1 {
+			instructions = strings.TrimSpace(strings.Join(values[1:], " "))
+		}
+		result, err := state.agent.Compact(ctx, agent.CompactConfig{CustomInstructions: instructions})
+		if err != nil {
+			return nil, err
+		}
+		newState, err := s.rotate(ctx, SessionCloseCompacted, state.id, state.agent.MessagesSnapshot(), "")
+		if err != nil {
+			return nil, err
+		}
+		commandResult := commandText(line, CommandPresentationPlain, fmt.Sprintf(
+			"Compacted: ~%d -> ~%d tokens (%d messages kept)", result.TokensBefore, result.TokensAfter, result.KeptMessages))
+		newState.emitCommandResult(commandResult.result)
+		return commandResult.result, nil
+	default:
+		return nil, fmt.Errorf("unsupported rotating command %q", name)
+	}
+}
+
+func (s *Session) Resume(ctx context.Context, path string) (int, error) {
+	state := s.currentState()
+	if state == nil {
+		return 0, fmt.Errorf("session is not configured")
+	}
+	if state.runtime.sessionRunActive(state.id) {
+		return 0, fmt.Errorf("task is running — use /stop first")
+	}
+	data, err := loadResumeState(path)
+	if err != nil {
+		return 0, err
+	}
+	if err := output.ValidateJSONLTarget(path); err != nil {
+		return 0, err
+	}
+	if _, err := s.rotate(ctx, SessionCloseResumed, data.SessionID, data.Messages, path); err != nil {
+		return 0, err
+	}
+	return len(data.Messages), nil
+}
+
+func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentSessionID string, messages []*aop.Message, recordPath string) (*sessionState, error) {
+	oldState := s.currentState()
+	if oldState == nil {
+		return nil, fmt.Errorf("session is not configured")
+	}
+	rt := oldState.runtime
+	logicalID := oldState.logicalID
+	agentName := oldState.agentName
+	prepared := prepareContinuationMessages(messages)
+	if err := rt.CloseSession(ctx, logicalID, reason); err != nil {
+		return nil, err
+	}
+	if recordPath != "" && !samePath(rt.recordPath, recordPath) {
+		if rt.app == nil {
+			return nil, fmt.Errorf("runtime application is unavailable")
+		}
+		if err := rt.app.SwitchRecording(recordPath); err != nil {
+			return nil, err
+		}
+		rt.recordPath = recordPath
+		if rt.option != nil {
+			rt.option.OutputFile = recordPath
+			rt.option.Resume = recordPath
+		}
+	}
+	newID := rt.nextContinuationID(logicalID)
+	continuation, err := rt.OpenSession(ctx, SessionOptions{
+		ID: newID, LogicalID: logicalID, ParentSessionID: parentSessionID,
+		AgentName: agentName, Messages: prepared,
+	})
+	if err != nil {
+		return nil, err
+	}
+	newState := continuation.currentState()
+	if newState == nil {
+		return nil, fmt.Errorf("continuation session was not created")
+	}
+	s.mu.Lock()
+	s.state = newState
+	s.mu.Unlock()
+	return newState, nil
+}
+
+func (rt *AgentRuntime) sessionRunActive(sessionID string) bool {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	for _, run := range rt.runs {
+		if run != nil && run.sessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareContinuationMessages(messages []*aop.Message) []*aop.Message {
+	prepared := make([]*aop.Message, 0, len(messages))
+	var counter int64
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		cloned := proto.CloneOf(message)
+		counter = max(counter, continuationMessageSequence(cloned.Id))
+		prepared = append(prepared, cloned)
+	}
+	for _, message := range prepared {
+		if strings.TrimSpace(message.Id) == "" {
+			counter++
+			message.Id = fmt.Sprintf("m-%d", counter)
+		}
+	}
+	return prepared
+}
+
+func continuationMessageSequence(id string) int64 {
+	if !strings.HasPrefix(id, "m-") {
+		return 0
+	}
+	value, _ := strconv.ParseInt(strings.TrimPrefix(id, "m-"), 10, 64)
+	return value
+}
+
+func emitContinuationMessages(state *sessionState, messages []*aop.Message) {
+	if state == nil || state.runtime == nil {
+		return
+	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if message.Role == "tool" {
+			for _, content := range message.Content {
+				if result := content.GetToolResult(); result != nil {
+					state.runtime.sessionEvents.Emit(&aop.Event{
+						SessionId: state.id, Emitter: state.agentName,
+						Payload: &aop.Event_ToolResult{ToolResult: proto.CloneOf(result)},
+					})
+				}
+			}
+			continue
+		}
+		state.runtime.sessionEvents.Emit(&aop.Event{
+			SessionId: state.id, Emitter: state.agentName,
+			Payload: &aop.Event_Message{Message: proto.CloneOf(message)},
+		})
+	}
 }
 
 func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, error) {
@@ -1050,6 +1341,10 @@ func (rt *AgentRuntime) nextRuntimeID(prefix string) string {
 	return id
 }
 
+func (rt *AgentRuntime) nextContinuationID(logicalID string) string {
+	return logicalID + "-" + rt.nextRuntimeID(fmt.Sprintf("session-%d", time.Now().UnixNano()))
+}
+
 func (rt *AgentRuntime) releaseRun(run *Run) {
 	if run == nil {
 		return
@@ -1106,5 +1401,11 @@ func (rt *AgentRuntime) consoleAppInfoForSession(session *Session) tui.AppInfo {
 		_, err := session.Command(ctx, line)
 		return err
 	}
+	info.Resume = session.Resume
+	info.ListSessions = func() ([]tui.SavedSession, error) {
+		return listSavedSessions(cfg.DataSubDir("sessions"))
+	}
+	info.ActiveAgent = session.Agent
+	info.ActiveSessionID = session.ID
 	return info
 }

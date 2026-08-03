@@ -8,6 +8,10 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+type EventEmitter interface {
+	Emit(*Event)
+}
+
 const JSONMediaType = "application/json"
 
 func JSONValue(value any) (*EncodedValue, error) {
