@@ -9,11 +9,14 @@ import (
 	"runtime"
 	"testing"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
@@ -70,28 +73,29 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 }
 
 func TestWireWebAppBindsRawArtifactsForReloadedApp(t *testing.T) {
-	bus := eventbus.New[output.ToolDataEvent]()
-	application := &runner.App{Artifacts: output.NewArtifactStream(bus)}
-	defer application.Artifacts.Close()
+	bus := eventbus.New[*aop.Event]()
+	application := &runner.App{EventBus: bus}
 	ingestor := &recordingArtifactIngestor{}
 
 	wireWebApp(application, ingestor)
-	bus.Emit(output.ToolDataEvent{
-		Tool: "gogo", Kind: output.ToolDataService, CallID: "scan-1",
-		Data: map[string]string{"ip": "127.0.0.1"},
+	extension, err := anypb.New(&toolpb.Artifact{
+		Tool: "gogo", Kind: toolpb.ArtifactKindService, CallId: "scan-1", Data: []byte(`{"ip":"127.0.0.1"}`),
 	})
-	if ingestor.operationID != "scan-1" || ingestor.artifact.Tool != "gogo" {
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.Emit(&aop.Event{SessionId: "session-1", Payload: &aop.Event_Extension{Extension: extension}})
+	if ingestor.artifact == nil || ingestor.artifact.CallId != "scan-1" || ingestor.artifact.Tool != "gogo" {
 		t.Fatalf("artifact was not forwarded: %+v", ingestor.artifact)
 	}
 }
 
 type recordingArtifactIngestor struct {
-	operationID string
-	artifact    output.ToolArtifact
+	artifact *toolpb.Artifact
 }
 
-func (i *recordingArtifactIngestor) IngestArtifact(_ context.Context, operationID string, artifact output.ToolArtifact) error {
-	i.operationID, i.artifact = operationID, artifact
+func (i *recordingArtifactIngestor) IngestArtifact(_ context.Context, artifact *toolpb.Artifact) error {
+	i.artifact = proto.CloneOf(artifact)
 	return nil
 }
 

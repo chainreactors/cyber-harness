@@ -21,7 +21,7 @@ func init() {
 				d.Skip("gogo", deps.Name(engine.SetKey)+".Gogo")
 				return
 			}
-			impl := New(es.Gogo).WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithDataBus(d.DataBus)
+			impl := New(es.Gogo).WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithEvents(d.Events)
 			reg.Register(commands.Command{
 				Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
 				DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",

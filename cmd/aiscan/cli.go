@@ -125,7 +125,7 @@ func aiscan() {
 		return
 	}
 	if option.ViewFile != "" {
-		if err := output.RenderFile(option.ViewFile, option.ViewFormat, option.ViewOutput); err != nil {
+		if err := output.RenderEventFile(option.ViewFile, option.ViewFormat, option.OutputFile); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
@@ -231,6 +231,9 @@ func parseCLI(args []string) (parsedCLI, error) {
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
 	}
+	if err := validateSessionFileFlags(option); err != nil {
+		return parsedCLI{}, err
+	}
 
 	if mode == cfg.RunModeNoCommand {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -301,9 +304,17 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 		if err != nil {
 			return parsedCLI{}, err
 		}
+	} else {
+		scannerArgs, err = applyScannerPersistenceArgs(scannerRest, &option)
+		if err != nil {
+			return parsedCLI{}, err
+		}
 	}
 	if boolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
+	}
+	if err := validateSessionFileFlags(option); err != nil {
+		return parsedCLI{}, err
 	}
 	return parsedCLI{
 		Option:      option,
@@ -312,7 +323,42 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}, nil
 }
 
+func validateSessionFileFlags(option cfg.Option) error {
+	if strings.TrimSpace(option.Resume) != "" && strings.TrimSpace(option.OutputFile) != "" {
+		return fmt.Errorf("--resume/-r and --file/-f are mutually exclusive")
+	}
+	return nil
+}
+
+func applyScannerPersistenceArgs(args []string, option *cfg.Option) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		key, value, hasValue := strings.Cut(arg, "=")
+		switch key {
+		case "--file", "-f":
+			resolved, err := flagValue(arg, hasValue, value, args, &i)
+			if err != nil {
+				return nil, err
+			}
+			option.OutputFile = resolved
+		case "--resume", "-r":
+			resolved, err := flagValue(arg, hasValue, value, args, &i)
+			if err != nil {
+				return nil, err
+			}
+			option.Resume = resolved
+		case "--save-session":
+			option.SaveSession = !hasValue || truthyFlagValue(value)
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out, nil
+}
+
 func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
+	option.OutputFile = cfg.ResolveString(manual.OutputFile, option.OutputFile)
 	option.Provider = cfg.ResolveString(manual.Provider, option.Provider)
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
@@ -345,6 +391,10 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.Prompt = cfg.ResolveString(manual.Prompt, option.Prompt)
 	option.TaskFile = cfg.ResolveString(manual.TaskFile, option.TaskFile)
 	option.WebURL = cfg.ResolveString(manual.WebURL, option.WebURL)
+	option.Resume = cfg.ResolveString(manual.Resume, option.Resume)
+	if manual.SaveSession {
+		option.SaveSession = true
+	}
 	if len(manual.Skills) > 0 {
 		option.Skills = append(option.Skills, manual.Skills...)
 	}
@@ -519,7 +569,9 @@ var scannerKnownFlags = []knownFlag{
 		}
 	}},
 	{names: []string{"--resume"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
+	{names: []string{"-r"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"--save-session"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.SaveSession = true }},
+	{names: []string{"--file", "-f"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
 }
 
 var rootOnlyFlagValueArity = map[string]int{

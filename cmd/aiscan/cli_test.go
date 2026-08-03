@@ -127,6 +127,60 @@ func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
 	}
 }
 
+func TestParseCLIExtractsUnifiedFileForAgentAndScanners(t *testing.T) {
+	tests := []struct {
+		args     []string
+		wantArgs []string
+	}{
+		{args: []string{"agent", "-p", "hello", "-f", "agent.jsonl"}},
+		{args: []string{"scan", "-i", "127.0.0.1", "-f", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
+		{args: []string{"gogo", "-i", "127.0.0.1", "-p", "80", "-f", "gogo.jsonl"}, wantArgs: []string{"gogo", "-i", "127.0.0.1", "-p", "80"}},
+	}
+	for _, test := range tests {
+		t.Run(test.args[0], func(t *testing.T) {
+			parsed, err := parseCLI(test.args)
+			if err != nil {
+				t.Fatalf("parseCLI: %v", err)
+			}
+			wantFile := test.args[len(test.args)-1]
+			if parsed.Option.OutputFile != wantFile {
+				t.Fatalf("output file = %q, want %q", parsed.Option.OutputFile, wantFile)
+			}
+			if test.wantArgs != nil && !reflect.DeepEqual(parsed.ScannerArgs, test.wantArgs) {
+				t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, test.wantArgs)
+			}
+		})
+	}
+}
+
+func TestParseCLIViewUsesUnifiedInputAndFileFlags(t *testing.T) {
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "markdown", "-f", "session.md"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.ViewFormat != "markdown" || parsed.Option.OutputFile != "session.md" {
+		t.Fatalf("view options = %#v", parsed.Option.MiscOptions)
+	}
+}
+
+func TestParseCLIRejectsResumeWithExplicitFile(t *testing.T) {
+	for _, args := range [][]string{
+		{"agent", "-r", "session.jsonl", "-f", "other.jsonl"},
+		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-f", "other.jsonl"},
+	} {
+		if _, err := parseCLI(args); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("parseCLI(%v) error = %v", args, err)
+		}
+	}
+	parsed, err := parseCLI([]string{"agent", "-r", "session.jsonl", "--save-session"})
+	if err != nil {
+		t.Fatalf("resume + save-session: %v", err)
+	}
+	if parsed.Option.Resume != "session.jsonl" || !parsed.Option.SaveSession {
+		t.Fatalf("resume options = %#v", parsed.Option)
+	}
+}
+
 func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"})
 	if err != nil {

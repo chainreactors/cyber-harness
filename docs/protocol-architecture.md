@@ -135,8 +135,8 @@ AOP 应用面只额外暴露一个双向流服务：
 
 - Session 和 Scan 以 protobuf 为存储真相；
 - AOP 历史只存 `aop.Event` ProtoJSON；
-- Scanner 文件输出只写 libcstx SCO JSONL；
-- 不保留旧扁平 DTO 列、Record/Timeline 双写或 fallback read。
+- CLI `-f` 将 agent、scan 和 scanner-native artifact 统一写入同一个 append-only `aop.Event` ProtoJSONL；
+- `-r`、`/resume` 和 `-F` 直接读取该事件流，不保留 checkpoint/snapshot 文件、Record/Timeline 双写或 replay/fallback 管线。
 
 历史读取是纯查询，不派发 Agent frame、不收敛 operation，也不复制 terminal event。
 

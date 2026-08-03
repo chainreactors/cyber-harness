@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
@@ -107,10 +109,10 @@ func TestFullScannerPublicIntegration(t *testing.T) {
 		t.Skip("set AISCAN_INTEGRATION=1 to run public network regression tests")
 	}
 
-	bus := eventbus.New[output.ToolDataEvent]()
+	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
 	registry := commands.NewRegistry()
-	deps := &commands.Deps{WorkDir: t.TempDir(), DataBus: bus, Logger: telemetry.NopLogger()}
+	deps := &commands.Deps{WorkDir: t.TempDir(), Events: bus, Logger: telemetry.NopLogger()}
 	commands.Provide(deps, engine.SetKey, &engine.Set{})
 	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
 
@@ -123,7 +125,7 @@ func TestFullScannerPublicIntegration(t *testing.T) {
 		Timeout: 45 * time.Second,
 		Check: func(t *testing.T, result functionalResult) {
 			requireOutputContains(t, result, "https://redhaze.top")
-			requireEvent(t, result, "katana", output.ToolDataWeb, func(data any) bool {
+			requireEvent(t, result, "katana", toolpb.ArtifactKindWeb, func(data any) bool {
 				encoded, err := json.Marshal(data)
 				return err == nil && strings.Contains(string(encoded), "redhaze.top")
 			})

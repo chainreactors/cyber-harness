@@ -9,7 +9,6 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -24,7 +23,7 @@ func TestSubAgentSyncReturnsResult(t *testing.T) {
 	})
 	tool := NewSubAgentTool(nil)
 
-	ctx := output.ContextWithCallID(withToolAgentConfig(context.Background(), parent.Cfg), "spawn-sync")
+	ctx := coretool.ContextWithInvocation(withToolAgentConfig(context.Background(), parent.Cfg), coretool.Invocation{CallID: "spawn-sync"})
 	result, err := tool.Execute(ctx, `{"action":"create","mode":"sync","name":"worker","prompt":"do the work"}`)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -83,7 +82,7 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		Bus:       bus,
 	})
 
-	ctx := output.ContextWithCallID(withToolAgentConfig(context.Background(), active.Cfg), "spawn-context")
+	ctx := coretool.ContextWithInvocation(withToolAgentConfig(context.Background(), active.Cfg), coretool.Invocation{CallID: "spawn-context"})
 	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","name":"context-worker","prompt":"work"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

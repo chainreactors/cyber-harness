@@ -4,8 +4,8 @@ import (
 	"context"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -27,8 +27,7 @@ type connectionConfig struct {
 	JSONFrames     bool
 	Registry       *commands.CommandRegistry
 	AgentSubscribe func(func(*aop.Event)) func()
-	DataBus        *eventbus.Bus[output.ToolDataEvent]
-	Artifacts      *output.ArtifactStream
+	Progress       *eventbus.Bus[*toolpb.Progress]
 	Logger         telemetry.Logger
 	Chat           *chatAgentHandler
 	// AgentRuntime handles the AOP core/command namespaces directly via

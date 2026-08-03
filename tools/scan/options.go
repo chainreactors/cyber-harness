@@ -4,8 +4,7 @@ import (
 	"context"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
@@ -21,8 +20,8 @@ func WithProxy(proxy string) Option {
 	return func(c *Command) { c.Proxy = proxy }
 }
 
-func WithDataBus(bus *eventbus.Bus[output.ToolDataEvent]) Option {
-	return func(c *Command) { c.DataBus = bus }
+func WithEvents(events aop.EventEmitter) Option {
+	return func(c *Command) { c.Events = events }
 }
 
 func WithLogger(logger telemetry.Logger) Option {

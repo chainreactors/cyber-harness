@@ -214,6 +214,15 @@ func (c *interactiveRunController) SetOnFinish(fn func()) {
 	c.onFinish = fn
 }
 
+func (c *interactiveRunController) SetSession(session *agent.Agent) {
+	if c == nil || session == nil {
+		return
+	}
+	c.mu.Lock()
+	c.session = session
+	c.mu.Unlock()
+}
+
 func (c *interactiveRunController) notifyFinish() {
 	c.mu.Lock()
 	fn := c.onFinish
