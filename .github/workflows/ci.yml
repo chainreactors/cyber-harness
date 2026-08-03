@@ -470,6 +470,14 @@ jobs:
           done
           ls -lh dist/
 
+      - name: Upload standard binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: aiscan-standard
+          path: dist/standard_*
+          if-no-files-found: error
+          retention-days: 7
+
   # ── Full build: native libcstx/CGO on supported platforms ────
 
   build-full:
@@ -537,3 +545,11 @@ jobs:
             -tags "forceposix emptytemplates noembed osusergo netgo full sqlite" \
             -ldflags "-s -w" -buildvcs=false \
             -o "dist/full_${{ matrix.goos }}_${{ matrix.goarch }}${suffix}" ./cmd/aiscan
+
+      - name: Upload full ${{ matrix.id }} binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: aiscan-full-${{ matrix.id }}
+          path: dist/full_*
+          if-no-files-found: error
+          retention-days: 7
