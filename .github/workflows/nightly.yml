@@ -58,9 +58,19 @@ jobs:
           cache: npm
           cache-dependency-path: web/frontend/package-lock.json
 
-      - name: Install upx
-        run: sudo apt install upx -y
-        continue-on-error: true
+      - name: Install pinned UPX
+        env:
+          UPX_VERSION: 5.2.0
+          UPX_SHA256: 3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          curl -fsSL \
+            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz" \
+            -o "${archive}"
+          echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux" >> "${GITHUB_PATH}"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7

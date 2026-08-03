@@ -245,8 +245,8 @@ jobs:
           path: dist/build/*
           retention-days: 1
 
-  # ── Publish release ─────────────────────────────────────────────
-  release:
+  # ── Package release ─────────────────────────────────────────────
+  package:
     needs: [prepare, build]
     runs-on: ubuntu-22.04
     env:
@@ -265,14 +265,28 @@ jobs:
           path: dist/build
           merge-multiple: true
 
-      - name: Compress supported binaries with UPX
-        continue-on-error: true
+      - name: Install pinned UPX
+        env:
+          UPX_VERSION: 5.2.0
+          UPX_SHA256: 3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1
         run: |
-          sudo apt-get update
-          sudo apt-get install -y upx-ucl
-          for f in dist/build/*_linux_amd64 dist/build/*_windows_amd64.exe; do
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          curl -fsSL \
+            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz" \
+            -o "${archive}"
+          echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
+          echo "UPX=${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux/upx" >> "${GITHUB_ENV}"
+
+      - name: Compress Windows amd64 binaries with UPX
+        run: |
+          set -euo pipefail
+          "${UPX}" --version
+          for f in dist/build/*_windows_amd64.exe; do
             [ -f "$f" ] || continue
-            upx --best --lzma "$f" || true
+            "${UPX}" "$f"
+            "${UPX}" -t "$f"
           done
 
       - name: Package archives
@@ -301,6 +315,75 @@ jobs:
           cd dist/release
           sha256sum *.zip > aiscan_checksums.txt
           cat aiscan_checksums.txt
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release/*
+          retention-days: 1
+
+  # UPX can report a structurally valid PE that still crashes at process
+  # startup. Run the exact packaged Windows binaries before publishing them.
+  verify-windows-release:
+    needs: [prepare, package]
+    runs-on: windows-2022
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release
+
+      - name: Smoke test packaged Windows binaries
+        shell: pwsh
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedVersion = "aiscan $env:TAG"
+          $cases = @(
+            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
+          )
+
+          foreach ($case in $cases) {
+            $destination = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($case.Archive))
+            Expand-Archive -LiteralPath (Join-Path 'dist/release' $case.Archive) -DestinationPath $destination
+            $binary = Join-Path $destination $case.Binary
+            $version = (& $binary --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "$($case.Binary) --version exited with $LASTEXITCODE"
+            }
+            if ($version -ne $expectedVersion) {
+              throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
+            }
+            if ($case.Full) {
+              & $binary web --help | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                throw "$($case.Binary) web --help exited with $LASTEXITCODE"
+              }
+            }
+          }
+
+  # ── Publish release ─────────────────────────────────────────────
+  release:
+    needs: [prepare, package, verify-windows-release]
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Download release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release
 
       - name: Generate changelog
         id: changelog
