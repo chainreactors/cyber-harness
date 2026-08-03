@@ -225,12 +225,12 @@ jobs:
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
       - name: Run native Windows package tests
-        run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
+        run: go test -count=1 -tags "re2_cgo re2_static" ./agent/... ./pkg/runner/... ./pkg/web/...
         env:
           CGO_ENABLED: "1"
 
       - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags full ./cmd/aiscan
+        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static" ./cmd/aiscan
         env:
           CGO_ENABLED: "1"
 
@@ -463,11 +463,15 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             IFS='/' read -r goos goarch <<< "$target"
             echo "  compile ${goos}/${goarch}"
+            suffix=""
+            [[ "$goos" == "windows" ]] && suffix=".exe"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
               go build -trimpath -tags "forceposix emptytemplates noembed osusergo netgo" \
               -ldflags "-s -w" -buildvcs=false \
-              -o "dist/standard_${goos}_${goarch}" ./cmd/aiscan
+              -o "dist/standard_${goos}_${goarch}${suffix}" ./cmd/aiscan
           done
+          test -f dist/standard_windows_amd64.exe
+          test -f dist/standard_windows_arm64.exe
           ls -lh dist/
 
       - name: Upload standard binaries
