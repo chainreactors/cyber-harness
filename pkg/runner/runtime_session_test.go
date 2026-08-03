@@ -231,6 +231,53 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 }
 
+func TestStatusReportsLLMAndToolHealth(t *testing.T) {
+	registry := commands.NewRegistry()
+	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{
+		WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger(),
+	}, registry)
+	for _, tool := range registry.Tools() {
+		tool := tool
+		if closer, ok := tool.(interface{ Close() }); ok {
+			t.Cleanup(closer.Close)
+		}
+	}
+	rt := newBareRuntime(t, registry, nil)
+	rt.app.ProviderConfig = agent.ProviderConfig{
+		Provider: "openai", Model: "gpt-test", ContextWindow: 128000, MaxTokens: 8192, Timeout: 45,
+	}
+	rt.app.setLLMHealth(LLMHealth{State: LLMHealthReady, LatencyMs: 12})
+	rt.config.Model = "gpt-test"
+
+	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-status", AgentName: "node-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.Command(context.Background(), "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.GetContent()) != 1 || result.GetContent()[0].GetText() == nil {
+		t.Fatalf("status result = %+v", result)
+	}
+	text := result.GetContent()[0].GetText().GetText()
+	for _, want := range []string{
+		"Session: session-status",
+		"Agent: node-test",
+		"LLM probe: ready (12ms)",
+		"Provider: openai",
+		"Model: gpt-test",
+		"Limits: context=128000 · max_output=8192 · timeout=45s",
+		"Tools: ready",
+		"bash",
+		"Scanners: disabled",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newBareRuntime(t, nil, provider)

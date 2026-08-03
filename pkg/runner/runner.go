@@ -404,6 +404,7 @@ func (rt *AgentRuntime) ReloadProvider(option *cfg.Option) (agent.Provider, stri
 		return nil, "", err
 	}
 	rt.SetProvider(provider, *resolved)
+	rt.app.setLLMHealth(logLLMProbeStatus(rt.ctx, *resolved, logger))
 	return provider, resolved.Model, nil
 }
 
@@ -417,6 +418,7 @@ func (rt *AgentRuntime) SetProvider(provider agent.Provider, providerConfig agen
 	if rt.app != nil {
 		rt.app.Provider = provider
 		rt.app.ProviderConfig = providerConfig
+		rt.app.setLLMHealth(LLMHealth{State: LLMHealthConfigured, CheckedAt: time.Now()})
 	}
 	rt.config.Provider = provider
 	if providerConfig.Model != "" {

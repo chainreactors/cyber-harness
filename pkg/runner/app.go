@@ -38,9 +38,29 @@ type App struct {
 	DataBus           *eventbus.Bus[output.ToolDataEvent]
 	Artifacts         *output.ArtifactStream
 	enginesReady      chan struct{}
+	enginesEnabled    bool
+	healthMu          sync.RWMutex
+	llmHealth         LLMHealth
 	loggerMu          sync.RWMutex
 	logger            telemetry.Logger
 }
+
+// LLMHealth is the latest lightweight provider connectivity check. It is kept
+// separately from ProviderConfig: a syntactically valid configuration can still
+// be unreachable or rejected by the remote service.
+type LLMHealth struct {
+	State     string
+	LatencyMs int64
+	Error     string
+	CheckedAt time.Time
+}
+
+const (
+	LLMHealthNotConfigured = "not_configured"
+	LLMHealthConfigured    = "configured"
+	LLMHealthReady         = "ready"
+	LLMHealthFailed        = "failed"
+)
 
 func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	a := &App{}
@@ -63,8 +83,13 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	a.SkillDiagnostics = diagnostics
 
 	if rc.Provider.Enabled {
+		// Retain the requested configuration even when provider construction or
+		// probing fails, so /status can explain what is configured instead of
+		// collapsing every failure into an unhelpful "not configured" state.
+		a.ProviderConfig = rc.Provider.Config
 		llmProvider, resolved, err := initProvider(rc.Provider.Config, logger)
 		if err != nil {
+			a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured, Error: err.Error(), CheckedAt: time.Now()})
 			if !rc.Provider.Optional {
 				return nil, err
 			}
@@ -72,7 +97,7 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		} else {
 			a.Provider = llmProvider
 			a.ProviderConfig = *resolved
-			logLLMProbeStatus(ctx, *resolved, logger)
+			a.setLLMHealth(logLLMProbeStatus(ctx, *resolved, logger))
 		}
 		for _, fbCfg := range rc.Provider.Fallbacks {
 			fbProvider, fbResolved, err := initProvider(fbCfg, logger)
@@ -87,12 +112,16 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 			logger.Infof("fallback provider init provider=%s model=%s", fbResolved.Provider, fbResolved.Model)
 		}
 	}
+	if !rc.Provider.Enabled {
+		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
+	}
 
 	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, logger)
 
 	a.enginesReady = make(chan struct{})
+	a.enginesEnabled = ScannerInitFunc != nil && !rc.SkipEngines
 	go func() {
-		if ScannerInitFunc != nil && !rc.SkipEngines {
+		if a.enginesEnabled {
 			ScannerInitFunc(ctx, a, rc, logger)
 		}
 		close(a.enginesReady)
@@ -141,6 +170,28 @@ func (a *App) currentLogger() telemetry.Logger {
 		return telemetry.NopLogger()
 	}
 	return logger
+}
+
+func (a *App) setLLMHealth(health LLMHealth) {
+	if a == nil {
+		return
+	}
+	a.healthMu.Lock()
+	a.llmHealth = health
+	a.healthMu.Unlock()
+}
+
+func (a *App) LLMHealth() LLMHealth {
+	if a == nil {
+		return LLMHealth{State: LLMHealthNotConfigured}
+	}
+	a.healthMu.RLock()
+	health := a.llmHealth
+	a.healthMu.RUnlock()
+	if health.State == "" {
+		health.State = LLMHealthNotConfigured
+	}
+	return health
 }
 
 type appLogger struct {
@@ -203,10 +254,11 @@ func initProvider(provCfg agent.ProviderConfig, logger telemetry.Logger) (agent.
 
 const startupLLMProbeTimeout = 5 * time.Second
 
-func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger telemetry.Logger) {
+func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger telemetry.Logger) LLMHealth {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
+	health := LLMHealth{State: LLMHealthConfigured, CheckedAt: time.Now()}
 	probeCtx, cancel := context.WithTimeout(ctx, startupLLMProbeTimeout)
 	defer cancel()
 
@@ -218,15 +270,22 @@ func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger
 		Proxy:    provCfg.Proxy,
 	}, "")
 	if err != nil {
+		health.State = LLMHealthFailed
+		health.Error = err.Error()
 		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %s", llmConfigLabel(provCfg.Provider, provCfg.Model), err.Error())))
-		return
+		return health
 	}
+	health.LatencyMs = result.LatencyMs
 	if !result.Ok {
+		health.State = LLMHealthFailed
+		health.Error = result.Error
 		logger.Warnf("%s", telemetry.StartupLine("fail", "llm", fmt.Sprintf("%s · %dms · %s", llmConfigLabel(result.Provider, result.Model), result.LatencyMs, result.Error)))
-		return
+		return health
 	}
 
+	health.State = LLMHealthReady
 	logger.Infof("%s", telemetry.StartupOK("llm", fmt.Sprintf("%s · %dms", llmConfigLabel(result.Provider, result.Model), result.LatencyMs)))
+	return health
 }
 
 func llmConfigLabel(providerName, model string) string {

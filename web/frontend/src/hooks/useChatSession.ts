@@ -170,12 +170,14 @@ export function useChatSession() {
   const timelineRef = useRef<TimelineItem[]>([])
   const [scanResults, setScanResults] = useState<Map<string, SCONode[]>>(() => new Map())
   const [isThinking, setIsThinking] = useState(false)
-  const [pendingResponse, setPendingResponse] = useState(false)
+  const [runRequestPending, setRunRequestPending] = useState(false)
+  const [activeTurnID, setActiveTurnID] = useState('')
   const [error, setError] = useState('')
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
   const activeSessionRef = useRef<string | null>(null)
   const activeTurnRef = useRef<string>('')
+  const endedTurnIDsRef = useRef<Set<string>>(new Set())
   // Latest roster mirrors `agents` for event handlers that run between renders.
   // selectedNodeID is the Web-scoped node_id; no second identity or
   // reconnect remapping state is needed.
@@ -239,9 +241,11 @@ export function useChatSession() {
   // Both a cold open and a cache restore want this cleared — only their handling
   // of the durable state (messages/timeline/scans) differs.
   function resetTransientState() {
-	activeTurnRef.current = ''
+    activeTurnRef.current = ''
+    endedTurnIDsRef.current.clear()
+    setActiveTurnID('')
     setIsThinking(false)
-    setPendingResponse(false)
+    setRunRequestPending(false)
     setError('')
   }
 
@@ -284,12 +288,23 @@ export function useChatSession() {
     setTimelineItems((prev) => prev.map((item) => item.id === id ? updater(item) : item))
   }
 
+  function activateTurn(turnID: string) {
+    const id = turnID.trim()
+    activeTurnRef.current = id
+    setActiveTurnID(id)
+  }
+
   // A Run converges only on turn_ended. Session lifecycle is independent and a
   // turn-scoped error is diagnostic until its terminal turn_ended arrives.
-  function finalizeRun() {
-	activeTurnRef.current = ''
+  // Ignore a late terminal event for an older turn so it cannot clear a newer
+  // active run after reconnect/replay interleaving.
+  function finalizeRun(turnID = '') {
+    const id = turnID.trim()
+    if (id) endedTurnIDsRef.current.add(id)
+    if (id && activeTurnRef.current && activeTurnRef.current !== id) return
+    activateTurn('')
     setIsThinking(false)
-    setPendingResponse(false)
+    setRunRequestPending(false)
   }
 
   function handleAOPEvent(event: AOPEvent) {
@@ -299,26 +314,32 @@ export function useChatSession() {
     })
     switch (event.payload.case) {
       case 'turnStarted':
-		activeTurnRef.current = event.turnId
-        setPendingResponse(true)
+        endedTurnIDsRef.current.delete(event.turnId)
+        activateTurn(event.turnId)
+        setRunRequestPending(false)
         setIsThinking(true)
         break
       case 'messageDelta':
-        setPendingResponse(true)
+        if (!event.turnId) break
+        activateTurn(event.turnId)
         setIsThinking(event.payload.value.value.case === 'reasoning')
         break
       case 'toolCall':
-        setPendingResponse(true)
+        if (!event.turnId) break
+        activateTurn(event.turnId)
         setIsThinking(false)
         break
       case 'message':
-        if (event.payload.value.role === 'assistant') {
-          setPendingResponse(true)
+        // Messages carry content, not lifecycle. Command results are durable
+        // assistant messages with no turn_id and must never reactivate the Run
+        // state during live delivery or history replay.
+        if (event.turnId && event.payload.value.role === 'assistant') {
+          activateTurn(event.turnId)
           setIsThinking(false)
         }
         break
       case 'turnEnded':
-        finalizeRun()
+        finalizeRun(event.turnId)
         break
       case 'sessionEnded':
         break
@@ -551,14 +572,15 @@ export function useChatSession() {
 		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
 	}
     setError('')
-    setPendingResponse(true)
+    setRunRequestPending(true)
 
     try {
 		const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
-		activeTurnRef.current = sent.turnId || ''
+      setRunRequestPending(false)
+      if (sent.turnId && !endedTurnIDsRef.current.has(sent.turnId)) activateTurn(sent.turnId)
       await refreshSessions()
     } catch (err: any) {
-      setPendingResponse(false)
+      setRunRequestPending(false)
       setError(err.message || 'Failed to send message')
     }
   }
@@ -689,7 +711,7 @@ export function useChatSession() {
     if (!sessionID) return
     try {
 		await cancelChatSession(sessionID, activeTurnRef.current)
-		finalizeRun()
+		finalizeRun(activeTurnRef.current)
       await refreshSessions()
     } catch (err: any) {
       setError(err.message || 'Failed to pause response')
@@ -730,7 +752,8 @@ export function useChatSession() {
     aopEvents,
     scanResults,
     isThinking,
-    busy: pendingResponse || isThinking,
+    busy: runRequestPending || activeTurnID !== '',
+    canPause: activeTurnID !== '',
     error,
     selectNode: (nodeID: string) => {
       setSelectedNodeID(nodeID)

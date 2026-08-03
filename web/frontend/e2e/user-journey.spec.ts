@@ -93,6 +93,8 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     await expect(page.getByText(/Session:/).last()).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(/Provider:\s*openai/).last()).toBeVisible()
     await expect(page.getByText(`Model: ${E2E_MODEL}`, { exact: false }).last()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Pause response' })).toHaveCount(0)
 
     // Terminal attaches to the resident tmux-backed Main REPL, accepts keyboard
     // input as a user would, and receives output from the selected node.
@@ -152,6 +154,8 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     await expect(page.getByText(secondPrompt, { exact: true }).last()).toBeVisible()
     await expect(page.getByText('/status', { exact: true }).last()).toBeVisible()
     await expect.poll(() => page.getByText('PONG', { exact: true }).count()).toBeGreaterThanOrEqual(2)
+    await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Pause response' })).toHaveCount(0)
 
     // Destructive cleanup is also a visible user action with confirmation.
     const sessionRow = page.getByText(firstPrompt, { exact: true }).first().locator('xpath=ancestor::div[contains(@class,"group")]')

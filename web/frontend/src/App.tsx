@@ -281,6 +281,7 @@ export default function App() {
             scanResults={chat.scanResults}
             isThinking={chat.isThinking}
             isBusy={chat.busy}
+            canPause={chat.canPause}
             error={chat.error}
             activeSessionID={chat.activeSessionID}
             hasActiveSession={chat.activeSessionID !== null}

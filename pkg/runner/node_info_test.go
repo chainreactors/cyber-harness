@@ -2,11 +2,25 @@ package runner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
+
+func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
+	app := &App{ProviderConfig: agent.ProviderConfig{Provider: "openai", Model: "gpt-test"}}
+	app.setLLMHealth(LLMHealth{State: LLMHealthFailed, Error: "unauthorized\ninvalid API key"})
+	status := AgentStatus(nil, app)
+	if status.GetProvider() != "openai" || status.GetModel() != "gpt-test" {
+		t.Fatalf("status provider/model = %+v", status)
+	}
+	if !strings.Contains(status.GetConfigError(), "unauthorized invalid API key") {
+		t.Fatalf("config error = %q", status.GetConfigError())
+	}
+}
 
 func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	registry := commands.NewRegistry()

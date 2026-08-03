@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -209,14 +210,7 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 		return commandText(line, CommandPresentationPreformatted,
 			"Runtime commands:\n  /status\n  /clear\n  /compact [focus]\n  /eval [criteria|off]\n  /loop [interval prompt|list|stop name]\n  !<command>")
 	case "/status":
-		provider, model, _ := s.state.runtime.providerSnapshot()
-		providerName := "not configured"
-		if provider != nil {
-			providerName = provider.Name()
-		}
-		return commandText(line, CommandPresentationPreformatted, fmt.Sprintf(
-			"Session: %s\nAgent: %s\nProvider: %s\nModel: %s\nMessages: %d",
-			s.state.id, s.state.agentName, providerName, model, len(s.state.agent.MessagesSnapshot())))
+		return commandText(line, CommandPresentationPreformatted, s.statusText())
 	case "/clear":
 		s.state.agent.Reset()
 		return commandText(line, CommandPresentationPlain, "Context cleared.")
@@ -256,6 +250,188 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 	default:
 		return commandOutcome{err: fmt.Errorf("command %q is not a Runtime command", name)}
 	}
+}
+
+func (s *commandSession) statusText() string {
+	if s == nil || s.state == nil || s.state.runtime == nil {
+		return "Agent runtime: unavailable"
+	}
+	rt := s.state.runtime
+	rt.mu.RLock()
+	app := rt.app
+	provider := rt.config.Provider
+	model := rt.config.Model
+	providerConfig := agent.ProviderConfig{}
+	if app != nil {
+		providerConfig = app.ProviderConfig
+	}
+	rt.mu.RUnlock()
+
+	providerName := strings.TrimSpace(providerConfig.Provider)
+	if providerName == "" && provider != nil {
+		providerName = provider.Name()
+	}
+	if providerName == "" {
+		providerName = "not configured"
+	}
+	if strings.TrimSpace(model) == "" {
+		model = strings.TrimSpace(providerConfig.Model)
+	}
+	if model == "" {
+		model = "-"
+	}
+
+	contextWindow := providerConfig.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = agent.ModelContextWindow(model)
+	}
+	maxTokens := providerConfig.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = agent.DefaultMaxTokens
+	}
+	timeout := providerConfig.Timeout
+	if timeout <= 0 {
+		timeout = 120
+	}
+
+	llmState := "not configured"
+	if app != nil {
+		health := app.LLMHealth()
+		switch health.State {
+		case LLMHealthReady:
+			llmState = "ready"
+			if health.LatencyMs > 0 {
+				llmState += fmt.Sprintf(" (%dms)", health.LatencyMs)
+			}
+		case LLMHealthFailed:
+			llmState = "failed"
+			if detail := statusOneLine(health.Error, 160); detail != "" {
+				llmState += " · " + detail
+			}
+		case LLMHealthConfigured:
+			llmState = "configured (probe pending)"
+		case LLMHealthNotConfigured:
+			if provider != nil && strings.TrimSpace(health.Error) == "" {
+				llmState = "configured (probe unavailable)"
+			} else if detail := statusOneLine(health.Error, 160); detail != "" {
+				llmState += " · " + detail
+			}
+		}
+	}
+
+	toolState := "unavailable"
+	toolNames := []string(nil)
+	commandNames := []string(nil)
+	scannerState := "unavailable"
+	scannerNames := []string(nil)
+	skillState := "not loaded"
+	if app != nil {
+		if app.Commands != nil {
+			for _, registered := range app.Commands.Tools() {
+				if registered != nil && strings.TrimSpace(registered.Name()) != "" {
+					toolNames = append(toolNames, registered.Name())
+				}
+			}
+			commandNames = app.Commands.Names()
+			scannerNames = app.Commands.GroupNames("scanner")
+			if len(toolNames) > 0 {
+				toolState = "ready"
+			}
+		}
+		if !app.enginesEnabled {
+			scannerState = "disabled"
+		} else if app.enginesReady != nil {
+			select {
+			case <-app.enginesReady:
+				if app.Engines == nil {
+					scannerState = "failed"
+				} else if len(scannerNames) > 0 {
+					scannerState = "ready"
+				} else {
+					scannerState = "degraded"
+				}
+			default:
+				scannerState = "loading"
+			}
+		} else if len(scannerNames) > 0 {
+			scannerState = "ready"
+		}
+		if app.Skills != nil {
+			visible := 0
+			for _, skill := range app.Skills.Skills {
+				if strings.TrimSpace(skill.Name) != "" && !skill.Internal {
+					visible++
+				}
+			}
+			skillState = fmt.Sprintf("ready (%d loaded)", visible)
+			if len(app.SkillDiagnostics) > 0 {
+				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(app.SkillDiagnostics))
+			}
+		}
+	}
+
+	toolDetail := fmt.Sprintf("%s (%d tools, %d commands)", toolState, len(toolNames), len(commandNames))
+	if names := summarizeStatusNames(toolNames, 12); names != "" {
+		toolDetail += " · " + names
+	}
+	scannerDetail := scannerState
+	if names := summarizeStatusNames(scannerNames, 12); names != "" {
+		scannerDetail += fmt.Sprintf(" (%d) · %s", len(scannerNames), names)
+	}
+	commandDetail := summarizeStatusNames(commandNames, 16)
+	if commandDetail == "" {
+		commandDetail = "-"
+	}
+
+	return strings.Join([]string{
+		fmt.Sprintf("Session: %s", s.state.id),
+		fmt.Sprintf("Agent: %s", s.state.agentName),
+		fmt.Sprintf("LLM probe: %s", llmState),
+		fmt.Sprintf("Provider: %s", providerName),
+		fmt.Sprintf("Model: %s", model),
+		fmt.Sprintf("Limits: context=%d · max_output=%d · timeout=%ds", contextWindow, maxTokens, timeout),
+		fmt.Sprintf("Tools: %s", toolDetail),
+		fmt.Sprintf("Commands: %s", commandDetail),
+		fmt.Sprintf("Scanners: %s", scannerDetail),
+		fmt.Sprintf("Skills: %s", skillState),
+		fmt.Sprintf("Messages: %d", len(s.state.agent.MessagesSnapshot())),
+	}, "\n")
+}
+
+func summarizeStatusNames(names []string, limit int) string {
+	if len(names) == 0 || limit <= 0 {
+		return ""
+	}
+	clean := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		clean = append(clean, name)
+	}
+	sort.Strings(clean)
+	if len(clean) <= limit {
+		return strings.Join(clean, ",")
+	}
+	return strings.Join(clean[:limit], ",") + fmt.Sprintf(",+%d", len(clean)-limit)
+}
+
+func statusOneLine(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if limit <= 0 || len(runes) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func (s *commandSession) executeBash(ctx context.Context, line, command string) commandOutcome {

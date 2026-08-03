@@ -17,7 +17,7 @@ import (
 
 func RuntimeCommandSpecs() []*types.CommandSpec {
 	return []*types.CommandSpec{
-		{Name: "/status", Description: "Show Runtime session and provider status"},
+		{Name: "/status", Description: "Show Agent LLM, tool, scanner, and session health"},
 		{Name: "/clear", Description: "Clear the current Agent context"},
 		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
 	}

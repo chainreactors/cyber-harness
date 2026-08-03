@@ -31,12 +31,15 @@ func TestLogLLMProbeStatusReady(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
 
-	logLLMProbeStatus(context.Background(), agent.ProviderConfig{
+	health := logLLMProbeStatus(context.Background(), agent.ProviderConfig{
 		Provider: "openai",
 		BaseURL:  srv.URL + "/v1",
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
+	if health.State != LLMHealthReady || health.LatencyMs < 0 || health.Error != "" {
+		t.Fatalf("health = %+v", health)
+	}
 
 	logText := logBuf.String()
 	if !strings.Contains(logText, "● llm") ||
@@ -55,12 +58,15 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
 
-	logLLMProbeStatus(context.Background(), agent.ProviderConfig{
+	health := logLLMProbeStatus(context.Background(), agent.ProviderConfig{
 		Provider: "openai",
 		BaseURL:  srv.URL + "/v1",
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
+	if health.State != LLMHealthFailed || !strings.Contains(health.Error, "unauthorized") {
+		t.Fatalf("health = %+v", health)
+	}
 
 	logText := logBuf.String()
 	if !strings.Contains(logText, "● fail llm") ||
