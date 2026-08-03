@@ -47,40 +47,73 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 
 | OS | Arch | Standard | Full |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
+| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64
+curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64.zip
+unzip aiscan_linux_amd64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
-# macOS
-curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64
+# macOS Apple Silicon
+curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64.zip
+unzip aiscan_darwin_arm64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.exe" -OutFile aiscan.exe
+Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
+Expand-Archive .\aiscan.zip -DestinationPath .
+.\aiscan.exe --version
 ```
+
+### Web Console (Full Edition)
+
+The Web console is included in `aiscan-full`. It starts the browser UI and an
+embedded local agent by default. Open `http://127.0.0.1:8080` and enter the
+access key printed at startup:
+
+```bash
+aiscan-full web
+```
+
+To listen on the network with a fixed access key:
+
+```bash
+aiscan-full web --addr 0.0.0.0:8080 --token change-me
+```
+
+Run the Web console as a hub without an embedded agent, then connect agents
+from this or other hosts:
+
+```bash
+# Hub
+aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+
+# Remote node
+aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
+```
+
+The Web console stores sessions, scans, assets, findings, and configuration in
+`aiscan-web.db` by default. Use `--db <path>` to select another SQLite file.
 
 ### Build from Source
 
 ```bash
 git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
-go build -o aiscan ./cmd/aiscan                          # standard
-go build -tags full -o aiscan-full ./cmd/aiscan           # full (playwright/katana/passive)
+make                                                       # standard edition
+make full                                                  # frontend + full edition
 ```
 
 The standalone agent executable is no longer a maintained build or release
 target. Reference wiring remains in `examples/agent` and can be run manually
-with `go run ./examples/agent --help`. The full target builds the frontend first
-so the latest `web/static` assets are embedded into the binary:
+with `go run ./examples/agent --help`. `make full` requires Node.js/npm and a
+working CGO toolchain; it builds the frontend first so the latest `web/static`
+assets are embedded into the binary:
 
 ```bash
-make                                                      # standard edition
-make full                                                 # frontend + full edition
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
 ```
 

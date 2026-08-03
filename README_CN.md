@@ -47,39 +47,71 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 | 系统 | 架构 | 标准版 | 完整版 |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_amd64` | `aiscan-full_linux_amd64` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_amd64` | `aiscan-full_darwin_arm64` |
-| Windows | amd64 | `aiscan_windows_amd64.exe` | `aiscan-full_windows_amd64.exe` |
+| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64
+curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64.zip
+unzip aiscan_linux_amd64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
-# macOS
-curl -L -o aiscan https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64
+# macOS Apple Silicon
+curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64.zip
+unzip aiscan_darwin_arm64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.exe" -OutFile aiscan.exe
+Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
+Expand-Archive .\aiscan.zip -DestinationPath .
+.\aiscan.exe --version
 ```
+
+### Web 控制台（完整版）
+
+Web 控制台包含在 `aiscan-full` 中，默认同时启动浏览器界面和一个内嵌本地
+Agent。启动后访问 `http://127.0.0.1:8080`，并输入终端中显示的 access key：
+
+```bash
+aiscan-full web
+```
+
+监听局域网地址并使用固定 access key：
+
+```bash
+aiscan-full web --addr 0.0.0.0:8080 --token change-me
+```
+
+也可以让 Web 只作为 Hub 运行，不启动内嵌 Agent，再从本机或其他主机接入
+执行节点：
+
+```bash
+# Hub
+aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+
+# 远程执行节点
+aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
+```
+
+Web 默认使用 `aiscan-web.db` 保存会话、扫描、资产、发现和配置；可以通过
+`--db <path>` 指定其他 SQLite 数据库路径。
 
 ### 从源码构建
 
 ```bash
 git clone https://github.com/chainreactors/aiscan.git && cd aiscan
 
-go build -o aiscan ./cmd/aiscan                          # 标准版
-go build -tags full -o aiscan-full ./cmd/aiscan           # 完整版（含 playwright/katana/passive）
+make                                                       # 标准版
+make full                                                  # 前端 + 完整版
 ```
 
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
-`examples/agent`，需要时可手动运行 `go run ./examples/agent --help`。
-`make full` 会先构建前端，再将最新的 `web/static` 嵌入 full 二进制：
+`examples/agent`，需要时可手动运行 `go run ./examples/agent --help`。执行
+`make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
+`web/static` 嵌入 full 二进制：
 
 ```bash
-make                                                      # Standard 默认版
-make full                                                 # 前端 + Full 完整版
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
 ```
 
