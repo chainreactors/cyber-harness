@@ -64,6 +64,31 @@ func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
 	}
 }
 
+func TestEmbeddedFingersMatchNginx(t *testing.T) {
+	set, err := Init(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if set.Fingers != nil {
+		t.Cleanup(func() { _ = set.Fingers.Close() })
+	}
+	if set.Neutron != nil {
+		t.Cleanup(func() { _ = set.Neutron.Close() })
+	}
+
+	raw := []byte("HTTP/1.1 200 OK\r\nServer: nginx/1.24.0\r\nContent-Type: text/html\r\n\r\n<html><body>Welcome to nginx!</body></html>")
+	frameworks, err := set.Fingers.Match(raw)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	for _, name := range frameworks.GetNames() {
+		if strings.Contains(strings.ToLower(name), "nginx") {
+			return
+		}
+	}
+	t.Fatalf("nginx fingerprint not matched: %v", frameworks.GetNames())
+}
+
 // TestPipelineDeliversAiscanBytes ensures that the bytes aiscan stages in
 // gogoConfigs / sprayConfigs / zombieConfigs really arrive at the downstream
 // SDK's pkg.LoadConfig — the actual call site each engine uses to read its
