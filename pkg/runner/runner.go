@@ -340,7 +340,7 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		Run:             loop.Run,
 	}, "loop")
 
-	if rt.app.IOAStreamClient != nil && option.Space != "" {
+	if !isNilIOADependency(rt.app.IOAStreamClient) && option.Space != "" {
 		nodeID := ""
 		if rt.app.IOAClient != nil {
 			nodeID = rt.app.IOAClient.NodeID()
@@ -351,7 +351,9 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		} else {
 			ioaCtx, cancel := context.WithCancel(ctx)
 			ioaCancel = cancel
-			go subscribeIOASpace(ioaCtx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
+			telemetry.SafeGo("ioa-space-subscription", func() {
+				subscribeIOASpace(ioaCtx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
+			})
 		}
 	}
 
@@ -740,6 +742,12 @@ func scannerCommandSupportsDebug(name string) bool {
 // ---------------------------------------------------------------------------
 
 func subscribeIOASpace(ctx context.Context, stream ioaclient.StreamAPI, spaceID, nodeID string, push func(inboxpkg.Message) error, logger telemetry.Logger) {
+	if ctx == nil || isNilIOADependency(stream) || spaceID == "" || push == nil {
+		return
+	}
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
 	for attempt := 0; ctx.Err() == nil; attempt++ {
 		msgs, errs, cancel, err := stream.Subscribe(ctx, spaceID)
 		if err != nil {

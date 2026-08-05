@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
@@ -17,6 +18,51 @@ import (
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
+
+func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
+	tools := commands.NewRegistry()
+	tools.RegisterTool(&recordingTool{name: "first", output: "first ok"})
+	tools.RegisterTool(&recordingTool{name: "second", output: "second ok"})
+	var logs bytes.Buffer
+	cfg := Config{
+		Tools:  tools,
+		Logger: telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs}),
+		BeforeToolCall: func(_ context.Context, call BeforeToolCallContext) (*BeforeToolCallResult, error) {
+			if call.ToolCall.Name == "first" {
+				panic("before boom")
+			}
+			return nil, nil
+		},
+	}.init()
+	firstArgs, _ := aop.JSONValue(map[string]any{})
+	secondArgs, _ := aop.JSONValue(map[string]any{})
+	assistant := &assistantTurn{
+		message: &aop.Message{Role: "assistant"},
+		toolCalls: []*aop.ToolCall{
+			{Id: "call-first", Name: "first", Arguments: firstArgs},
+			{Id: "call-second", Name: "second", Arguments: secondArgs},
+		},
+	}
+
+	batch, err := executeToolCalls(context.Background(), cfg, cfg.emitter, assistant, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.messages) != 2 {
+		t.Fatalf("messages = %d", len(batch.messages))
+	}
+	first := provider.MessageToolResult(batch.messages[0])
+	second := provider.MessageToolResult(batch.messages[1])
+	if first == nil || !first.IsError || !strings.Contains(tool.ResultText(first), "call-first") {
+		t.Fatalf("first result = %+v", first)
+	}
+	if second == nil || second.IsError || tool.ResultText(second) != "second ok" {
+		t.Fatalf("second result = %+v", second)
+	}
+	if got := logs.String(); !strings.Contains(got, "before boom") || !strings.Contains(got, "call-first") {
+		t.Fatalf("panic log = %s", got)
+	}
+}
 
 func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	tools := commands.NewRegistry()
