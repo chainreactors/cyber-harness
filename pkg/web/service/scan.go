@@ -10,11 +10,13 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
 	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -167,8 +169,9 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 	}()
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			telemetry.GlobalLogs().Errorf("scan panic scan_id=%s panic=%v\n%s", scanID, recovered, debug.Stack())
 			if scan, err := s.store.Get(context.Background(), scanID); err == nil {
-				_, _ = s.failScan(scan, fmt.Sprintf("scan runtime panic: %v", recovered))
+				_, _ = s.failScan(scan, "scan failed unexpectedly")
 			}
 		}
 	}()

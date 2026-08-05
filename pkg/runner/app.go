@@ -78,6 +78,10 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	logger = a.Logger()
 	a.Hooks = hooks.New()
 	a.Hooks.SetErrorSink(func(he *hooks.HandlerError) {
+		if len(he.Stack) > 0 {
+			a.Logger().Errorf("hook panic kind=%s source=%s panic=%v\n%s", he.Kind, he.Source, he.Panic, he.Stack)
+			return
+		}
 		a.Logger().Warnf("hook failed kind=%s source=%s error=%q", he.Kind, he.Source, he.Err)
 	})
 
@@ -379,6 +383,7 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	commands.BuildPlan(plan, deps, cmdReg)
+	cmdReg.SetLogger(logger)
 	return cmdReg
 }
 
@@ -466,7 +471,9 @@ func (a *App) InitIOA(ctx context.Context, ioa IOAConfig) error {
 	if ioa.AutoRegister {
 		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
 			a.Logger().Warnf("ioa registration pending: %s", err)
-			go a.retryIOARegistration(ctx, client, ioa)
+			telemetry.SafeGo("ioa-registration-retry", func() {
+				a.retryIOARegistration(ctx, client, ioa)
+			})
 			return nil
 		}
 	}

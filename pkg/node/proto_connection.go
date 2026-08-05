@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
+	cc.Logger = logger
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
@@ -453,6 +455,12 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	trackOperation(operationsMu, operations, operationID, taskCancel)
 	go func() {
 		defer finishOperation(operationsMu, operations, operationID, taskCancel)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				cc.Logger.Errorf("tool operation panic operation_id=%s tool=%s panic=%v\n%s", operationID, request.Call.Name, recovered, debug.Stack())
+				fail("tool operation failed unexpectedly")
+			}
+		}()
 		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.Progress)
 		if err != nil {
 			fail(err.Error())

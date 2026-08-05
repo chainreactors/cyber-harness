@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -463,7 +464,7 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 			defer wg.Done()
 			defer func() { <-sem }()
 			slots[i].startedAt = time.Now()
-			slots[i].result = runToolCall(ctx, cfg, assistant.message, slots[i].tc, turn)
+			slots[i].result = runToolCallSafely(ctx, cfg, assistant.message, slots[i].tc, turn)
 		}()
 	}
 	wg.Wait()
@@ -513,6 +514,23 @@ type toolExecution struct {
 	isError    bool
 	err        error
 	flow       ToolFlowDecision
+}
+
+func runToolCallSafely(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, turn int) (execution toolExecution) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			cfg.Logger.Errorf(
+				"tool call panic turn=%d name=%s call_id=%s session_id=%s panic=%v\n%s",
+				turn, tc.Name, tc.Id, cfg.SessionID, recovered, debug.Stack(),
+			)
+			message := fmt.Sprintf("tool %s failed unexpectedly (call_id=%s)", tc.Name, tc.Id)
+			execution = toolExecution{
+				result: message, rawResult: message, isError: true,
+				err: fmt.Errorf("tool call failed unexpectedly"),
+			}
+		}
+	}()
+	return runToolCall(ctx, cfg, assistantMsg, tc, turn)
 }
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, turn int) toolExecution {

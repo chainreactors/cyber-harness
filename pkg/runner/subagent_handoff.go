@@ -17,7 +17,7 @@ import (
 )
 
 func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[*aop.Event], client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
-	if bus == nil || client == nil || spaceName == "" {
+	if bus == nil || isNilIOADependency(client) || spaceName == "" {
 		return func() {}
 	}
 	if ctx == nil {
@@ -43,7 +43,7 @@ func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[*aop.Even
 			r.logger.Warnf("ioa handoff queue full, dropping %s", aop.Kind(event))
 		}
 	})
-	go r.run(ctx)
+	telemetry.SafeGo("ioa-handoff", func() { r.run(ctx) })
 	return func() {
 		cancel()
 		unsub()
@@ -80,6 +80,9 @@ func (r *ioaHandoffRecorder) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case event := <-r.events:
+			if event == nil {
+				continue
+			}
 			switch event.Payload.(type) {
 			case *aop.Event_SessionStarted:
 				r.onSessionStart(event)
@@ -182,6 +185,9 @@ func (r *ioaHandoffRecorder) onTurnEnd(event *aop.Event) {
 }
 
 func (r *ioaHandoffRecorder) send(phase, status string, state *handoffState, title, message, refID string) (string, error) {
+	if r == nil || isNilIOADependency(r.client) {
+		return "", fmt.Errorf("IOA client is not configured")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	spaceID, err := r.resolveSpace(ctx)

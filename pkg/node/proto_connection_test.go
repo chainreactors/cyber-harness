@@ -1,16 +1,68 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protobuf "google.golang.org/protobuf/proto"
 	"os"
 	"path/filepath"
 	"runtime"
-	"testing"
 )
+
+func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
+	var logs bytes.Buffer
+	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs})
+	operations := make(map[string]context.CancelFunc)
+	var operationsMu sync.Mutex
+	failure := make(chan *aop.ProtocolError, 1)
+	send := func(_ string, message protobuf.Message) {
+		protocol := message.(*aop.ProtocolMessage)
+		if protocol.GetEvent() != nil {
+			panic("send event boom")
+		}
+		if value := protocol.GetProtocolError(); value != nil {
+			failure <- value
+		}
+	}
+	arguments, _ := aop.JSONValue(map[string]any{})
+	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
+	handleAgentToolMessage(
+		context.Background(),
+		connectionConfig{Registry: commands.NewRegistry(), Logger: logger},
+		&aop.Envelope{Id: "op-panic"},
+		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
+		send, &operationsMu, operations,
+	)
+
+	select {
+	case got := <-failure:
+		if got.Code != "OPERATION_FAILED" || !strings.Contains(got.Message, "unexpectedly") {
+			t.Fatalf("failure = %+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for operation failure")
+	}
+	operationsMu.Lock()
+	_, tracked := operations["op-panic"]
+	operationsMu.Unlock()
+	if tracked {
+		t.Fatal("panicking operation was not cleaned up")
+	}
+	if got := logs.String(); !strings.Contains(got, "send event boom") || !strings.Contains(got, "op-panic") {
+		t.Fatalf("panic log = %s", got)
+	}
+}
 
 func TestExecRequestCompletesWithOutput(t *testing.T) {
 	command := "printf hello"

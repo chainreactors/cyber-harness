@@ -21,19 +21,6 @@ type ToolExecutor interface {
 	ExecuteTool(context.Context, string, string) (*tool.Result, error)
 }
 
-// toolResolver is an optional executor capability exposing the concrete tool
-// catalog, so the transport can assert execution capabilities on the resolved
-// tool instead of its name. *commands.CommandRegistry implements it.
-type toolResolver interface {
-	GetTool(name string) (tool.Tool, bool)
-}
-
-// foregroundTool is implemented by tools that run a command in the foreground
-// with streaming output, bypassing the agent-facing auto-background behavior.
-type foregroundTool interface {
-	RunForegroundTool(context.Context, string, commands.BashExecOptions) (*tool.Result, error)
-}
-
 // ExecuteToolRequest runs one canonical AOP tool call against the executor
 // and wraps the outcome as a ToolResult event correlated to operationID.
 func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor ToolExecutor, progressBus *eventbus.Bus[*toolpb.Progress]) (*aop.Event, error) {
@@ -79,22 +66,18 @@ func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall,
 	if len(arguments) == 0 {
 		arguments = []byte("{}")
 	}
-	if resolver, ok := executor.(toolResolver); ok {
-		if resolved, ok := resolver.GetTool(call.Name); ok {
-			if fg, ok := resolved.(foregroundTool); ok {
-				args, err := tool.ParseArgs[commands.BashArgs](string(arguments))
-				if err != nil {
-					return nil, err
-				}
-				progress := newProgressStreamer(progressBus, call.Name, callID)
-				result, err := fg.RunForegroundTool(ctx, args.Command, commands.BashExecOptions{
-					Timeout:  time.Duration(args.Timeout) * time.Second,
-					OnOutput: progress.Write,
-				})
-				progress.Flush()
-				return result, err
-			}
+	if registry, ok := executor.(*commands.CommandRegistry); ok && call.Name == "bash" {
+		args, err := tool.ParseArgs[commands.BashArgs](string(arguments))
+		if err != nil {
+			return nil, err
 		}
+		progress := newProgressStreamer(progressBus, call.Name, callID)
+		result, err := registry.ExecuteBashForeground(ctx, args.Command, commands.BashExecOptions{
+			Timeout:  time.Duration(args.Timeout) * time.Second,
+			OnOutput: progress.Write,
+		})
+		progress.Flush()
+		return result, err
 	}
 	return executor.ExecuteTool(ctx, call.Name, string(arguments))
 }

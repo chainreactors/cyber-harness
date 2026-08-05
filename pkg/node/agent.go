@@ -22,6 +22,9 @@ func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 }
 
 func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
+	if err := resolveRemoteAgentURLs(option); err != nil {
+		return err
+	}
 	nodeID, err := webNodeID(option)
 	if err != nil {
 		return err
@@ -116,6 +119,16 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 	<-connectionDone
 	return err
+}
+
+func resolveRemoteAgentURLs(option *cfg.Option) error {
+	if option == nil {
+		return fmt.Errorf("web node configuration is required")
+	}
+	if err := cfg.ResolveAgentServerURLs(option); err != nil {
+		return fmt.Errorf("resolve remote agent URLs: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
