@@ -85,11 +85,11 @@ func TestCommandTemplateListSupportsNucleiStyleFlagsAndJSON(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	out := output.String()
-	var result neutronResult
+	var result map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
 		t.Fatalf("json output = %q, error = %v", out, err)
 	}
-	if result.Template != "critical-cve" || result.Severity != "critical" {
+	if result["template_id"] != "critical-cve" || result["severity"] != "critical" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -175,9 +175,8 @@ func TestNeutronResultFromExecutionCarriesExchange(t *testing.T) {
 		Response: "HTTP/1.1 200 OK\r\n\r\nidentifier=3.3M2.0",
 	}
 	op.Matched = true
-	record := neutronResultFromExecution(
+	record := (&sdkneutron.ExecuteResult{TypedResult: sdktypes.NewResult(true, nil, op)}).TemplateResult(
 		"https://example.test",
-		&sdkneutron.ExecuteResult{TypedResult: sdktypes.NewResult(true, nil, op)},
 	)
 	if record.Request != op.Request {
 		t.Fatalf("request not carried through: got %q, want %q", record.Request, op.Request)

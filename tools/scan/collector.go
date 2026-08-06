@@ -26,6 +26,7 @@ type collector struct {
 	stats        *statsCollector
 	gogoResults  []*parsers.GOGOResult
 	sprayResults []sprayObservation
+	artifacts    []output.ArtifactResult
 	loots        []output.Loot
 	errors       []string
 	trace        []string
@@ -128,6 +129,9 @@ func (c *collector) recordLootEvent(event event) {
 		return
 	}
 	loot := *event.Loot
+	if event.Artifact != nil {
+		c.artifacts = append(c.artifacts, *event.Artifact)
+	}
 	switch loot.Kind {
 	case output.LootFingerprint:
 		fingers := loot.Tags

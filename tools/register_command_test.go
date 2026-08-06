@@ -571,7 +571,7 @@ http:
 			Name: "neutron/custom-poc-filter-json", Tool: "neutron",
 			Args: []string{"-i", httpServer.URL, "-t", templateFile, "--tags", "regression", "-s", "high", "-j"},
 			Check: func(t *testing.T, result functionalResult) {
-				requireOutputContains(t, result, `"matched":true`, `"template":"regression-marker"`)
+				requireOutputContains(t, result, `"matched":true`, `"template_id":"regression-marker"`)
 				requireEvent(t, result, "neutron", toolpb.ArtifactKindVuln, nil)
 			},
 		},

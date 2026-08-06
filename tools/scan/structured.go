@@ -39,6 +39,7 @@ func (c *collector) StructuredResult() *output.ScanResult {
 		}
 		result.Spray = append(result.Spray, item.Result)
 	}
+	result.Artifacts = append(result.Artifacts, c.artifacts...)
 	result.Loots = append(result.Loots, c.loots...)
 	for _, message := range c.errors {
 		result.Errors = append(result.Errors, output.Error{Message: message})
