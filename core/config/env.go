@@ -41,10 +41,8 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if v := firstEnv(lookup, "AISCAN_PROVIDER"); v != "" && !providerExplicit {
 		option.Provider = v
 	}
-
-	selectedProvider := selectedEnvProvider(option, lookup)
-	if option.Provider == "" && selectedProvider != "" && !providerExplicit {
-		option.Provider = selectedProvider
+	if option.Provider == "" && !providerExplicit {
+		option.Provider = firstEnv(lookup, "LLM_PROVIDER")
 	}
 
 	// AISCAN_BASE_URL is aiscan's own namespace: an intentional override that wins
@@ -52,7 +50,14 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.BaseURL) == "" {
 		if v := firstEnv(lookup, "AISCAN_BASE_URL"); v != "" {
 			option.BaseURL = v
+		} else if strings.TrimSpace(option.BaseURL) == "" {
+			option.BaseURL = firstEnv(lookup, "LLM_BASE_URL")
 		}
+	}
+
+	selectedProvider := selectedEnvProvider(option, lookup)
+	if option.Provider == "" && selectedProvider != "" && !providerExplicit {
+		option.Provider = selectedProvider
 	}
 	// Provider-scoped base-URL envs (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, …) are
 	// commonly injected by the surrounding environment for *other* tools — e.g.
@@ -73,6 +78,8 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.Model) == "" {
 		if v := firstEnv(lookup, "AISCAN_MODEL"); v != "" {
 			option.Model = v
+		} else if strings.TrimSpace(option.Model) == "" {
+			option.Model = firstEnv(lookup, "LLM_MODEL")
 		}
 	}
 	// Provider-scoped model envs (ANTHROPIC_MODEL, OPENAI_MODEL, …) are commonly
@@ -91,6 +98,8 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.APIKey) == "" {
 		if v := firstEnv(lookup, "AISCAN_API_KEY"); v != "" {
 			option.APIKey = v
+		} else if strings.TrimSpace(option.APIKey) == "" {
+			option.APIKey = firstEnv(lookup, "LLM_API_KEY")
 		}
 	}
 	// Provider-scoped key envs (ANTHROPIC_API_KEY, OPENAI_API_KEY) are commonly
