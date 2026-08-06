@@ -6,7 +6,10 @@ import (
 	"net/url"
 	"strings"
 
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
+	"github.com/chainreactors/aiscan/tools/toolargs"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils"
@@ -170,7 +173,16 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 		if result == nil || !result.Matched() {
 			continue
 		}
-		emit(lootEvent(capNeutronPOC, vulnLoot(result.TemplateResult(target.Target))))
+		record := result.TemplateResult(target.Target)
+		resultID := toolargs.ArtifactResultID("neutron", toolpb.ArtifactKindVuln, target.Target, record)
+		loot := bindLoot(vulnLoot(record), resultID, "neutron")
+		emit(artifactLootEvent(capNeutronPOC, loot, output.ArtifactResult{
+			ResultID: resultID,
+			Tool:     "neutron",
+			Kind:     toolpb.ArtifactKindVuln,
+			Target:   target.Target,
+			Data:     record,
+		}))
 	}
 }
 
@@ -189,7 +201,12 @@ func deriveServiceResult(profile profile, source string, result *parsers.GOGORes
 		emit(targetEvent(source, "", newWebTarget("", target, "")))
 	}
 	if len(fingers) > 0 {
-		emit(lootEvent(source, fingerprintLoot(target, parsers.NormalizeNames(fingers), result.Frameworks.IsFocus())))
+		resultID := toolargs.ArtifactResultID("gogo", toolpb.ArtifactKindService, result.GetTarget(), result)
+		emit(lootEvent(source, bindLoot(
+			fingerprintLoot(target, parsers.NormalizeNames(fingers), result.Frameworks.IsFocus()),
+			resultID,
+			"gogo",
+		)))
 	}
 	if len(fingers) > 0 || profile.AllowBroadPOC {
 		emit(targetEvent(source, "", newPOCTarget("", target, fingers)))
@@ -217,7 +234,12 @@ func deriveWebProbeResult(profile profile, source string, result *parsers.SprayR
 	}
 	fingers := parsers.FrameworkNames(result.Frameworks)
 	if len(fingers) > 0 {
-		emit(lootEvent(source, fingerprintLoot(result.UrlString, parsers.NormalizeNames(fingers), result.Frameworks.IsFocus())))
+		resultID := toolargs.ArtifactResultID("spray", toolpb.ArtifactKindWeb, result.UrlString, result)
+		emit(lootEvent(source, bindLoot(
+			fingerprintLoot(result.UrlString, parsers.NormalizeNames(fingers), result.Frameworks.IsFocus()),
+			resultID,
+			"spray",
+		)))
 	}
 	if result.Status > 0 && (len(fingers) > 0 || profile.AllowBroadPOC) {
 		emit(targetEvent(source, "", newPOCTarget("", result.UrlString, fingers)))
@@ -305,7 +327,16 @@ func deriveWeakpassResult(source string, result *parsers.ZombieResult, emit func
 	if result == nil {
 		return
 	}
-	emit(lootEvent(source, weakpassLoot(result)))
+	target := result.Address()
+	resultID := toolargs.ArtifactResultID("zombie", toolpb.ArtifactKindWeakpass, target, result)
+	loot := bindLoot(weakpassLoot(result), resultID, "zombie")
+	emit(artifactLootEvent(source, loot, output.ArtifactResult{
+		ResultID: resultID,
+		Tool:     "zombie",
+		Kind:     toolpb.ArtifactKindWeakpass,
+		Target:   target,
+		Data:     result,
+	}))
 }
 
 func zombieTargetFromGogo(result *parsers.GOGOResult) (sdkzombie.Target, bool) {

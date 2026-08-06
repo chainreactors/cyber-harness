@@ -23,13 +23,14 @@ const (
 var statsEventSeq uint64
 
 type event struct {
-	Kind   eventKind
-	Source string
-	Raw    string
-	Target target
-	Loot   *output.Loot
-	Error  errorEvent
-	Stats  sdktypes.Stats
+	Kind     eventKind
+	Source   string
+	Raw      string
+	Target   target
+	Loot     *output.Loot
+	Artifact *output.ArtifactResult
+	Error    errorEvent
+	Stats    sdktypes.Stats
 }
 
 func targetEvent(source, raw string, target target) event {
@@ -41,6 +42,19 @@ func targetEvent(source, raw string, target target) event {
 
 func lootEvent(source string, loot output.Loot) event {
 	return event{Kind: eventLoot, Source: source, Loot: &loot}
+}
+
+func bindLoot(loot output.Loot, resultID, tool string) output.Loot {
+	if loot.Data == nil {
+		loot.Data = make(map[string]any)
+	}
+	loot.Data["result_id"] = resultID
+	loot.Data["artifact_tool"] = tool
+	return loot
+}
+
+func artifactLootEvent(source string, loot output.Loot, artifact output.ArtifactResult) event {
+	return event{Kind: eventLoot, Source: source, Loot: &loot, Artifact: &artifact}
 }
 
 func errorEventOf(source, message string) event {
