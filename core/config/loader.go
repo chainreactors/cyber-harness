@@ -134,6 +134,9 @@ func mergeOption(dst, src *Option) {
 	if !dst.SaveSession && src.SaveSession {
 		dst.SaveSession = true
 	}
+	if !dst.CommandBridge && src.CommandBridge {
+		dst.CommandBridge = true
+	}
 	mergeOutputOptions(&dst.OutputOptions, &src.OutputOptions)
 	dst.DataDir = ResolveString(dst.DataDir, src.DataDir)
 }

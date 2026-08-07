@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chainreactors/aiscan/agent/inbox"
@@ -44,6 +45,9 @@ type BashTool struct {
 	tasks          *tmux.Manager
 	commandNames   func() []string
 	resolveCommand func(string) (Command, bool)
+	bridge         *commandBridge
+	bridgeErr      error
+	closeOnce      sync.Once
 }
 
 func NewBashTool(workDir string, timeout int) *BashTool {
@@ -60,7 +64,59 @@ func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
 	t.resolveCommand = fn
 }
 func (t *BashTool) Name() string { return "bash" }
-func (t *BashTool) Close()       { t.tasks.Shutdown() }
+func (t *BashTool) Close() {
+	t.closeOnce.Do(func() {
+		if t.bridge != nil {
+			t.bridge.shutdown()
+		}
+		t.tasks.Shutdown()
+		if t.bridge != nil {
+			t.bridge.cleanup()
+		}
+	})
+}
+
+func (t *BashTool) EnableCommandBridge(registry *CommandRegistry) error {
+	if t.bridge != nil {
+		return t.SyncCommandBridgeAliases()
+	}
+	bridge, err := newCommandBridge(registry)
+	if err != nil {
+		t.bridgeErr = err
+		return err
+	}
+	t.bridge = bridge
+	if err := t.SyncCommandBridgeAliases(); err != nil {
+		t.bridgeErr = err
+		bridge.close()
+		t.bridge = nil
+		return err
+	}
+	t.bridgeErr = nil
+	return nil
+}
+
+func (t *BashTool) SyncCommandBridgeAliases() error {
+	if t.bridge == nil || t.commandNames == nil {
+		return t.bridgeErr
+	}
+	if err := t.bridge.syncAliases(t.commandNames()); err != nil {
+		t.bridgeErr = err
+		return err
+	}
+	return nil
+}
+
+func (t *BashTool) CommandBridgeError() error { return t.bridgeErr }
+
+func (t *BashTool) CommandBridgeEnabled() bool { return t.bridge != nil }
+
+func (t *BashTool) CommandBridgeRuntimeDir() string {
+	if t.bridge == nil {
+		return ""
+	}
+	return t.bridge.runtimeDir
+}
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	t.scannerProxy = proxy
@@ -208,7 +264,16 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	if workDir == "" {
 		workDir = t.workDir
 	}
-	env := t.runEnv(options.Env)
+	env := t.runEnv(ctx, options.Env)
+	if t.bridge != nil {
+		execution := newExecution(t.tasks, command, nil, workDir, env)
+		info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+		if err != nil {
+			return nil, err
+		}
+		execution.bind(info)
+		return execution, nil
+	}
 	left, right, hasPipe := splitPipeline(command)
 	leftToken := firstCommandToken(left)
 	if cmd, ok := t.resolve(leftToken); ok {
@@ -447,7 +512,7 @@ func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 	return result
 }
 
-func (t *BashTool) runEnv(overrides map[string]string) []string {
+func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string) []string {
 	values := make(map[string]string)
 	for _, item := range t.proxyEnv() {
 		if key, value, ok := strings.Cut(item, "="); ok {
@@ -456,6 +521,18 @@ func (t *BashTool) runEnv(overrides map[string]string) []string {
 	}
 	for key, value := range overrides {
 		values[key] = value
+	}
+	if t.bridge != nil {
+		for _, item := range t.bridge.environment(coretool.InvocationFromContext(ctx)) {
+			if key, value, ok := strings.Cut(item, "="); ok {
+				values[key] = value
+			}
+		}
+		path := values["PATH"]
+		if path == "" {
+			path = os.Getenv("PATH")
+		}
+		values["PATH"] = t.bridge.runtimeDir + string(os.PathListSeparator) + path
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {

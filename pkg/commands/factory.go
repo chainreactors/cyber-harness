@@ -29,10 +29,11 @@ type SkillSource interface {
 type Deps struct {
 	*deps.Bag
 
-	WorkDir     string
-	BashTimeout int
-	SkillStore  SkillSource
-	RunnerMode  bool
+	WorkDir       string
+	BashTimeout   int
+	SkillStore    SkillSource
+	RunnerMode    bool
+	CommandBridge bool
 
 	Provider          provider.Provider
 	ScannerProxy      string
@@ -95,5 +96,12 @@ func BuildPlan(plan capability.Plan, deps *Deps, reg *CommandRegistry) {
 			continue
 		}
 		f.Build(deps, reg)
+	}
+	if tool, ok := reg.GetTool("bash"); ok {
+		if bash, ok := tool.(*BashTool); ok && bash.CommandBridgeEnabled() {
+			if err := bash.SyncCommandBridgeAliases(); err != nil {
+				deps.GetLogger().Warnf("command bridge alias sync failed: %s", err)
+			}
+		}
 	}
 }

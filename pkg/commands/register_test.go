@@ -29,3 +29,25 @@ func TestNativeListToolIsRunnerOnly(t *testing.T) {
 		t.Fatal("runner mode must expose the native ls tool")
 	}
 }
+
+func TestCommandBridgeFactoryIsOptIn(t *testing.T) {
+	disabled := NewRegistry()
+	BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &Deps{WorkDir: t.TempDir()}, disabled)
+	defer closeRegistryTools(disabled)
+	disabledTool, ok := disabled.GetTool("bash")
+	if !ok || disabledTool.(*BashTool).CommandBridgeEnabled() {
+		t.Fatal("regular factory must leave the command bridge disabled")
+	}
+
+	enabled := NewRegistry()
+	BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &Deps{WorkDir: t.TempDir(), CommandBridge: true}, enabled)
+	defer closeRegistryTools(enabled)
+	enabledTool, ok := enabled.GetTool("bash")
+	if !ok {
+		t.Fatal("enabled factory did not register bash")
+	}
+	bash := enabledTool.(*BashTool)
+	if !bash.CommandBridgeEnabled() || bash.CommandBridgeError() != nil {
+		t.Fatalf("command bridge enabled=%v error=%v", bash.CommandBridgeEnabled(), bash.CommandBridgeError())
+	}
+}

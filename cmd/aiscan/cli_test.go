@@ -181,6 +181,23 @@ func TestParseCLIRejectsResumeWithExplicitFile(t *testing.T) {
 	}
 }
 
+func TestAgentCommandBridgeFlagIsOptIn(t *testing.T) {
+	parsed, err := parseCLI([]string{"agent", "--command-bridge", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if !parsed.Option.CommandBridge {
+		t.Fatal("--command-bridge was not propagated to agent options")
+	}
+	parsed, err = parseCLI([]string{"agent", "-p", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI() default error = %v", err)
+	}
+	if parsed.Option.CommandBridge {
+		t.Fatal("command bridge must remain disabled by default")
+	}
+}
+
 func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"})
 	if err != nil {
