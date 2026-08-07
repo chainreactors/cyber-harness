@@ -527,6 +527,29 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
+      - name: Install recorder SDK link dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential nasm yasm pkg-config \
+            libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Install recorder SDK link dependencies on Windows
+        if: runner.os == 'Windows'
+        run: |
+          C:/msys64/usr/bin/bash.exe -lc \
+            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
+
+      - name: Prepare static FFmpeg and x264 recorder SDK
+        if: runner.os != 'macOS'
+        run: |
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows '${{ matrix.goarch }}' || bash .github/native/build-windows.sh"
+          else
+            chmod +x .github/native/pkg-config-static.sh
+            bash .github/native/fetch.sh linux '${{ matrix.goarch }}' || bash .github/native/build-linux.sh
+          fi
+
       - name: Download embedded frontend
         uses: actions/download-artifact@v7
         with:
@@ -542,9 +565,27 @@ jobs:
           [[ "${{ matrix.goos }}" == "windows" ]] && suffix=".exe"
           CGO_ENABLED=1 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
             go build -trimpath \
-            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite" \
+            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg" \
             -ldflags "-s -w" -buildvcs=false \
             -o "dist/full_${{ matrix.goos }}_${{ matrix.goarch }}${suffix}" ./cmd/aiscan
+
+      - name: Verify recorder libraries are statically linked
+        if: runner.os != 'macOS'
+        run: |
+          set -euo pipefail
+          binary="$(find dist -maxdepth 1 -type f -name 'full_*' -print -quit)"
+          test -n "${binary}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            if objdump -p "${binary}" | grep -Eiq 'DLL Name:.*(libav|x264|libwinpthread)'; then
+              echo "recorder library remained dynamically linked" >&2
+              exit 1
+            fi
+          else
+            if ldd "${binary}" | grep -Eiq '(libav|libx264)'; then
+              echo "recorder library remained dynamically linked" >&2
+              exit 1
+            fi
+          fi
 
       - name: Upload full ${{ matrix.id }} binary
         uses: actions/upload-artifact@v7
