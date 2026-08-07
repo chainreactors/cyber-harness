@@ -560,7 +560,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
-		if tool.ResultHasImages(toolResult) || toolResult.Terminate {
+		if tool.ResultHasMedia(toolResult) || toolResult.Terminate {
 			execution.fullResult = toolResult
 		}
 	}
@@ -582,12 +582,10 @@ func (e toolExecution) eventContent() []*aop.Content {
 	}
 	for _, block := range e.fullResult.Output {
 		media := block.GetMedia()
-		if media == nil || media.Kind != "image" || media.Resource == nil {
+		if media == nil || media.Resource == nil {
 			continue
 		}
-		if data := media.Resource.GetData(); len(data) > 0 {
-			content = append(content, aop.Image(media.Resource.MediaType, data))
-		}
+		content = append(content, block)
 	}
 	return content
 }

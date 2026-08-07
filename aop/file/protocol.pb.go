@@ -22,8 +22,12 @@ const (
 )
 
 type ReadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// offset and limit enable bounded reads for large artifacts. A zero limit
+	// preserves the original whole-file behavior for older clients.
+	Offset        int64 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
+	Limit         int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -63,6 +67,20 @@ func (x *ReadRequest) GetPath() string {
 		return x.Path
 	}
 	return ""
+}
+
+func (x *ReadRequest) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ReadRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
 }
 
 type WriteRequest struct {
@@ -334,13 +352,17 @@ func (x *Entry) GetSize() int64 {
 }
 
 type Result struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Filename      string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`
-	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
-	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
-	Entries       []*Entry               `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
-	MediaType     string                 `protobuf:"bytes,6,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Path      string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Filename  string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`
+	Size      int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	Data      []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Entries   []*Entry               `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
+	MediaType string                 `protobuf:"bytes,6,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	// offset is the position of data within the file; size remains the total
+	// file size. eof marks the final chunk.
+	Offset        int64 `protobuf:"varint,7,opt,name=offset,proto3" json:"offset,omitempty"`
+	Eof           bool  `protobuf:"varint,8,opt,name=eof,proto3" json:"eof,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -415,6 +437,20 @@ func (x *Result) GetMediaType() string {
 		return x.MediaType
 	}
 	return ""
+}
+
+func (x *Result) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *Result) GetEof() bool {
+	if x != nil {
+		return x.Eof
+	}
+	return false
 }
 
 type ProtocolMessage struct {
@@ -567,9 +603,11 @@ var File_aop_file_protocol_proto protoreflect.FileDescriptor
 
 const file_aop_file_protocol_proto_rawDesc = "" +
 	"\n" +
-	"\x17aop/file/protocol.proto\x12\baop.file\"!\n" +
+	"\x17aop/file/protocol.proto\x12\baop.file\"O\n" +
 	"\vReadRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"6\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"6\n" +
 	"\fWriteRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\"!\n" +
@@ -587,7 +625,7 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\x05Entry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fis_directory\x18\x02 \x01(\bR\visDirectory\x12\x12\n" +
-	"\x04size\x18\x03 \x01(\x03R\x04size\"\xaa\x01\n" +
+	"\x04size\x18\x03 \x01(\x03R\x04size\"\xd4\x01\n" +
 	"\x06Result\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x12\n" +
@@ -595,7 +633,9 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12)\n" +
 	"\aentries\x18\x05 \x03(\v2\x0f.aop.file.EntryR\aentries\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x06 \x01(\tR\tmediaType\"\x80\x03\n" +
+	"media_type\x18\x06 \x01(\tR\tmediaType\x12\x16\n" +
+	"\x06offset\x18\a \x01(\x03R\x06offset\x12\x10\n" +
+	"\x03eof\x18\b \x01(\bR\x03eof\"\x80\x03\n" +
 	"\x0fProtocolMessage\x12:\n" +
 	"\fread_request\x18\n" +
 	" \x01(\v2\x15.aop.file.ReadRequestH\x00R\vreadRequest\x12=\n" +

@@ -80,11 +80,27 @@ func Reasoning(text string) *Content {
 }
 
 func Image(mediaType string, data []byte) *Content {
+	return MediaData("image", mediaType, "", data)
+}
+
+func MediaData(kind, mediaType, filename string, data []byte) *Content {
 	return &Content{Value: &Content_Media{Media: &MediaContent{
-		Kind: "image",
+		Kind: kind,
 		Resource: &Resource{
 			Source:    &Resource_Data{Data: data},
 			MediaType: mediaType,
+			Filename:  filename,
+		},
+	}}}
+}
+
+func MediaURI(kind, mediaType, filename, uri string) *Content {
+	return &Content{Value: &Content_Media{Media: &MediaContent{
+		Kind: kind,
+		Resource: &Resource{
+			Source:    &Resource_Uri{Uri: uri},
+			MediaType: mediaType,
+			Filename:  filename,
 		},
 	}}}
 }

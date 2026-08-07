@@ -150,6 +150,44 @@ func TestNativeFileRPCsResolveRelativeToRuntimeWorkdir(t *testing.T) {
 	}
 }
 
+func TestFileReadReturnsBoundedChunks(t *testing.T) {
+	base := t.TempDir()
+	path := filepath.Join(base, "capture.mp4")
+	data := bytes.Repeat([]byte("frame"), 300_000)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := fileRead(&filepb.ReadRequest{Path: path, Limit: 256 * 1024}, base)
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	if first.result.Offset != 0 || first.result.Eof || len(first.result.Data) != 256*1024 || first.result.Size != int64(len(data)) {
+		t.Fatalf("first chunk = %+v, bytes=%d", first.result, len(first.result.Data))
+	}
+	if first.result.MediaType != "video/mp4" {
+		t.Fatalf("media type = %q, want video/mp4", first.result.MediaType)
+	}
+	joined := append([]byte(nil), first.result.Data...)
+	offset := int64(len(joined))
+	for {
+		next := fileRead(&filepb.ReadRequest{Path: path, Offset: offset, Limit: maxFileReadChunkBytes + 1}, base)
+		if next.err != nil {
+			t.Fatal(next.err)
+		}
+		if next.result.Offset != offset || len(next.result.Data) > int(maxFileReadChunkBytes) {
+			t.Fatalf("chunk offset=%d bytes=%d, want offset=%d max=%d", next.result.Offset, len(next.result.Data), offset, maxFileReadChunkBytes)
+		}
+		joined = append(joined, next.result.Data...)
+		offset += int64(len(next.result.Data))
+		if next.result.Eof {
+			break
+		}
+	}
+	if !bytes.Equal(joined, data) {
+		t.Fatalf("joined bytes = %d, want %d", len(joined), len(data))
+	}
+}
+
 func TestUploadWritesAbsolutePath(t *testing.T) {
 	const filename = "aiscan_test_upload_probe.txt"
 	const body = "codex public proof\nkey=appImage/probe"
