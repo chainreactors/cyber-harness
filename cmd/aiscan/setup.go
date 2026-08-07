@@ -99,7 +99,6 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 	deps := &commands.Deps{
 		WorkDir:           workDir,
 		BashTimeout:       toolCfg.BashTimeout,
-		CommandBridge:     toolCfg.CommandBridge,
 		SkillStore:        skillStore,
 		ScannerProxy:      scanCfg.Proxy,
 		Logger:            logger,

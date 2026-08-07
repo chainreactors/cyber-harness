@@ -366,7 +366,6 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 	deps := &commands.Deps{
 		WorkDir:           workDir,
 		BashTimeout:       rc.Tools.BashTimeout,
-		CommandBridge:     rc.Tools.CommandBridge,
 		SkillStore:        skillStore,
 		Provider:          llmProvider,
 		Logger:            logger,
