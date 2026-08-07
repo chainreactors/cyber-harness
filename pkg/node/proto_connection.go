@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -605,10 +607,69 @@ func fileRead(req *filepb.ReadRequest, base string) fileResultValue {
 	if req == nil || req.Path == "" {
 		return fileResultValue{result: result, err: fmt.Errorf("file path is required")}
 	}
-	data, err := os.ReadFile(resolveFileRPCPath(base, req.Path))
-	result.Data = data
-	result.Size = int64(len(data))
-	return fileResultValue{result: result, err: err}
+	requestPath := req.GetPath()
+	offset := req.GetOffset()
+	limit := req.GetLimit()
+	result.Path = requestPath
+	if offset < 0 {
+		return fileResultValue{result: result, err: fmt.Errorf("file offset cannot be negative")}
+	}
+	if limit < 0 {
+		return fileResultValue{result: result, err: fmt.Errorf("file read limit cannot be negative")}
+	}
+	path := resolveFileRPCPath(base, requestPath)
+	file, err := os.Open(path)
+	if err != nil {
+		return fileResultValue{result: result, err: err}
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return fileResultValue{result: result, err: err}
+	}
+	if info.IsDir() {
+		return fileResultValue{result: result, err: fmt.Errorf("file path is a directory")}
+	}
+	if offset > info.Size() {
+		return fileResultValue{result: result, err: fmt.Errorf("file offset %d exceeds size %d", offset, info.Size())}
+	}
+	result.Filename = info.Name()
+	result.Size = info.Size()
+	result.Offset = offset
+	if limit == 0 {
+		data, readErr := io.ReadAll(file)
+		result.Data = data
+		result.Offset = 0
+		result.Eof = readErr == nil
+		result.MediaType = detectFileMediaType(path, data)
+		return fileResultValue{result: result, err: readErr}
+	}
+	readLimit := min(int64(limit), int64(maxFileReadChunkBytes))
+	remaining := info.Size() - offset
+	if readLimit > remaining {
+		readLimit = remaining
+	}
+	data := make([]byte, int(readLimit))
+	n, readErr := file.ReadAt(data, offset)
+	if readErr != nil && readErr != io.EOF {
+		return fileResultValue{result: result, err: readErr}
+	}
+	result.Data = data[:n]
+	result.Eof = offset+int64(n) >= info.Size()
+	result.MediaType = detectFileMediaType(path, result.Data)
+	return fileResultValue{result: result}
+}
+
+const maxFileReadChunkBytes int32 = 1 << 20
+
+func detectFileMediaType(path string, data []byte) string {
+	if value := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); value != "" {
+		return value
+	}
+	if len(data) > 0 {
+		return http.DetectContentType(data)
+	}
+	return "application/octet-stream"
 }
 
 func fileWrite(req *filepb.WriteRequest, base string) fileResultValue {

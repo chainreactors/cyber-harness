@@ -20,10 +20,28 @@ FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 
 # Standard/full match release artifacts.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
-FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite
+FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg
 BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: help prepare frontend proto-gen aop-gen standard full web-build web-run web all clean
+UNAME_S := $(shell uname -s 2>/dev/null)
+ifeq ($(OS),Windows_NT)
+RECORD_PLATFORM := windows
+else ifeq ($(UNAME_S),Linux)
+RECORD_PLATFORM := linux
+else
+RECORD_PLATFORM := unsupported
+endif
+RECORD_PREFIX := $(if $(AISCAN_RECORD_PREFIX),$(AISCAN_RECORD_PREFIX),$(CURDIR)/.cache/record-native/$(RECORD_PLATFORM)-$(shell $(GO) env GOARCH))
+ifeq ($(RECORD_PLATFORM),windows)
+RECORD_PKG_CONFIG := $(CURDIR)/.github/native/pkg-config-static.cmd
+RECORD_EXTRA_LDFLAGS := -static -static-libgcc
+else
+RECORD_PKG_CONFIG := $(CURDIR)/.github/native/pkg-config-static.sh
+RECORD_EXTRA_LDFLAGS :=
+endif
+RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
+
+.PHONY: help prepare frontend proto-gen aop-gen standard record-native record-native-source full web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets:"
@@ -31,6 +49,8 @@ help:
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
+	@echo "  make record-native    Download the prebuilt FFmpeg/x264 recorder SDK"
+	@echo "  make record-native-source  Build the recorder SDK from pinned sources"
 	@echo "  make proto-gen        Regenerate all AOP and AIScan protobuf bindings"
 	@echo "  make all              Build the standard and full editions"
 	@echo ""
@@ -56,8 +76,26 @@ standard: prepare
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 # The full binary embeds web/static, so frontend must finish first.
-full: frontend prepare
-	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+record-native:
+ifeq ($(RECORD_PLATFORM),unsupported)
+	@echo "record native backend is not supported on this platform"
+else
+	@if [ "$(AISCAN_RECORD_BUILD_FROM_SOURCE)" = "1" ]; then \
+		bash ".github/native/build-$(RECORD_PLATFORM).sh"; \
+	else \
+		bash ".github/native/fetch.sh" "$(RECORD_PLATFORM)" "$(shell $(GO) env GOARCH)"; \
+	fi
+endif
+
+record-native-source:
+ifeq ($(RECORD_PLATFORM),unsupported)
+	@echo "record native backend is not supported on this platform"
+else
+	bash ".github/native/build-$(RECORD_PLATFORM).sh"
+endif
+
+full: frontend record-native prepare
+	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
 web-build: full

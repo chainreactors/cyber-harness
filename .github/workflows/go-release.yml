@@ -138,7 +138,7 @@ jobs:
             runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg"
             targets: "linux/amd64"
             cgo: "1"
           - id: aiscan-full-linux-arm64
@@ -146,7 +146,7 @@ jobs:
             runner: ubuntu-24.04-arm
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg"
             targets: "linux/arm64"
             cgo: "1"
           - id: aiscan-full-darwin-amd64
@@ -154,7 +154,7 @@ jobs:
             runner: macos-15-intel
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg"
             targets: "darwin/amd64"
             cgo: "1"
           - id: aiscan-full-darwin-arm64
@@ -170,7 +170,7 @@ jobs:
             runner: windows-2022
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg"
             targets: "windows/amd64"
             cgo: "1"
 
@@ -195,6 +195,29 @@ jobs:
       - name: Set up mingw for libcstx
         if: runner.os == 'Windows'
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+
+      - name: Install recorder SDK link dependencies on Linux
+        if: matrix.profile == 'full' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config \
+            libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Install recorder SDK link dependencies on Windows
+        if: matrix.profile == 'full' && runner.os == 'Windows'
+        run: |
+          C:/msys64/usr/bin/bash.exe -lc \
+            "pacman -S --noconfirm --needed pkgconf mingw-w64-x86_64-toolchain"
+
+      - name: Download static FFmpeg and x264 recorder SDK
+        if: matrix.profile == 'full' && runner.os != 'macOS'
+        run: |
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows amd64"
+          else
+            chmod +x .github/native/pkg-config-static.sh
+            bash .github/native/fetch.sh linux "$(go env GOARCH)"
+          fi
 
       - name: Download embedded frontend
         if: matrix.profile == 'full'
@@ -237,6 +260,24 @@ jobs:
 
           echo "=== Binaries ==="
           ls -lh "${OUTDIR}/"
+
+      - name: Verify recorder libraries are statically linked
+        if: matrix.profile == 'full' && runner.os != 'macOS'
+        run: |
+          set -euo pipefail
+          binary="$(find dist/build -maxdepth 1 -type f -name 'aiscan-full_*' -print -quit)"
+          test -n "${binary}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            if objdump -p "${binary}" | grep -Eiq 'DLL Name:.*(libav|x264|libwinpthread)'; then
+              echo "recorder library remained dynamically linked" >&2
+              exit 1
+            fi
+          else
+            if ldd "${binary}" | grep -Eiq '(libav|libx264)'; then
+              echo "recorder library remained dynamically linked" >&2
+              exit 1
+            fi
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

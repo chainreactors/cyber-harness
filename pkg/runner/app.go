@@ -379,12 +379,25 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		Events:            events,
 	}
 	plan := capability.Select(capability.Options{
-		Groups:        []string{"core", "arsenal", "search", "browser"},
+		Groups:        linkedToolGroups(),
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	commands.BuildPlan(plan, deps, cmdReg)
 	cmdReg.SetLogger(logger)
 	return cmdReg
+}
+
+func linkedToolGroups() []string {
+	seen := make(map[string]bool)
+	var groups []string
+	for _, descriptor := range capability.All() {
+		if descriptor.Kind != capability.KindTool || descriptor.Group == "" || seen[descriptor.Group] {
+			continue
+		}
+		seen[descriptor.Group] = true
+		groups = append(groups, descriptor.Group)
+	}
+	return groups
 }
 
 func executeRegistryCommand(ctx context.Context, reg *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {

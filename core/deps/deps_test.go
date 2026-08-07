@@ -459,9 +459,9 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	makefile := readRepositoryFile(t, root, "Makefile")
 	for _, required := range []string{
 		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build",
-		"full: frontend prepare\n\tCGO_ENABLED=1 $(GO) build",
+		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build",
 		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
-		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite",
+		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile missing build profile contract %q", required)

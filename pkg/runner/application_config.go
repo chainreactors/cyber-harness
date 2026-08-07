@@ -45,7 +45,7 @@ type ToolConfig struct {
 	BashTimeout       int
 	TavilyKeys        string
 	PlaywrightSession string
-	OptionalTools     []string // optional tool groups to enable (e.g. "search", "browser")
+	OptionalTools     []string // optional tool groups to enable
 }
 
 type IOAConfig struct {

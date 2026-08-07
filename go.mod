@@ -10,6 +10,7 @@ tool (
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/alecthomas/chroma/v2 v2.14.0
+	github.com/asticode/go-astiav v0.41.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
@@ -61,6 +62,7 @@ require (
 )
 
 require (
+	github.com/asticode/go-astikit v0.42.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect

@@ -63,6 +63,13 @@
     "reason": "Validates Unix-only PTY and process lifecycle behavior."
   },
   {
+    "path": "cmd/aiscan/imports_full_test.go",
+    "format": "record is only linked on Windows and Linux",
+    "count": 1,
+    "category": "platform",
+    "reason": "The native recorder capability is linked only into Windows and Linux full builds."
+  },
+  {
     "path": "pkg/commands/bash_test.go",
     "format": "unix-only test",
     "count": 2,
