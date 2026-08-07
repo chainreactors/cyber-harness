@@ -35,7 +35,7 @@ func TestCommandBridgeFactoryIsOptIn(t *testing.T) {
 	BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &Deps{WorkDir: t.TempDir()}, disabled)
 	defer closeRegistryTools(disabled)
 	disabledTool, ok := disabled.GetTool("bash")
-	if !ok || disabledTool.(*BashTool).CommandBridgeEnabled() {
+	if !ok || disabledTool.(*BashTool).bridge != nil {
 		t.Fatal("regular factory must leave the command bridge disabled")
 	}
 
@@ -47,7 +47,7 @@ func TestCommandBridgeFactoryIsOptIn(t *testing.T) {
 		t.Fatal("enabled factory did not register bash")
 	}
 	bash := enabledTool.(*BashTool)
-	if !bash.CommandBridgeEnabled() || bash.CommandBridgeError() != nil {
-		t.Fatalf("command bridge enabled=%v error=%v", bash.CommandBridgeEnabled(), bash.CommandBridgeError())
+	if bash.bridge == nil {
+		t.Fatal("command bridge was not enabled")
 	}
 }

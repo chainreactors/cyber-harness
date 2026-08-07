@@ -98,7 +98,7 @@ func BuildPlan(plan capability.Plan, deps *Deps, reg *CommandRegistry) {
 		f.Build(deps, reg)
 	}
 	if tool, ok := reg.GetTool("bash"); ok {
-		if bash, ok := tool.(*BashTool); ok && bash.CommandBridgeEnabled() {
+		if bash, ok := tool.(*BashTool); ok && bash.bridge != nil {
 			if err := bash.SyncCommandBridgeAliases(); err != nil {
 				deps.GetLogger().Warnf("command bridge alias sync failed: %s", err)
 			}
