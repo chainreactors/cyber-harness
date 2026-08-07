@@ -34,6 +34,18 @@ func ResultHasImages(r *Result) bool {
 	return false
 }
 
+func ResultHasMedia(r *Result) bool {
+	if r == nil {
+		return false
+	}
+	for _, block := range r.Output {
+		if block.GetMedia() != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func TextResult(s string) *Result {
 	return &Result{Output: []*aop.Content{aop.Text(s)}}
 }

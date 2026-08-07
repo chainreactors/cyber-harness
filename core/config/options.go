@@ -76,7 +76,7 @@ type AgentOptions struct {
 	Prompt                string   `short:"p" long:"prompt" description:"Natural language task or existing file path for the agent"`
 	Inputs                []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
 	Skills                []string `short:"s" long:"skill" description:"Skill to apply (name or file path). Can specify multiple"`
-	Tools                 []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable (search, browser). Arsenal is always loaded"`
+	Tools                 []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable. Arsenal is always loaded"`
 	TaskFile              string   `long:"task-file" description:"File containing task description"`
 	Heartbeat             int      `long:"heartbeat" description:"Heartbeat interval in minutes: periodically wake the agent to review context (0 disables)" default:"0"`
 	Timeout               int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
