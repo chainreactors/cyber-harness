@@ -407,11 +407,15 @@ func (b *commandBridge) shutdown() {
 
 func (b *commandBridge) cleanup() {
 	b.cleanupOnce.Do(func() {
-		for attempt := 0; attempt < 5; attempt++ {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
 			if err := os.RemoveAll(b.runtimeDir); err == nil {
 				break
 			}
-			time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
 		_ = os.Remove(commandBridgeRuntimeRoot())
 	})
