@@ -161,6 +161,9 @@ func TestClearRotatesToAnEmptyContinuationSession(t *testing.T) {
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	if runtime.sessionRunActive(session.ID()) {
+		t.Fatal("Run.Wait returned before the active run registration was released")
+	}
 	oldID := session.ID()
 
 	var events []*aop.Event
