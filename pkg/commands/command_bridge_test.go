@@ -97,11 +97,8 @@ func runBridgeCommand(t *testing.T, bash *BashTool, ctx context.Context, command
 func TestCommandBridgeDisabledByDefault(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 5)
 	defer bash.Close()
-	if bash.CommandBridgeEnabled() {
-		t.Fatal("command bridge must be disabled by default")
-	}
-	if bash.CommandBridgeRuntimeDir() != "" {
-		t.Fatalf("disabled bridge runtime dir = %q", bash.CommandBridgeRuntimeDir())
+	if bash.bridge != nil {
+		t.Fatal("disabled bridge allocated runtime state")
 	}
 }
 
@@ -178,7 +175,7 @@ func TestCommandBridgeSyncsCommandsRegisteredLater(t *testing.T) {
 
 func TestCommandBridgeCloseCancelsCallsAndRemovesRuntime(t *testing.T) {
 	bash, _, state := newBridgeTestBash(t)
-	runtimeDir := bash.CommandBridgeRuntimeDir()
+	runtimeDir := bash.bridge.runtimeDir
 	if _, err := os.Stat(runtimeDir); err != nil {
 		t.Fatalf("runtime directory before close: %v", err)
 	}

@@ -46,7 +46,6 @@ type BashTool struct {
 	commandNames   func() []string
 	resolveCommand func(string) (Command, bool)
 	bridge         *commandBridge
-	bridgeErr      error
 	closeOnce      sync.Once
 }
 
@@ -82,40 +81,22 @@ func (t *BashTool) EnableCommandBridge(registry *CommandRegistry) error {
 	}
 	bridge, err := newCommandBridge(registry)
 	if err != nil {
-		t.bridgeErr = err
 		return err
 	}
 	t.bridge = bridge
 	if err := t.SyncCommandBridgeAliases(); err != nil {
-		t.bridgeErr = err
 		bridge.close()
 		t.bridge = nil
 		return err
 	}
-	t.bridgeErr = nil
 	return nil
 }
 
 func (t *BashTool) SyncCommandBridgeAliases() error {
 	if t.bridge == nil || t.commandNames == nil {
-		return t.bridgeErr
+		return nil
 	}
-	if err := t.bridge.syncAliases(t.commandNames()); err != nil {
-		t.bridgeErr = err
-		return err
-	}
-	return nil
-}
-
-func (t *BashTool) CommandBridgeError() error { return t.bridgeErr }
-
-func (t *BashTool) CommandBridgeEnabled() bool { return t.bridge != nil }
-
-func (t *BashTool) CommandBridgeRuntimeDir() string {
-	if t.bridge == nil {
-		return ""
-	}
-	return t.bridge.runtimeDir
+	return t.bridge.syncAliases(t.commandNames())
 }
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {

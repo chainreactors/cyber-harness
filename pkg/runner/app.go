@@ -123,12 +123,7 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
 
-	commandRegistry, err := initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, logger)
-	if err != nil {
-		a.Close()
-		return nil, err
-	}
-	a.Commands = commandRegistry
+	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, logger)
 	if rc.RecordFile != "" {
 		if err := a.StartRecording(rc.RecordFile); err != nil {
 			a.Close()
@@ -365,7 +360,7 @@ func llmConfigLabel(providerName, model string) string {
 	return providerName + "/" + model
 }
 
-func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, logger telemetry.Logger) (*commands.CommandRegistry, error) {
+func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, logger telemetry.Logger) *commands.CommandRegistry {
 	cmdReg := commands.NewRegistry()
 	workDir, _ := os.Getwd()
 	deps := &commands.Deps{
@@ -385,23 +380,7 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	commands.BuildPlan(plan, deps, cmdReg)
-	if rc.Tools.CommandBridge {
-		tool, ok := cmdReg.GetTool("bash")
-		if !ok {
-			return nil, fmt.Errorf("command bridge requires the bash tool")
-		}
-		bash, ok := tool.(*commands.BashTool)
-		if !ok {
-			return nil, fmt.Errorf("command bridge requires the built-in bash tool")
-		}
-		if err := bash.CommandBridgeError(); err != nil {
-			return nil, fmt.Errorf("start command bridge: %w", err)
-		}
-		if !bash.CommandBridgeEnabled() {
-			return nil, fmt.Errorf("command bridge was requested but is not active")
-		}
-	}
-	return cmdReg, nil
+	return cmdReg
 }
 
 func executeRegistryCommand(ctx context.Context, reg *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {
