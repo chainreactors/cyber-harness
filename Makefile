@@ -26,6 +26,8 @@ BUILD_FLAGS := -trimpath -buildvcs=false
 UNAME_S := $(shell uname -s 2>/dev/null)
 ifeq ($(OS),Windows_NT)
 RECORD_PLATFORM := windows
+else ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
+RECORD_PLATFORM := windows
 else ifeq ($(UNAME_S),Linux)
 RECORD_PLATFORM := linux
 else
