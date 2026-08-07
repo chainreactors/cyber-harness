@@ -70,6 +70,8 @@ github.com/M09ic/go-ntlmssp v0.0.0-20230312133735-dcccd454dfe0 h1:9Y+BdzDIHfpKy0
 github.com/M09ic/go-ntlmssp v0.0.0-20230312133735-dcccd454dfe0/go.mod h1:yMNEF6ulbFipt3CakMhcmcNVACshPRG4Ap4l00V+mMs=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
+github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
+github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/Mzack9999/gcache v0.0.0-20230410081825-519e28eab057 h1:KFac3SiGbId8ub47e7kd2PLZeACxc1LkiiNoDOFRClE=
 github.com/Mzack9999/gcache v0.0.0-20230410081825-519e28eab057/go.mod h1:iLB2pivrPICvLOuROKmlqURtFIEsoJZaMidQfCG1+D4=
 github.com/Mzack9999/go-http-digest-auth-client v0.6.1-0.20220414142836-eb8883508809 h1:ZbFL+BDfBqegi+/Ssh7im5+aQfBRx6it+kHnC7jaDU8=

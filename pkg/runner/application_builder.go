@@ -61,6 +61,7 @@ func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConf
 	}
 	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
 	rc.Tools.PlaywrightSession = option.PlaywrightSession
+	rc.Tools.CommandBridge = option.CommandBridge
 	rc.CLISkillPaths = skillPathsFromOptions(option)
 	rc.RecordFile = option.OutputFile
 	return rc
@@ -92,6 +93,7 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 		Tools: ToolConfig{
 			Enabled:           features.ToolsEnabled,
 			BashTimeout:       300,
+			CommandBridge:     option.CommandBridge,
 			TavilyKeys:        resolveTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
 			PlaywrightSession: option.PlaywrightSession,
 			OptionalTools:     option.Tools,

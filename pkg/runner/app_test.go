@@ -16,10 +16,33 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/utils/parsers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+func TestAppCloseRemovesCommandBridgeRuntime(t *testing.T) {
+	app, err := NewApp(context.Background(), ApplicationConfig{
+		Tools: ToolConfig{CommandBridge: true}, SkipEngines: true, Logger: telemetry.NopLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	tool, ok := app.Commands.GetTool("bash")
+	if !ok {
+		t.Fatal("bash tool is missing")
+	}
+	runtimeDir := tool.(*commands.BashTool).CommandBridgeRuntimeDir()
+	if _, err := os.Stat(runtimeDir); err != nil {
+		t.Fatalf("command bridge runtime before close: %v", err)
+	}
+	app.Close()
+	app.Close()
+	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {
+		t.Fatalf("command bridge runtime after close: %v", err)
+	}
+}
 
 func TestLogLLMProbeStatusReady(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
