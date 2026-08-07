@@ -513,6 +513,7 @@ func TestRecorderNativeBuildUsesSingleSDKScript(t *testing.T) {
 		"record-native:",
 		"record-native-source:",
 		"record-native-package:",
+		"MINGW% MSYS% CYGWIN%",
 		`bash ".github/native/sdk.sh" fetch`,
 		`bash ".github/native/sdk.sh" build`,
 		`bash ".github/native/sdk.sh" package`,
