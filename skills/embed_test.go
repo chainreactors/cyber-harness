@@ -124,6 +124,36 @@ func TestReadVirtual(t *testing.T) {
 	}
 }
 
+func TestIOAFindingConvention(t *testing.T) {
+	store, _ := LoadEmbeddedStore()
+	body, handled, err := store.ReadVirtualBody("aiscan://skills/aiscan/okf/runtime/ioa-finding.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtualBody(ioa-finding) handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(body, "--kind finding") || !strings.Contains(body, "result_id") {
+		t.Fatalf("ioa-finding convention missing checkpoint command or result_id:\n%s", body)
+	}
+	if strings.Contains(body, "finding-id") {
+		t.Fatal("ioa-finding must not reintroduce a separate finding-id")
+	}
+
+	main, _, err := store.ReadVirtual("aiscan://skills/aiscan/SKILL.md")
+	if err != nil {
+		t.Fatalf("ReadVirtual(SKILL.md) error = %v", err)
+	}
+	if !strings.Contains(main, "okf/runtime/ioa-finding.md") {
+		t.Fatal("SKILL.md does not reference the ioa-finding convention")
+	}
+
+	report, _, err := store.ReadVirtual("aiscan://skills/aiscan/reference/report.md")
+	if err != nil {
+		t.Fatalf("ReadVirtual(report.md) error = %v", err)
+	}
+	if !strings.Contains(report, "findings/<result_id>.md") {
+		t.Fatal("report.md must name findings by result_id")
+	}
+}
+
 func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
 	store, diags := LoadAll(nil)
 	if len(diags) != 0 {
