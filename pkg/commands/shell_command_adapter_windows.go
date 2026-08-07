@@ -14,35 +14,35 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func commandBridgeEndpoint(runtimeDir string) string {
-	return `\\.\pipe\aiscan-command-bridge-` + fmt.Sprintf("%d-%s", os.Getpid(), filepath.Base(runtimeDir))
+func shellCommandAdapterEndpoint(runtimeDir string) string {
+	return `\\.\pipe\aiscan-shell-commands-` + fmt.Sprintf("%d-%s", os.Getpid(), filepath.Base(runtimeDir))
 }
 
-func listenCommandBridge(endpoint string) (net.Listener, error) {
+func listenShellCommandAdapter(endpoint string) (net.Listener, error) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return nil, err
 	}
 	return winio.ListenPipe(endpoint, &winio.PipeConfig{
 		SecurityDescriptor: "D:P(A;;GA;;;" + user.User.Sid.String() + ")",
-		InputBufferSize:    commandBridgeChunkSize,
-		OutputBufferSize:   commandBridgeChunkSize,
+		InputBufferSize:    shellCommandAdapterChunkSize,
+		OutputBufferSize:   shellCommandAdapterChunkSize,
 	})
 }
 
-func dialCommandBridge(ctx context.Context, endpoint string) (net.Conn, error) {
+func dialShellCommandAdapter(ctx context.Context, endpoint string) (net.Conn, error) {
 	return winio.DialPipeContext(ctx, endpoint)
 }
 
-func createCommandBridgeAlias(executable, runtimeDir, name string) (string, error) {
+func createShellCommandAdapterAlias(executable, runtimeDir, name string) (string, error) {
 	_ = executable
 	path := filepath.Join(runtimeDir, name+".cmd")
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
 	content := "@echo off\r\n" +
-		"set \"" + commandBridgeCommandEnv + "=" + name + "\"\r\n" +
-		"\"%" + commandBridgeExecutableEnv + "%\" %*\r\n" +
+		"set \"" + shellCommandAdapterCommandEnv + "=" + name + "\"\r\n" +
+		"\"%" + shellCommandAdapterExecutableEnv + "%\" %*\r\n" +
 		"exit /b %errorlevel%\r\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return "", err
@@ -50,7 +50,7 @@ func createCommandBridgeAlias(executable, runtimeDir, name string) (string, erro
 	return path, nil
 }
 
-func commandBridgeProcessAlive(pid int) bool {
+func shellCommandAdapterProcessAlive(pid int) bool {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return err == windows.ERROR_ACCESS_DENIED
@@ -63,7 +63,7 @@ func commandBridgeProcessAlive(pid int) bool {
 	return exitCode == 259 // STILL_ACTIVE
 }
 
-func flushCommandBridgeProxyOutput() {
+func flushShellCommandAdapterProxyOutput() {
 	_ = os.Stdout.Sync()
 	_ = os.Stderr.Sync()
 	// ConPTY can report the proxy process exit before consuming its final

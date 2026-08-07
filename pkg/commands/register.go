@@ -33,11 +33,7 @@ func init() {
 			bash.SetCommandNames(reg.Names)
 			bash.SetCommandResolver(reg.Get)
 			reg.RegisterTool(bash)
-			if deps.CommandBridge {
-				if err := bash.EnableCommandBridge(reg); err != nil {
-					deps.GetLogger().Warnf("command bridge disabled after startup failure: %s", err)
-				}
-			}
+			bash.attachShellCommands(reg)
 
 			tmuxCmd := NewTmuxCommand(bash)
 			reg.Register(tmuxCmd, "core")

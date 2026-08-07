@@ -45,7 +45,9 @@ type BashTool struct {
 	tasks          *tmux.Manager
 	commandNames   func() []string
 	resolveCommand func(string) (Command, bool)
-	bridge         *commandBridge
+	shellRegistry  *CommandRegistry
+	adapterMu      sync.Mutex
+	shellAdapter   *shellCommandAdapter
 	closeOnce      sync.Once
 }
 
@@ -65,38 +67,44 @@ func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
 func (t *BashTool) Name() string { return "bash" }
 func (t *BashTool) Close() {
 	t.closeOnce.Do(func() {
-		if t.bridge != nil {
-			t.bridge.shutdown()
+		t.adapterMu.Lock()
+		adapter := t.shellAdapter
+		if adapter != nil {
+			adapter.shutdown()
 		}
+		t.adapterMu.Unlock()
 		t.tasks.Shutdown()
-		if t.bridge != nil {
-			t.bridge.cleanup()
+		if adapter != nil {
+			adapter.cleanup()
 		}
 	})
 }
 
-func (t *BashTool) EnableCommandBridge(registry *CommandRegistry) error {
-	if t.bridge != nil {
-		return t.SyncCommandBridgeAliases()
-	}
-	bridge, err := newCommandBridge(registry)
-	if err != nil {
-		return err
-	}
-	t.bridge = bridge
-	if err := t.SyncCommandBridgeAliases(); err != nil {
-		bridge.close()
-		t.bridge = nil
-		return err
-	}
-	return nil
+func (t *BashTool) attachShellCommands(registry *CommandRegistry) {
+	t.shellRegistry = registry
 }
 
-func (t *BashTool) SyncCommandBridgeAliases() error {
-	if t.bridge == nil || t.commandNames == nil {
-		return nil
+func (t *BashTool) ensureShellCommands() (*shellCommandAdapter, error) {
+	if t.shellRegistry == nil {
+		return nil, nil
 	}
-	return t.bridge.syncAliases(t.commandNames())
+	t.adapterMu.Lock()
+	defer t.adapterMu.Unlock()
+	if t.shellAdapter == nil {
+		adapter, err := newShellCommandAdapter(t.shellRegistry)
+		if err != nil {
+			return nil, err
+		}
+		t.shellAdapter = adapter
+	}
+	if t.commandNames != nil {
+		if err := t.shellAdapter.syncAliases(t.commandNames()); err != nil {
+			t.shellAdapter.close()
+			t.shellAdapter = nil
+			return nil, err
+		}
+	}
+	return t.shellAdapter, nil
 }
 
 func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
@@ -245,18 +253,39 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	if workDir == "" {
 		workDir = t.workDir
 	}
-	env := t.runEnv(ctx, options.Env)
-	if t.bridge != nil {
+	left, right, hasPipe := splitPipeline(command)
+	leftToken := firstCommandToken(left)
+	if !hasPipe {
+		if cmd, ok := t.resolve(leftToken); ok {
+			if tokens, err := SplitCommandLine(left); err == nil {
+				if args, syntaxErr := stripShellSyntax(tokens[1:]); syntaxErr == nil {
+					args = normalizeNoColor(cmd.Name, args)
+					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(options.Env, nil, ""), options)
+				}
+			}
+		}
+	}
+	adapter, err := t.ensureShellCommands()
+	if err != nil {
+		return nil, err
+	}
+	if adapter != nil {
+		contextID := adapter.retainContext(ctx)
+		env := t.runEnv(options.Env, adapter, contextID)
 		execution := newExecution(t.tasks, command, nil, workDir, env)
 		info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
 		if err != nil {
+			adapter.releaseContext(contextID)
 			return nil, err
 		}
 		execution.bind(info)
+		go func() {
+			<-t.tasks.Done(execution.ID)
+			adapter.releaseContext(contextID)
+		}()
 		return execution, nil
 	}
-	left, right, hasPipe := splitPipeline(command)
-	leftToken := firstCommandToken(left)
+	env := t.runEnv(options.Env, nil, "")
 	if cmd, ok := t.resolve(leftToken); ok {
 		tokens, err := SplitCommandLine(left)
 		if err != nil {
@@ -493,7 +522,7 @@ func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 	return result
 }
 
-func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string) []string {
+func (t *BashTool) runEnv(overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
 	values := make(map[string]string)
 	for _, item := range t.proxyEnv() {
 		if key, value, ok := strings.Cut(item, "="); ok {
@@ -503,8 +532,8 @@ func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string) []st
 	for key, value := range overrides {
 		values[key] = value
 	}
-	if t.bridge != nil {
-		for _, item := range t.bridge.environment(coretool.InvocationFromContext(ctx)) {
+	if adapter != nil && shellContextID != "" {
+		for _, item := range adapter.environment(shellContextID) {
 			if key, value, ok := strings.Cut(item, "="); ok {
 				values[key] = value
 			}
@@ -513,7 +542,7 @@ func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string) []st
 		if path == "" {
 			path = os.Getenv("PATH")
 		}
-		values["PATH"] = t.bridge.runtimeDir + string(os.PathListSeparator) + path
+		values["PATH"] = adapter.runtimeDir + string(os.PathListSeparator) + path
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {

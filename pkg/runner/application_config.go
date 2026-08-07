@@ -43,7 +43,6 @@ type ScannerConfig struct {
 type ToolConfig struct {
 	Enabled           bool
 	BashTimeout       int
-	CommandBridge     bool
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string // optional tool groups to enable (e.g. "search", "browser")

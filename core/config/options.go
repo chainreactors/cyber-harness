@@ -89,7 +89,6 @@ type AgentOptions struct {
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
 	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-select a .aiscan/sessions/*.jsonl recording path"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
-	CommandBridge         bool     `long:"command-bridge" config:"command_bridge" description:"Expose in-memory commands to shell composition through a process-local bridge"`
 }
 
 type AgentTransport string
