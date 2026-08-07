@@ -57,15 +57,13 @@ jobs:
 
       - name: Build and package Linux SDK
         if: runner.os == 'Linux'
-        run: |
-          bash .github/native/build-linux.sh
-          bash .github/native/package.sh linux '${{ matrix.arch }}' dist/native
+        run: make record-native-source record-native-package RECORD_ARCH='${{ matrix.arch }}'
 
       - name: Build and package Windows SDK
         if: runner.os == 'Windows'
         run: |
           C:/msys64/usr/bin/bash.exe -lc \
-            "cd '${GITHUB_WORKSPACE}'; bash .github/native/build-windows.sh; bash .github/native/package.sh windows amd64 dist/native"
+            "cd '${GITHUB_WORKSPACE}'; make record-native-source record-native-package RECORD_ARCH=amd64"
 
       - name: Upload SDK archive
         uses: actions/upload-artifact@v7

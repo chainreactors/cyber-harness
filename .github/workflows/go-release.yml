@@ -213,19 +213,13 @@ jobs:
         if: matrix.profile == 'full' && runner.os != 'macOS'
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows amd64"
-            record_root="$(cygpath -m "${GITHUB_WORKSPACE}")"
-            record_prefix="${record_root}/.cache/record-native/windows-amd64"
-            {
-              echo "PKG_CONFIG_PATH=${record_prefix}/lib/pkgconfig"
-              echo "PKG_CONFIG=${record_root}/.github/native/pkg-config-static.cmd"
-              echo "CGO_CFLAGS=-I${record_prefix}/include"
-              echo "CGO_LDFLAGS=-L${record_prefix}/lib -static -static-libgcc"
-            } >> "${GITHUB_ENV}"
+            platform=windows
+            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH=amd64"
           else
-            chmod +x .github/native/pkg-config-static.sh
-            bash .github/native/fetch.sh linux "$(go env GOARCH)"
+            platform=linux
+            make record-native RECORD_ARCH="$(go env GOARCH)"
           fi
+          bash .github/native/sdk.sh env "${platform}" "$(go env GOARCH)" >> "${GITHUB_ENV}"
 
       - name: Verify recorder SDK link environment
         if: matrix.profile == 'full' && runner.os != 'macOS'

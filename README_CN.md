@@ -43,7 +43,7 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 | 版本 | 说明 |
 | --- | --- |
 | **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | 完整版 — 额外包含 playwright 浏览器、passive recon、katana 爬虫 |
+| **aiscan-full** | 完整版 — 额外包含 playwright、passive、katana，以及受支持 Windows/Linux 系统上的原生录屏 |
 
 | 系统 | 架构 | 标准版 | 完整版 |
 | --- | --- | --- | --- |
@@ -109,7 +109,8 @@ make full                                                  # 前端 + 完整版
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
 `examples/agent`，需要时可手动运行 `go run ./examples/agent --help`。执行
 `make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
-`web/static` 嵌入 full 二进制：
+`web/static` 嵌入 full 二进制。在受支持的 Windows/Linux 目标上，它还会下载并
+校验固定版本的录屏 SDK；使用 `make record-native-source` 可从固定源码构建该 SDK。
 
 ```bash
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
@@ -125,7 +126,7 @@ libstdc++、libgcc 或 winpthread DLL。
 
 ### 设计理念
 
-- **单文件、零依赖** — 静态链接，开箱即用
+- **单文件分发** — 内置引擎无需额外安装，仍使用操作系统图形与基础系统库
 - **极简 agent 内核** — 可组合的 ~160 行循环；工具、重试、评估均为插拔式，非硬编码
 - **插件式架构** — 新增工具只需一个文件；重依赖（playwright、katana）编译期可选
 - **内嵌 Skill** — 每个工具自带用法文档和战术指导，agent 按需加载
@@ -165,6 +166,7 @@ libstdc++、libgcc 或 winpthread DLL。
 - playwright — headless Chromium 会话、截图、网络捕获
 - katana — Web 爬虫，支持 standard/headless/hybrid 引擎
 - passive — 网络空间搜索（FOFA、Hunter、Shodan）
+- record — 原生桌面/窗口截图和 H.264/MP4 录屏（Windows 与 Linux X11）
 
 **辅助工具**
 - tmux — 后台任务会话，增量输出自动推送
@@ -241,6 +243,7 @@ llm:
 | [Scan 模式详解](docs/scan.md) | 扫描流水线、AI 增强、输出格式 |
 | [Agent 模式详解](docs/agent.md) | Agent 工具集、Goal Evaluation、REPL |
 | [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
+| [Record 工具](docs/record.md) | 桌面/窗口捕获、平台支持与原生构建 |
 | [协议与传输架构](docs/protocol-architecture.md) | AOP WebSocket、Connect 管理平面、namespace 与身份边界 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
 | [Changelog](docs/changelog.md) | 版本变更记录 |
