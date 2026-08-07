@@ -55,8 +55,12 @@ func commandBridgeProcessAlive(pid int) bool {
 	if err != nil {
 		return err == windows.ERROR_ACCESS_DENIED
 	}
-	_ = windows.CloseHandle(handle)
-	return true
+	defer windows.CloseHandle(handle)
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(handle, &exitCode); err != nil {
+		return true
+	}
+	return exitCode == 259 // STILL_ACTIVE
 }
 
 func flushCommandBridgeProxyOutput() {
