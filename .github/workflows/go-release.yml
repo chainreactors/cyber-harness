@@ -214,10 +214,22 @@ jobs:
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows amd64"
+            record_root="$(cygpath -m "${GITHUB_WORKSPACE}")"
+            record_prefix="${record_root}/.cache/record-native/windows-amd64"
+            {
+              echo "PKG_CONFIG_PATH=${record_prefix}/lib/pkgconfig"
+              echo "PKG_CONFIG=${record_root}/.github/native/pkg-config-static.cmd"
+              echo "CGO_CFLAGS=-I${record_prefix}/include"
+              echo "CGO_LDFLAGS=-L${record_prefix}/lib -static -static-libgcc"
+            } >> "${GITHUB_ENV}"
           else
             chmod +x .github/native/pkg-config-static.sh
             bash .github/native/fetch.sh linux "$(go env GOARCH)"
           fi
+
+      - name: Verify recorder SDK link environment
+        if: matrix.profile == 'full' && runner.os != 'macOS'
+        run: pkg-config --modversion libavcodec
 
       - name: Download embedded frontend
         if: matrix.profile == 'full'
