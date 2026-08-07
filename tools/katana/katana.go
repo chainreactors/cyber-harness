@@ -14,6 +14,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 	"github.com/projectdiscovery/goflags"
@@ -139,6 +140,9 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if options.Proxy == "" && c.Proxy != "" {
 		options.Proxy = c.Proxy
 	}
+	if err := configureBrowserOptions(options); err != nil {
+		return nil, fmt.Errorf("katana: %w", err)
+	}
 
 	if err := validateOptions(options); err != nil {
 		return nil, fmt.Errorf("katana: %w", err)
@@ -214,6 +218,35 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		fmt.Fprint(execution.Stdout, string(line)+"\n")
 	}
 	return nil, nil
+}
+
+type browserDiscoverer func() (browserutil.Binary, error)
+
+func configureBrowserOptions(options *katanatypes.Options) error {
+	return configureBrowserOptionsWith(options, browserutil.Discover)
+}
+
+func configureBrowserOptionsWith(options *katanatypes.Options, discover browserDiscoverer) error {
+	if options.ChromeWSUrl != "" {
+		return nil
+	}
+	if options.SystemChromePath != "" {
+		options.UseInstalledChrome = true
+		return nil
+	}
+	if !options.Headless && !options.HeadlessHybrid {
+		return nil
+	}
+
+	binary, err := discover()
+	if err != nil {
+		return fmt.Errorf("browser discovery failed: %w", err)
+	}
+	if binary.Path != "" {
+		options.SystemChromePath = binary.Path
+		options.UseInstalledChrome = true
+	}
+	return nil
 }
 
 // readFlags replicates katana's cmd/katana/main.go readFlags() using goflags,

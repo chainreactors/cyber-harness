@@ -4,8 +4,15 @@ package scan
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 )
 
 func TestKatanaProfileExtender(t *testing.T) {
@@ -57,4 +64,93 @@ func TestRunKatanaCrawlEmitsTargets(t *testing.T) {
 		}
 	}
 	t.Logf("katana discovered %d web targets from example.com (depth=1)", targets)
+}
+
+func TestE2EKatanaDeepRendersAuthenticatedSPA(t *testing.T) {
+	binary, err := browserutil.Discover()
+	if err != nil {
+		t.Fatalf("discover browser: %v", err)
+	}
+	if binary.Path == "" {
+		t.Skip("no system browser available; CI installs Chrome for this test")
+	}
+	t.Setenv(browserutil.PathEnv, binary.Path)
+
+	const (
+		sessionToken  = "scan-session-73"
+		workspacePath = "/workspace/session-73?view=assets"
+	)
+	var authenticatedWorkspaceHits atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html><body><main>Loading assets...</main><script>
+(async () => {
+  const response = await fetch('/api/session', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': 'scan-e2e'},
+    body: JSON.stringify({username: 'analyst'})
+  });
+  const session = await response.json();
+  localStorage.setItem('scan.token', session.token);
+  document.cookie = 'scan_session=' + session.token + '; Path=/; SameSite=Lax';
+  location.assign(session.next);
+})();
+</script></body></html>`)
+	})
+	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-CSRF-Token") != "scan-e2e" {
+			http.Error(w, "invalid session request", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token":%q,"next":%q}`, sessionToken, workspacePath)
+	})
+	mux.HandleFunc("/workspace/session-73", func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("scan_session")
+		if err != nil || cookie.Value != sessionToken {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		authenticatedWorkspaceHits.Add(1)
+		fmt.Fprint(w, `<!doctype html><html><body><a href="/assets/detail?id=9">Asset detail</a></body></html>`)
+	})
+	mux.HandleFunc("/assets/detail", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "asset detail")
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cmd := &Command{}
+	e := targetEvent(capSprayCheck, srv.URL, newWebTarget(srv.URL, srv.URL, ""))
+	var emitted []event
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	runKatanaCrawl(ctx, cmd, e, 2, true, func(ev event) {
+		emitted = append(emitted, ev)
+	})
+
+	for _, ev := range emitted {
+		if ev.Kind == eventError {
+			t.Fatalf("katana_deep emitted error: %s", ev.Error.Message)
+		}
+	}
+	if authenticatedWorkspaceHits.Load() == 0 {
+		t.Fatal("katana_deep browser never reached the authenticated workspace")
+	}
+	for _, ev := range emitted {
+		if ev.Kind != eventTarget {
+			continue
+		}
+		wt, ok := ev.Target.(webTarget)
+		if ok && strings.Contains(wt.URL, "/workspace/session-73") {
+			return
+		}
+	}
+	t.Fatal("katana_deep did not emit the browser-only workspace route")
 }
