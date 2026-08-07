@@ -1130,7 +1130,6 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 	emitter := &turnEmitter{sessionID: s.id, turnID: turnID, agentName: s.agentName, emitter: s.runtime.sessionEvents}
 	op := &sessionOperation{
 		execute: func(runCtx context.Context) {
-			defer s.runtime.releaseRun(run)
 			s.inbox.setActive(true)
 			emitter.start()
 			result, runErr := s.executeRun(runCtx, turnID, input)
@@ -1149,17 +1148,16 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			}
 			emitter.end(runResult, runErr)
 			s.inbox.setActive(false)
-			run.finish(runResult, runErr)
+			s.runtime.finishRun(run, runResult, runErr)
 		},
 		reject: func(err error) {
-			defer s.runtime.releaseRun(run)
 			result := RunResult{Stop: agent.StopReasonCanceled}
 			if !errors.Is(err, context.Canceled) {
 				result.Stop = agent.StopReasonError
 			}
 			emitter.start()
 			emitter.end(result, err)
-			run.finish(result, err)
+			s.runtime.finishRun(run, result, err)
 		},
 	}
 	if err := s.admit(runCtx, op); err != nil {
@@ -1349,13 +1347,26 @@ func (rt *AgentRuntime) releaseRun(run *Run) {
 	if run == nil {
 		return
 	}
+	rt.unregisterRun(run)
+	rt.operations.Done()
+}
+
+func (rt *AgentRuntime) finishRun(run *Run, result RunResult, err error) {
+	if run == nil {
+		return
+	}
+	rt.unregisterRun(run)
+	run.finish(result, err)
+	rt.operations.Done()
+}
+
+func (rt *AgentRuntime) unregisterRun(run *Run) {
 	run.cancel()
 	rt.mu.Lock()
 	if rt.runs[run.turnID] == run {
 		delete(rt.runs, run.turnID)
 	}
 	rt.mu.Unlock()
-	rt.operations.Done()
 }
 
 func (rt *AgentRuntime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {

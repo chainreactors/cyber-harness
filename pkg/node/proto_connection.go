@@ -457,13 +457,13 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	trackOperation(operationsMu, operations, operationID, taskCancel)
 	go func() {
-		defer finishOperation(operationsMu, operations, operationID, taskCancel)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				cc.Logger.Errorf("tool operation panic operation_id=%s tool=%s panic=%v\n%s", operationID, request.Call.Name, recovered, debug.Stack())
 				fail("tool operation failed unexpectedly")
 			}
 		}()
+		defer finishOperation(operationsMu, operations, operationID, taskCancel)
 		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.Progress)
 		if err != nil {
 			fail(err.Error())
