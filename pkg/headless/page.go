@@ -27,6 +27,9 @@ const (
 type HistoryEntry struct {
 	RawRequest  string
 	RawResponse string
+	URL         string
+	Method      string
+	StatusCode  int
 }
 
 // Page wraps a go-rod page and executes headless action sequences.
@@ -157,7 +160,7 @@ func (p *Page) ExecuteActions(actions []*Action) (ActionData, error) {
 		case ActionWaitFMP:
 			err = p.actionWaitLifecycle(resolved, out, proto.PageLifecycleEventNameFirstMeaningfulPaint)
 		case ActionWaitIdle:
-			err = p.actionWaitLifecycle(resolved, out, proto.PageLifecycleEventNameNetworkIdle)
+			err = p.actionWaitIdle(resolved, out)
 		case ActionWaitLoad:
 			err = p.actionWaitLifecycle(resolved, out, proto.PageLifecycleEventNameLoad)
 		case ActionWaitStable:
@@ -186,6 +189,49 @@ func (p *Page) ExecuteActions(actions []*Action) (ActionData, error) {
 			err = p.actionDialog(resolved, out)
 		case ActionWaitDialog:
 			err = p.actionWaitDialog(resolved, out)
+		case ActionDblClick:
+			err = p.actionDblClick(resolved, out)
+		case ActionHover:
+			err = p.actionHover(resolved, out)
+		case ActionFocus:
+			err = p.actionFocus(resolved, out)
+		case ActionBlur:
+			err = p.actionBlur(resolved, out)
+		case ActionCheck:
+			err = p.actionCheck(resolved, out, true)
+		case ActionUncheck:
+			err = p.actionCheck(resolved, out, false)
+		case ActionDispatchEvent:
+			err = p.actionDispatchEvent(resolved, out)
+		case ActionSetViewport:
+			err = p.actionSetViewport(resolved, out)
+		case ActionWaitURL:
+			err = p.actionWaitURL(resolved, out)
+		case ActionWaitRequest:
+			err = p.actionWaitNetwork(resolved, out, false)
+		case ActionWaitResponse:
+			err = p.actionWaitNetwork(resolved, out, true)
+		case ActionStorage:
+			err = p.actionStorage(resolved, out)
+		case ActionCookie:
+			err = p.actionCookie(resolved, out)
+		case ActionAssert:
+			err = p.actionAssert(resolved, out)
+			if err != nil {
+				err = fmt.Errorf("%s assertion: %w", firstNonEmpty(resolved.GetArg("type"), resolved.GetArg("target")), err)
+			}
+		case ActionScroll:
+			err = p.actionScroll(resolved, out)
+		case ActionDrag:
+			err = p.actionDrag(resolved, out)
+		case ActionReload:
+			err = p.actionReload(resolved, out)
+		case ActionGoBack:
+			err = p.actionHistoryNavigation(resolved, out, false)
+		case ActionGoForward:
+			err = p.actionHistoryNavigation(resolved, out, true)
+		case ActionSetContent:
+			err = p.actionSetContent(resolved, out)
 		default:
 			continue
 		}
@@ -350,7 +396,7 @@ func (p *Page) captureHijackHistory(ctx *rod.Hijack) {
 		rawResp.WriteString(ctx.Response.Body())
 	}
 
-	p.addHistory(rawReq, rawResp.String(), payload)
+	p.addHistory(rawReq, rawResp.String(), req.Method, req.URL.String(), payload)
 }
 
 // routingRuleHandlerNative handles capture-only interception via native CDP Fetch.
@@ -393,6 +439,9 @@ func (p *Page) routingRuleHandlerNative(e *proto.FetchRequestPaused) error {
 	p.History = append(p.History, HistoryEntry{
 		RawRequest:  rawReq.String(),
 		RawResponse: rawResp.String(),
+		URL:         e.Request.URL,
+		Method:      e.Request.Method,
+		StatusCode:  statusCode,
 	})
 	p.mu.Unlock()
 
@@ -400,7 +449,7 @@ func (p *Page) routingRuleHandlerNative(e *proto.FetchRequestPaused) error {
 }
 
 // addHistory records a request/response pair from the HijackRouter path.
-func (p *Page) addHistory(rawReq, rawResp string, payload *proto.FetchFulfillRequest) {
+func (p *Page) addHistory(rawReq, rawResp, method, requestURL string, payload *proto.FetchFulfillRequest) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -410,10 +459,16 @@ func (p *Page) addHistory(rawReq, rawResp string, payload *proto.FetchFulfillReq
 			p.responseHeaders[h.Name] = h.Value
 		}
 	}
-	p.History = append(p.History, HistoryEntry{
+	entry := HistoryEntry{
 		RawRequest:  rawReq,
 		RawResponse: rawResp,
-	})
+		URL:         requestURL,
+		Method:      method,
+	}
+	if payload != nil {
+		entry.StatusCode = payload.ResponseCode
+	}
+	p.History = append(p.History, entry)
 }
 
 // Close cleans up any resources held by the page.
@@ -430,35 +485,7 @@ func (p *Page) Close() {
 
 // pageElementBy resolves a page element using nuclei's selector conventions.
 func (p *Page) pageElementBy(data map[string]string) (*rod.Element, error) {
-	by := data["by"]
-	page := p.page.Timeout(defaultActionTimeout)
-	switch by {
-	case "x", "xpath":
-		xpath := data["xpath"]
-		if xpath == "" {
-			return nil, fmt.Errorf("xpath selector required")
-		}
-		return page.ElementX(xpath)
-	case "js":
-		return page.ElementByJS(&rod.EvalOptions{JS: data["js"]})
-	case "r", "regex":
-		return page.ElementR(data["selector"], data["regex"])
-	case "search":
-		elms, err := page.Search(data["query"])
-		if err != nil {
-			return nil, err
-		}
-		if elms.First != nil {
-			return elms.First, nil
-		}
-		return nil, fmt.Errorf("no element found for query: %s", data["query"])
-	default:
-		sel := data["selector"]
-		if sel == "" {
-			return nil, fmt.Errorf("no selector provided")
-		}
-		return page.Element(sel)
-	}
+	return ElementBy(p.page, data, defaultActionTimeout)
 }
 
 // ResponseData captures HTTP response info from the navigated page.

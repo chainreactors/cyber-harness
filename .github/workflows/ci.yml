@@ -310,6 +310,52 @@ jobs:
           CGO_ENABLED=1 go test -tags "full re2_cgo re2_static" -count=1 -timeout 5m \
             ./cmd/aiscan ./pkg/web/api ./pkg/web/service
 
+  headless-record-replay-e2e:
+    runs-on: ubuntu-22.04
+    needs: tidy
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Verify Chrome discovery
+        run: chrome --version
+
+      - name: Run headless action E2E
+        run: |
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 2m -v \
+            -run '^(TestExecAIScanExtendedActions|TestExecAIScanHistoryActions)$' \
+            ./pkg/headless
+
+      - name: Run authenticated record and replay E2E
+        run: |
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 2m -v \
+            -run '^TestE2E_RecordReplayAuthenticatedDashboard$' \
+            ./tools/playwright
+
+      - name: Run Katana browser reuse E2E
+        run: |
+          go test -count=1 -timeout 2m -v \
+            -run '^TestE2EHeadlessReusesDiscoveredBrowser$' \
+            ./tools/katana
+          go test -tags "full re2_cgo re2_static" -count=1 -timeout 2m -v \
+            -run '^TestE2EKatanaDeepRendersAuthenticatedSPA$' \
+            ./tools/scan
+
   # ── Generated templates tests (depends on tidy) ───────────────
 
   generated-test:
