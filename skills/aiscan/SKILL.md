@@ -25,6 +25,7 @@ Core agent tools:
 - `bash`: run shell commands and pseudo-commands (see below).
 - `web_search`: search the web for CVEs, advisories, exploits, and documentation.
 - `fetch`: fetch and read a specific URL.
+- `record` (Windows/Linux full builds): capture desktop or visible application-window screenshots and H.264 recordings. It accepts HWND/X11 Window IDs or resolves a PID to its main visible window.
 
 ## User Tool Restrictions
 
@@ -69,7 +70,7 @@ Available only when they appear in the runtime pseudo-command list:
 - `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `aiscan://skills/aiscan/okf/runtime/search.md`.
 - `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `aiscan://skills/aiscan/okf/runtime/tmux.md`.
 - `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/okf/runtime/proxy.md`.
-- `ioa`: multi-agent collaboration via shared message spaces — `ioa space <name> <desc>`, `ioa send`, `ioa read --all`, and `ioa send checkpoint`. Reference: `aiscan://skills/ioa/SKILL.md`; wire-protocol formats live in the ioa module skills (`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`).
+- `ioa`: multi-agent collaboration via shared message spaces — `ioa space <name> <desc>`, `ioa send`, `ioa read --all`, and `ioa send checkpoint`. Reference: `aiscan://skills/ioa/SKILL.md`; wire-protocol formats live in the ioa module skills (`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`). Publish vulnerability discoveries per `aiscan://skills/aiscan/okf/runtime/ioa-finding.md`.
 
 ## Fingerprint → POC Workflow
 
