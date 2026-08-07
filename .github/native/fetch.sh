@@ -32,19 +32,23 @@ emit_env() {
   if [[ -z "${GITHUB_ENV:-}" ]]; then
     return
   fi
+  local env_file="${GITHUB_ENV}"
+  if command -v cygpath >/dev/null 2>&1; then
+    env_file="$(cygpath -u "${env_file}")"
+  fi
   if [[ "${PLATFORM}" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
     local prefix_native root_native
-    prefix_native="$(cygpath -w "${PREFIX}")"
-    root_native="$(cygpath -w "${ROOT}")"
-    echo "PKG_CONFIG_PATH=${prefix_native}\\lib\\pkgconfig" >> "${GITHUB_ENV}"
-    echo "PKG_CONFIG=${root_native}\\.github\\native\\pkg-config-static.cmd" >> "${GITHUB_ENV}"
-    echo "CGO_CFLAGS=-I${prefix_native}\\include" >> "${GITHUB_ENV}"
-    echo "CGO_LDFLAGS=-L${prefix_native}\\lib -static -static-libgcc" >> "${GITHUB_ENV}"
+    prefix_native="$(cygpath -m "${PREFIX}")"
+    root_native="$(cygpath -m "${ROOT}")"
+    echo "PKG_CONFIG_PATH=${prefix_native}/lib/pkgconfig" >> "${env_file}"
+    echo "PKG_CONFIG=${root_native}/.github/native/pkg-config-static.cmd" >> "${env_file}"
+    echo "CGO_CFLAGS=-I${prefix_native}/include" >> "${env_file}"
+    echo "CGO_LDFLAGS=-L${prefix_native}/lib -static -static-libgcc" >> "${env_file}"
   else
-    echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> "${GITHUB_ENV}"
-    echo "PKG_CONFIG=${ROOT}/.github/native/pkg-config-static.sh" >> "${GITHUB_ENV}"
-    echo "CGO_CFLAGS=-I${PREFIX}/include" >> "${GITHUB_ENV}"
-    echo "CGO_LDFLAGS=-L${PREFIX}/lib" >> "${GITHUB_ENV}"
+    echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> "${env_file}"
+    echo "PKG_CONFIG=${ROOT}/.github/native/pkg-config-static.sh" >> "${env_file}"
+    echo "CGO_CFLAGS=-I${PREFIX}/include" >> "${env_file}"
+    echo "CGO_LDFLAGS=-L${PREFIX}/lib" >> "${env_file}"
   fi
 }
 

@@ -35,12 +35,14 @@ EXPECTED="source_bundle=${RECORD_NATIVE_VERSION} ffmpeg=${FFMPEG_COMMIT} x264=${
 
 emit_env() {
   if [[ -n "${GITHUB_ENV:-}" ]]; then
-    PREFIX_WIN="$(cygpath -w "${PREFIX}")"
-    ROOT_WIN="$(cygpath -w "${ROOT}")"
-    echo "PKG_CONFIG_PATH=${PREFIX_WIN}\\lib\\pkgconfig" >> "${GITHUB_ENV}"
-    echo "PKG_CONFIG=${ROOT_WIN}\\.github\\native\\pkg-config-static.cmd" >> "${GITHUB_ENV}"
-    echo "CGO_CFLAGS=-I${PREFIX_WIN}\\include" >> "${GITHUB_ENV}"
-    echo "CGO_LDFLAGS=-L${PREFIX_WIN}\\lib -static -static-libgcc" >> "${GITHUB_ENV}"
+    local env_file prefix_win root_win
+    env_file="$(cygpath -u "${GITHUB_ENV}")"
+    prefix_win="$(cygpath -m "${PREFIX}")"
+    root_win="$(cygpath -m "${ROOT}")"
+    echo "PKG_CONFIG_PATH=${prefix_win}/lib/pkgconfig" >> "${env_file}"
+    echo "PKG_CONFIG=${root_win}/.github/native/pkg-config-static.cmd" >> "${env_file}"
+    echo "CGO_CFLAGS=-I${prefix_win}/include" >> "${env_file}"
+    echo "CGO_LDFLAGS=-L${prefix_win}/lib -static -static-libgcc" >> "${env_file}"
   fi
 }
 
