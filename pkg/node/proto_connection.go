@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -607,9 +608,10 @@ func fileRead(req *filepb.ReadRequest, base string) fileResultValue {
 	if req == nil || req.Path == "" {
 		return fileResultValue{result: result, err: fmt.Errorf("file path is required")}
 	}
-	requestPath := req.GetPath()
-	offset := req.GetOffset()
-	limit := req.GetLimit()
+	requestPath, offset, limit, compat, err := normalizeFileReadRequest(req)
+	if err != nil {
+		return fileResultValue{result: result, err: err}
+	}
 	result.Path = requestPath
 	if offset < 0 {
 		return fileResultValue{result: result, err: fmt.Errorf("file offset cannot be negative")}
@@ -642,6 +644,7 @@ func fileRead(req *filepb.ReadRequest, base string) fileResultValue {
 		result.Offset = 0
 		result.Eof = readErr == nil
 		result.MediaType = detectFileMediaType(path, data)
+		finalizeCompatFileResult(result, compat)
 		return fileResultValue{result: result, err: readErr}
 	}
 	readLimit := min(int64(limit), int64(maxFileReadChunkBytes))
@@ -657,6 +660,7 @@ func fileRead(req *filepb.ReadRequest, base string) fileResultValue {
 	result.Data = data[:n]
 	result.Eof = offset+int64(n) >= info.Size()
 	result.MediaType = detectFileMediaType(path, result.Data)
+	finalizeCompatFileResult(result, compat)
 	return fileResultValue{result: result}
 }
 
@@ -670,6 +674,47 @@ func detectFileMediaType(path string, data []byte) string {
 		return http.DetectContentType(data)
 	}
 	return "application/octet-stream"
+}
+
+func normalizeFileReadRequest(req *filepb.ReadRequest) (path string, offset int64, limit int32, compat bool, err error) {
+	parsed, parseErr := url.Parse(req.GetPath())
+	if parseErr != nil || parsed.Scheme != "aop-range" || parsed.Host != "read" {
+		return req.GetPath(), req.GetOffset(), req.GetLimit(), false, nil
+	}
+	query := parsed.Query()
+	offset, err = strconv.ParseInt(query.Get("offset"), 10, 64)
+	if err != nil {
+		return "", 0, 0, true, fmt.Errorf("invalid range offset")
+	}
+	if rawLimit := query.Get("limit"); rawLimit != "" {
+		parsedLimit, limitErr := strconv.ParseInt(rawLimit, 10, 32)
+		if limitErr != nil {
+			return "", 0, 0, true, fmt.Errorf("invalid range limit")
+		}
+		limit = int32(parsedLimit)
+	}
+	path = query.Get("path")
+	if path == "" {
+		return "", 0, 0, true, fmt.Errorf("range file path is required")
+	}
+	return path, offset, limit, true, nil
+}
+
+func finalizeCompatFileResult(result *filepb.Result, compat bool) {
+	if !compat || result == nil {
+		return
+	}
+	value := &url.URL{Scheme: "aop-range", Host: "result"}
+	query := value.Query()
+	query.Set("path", result.Path)
+	query.Set("offset", strconv.FormatInt(result.Offset, 10))
+	if result.Eof {
+		query.Set("eof", "1")
+	}
+	value.RawQuery = query.Encode()
+	result.Path = value.String()
+	result.Offset = 0
+	result.Eof = false
 }
 
 func fileWrite(req *filepb.WriteRequest, base string) fileResultValue {

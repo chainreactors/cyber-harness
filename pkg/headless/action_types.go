@@ -41,38 +41,81 @@ const (
 	ActionWaitVisible                        // wait for element visibility
 	ActionDialog                             // handle JS dialog (deprecated, use waitdialog)
 	ActionWaitDialog                         // wait for JS dialog and capture type+message
+
+	// AIScan extensions. Keep these appended so the nuclei-compatible values
+	// above remain stable.
+	ActionDblClick      // double-click an element
+	ActionHover         // hover an element
+	ActionFocus         // focus an element
+	ActionBlur          // blur an element
+	ActionCheck         // ensure a checkbox/radio is checked
+	ActionUncheck       // ensure a checkbox is unchecked
+	ActionDispatchEvent // dispatch a DOM event
+	ActionSetViewport   // set viewport dimensions
+	ActionWaitURL       // wait for the page URL to match
+	ActionWaitRequest   // wait for a captured request URL to match
+	ActionWaitResponse  // wait for a captured response URL to match
+	ActionStorage       // mutate localStorage/sessionStorage
+	ActionCookie        // mutate browser cookies
+	ActionAssert        // assert rendered page state
+	ActionScroll        // scroll the page mouse wheel
+	ActionDrag          // drag one element to another
+	ActionReload        // reload the current page
+	ActionGoBack        // navigate backward
+	ActionGoForward     // navigate forward
+	ActionSetContent    // replace the current document content
 )
 
 var actionTypeNames = map[ActionType]string{
-	ActionNavigate:     "navigate",
-	ActionScript:       "script",
-	ActionClick:        "click",
-	ActionRightClick:   "rightclick",
-	ActionTextInput:    "text",
-	ActionScreenshot:   "screenshot",
-	ActionTimeInput:    "time",
-	ActionSelectInput:  "select",
-	ActionFilesInput:   "files",
-	ActionWaitDOM:      "waitdom",
-	ActionWaitFCP:      "waitfcp",
-	ActionWaitFMP:      "waitfmp",
-	ActionWaitIdle:     "waitidle",
-	ActionWaitLoad:     "waitload",
-	ActionWaitStable:   "waitstable",
-	ActionGetResource:  "getresource",
-	ActionExtract:      "extract",
-	ActionSetMethod:    "setmethod",
-	ActionAddHeader:    "addheader",
-	ActionSetHeader:    "setheader",
-	ActionDeleteHeader: "deleteheader",
-	ActionSetBody:      "setbody",
-	ActionWaitEvent:    "waitevent",
-	ActionKeyboard:     "keyboard",
-	ActionDebug:        "debug",
-	ActionSleep:        "sleep",
-	ActionWaitVisible:  "waitvisible",
-	ActionDialog:       "dialog",
-	ActionWaitDialog:   "waitdialog",
+	ActionNavigate:      "navigate",
+	ActionScript:        "script",
+	ActionClick:         "click",
+	ActionRightClick:    "rightclick",
+	ActionTextInput:     "text",
+	ActionScreenshot:    "screenshot",
+	ActionTimeInput:     "time",
+	ActionSelectInput:   "select",
+	ActionFilesInput:    "files",
+	ActionWaitDOM:       "waitdom",
+	ActionWaitFCP:       "waitfcp",
+	ActionWaitFMP:       "waitfmp",
+	ActionWaitIdle:      "waitidle",
+	ActionWaitLoad:      "waitload",
+	ActionWaitStable:    "waitstable",
+	ActionGetResource:   "getresource",
+	ActionExtract:       "extract",
+	ActionSetMethod:     "setmethod",
+	ActionAddHeader:     "addheader",
+	ActionSetHeader:     "setheader",
+	ActionDeleteHeader:  "deleteheader",
+	ActionSetBody:       "setbody",
+	ActionWaitEvent:     "waitevent",
+	ActionKeyboard:      "keyboard",
+	ActionDebug:         "debug",
+	ActionSleep:         "sleep",
+	ActionWaitVisible:   "waitvisible",
+	ActionDialog:        "dialog",
+	ActionWaitDialog:    "waitdialog",
+	ActionDblClick:      "dblclick",
+	ActionHover:         "hover",
+	ActionFocus:         "focus",
+	ActionBlur:          "blur",
+	ActionCheck:         "check",
+	ActionUncheck:       "uncheck",
+	ActionDispatchEvent: "dispatch",
+	ActionSetViewport:   "setviewport",
+	ActionWaitURL:       "waiturl",
+	ActionWaitRequest:   "waitrequest",
+	ActionWaitResponse:  "waitresponse",
+	ActionStorage:       "storage",
+	ActionCookie:        "cookie",
+	ActionAssert:        "assert",
+	ActionScroll:        "scroll",
+	ActionDrag:          "drag",
+	ActionReload:        "reload",
+	ActionGoBack:        "goback",
+	ActionGoForward:     "goforward",
+	ActionSetContent:    "setcontent",
 }
 
 var actionTypeMapping = func() map[string]ActionType {

@@ -9,6 +9,7 @@ tool (
 
 require (
 	connectrpc.com/connect v1.20.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/asticode/go-astiav v0.41.0
 	github.com/carapace-sh/carapace v1.11.6
@@ -331,6 +332,6 @@ require (
 
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.6.2-0.20260716115809-46dd3ac126d2
 
-replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260718064805-1d8511959320
+replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
 
 replace github.com/chainreactors/aiscan/aop => ./aop

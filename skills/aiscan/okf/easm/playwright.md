@@ -269,7 +269,7 @@ playwright unroute <session>                           # Remove all request inte
 
 ## Recording (nuclei headless template codegen)
 
-Record browser interactions as a nuclei-compatible headless YAML template. This is aiscan's equivalent of Playwright's `codegen` — but outputs nuclei headless YAML instead of test scripts.
+Record successful browser commands as a nuclei-shaped headless YAML template. This is aiscan's codegen workflow: it records CLI operations after they succeed and emits declarative browser actions instead of Node.js test code.
 
 ### Enable recording
 ```bash
@@ -280,7 +280,7 @@ playwright open http://target.com/login --session s1 --record
 playwright record s1 --start
 ```
 
-When `--record` is active, every interaction command (click, fill, press, select-option, wait-for, eval, etc.) is automatically captured as a nuclei headless action.
+When `--record` is active, supported interaction, navigation, extraction, storage, cookie, and wait commands are captured automatically. `fill` records a clear-then-input operation, while `type` appends. `press` keeps both the target selector and key expression (for example `Control+A` or `Shift+Enter`).
 
 ### Export recorded template
 ```bash
@@ -301,7 +301,7 @@ playwright template poc.yaml http://other-target.com
 playwright template poc.yaml http://other-target.com --payload username=admin --payload password=test
 ```
 
-The generated YAML is standard nuclei headless format — it can also be used with neutron or nuclei directly.
+The generated YAML uses the nuclei headless schema. Templates containing only the upstream core actions remain portable to compatible nuclei/neutron runners. Actions marked as AIScan extensions require `playwright template` in AIScan; upstream nuclei does not know those action names.
 
 ### Recording workflow example
 ```bash
@@ -325,21 +325,99 @@ playwright template interaction.yaml http://target3.com/search
 |---|---|
 | `open --record` (initial) | `navigate` with `{{BaseURL}}` |
 | `click` | `click` |
-| `fill` / `type` | `text` |
-| `press` | `keyboard` |
-| `select-option` | `select` |
+| `fill` | `text` with `clear: "true"` |
+| `type` | `text` (append) |
+| `press` | `keyboard` with selector and `keys` |
+| `select-option` | `select` with `selected: "true"` |
+| `set-input-files` / `upload` | `files` |
 | `eval` | `script` |
 | `wait-for --stable` | `waitstable` |
 | `wait-for --idle` | `waitidle` |
 | `wait-for <selector>` | `waitvisible` |
+| `wait-for-url/request/response` | `waiturl` / `waitrequest` / `waitresponse` (AIScan) |
 | `text-content` / `inner-text` | `extract` (with auto-generated name) |
+| `content` / `inner-html` | `extract` with `target: html` |
 | `get-attribute` | `extract` (target=attribute) |
-| `screenshot` | `screenshot` |
+| `input-value`, `url`, `title` | `extract` with the corresponding target |
+| `is-visible/hidden/checked/enabled/disabled` | `assert` preserving the observed boolean state (AIScan) |
+| `screenshot` | `screenshot`, including `--selector` |
 | `set-extra-headers` | `setheader` (one per header) |
-| `dialog --arm` | `waitdialog` |
-| `hover` / `dblclick` / `reload` | `script` (JS fallback) |
+| `hover`, `dblclick`, `focus`, `blur` | same-named AIScan action |
+| `check`, `uncheck` | idempotent same-named AIScan action |
+| `dispatch-event` | `dispatch` (AIScan) |
+| `set-viewport` | `setviewport` (AIScan) |
+| `reload`, `go-back`, `go-forward` | `reload`, `goback`, `goforward` (AIScan) |
+| `set-content` | `setcontent` (AIScan) |
+| local/session storage set/delete/clear | `storage` (AIScan) |
+| local/session storage get/list | `extract` with `target: storage` |
+| cookie set/delete/clear | `cookie` (AIScan) |
+| cookie get/list | `extract` with `target: cookie` |
+| `dialog --arm`, `dialog-accept`, `dialog-dismiss` | non-blocking `dialog` handler |
 
-URLs are automatically templatized: the session's base origin is replaced with `{{BaseURL}}`. XPath selectors (`xpath:...`) are preserved as `by: xpath`.
+URLs are automatically templatized: the session's base origin is replaced with `{{BaseURL}}`.
+
+### Selector vocabulary
+
+Live CLI operations and recorded template replay use the same selector resolver. Semantic selectors traverse the document and open shadow roots.
+
+| syntax | meaning |
+|---|---|
+| `input[name=email]` | CSS selector |
+| `xpath://button[@type='submit']` | XPath selector |
+| `text=Sign in` | visible text substring |
+| `label=Email` | form control associated with a label |
+| `testid=submit` | exact `data-testid` value |
+| `role=button[name="Sign in"]` | implicit/explicit ARIA role and accessible name |
+
+Recorded semantic selectors are stored as structured action args (`by`, `role`, `name`, `label`, `testid`, and so on), so replay does not fall back to `document.querySelector`. In hand-written YAML, add `exact: "true"` for exact semantic text/name matching, or `testid-attribute` to override `data-testid`.
+
+### AIScan headless extensions
+
+These actions are available to `playwright template` in addition to the upstream nuclei-compatible core set.
+
+| action | important args | behavior |
+|---|---|---|
+| `dblclick`, `hover`, `focus`, `blur` | selector args | Native Rod element interaction |
+| `check`, `uncheck` | selector args | Set the desired checked state; repeated replay is safe |
+| `dispatch` | selector, `event`, optional JSON `detail` | Dispatch `Event` or `CustomEvent` |
+| `setviewport` | `width`, `height`, optional `device-scale-factor` | Change viewport metrics |
+| `waiturl` | `url`, optional `match` | Wait for current URL |
+| `waitrequest`, `waitresponse` | `url`, optional `method`, `match`, `timeout` | Match captured browser traffic |
+| `storage` | `storage`, `operation`, `key`, `value` | Set/delete/clear localStorage or sessionStorage |
+| `cookie` | `operation`, `name`, `value`, optional URL/domain/path flags | Set/delete/clear cookies |
+| `assert` | `type`, selector/value-specific args, optional `match` | Verify visible DOM, value, attribute, URL, title, storage, or cookie state |
+| `scroll` | `x`, `y`, `steps` | Mouse-wheel scrolling |
+| `drag` | source selector args, `target` | Drag the source element to a target selector |
+| `reload`, `goback`, `goforward` | optional `timeout` | Browser history navigation followed by stability wait |
+| `setcontent` | `html` | Replace the current document content |
+
+String waits and assertions accept `match: contains`, `equals`, or `regex`. Boolean assertion types are `visible`, `hidden`, `checked`, `unchecked`, `enabled`, and `disabled`; value assertions include `text`, `value`, `attribute`, `url`, `title`, `storage`, and `cookie`.
+
+Example extension steps:
+
+```yaml
+- action: text
+  args:
+    by: label
+    label: Email
+    value: user@example.com
+    clear: "true"
+- action: check
+  args:
+    by: testid
+    testid: terms
+- action: assert
+  args:
+    by: role
+    role: button
+    name: Continue
+    type: visible
+- action: waitresponse
+  args:
+    url: /api/session
+    method: POST
+    match: contains
+```
 
 ## Headless Template Execution
 
@@ -349,7 +427,7 @@ Run a nuclei-compatible headless YAML template against a target URL. Shares the 
 playwright template <file.yaml> <target-url> [--payload key=value ...]
 ```
 
-Templates support the full nuclei headless action set (29 action types), DSL expressions (`{{rand_int()}}`, `{{replace()}}`, etc.), payload iteration (sniper/pitchfork/clusterbomb), template variables, matchers, and extractors.
+Templates support the 29-action nuclei-compatible core plus the AIScan extensions above, DSL expressions (`{{rand_int()}}`, `{{replace()}}`, etc.), payload iteration (sniper/pitchfork/clusterbomb), template variables, matchers, and extractors.
 
 ```bash
 # Run a recorded template
@@ -451,8 +529,10 @@ Use browser automation when evidence depends on rendered DOM, user interaction, 
   - setTimeout/setInterval acceleration (0.1x factor, disable with `--no-speed-up`)
 - Console messages are auto-captured from session open — retrieve with `console <session>`.
 - Sessions persist until explicitly closed — the agent is responsible for calling `playwright close`.
-- Chromium is automatically downloaded on first launch if not found.
-- Selectors may be CSS or `xpath:<xpath>` — interaction commands accept both.
+- Browser discovery uses `AISCAN_BROWSER_PATH` first, then installed Chrome, Chromium, or Edge in the system PATH and standard OS install locations. Rod's cached/downloaded Chromium is used only when neither is available. Katana uses the same discovery policy.
+- System-browser reuse means reusing the executable while AIScan launches an isolated managed process/profile. To control an already running browser process, use `attach --cdp <url>` or `open --cdp <url>`.
+- `playwright template` injects the already connected Playwright Rod browser into the nuclei-compatible headless engine, so template replay does not launch or download a second browser.
+- Selectors may be CSS, `xpath:<xpath>`, `text=...`, `label=...`, `testid=...`, or `role=<role>[name="..."]`; live commands and template replay share the resolver.
 
 ## Related concepts
 

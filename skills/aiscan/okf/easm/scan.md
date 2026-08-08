@@ -59,7 +59,8 @@ Notes:
 
 - `quick` uses gogo ports `all`, spray check/finger, spray crawl depth 2, weakpass checks, and fingerprint-based POC checks.
 - `full` uses gogo ports `-` and adds spray plugins (common/bak/active) plus spray default-dictionary probing; crawl depth remains 2.
-- Full builds additionally add katana crawling: `katana_crawl` in quick/full and `katana_deep` in full.
+- Full builds additionally add Katana crawling: `katana_crawl` in quick/full uses the standard HTTP engine, while `katana_deep` in full uses pure headless rendering and emits browser-only requests and SPA navigation.
+- `katana_deep` shares AIScan's browser discovery order: `AISCAN_BROWSER_PATH`, installed Chrome/Chromium/Edge, then Rod's cache/download fallback.
 - Spray web capabilities run with recon enabled in both profiles.
 - `--verify=<level>` triggers in-pipeline AI verification for loots at or above the specified priority threshold (low, medium, high, critical). Only loots meeting the threshold are sent to a verify sub-agent.
 - `--sniper` asks an LLM agent to perform fingerprint vulnerability intelligence.

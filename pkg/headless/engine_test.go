@@ -334,6 +334,141 @@ func TestExecMultipleHeadlessRequests(t *testing.T) {
 	}
 }
 
+func TestExecAIScanExtendedActions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/actions", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html><body>
+<label for="email">Email</label><input id="email" value="old value">
+<label><input id="terms" data-testid="terms" type="checkbox"> Accept terms</label>
+<label for="plan">Plan</label><select id="plan" aria-label="Plan"><option value="free">Free</option><option value="pro">Professional</option></select>
+<button id="activate">Activate</button><div id="state" data-testid="state"></div>
+<div id="source" data-testid="source" style="width:80px;height:40px;background:#ccc">Source</div>
+<div id="drop" data-testid="drop" style="width:80px;height:40px;margin-top:20px;background:#ddd">Drop</div>
+<div style="height:1600px"></div>
+<script>
+const email = document.getElementById('email');
+const activate = document.getElementById('activate');
+const state = document.getElementById('state');
+email.addEventListener('focus', () => state.dataset.focus = 'yes');
+email.addEventListener('blur', () => state.dataset.blur = 'yes');
+activate.addEventListener('mouseover', () => state.dataset.hover = 'yes');
+activate.addEventListener('dblclick', () => state.dataset.dblclick = 'yes');
+activate.addEventListener('aiscan', event => state.dataset.custom = event.detail.flag);
+document.getElementById('source').addEventListener('mousedown', () => state.dataset.dragstart = 'yes');
+document.getElementById('drop').addEventListener('mouseup', () => state.dataset.dragend = 'yes');
+</script></body></html>`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rodPage, err := sharedEngine.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := NewPage(rodPage, sharedEngine, nil)
+	defer page.Close()
+
+	action := func(kind ActionType, data map[string]string) *Action {
+		return &Action{ActionType: ActionTypeHolder{ActionType: kind}, Data: data}
+	}
+	actions := []*Action{
+		action(ActionNavigate, map[string]string{"url": srv.URL + "/actions"}),
+		action(ActionWaitURL, map[string]string{"url": "/actions"}),
+		action(ActionWaitRequest, map[string]string{"url": "/actions"}),
+		action(ActionWaitResponse, map[string]string{"url": "/actions"}),
+		action(ActionTextInput, mergeMapsForTest(ParseSelector("label=Email"), map[string]string{"value": "alice@example.com", "clear": "true"})),
+		action(ActionKeyboard, mergeMapsForTest(ParseSelector("label=Email"), map[string]string{"keys": "End"})),
+		action(ActionFocus, ParseSelector("label=Email")),
+		action(ActionBlur, ParseSelector("label=Email")),
+		action(ActionCheck, ParseSelector("testid=terms")),
+		action(ActionCheck, ParseSelector("testid=terms")),
+		action(ActionUncheck, ParseSelector("testid=terms")),
+		action(ActionCheck, ParseSelector("testid=terms")),
+		action(ActionSelectInput, mergeMapsForTest(ParseSelector(`role=combobox[name="Plan"]`), map[string]string{"value": "pro"})),
+		action(ActionHover, ParseSelector(`role=button[name="Activate"]`)),
+		action(ActionDblClick, ParseSelector(`role=button[name="Activate"]`)),
+		action(ActionDispatchEvent, mergeMapsForTest(ParseSelector("#activate"), map[string]string{"event": "aiscan", "detail": `{"flag":"ok"}`})),
+		action(ActionDrag, mergeMapsForTest(ParseSelector("testid=source"), map[string]string{"target": "testid=drop"})),
+		action(ActionScroll, map[string]string{"y": "250", "steps": "2"}),
+		action(ActionStorage, map[string]string{"storage": "local", "operation": "set", "key": "token", "value": "abc123"}),
+		action(ActionCookie, map[string]string{"operation": "set", "name": "session", "value": "cookie-value"}),
+		action(ActionSetViewport, map[string]string{"width": "1024", "height": "768"}),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("label=Email"), map[string]string{"type": "value", "value": "alice@example.com"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=terms"), map[string]string{"type": "checked"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector(`role=combobox[name="Plan"]`), map[string]string{"type": "value", "value": "pro"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-focus", "value": "yes"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-blur", "value": "yes"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-hover", "value": "yes"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-dblclick", "value": "yes"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-custom", "value": "ok"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-dragstart", "value": "yes"})),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=state"), map[string]string{"type": "attribute", "attribute": "data-dragend", "value": "yes"})),
+		action(ActionAssert, map[string]string{"type": "storage", "storage": "local", "key": "token", "value": "abc123"}),
+		action(ActionAssert, map[string]string{"type": "cookie", "name": "session", "value": "cookie-value"}),
+		action(ActionSetContent, map[string]string{"html": `<main data-testid="replacement">Replacement content</main>`}),
+		action(ActionAssert, mergeMapsForTest(ParseSelector("testid=replacement"), map[string]string{"type": "text", "value": "Replacement content"})),
+	}
+	if _, err := page.ExecuteActions(actions); err != nil {
+		t.Fatalf("extended action replay failed: %v", err)
+	}
+
+	viewport, err := rodPage.Eval(`() => [window.innerWidth, window.innerHeight]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := viewport.Value.Arr(); len(got) != 2 || got[0].Int() != 1024 || got[1].Int() != 768 {
+		t.Fatalf("viewport = %v, want 1024x768", viewport.Value.Val())
+	}
+}
+
+func TestExecAIScanHistoryActions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/one", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<html><head><title>Page One</title></head><body>one</body></html>`)
+	})
+	mux.HandleFunc("/two", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<html><head><title>Page Two</title></head><body>two</body></html>`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rodPage, err := sharedEngine.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := NewPage(rodPage, sharedEngine, nil)
+	defer page.Close()
+	action := func(kind ActionType, data map[string]string) *Action {
+		return &Action{ActionType: ActionTypeHolder{ActionType: kind}, Data: data}
+	}
+
+	actions := []*Action{
+		action(ActionNavigate, map[string]string{"url": srv.URL + "/one"}),
+		action(ActionNavigate, map[string]string{"url": srv.URL + "/two"}),
+		action(ActionGoBack, map[string]string{}),
+		action(ActionAssert, map[string]string{"type": "url", "value": "/one", "match": "contains"}),
+		action(ActionGoForward, map[string]string{}),
+		action(ActionAssert, map[string]string{"type": "url", "value": "/two", "match": "contains"}),
+		action(ActionReload, map[string]string{}),
+		action(ActionAssert, map[string]string{"type": "title", "value": "Page Two"}),
+	}
+	if _, err := page.ExecuteActions(actions); err != nil {
+		t.Fatalf("history action replay failed: %v", err)
+	}
+}
+
+func mergeMapsForTest(left, right map[string]string) map[string]string {
+	merged := make(map[string]string, len(left)+len(right))
+	for key, value := range left {
+		merged[key] = value
+	}
+	for key, value := range right {
+		merged[key] = value
+	}
+	return merged
+}
+
 // ==========================================================================
 // Engine lifecycle
 // ==========================================================================
