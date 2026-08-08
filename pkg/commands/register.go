@@ -33,6 +33,7 @@ func init() {
 			bash.SetCommandNames(reg.Names)
 			bash.SetCommandResolver(reg.Get)
 			reg.RegisterTool(bash)
+			bash.attachShellCommands(reg)
 
 			tmuxCmd := NewTmuxCommand(bash)
 			reg.Register(tmuxCmd, "core")
