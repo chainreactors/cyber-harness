@@ -9,6 +9,7 @@ tool (
 
 require (
 	connectrpc.com/connect v1.20.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/asticode/go-astiav v0.41.0
 	github.com/carapace-sh/carapace v1.11.6
