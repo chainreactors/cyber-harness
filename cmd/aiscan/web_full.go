@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -157,21 +158,38 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		// The hub's own agent comes online exactly like any node: an
 		// `aiscan agent` dialed into this server over loopback WebSocket,
 		// just in-process. The pool never sees a special "local" kind.
-		agentOption := *option
-		agentOption.ServerURL = "http://" + accessKey + "@" + listenAddr
-		if agentOption.IOANodeID == "" && agentOption.IOANodeName == "" {
-			agentOption.IOANodeName = "local"
+		agentOption, err := embeddedAgentOption(option, accessKey, listenAddr)
+		if err != nil {
+			return err
 		}
-		go func() {
+		telemetry.SafeGo("embedded-agent", func() {
 			if err := node.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
-		}()
+		})
 	}
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil
+}
+
+func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Option, error) {
+	var option cfg.Option
+	if base != nil {
+		option = *base
+	}
+	serverURL := &url.URL{Scheme: "http", Host: listenAddr}
+	serverURL.User = url.User(accessKey)
+	option.ServerURL = serverURL.String()
+	option.WebURL = option.ServerURL
+	if option.IOANodeID == "" && option.IOANodeName == "" {
+		option.IOANodeName = "local"
+	}
+	if err := cfg.ResolveAgentServerURLs(&option); err != nil {
+		return cfg.Option{}, fmt.Errorf("configure embedded agent: %w", err)
+	}
+	return option, nil
 }
 
 func wireWebApp(application *runner.App, ingestor webservice.ArtifactIngestor) {

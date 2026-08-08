@@ -61,21 +61,6 @@ type neutronFlags struct {
 	Debug             bool     `long:"debug" description:"Enable debug logging"`
 }
 
-type neutronResult struct {
-	Timestamp string   `json:"timestamp,omitempty"`
-	Target    string   `json:"target"`
-	Matched   bool     `json:"matched"`
-	Template  string   `json:"template"`
-	Name      string   `json:"name,omitempty"`
-	Severity  string   `json:"severity,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
-	Fingers   []string `json:"fingers,omitempty"`
-	Extracts  []string `json:"extracts,omitempty"`
-	Request   string   `json:"request,omitempty"`
-	Response  string   `json:"response,omitempty"`
-	Error     string   `json:"error,omitempty"`
-}
-
 type neutronSummary struct {
 	Targets   int
 	Templates int
@@ -245,11 +230,11 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 			if result.Error() != nil {
 				summary.Errors++
 			}
-			record := neutronResultFromExecution(target, result)
-			results = append(results, result.TemplateResult(target))
+			record := result.TemplateResult(target)
+			results = append(results, record)
 			if record.Matched {
 				summary.Matched++
-				c.EmitArtifactCtx(ctx, "neutron", toolpb.ArtifactKindVuln, target, &record)
+				c.EmitArtifactCtx(ctx, "neutron", toolpb.ArtifactKindVuln, target, record)
 			}
 			if shouldPrintNeutronResult(record, flags) {
 				line := formatNeutronResult(record, jsonOutput)
@@ -424,7 +409,7 @@ func validateNeutronSeverities(groups ...[]string) error {
 	return nil
 }
 
-func shouldPrintNeutronResult(record neutronResult, flags neutronFlags) bool {
+func shouldPrintNeutronResult(record *sdktypes.TemplateResult, flags neutronFlags) bool {
 	if flags.AllResults {
 		return true
 	}
@@ -434,34 +419,7 @@ func shouldPrintNeutronResult(record neutronResult, flags neutronFlags) bool {
 	return record.Matched
 }
 
-func neutronResultFromExecution(target string, result *sdkneutron.ExecuteResult) neutronResult {
-	record := neutronResult{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Target:    target,
-		Matched:   result.Matched(),
-	}
-	if tmpl := result.Template(); tmpl != nil {
-		record.Template = tmpl.Id
-		record.Name = tmpl.Info.Name
-		record.Severity = tmpl.Info.Severity
-		record.Tags = cleanTemplateTags(tmpl)
-		record.Fingers = append([]string(nil), tmpl.Fingers...)
-	}
-	if opResult := result.Value(); opResult != nil {
-		record.Extracts = append([]string(nil), opResult.OutputExtracts()...)
-		// The engine captures the exchange (protocols/http/request.go sets these
-		// on the operator result); dropping it here left every consumer unable to
-		// show what was actually sent, so a match had no reviewable evidence.
-		record.Request = opResult.Request
-		record.Response = opResult.Response
-	}
-	if err := result.Error(); err != nil {
-		record.Error = err.Error()
-	}
-	return record
-}
-
-func formatNeutronResult(record neutronResult, jsonOutput bool) string {
+func formatNeutronResult(record *sdktypes.TemplateResult, jsonOutput bool) string {
 	if jsonOutput {
 		data, err := json.Marshal(record)
 		if err != nil {
@@ -479,25 +437,17 @@ func formatNeutronResult(record neutronResult, jsonOutput bool) string {
 	b.WriteString(status)
 	b.WriteString("] ")
 	b.WriteString(record.Target)
-	if record.Template != "" {
+	if record.TemplateID != "" {
 		b.WriteString(" template=")
-		b.WriteString(record.Template)
+		b.WriteString(record.TemplateID)
 	}
 	if record.Severity != "" {
 		b.WriteString(" severity=")
 		b.WriteString(record.Severity)
 	}
-	if record.Name != "" {
+	if record.TemplateName != "" {
 		b.WriteString(" name=")
-		b.WriteString(strconv.Quote(record.Name))
-	}
-	if len(record.Extracts) > 0 {
-		b.WriteString(" extracts=")
-		b.WriteString(strconv.Quote(strings.Join(record.Extracts, ",")))
-	}
-	if record.Error != "" {
-		b.WriteString(" error=")
-		b.WriteString(strconv.Quote(record.Error))
+		b.WriteString(strconv.Quote(record.TemplateName))
 	}
 	b.WriteByte('\n')
 	return b.String()
@@ -541,12 +491,12 @@ func renderTemplateList(selected []*templates.Template, jsonOutput bool) string 
 		if tmpl == nil {
 			continue
 		}
-		record := neutronResult{
-			Template: tmpl.Id,
-			Name:     tmpl.Info.Name,
-			Severity: tmpl.Info.Severity,
-			Tags:     cleanTemplateTags(tmpl),
-			Fingers:  append([]string(nil), tmpl.Fingers...),
+		record := map[string]any{
+			"template_id":   tmpl.Id,
+			"template_name": tmpl.Info.Name,
+			"severity":      tmpl.Info.Severity,
+			"tags":          cleanTemplateTags(tmpl),
+			"fingers":       append([]string(nil), tmpl.Fingers...),
 		}
 		if jsonOutput {
 			data, err := json.Marshal(record)

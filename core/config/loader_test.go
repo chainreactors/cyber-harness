@@ -587,6 +587,27 @@ llm:
 	})
 }
 
+func TestApplyEnvironmentUsesSharedLLMConfiguration(t *testing.T) {
+	values := map[string]string{
+		"LLM_BASE_URL": "https://api.deepseek.com",
+		"LLM_API_KEY":  "shared-key",
+		"LLM_MODEL":    "deepseek-v4-flash",
+	}
+	lookup := func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
+
+	option := Option{}
+	applyEnvironment(&option, Option{}, lookup)
+	if err := normalizeProviderOptions(&option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Provider != "openai" || option.BaseURL != values["LLM_BASE_URL"] || option.APIKey != values["LLM_API_KEY"] || option.Model != values["LLM_MODEL"] {
+		t.Fatalf("shared LLM configuration not applied: %#v", option.LLMOptions)
+	}
+}
+
 func TestResolveRuntimeConfigUsesAnthropicEnvironment(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://anthropic-proxy.example/v1")
 	t.Setenv("ANTHROPIC_MODEL", "claude-env")

@@ -11,10 +11,12 @@ Write the report as a directory of markdown files, borrowing mechanisms from OKF
 <report-dir>/
   index.md            # human-readable summary (the six sections below)
   findings/
-    <finding-id>.md   # one concept file per confirmed finding or noteworthy lead
+    <result_id>.md    # one concept file per confirmed finding or noteworthy lead
 ```
 
-Each `findings/<id>.md` carries frontmatter:
+A finding's only identity is its `result_id` — the content-addressed artifact id assigned at scan time, stable across re-scans of the same data. There is no separate finding id or slug; the filename is the id.
+
+Each `findings/<result_id>.md` carries frontmatter:
 
 ```yaml
 ---
@@ -77,7 +79,7 @@ Count confirmed vulnerabilities separately from unverified leads. Strikethrough 
 
 List verified loots first. Unannotated scanner matches may appear only with "unverified scanner match" stated clearly.
 For each:
-- **[target]** — vulnerability description, CVE if applicable, impact, verification status, link to findings/<id>.md with the reproducible PoC
+- **[target]** — vulnerability description, CVE if applicable, impact, verification status, link to findings/<result_id>.md with the reproducible PoC
 
 ## Potential Risks (Unverified)
 
@@ -110,3 +112,7 @@ Brief list so the reader knows what was checked and cleared.
 - Prioritize by severity: critical > high > medium.
 - Use plain markdown, no code fences around the report.
 - If no significant loots remain after applying verification filters, say so clearly. An honest "no confirmed vulnerabilities" is far more valuable than inflated severity.
+
+## Publishing to IOA
+
+When the session is IOA-bound, publish each confirmed finding to the current space as a `checkpoint` message (`--kind finding`, natural-language content) per `aiscan://skills/aiscan/okf/runtime/ioa-finding.md`. Cite the `result_id` in the message — it is the whole link: the IOA message is the observable notification, `findings/<result_id>.md` is the complete record. Review replies on the checkpoint (confirmed/dismissed) are the disposition trail — mirror them into the finding frontmatter on the next report update.

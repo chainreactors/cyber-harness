@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -32,6 +33,8 @@ type HandlerError struct {
 	Source string
 	Kind   Kind
 	Err    error
+	Panic  any
+	Stack  []byte
 }
 
 func (e *HandlerError) Error() string {
@@ -289,9 +292,9 @@ func (p Point[E, R]) dispatch(ctx context.Context, r *Registry, entries []entry,
 			}
 			continue
 		}
-		out, err := fn(ctx, ev)
+		out, err, panicValue, stack := invokeHandler(ctx, fn, ev)
 		if err != nil {
-			he := &HandlerError{Source: e.source, Kind: p.Kind, Err: err}
+			he := &HandlerError{Source: e.source, Kind: p.Kind, Err: err, Panic: panicValue, Stack: stack}
 			r.report(he)
 			errs = append(errs, he)
 			if p.OnError == FailClosed {
@@ -307,4 +310,18 @@ func (p Point[E, R]) dispatch(ctx context.Context, r *Registry, entries []entry,
 		}
 	}
 	return acc, errors.Join(errs...)
+}
+
+func invokeHandler[E any, R any](ctx context.Context, fn func(context.Context, E) (R, error), ev E) (out R, err error, panicValue any, stack []byte) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			var zero R
+			out = zero
+			err = errors.New("handler panicked")
+			panicValue = recovered
+			stack = debug.Stack()
+		}
+	}()
+	out, err = fn(ctx, ev)
+	return out, err, nil, nil
 }

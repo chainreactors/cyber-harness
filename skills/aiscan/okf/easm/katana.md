@@ -35,7 +35,29 @@ katana -u https://target.com -d 2 -jsonl
 katana -u https://target.com -f qurl
 katana -u https://target.com -d 3 -jc -jsonl
 katana -list urls.txt -d 2 -jc -timeout 60
+
+# Rendered browser crawling
+katana -u https://target.com -hl -d 2 -jsonl
+katana -u https://target.com -hh -d 2 -jsonl
+katana -u https://target.com -hl --chrome-ws-url ws://127.0.0.1:9222/devtools/browser/<id>
 ```
+
+## Browser Modes and Reuse
+
+- Standard Katana crawling does not launch a browser. `-jc` parses JavaScript responses but does not render the application.
+- `-hl` runs pure headless crawling and captures browser requests, dynamic navigation, forms, and rendered interactions.
+- `-hh` combines HTTP crawling with browser rendering. Prefer `-hl` when browser network events and SPA navigation must be emitted as results.
+- The full scan profile's `katana_deep` capability uses pure headless crawling; `katana_crawl` remains the lower-cost standard crawler.
+
+AIScan resolves a browser in this order:
+
+1. Katana `--chrome-ws-url` (`-cwu`) for an explicitly managed running process.
+2. Katana `--system-chrome-path` (`-scp`) for an explicitly selected executable.
+3. `AISCAN_BROWSER_PATH` shared by AIScan Playwright, nuclei headless replay, and Katana.
+4. Installed Chrome, Chromium, or Edge in PATH or the standard OS install locations.
+5. Rod's existing browser cache, with its first-use download only when the cache is absent.
+
+Automatic reuse means the executable is shared while each engine starts an isolated process/profile. AIScan does not automatically attach to a user's running browser. Use `--chrome-ws-url` only when process-level reuse is intentional.
 
 ## Useful Filters
 

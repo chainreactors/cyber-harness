@@ -102,6 +102,15 @@ type profile struct {
 	AllowBroadPOC bool
 }
 
+func profileForFlags(flags flags) (profile, error) {
+	profile, err := profileForMode(flags.Mode)
+	if err != nil {
+		return profile, err
+	}
+	profile.AllowBroadPOC = flags.BroadPOC
+	return profile, nil
+}
+
 func profileForMode(mode string) (profile, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {

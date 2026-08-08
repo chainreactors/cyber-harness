@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -105,6 +106,10 @@ func (r *recorder) generateTemplate(id, name string) *headless.Template {
 // recordCommand maps a playwright command invocation to a nuclei headless action
 // and appends it to the session's recorder. Returns true if the action was recorded.
 func recordCommand(sess *Session, cmd string, args []string) bool {
+	return recordCommandResult(sess, cmd, args, "")
+}
+
+func recordCommandResult(sess *Session, cmd string, args []string, result string) bool {
 	if sess.rec == nil {
 		return false
 	}
@@ -132,10 +137,8 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			return false
 		}
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args: map[string]string{
-				"code": fmt.Sprintf(`document.querySelector(%q).dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))`, sel),
-			},
+			Action: headless.ActionDblClick,
+			Args:   selectorArgs(sel),
 		}
 
 	case "fill":
@@ -146,7 +149,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		value := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionTextInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value}),
+			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value, "clear": "true"}),
 		}
 
 	case "type":
@@ -167,7 +170,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		keys := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionKeyboard,
-			Args:   map[string]string{"keys": keys},
+			Args:   mergeMaps(selectorArgs(args[1]), map[string]string{"keys": keys}),
 		}
 
 	case "select-option", "select":
@@ -178,7 +181,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		value := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionSelectInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value}),
+			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value, "selected": "true"}),
 		}
 
 	case "screenshot":
@@ -192,10 +195,13 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			} else if args[i] == "--output" && i+1 < len(args) {
 				i++
 				ra.Args["to"] = args[i]
+			} else if args[i] == "--selector" && i+1 < len(args) {
+				i++
+				ra.Args = mergeMaps(ra.Args, selectorArgs(args[i]))
 			}
 		}
 
-	case "set-input-files":
+	case "set-input-files", "upload":
 		if len(args) < 3 {
 			return false
 		}
@@ -222,10 +228,8 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			return false
 		}
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args: map[string]string{
-				"code": fmt.Sprintf(`document.querySelector(%q).dispatchEvent(new MouseEvent('mouseover', {bubbles: true}))`, sel),
-			},
+			Action: headless.ActionHover,
+			Args:   selectorArgs(sel),
 		}
 
 	case "wait-for", "wait":
@@ -247,7 +251,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		default:
 			ra = RecordedAction{
 				Action: headless.ActionWaitVisible,
-				Args:   map[string]string{"selector": target},
+				Args:   selectorArgs(target),
 			}
 		}
 
@@ -269,20 +273,20 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 
 	case "reload":
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args:   map[string]string{"code": "window.location.reload()"},
+			Action: headless.ActionReload,
+			Args:   map[string]string{},
 		}
 
 	case "go-back", "back":
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args:   map[string]string{"code": "window.history.back()"},
+			Action: headless.ActionGoBack,
+			Args:   map[string]string{},
 		}
 
 	case "go-forward", "forward":
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args:   map[string]string{"code": "window.history.forward()"},
+			Action: headless.ActionGoForward,
+			Args:   map[string]string{},
 		}
 
 	case "check":
@@ -291,7 +295,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			return false
 		}
 		ra = RecordedAction{
-			Action: headless.ActionClick,
+			Action: headless.ActionCheck,
 			Args:   selectorArgs(sel),
 		}
 
@@ -301,7 +305,7 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			return false
 		}
 		ra = RecordedAction{
-			Action: headless.ActionClick,
+			Action: headless.ActionUncheck,
 			Args:   selectorArgs(sel),
 		}
 
@@ -322,16 +326,14 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		sel := args[1]
 		eventType := args[2]
 		ra = RecordedAction{
-			Action: headless.ActionScript,
-			Args: map[string]string{
-				"code": fmt.Sprintf(`document.querySelector(%q).dispatchEvent(new Event(%q, {bubbles: true}))`, sel, eventType),
-			},
+			Action: headless.ActionDispatchEvent,
+			Args:   mergeMaps(selectorArgs(sel), map[string]string{"event": eventType}),
 		}
 
 	case "dialog":
 		if len(args) >= 2 && args[1] == "--arm" {
 			ra = RecordedAction{
-				Action: headless.ActionWaitDialog,
+				Action: headless.ActionDialog,
 				Args:   map[string]string{},
 			}
 		} else {
@@ -347,6 +349,17 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 			Action: headless.ActionExtract,
 			Args:   selectorArgs(sel),
 			Name:   sanitizeName(sel),
+		}
+
+	case "content", "inner-html", "html":
+		sel := "html"
+		if len(args) >= 2 {
+			sel = strings.Join(args[1:], " ")
+		}
+		ra = RecordedAction{
+			Action: headless.ActionExtract,
+			Args:   mergeMaps(selectorArgs(sel), map[string]string{"target": "html"}),
+			Name:   sanitizeName(sel + "_html"),
 		}
 
 	case "get-attribute":
@@ -372,14 +385,159 @@ func recordCommand(sess *Session, cmd string, args []string) bool {
 		ra = RecordedAction{
 			Action: headless.ActionExtract,
 			Args: mergeMaps(selectorArgs(sel), map[string]string{
-				"target":    "attribute",
-				"attribute": "value",
+				"target": "value",
 			}),
 			Name: sanitizeName(sel + "_value"),
 		}
 
 	case "set-viewport":
-		return false
+		if len(args) < 3 {
+			return false
+		}
+		ra = RecordedAction{
+			Action: headless.ActionSetViewport,
+			Args:   map[string]string{"width": args[1], "height": args[2]},
+		}
+
+	case "focus", "blur":
+		sel := extractSelector(args, 1)
+		if sel == "" {
+			return false
+		}
+		action := headless.ActionFocus
+		if cmd == "blur" {
+			action = headless.ActionBlur
+		}
+		ra = RecordedAction{Action: action, Args: selectorArgs(sel)}
+
+	case "wait-for-url", "wait-for-request", "wait-for-response":
+		if len(args) < 2 {
+			return false
+		}
+		action := headless.ActionWaitURL
+		if cmd == "wait-for-request" {
+			action = headless.ActionWaitRequest
+		} else if cmd == "wait-for-response" {
+			action = headless.ActionWaitResponse
+		}
+		ra = RecordedAction{Action: action, Args: map[string]string{"url": strings.Join(args[1:], " ")}}
+
+	case "set-content":
+		if len(args) < 2 {
+			return false
+		}
+		ra = RecordedAction{Action: headless.ActionSetContent, Args: map[string]string{"html": strings.Join(args[1:], " ")}}
+
+	case "url", "title":
+		ra = RecordedAction{
+			Action: headless.ActionExtract,
+			Args:   map[string]string{"target": cmd},
+			Name:   cmd,
+		}
+
+	case "is-visible", "is-hidden", "is-checked", "is-disabled", "is-enabled":
+		sel := extractSelector(args, 1)
+		if sel == "" {
+			return false
+		}
+		assertionType := strings.TrimPrefix(cmd, "is-")
+		if strings.HasSuffix(strings.TrimSpace(result), "= false") {
+			assertionType = map[string]string{
+				"visible": "hidden", "hidden": "visible",
+				"checked": "unchecked", "disabled": "enabled", "enabled": "disabled",
+			}[assertionType]
+		}
+		ra = RecordedAction{
+			Action: headless.ActionAssert,
+			Args:   mergeMaps(selectorArgs(sel), map[string]string{"type": assertionType}),
+		}
+
+	case "localstorage-set", "sessionstorage-set":
+		if len(args) < 3 {
+			return false
+		}
+		storageType := strings.TrimSuffix(cmd, "-set")
+		ra = RecordedAction{Action: headless.ActionStorage, Args: map[string]string{
+			"storage": storageType, "operation": "set", "key": args[1], "value": strings.Join(args[2:], " "),
+		}}
+
+	case "localstorage-delete", "sessionstorage-delete":
+		if len(args) < 2 {
+			return false
+		}
+		storageType := strings.TrimSuffix(cmd, "-delete")
+		ra = RecordedAction{Action: headless.ActionStorage, Args: map[string]string{
+			"storage": storageType, "operation": "delete", "key": args[1],
+		}}
+
+	case "localstorage-clear", "sessionstorage-clear":
+		storageType := strings.TrimSuffix(cmd, "-clear")
+		ra = RecordedAction{Action: headless.ActionStorage, Args: map[string]string{
+			"storage": storageType, "operation": "clear",
+		}}
+
+	case "localstorage-get", "sessionstorage-get":
+		if len(args) < 2 {
+			return false
+		}
+		storageType := strings.TrimSuffix(cmd, "-get")
+		ra = RecordedAction{Action: headless.ActionExtract, Args: map[string]string{
+			"target": "storage", "storage": storageType, "key": args[1],
+		}, Name: sanitizeName(storageType + "_" + args[1])}
+
+	case "localstorage-list", "sessionstorage-list":
+		storageType := strings.TrimSuffix(cmd, "-list")
+		ra = RecordedAction{Action: headless.ActionExtract, Args: map[string]string{
+			"target": "storage", "storage": storageType,
+		}, Name: sanitizeName(storageType)}
+
+	case "cookie-set":
+		if len(args) < 2 {
+			return false
+		}
+		recorded := false
+		for _, pair := range args[1:] {
+			name, value, ok := strings.Cut(pair, "=")
+			if !ok || name == "" {
+				continue
+			}
+			sess.rec.record(RecordedAction{Action: headless.ActionCookie, Args: map[string]string{
+				"operation": "set", "name": name, "value": value,
+			}})
+			recorded = true
+		}
+		return recorded
+
+	case "cookie-delete":
+		if len(args) < 2 {
+			return false
+		}
+		ra = RecordedAction{Action: headless.ActionCookie, Args: map[string]string{
+			"operation": "delete", "name": args[1],
+		}}
+
+	case "cookie-clear":
+		ra = RecordedAction{Action: headless.ActionCookie, Args: map[string]string{"operation": "clear"}}
+
+	case "cookie-get":
+		if len(args) < 2 {
+			return false
+		}
+		ra = RecordedAction{Action: headless.ActionExtract, Args: map[string]string{
+			"target": "cookie", "name": args[1],
+		}, Name: sanitizeName("cookie_" + args[1])}
+
+	case "cookie-list":
+		ra = RecordedAction{Action: headless.ActionExtract, Args: map[string]string{
+			"target": "cookie",
+		}, Name: "cookies"}
+
+	case "dialog-accept", "dialog-dismiss":
+		argsMap := map[string]string{"accept": strconv.FormatBool(cmd == "dialog-accept")}
+		if cmd == "dialog-accept" && len(args) >= 2 {
+			argsMap["prompt"] = strings.Join(args[1:], " ")
+		}
+		ra = RecordedAction{Action: headless.ActionDialog, Args: argsMap}
 
 	default:
 		return false
@@ -503,11 +661,7 @@ func recordSave(sess *Session, path, id, name string) (string, error) {
 
 // selectorArgs converts a CSS/XPath selector string to nuclei action args.
 func selectorArgs(sel string) map[string]string {
-	sel = strings.TrimSpace(sel)
-	if xpath, ok := strings.CutPrefix(sel, "xpath:"); ok {
-		return map[string]string{"by": "xpath", "xpath": xpath}
-	}
-	return map[string]string{"selector": sel}
+	return headless.ParseSelector(sel)
 }
 
 // extractSelector extracts a selector from args starting at the given offset.

@@ -2,7 +2,9 @@ package toolargs
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
@@ -32,6 +34,18 @@ func (b *Base) InitLogger(logger telemetry.Logger) {
 }
 
 func (b *Base) EmitArtifactCtx(ctx context.Context, tool, kind, target string, data any) {
+	b.EmitArtifactResultCtx(ctx, ArtifactResultID(tool, kind, target, data), tool, kind, target, data)
+}
+
+// ArtifactResultID returns a stable identity for one scanner-native record.
+// The same value is carried by its aop.tool.Loot marker.
+func ArtifactResultID(tool, kind, target string, data any) string {
+	raw, _ := json.Marshal(data)
+	digest := sha256.Sum256(append([]byte(tool+"\x00"+kind+"\x00"+target+"\x00"), raw...))
+	return fmt.Sprintf("%x", digest[:16])
+}
+
+func (b *Base) EmitArtifactResultCtx(ctx context.Context, resultID, tool, kind, target string, data any) {
 	if b.Events == nil || data == nil {
 		return
 	}
@@ -44,10 +58,46 @@ func (b *Base) EmitArtifactCtx(ctx context.Context, tool, kind, target string, d
 	artifact := &toolpb.Artifact{
 		Tool: tool, Kind: kind, Target: target, Data: raw,
 		MediaType: aop.JSONMediaType, Timestamp: timestamppb.New(time.Now()), CallId: invocation.CallID,
+		ResultId: resultID,
 	}
 	extension, err := anypb.New(artifact)
 	if err != nil {
 		b.Logger.Warnf("encode %s artifact: %s", tool, err)
+		return
+	}
+	emitter := invocation.Emitter
+	if emitter == "" {
+		emitter = tool
+	}
+	b.Events.Emit(&aop.Event{
+		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: emitter,
+		Payload: &aop.Event_Extension{Extension: extension},
+	})
+}
+
+func (b *Base) EmitLootCtx(
+	ctx context.Context,
+	resultID, tool, kind, target, priority, description, verificationStatus string,
+	tags []string,
+) {
+	if b.Events == nil || resultID == "" {
+		return
+	}
+	invocation := coretool.InvocationFromContext(ctx)
+	loot := &toolpb.Loot{
+		ResultId:           resultID,
+		Tool:               tool,
+		Kind:               kind,
+		Target:             target,
+		Priority:           priority,
+		Tags:               append([]string(nil), tags...),
+		Description:        description,
+		VerificationStatus: verificationStatus,
+		CallId:             invocation.CallID,
+	}
+	extension, err := anypb.New(loot)
+	if err != nil {
+		b.Logger.Warnf("encode %s loot: %s", tool, err)
 		return
 	}
 	emitter := invocation.Emitter

@@ -135,6 +135,45 @@ func TestFailClosedShortCircuits(t *testing.T) {
 	}
 }
 
+func TestHandlerPanicIsAttributedAndReported(t *testing.T) {
+	r := New()
+	var reported *HandlerError
+	r.SetErrorSink(func(he *HandlerError) { reported = he })
+	ToolCallHook.On(r, "plugin", func(context.Context, ToolCallEvent) (ToolCallResult, error) {
+		panic("boom")
+	})
+
+	_, err := ToolCallHook.Emit(context.Background(), r, ToolCallEvent{})
+	if err == nil {
+		t.Fatal("err = nil, want handler panic")
+	}
+	if reported == nil || reported.Source != "plugin" || reported.Kind != "tool_call" {
+		t.Fatalf("reported = %+v", reported)
+	}
+	if reported.Panic != "boom" || len(reported.Stack) == 0 || strings.Contains(err.Error(), "boom") {
+		t.Fatalf("panic visibility = %+v, err = %v", reported, err)
+	}
+}
+
+func TestContinueOnErrorContinuesAfterHandlerPanic(t *testing.T) {
+	r := New()
+	var secondRan bool
+	Context.On(r, "plugin", func(context.Context, ContextEvent) (ContextResult, error) {
+		panic("boom")
+	})
+	Context.On(r, "core", func(context.Context, ContextEvent) (ContextResult, error) {
+		secondRan = true
+		return ContextResult{}, nil
+	})
+
+	if _, err := Context.Emit(context.Background(), r, ContextEvent{}); err == nil {
+		t.Fatal("err = nil, want handler panic")
+	}
+	if !secondRan {
+		t.Fatal("continue-on-error hook stopped after panic")
+	}
+}
+
 func TestContinueOnErrorCollectsAndKeepsGoing(t *testing.T) {
 	r := New()
 	first := errors.New("first")

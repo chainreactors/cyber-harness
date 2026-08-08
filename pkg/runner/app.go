@@ -78,6 +78,10 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	logger = a.Logger()
 	a.Hooks = hooks.New()
 	a.Hooks.SetErrorSink(func(he *hooks.HandlerError) {
+		if len(he.Stack) > 0 {
+			a.Logger().Errorf("hook panic kind=%s source=%s panic=%v\n%s", he.Kind, he.Source, he.Panic, he.Stack)
+			return
+		}
 		a.Logger().Warnf("hook failed kind=%s source=%s error=%q", he.Kind, he.Source, he.Err)
 	})
 
@@ -375,11 +379,25 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		Events:            events,
 	}
 	plan := capability.Select(capability.Options{
-		Groups:        []string{"core", "arsenal", "search", "browser"},
+		Groups:        linkedToolGroups(),
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	commands.BuildPlan(plan, deps, cmdReg)
+	cmdReg.SetLogger(logger)
 	return cmdReg
+}
+
+func linkedToolGroups() []string {
+	seen := make(map[string]bool)
+	var groups []string
+	for _, descriptor := range capability.All() {
+		if descriptor.Kind != capability.KindTool || descriptor.Group == "" || seen[descriptor.Group] {
+			continue
+		}
+		seen[descriptor.Group] = true
+		groups = append(groups, descriptor.Group)
+	}
+	return groups
 }
 
 func executeRegistryCommand(ctx context.Context, reg *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {
@@ -466,7 +484,9 @@ func (a *App) InitIOA(ctx context.Context, ioa IOAConfig) error {
 	if ioa.AutoRegister {
 		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
 			a.Logger().Warnf("ioa registration pending: %s", err)
-			go a.retryIOARegistration(ctx, client, ioa)
+			telemetry.SafeGo("ioa-registration-retry", func() {
+				a.retryIOARegistration(ctx, client, ioa)
+			})
 			return nil
 		}
 	}

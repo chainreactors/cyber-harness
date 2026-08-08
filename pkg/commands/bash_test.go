@@ -719,17 +719,23 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 
 func TestExecuteTool_RecoversPanic(t *testing.T) {
 	reg := NewRegistry()
+	var logs bytes.Buffer
+	reg.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs}))
 	reg.RegisterTool(&panicTool{msg: "boom"})
 
-	result, err := reg.ExecuteTool(context.Background(), "panic_tool", "{}")
+	ctx := tool.ContextWithInvocation(context.Background(), tool.Invocation{CallID: "call-panic"})
+	result, err := reg.ExecuteTool(ctx, "panic_tool", "{}")
 	if err == nil {
 		t.Fatal("expected error from panicking tool, got nil")
 	}
-	if !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("error should contain panic message, got: %s", err.Error())
+	if strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "goroutine") {
+		t.Fatalf("external error leaked panic details: %s", err.Error())
 	}
-	if !strings.Contains(err.Error(), "tool panic_tool panic") {
-		t.Fatalf("error should identify the tool, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "panic_tool") || !strings.Contains(err.Error(), "call-panic") {
+		t.Fatalf("error should identify the tool call, got: %s", err.Error())
+	}
+	if got := logs.String(); !strings.Contains(got, "boom") || !strings.Contains(got, "goroutine") || !strings.Contains(got, "call-panic") {
+		t.Fatalf("panic log missing details: %s", got)
 	}
 	if tool.ResultText(result) != "" {
 		t.Fatalf("result should be empty on panic, got: %s", tool.ResultText(result))
