@@ -581,23 +581,23 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config \
+          sudo apt-get install -y build-essential nasm yasm pkg-config \
             libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
       - name: Install recorder SDK link dependencies on Windows
         if: runner.os == 'Windows'
         run: |
           C:/msys64/usr/bin/bash.exe -lc \
-            "pacman -S --noconfirm --needed pkgconf mingw-w64-x86_64-toolchain"
+            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
 
-      - name: Download static FFmpeg and x264 recorder SDK
+      - name: Prepare static FFmpeg and x264 recorder SDK
         if: runner.os != 'macOS'
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows '${{ matrix.goarch }}'"
+            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; bash .github/native/fetch.sh windows '${{ matrix.goarch }}' || bash .github/native/build-windows.sh"
           else
             chmod +x .github/native/pkg-config-static.sh
-            bash .github/native/fetch.sh linux '${{ matrix.goarch }}'
+            bash .github/native/fetch.sh linux '${{ matrix.goarch }}' || bash .github/native/build-linux.sh
           fi
 
       - name: Download embedded frontend
