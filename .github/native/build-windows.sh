@@ -53,7 +53,7 @@ fi
 mkdir -p "${SOURCE_ROOT}" "${PREFIX}"
 
 if [[ ! -d "${SOURCE_ROOT}/x264/.git" ]]; then
-  git clone https://code.videolan.org/videolan/x264.git "${SOURCE_ROOT}/x264"
+  git clone "${X264_REPOSITORY}" "${SOURCE_ROOT}/x264"
 fi
 git -C "${SOURCE_ROOT}/x264" fetch --depth 1 origin "${X264_COMMIT}"
 git -C "${SOURCE_ROOT}/x264" checkout --detach "${X264_COMMIT}"
@@ -71,7 +71,7 @@ git -C "${SOURCE_ROOT}/x264" checkout --detach "${X264_COMMIT}"
 )
 
 if [[ ! -d "${SOURCE_ROOT}/ffmpeg/.git" ]]; then
-  git clone https://github.com/FFmpeg/FFmpeg.git "${SOURCE_ROOT}/ffmpeg"
+  git clone "${FFMPEG_REPOSITORY}" "${SOURCE_ROOT}/ffmpeg"
 fi
 git -C "${SOURCE_ROOT}/ffmpeg" fetch --depth 1 origin "${FFMPEG_COMMIT}"
 git -C "${SOURCE_ROOT}/ffmpeg" checkout --detach "${FFMPEG_COMMIT}"
