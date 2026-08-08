@@ -1,6 +1,13 @@
 # record — desktop and window capture
 
-`record` is a native full-build tool for Windows and Linux X11. It captures PNG screenshots and H.264/MP4 recordings from the desktop or a visible application window.
+`record` is a native full-build tool that captures PNG screenshots and H.264/MP4 recordings from the desktop or a visible application window.
+
+| Platform | Support |
+| --- | --- |
+| Windows amd64 | Supported |
+| Linux amd64/arm64 with X11 | Supported |
+| Wayland, macOS, Windows arm64 | Not supported |
+| Headless hosts and Windows session 0 | Not supported |
 
 Examples:
 
@@ -34,10 +41,12 @@ Limitations:
 
 - Video only; microphone and system audio are not captured.
 - Wayland is not supported. Use an X11 session.
+- macOS and Windows arm64 do not have a native recorder backend.
+- Capture requires an interactive graphical session; headless hosts and Windows session 0 are not supported.
 - The window must be visible and non-minimized. Capture size is fixed when recording starts; closing, minimizing, or shrinking the window can terminate the recording.
-- The native backend is present in official Windows/Linux full builds. Custom builds require CGO and a supported C toolchain. `make full` downloads the pinned, prebuilt FFmpeg/x264 SDK automatically.
+- The native backend is present in official Windows amd64 and Linux amd64/arm64 full builds. Custom builds require CGO and a supported C toolchain. `make full` downloads the pinned, prebuilt FFmpeg/x264 SDK automatically.
 
-The full build statically links a feature-minimal FFmpeg and x264. The SDK only enables the platform capture input, its raw/BMP decoder, libx264, the MP4 muxer, file output, and pixel conversion. It is not a general-purpose FFmpeg build. Windows system DLLs and Linux system libraries such as glibc/X11 remain platform dependencies.
+The full build statically links a feature-minimal FFmpeg and x264, so users do not install either runtime separately. This is single-file distribution, not literally zero runtime dependencies: Windows still uses system DLLs; Linux requires glibc, X11/XCB libraries, and an accessible `DISPLAY`. The SDK only enables the platform capture input, its raw/BMP decoder, libx264, the MP4 muxer, file output, and pixel conversion. It is not a general-purpose FFmpeg build.
 
 ## Two-stage native build
 
@@ -52,11 +61,12 @@ The `record-native` prerequisite downloads a versioned SDK into `.cache/record-n
 Maintainers build the SDK from the pinned commits separately:
 
 ```bash
-make record-native-source
-bash .github/native/package.sh linux "$(go env GOARCH)" dist/native
+make record-native-source record-native-package
 ```
 
-The `recorder-native-sdk` GitHub Actions workflow performs that source-build/package phase for every supported target and publishes the archives under the release tag declared in `.github/native/versions.env`. Normal CI, release builds, `make full`, and `build.sh -p full` only consume those archives. Set `AISCAN_RECORD_BUILD_FROM_SOURCE=1` when invoking `make full` or `build.sh -p full` to opt into the slow source-build fallback. `AISCAN_RECORD_PREFIX` changes the SDK cache/install directory, and `AISCAN_RECORD_NATIVE_URL` can point downloads at an internal mirror.
+Set `RECORD_ARCH=arm64` or `RECORD_NATIVE_OUTPUT=<directory>` when the defaults do not match the target. The Makefile is the supported build interface; `.github/native/sdk.sh` is the underlying maintainer/CI implementation.
+
+The `recorder-native-sdk` GitHub Actions workflow performs that source-build/package phase for every supported target and publishes the archives under the release tag declared in `.github/native/versions.env`. Release builds, `make full`, and `build.sh -p full` consume those archives. Pull-request CI falls back to the pinned source builders while a new SDK release is not available yet. Set `AISCAN_RECORD_BUILD_FROM_SOURCE=1` when invoking `make full` or `build.sh -p full` to opt into the slow source-build path locally. `AISCAN_RECORD_PREFIX` changes the SDK cache/install directory, and `AISCAN_RECORD_NATIVE_URL` can point downloads at an internal mirror.
 
 The source build verifies an exact FFmpeg component allowlist, and packaging rejects static libraries above a 16 MiB budget unless `AISCAN_RECORD_MAX_LIB_BYTES` explicitly overrides it. This prevents an FFmpeg upgrade or configure change from silently restoring all default codecs and adding tens of megabytes to `aiscan-full`.
 

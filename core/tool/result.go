@@ -23,23 +23,19 @@ func ResultText(r *Result) string {
 }
 
 func ResultHasImages(r *Result) bool {
-	if r == nil {
-		return false
-	}
-	for _, block := range r.Output {
-		if media := block.GetMedia(); media != nil && media.Kind == "image" {
-			return true
-		}
-	}
-	return false
+	return resultHasMedia(r, "image")
 }
 
 func ResultHasMedia(r *Result) bool {
+	return resultHasMedia(r, "")
+}
+
+func resultHasMedia(r *Result, kind string) bool {
 	if r == nil {
 		return false
 	}
 	for _, block := range r.Output {
-		if block.GetMedia() != nil {
+		if media := block.GetMedia(); media != nil && (kind == "" || media.Kind == kind) {
 			return true
 		}
 	}
