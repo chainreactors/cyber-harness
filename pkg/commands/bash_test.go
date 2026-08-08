@@ -479,7 +479,9 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd`, BashExecOptions{
+			// Keep the short-lived shell alive until the PTY reader is scheduled;
+			// this test exercises concurrent option isolation, not PTY drain timing.
+			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd; sleep 0.05`, BashExecOptions{
 				WorkDir: dirs[i],
 				Env:     map[string]string{"AISCAN_RUN_VALUE": fmt.Sprintf("value-%d", i)},
 				OnOutput: func(data []byte) {
