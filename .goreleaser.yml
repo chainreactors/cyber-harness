@@ -66,6 +66,8 @@ builds:
       - netgo
       - full
       - sqlite
+      - re2_cgo
+      - re2_static
     ldflags:
       - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
     asmflags:
