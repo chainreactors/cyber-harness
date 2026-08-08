@@ -22,3 +22,31 @@ func TestWebNodeID(t *testing.T) {
 		t.Fatal("expected missing node_id error")
 	}
 }
+
+func TestResolveRemoteAgentURLsDerivesEmbeddedIOA(t *testing.T) {
+	option := &cfg.Option{
+		AgentOptions: cfg.AgentOptions{ServerURL: "http://token@127.0.0.1:18080"},
+	}
+	if err := resolveRemoteAgentURLs(option); err != nil {
+		t.Fatal(err)
+	}
+	if option.ServerURL != "http://token@127.0.0.1:18080" {
+		t.Fatalf("server URL = %q", option.ServerURL)
+	}
+	if option.IOAURL != "http://token@127.0.0.1:18080/ioa" {
+		t.Fatalf("IOA URL = %q, want same-origin embedded endpoint", option.IOAURL)
+	}
+}
+
+func TestResolveRemoteAgentURLsPreservesIndependentIOA(t *testing.T) {
+	option := &cfg.Option{
+		AgentOptions: cfg.AgentOptions{ServerURL: "http://token@127.0.0.1:18080"},
+		IOAOptions:   cfg.IOAOptions{IOAURL: "http://ioa-token@127.0.0.1:18765"},
+	}
+	if err := resolveRemoteAgentURLs(option); err != nil {
+		t.Fatal(err)
+	}
+	if option.IOAURL != "http://ioa-token@127.0.0.1:18765" {
+		t.Fatalf("independent IOA URL = %q", option.IOAURL)
+	}
+}

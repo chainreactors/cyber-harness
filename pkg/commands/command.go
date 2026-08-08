@@ -39,14 +39,19 @@ type CommandRegistry struct {
 	items  map[string]Command
 	order  []string
 	groups map[string][]string
+	logger telemetry.Logger
 
 	tools     map[string]tool.Tool
 	toolOrder []string
 }
 
 func (r *CommandRegistry) SetLogger(logger telemetry.Logger) {
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.logger = logger
 	for _, tool := range r.tools {
 		if aware, ok := tool.(LoggerAware); ok {
 			aware.InitLogger(logger)
@@ -59,6 +64,7 @@ func NewRegistry() *CommandRegistry {
 		items:  make(map[string]Command),
 		groups: make(map[string][]string),
 		tools:  make(map[string]tool.Tool),
+		logger: telemetry.NopLogger(),
 	}
 }
 
@@ -98,11 +104,40 @@ func (r *CommandRegistry) ToolDefinitions() []*tool.Definition {
 	return defs
 }
 
-func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (result *tool.Result, err error) {
+func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments string) (*tool.Result, error) {
+	return r.executeTool(ctx, name, func(t tool.Tool) (*tool.Result, error) {
+		return t.Execute(ctx, arguments)
+	})
+}
+
+// ExecuteBashForeground runs the transport-facing Bash path through the same
+// panic boundary as ordinary tool execution.
+func (r *CommandRegistry) ExecuteBashForeground(ctx context.Context, command string, options BashExecOptions) (*tool.Result, error) {
+	return r.executeTool(ctx, "bash", func(t tool.Tool) (*tool.Result, error) {
+		foreground, ok := t.(interface {
+			RunForegroundTool(context.Context, string, BashExecOptions) (*tool.Result, error)
+		})
+		if !ok {
+			return nil, fmt.Errorf("bash tool does not support foreground execution")
+		}
+		return foreground.RunForegroundTool(ctx, command, options)
+	})
+}
+
+func (r *CommandRegistry) executeTool(ctx context.Context, name string, run func(tool.Tool) (*tool.Result, error)) (result *tool.Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = nil
-			err = fmt.Errorf("tool %s panic: %v\n%s", name, recovered, debug.Stack())
+			invocation := tool.InvocationFromContext(ctx)
+			r.currentLogger().Errorf(
+				"tool panic name=%s call_id=%s session_id=%s turn_id=%s panic=%v\n%s",
+				name, invocation.CallID, invocation.SessionID, invocation.TurnID, recovered, debug.Stack(),
+			)
+			if invocation.CallID != "" {
+				err = fmt.Errorf("tool %s failed unexpectedly (call_id=%s)", name, invocation.CallID)
+			} else {
+				err = fmt.Errorf("tool %s failed unexpectedly", name)
+			}
 		}
 	}()
 
@@ -110,7 +145,17 @@ func (r *CommandRegistry) ExecuteTool(ctx context.Context, name, arguments strin
 	if !ok {
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
-	return t.Execute(ctx, arguments)
+	return run(t)
+}
+
+func (r *CommandRegistry) currentLogger() telemetry.Logger {
+	r.mu.RLock()
+	logger := r.logger
+	r.mu.RUnlock()
+	if logger == nil {
+		return telemetry.NopLogger()
+	}
+	return logger
 }
 
 func (r *CommandRegistry) Register(cmd Command, group string) {

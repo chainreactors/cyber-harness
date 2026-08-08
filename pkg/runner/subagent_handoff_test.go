@@ -9,6 +9,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -178,4 +179,24 @@ func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestIOAHandoffTypedNilClientIsDisabled(t *testing.T) {
+	var concrete *ioaclient.Client
+	var client protocols.ClientAPI = concrete
+	if !isNilIOADependency(client) {
+		t.Fatal("typed-nil IOA client was treated as configured")
+	}
+
+	bus := eventbus.New[*aop.Event]()
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
+	defer cancel()
+
+	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
+		ParentSessionId: "parent-session", ParentToolCallId: "spawn-typed-nil",
+	}}})
+	if err := types.SetDelegation(start, &types.DelegationDetail{Task: "inspect target", AgentName: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	bus.Emit(start)
 }

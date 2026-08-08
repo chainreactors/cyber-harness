@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
@@ -1055,14 +1056,7 @@ func (c *Command) execType(ctx context.Context, args []string) (string, error) {
 // ---------------------------------------------------------------------------
 
 func findElement(page *rod.Page, selector string) (*rod.Element, error) {
-	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return nil, fmt.Errorf("empty selector")
-	}
-	if xpath, ok := strings.CutPrefix(selector, "xpath:"); ok {
-		return page.ElementX(xpath)
-	}
-	return page.Element(selector)
+	return headless.FindElement(page, selector, 0)
 }
 
 func selectOption(el *rod.Element, value string) error {

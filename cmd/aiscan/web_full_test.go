@@ -90,6 +90,42 @@ func TestWireWebAppBindsRawArtifactsForReloadedApp(t *testing.T) {
 	}
 }
 
+func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
+	base := &cfg.Option{IOAOptions: cfg.IOAOptions{Space: "case-1"}}
+	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if option.ServerURL != "http://promo-demo@127.0.0.1:18080" {
+		t.Fatalf("server URL = %q", option.ServerURL)
+	}
+	if option.IOAURL != "http://promo-demo@127.0.0.1:18080/ioa" {
+		t.Fatalf("IOA URL = %q, want embedded same-origin endpoint", option.IOAURL)
+	}
+	if option.IOANodeName != "local" || option.Space != "case-1" {
+		t.Fatalf("embedded identity = name %q space %q", option.IOANodeName, option.Space)
+	}
+	if base.ServerURL != "" || base.IOAURL != "" || base.IOANodeName != "" {
+		t.Fatalf("base option was mutated: %+v", base)
+	}
+}
+
+func TestEmbeddedAgentOptionPreservesExplicitIOAAndNode(t *testing.T) {
+	base := &cfg.Option{
+		IOAOptions: cfg.IOAOptions{
+			IOAURL:      "http://ioa-token@127.0.0.1:18765",
+			IOANodeName: "coordinator",
+		},
+	}
+	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if option.IOAURL != base.IOAURL || option.IOANodeName != "coordinator" {
+		t.Fatalf("explicit IOA configuration was not preserved: %+v", option.IOAOptions)
+	}
+}
+
 type recordingArtifactIngestor struct {
 	artifact *toolpb.Artifact
 }

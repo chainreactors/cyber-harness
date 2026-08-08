@@ -1,16 +1,68 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protobuf "google.golang.org/protobuf/proto"
 	"os"
 	"path/filepath"
 	"runtime"
-	"testing"
 )
+
+func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
+	var logs bytes.Buffer
+	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs})
+	operations := make(map[string]context.CancelFunc)
+	var operationsMu sync.Mutex
+	failure := make(chan *aop.ProtocolError, 1)
+	send := func(_ string, message protobuf.Message) {
+		protocol := message.(*aop.ProtocolMessage)
+		if protocol.GetEvent() != nil {
+			panic("send event boom")
+		}
+		if value := protocol.GetProtocolError(); value != nil {
+			failure <- value
+		}
+	}
+	arguments, _ := aop.JSONValue(map[string]any{})
+	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
+	handleAgentToolMessage(
+		context.Background(),
+		connectionConfig{Registry: commands.NewRegistry(), Logger: logger},
+		&aop.Envelope{Id: "op-panic"},
+		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
+		send, &operationsMu, operations,
+	)
+
+	select {
+	case got := <-failure:
+		if got.Code != "OPERATION_FAILED" || !strings.Contains(got.Message, "unexpectedly") {
+			t.Fatalf("failure = %+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for operation failure")
+	}
+	operationsMu.Lock()
+	_, tracked := operations["op-panic"]
+	operationsMu.Unlock()
+	if tracked {
+		t.Fatal("panicking operation was not cleaned up")
+	}
+	if got := logs.String(); !strings.Contains(got, "send event boom") || !strings.Contains(got, "op-panic") {
+		t.Fatalf("panic log = %s", got)
+	}
+}
 
 func TestExecRequestCompletesWithOutput(t *testing.T) {
 	command := "printf hello"
@@ -95,6 +147,44 @@ func TestNativeFileRPCsResolveRelativeToRuntimeWorkdir(t *testing.T) {
 	value := fileRead(&filepb.ReadRequest{Path: path}, base)
 	if value.err != nil || string(value.result.Data) != "hello" {
 		t.Fatalf("read data = %q, err = %v", value.result.Data, value.err)
+	}
+}
+
+func TestFileReadReturnsBoundedChunks(t *testing.T) {
+	base := t.TempDir()
+	path := filepath.Join(base, "capture.mp4")
+	data := bytes.Repeat([]byte("frame"), 300_000)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := fileRead(&filepb.ReadRequest{Path: path, Limit: 256 * 1024}, base)
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	if first.result.Offset != 0 || first.result.Eof || len(first.result.Data) != 256*1024 || first.result.Size != int64(len(data)) {
+		t.Fatalf("first chunk = %+v, bytes=%d", first.result, len(first.result.Data))
+	}
+	if first.result.MediaType != "video/mp4" {
+		t.Fatalf("media type = %q, want video/mp4", first.result.MediaType)
+	}
+	joined := append([]byte(nil), first.result.Data...)
+	offset := int64(len(joined))
+	for {
+		next := fileRead(&filepb.ReadRequest{Path: path, Offset: offset, Limit: maxFileReadChunkBytes + 1}, base)
+		if next.err != nil {
+			t.Fatal(next.err)
+		}
+		if next.result.Offset != offset || len(next.result.Data) > int(maxFileReadChunkBytes) {
+			t.Fatalf("chunk offset=%d bytes=%d, want offset=%d max=%d", next.result.Offset, len(next.result.Data), offset, maxFileReadChunkBytes)
+		}
+		joined = append(joined, next.result.Data...)
+		offset += int64(len(next.result.Data))
+		if next.result.Eof {
+			break
+		}
+	}
+	if !bytes.Equal(joined, data) {
+		t.Fatalf("joined bytes = %d, want %d", len(joined), len(data))
 	}
 }
 

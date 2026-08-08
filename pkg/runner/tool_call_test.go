@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
@@ -132,5 +134,34 @@ func TestExecuteToolRequestForeground(t *testing.T) {
 	result := event.GetToolResult()
 	if result.IsError || result.Output[0].GetText().Text != "streamed" {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+type panicForegroundBash struct{ recordingBash }
+
+func (*panicForegroundBash) RunForegroundTool(context.Context, string, commands.BashExecOptions) (*tool.Result, error) {
+	panic("foreground boom")
+}
+
+func TestExecuteToolRequestForegroundPanicIsReturnedWithoutStack(t *testing.T) {
+	registry := commands.NewRegistry()
+	var logs bytes.Buffer
+	registry.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs}))
+	registry.RegisterTool(&panicForegroundBash{})
+
+	event, err := ExecuteToolRequest(context.Background(), "task-panic", toolRequest(t, "task-panic", "bash", map[string]any{"command": "echo test"}), registry, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := event.GetToolResult()
+	text := tool.ResultText(result)
+	if !result.IsError || !strings.Contains(text, "task-panic") {
+		t.Fatalf("result = %+v", result)
+	}
+	if strings.Contains(text, "foreground boom") || strings.Contains(text, "goroutine") {
+		t.Fatalf("tool result leaked panic details: %q", text)
+	}
+	if got := logs.String(); !strings.Contains(got, "foreground boom") || !strings.Contains(got, "goroutine") {
+		t.Fatalf("panic log = %s", got)
 	}
 }

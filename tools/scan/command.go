@@ -113,7 +113,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		defer restoreDebug()
 		c.Logger.Debugf("scan debug enabled")
 	}
-	profile, err := profileForMode(flags.Mode)
+	profile, err := profileForFlags(flags)
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
@@ -193,27 +193,47 @@ func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanRes
 	}
 	for _, service := range result.GOGO {
 		if service != nil {
-			c.EmitArtifactCtx(ctx, "gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
+			resultID := toolargs.ArtifactResultID("gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
+			c.EmitArtifactResultCtx(ctx, resultID, "gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
 		}
 	}
 	for _, probe := range result.Spray {
 		if probe != nil {
-			c.EmitArtifactCtx(ctx, "spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
+			resultID := toolargs.ArtifactResultID("spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
+			c.EmitArtifactResultCtx(ctx, resultID, "spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
 		}
+	}
+	for _, artifact := range result.Artifacts {
+		c.EmitArtifactResultCtx(
+			ctx,
+			artifact.ResultID,
+			artifact.Tool,
+			artifact.Kind,
+			artifact.Target,
+			artifact.Data,
+		)
 	}
 	for i := range result.Loots {
 		loot := result.Loots[i]
-		kind := loot.Kind
-		if kind == "" {
-			kind = toolpb.ArtifactKindVuln
+		resultID, _ := loot.Data["result_id"].(string)
+		tool, _ := loot.Data["artifact_tool"].(string)
+		if resultID == "" || tool == "" {
+			c.Logger.Warnf("skip unbound %s loot for %s", loot.Kind, loot.Target)
+			continue
 		}
-		c.EmitArtifactCtx(ctx, "scan", kind, loot.Target, &loot)
+		verificationStatus, _ := loot.Data["verification_status"].(string)
+		c.EmitLootCtx(
+			ctx,
+			resultID,
+			tool,
+			loot.Kind,
+			loot.Target,
+			loot.Priority,
+			loot.Description,
+			verificationStatus,
+			loot.Tags,
+		)
 	}
-	for i := range result.Errors {
-		scanErr := result.Errors[i]
-		c.EmitArtifactCtx(ctx, "scan", toolpb.ArtifactKindError, scanErr.Source, &scanErr)
-	}
-	c.EmitArtifactCtx(ctx, "scan", toolpb.ArtifactKindSummary, "", &result.Summary)
 }
 
 var scanFileFlags = map[string]bool{

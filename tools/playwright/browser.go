@@ -16,6 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/truncate"
+	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -529,7 +530,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 
 	if err == nil && len(subArgs) > 0 {
 		if sess, sessErr := c.getSession(subArgs[0]); sessErr == nil && sess.rec != nil {
-			recordCommand(sess, sub, subArgs)
+			recordCommandResult(sess, sub, subArgs, result)
 		}
 	}
 
@@ -583,11 +584,12 @@ func (c *Command) getOrLaunchBrowser() (*rod.Browser, error) {
 			Set("disable-dev-shm-usage").
 			Set("ignore-certificate-errors").
 			Set("allow-insecure-localhost")
-		// Prefer an installed browser when one is available. Rod otherwise
-		// enters its auto-download path, which is inappropriate for offline CI
-		// and can block even though launcher.LookPath already found Chromium.
-		if browserPath, ok := launcher.LookPath(); ok {
-			l = l.Bin(browserPath)
+		binary, err := browserutil.Discover()
+		if err != nil {
+			return nil, fmt.Errorf("playwright: browser discovery failed: %w", err)
+		}
+		if binary.Path != "" {
+			l = l.Bin(binary.Path)
 		}
 
 		c.proxyMu.RLock()

@@ -106,6 +106,29 @@ func TestScanProfilesAssembleCapabilities(t *testing.T) {
 	}
 }
 
+func TestBroadPOCFlagDerivesUnfingerprintedTarget(t *testing.T) {
+	profile, err := profileForFlags(flags{Mode: scanModeQuick, BroadPOC: true})
+	if err != nil {
+		t.Fatalf("profileForFlags() error = %v", err)
+	}
+	if !profile.AllowBroadPOC {
+		t.Fatal("profile dropped --broad-poc")
+	}
+
+	result := &parsers.SprayResult{
+		IsValid:   true,
+		UrlString: "http://127.0.0.1:8080",
+		Status:    http.StatusOK,
+	}
+	var events []event
+	deriveWebProbeResult(profile, capSprayCheck, result, "", func(event event) {
+		events = append(events, event)
+	})
+	if !hasTargetKind(events, targetPOC) {
+		t.Fatalf("derived events missing broad poc target: %#v", events)
+	}
+}
+
 func TestScanOptionsResolveCredentialFlags(t *testing.T) {
 	flags := flags{
 		Users:     []string{"root", "admin"},
@@ -1673,19 +1696,65 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 		}},
 	})
 
-	if len(events) != 3 {
-		t.Fatalf("events = %d, want 3: %#v", len(events), events)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %#v", len(events), events)
 	}
 	wants := []struct{ tool, kind string }{
-		{"gogo", toolpb.ArtifactKindService}, {"spray", toolpb.ArtifactKindWeb}, {"scan", toolpb.ArtifactKindSummary},
+		{"gogo", toolpb.ArtifactKindService}, {"spray", toolpb.ArtifactKindWeb},
 	}
 	for index, event := range events {
 		artifact := new(toolpb.Artifact)
 		if event.GetExtension() == nil || event.GetExtension().UnmarshalTo(artifact) != nil {
 			t.Fatalf("artifact event = %#v", event)
 		}
-		if artifact.Tool != wants[index].tool || artifact.Kind != wants[index].kind || artifact.CallId != "scan-call-1" {
+		if artifact.Tool != wants[index].tool || artifact.Kind != wants[index].kind || artifact.CallId != "scan-call-1" || artifact.ResultId == "" {
 			t.Fatalf("artifact = %#v, want %#v", artifact, wants[index])
 		}
+	}
+}
+
+func TestEmitStructuredDataPublishesNativeArtifactAndLoot(t *testing.T) {
+	bus := eventbus.New[*aop.Event]()
+	cmd := New(&engine.Set{}, WithEvents(bus))
+	var events []*aop.Event
+	unsub := bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
+	defer unsub()
+
+	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{
+		CallID: "scan-call-1", SessionID: "scan-session", TurnID: "scan-turn", Emitter: "scan",
+	})
+	record := &sdktypes.TemplateResult{
+		Target: "http://127.0.0.1:5000", TemplateID: "test-rce", Severity: "critical", Matched: true,
+		Request: "GET / HTTP/1.1", Response: "HTTP/1.1 200 OK",
+	}
+	cmd.emitStructuredData(ctx, &output.ScanResult{
+		Artifacts: []output.ArtifactResult{{
+			ResultID: "result-1", Tool: "neutron", Kind: toolpb.ArtifactKindVuln,
+			Target: record.Target, Data: record,
+		}},
+		Loots: []output.Loot{{
+			Kind: output.LootVuln, Target: record.Target, Priority: "critical",
+			Tags: []string{"rce"}, Data: map[string]any{
+				"result_id": "result-1", "artifact_tool": "neutron", "verification_status": "confirmed",
+			},
+		}},
+	})
+
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want artifact + loot", len(events))
+	}
+	artifact := new(toolpb.Artifact)
+	if err := events[0].GetExtension().UnmarshalTo(artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Tool != "neutron" || artifact.ResultId != "result-1" {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+	loot := new(toolpb.Loot)
+	if err := events[1].GetExtension().UnmarshalTo(loot); err != nil {
+		t.Fatal(err)
+	}
+	if loot.Tool != "neutron" || loot.ResultId != artifact.ResultId || loot.VerificationStatus != "confirmed" {
+		t.Fatalf("loot = %#v", loot)
 	}
 }

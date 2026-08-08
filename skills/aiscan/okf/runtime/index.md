@@ -11,6 +11,7 @@ This bundle organizes aiscan's runtime mechanism tool documentation as concept f
 - [ioa space](ioa-space.md) — IOA space selection and discovery
 - [ioa send](ioa-send.md) — IOA messages and checkpoints
 - [ioa read](ioa-read.md) — IOA inbox and thread reading
+- [ioa finding](ioa-finding.md) — publishing vulnerability discoveries as IOA checkpoints
 - [search](search.md) — cyberhub fingerprint/POC search
 - [fetch](fetch.md) — URL content retrieval and focused extraction
 - [loop](loop.md) — recurring agent task scheduling

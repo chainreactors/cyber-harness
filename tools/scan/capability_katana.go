@@ -9,8 +9,11 @@ import (
 	"strings"
 	"sync"
 
+	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/projectdiscovery/gologger"
 	"github.com/projectdiscovery/gologger/levels"
+	"github.com/projectdiscovery/katana/pkg/engine"
+	"github.com/projectdiscovery/katana/pkg/engine/headless"
 	"github.com/projectdiscovery/katana/pkg/engine/standard"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"
@@ -85,6 +88,29 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 
 	var mu sync.Mutex
 	seen := make(map[string]struct{})
+	handleResult := func(r *katanaoutput.Result) {
+		if r == nil || r.Request == nil || r.Request.URL == "" {
+			return
+		}
+		discoveredURL := r.Request.URL
+
+		if seedRDN != "" && !sameRootDomain(discoveredURL, seedRDN) {
+			return
+		}
+		if strings.TrimRight(strings.ToLower(discoveredURL), "/") == seedNorm {
+			return
+		}
+
+		mu.Lock()
+		if _, dup := seen[discoveredURL]; dup {
+			mu.Unlock()
+			return
+		}
+		seen[discoveredURL] = struct{}{}
+		mu.Unlock()
+
+		emit(targetEvent(source, wt.Raw, newWebTarget(wt.Raw, discoveredURL, wt.HostHeader)))
+	}
 
 	options := &katanatypes.Options{
 		MaxDepth:               depth,
@@ -95,35 +121,31 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		Silent:                 true,
 		ScrapeJSResponses:      jsMode,
 		ScrapeJSLuiceResponses: jsMode,
+		Headless:               jsMode,
 		Timeout:                10,
+		TimeStable:             1,
+		MaxFailureCount:        10,
+		PageLoadStrategy:       "heuristic",
+		DOMWaitTime:            5,
 		Concurrency:            10,
 		Parallelism:            10,
 		OnResult: func(r katanaoutput.Result) {
-			if r.Request == nil || r.Request.URL == "" {
-				return
-			}
-			discoveredURL := r.Request.URL
-
-			if seedRDN != "" && !sameRootDomain(discoveredURL, seedRDN) {
-				return
-			}
-			if strings.TrimRight(strings.ToLower(discoveredURL), "/") == seedNorm {
-				return
-			}
-
-			mu.Lock()
-			if _, dup := seen[discoveredURL]; dup {
-				mu.Unlock()
-				return
-			}
-			seen[discoveredURL] = struct{}{}
-			mu.Unlock()
-
-			emit(targetEvent(source, wt.Raw, newWebTarget(wt.Raw, discoveredURL, wt.HostHeader)))
+			handleResult(&r)
 		},
 	}
 	if c.Proxy != "" {
 		options.Proxy = c.Proxy
+	}
+	if jsMode {
+		binary, err := browserutil.Discover()
+		if err != nil {
+			emitError(emit, source, "katana browser discovery: %v", err)
+			return
+		}
+		if binary.Path != "" {
+			options.SystemChromePath = binary.Path
+			options.UseInstalledChrome = true
+		}
 	}
 
 	gologger.DefaultLogger.SetMaxLevel(levels.LevelSilent)
@@ -133,13 +155,18 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		emitError(emit, source, "katana init %s: %v", wt.URL, err)
 		return
 	}
-	crawlerOptions.OutputWriter = &silentWriter{}
+	crawlerOptions.OutputWriter = &scanResultWriter{onResult: handleResult}
 	defer func() {
 		crawlerOptions.Close()
 		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
 	}()
 
-	crawler, err := standard.New(crawlerOptions)
+	var crawler engine.Engine
+	if jsMode {
+		crawler, err = headless.New(crawlerOptions)
+	} else {
+		crawler, err = standard.New(crawlerOptions)
+	}
 	if err != nil {
 		emitError(emit, source, "katana create %s: %v", wt.URL, err)
 		return
@@ -175,8 +202,15 @@ func sameRootDomain(rawURL, rdn string) bool {
 	return host == rdn || strings.HasSuffix(host, "."+rdn)
 }
 
-type silentWriter struct{}
+type scanResultWriter struct {
+	onResult func(*katanaoutput.Result)
+}
 
-func (w *silentWriter) Close() error                         { return nil }
-func (w *silentWriter) Write(_ *katanaoutput.Result) error   { return nil }
-func (w *silentWriter) WriteErr(_ *katanaoutput.Error) error { return nil }
+func (w *scanResultWriter) Close() error { return nil }
+func (w *scanResultWriter) Write(result *katanaoutput.Result) error {
+	if w.onResult != nil {
+		w.onResult(result)
+	}
+	return nil
+}
+func (w *scanResultWriter) WriteErr(_ *katanaoutput.Error) error { return nil }

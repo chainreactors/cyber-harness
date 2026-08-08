@@ -9,11 +9,22 @@ import (
 // ScanResult is private collector state. Scanner-native records leave a node
 // only as canonical aop.tool.Artifact messages.
 type ScanResult struct {
-	Summary Summary                `json:"summary"`
-	GOGO    []*parsers.GOGOResult  `json:"gogo,omitempty"`
-	Spray   []*parsers.SprayResult `json:"spray,omitempty"`
-	Loots   []Loot                 `json:"loots,omitempty"`
-	Errors  []Error                `json:"errors,omitempty"`
+	Summary   Summary                `json:"summary"`
+	GOGO      []*parsers.GOGOResult  `json:"gogo,omitempty"`
+	Spray     []*parsers.SprayResult `json:"spray,omitempty"`
+	Artifacts []ArtifactResult       `json:"artifacts,omitempty"`
+	Loots     []Loot                 `json:"loots,omitempty"`
+	Errors    []Error                `json:"errors,omitempty"`
+}
+
+// ArtifactResult keeps the scanner-native result paired with a Loot marker.
+// Data is serialized directly into aop.tool.Artifact without reshaping.
+type ArtifactResult struct {
+	ResultID string `json:"result_id"`
+	Tool     string `json:"tool"`
+	Kind     string `json:"kind"`
+	Target   string `json:"target"`
+	Data     any    `json:"data"`
 }
 
 type Summary struct {
