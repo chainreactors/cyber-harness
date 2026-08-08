@@ -147,6 +147,13 @@
     "reason": "The IOA integration calls a live model endpoint and requires an explicit credential."
   },
   {
+    "path": "tools/katana/katana_test.go",
+    "format": "no system browser available; CI installs Chrome for this test",
+    "count": 1,
+    "category": "external_runtime",
+    "reason": "The Katana browser capability test requires a locally installed Chromium-family executable."
+  },
+  {
     "path": "tools/playwright/browser_test.go",
     "format": "no Chromium/Chrome found, skipping browser integration test",
     "count": 1,
@@ -187,5 +194,12 @@
     "count": 1,
     "category": "external_api",
     "reason": "The Hunter integration requires a user-supplied service credential."
+  },
+  {
+    "path": "tools/scan/capability_katana_test.go",
+    "format": "no system browser available; CI installs Chrome for this test",
+    "count": 1,
+    "category": "external_runtime",
+    "reason": "The scan capability test requires a locally installed Chromium-family executable."
   }
 ]
