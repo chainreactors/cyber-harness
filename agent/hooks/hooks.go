@@ -292,7 +292,7 @@ func (p Point[E, R]) dispatch(ctx context.Context, r *Registry, entries []entry,
 			}
 			continue
 		}
-		out, err, panicValue, stack := invokeHandler(ctx, fn, ev)
+		out, panicValue, stack, err := invokeHandler(ctx, fn, ev)
 		if err != nil {
 			he := &HandlerError{Source: e.source, Kind: p.Kind, Err: err, Panic: panicValue, Stack: stack}
 			r.report(he)
@@ -312,7 +312,7 @@ func (p Point[E, R]) dispatch(ctx context.Context, r *Registry, entries []entry,
 	return acc, errors.Join(errs...)
 }
 
-func invokeHandler[E any, R any](ctx context.Context, fn func(context.Context, E) (R, error), ev E) (out R, err error, panicValue any, stack []byte) {
+func invokeHandler[E any, R any](ctx context.Context, fn func(context.Context, E) (R, error), ev E) (out R, panicValue any, stack []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			var zero R
@@ -323,5 +323,5 @@ func invokeHandler[E any, R any](ctx context.Context, fn func(context.Context, E
 		}
 	}()
 	out, err = fn(ctx, ev)
-	return out, err, nil, nil
+	return out, nil, nil, err
 }

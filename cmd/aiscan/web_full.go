@@ -337,7 +337,6 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *types.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
 	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *types.ReconConfig) {
 		preserveSecret(&c.FofaKey, current.GetRecon().GetFofaKey())
-		preserveSecret(&c.HunterToken, current.GetRecon().GetHunterToken())
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })

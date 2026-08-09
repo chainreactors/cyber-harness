@@ -148,11 +148,9 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		rt.replMode = rc.REPLMode
 		rt.maxPending = rc.MaxPending
 	}
-	if option != nil {
-		optCopy := *option
-		rt.option = &optCopy
-		rt.configFile = option.ConfigFile
-	}
+	optCopy := *option
+	rt.option = &optCopy
+	rt.configFile = option.ConfigFile
 	recordPath := resolveJSONLRecordPath(option, rt.replMode)
 	if recordPath != "" {
 		option.OutputFile = recordPath

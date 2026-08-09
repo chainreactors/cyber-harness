@@ -11,7 +11,6 @@ import (
 
 func TestParseCLIReconCommandsAndFlags(t *testing.T) {
 	parsed, err := parseCLI([]string{
-		"--fofa-email", "ops@example.com",
 		"--fofa-key", "FOFAKEY",
 		"--hunter-api-key", "HUNTERKEY",
 		"--recon-proxy", "socks5://127.0.0.1:1080",
@@ -30,7 +29,7 @@ func TestParseCLIReconCommandsAndFlags(t *testing.T) {
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
-	if parsed.Option.FofaEmail != "ops@example.com" || parsed.Option.FofaKey != "FOFAKEY" || parsed.Option.HunterAPIKey != "HUNTERKEY" || parsed.Option.ReconProxy != "socks5://127.0.0.1:1080" {
+	if parsed.Option.FofaKey != "FOFAKEY" || parsed.Option.HunterAPIKey != "HUNTERKEY" || parsed.Option.ReconProxy != "socks5://127.0.0.1:1080" {
 		t.Fatalf("recon options = %#v", parsed.Option.ReconOptions)
 	}
 	if parsed.Option.ReconLimit == nil || *parsed.Option.ReconLimit != 0 {

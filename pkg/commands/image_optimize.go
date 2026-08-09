@@ -12,8 +12,6 @@ const (
 	maxPayloadBytes = imageutil.MaxPayloadBytes
 )
 
-var jpegQualities = imageutil.JPEGQualities
-
 type optimizedImage = imageutil.Optimized
 
 func optimizeImage(r io.Reader, srcMime string) (*optimizedImage, error) {

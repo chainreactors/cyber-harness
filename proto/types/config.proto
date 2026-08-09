@@ -41,12 +41,10 @@ message CyberhubConfig {
 }
 
 message ReconConfig {
-  string fofa_email = 1;
-  string fofa_key = 2;
-  string hunter_token = 3;
-  string hunter_api_key = 4;
-  string proxy = 5;
-  int32 limit = 6;
+  string fofa_key = 1;
+  string hunter_api_key = 2;
+  string proxy = 3;
+  int32 limit = 4;
 }
 
 message ScanConfig {
@@ -98,12 +96,10 @@ message CyberhubView {
 }
 
 message ReconView {
-  string fofa_email = 1;
-  bool fofa_key_configured = 2;
-  bool hunter_token_configured = 3;
-  bool hunter_api_key_configured = 4;
-  string proxy = 5;
-  int32 limit = 6;
+  bool fofa_key_configured = 1;
+  bool hunter_api_key_configured = 2;
+  string proxy = 3;
+  int32 limit = 4;
 }
 
 message SearchView { bool tavily_keys_configured = 1; }

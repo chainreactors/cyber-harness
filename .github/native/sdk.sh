@@ -152,15 +152,18 @@ fetch_sdk() {
     ""|/|"${HOME:-__missing__}"|"${ROOT}") echo "refusing unsafe recorder SDK prefix: ${prefix}" >&2; exit 1 ;;
   esac
 
-  local tmp stage backup
+  local tmp stage backup cleanup_cmd
   tmp="$(mktemp -d)"
   stage="${prefix}.tmp.$$"
   backup="${prefix}.old.$$"
-  trap 'rm -rf "${tmp}" "${stage}"' EXIT
+  printf -v cleanup_cmd 'rm -rf -- %q %q' "${tmp}" "${stage}"
+  trap "${cleanup_cmd}" EXIT
 
   echo "downloading recorder SDK ${RECORD_NATIVE_VERSION} for ${platform}/${arch}"
-  curl --fail --location --retry 3 --retry-delay 2 "${base_url}/${archive}" -o "${tmp}/${archive}"
-  curl --fail --location --retry 3 --retry-delay 2 "${base_url}/${archive}.sha256" -o "${tmp}/${archive}.sha256"
+  curl --fail --location --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+    --retry 5 --retry-delay 2 --retry-all-errors "${base_url}/${archive}" -o "${tmp}/${archive}"
+  curl --fail --location --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+    --retry 5 --retry-delay 2 --retry-all-errors "${base_url}/${archive}.sha256" -o "${tmp}/${archive}.sha256"
   if command -v sha256sum >/dev/null 2>&1; then
     (cd "${tmp}" && sha256sum --check "${archive}.sha256")
   elif command -v shasum >/dev/null 2>&1; then
@@ -291,10 +294,11 @@ package_sdk() {
     exit 1
   fi
 
-  local tmp stage
+  local tmp stage cleanup_cmd
   tmp="$(mktemp -d)"
   stage="${tmp}/sdk"
-  trap 'rm -rf "${tmp}"' EXIT
+  printf -v cleanup_cmd 'rm -rf -- %q' "${tmp}"
+  trap "${cleanup_cmd}" EXIT
   mkdir -p "${stage}" "${output_dir}"
   cp -R "${prefix}/include" "${prefix}/lib" "${stage}/"
   if [[ -d "${prefix}/share/licenses" ]]; then

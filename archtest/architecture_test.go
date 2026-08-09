@@ -534,14 +534,6 @@ func trackedFiles(t *testing.T, root string) []string {
 	return files
 }
 
-func shouldSkipTree(root, path string) bool {
-	rel := filepath.ToSlash(relative(root, path))
-	return rel == ".git" || strings.HasPrefix(rel, ".git/") ||
-		rel == "refer" || strings.HasPrefix(rel, "refer/") ||
-		rel == "templates" || strings.HasPrefix(rel, "templates/") ||
-		rel == "web/frontend/cyber-ui" || strings.HasPrefix(rel, "web/frontend/cyber-ui/")
-}
-
 func relative(root, path string) string {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {

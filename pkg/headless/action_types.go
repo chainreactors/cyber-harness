@@ -39,7 +39,7 @@ const (
 	ActionDebug                              // log debug info
 	ActionSleep                              // sleep for duration
 	ActionWaitVisible                        // wait for element visibility
-	ActionDialog                             // handle JS dialog (deprecated, use waitdialog)
+	ActionDialog                             // install a JS dialog handler
 	ActionWaitDialog                         // wait for JS dialog and capture type+message
 
 	// AIScan extensions. Keep these appended so the nuclei-compatible values

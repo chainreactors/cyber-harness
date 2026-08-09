@@ -2,7 +2,6 @@
   <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
   <p align="center">AI-driven single-binary pentest agent with a built-in multi-engine arsenal, ready to go</p>
-  <p align="center"><strong>Preview — APIs and features may change between releases</strong></p>
 </p>
 
 <p align="center">
@@ -248,6 +247,7 @@ llm:
 | [IOA](docs/ioa.md) | Multi-agent architecture, Space/Node/Message model |
 | [Record Tool](docs/record.md) | Desktop/window capture, platform support, native builds |
 | [Reference](docs/reference.md) | Configuration, providers, flags, scanner usage, FAQ |
+| [v1.0.0 Guide](docs/v1.0.0.md) | Stable API baseline, removed pre-v1 interfaces, release profiles |
 | [Changelog](docs/changelog.md) | Version history |
 
 ## Contributing

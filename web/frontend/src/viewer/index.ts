@@ -53,9 +53,3 @@ export type { AssistantResponseProps } from '../../cyber-ui/packages/viewer/src/
 export type { ToolCallDisplayProps, CodeCallDisplayProps, BlockingOutputDisplayProps } from '../../cyber-ui/packages/viewer/src/components/chat/ToolCallDisplay'
 export type { ChatInputProps, CommandHint, ChatAttachment, AttachmentMode, Mentionable, MentionPopupApi, PopupNavigationCommand, PopupNavigationKey } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
 export type { AgentVoiceCardProps } from '../../cyber-ui/packages/viewer/src/components/chat/AgentVoiceCard'
-
-// Backward compat: the local timeline-registry types used slightly different names
-export type {
-  TimelineItemRendererProps as TimelineRendererProps,
-} from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'
-export type { ExtensionRendererProps as TimelineRendererContext } from '../../cyber-ui/packages/viewer/src/components/chat/timeline-registry'

@@ -151,8 +151,7 @@ Session Subcommands (multi-step interactive workflows):
     dispatch-event <session> <selector> <type>  Dispatch a DOM event (change, input, submit, etc.)
 
   Extraction:
-    text-content <session> [selector]           Extract visible text from session
-    inner-html <session> [selector]             Extract HTML from session
+    inner-text <session> <selector>             Extract visible text from session
     get-attribute <session> <selector> <name>   Get an element attribute value
     input-value <session> <selector>            Get the current value of an input
     is-visible <session> <selector>             Check if an element is visible
@@ -175,7 +174,6 @@ Session Subcommands (multi-step interactive workflows):
     cookie-set <session> <n=v> [n=v...]         Set cookies
     cookie-delete <session> <name>              Delete a specific cookie
     cookie-clear <session>                      Clear all cookies
-    cookies <session> --list|--set|--clear       (legacy alias)
     localstorage-list <session>                 List all localStorage items
     localstorage-get <session> <key>            Get a localStorage item
     localstorage-set <session> <key> <value>    Set a localStorage item
@@ -283,11 +281,11 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 
 	switch sub {
 	// --- Unified URL/session commands (Playwright-aligned) ---
-	case "goto", "navigate": // navigate is backward-compat alias
+	case "goto":
 		if c.firstArgIsSession(subArgs) {
 			result, err = c.execSessionText(ctx, subArgs, "goto")
 		} else {
-			result, err = c.execNavigate(ctx, subArgs)
+			result, err = c.execGoto(ctx, subArgs)
 		}
 	case "screenshot":
 		if c.firstArgIsSession(subArgs) {
@@ -301,27 +299,18 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		} else {
 			result, err = c.execContent(ctx, subArgs)
 		}
-	case "evaluate", "eval": // eval is backward-compat alias
+	case "evaluate":
 		if c.firstArgIsSession(subArgs) {
 			result, err = c.execSessionEval(ctx, subArgs)
 		} else {
-			result, err = c.execEval(ctx, subArgs)
+			result, err = c.execEvaluate(ctx, subArgs)
 		}
-	case "network", "netcap": // netcap is backward-compat alias
+	case "network":
 		if c.firstArgIsSession(subArgs) {
 			result, err = c.execSessionNetwork(ctx, subArgs)
 		} else {
 			result, err = c.execNetwork(ctx, subArgs)
 		}
-	case "text-content", "text": // text is backward-compat alias
-		result, err = c.execSessionText(ctx, subArgs, "text-content")
-	case "inner-html", "html": // html is backward-compat alias
-		result, err = c.execSessionContent(ctx, subArgs)
-	case "seval":
-		result, err = c.execSessionEval(ctx, subArgs)
-	case "sshot":
-		result, err = c.execSessionScreenshot(ctx, subArgs)
-
 	// --- Stateless-only ---
 	case "pdf":
 		result, err = c.execPDF(ctx, subArgs)
@@ -377,8 +366,8 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		result, err = c.execHover(ctx, subArgs)
 	case "dblclick":
 		result, err = c.execDblclick(ctx, subArgs)
-	case "select-option", "select": // select is backward-compat alias
-		result, err = c.execSelect(ctx, subArgs)
+	case "select-option":
+		result, err = c.execSelectOption(ctx, subArgs)
 	case "check":
 		result, err = c.execCheck(ctx, subArgs)
 	case "uncheck":
@@ -391,8 +380,8 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		result, err = c.execFocus(ctx, subArgs)
 	case "blur":
 		result, err = c.execBlur(ctx, subArgs)
-	case "wait-for", "wait": // wait is backward-compat alias
-		result, err = c.execWait(ctx, subArgs)
+	case "wait-for":
+		result, err = c.execWaitFor(ctx, subArgs)
 	case "wait-for-url":
 		result, err = c.execWaitForURL(ctx, subArgs)
 	case "wait-for-request":
@@ -427,9 +416,6 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	// --- Vuln verification ---
 	case "dialog":
 		result, err = c.execDialog(ctx, subArgs)
-	case "cookies":
-		result, err = c.execCookies(ctx, subArgs)
-
 	// --- Cookie management (playwright-cli aligned) ---
 	case "cookie-list":
 		result, err = c.execCookieList(ctx, subArgs)
@@ -727,7 +713,7 @@ func navigateTo(page *rod.Page, url string) error {
 // Sub-commands
 // ---------------------------------------------------------------------------
 
-func (c *Command) execNavigate(ctx context.Context, args []string) (string, error) {
+func (c *Command) execGoto(ctx context.Context, args []string) (string, error) {
 	opts, err := parseCommonOpts(args, true, c.Usage())
 	if err != nil {
 		return "", err
@@ -740,16 +726,16 @@ func (c *Command) execNavigate(ctx context.Context, args []string) (string, erro
 	defer cleanup()
 
 	if err := navigateTo(page, opts.url); err != nil {
-		return "", fmt.Errorf("playwright navigate: %w", err)
+		return "", fmt.Errorf("playwright goto: %w", err)
 	}
 
 	el, err := page.Element("body")
 	if err != nil {
-		return "", fmt.Errorf("playwright navigate: body element: %w", err)
+		return "", fmt.Errorf("playwright goto: body element: %w", err)
 	}
 	text, err := el.Text()
 	if err != nil {
-		return "", fmt.Errorf("playwright navigate: extract text: %w", err)
+		return "", fmt.Errorf("playwright goto: extract text: %w", err)
 	}
 
 	return formatTextOutput(opts.url, text), nil
@@ -833,7 +819,7 @@ func (c *Command) execContent(ctx context.Context, args []string) (string, error
 	return formatHTMLOutput(opts.url, html), nil
 }
 
-func (c *Command) execEval(ctx context.Context, args []string) (string, error) {
+func (c *Command) execEvaluate(ctx context.Context, args []string) (string, error) {
 	opts, err := parseEvalOpts(args, c.Usage())
 	if err != nil {
 		return "", err
@@ -846,14 +832,14 @@ func (c *Command) execEval(ctx context.Context, args []string) (string, error) {
 	defer cleanup()
 
 	if err := navigateTo(page, opts.url); err != nil {
-		return "", fmt.Errorf("playwright eval: %w", err)
+		return "", fmt.Errorf("playwright evaluate: %w", err)
 	}
 
 	// Wrap raw expression in arrow function for rod compatibility.
 	jsFunc := fmt.Sprintf("() => (%s)", opts.script)
 	res, err := page.Eval(jsFunc)
 	if err != nil {
-		return "", fmt.Errorf("playwright eval: execute: %w", err)
+		return "", fmt.Errorf("playwright evaluate: execute: %w", err)
 	}
 
 	var result string
@@ -1374,7 +1360,7 @@ func (c *Command) injectGlobalSession(sub string, subArgs []string, globalSessio
 	case "sessions", "list", "close-all", "kill-all", "pdf":
 		return subArgs
 
-	case "goto", "navigate", "screenshot", "content", "evaluate", "eval", "network", "netcap":
+	case "goto", "screenshot", "content", "evaluate", "network":
 		if len(subArgs) == 0 {
 			return append([]string{globalSession}, subArgs...)
 		}

@@ -116,7 +116,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 
 	var ra RecordedAction
 	switch cmd {
-	case "goto", "navigate":
+	case "goto":
 		// goto <session> [selector] is text extraction, not navigation — skip.
 		// Only record when goto is used with a URL (stateless mode, not session-bound).
 		return false
@@ -173,7 +173,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			Args:   mergeMaps(selectorArgs(args[1]), map[string]string{"keys": keys}),
 		}
 
-	case "select-option", "select":
+	case "select-option":
 		if len(args) < 3 {
 			return false
 		}
@@ -212,7 +212,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value}),
 		}
 
-	case "evaluate", "eval":
+	case "evaluate":
 		if len(args) < 2 {
 			return false
 		}
@@ -232,7 +232,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			Args:   selectorArgs(sel),
 		}
 
-	case "wait-for", "wait":
+	case "wait-for":
 		if len(args) < 2 {
 			return false
 		}
@@ -340,7 +340,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			return false
 		}
 
-	case "text-content", "text", "inner-text":
+	case "inner-text":
 		sel := "body"
 		if len(args) >= 2 {
 			sel = strings.Join(args[1:], " ")
@@ -351,7 +351,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			Name:   sanitizeName(sel),
 		}
 
-	case "content", "inner-html", "html":
+	case "content":
 		sel := "html"
 		if len(args) >= 2 {
 			sel = strings.Join(args[1:], " ")

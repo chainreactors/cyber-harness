@@ -365,7 +365,7 @@ aiscan passive -s hunter 'domain.suffix="example.com"'
 
 | 数据源 | 凭据参数 | 环境变量 |
 | --- | --- | --- |
-| `fofa` | `--fofa-email`, `--fofa-key` | `FOFA_EMAIL`, `FOFA_KEY` |
+| `fofa` | `--fofa-key` | `FOFA_KEY` |
 | `hunter` | `--hunter-api-key` | `HUNTER_API_KEY` |
 | `shodan-idb` | 无需 API key | — |
 
@@ -434,8 +434,8 @@ scan:
 | `AISCAN_CYBERHUB_KEY` | Cyberhub API key |
 | `AISCAN_CYBERHUB_MODE` | Cyberhub 资源模式 |
 | `TAVILY_API_KEY` | Tavily Web Search API key，多个 key 可逗号分隔 |
-| `FOFA_EMAIL` / `FOFA_KEY` | FOFA 凭据 |
-| `HUNTER_API_KEY` / `HUNTER_TOKEN` | Hunter 凭据 |
+| `FOFA_KEY` | FOFA API key |
+| `HUNTER_API_KEY` | Hunter API key |
 | `RECON_PROXY` | 被动测绘出站代理 |
 | `SHODAN_API_KEY`、`QUAKE_TOKEN`、`ZOOMEYE_API_KEY`、`NETLAS_API_KEY` | Uncover 数据源凭据 |
 | `CENSYS_API_TOKEN` / `CENSYS_ORGANIZATION_ID` | Censys 凭据 |

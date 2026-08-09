@@ -251,7 +251,7 @@ console.warn('a warning');
 	}
 
 	// Trigger more console output via eval
-	execString(t, cmd, context.Background(), []string{"eval", "con", "console.log('from eval')"})
+	execString(t, cmd, context.Background(), []string{"evaluate", "con", "console.log('from eval')"})
 	time.Sleep(300 * time.Millisecond)
 
 	out = execString(t, cmd, context.Background(), []string{"console", "con"})
@@ -272,39 +272,4 @@ console.warn('a warning');
 	}
 
 	execString(t, cmd, context.Background(), []string{"close", "con"})
-}
-
-func TestIntegration_LegacyCookiesAlias(t *testing.T) {
-	skipIfNoBrowser(t)
-
-	srv := newTestServer(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<!DOCTYPE html><html><body>legacy test</body></html>`)
-	})
-	defer srv.Close()
-
-	cmd := New(t.TempDir())
-	defer cmd.Close()
-
-	execString(t, cmd, context.Background(), []string{"open", srv.URL, "--session", "lg", "--timeout", "10"})
-
-	// Legacy cookies --list
-	out := execString(t, cmd, context.Background(), []string{"cookies", "lg", "--list"})
-	if !strings.Contains(out, "No cookies") {
-		t.Fatalf("expected no cookies, got: %s", out)
-	}
-
-	// Legacy cookies --set
-	out = execString(t, cmd, context.Background(), []string{"cookies", "lg", "--set", "x=y"})
-	if !strings.Contains(out, "Set 1 cookie") {
-		t.Fatalf("expected set 1 cookie, got: %s", out)
-	}
-
-	// Legacy cookies --clear
-	out = execString(t, cmd, context.Background(), []string{"cookies", "lg", "--clear"})
-	if !strings.Contains(out, "Cleared") {
-		t.Fatalf("expected cleared, got: %s", out)
-	}
-
-	execString(t, cmd, context.Background(), []string{"close", "lg"})
 }

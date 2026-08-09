@@ -31,9 +31,7 @@ type ScannerConfig struct {
 	AIEnabled          bool
 	VerifyMode         string
 	Proxy              string
-	FofaEmail          string
 	FofaKey            string
-	HunterToken        string
 	HunterAPIKey       string
 	ReconProxy         string
 	ReconLimit         int

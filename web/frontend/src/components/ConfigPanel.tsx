@@ -31,7 +31,7 @@ interface LLMProfileForm {
 interface ConfigFormState {
   llm: { active_profile: string; providers: LLMProfileForm[] }
   cyberhub: { url: string; key: string; mode: string; proxy: string }
-  recon: { fofa_email: string; fofa_key: string; hunter_token: string; hunter_api_key: string; proxy: string; limit?: number }
+  recon: { fofa_key: string; hunter_api_key: string; proxy: string; limit?: number }
   scan: { verify: string }
   search: { tavily_keys: string }
   ioa: { url: string; token: string; node_name: string; space: string }
@@ -58,9 +58,7 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
     },
     cyberhub: { ...form.cyberhub },
     recon: {
-      fofaEmail: form.recon.fofa_email,
       fofaKey: form.recon.fofa_key,
-      hunterToken: form.recon.hunter_token,
       hunterApiKey: form.recon.hunter_api_key,
       proxy: form.recon.proxy,
       limit: form.recon.limit ?? 0,
@@ -111,7 +109,7 @@ function emptyForm(): ConfigFormState {
   return {
     llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
-    recon: { fofa_email: '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: '' },
+    recon: { fofa_key: '', hunter_api_key: '', proxy: '' },
     scan: { verify: '' },
     search: { tavily_keys: '' },
     ioa: { url: '', token: '', node_name: '', space: '' },
@@ -154,7 +152,7 @@ function statusToForm(cs: ConfigView): ConfigFormState {
       providers: profiles,
     },
     cyberhub: { url: cs.cyberhub?.url || '', key: '', mode: cs.cyberhub?.mode || '', proxy: cs.cyberhub?.proxy || '' },
-    recon: { fofa_email: cs.recon?.fofaEmail || '', fofa_key: '', hunter_token: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
+    recon: { fofa_key: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
     scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
     ioa: { url: cs.ioa?.url || '', token: '', node_name: cs.ioa?.nodeName || '', space: cs.ioa?.space || '' },
@@ -203,11 +201,8 @@ function sectionStatus(
       return [tag('Cyberhub', !!(cs?.cyberhub?.url && cs?.cyberhub?.keyConfigured))]
     case 'recon':
       return [
-        // FOFA's 2023 simplified auth needs only the API key — the email never
-        // enters the request URL (see engine/uncover.go). Gate readiness on the
-        // key alone so a valid key-only setup doesn't read as "not configured".
         tag('FOFA', !!cs?.recon?.fofaKeyConfigured),
-        tag('Hunter', !!(cs?.recon?.hunterApiKeyConfigured || cs?.recon?.hunterTokenConfigured)),
+        tag('Hunter', !!cs?.recon?.hunterApiKeyConfigured),
       ]
     case 'search':
       return [tag('Tavily', !!cs?.search?.tavilyKeysConfigured)]
@@ -654,10 +649,8 @@ function ReconTab({ form, setForm, cs }: TabProps) {
   const u = (k: string, v: string) => setForm((f) => ({ ...f, recon: { ...f.recon, [k]: v } }))
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <Field label={t('fofaEmail')}><Input value={form.recon.fofa_email} onChange={(e) => u('fofa_email', e.target.value)} placeholder="account@example.com" /></Field>
       <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.recon?.fofaKeyConfigured ? t('configuredKeep') : t('fofaApiKey')} /></Field>
       <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.recon?.hunterApiKeyConfigured ? t('configuredKeep') : t('hex64')} /></Field>
-      <Field label={t('hunterToken')}><Input type="password" value={form.recon.hunter_token} onChange={(e) => u('hunter_token', e.target.value)} placeholder={cs?.recon?.hunterTokenConfigured ? t('configuredKeep') : t('webTokenRare')} /></Field>
       <Field label={t('reconProxy')}><Input value={form.recon.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://host:port" /></Field>
       <Field label={t('perQueryLimit')}>
         <Input type="number" value={form.recon.limit ?? ''} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, recon: { ...f.recon, limit: v === '' ? undefined : parseInt(v, 10) } })) }} placeholder={t('unlimited')} />

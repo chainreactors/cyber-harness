@@ -75,7 +75,7 @@ func TestAppConfigFromDistributeMapsProtoSections(t *testing.T) {
 		},
 		Cyberhub: &types.CyberhubConfig{Url: "https://hub", Key: "hub-key", Mode: "release", Proxy: "http://proxy"},
 		Recon: &types.ReconConfig{
-			FofaEmail: "a@b.c", FofaKey: "fofa", HunterToken: "ht", HunterApiKey: "hk",
+			FofaKey: "fofa", HunterApiKey: "hk",
 			Proxy: "http://recon-proxy", Limit: 42,
 		},
 		Scan:   &types.ScanConfig{Verify: "high"},
@@ -90,7 +90,7 @@ func TestAppConfigFromDistributeMapsProtoSections(t *testing.T) {
 	if rc.Scanner.CyberhubURL != "https://hub" || rc.Scanner.CyberhubKey != "hub-key" || rc.Scanner.CyberhubMode != "release" || rc.Scanner.Proxy != "http://proxy" {
 		t.Fatalf("cyberhub = %+v", rc.Scanner)
 	}
-	if rc.Scanner.FofaEmail != "a@b.c" || rc.Scanner.FofaKey != "fofa" || rc.Scanner.HunterToken != "ht" || rc.Scanner.HunterAPIKey != "hk" {
+	if rc.Scanner.FofaKey != "fofa" || rc.Scanner.HunterAPIKey != "hk" {
 		t.Fatalf("recon = %+v", rc.Scanner)
 	}
 	if rc.Scanner.ReconProxy != "http://recon-proxy" || rc.Scanner.ReconLimit != 42 {

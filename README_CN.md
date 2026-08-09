@@ -2,7 +2,6 @@
   <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
   <h1 align="center">aiscan</h1>
   <p align="center">AI 驱动的面向实战的单文件渗透 agent，内置多引擎武器库开箱即用</p>
-  <p align="center"><strong>Preview — 本项目处于早期预览阶段，API 和功能可能随版本变更</strong></p>
 </p>
 
 <p align="center">
@@ -246,6 +245,7 @@ llm:
 | [Record 工具](docs/record.md) | 桌面/窗口捕获、平台支持与原生构建 |
 | [协议与传输架构](docs/protocol-architecture.md) | AOP WebSocket、Connect 管理平面、namespace 与身份边界 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
+| [v1.0.0 发布与迁移](docs/v1.0.0.md) | 稳定接口基线、pre-v1 接口清理与发布平台 |
 | [Changelog](docs/changelog.md) | 版本变更记录 |
 
 ## 贡献

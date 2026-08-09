@@ -218,12 +218,12 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	if !verify || !sniper || deep {
 		t.Fatalf("relational options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
 	}
-	var legacyColumns int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('scans') WHERE name = 'scan_proto'`).Scan(&legacyColumns); err != nil {
+	var obsoleteColumns int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('scans') WHERE name = 'scan_proto'`).Scan(&obsoleteColumns); err != nil {
 		t.Fatal(err)
 	}
-	if legacyColumns != 0 {
-		t.Fatal("legacy scan_proto BLOB column still exists")
+	if obsoleteColumns != 0 {
+		t.Fatal("obsolete scan_proto BLOB column still exists")
 	}
 }
 

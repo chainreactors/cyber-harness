@@ -8,7 +8,7 @@ info:
   tags: headless,screenshot,discovery
 
 variables:
-  filename: '{{replace(BaseURL,"/","_")}}'
+  filename: '{{replace(replace(BaseURL,"/","_"),":","_")}}'
   dir: "screenshots"
 
 headless:

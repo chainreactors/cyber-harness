@@ -203,8 +203,8 @@ func TestExecScreenshot(t *testing.T) {
 	srv := testServer(t)
 	defer srv.Close()
 	tmpDir := t.TempDir()
-	// screenshot.yaml defines variables: dir="screenshots", filename="{{replace(BaseURL...)}}".
-	// Override dir to use our temp directory, and set screenshotDir for compat.
+	// screenshot.yaml derives a portable filename from BaseURL.
+	// Override both supported output-directory variables with the test directory.
 	_, _ = runTemplate(t, sharedEngine,
 		"testdata/screenshot.yaml",
 		srv.URL+"/extract-urls.html",

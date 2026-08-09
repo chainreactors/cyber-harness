@@ -157,10 +157,10 @@ func TestRecordCommandMapping(t *testing.T) {
 		{"go-back", []string{"test"}, headless.ActionGoBack},
 		{"go-forward", []string{"test"}, headless.ActionGoForward},
 		{"dialog", []string{"test", "--arm"}, headless.ActionDialog},
-		{"text-content", []string{"test", "#result"}, headless.ActionExtract},
+		{"inner-text", []string{"test", "#result"}, headless.ActionExtract},
 		{"get-attribute", []string{"test", "a", "href"}, headless.ActionExtract},
 		{"inner-text", []string{"test", "#text"}, headless.ActionExtract},
-		{"inner-html", []string{"test", "#markup"}, headless.ActionExtract},
+		{"content", []string{"test", "#markup"}, headless.ActionExtract},
 		{"check", []string{"test", "#terms"}, headless.ActionCheck},
 		{"uncheck", []string{"test", "#terms"}, headless.ActionUncheck},
 		{"focus", []string{"test", "#email"}, headless.ActionFocus},
@@ -407,11 +407,11 @@ func TestIntegration_RecordFullLoginFlow(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"click", "login", "#submit-btn"})
 
 	// Wait for page stable
-	recExecString(t, cmd, ctx, []string{"wait", "login", "--stable"})
+	recExecString(t, cmd, ctx, []string{"wait-for", "login", "--stable"})
 
 	// Extract text
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: []string{"text-content", "login", "#status"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
-		t.Logf("text-content skipped: %v", err)
+	if _, err := cmd.Run(ctx, &commands.Execution{Args: []string{"inner-text", "login", "#status"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Logf("inner-text skipped: %v", err)
 	}
 
 	// Dump recorded YAML
@@ -624,7 +624,7 @@ func TestIntegration_RecordExtract(t *testing.T) {
 	})
 
 	// Extract text content
-	recExecString(t, cmd, ctx, []string{"text-content", "ext", "#version"})
+	recExecString(t, cmd, ctx, []string{"inner-text", "ext", "#version"})
 
 	// Get attribute
 	recExecString(t, cmd, ctx, []string{"get-attribute", "ext", "#about-link", "href"})
@@ -735,7 +735,7 @@ func TestIntegration_RecordRoundTrip(t *testing.T) {
 
 	recExecString(t, cmd, ctx, []string{"fill", "rt", "#username", "testuser"})
 	recExecString(t, cmd, ctx, []string{"click", "rt", "#submit-btn"})
-	recExecString(t, cmd, ctx, []string{"wait", "rt", "--stable"})
+	recExecString(t, cmd, ctx, []string{"wait-for", "rt", "--stable"})
 
 	// Step 2: Save
 	templatePath := filepath.Join(workDir, "roundtrip.yaml")

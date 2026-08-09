@@ -48,15 +48,13 @@ playwright content <url> [--timeout <seconds>] [--user-agent <string>]
 playwright content <session> [selector]
 ```
 
-### eval
+### evaluate
 Execute a JavaScript expression on a URL or session page.
 ```bash
-playwright eval <url> <expression>
-playwright eval <url> --script "document.querySelectorAll('a').length"
-playwright eval <session> "document.title"
+playwright evaluate <url> <expression>
+playwright evaluate <url> --script "document.querySelectorAll('a').length"
+playwright evaluate <session> "document.title"
 ```
-Alias: `evaluate`
-
 ### network
 Navigate to a URL and capture all network requests/responses, or control session network capture.
 ```bash
@@ -146,7 +144,7 @@ playwright dispatch-event <session> <selector> <event-type>
 ```bash
 playwright goto <session> [selector]           # Extract visible text
 playwright content <session> [selector]        # Extract HTML
-playwright eval <session> <js-expression>      # Execute JS in session
+playwright evaluate <session> <js-expression>  # Execute JS in session
 playwright screenshot <session> [--output f] [--selector s] [--full-page]
 playwright url <session>                       # Current URL and title
 playwright get-attribute <session> <sel> <attr>
@@ -158,8 +156,6 @@ playwright is-checked <session> <selector>
 playwright is-disabled <session> <selector>
 playwright is-enabled <session> <selector>
 ```
-
-Short aliases (backward compat): `text-content`, `inner-html`, `navigate`, `evaluate`, `select`, `wait`, `text`, `html`, `seval`, `sshot`.
 
 ### Tab Management (playwright-cli aligned)
 Manage multiple tabs within a single session. Each session starts with one tab; new tabs share the same browser context (cookies, storage).
@@ -201,8 +197,6 @@ playwright cookie-set <session> <name=value> [...]   # Set one or more cookies
 playwright cookie-delete <session> <name>            # Delete a specific cookie
 playwright cookie-clear <session>                    # Clear all cookies
 ```
-Legacy alias: `cookies <session> --list|--set k=v|--clear`
-
 #### localStorage
 ```bash
 playwright localstorage-list <session>               # List all localStorage items
@@ -310,7 +304,7 @@ playwright open http://target.com/search --session s1 --record
 playwright fill s1 "input[name=q]" "aiscan_canary_8f2a"
 playwright click s1 "button[type=submit]"
 playwright wait-for s1 --stable
-playwright text-content s1
+playwright inner-text s1 "body"
 playwright record s1 --save interaction.yaml --id browser-interaction
 playwright close s1
 
@@ -330,13 +324,13 @@ playwright template interaction.yaml http://target3.com/search
 | `press` | `keyboard` with selector and `keys` |
 | `select-option` | `select` with `selected: "true"` |
 | `set-input-files` / `upload` | `files` |
-| `eval` | `script` |
+| `evaluate` | `script` |
 | `wait-for --stable` | `waitstable` |
 | `wait-for --idle` | `waitidle` |
 | `wait-for <selector>` | `waitvisible` |
 | `wait-for-url/request/response` | `waiturl` / `waitrequest` / `waitresponse` (AIScan) |
-| `text-content` / `inner-text` | `extract` (with auto-generated name) |
-| `content` / `inner-html` | `extract` with `target: html` |
+| `inner-text` | `extract` (with auto-generated name) |
+| `content` | `extract` with `target: html` |
 | `get-attribute` | `extract` (target=attribute) |
 | `input-value`, `url`, `title` | `extract` with the corresponding target |
 | `is-visible/hidden/checked/enabled/disabled` | `assert` preserving the observed boolean state (AIScan) |

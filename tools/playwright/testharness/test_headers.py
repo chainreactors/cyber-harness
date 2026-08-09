@@ -19,6 +19,6 @@ def test_set_extra_headers(test_server, pw_page, pw_driver):
         '{"X-Custom-Test":"aiscan-val-456"}'
     )
     pw_driver.execute("reload", "hdr-t")
-    out = pw_driver.execute("text-content", "hdr-t", "body")
+    out = pw_driver.execute("inner-text", "hdr-t", "body")
     assert "aiscan-val-456" in out
     pw_driver.execute("close", "hdr-t")

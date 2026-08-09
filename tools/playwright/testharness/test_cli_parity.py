@@ -28,7 +28,7 @@ def test_set_content(test_server, pw_page, pw_driver):
 
     pw_driver.execute("open", url, "--session", "sc-t", "--timeout", "10")
     pw_driver.execute("set-content", "sc-t", "<h1>Injected</h1>")
-    out = pw_driver.execute("text-content", "sc-t", "h1")
+    out = pw_driver.execute("inner-text", "sc-t", "h1")
     assert "Injected" in out
     pw_driver.execute("close", "sc-t")
 

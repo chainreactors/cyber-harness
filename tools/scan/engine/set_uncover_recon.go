@@ -25,14 +25,8 @@ func (e *Set) SetupUncover(opts ReconOptions, logger telemetry.Logger) {
 }
 
 func mergeReconOptions(base, next ReconOptions) ReconOptions {
-	if next.FofaEmail != "" {
-		base.FofaEmail = next.FofaEmail
-	}
 	if next.FofaKey != "" {
 		base.FofaKey = next.FofaKey
-	}
-	if next.HunterToken != "" {
-		base.HunterToken = next.HunterToken
 	}
 	if next.HunterAPIKey != "" {
 		base.HunterAPIKey = next.HunterAPIKey

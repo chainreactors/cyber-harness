@@ -56,7 +56,6 @@ linters:
     presets:
       - comments
       - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       - linters:
@@ -71,6 +70,7 @@ linters:
       - template\.go$
       - vendor
       - templates
+      - ^dist/
       - third_party$
       - builtin$
       - ^examples/
@@ -81,6 +81,7 @@ formatters:
   exclusions:
     generated: lax
     paths:
+      - ^dist/
       - third_party$
       - builtin$
       - ^examples/

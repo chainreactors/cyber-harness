@@ -12,9 +12,9 @@ def test_dispatch_custom_event(test_server, pw_page, pw_driver):
 
     # aiscan
     pw_driver.execute("open", url, "--session", "disp-t", "--timeout", "10")
-    before = pw_driver.execute("text-content", "disp-t", "#dispatch-target")
+    before = pw_driver.execute("inner-text", "disp-t", "#dispatch-target")
     assert "waiting" in before
     pw_driver.execute("dispatch-event", "disp-t", "#dispatch-target", "custom-ping")
-    after = pw_driver.execute("text-content", "disp-t", "#dispatch-target")
+    after = pw_driver.execute("inner-text", "disp-t", "#dispatch-target")
     assert "pinged" in after
     pw_driver.execute("close", "disp-t")

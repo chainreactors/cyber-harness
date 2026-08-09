@@ -408,8 +408,7 @@ func TestInferImageSupportModelRegistry(t *testing.T) {
 // --- Backoff & Retry-After parsing tests ---
 
 func TestRetryDelayBackoffSequence(t *testing.T) {
-	// RetryDelay keeps the original conservative policy (1s·2^attempt, cap 10s)
-	// for backward compatibility with external callers (runner, webagent).
+	// RetryDelay is the public conservative policy: 1s·2^attempt, capped at 10s.
 	want := []time.Duration{
 		1 * time.Second,
 		2 * time.Second,
