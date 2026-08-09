@@ -280,7 +280,7 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build",
 		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build",
 		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
-		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg",
+		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile missing build profile contract %q", required)
@@ -290,7 +290,7 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	for _, required := range []string{
 		"CGO_MODE=0",
 		"CGO_MODE=1",
-		`EXTRA_TAGS="full,record_ffmpeg${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
+		`EXTRA_TAGS="full,record_ffmpeg,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
 		`CGO_ENABLED="$CGO_MODE"`,
 		`OSARCH="${HOST_OS}/${HOST_ARCH}"`,
 	} {
