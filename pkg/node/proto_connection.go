@@ -35,12 +35,66 @@ import (
 )
 
 type webSocketEnvelopeStream struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
-	json bool
+	conn          *websocket.Conn
+	mu            sync.Mutex
+	json          bool
+	liveness      websocketLiveness
+	done          chan struct{}
+	heartbeatDone chan struct{}
+	closeOnce     sync.Once
+	closeErr      error
 }
 
-func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
+func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool, liveness websocketLiveness) (*webSocketEnvelopeStream, error) {
+	liveness = liveness.normalized()
+	stream := &webSocketEnvelopeStream{
+		conn:          conn,
+		json:          json,
+		liveness:      liveness,
+		done:          make(chan struct{}),
+		heartbeatDone: make(chan struct{}),
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(liveness.pongWait)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(liveness.pongWait))
+	})
+	go stream.heartbeat()
+	return stream, nil
+}
+
+func (s *webSocketEnvelopeStream) heartbeat() {
+	defer close(s.heartbeatDone)
+	ticker := time.NewTicker(s.liveness.pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case now := <-ticker.C:
+			if err := s.conn.WriteControl(websocket.PingMessage, nil, now.Add(s.liveness.writeWait)); err != nil {
+				s.shutdown()
+				return
+			}
+		}
+	}
+}
+
+func (s *webSocketEnvelopeStream) shutdown() {
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.closeErr = s.conn.Close()
+	})
+}
+
+func (s *webSocketEnvelopeStream) Close() error {
+	s.shutdown()
+	<-s.heartbeatDone
+	return s.closeErr
+}
+
 func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 	_, data, err := s.conn.ReadMessage()
 	if err != nil {
@@ -74,6 +128,9 @@ func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.liveness.writeWait)); err != nil {
+		return err
+	}
 	return s.conn.WriteMessage(frame, data)
 }
 
@@ -90,14 +147,18 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 	if accessKey != "" {
 		headers = http.Header{"Authorization": {"Bearer " + accessKey}}
 	}
-	conn, response, err := websocket.DefaultDialer.DialContext(ctx, HTTPToWS(dialURL)+path, headers)
+	dialer := cc.Dialer
+	if dialer == nil {
+		dialer = websocket.DefaultDialer
+	}
+	conn, response, err := dialer.DialContext(ctx, HTTPToWS(dialURL)+path, headers)
 	if response != nil && response.Body != nil {
 		response.Body.Close()
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &webSocketEnvelopeStream{conn: conn, json: cc.JSONFrames}, nil
+	return newWebSocketEnvelopeStream(conn, cc.JSONFrames, cc.Liveness)
 }
 
 // Package variables keep the real reconnect loop testable without waiting for
