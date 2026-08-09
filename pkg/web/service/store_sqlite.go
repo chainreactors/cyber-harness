@@ -72,7 +72,7 @@ func migrate(orm *bun.DB, db *sql.DB) error {
 		return err
 	}
 	if tables != 0 {
-		return fmt.Errorf("legacy sqlite schema is not supported; delete the database and restart")
+		return fmt.Errorf("unversioned sqlite schema is not supported; delete the database and restart")
 	}
 
 	return orm.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {

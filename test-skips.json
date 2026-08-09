@@ -49,6 +49,13 @@
     "reason": "Live multi-provider cache coverage requires explicit endpoint credentials."
   },
   {
+    "path": "archtest/architecture_test.go",
+    "format": "repository governance requires a Git checkout: %v",
+    "count": 1,
+    "category": "external_runtime",
+    "reason": "Repository-wide governance scans enumerate tracked files and therefore require Git metadata."
+  },
+  {
     "path": "agent/tmux/manager_test.go",
     "format": "unix-only test",
     "count": 19,

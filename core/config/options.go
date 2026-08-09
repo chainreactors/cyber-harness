@@ -84,7 +84,6 @@ type AgentOptions struct {
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries        int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
 	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
-	WebURL                string   `long:"web-url" config:"web_url" description:"Deprecated alias for --server-url" hidden:"true"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
 	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-select a .aiscan/sessions/*.jsonl recording path"`
@@ -107,7 +106,7 @@ func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
 	}
 	switch value {
 	case AgentTransportAuto:
-		if strings.TrimSpace(opt.ServerURL) != "" || strings.TrimSpace(opt.WebURL) != "" {
+		if strings.TrimSpace(opt.ServerURL) != "" {
 			if err := ResolveAgentServerURLs(opt); err != nil {
 				return "", err
 			}

@@ -12,8 +12,8 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -76,7 +76,7 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 			Runtime:        runner.DefaultRuntimeInfo(),
 			Status:         func() *aop.AgentStatus { return runner.AgentStatus(option, application) },
 			Menu:           func() []*types.CommandSpec { return runner.CommandCatalog(application) },
-			PTYRouter:      func() (*coreterminal.Router, error) { return NewPTYRouter(application.Commands), nil },
+			PTYRouter:      func() (*terminal.Router, error) { return NewPTYRouter(application.Commands), nil },
 		}
 		_ = connect(ctx, connection)
 	}()

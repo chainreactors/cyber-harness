@@ -7,9 +7,9 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
+	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -38,7 +38,7 @@ type connectionConfig struct {
 	Status        func() *aop.AgentStatus
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
-	PTYRouter     func() (*coreterminal.Router, error)
+	PTYRouter     func() (*terminal.Router, error)
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

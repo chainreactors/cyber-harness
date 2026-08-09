@@ -1,8 +1,7 @@
 package capability
 
-// A Plan is the set of capabilities one binary should actually assemble. It
-// replaces the four divergent BuildGroup lists that each entry point used to
-// keep, so "which groups does this binary build" has exactly one answer.
+// A Plan is the set of capabilities one binary should actually assemble, so
+// "which groups does this binary build" has exactly one answer.
 
 type Options struct {
 	// Groups limits the plan to these assembly groups. Nil means every linked

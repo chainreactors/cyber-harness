@@ -10,7 +10,7 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
-	coreterminal "github.com/chainreactors/aiscan/core/terminal"
+	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	protobuf "google.golang.org/protobuf/proto"
@@ -345,7 +345,7 @@ func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progres
 }
 
 func (p *AgentPool) forwardPTYMessage(message *ptypb.ProtocolMessage) {
-	streamID := coreterminal.StreamID(message)
+	streamID := terminal.StreamID(message)
 	if streamID == "" {
 		return
 	}

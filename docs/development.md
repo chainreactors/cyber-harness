@@ -67,39 +67,31 @@ bash(command="<tool_name> <args>")
 
 ### 2.2 方式一：Pseudo-Command（编译内置）
 
-#### Command 接口
+#### Command 定义
 
 ```go
 // pkg/commands/command.go
-type Command interface {
-    Name() string                                      // 命令名，AI 用此名称调用
-    Usage() string                                     // 用法说明，注入到 system prompt
-    Execute(ctx context.Context, args []string) error  // 执行逻辑，args 已按 shell 规则解析
+type Command struct {
+    Name  string
+    Usage string
+    Run   func(context.Context, *Execution) (any, error)
+    SetProxy func(string)
+    Close    func()
 }
 ```
 
 #### 输出方式
 
-伪命令通过 `commands.Output` 全局 writer 输出结果。tmux.Manager 在执行前/后自动设置 Output 指向会话缓冲区：
+每次调用都拥有独立的 `commands.Execution`。命令从 `Args` 读取参数，通过 `Stdout`/`Stderr` 输出，并可返回结构化 details：
 
 ```go
-func (c *MyCommand) Execute(ctx context.Context, args []string) error {
-    fmt.Fprint(commands.Output, "scan result here\n")
-    return nil
+func (c *MyCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
+    fmt.Fprintln(execution.Stdout, "scan result here")
+    return nil, nil
 }
 ```
 
-#### 可选接口
-
-```go
-// 工作目录感知 — 初始化和 SetWorkDir 时自动调用
-type WorkDirAware interface {
-    SetWorkDir(dir string)
-}
-
-// 代理更新 — proxy 命令切换代理时自动调用
-interface { SetProxy(proxy string) }
-```
+`Execution` 同时携带本次调用的工作目录、环境变量、PTY session ID、状态和退出码；命令不得使用进程级全局 writer 保存会话状态。
 
 #### 工厂注册机制
 
@@ -108,13 +100,12 @@ interface { SetProxy(proxy string) }
 ```go
 // pkg/commands/factory.go
 type Factory struct {
-    Group string                                    // 工具组名
+    Capability capability.ID
     Build func(deps *Deps, reg *CommandRegistry)    // 构建函数
 }
 
-func RegisterFactory(f Factory)                                    // 全局注册
-func BuildAll(deps *Deps, reg *CommandRegistry)                    // 构建所有组
-func BuildGroup(group string, deps *Deps, reg *CommandRegistry)    // 构建指定组
+func RegisterFactory(f Factory)
+func BuildPlan(plan capability.Plan, deps *Deps, reg *CommandRegistry)
 ```
 
 **工具组（Group）分类：**
@@ -133,22 +124,20 @@ func BuildGroup(group string, deps *Deps, reg *CommandRegistry)    // 构建指�
 
 ```go
 type Deps struct {
-    WorkDir      string          // 工作目录
-    BashTimeout  int             // bash 超时（秒）
-    SkillStore   any             // Skill 存储
-    EngineSet    any             // 扫描引擎集合
-    Resources    any             // 指纹/POC 资源
-    IOAClient    any             // IOA 协作客户端
-    Provider     any             // LLM Provider
-    Model        string          // 模型名称
-    ScannerProxy string          // 代理地址
-    ScanOpts     []any           // scan 命令选项
-    Logger       any             // 日志记录器
-    NodeName     string          // IOA 节点名
-    NodeMeta     map[string]any  // IOA 节点元数据
-    TavilyKeys   string          // Tavily API Key
+    *deps.Bag                   // package-owned typed dependencies
+    WorkDir          string
+    BashTimeout      int
+    SkillStore       SkillSource
+    RunnerMode       bool
+    Provider         provider.Provider
+    ScannerProxy     string
+    Logger           telemetry.Logger
+    Events           aop.EventEmitter
+    Hooks            *hooks.Registry
 }
 ```
+
+扫描引擎、资源集合和 IOA Client 等可选依赖通过各自 package 声明的 `deps.Key[T]` 注入，避免 `pkg/commands` 直接依赖具体实现。
 
 **激活方式 — 空导入（blank import）：**
 
@@ -177,7 +166,7 @@ tools/whatweb/
 └── register.go      # 工厂注册
 ```
 
-**步骤 2：实现 Command 接口** — `tools/whatweb/whatweb.go`
+**步骤 2：实现命令运行函数** — `tools/whatweb/whatweb.go`
 
 ```go
 package whatweb
@@ -225,9 +214,10 @@ Usage:
   whatweb -u <url> -j           JSON 输出`
 }
 
-func (c *Command) Execute(ctx context.Context, args []string) error {
+func (c *Command) Run(ctx context.Context, execution *commands.Execution) (any, error) {
     var target, listFile string
     var jsonOutput bool
+    args := execution.Args
     for i := 0; i < len(args); i++ {
         switch args[i] {
         case "-u", "--url":
@@ -246,18 +236,18 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
     }
 
     if target == "" && listFile == "" {
-        return fmt.Errorf("usage: whatweb -u <url> or whatweb -l <file>")
+        return nil, fmt.Errorf("usage: whatweb -u <url> or whatweb -l <file>")
     }
 
     // 执行指纹识别逻辑 ...
     result := doFingerprint(ctx, target, c.proxy)
 
     if jsonOutput {
-        fmt.Fprintf(commands.Output, "%s\n", result.JSON())
+        fmt.Fprintln(execution.Stdout, result.JSON())
     } else {
-        fmt.Fprintf(commands.Output, "%s\n", result.String())
+        fmt.Fprintln(execution.Stdout, result.String())
     }
-    return nil
+    return result, nil
 }
 ```
 
@@ -267,20 +257,22 @@ func (c *Command) Execute(ctx context.Context, args []string) error {
 package whatweb
 
 import (
+    "github.com/chainreactors/aiscan/core/capability"
     "github.com/chainreactors/aiscan/pkg/commands"
-    "github.com/chainreactors/aiscan/core/telemetry"
 )
 
 func init() {
+    capability.Register(capability.Descriptor{
+        ID: "whatweb", Kind: capability.KindScanner, Group: "scanner",
+    })
     commands.RegisterFactory(commands.Factory{
-        Group: "scanner",
+        Capability: "whatweb",
         Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-            logger, _ := deps.Logger.(telemetry.Logger)
-            if logger == nil {
-                logger = telemetry.NopLogger()
-            }
-            cmd := New().WithLogger(logger).WithProxy(deps.ScannerProxy)
-            reg.Register(cmd, "scanner")
+            cmd := New().WithLogger(deps.GetLogger()).WithProxy(deps.ScannerProxy)
+            cmd.SetWorkDir(deps.WorkDir)
+            reg.Register(commands.Command{
+                Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run,
+            }, "scanner")
         },
     })
 }

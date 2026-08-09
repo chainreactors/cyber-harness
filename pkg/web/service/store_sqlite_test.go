@@ -40,8 +40,8 @@ func TestListSessionPageDoesNotDeadlockOnNonEmptyStore(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreRejectsLegacySchema(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
+func TestSQLiteStoreRejectsUnversionedSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unversioned.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -57,11 +57,11 @@ func TestSQLiteStoreRejectsLegacySchema(t *testing.T) {
 	_ = db.Close()
 
 	if _, err := NewSQLiteStore(path); err == nil {
-		t.Fatal("NewSQLiteStore() accepted a legacy schema")
+		t.Fatal("NewSQLiteStore() accepted an unversioned schema")
 	}
 }
 
-func TestSQLiteStoreRejectsV1Schema(t *testing.T) {
+func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestSQLiteStoreRejectsV1Schema(t *testing.T) {
 	_ = db.Close()
 
 	if _, err := NewSQLiteStore(path); err == nil {
-		t.Fatal("NewSQLiteStore() accepted the incompatible v1 schema")
+		t.Fatal("NewSQLiteStore() accepted an unsupported schema version")
 	}
 }
 

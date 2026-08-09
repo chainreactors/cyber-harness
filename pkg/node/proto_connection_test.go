@@ -3,6 +3,10 @@ package node
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,11 +18,57 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
-	"os"
-	"path/filepath"
-	"runtime"
 )
+
+type handshakeThenEOFStream struct {
+	helloID string
+	recvs   int
+}
+
+func (s *handshakeThenEOFStream) Send(envelope *aop.Envelope) error {
+	if s.helloID == "" {
+		s.helloID = envelope.GetId()
+	}
+	return nil
+}
+
+func (s *handshakeThenEOFStream) Recv() (*aop.Envelope, error) {
+	s.recvs++
+	if s.recvs == 1 {
+		return aop.MustWrap("accepted", s.helloID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}}), nil
+	}
+	return nil, io.EOF
+}
+
+func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
+	stream := new(handshakeThenEOFStream)
+	subscribed := false
+	menuCalled := false
+	cc := connectionConfig{
+		Name:     "runner-1",
+		NodeID:   "runner-1",
+		Registry: commands.NewRegistry(),
+		AgentSubscribe: func(func(*aop.Event)) func() {
+			subscribed = true
+			return func() {}
+		},
+		Menu: func() []*types.CommandSpec {
+			menuCalled = true
+			if !subscribed {
+				t.Error("command catalog was published before event subscription")
+			}
+			return nil
+		},
+	}
+	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {
+		t.Fatalf("serveAgentConnection error = %v, want EOF", err)
+	}
+	if !menuCalled {
+		t.Fatal("command catalog was not published")
+	}
+}
 
 func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	var logs bytes.Buffer
@@ -185,6 +235,17 @@ func TestFileReadReturnsBoundedChunks(t *testing.T) {
 	}
 	if !bytes.Equal(joined, data) {
 		t.Fatalf("joined bytes = %d, want %d", len(joined), len(data))
+	}
+}
+
+func TestFileReadDoesNotDecodePathEncodedRanges(t *testing.T) {
+	encoded := "aop-range://read?path=proof.txt&offset=1&limit=2"
+	value := fileRead(&filepb.ReadRequest{Path: encoded}, t.TempDir())
+	if value.err == nil {
+		t.Fatal("path-encoded range unexpectedly succeeded")
+	}
+	if value.result.Path != encoded {
+		t.Fatalf("result path = %q, want original path %q", value.result.Path, encoded)
 	}
 }
 
