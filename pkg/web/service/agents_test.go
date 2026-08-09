@@ -215,9 +215,11 @@ func writeBrowserPTYList(t *testing.T, conn *websocket.Conn, list *ptypb.List) {
 
 func readBrowserPTY(t *testing.T, conn *websocket.Conn, want string) *ptypb.ProtocolMessage {
 	t.Helper()
-	message := ptyMessageFromEnvelope(readHubEnvelope(t, conn))
+	envelope := readHubEnvelope(t, conn)
+	message := ptyMessageFromEnvelope(envelope)
 	if got := ptyMessageKind(message); got != want {
-		t.Fatalf("browser expected PTY %s, got %s", want, got)
+		decoded, err := aop.Unwrap(envelope)
+		t.Fatalf("browser expected PTY %s, got %s (payload=%T, reply_to=%q, unwrap_err=%v)", want, got, decoded, envelope.GetReplyTo(), err)
 	}
 	return message
 }
@@ -789,7 +791,14 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	if err := agentConn.Close(); err != nil {
 		t.Fatalf("close agent: %v", err)
 	}
+	waitAgents(t, pool, 0)
+	if err := browserConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set detached read deadline: %v", err)
+	}
 	detached := readBrowserPTY(t, browserConn, "detached").GetDetached()
+	if err := browserConn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("clear detached read deadline: %v", err)
+	}
 	if detached.GetStreamId() != streamID {
 		t.Fatalf("disconnect notification = %+v, want stream %s", detached, streamID)
 	}
