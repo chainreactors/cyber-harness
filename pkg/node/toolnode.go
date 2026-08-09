@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"runtime"
@@ -18,6 +19,11 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+const instanceIDMetadataKey = "instance_id"
+
+// processInstanceID stays stable across reconnects and changes on restart.
+var processInstanceID = rand.Text()
 
 // ToolNodeConfig configures a tool-only runner: an outbound WebSocket
 // connection exposing Command, native file RPCs, PTY, progress and raw tool
@@ -62,12 +68,13 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	runnerRuntime := runner.DefaultRuntimeInfo()
 	home, _ := os.UserHomeDir()
 	runnerRuntime.Metadata, _ = structpb.NewStruct(map[string]any{
-		"version": cfg.Version,
-		"mode":    "tool",
-		"home":    home,
-		"os":      runtime.GOOS,
-		"arch":    runtime.GOARCH,
-		"cores":   runtime.NumCPU(),
+		"version":             cfg.Version,
+		"mode":                "tool",
+		"home":                home,
+		"os":                  runtime.GOOS,
+		"arch":                runtime.GOARCH,
+		"cores":               runtime.NumCPU(),
+		instanceIDMetadataKey: processInstanceID,
 	})
 	var menu func() []*types.CommandSpec
 	if !cfg.DisableCommandCatalog {

@@ -2,10 +2,12 @@ package node
 
 import (
 	"context"
+	"encoding/base32"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -357,6 +360,83 @@ func TestRunToolNodeWireInteropProtoJSON(t *testing.T) {
 	select {
 	case <-errCh:
 	case <-time.After(5 * time.Second):
+		t.Fatal("tool node did not stop")
+	}
+}
+
+func TestToolNodeProcessInstanceIDHasEnoughEntropy(t *testing.T) {
+	decoder := base32.StdEncoding.WithPadding(base32.NoPadding)
+	decoded, err := decoder.DecodeString(processInstanceID)
+	if err != nil || len(decoded) < 16 {
+		t.Fatalf("process instance ID %q has less than 128 bits: %v", processInstanceID, err)
+	}
+}
+
+func TestRunToolNodeKeepsInstanceIdentityAcrossReconnects(t *testing.T) {
+	instanceIDs := make(chan string, 2)
+	serverErrors := make(chan error, 2)
+	var connections atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			serverErrors <- err
+			return
+		}
+		defer conn.Close()
+
+		first, message, err := readAgentEnvelope(conn, false)
+		core, ok := message.(*aop.ProtocolMessage)
+		if err != nil || !ok || core.GetAgentHello() == nil {
+			serverErrors <- err
+			return
+		}
+		hello := core.GetAgentHello()
+		instanceIDs <- hello.GetRuntime().GetMetadata().GetFields()[instanceIDMetadataKey].GetStringValue()
+		if err := writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId}}})); err != nil {
+			serverErrors <- err
+			return
+		}
+		if connections.Add(1) == 1 {
+			return
+		}
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunToolNode(ctx, ToolNodeConfig{
+			ServerURL: server.URL,
+			WSPath:    "/ws/runner",
+			ID:        "stable-runner-id",
+			Registry:  commands.NewRegistry(),
+			Logger:    telemetry.NopLogger(),
+		})
+	}()
+
+	got := make([]string, 0, 2)
+	for len(got) < 2 {
+		select {
+		case instanceID := <-instanceIDs:
+			got = append(got, instanceID)
+		case err := <-serverErrors:
+			t.Fatalf("server error: %v", err)
+		case <-time.After(4 * time.Second):
+			t.Fatalf("only observed %d registrations", len(got))
+		}
+	}
+	if got[0] == "" || got[1] == "" {
+		t.Fatalf("instance IDs must be advertised: %q", got)
+	}
+	if got[0] != got[1] {
+		t.Fatalf("instance ID changed across reconnect: %q", got)
+	}
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
 		t.Fatal("tool node did not stop")
 	}
 }
