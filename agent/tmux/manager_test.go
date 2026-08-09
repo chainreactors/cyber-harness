@@ -495,9 +495,10 @@ func TestTailLines(t *testing.T) {
 
 func TestReadFromIndependentOffset(t *testing.T) {
 	mgr := NewManager()
-	dir := t.TempDir()
-
-	info, err := mgr.Create(dir, "printf 'line1\\nline2\\nline3\\n'", "readfrom-test", 5*time.Second, nil, "")
+	info, err := mgr.CreateFunc(context.Background(), "readfrom-test", 5*time.Second, func(_ context.Context, output io.Writer) error {
+		_, writeErr := io.WriteString(output, "line1\nline2\nline3\n")
+		return writeErr
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
