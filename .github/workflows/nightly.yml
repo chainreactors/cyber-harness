@@ -8,9 +8,16 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
 jobs:
-  nightly:
+  prepare:
     runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.nightly.outputs.tag }}
+      target: ${{ steps.nightly.outputs.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -20,23 +27,13 @@ jobs:
           submodules: recursive
 
       - name: Set nightly tag
+        id: nightly
         run: |
           DATE=$(date -u +%Y%m%d)
-          echo "DATE=$DATE" >> $GITHUB_ENV
-          echo "TAG=v0.0.0-nightly.$DATE" >> $GITHUB_ENV
-          echo "GORELEASER_CURRENT_TAG=v0.0.0-nightly.$DATE" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Nightly $DATE" >> $GITHUB_ENV
-
-      - name: Delete old nightly releases
-        run: |
-          gh release list --limit 50 --json tagName,isPrerelease \
-            | jq -r '.[] | select(.tagName | startswith("v0.0.0-nightly")) | .tagName' \
-            | while read tag; do
-                echo "Deleting release $tag"
-                gh release delete "$tag" --yes --cleanup-tag || true
-              done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG="v0.0.0-nightly.${DATE}"
+          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "target=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Create nightly tag
         run: |
@@ -45,49 +42,30 @@ jobs:
           git tag -f "$TAG"
           git push --force origin "$TAG"
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+  release:
+    needs: prepare
+    uses: ./.github/workflows/go-release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      target: ${{ needs.prepare.outputs.target }}
+      prerelease: true
+    secrets: inherit
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
-
-      - name: Install pinned UPX
-        env:
-          UPX_VERSION: 5.2.0
-          UPX_SHA256: 3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1
+  cleanup:
+    needs: [prepare, release]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Delete superseded nightly releases
         run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
-          curl -fsSL \
-            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz" \
-            -o "${archive}"
-          echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
-          echo "${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux" >> "${GITHUB_PATH}"
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean --skip=validate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GOPATH: "/home/runner/go"
-
-      - name: Verify embedded frontend was built
-        run: |
-          test -s web/static/index.html
-          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
-
-      - name: Publish release (remove draft)
-        run: gh release edit "$TAG" --draft=false --prerelease
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh release list --limit 50 --json tagName \
+            | jq -r '.[] | select(.tagName | startswith("v0.0.0-nightly.")) | .tagName' \
+            | while read -r tag; do
+                if [[ "${tag}" == "${TAG}" ]]; then
+                  continue
+                fi
+                echo "Deleting release ${tag}"
+                gh release delete "${tag}" --yes --cleanup-tag || true
+              done
