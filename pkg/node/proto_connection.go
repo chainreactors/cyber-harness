@@ -156,6 +156,9 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 		response.Body.Close()
 	}
 	if err != nil {
+		if response != nil {
+			return nil, &websocketHandshakeError{statusCode: response.StatusCode, cause: err}
+		}
 		return nil, err
 	}
 	return newWebSocketEnvelopeStream(conn, cc.JSONFrames, cc.Liveness)
@@ -210,7 +213,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 		}
 		delay := reconnectDelay(attempt)
 		attempt++
-		logger.Warnf("connection lost (attempt %d), retrying in %v: %v", attempt, delay, err)
+		logger.Warnf("connection lost (attempt %d), retrying in %v: %s", attempt, delay, describeConnectionFailure(err))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
