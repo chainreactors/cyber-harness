@@ -284,7 +284,7 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 		view.Llm.ActiveProfile = view.Llm.Active.Id
 	}
 	view.Cyberhub = &types.CyberhubView{Url: config.GetCyberhub().GetUrl(), KeyConfigured: config.GetCyberhub().GetKey() != "", Mode: config.GetCyberhub().GetMode(), Proxy: config.GetCyberhub().GetProxy()}
-	view.Recon = &types.ReconView{FofaEmail: config.GetRecon().GetFofaEmail(), FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterTokenConfigured: config.GetRecon().GetHunterToken() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
+	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
 	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
 	view.Ioa = &types.IOAView{Url: config.GetIoa().GetUrl(), TokenConfigured: config.GetIoa().GetToken() != "", NodeName: config.GetIoa().GetNodeName(), Space: config.GetIoa().GetSpace()}

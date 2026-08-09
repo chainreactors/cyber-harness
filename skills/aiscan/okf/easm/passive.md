@@ -17,7 +17,7 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 
 | Source       | Provider    | Credential                                            |
 | ------------ | ----------- | ----------------------------------------------------- |
-| `fofa`       | FOFA        | `recon.fofa_email` + `recon.fofa_key` or env vars     |
+| `fofa`       | FOFA        | `recon.fofa_key` or env `FOFA_KEY`                     |
 | `hunter`     | Hunter      | `recon.hunter_api_key` or env `HUNTER_API_KEY`         |
 | `shodan`     | Shodan      | env `SHODAN_API_KEY`                                   |
 | `shodan-idb` | Shodan IDB  | none                                                   |

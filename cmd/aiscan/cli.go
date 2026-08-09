@@ -297,7 +297,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 		option.Timeout = 3600
 	}
 
-	scannerArgs := append([]string(nil), scannerRest...)
+	var scannerArgs []string
 	if scannerName == "scan" {
 		scannerArgs, err = applyScannerCommandArgs(scannerName, scannerRest, &option)
 		if err != nil {
@@ -375,9 +375,7 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.CyberhubURL = cfg.ResolveString(manual.CyberhubURL, option.CyberhubURL)
 	option.CyberhubKey = cfg.ResolveString(manual.CyberhubKey, option.CyberhubKey)
 	option.CyberhubMode = cfg.ResolveString(manual.CyberhubMode, option.CyberhubMode)
-	option.FofaEmail = cfg.ResolveString(manual.FofaEmail, option.FofaEmail)
 	option.FofaKey = cfg.ResolveString(manual.FofaKey, option.FofaKey)
-	option.HunterToken = cfg.ResolveString(manual.HunterToken, option.HunterToken)
 	option.HunterAPIKey = cfg.ResolveString(manual.HunterAPIKey, option.HunterAPIKey)
 	option.ReconProxy = cfg.ResolveString(manual.ReconProxy, option.ReconProxy)
 	if manual.ReconLimit != nil {
@@ -546,9 +544,7 @@ var scannerKnownFlags = []knownFlag{
 	}},
 	{names: []string{"--proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Proxy = v }},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.LLMProxy = v }},
-	{names: []string{"--fofa-email"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaEmail = v }},
 	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaKey = v }},
-	{names: []string{"--hunter-token"}, arity: 1, apply: func(o *cfg.Option, v string) { o.HunterToken = v }},
 	{names: []string{"--hunter-api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.HunterAPIKey = v }},
 	{names: []string{"--tavily-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TavilyKey = v }},
 	{names: []string{"--recon-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ReconProxy = v }},

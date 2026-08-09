@@ -1,4 +1,4 @@
-//go:build full && (windows || linux)
+//go:build full && record_ffmpeg && cgo && (windows || linux)
 
 package record
 

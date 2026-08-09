@@ -5,6 +5,9 @@
 
 - [rpc/agent.proto](#rpc_agent-proto)
     - [AgentService](#aiscan-rpc-agent-AgentService)
+
+- [rpc/aop.proto](#rpc_aop-proto)
+    - [AOPService](#aiscan-rpc-aop-AOPService)
   
 - [rpc/chat.proto](#rpc_chat-proto)
     - [SessionService](#aiscan-rpc-chat-SessionService)
@@ -148,11 +151,11 @@
 ## rpc/agent.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-agent-AgentService"></a>
@@ -163,6 +166,34 @@
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
 | ListAgents | [.aiscan.agent.ListAgentsRequest](#aiscan-agent-ListAgentsRequest) | [.aiscan.agent.ListAgentsResponse](#aiscan-agent-ListAgentsResponse) |  |
+
+
+
+
+
+<a name="rpc_aop-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## rpc/aop.proto
+
+
+
+
+
+
+
+
+
+<a name="aiscan-rpc-aop-AOPService"></a>
+
+### AOPService
+AOPService exposes the application protocol as one bidirectional Envelope
+stream. Native clients may use Connect or gRPC; browser clients keep using
+the WebSocket compatibility transport over the same service core.
+
+| Method Name | Request Type | Response Type | Description |
+| ----------- | ------------ | ------------- | ------------|
+| Connect | [.aop.Envelope](#aop-Envelope) stream | [.aop.Envelope](#aop-Envelope) stream |  |
 
  
 
@@ -1261,9 +1292,7 @@
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| fofa_email | [string](#string) |  |  |
 | fofa_key | [string](#string) |  |  |
-| hunter_token | [string](#string) |  |  |
 | hunter_api_key | [string](#string) |  |  |
 | proxy | [string](#string) |  |  |
 | limit | [int32](#int32) |  |  |
@@ -1281,9 +1310,7 @@
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| fofa_email | [string](#string) |  |  |
 | fofa_key_configured | [bool](#bool) |  |  |
-| hunter_token_configured | [bool](#bool) |  |  |
 | hunter_api_key_configured | [bool](#bool) |  |  |
 | proxy | [string](#string) |  |  |
 | limit | [int32](#int32) |  |  |
@@ -2115,4 +2142,3 @@ reintroducing a parallel web-only domain event envelope.
 | <a name="bool" /> bool |  | bool | boolean | boolean | bool | bool | boolean | TrueClass/FalseClass |
 | <a name="string" /> string | A string must always contain UTF-8 encoded or 7-bit ASCII text. | string | String | str/unicode | string | string | string | String (UTF-8) |
 | <a name="bytes" /> bytes | May contain any arbitrary sequence of bytes. | string | ByteString | str | []byte | ByteString | string | String (ASCII-8BIT) |
-

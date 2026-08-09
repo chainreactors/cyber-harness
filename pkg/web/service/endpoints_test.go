@@ -52,7 +52,7 @@ func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	return server, service
 }
 
-func TestLegacyAOPWebSocketPathReturnsNotFound(t *testing.T) {
+func TestRemovedAOPWebSocketPathReturnsNotFound(t *testing.T) {
 	server, _ := newEndpointTestServer(t)
 	response, err := http.Get(server.URL + "/api/aop/ws")
 	if err != nil {
@@ -60,7 +60,7 @@ func TestLegacyAOPWebSocketPathReturnsNotFound(t *testing.T) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNotFound {
-		t.Fatalf("legacy endpoint status = %d, want 404", response.StatusCode)
+		t.Fatalf("removed endpoint status = %d, want 404", response.StatusCode)
 	}
 }
 

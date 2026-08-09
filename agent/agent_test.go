@@ -1270,9 +1270,9 @@ func TestSetProviderRaceWithRun(t *testing.T) {
 	<-done
 }
 
-// --- Legacy message construction shims -------------------------------------
-// These mirror the pre-proto ChatMessage shape so the many construction sites
-// in the tests stay readable; chatResponse converts them to *aop.Message.
+// --- Message construction test helpers -------------------------------------
+// These compact helpers keep provider fixtures readable; chatResponse converts
+// them to *aop.Message.
 
 type FunctionCall struct {
 	Name      string

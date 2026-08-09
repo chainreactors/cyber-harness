@@ -87,12 +87,7 @@ func testRecon(ctx context.Context, in, stored *types.DistributeConfig) []*types
 		}))
 	}
 
-	// Hunter accepts either an API key or a (legacy, rarely used) web token; the
-	// API key takes precedence, matching the recon engine's credential order.
 	hunterKey := fallbackStr(in.GetRecon().GetHunterApiKey(), stored.GetRecon().GetHunterApiKey())
-	if strings.TrimSpace(hunterKey) == "" {
-		hunterKey = fallbackStr(in.GetRecon().GetHunterToken(), stored.GetRecon().GetHunterToken())
-	}
 	if strings.TrimSpace(hunterKey) != "" {
 		checks = append(checks, runCheck("hunter", func() (string, error) {
 			return probeHunter(ctx, hunterKey, proxy)

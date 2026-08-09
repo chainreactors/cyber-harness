@@ -48,7 +48,7 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 		sessionTestEvent("root", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}}}),
 		sessionTestEvent("root", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}}}),
 	})
-	if err := os.WriteFile(filepath.Join(dir, "legacy.json"), []byte(`{"messages":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "unsupported.json"), []byte(`{"messages":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := listSavedSessions(dir)

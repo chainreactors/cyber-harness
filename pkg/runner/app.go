@@ -565,7 +565,7 @@ func CollectDeepBrowserArtifacts(ctx context.Context, reg *commands.CommandRegis
 		{"wait-idle", "playwright wait-for " + session + " --idle"},
 		{"url", "playwright url " + session},
 		{"discover", "playwright discover " + session},
-		{"text-content", "playwright text-content " + session},
+		{"inner-text", "playwright inner-text " + session + " body"},
 		{"storage-links-scripts", fmt.Sprintf("playwright evaluate %s %s", session, quoteCommandArg(script))},
 		{"network-dump", "playwright network " + session + " --dump"},
 	}

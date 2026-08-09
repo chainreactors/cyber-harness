@@ -12,7 +12,7 @@ import (
 type CacheRetention string
 
 const (
-	CacheNone  CacheRetention = ""      // no caching (zero value, backward compatible)
+	CacheNone  CacheRetention = ""      // no caching (zero value)
 	CacheShort CacheRetention = "short" // Anthropic ephemeral / OpenAI automatic
 	CacheLong  CacheRetention = "long"  // Anthropic ephemeral+TTL / OpenAI 24h retention
 )

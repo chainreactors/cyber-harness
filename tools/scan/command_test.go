@@ -188,7 +188,7 @@ func TestScanOptionsResolveDiscoveryFlags(t *testing.T) {
 	}
 }
 
-func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
+func TestScanUsageContainsOnlyCanonicalFlags(t *testing.T) {
 	usage := Usage()
 	if !strings.Contains(usage, "Usage:") || !strings.Contains(usage, "scan [OPTIONS]") {
 		t.Fatalf("usage was not rendered by the scan go-flags parser:\n%s", usage)
@@ -199,10 +199,10 @@ func TestScanUsageHidesDeprecatedAliases(t *testing.T) {
 		}
 	}
 	if strings.Contains(usage, "--verify-timeout") {
-		t.Fatal("usage should not advertise deprecated --verify-timeout")
+		t.Fatal("usage should not advertise removed --verify-timeout")
 	}
 	if strings.Contains(usage, "--port        ") || strings.Contains(usage, "--port top100") {
-		t.Fatal("usage should not advertise deprecated --port alias")
+		t.Fatal("usage should not advertise removed --port alias")
 	}
 	if strings.Contains(usage, "--ai") {
 		t.Fatal("usage should not advertise removed --ai alias")

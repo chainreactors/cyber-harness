@@ -143,19 +143,9 @@ func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) 
 }
 
 func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if strings.TrimSpace(explicit.FofaEmail) == "" {
-		if v := firstEnv(lookup, "FOFA_EMAIL"); v != "" {
-			option.FofaEmail = v
-		}
-	}
 	if strings.TrimSpace(explicit.FofaKey) == "" {
 		if v := firstEnv(lookup, "FOFA_KEY"); v != "" {
 			option.FofaKey = v
-		}
-	}
-	if strings.TrimSpace(explicit.HunterToken) == "" {
-		if v := firstEnv(lookup, "HUNTER_TOKEN"); v != "" {
-			option.HunterToken = v
 		}
 	}
 	if strings.TrimSpace(explicit.HunterAPIKey) == "" {

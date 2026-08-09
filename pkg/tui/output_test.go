@@ -209,7 +209,7 @@ func TestInboxPreviewKeepsThinkingLiveAndTruncates(t *testing.T) {
 		t.Fatalf("long inbox entry was not truncated: %q", got)
 	}
 	if strings.Contains(got, "queued:") {
-		t.Fatalf("legacy queued line leaked into inbox rendering: %q", got)
+		t.Fatalf("stale queued line leaked into inbox rendering: %q", got)
 	}
 
 	// Starting the next run resets turn state but must retain inputs that are

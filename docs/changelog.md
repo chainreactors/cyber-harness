@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.0 — 稳定接口基线 + 发布链路收敛 + pre-v1 清理
+
+v1.0.0 将当前 CLI、配置、AOP/Connect 协议和 standard/full 构建定义为首个稳定基线。CI、nightly 与正式发布共用同一套构建矩阵；Web 控制台和 cyber-ui 纳入发布验证；pre-v1 阶段保留的别名、重复字段与兼容入口不再进入 1.0。
+
+### Release Baseline
+
+- standard：Linux、macOS、Windows 的 amd64/arm64
+- full：Linux amd64/arm64、macOS amd64/arm64、Windows amd64
+- `golangci-lint`、Go 测试、生成文件、前端构建、cyber-ui 测试和发布包验证均为 CI 阻塞项
+- nightly 和正式 release 复用 `.github/workflows/go-release.yml`，避免构建标签和产物矩阵漂移
+
+### Breaking Changes
+
+- FOFA 仅接受 `fofa_key` / `FOFA_KEY` / `--fofa-key`；Hunter 仅接受 `hunter_api_key` / `HUNTER_API_KEY` / `--hunter-api-key`
+- Playwright 仅保留规范命令名，删除 `navigate`、`eval`、`netcap`、`text`、`text-content`、`html`、`inner-html`、`seval`、`sshot`、`select`、`wait`、`cookies` 等重复入口
+- Agent Web/AOP 连接仅使用 `--server-url`；IOA 仅使用 `--ioa-url`
+- AOP 文件分段读取直接使用 `ReadRequest.offset/limit` 与 `Result.offset/eof`，不再接受编码到 path 中的 range 请求
+- evaluator 调用必须显式提供 `InitialInput`
+- 终端路由从 `core/terminal` 移至 `pkg/terminal`，作为可复用传输组件而非核心领域能力
+- 删除不可用 recorder backend 的占位实现；仅在支持原生录屏且启用 `record_ffmpeg` 的 full profile 中注册 record 工具
+
+迁移细节和发布平台说明见 [v1.0.0 发布与迁移](v1.0.0.md)。
+
 ## v0.4.0 — Web 控制台升级 + Agent 上下文管理 + SCO 标准化输出 + 统一接入 API
 
 ### New Features

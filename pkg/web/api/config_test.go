@@ -508,7 +508,7 @@ func TestProbeHunterError(t *testing.T) {
 	defer func() { probe.HunterSearchEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
-		c.Recon = &types.ReconConfig{HunterToken: "bad"}
+		c.Recon = &types.ReconConfig{HunterApiKey: "bad"}
 	}))
 	c, ok := findCheck(resp, "hunter")
 	if !ok || c.Ok {

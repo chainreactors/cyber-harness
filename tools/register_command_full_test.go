@@ -40,8 +40,7 @@ func TestRegisterAllRegistersKatanaInFullBuild(t *testing.T) {
 func TestRegisterAllRegistersPassiveWithUncover(t *testing.T) {
 	engineSet := &engine.Set{}
 	engineSet.SetupUncover(engine.ReconOptions{
-		FofaEmail: "test@example.com",
-		FofaKey:   "deadbeef",
+		FofaKey: "deadbeef",
 	}, nil)
 	reg := buildRegistry(engineSet)
 

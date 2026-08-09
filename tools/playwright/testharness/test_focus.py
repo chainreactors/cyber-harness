@@ -12,7 +12,7 @@ def test_focus_triggers_event(test_server, pw_page, pw_driver):
     # aiscan
     pw_driver.execute("open", url, "--session", "focus-t", "--timeout", "10")
     pw_driver.execute("focus", "focus-t", "#focus-target")
-    out = pw_driver.execute("text-content", "focus-t", "#focus-result")
+    out = pw_driver.execute("inner-text", "focus-t", "#focus-result")
     assert "focused" in out
     pw_driver.execute("close", "focus-t")
 
@@ -31,6 +31,6 @@ def test_blur_triggers_event(test_server, pw_page, pw_driver):
     pw_driver.execute("open", url, "--session", "blur-t", "--timeout", "10")
     pw_driver.execute("focus", "blur-t", "#focus-target")
     pw_driver.execute("blur", "blur-t", "#focus-target")
-    out = pw_driver.execute("text-content", "blur-t", "#focus-result")
+    out = pw_driver.execute("inner-text", "blur-t", "#focus-result")
     assert "blurred" in out
     pw_driver.execute("close", "blur-t")

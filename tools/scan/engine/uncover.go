@@ -17,10 +17,9 @@ import (
 	"github.com/projectdiscovery/uncover/sources"
 )
 
-// UncoverEngine wraps uncover's session and agent infrastructure to provide
-// a QueryRaw API compatible with the old ina-go engine. It uses custom agents
-// for fofa/hunter to preserve rich fields (title, icp, company, etc.) and
-// falls back to stock uncover agents for other sources.
+// UncoverEngine wraps uncover's session and agent infrastructure. It uses
+// custom agents for fofa/hunter to preserve rich fields (title, icp, company,
+// etc.) and stock uncover agents for other sources.
 type UncoverEngine struct {
 	provider *sources.Provider
 	keys     sources.Keys
@@ -39,34 +38,20 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	}
 	p := &sources.Provider{}
 
-	// FOFA simplified auth (announced 2023): only the API key is required and the
-	// email never appears in the request URL. Accept key-only credentials while
-	// keeping the legacy "email:key" format compatible.
 	if opts.FofaKey != "" {
-		cred := opts.FofaKey
-		if opts.FofaEmail != "" {
-			cred = opts.FofaEmail + ":" + opts.FofaKey
-		}
-		p.Fofa = append(p.Fofa, cred)
+		p.Fofa = append(p.Fofa, opts.FofaKey)
 	}
 	if opts.HunterAPIKey != "" {
 		p.Hunter = append(p.Hunter, opts.HunterAPIKey)
-	} else if opts.HunterToken != "" {
-		p.Hunter = append(p.Hunter, opts.HunterToken)
 	}
 
 	applyCredentials(p, opts.Credentials)
 
 	keys := p.GetKeys()
-	// uncover's GetKeys only populates the FofaEmail/FofaKey pair when the stored
-	// credential splits into exactly two "email:key" segments. A key-only credential
-	// therefore yields empty keys here; backfill it so key-only setups (config.yaml /
-	// --fofa-key / FOFA_KEY without an email) still resolve to a usable FofaKey.
+	// uncover currently expects a paired FOFA credential. AIScan's public
+	// configuration is key-only, so populate the canonical key explicitly.
 	if keys.FofaKey == "" && opts.FofaKey != "" {
 		keys.FofaKey = opts.FofaKey
-		if opts.FofaEmail != "" {
-			keys.FofaEmail = opts.FofaEmail
-		}
 	}
 
 	timeout := 600

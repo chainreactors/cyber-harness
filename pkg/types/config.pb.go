@@ -359,12 +359,10 @@ func (x *CyberhubConfig) GetProxy() string {
 
 type ReconConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FofaEmail     string                 `protobuf:"bytes,1,opt,name=fofa_email,json=fofaEmail,proto3" json:"fofa_email,omitempty"`
-	FofaKey       string                 `protobuf:"bytes,2,opt,name=fofa_key,json=fofaKey,proto3" json:"fofa_key,omitempty"`
-	HunterToken   string                 `protobuf:"bytes,3,opt,name=hunter_token,json=hunterToken,proto3" json:"hunter_token,omitempty"`
-	HunterApiKey  string                 `protobuf:"bytes,4,opt,name=hunter_api_key,json=hunterApiKey,proto3" json:"hunter_api_key,omitempty"`
-	Proxy         string                 `protobuf:"bytes,5,opt,name=proxy,proto3" json:"proxy,omitempty"`
-	Limit         int32                  `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	FofaKey       string                 `protobuf:"bytes,1,opt,name=fofa_key,json=fofaKey,proto3" json:"fofa_key,omitempty"`
+	HunterApiKey  string                 `protobuf:"bytes,2,opt,name=hunter_api_key,json=hunterApiKey,proto3" json:"hunter_api_key,omitempty"`
+	Proxy         string                 `protobuf:"bytes,3,opt,name=proxy,proto3" json:"proxy,omitempty"`
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -399,23 +397,9 @@ func (*ReconConfig) Descriptor() ([]byte, []int) {
 	return file_types_config_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ReconConfig) GetFofaEmail() string {
-	if x != nil {
-		return x.FofaEmail
-	}
-	return ""
-}
-
 func (x *ReconConfig) GetFofaKey() string {
 	if x != nil {
 		return x.FofaKey
-	}
-	return ""
-}
-
-func (x *ReconConfig) GetHunterToken() string {
-	if x != nil {
-		return x.HunterToken
 	}
 	return ""
 }
@@ -911,12 +895,10 @@ func (x *CyberhubView) GetProxy() string {
 
 type ReconView struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
-	FofaEmail              string                 `protobuf:"bytes,1,opt,name=fofa_email,json=fofaEmail,proto3" json:"fofa_email,omitempty"`
-	FofaKeyConfigured      bool                   `protobuf:"varint,2,opt,name=fofa_key_configured,json=fofaKeyConfigured,proto3" json:"fofa_key_configured,omitempty"`
-	HunterTokenConfigured  bool                   `protobuf:"varint,3,opt,name=hunter_token_configured,json=hunterTokenConfigured,proto3" json:"hunter_token_configured,omitempty"`
-	HunterApiKeyConfigured bool                   `protobuf:"varint,4,opt,name=hunter_api_key_configured,json=hunterApiKeyConfigured,proto3" json:"hunter_api_key_configured,omitempty"`
-	Proxy                  string                 `protobuf:"bytes,5,opt,name=proxy,proto3" json:"proxy,omitempty"`
-	Limit                  int32                  `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	FofaKeyConfigured      bool                   `protobuf:"varint,1,opt,name=fofa_key_configured,json=fofaKeyConfigured,proto3" json:"fofa_key_configured,omitempty"`
+	HunterApiKeyConfigured bool                   `protobuf:"varint,2,opt,name=hunter_api_key_configured,json=hunterApiKeyConfigured,proto3" json:"hunter_api_key_configured,omitempty"`
+	Proxy                  string                 `protobuf:"bytes,3,opt,name=proxy,proto3" json:"proxy,omitempty"`
+	Limit                  int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -951,23 +933,9 @@ func (*ReconView) Descriptor() ([]byte, []int) {
 	return file_types_config_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *ReconView) GetFofaEmail() string {
-	if x != nil {
-		return x.FofaEmail
-	}
-	return ""
-}
-
 func (x *ReconView) GetFofaKeyConfigured() bool {
 	if x != nil {
 		return x.FofaKeyConfigured
-	}
-	return false
-}
-
-func (x *ReconView) GetHunterTokenConfigured() bool {
-	if x != nil {
-		return x.HunterTokenConfigured
 	}
 	return false
 }
@@ -1912,15 +1880,12 @@ const file_types_config_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\tR\x04mode\x12\x14\n" +
-	"\x05proxy\x18\x04 \x01(\tR\x05proxy\"\xbc\x01\n" +
-	"\vReconConfig\x12\x1d\n" +
-	"\n" +
-	"fofa_email\x18\x01 \x01(\tR\tfofaEmail\x12\x19\n" +
-	"\bfofa_key\x18\x02 \x01(\tR\afofaKey\x12!\n" +
-	"\fhunter_token\x18\x03 \x01(\tR\vhunterToken\x12$\n" +
-	"\x0ehunter_api_key\x18\x04 \x01(\tR\fhunterApiKey\x12\x14\n" +
-	"\x05proxy\x18\x05 \x01(\tR\x05proxy\x12\x14\n" +
-	"\x05limit\x18\x06 \x01(\x05R\x05limit\"$\n" +
+	"\x05proxy\x18\x04 \x01(\tR\x05proxy\"z\n" +
+	"\vReconConfig\x12\x19\n" +
+	"\bfofa_key\x18\x01 \x01(\tR\afofaKey\x12$\n" +
+	"\x0ehunter_api_key\x18\x02 \x01(\tR\fhunterApiKey\x12\x14\n" +
+	"\x05proxy\x18\x03 \x01(\tR\x05proxy\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\"$\n" +
 	"\n" +
 	"ScanConfig\x12\x16\n" +
 	"\x06verify\x18\x01 \x01(\tR\x06verify\"/\n" +
@@ -1959,15 +1924,12 @@ const file_types_config_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12%\n" +
 	"\x0ekey_configured\x18\x02 \x01(\bR\rkeyConfigured\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\tR\x04mode\x12\x14\n" +
-	"\x05proxy\x18\x04 \x01(\tR\x05proxy\"\xf9\x01\n" +
-	"\tReconView\x12\x1d\n" +
-	"\n" +
-	"fofa_email\x18\x01 \x01(\tR\tfofaEmail\x12.\n" +
-	"\x13fofa_key_configured\x18\x02 \x01(\bR\x11fofaKeyConfigured\x126\n" +
-	"\x17hunter_token_configured\x18\x03 \x01(\bR\x15hunterTokenConfigured\x129\n" +
-	"\x19hunter_api_key_configured\x18\x04 \x01(\bR\x16hunterApiKeyConfigured\x12\x14\n" +
-	"\x05proxy\x18\x05 \x01(\tR\x05proxy\x12\x14\n" +
-	"\x05limit\x18\x06 \x01(\x05R\x05limit\"B\n" +
+	"\x05proxy\x18\x04 \x01(\tR\x05proxy\"\xa2\x01\n" +
+	"\tReconView\x12.\n" +
+	"\x13fofa_key_configured\x18\x01 \x01(\bR\x11fofaKeyConfigured\x129\n" +
+	"\x19hunter_api_key_configured\x18\x02 \x01(\bR\x16hunterApiKeyConfigured\x12\x14\n" +
+	"\x05proxy\x18\x03 \x01(\tR\x05proxy\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\"B\n" +
 	"\n" +
 	"SearchView\x124\n" +
 	"\x16tavily_keys_configured\x18\x01 \x01(\bR\x14tavilyKeysConfigured\"y\n" +

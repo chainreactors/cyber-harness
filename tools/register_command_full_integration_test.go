@@ -1,6 +1,6 @@
 //go:build full && integration
 
-//	Run with: AISCAN_INTEGRATION=1 FOFA_EMAIL=... FOFA_KEY=... \
+//	Run with: AISCAN_INTEGRATION=1 FOFA_KEY=... \
 //	  go test -tags 'full integration' ./tools/... -run TestIntegration -v
 package tools
 
@@ -38,13 +38,12 @@ func TestIntegrationPassiveFofa(t *testing.T) {
 	if os.Getenv("AISCAN_INTEGRATION") == "" {
 		t.Skip("set AISCAN_INTEGRATION=1 to run")
 	}
-	email := os.Getenv("FOFA_EMAIL")
 	key := os.Getenv("FOFA_KEY")
-	if email == "" || key == "" {
-		t.Skip("FOFA_EMAIL / FOFA_KEY required")
+	if key == "" {
+		t.Skip("FOFA_KEY required")
 	}
 	set := &engine.Set{}
-	set.SetupUncover(engine.ReconOptions{FofaEmail: email, FofaKey: key, Limit: 5}, telemetry.NopLogger())
+	set.SetupUncover(engine.ReconOptions{FofaKey: key, Limit: 5}, telemetry.NopLogger())
 	if set.Uncover == nil {
 		t.Fatal("expected Uncover engine to be initialized")
 	}
@@ -70,14 +69,12 @@ func TestIntegrationPassiveHunter(t *testing.T) {
 	if os.Getenv("AISCAN_INTEGRATION") == "" {
 		t.Skip("set AISCAN_INTEGRATION=1 to run")
 	}
-	token := os.Getenv("HUNTER_TOKEN")
 	apikey := os.Getenv("HUNTER_API_KEY")
-	if token == "" && apikey == "" {
-		t.Skip("HUNTER_TOKEN or HUNTER_API_KEY required")
+	if apikey == "" {
+		t.Skip("HUNTER_API_KEY required")
 	}
 	set := &engine.Set{}
 	set.SetupUncover(engine.ReconOptions{
-		HunterToken:  token,
 		HunterAPIKey: apikey,
 		IngressProxy: os.Getenv("RECON_PROXY"),
 		Limit:        3,

@@ -35,7 +35,7 @@ def test_route_fulfill(test_server, pw_page, pw_driver):
         "fetch('/api/data').then(r=>r.json()).then(d=>{document.getElementById('fetch-result').textContent=JSON.stringify(d)})"
     )
     pw_driver.execute("wait-for", "route-t", "--stable")
-    out = pw_driver.execute("text-content", "route-t", "#fetch-result")
+    out = pw_driver.execute("inner-text", "route-t", "#fetch-result")
     assert "intercepted" in out
     pw_driver.execute("unroute", "route-t")
     pw_driver.execute("close", "route-t")
@@ -62,7 +62,7 @@ def test_route_abort(test_server, pw_page, pw_driver):
         "fetch('/api/data').then(r=>r.text()).then(t=>{document.getElementById('fetch-result').textContent=t}).catch(e=>{document.getElementById('fetch-result').textContent='error:'+e.message})"
     )
     pw_driver.execute("wait-for", "abort-t", "--stable")
-    out = pw_driver.execute("text-content", "abort-t", "#fetch-result")
+    out = pw_driver.execute("inner-text", "abort-t", "#fetch-result")
     assert "error" in out.lower()
     pw_driver.execute("unroute", "abort-t")
     pw_driver.execute("close", "abort-t")

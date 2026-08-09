@@ -224,24 +224,26 @@ jobs:
         if: matrix.profile == 'full' && runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config \
+          sudo apt-get install -y build-essential nasm yasm pkg-config \
             libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
       - name: Install recorder SDK link dependencies on Windows
         if: matrix.profile == 'full' && runner.os == 'Windows'
         run: |
           C:/msys64/usr/bin/bash.exe -lc \
-            "pacman -S --noconfirm --needed pkgconf mingw-w64-x86_64-toolchain"
+            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
 
-      - name: Download static FFmpeg and x264 recorder SDK
+      - name: Prepare static FFmpeg and x264 recorder SDK
         if: matrix.profile == 'full' && runner.os != 'macOS'
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             platform=windows
-            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH=amd64"
+            C:/msys64/usr/bin/bash.exe -lc \
+              "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH=amd64 || make record-native-source RECORD_ARCH=amd64"
           else
             platform=linux
-            make record-native RECORD_ARCH="$(go env GOARCH)"
+            make record-native RECORD_ARCH="$(go env GOARCH)" || \
+              make record-native-source RECORD_ARCH="$(go env GOARCH)"
           fi
           bash .github/native/sdk.sh env "${platform}" "$(go env GOARCH)" >> "${GITHUB_ENV}"
 

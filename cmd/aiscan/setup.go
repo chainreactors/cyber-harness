@@ -55,9 +55,7 @@ func initEngines(ctx context.Context, sc runner.ScannerConfig, logger telemetry.
 		return nil
 	}
 	recon := engine.ReconOptions{
-		FofaEmail:    sc.FofaEmail,
 		FofaKey:      sc.FofaKey,
-		HunterToken:  sc.HunterToken,
 		HunterAPIKey: sc.HunterAPIKey,
 		IngressProxy: sc.ReconProxy,
 		Limit:        sc.ReconLimit,

@@ -60,7 +60,7 @@ func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
 	}
 }
 
-func TestLegacyChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
+func TestRemovedChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
 		t.Fatal(err)

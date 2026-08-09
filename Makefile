@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := standard
 
 GO ?= go
+BASH ?= $(dir $(shell command -v sh))bash
+PROJECT_ROOT := $(shell pwd -W 2>/dev/null || pwd)
 
 WEB_DIR ?= web/frontend
 WEB_ADDR ?= 127.0.0.1:8080
@@ -35,9 +37,9 @@ RECORD_PLATFORM := unsupported
 endif
 RECORD_ARCH ?= $(shell $(GO) env GOARCH)
 RECORD_NATIVE_OUTPUT ?= dist/native
-RECORD_PREFIX := $(if $(AISCAN_RECORD_PREFIX),$(AISCAN_RECORD_PREFIX),$(CURDIR)/.cache/record-native/$(RECORD_PLATFORM)-$(RECORD_ARCH))
+RECORD_PREFIX := $(if $(AISCAN_RECORD_PREFIX),$(AISCAN_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/record-native/$(RECORD_PLATFORM)-$(RECORD_ARCH))
 ifeq ($(RECORD_PLATFORM),windows)
-RECORD_PKG_CONFIG := $(CURDIR)/.github/native/pkg-config-static.cmd
+RECORD_PKG_CONFIG := $(PROJECT_ROOT)/.github/native/pkg-config-static.cmd
 RECORD_EXTRA_LDFLAGS := -static -static-libgcc
 else
 RECORD_PKG_CONFIG := $(CURDIR)/.github/native/pkg-config-static.sh
@@ -45,7 +47,7 @@ RECORD_EXTRA_LDFLAGS :=
 endif
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen aop-gen standard record-native record-native-source record-native-package full web-build web-run web all clean
+.PHONY: help prepare frontend proto-gen standard record-native record-native-source record-native-package full web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets:"
@@ -70,9 +72,6 @@ prepare:
 proto-gen:
 	$(GO) run ./cmd/gen
 
-# Compatibility alias; AOP and product schemas share one generation entrypoint.
-aop-gen: proto-gen
-
 frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
@@ -86,9 +85,9 @@ ifeq ($(RECORD_PLATFORM),unsupported)
 	@echo "record native backend is not supported on this platform"
 else
 	@if [ "$(AISCAN_RECORD_BUILD_FROM_SOURCE)" = "1" ]; then \
-		bash ".github/native/sdk.sh" build "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
+		"$(BASH)" ".github/native/sdk.sh" build "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
 	else \
-		bash ".github/native/sdk.sh" fetch "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
+		"$(BASH)" ".github/native/sdk.sh" fetch "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
 	fi
 endif
 
@@ -96,14 +95,14 @@ record-native-source:
 ifeq ($(RECORD_PLATFORM),unsupported)
 	@echo "record native backend is not supported on this platform"
 else
-	bash ".github/native/sdk.sh" build "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"
+	"$(BASH)" ".github/native/sdk.sh" build "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"
 endif
 
 record-native-package:
 ifeq ($(RECORD_PLATFORM),unsupported)
 	@echo "record native backend is not supported on this platform"
 else
-	bash ".github/native/sdk.sh" package "$(RECORD_PLATFORM)" "$(RECORD_ARCH)" "$(RECORD_NATIVE_OUTPUT)"
+	"$(BASH)" ".github/native/sdk.sh" package "$(RECORD_PLATFORM)" "$(RECORD_ARCH)" "$(RECORD_NATIVE_OUTPUT)"
 endif
 
 full: frontend record-native prepare

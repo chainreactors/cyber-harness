@@ -14,7 +14,7 @@ def test_press_enter_submits_form(test_server, pw_page, pw_driver):
     pw_driver.execute("open", url, "--session", "press-test", "--timeout", "10")
     pw_driver.execute("fill", "press-test", "#username", "admin")
     pw_driver.execute("press", "press-test", "#username", "Enter")
-    text_out = pw_driver.execute("text-content", "press-test", "#result")
+    text_out = pw_driver.execute("inner-text", "press-test", "#result")
     assert "Submitted: admin" in text_out
     pw_driver.execute("close", "press-test")
 

@@ -92,10 +92,8 @@ func isRetryableByMessage(err error) bool {
 	return false
 }
 
-// RetryDelay returns the backoff duration for the given attempt index (0-based).
-// It keeps the original conservative policy (1s·2^attempt, capped at 10s) for
-// backward compatibility with external callers such as runner and webagent
-// reconnect logic.
+// RetryDelay returns the canonical backoff duration for the given attempt
+// index (0-based): 1s·2^attempt, capped at 10s.
 func RetryDelay(attempt int) time.Duration {
 	if attempt < 0 {
 		attempt = 0

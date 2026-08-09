@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
@@ -20,6 +21,20 @@ func (p *fixedProvider) Name() string { return "fixed" }
 func (p *fixedProvider) ChatCompletion(_ context.Context, request *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 	p.request = request
 	return p.response, nil
+}
+
+func TestRunWithEvalRequiresInitialInput(t *testing.T) {
+	ag := agent.NewAgent(agent.Config{
+		Provider: &fixedProvider{},
+		Model:    "test",
+	})
+	_, _, err := RunWithEval(context.Background(), ag, EvalLoopConfig{
+		Goal:          "finish the task",
+		MaxEvalRounds: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "initial input is required") {
+		t.Fatalf("RunWithEval() error = %v, want missing initial input error", err)
+	}
 }
 
 func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing.T) {

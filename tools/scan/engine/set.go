@@ -27,10 +27,8 @@ var neutronProxyMu sync.Mutex
 
 // ReconOptions 提供 uncover 资产测绘引擎所需的凭证与默认行为。
 type ReconOptions struct {
-	FofaEmail    string
 	FofaKey      string
-	HunterToken  string // 极少用 — 抓包出来的 web 登录 cookie/JWT, Python 原版 token 模式
-	HunterAPIKey string // 华顺信安后台 API 管理生成的 api-key (推荐, 64 位 hex)
+	HunterAPIKey string
 	Limit        int
 	IngressProxy string // 给 uncover 的全局出站代理 (http://, https://, socks5://, socks5h://)
 	Credentials  map[string]string

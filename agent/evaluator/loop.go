@@ -76,10 +76,8 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 	}
 
 	input := cfg.InitialInput
-	// Keep direct EvalLoopConfig literals compatible with the pre-InitialInput
-	// API. Constructors always populate InitialInput.
 	if input == nil {
-		input = agent.TextInput(cfg.Goal)
+		return nil, nil, fmt.Errorf("evaluation initial input is required")
 	}
 	var lastVerdict *Verdict
 	for round := 1; round <= cfg.MaxEvalRounds; round++ {

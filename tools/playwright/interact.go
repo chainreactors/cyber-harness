@@ -89,9 +89,9 @@ func (c *Command) execFill(ctx context.Context, args []string) (string, error) {
 // select
 // ---------------------------------------------------------------------------
 
-func (c *Command) execSelect(ctx context.Context, args []string) (string, error) {
+func (c *Command) execSelectOption(ctx context.Context, args []string) (string, error) {
 	if len(args) < 3 {
-		return "", fmt.Errorf("playwright select: usage: playwright select-option <session> <selector> <value>")
+		return "", fmt.Errorf("playwright select-option: usage: playwright select-option <session> <selector> <value>")
 	}
 	sess, err := c.getSession(args[0])
 	if err != nil {
@@ -103,22 +103,22 @@ func (c *Command) execSelect(ctx context.Context, args []string) (string, error)
 	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
 		el, err := findElement(page, selector)
 		if err != nil {
-			return "", fmt.Errorf("playwright select: element %q not found: %w", selector, err)
+			return "", fmt.Errorf("playwright select-option: element %q not found: %w", selector, err)
 		}
 		if err := selectOption(el, value); err != nil {
-			return "", fmt.Errorf("playwright select: %w", err)
+			return "", fmt.Errorf("playwright select-option: %w", err)
 		}
 		return fmt.Sprintf("Selected %q in %q", value, selector), nil
 	})
 }
 
 // ---------------------------------------------------------------------------
-// wait
+// wait-for
 // ---------------------------------------------------------------------------
 
-func (c *Command) execWait(ctx context.Context, args []string) (string, error) {
+func (c *Command) execWaitFor(ctx context.Context, args []string) (string, error) {
 	if len(args) < 2 {
-		return "", fmt.Errorf("playwright wait: usage: playwright wait-for <session> <selector|--idle|--stable>")
+		return "", fmt.Errorf("playwright wait-for: usage: playwright wait-for <session> <selector|--idle|--stable>")
 	}
 	sess, err := c.getSession(args[0])
 	if err != nil {
@@ -138,7 +138,7 @@ func (c *Command) execWait(ctx context.Context, args []string) (string, error) {
 		default:
 			el, err := findElement(page, target)
 			if err != nil {
-				return "", fmt.Errorf("playwright wait: element %q did not appear: %w", target, err)
+				return "", fmt.Errorf("playwright wait-for: element %q did not appear: %w", target, err)
 			}
 			_ = el.WaitVisible()
 			return fmt.Sprintf("Element %q visible", target), nil
@@ -218,12 +218,12 @@ func (c *Command) execSessionContent(ctx context.Context, args []string) (string
 }
 
 // ---------------------------------------------------------------------------
-// session-aware JS eval
+// session-aware JavaScript evaluation
 // ---------------------------------------------------------------------------
 
 func (c *Command) execSessionEval(ctx context.Context, args []string) (string, error) {
 	if len(args) < 2 {
-		return "", fmt.Errorf("playwright eval: usage: playwright evaluate <url|session> <script>")
+		return "", fmt.Errorf("playwright evaluate: usage: playwright evaluate <url|session> <script>")
 	}
 	sess, err := c.getSession(args[0])
 	if err != nil {
@@ -235,7 +235,7 @@ func (c *Command) execSessionEval(ctx context.Context, args []string) (string, e
 		jsFunc := fmt.Sprintf("() => (%s)", script)
 		res, err := page.Eval(jsFunc)
 		if err != nil {
-			return "", fmt.Errorf("playwright eval: %w", err)
+			return "", fmt.Errorf("playwright evaluate: %w", err)
 		}
 
 		var result string
@@ -345,78 +345,6 @@ func (c *Command) execURL(ctx context.Context, args []string) (string, error) {
 			return "", fmt.Errorf("playwright url: %w", err)
 		}
 		return fmt.Sprintf("URL: %s\nTitle: %s", info.URL, info.Title), nil
-	})
-}
-
-// ---------------------------------------------------------------------------
-// cookies: list / set / clear
-// ---------------------------------------------------------------------------
-
-func (c *Command) execCookies(ctx context.Context, args []string) (string, error) {
-	if len(args) < 2 {
-		return "", fmt.Errorf("playwright cookies: usage: playwright cookies <session> --list|--set k=v|--clear")
-	}
-	sess, err := c.getSession(args[0])
-	if err != nil {
-		return "", err
-	}
-	flag := args[1]
-
-	return sess.withPage(ctx, func(page *rod.Page) (string, error) {
-		switch flag {
-		case "--list":
-			cookies, err := page.Cookies(nil)
-			if err != nil {
-				return "", fmt.Errorf("playwright cookies: %w", err)
-			}
-			if len(cookies) == 0 {
-				return "No cookies", nil
-			}
-			data, _ := json.MarshalIndent(cookies, "", "  ")
-			return fmt.Sprintf("Cookies (%d):\n%s", len(cookies), string(data)), nil
-
-		case "--set":
-			if len(args) < 3 {
-				return "", fmt.Errorf("playwright cookies --set: requires name=value")
-			}
-			info, _ := page.Info()
-			domain := ""
-			if info != nil {
-				domain = info.URL
-			}
-			var cookies []*proto.NetworkCookieParam
-			for _, pair := range args[2:] {
-				kv := strings.SplitN(pair, "=", 2)
-				if len(kv) != 2 {
-					continue
-				}
-				cookies = append(cookies, &proto.NetworkCookieParam{
-					Name:  kv[0],
-					Value: kv[1],
-					URL:   domain,
-				})
-			}
-			if len(cookies) == 0 {
-				return "", fmt.Errorf("playwright cookies --set: no valid name=value pairs")
-			}
-			if err := page.SetCookies(cookies); err != nil {
-				return "", fmt.Errorf("playwright cookies --set: %w", err)
-			}
-			return fmt.Sprintf("Set %d cookie(s)", len(cookies)), nil
-
-		case "--clear":
-			cookies, _ := page.Cookies(nil)
-			for _, ck := range cookies {
-				_ = proto.NetworkDeleteCookies{
-					Name:   ck.Name,
-					Domain: ck.Domain,
-				}.Call(page)
-			}
-			return fmt.Sprintf("Cleared %d cookie(s)", len(cookies)), nil
-
-		default:
-			return "", fmt.Errorf("playwright cookies: unknown flag %q (expected --list, --set, or --clear)", flag)
-		}
 	})
 }
 

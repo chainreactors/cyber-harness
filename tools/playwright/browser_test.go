@@ -284,7 +284,7 @@ func execStringErr(cmd *Command, ctx context.Context, args []string) (string, er
 	return output.String(), err
 }
 
-func TestIntegration_Navigate(t *testing.T) {
+func TestIntegration_Goto(t *testing.T) {
 	skipIfNoBrowser(t)
 
 	srv := newTestServer(func(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +300,7 @@ func TestIntegration_Navigate(t *testing.T) {
 	cmd := New(t.TempDir())
 	defer cmd.Close()
 
-	out := execString(t, cmd, context.Background(), []string{"navigate", srv.URL})
+	out := execString(t, cmd, context.Background(), []string{"goto", srv.URL})
 	if !strings.Contains(out, "JS rendered content") {
 		t.Fatalf("expected JS-rendered content in output, got:\n%s", out)
 	}
@@ -356,7 +356,7 @@ func TestIntegration_Content(t *testing.T) {
 	}
 }
 
-func TestIntegration_Eval(t *testing.T) {
+func TestIntegration_Evaluate(t *testing.T) {
 	skipIfNoBrowser(t)
 
 	srv := newTestServer(func(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +368,7 @@ func TestIntegration_Eval(t *testing.T) {
 	cmd := New(t.TempDir())
 	defer cmd.Close()
 
-	out := execString(t, cmd, context.Background(), []string{"eval", srv.URL, "document.title"})
+	out := execString(t, cmd, context.Background(), []string{"evaluate", srv.URL, "document.title"})
 	if !strings.Contains(out, "Test Page") {
 		t.Fatalf("expected 'Test Page' in eval result, got:\n%s", out)
 	}
@@ -449,10 +449,10 @@ func TestIntegration_BrowserReuse(t *testing.T) {
 	defer cmd.Close()
 
 	// First call launches browser.
-	execString(t, cmd, context.Background(), []string{"navigate", srv.URL})
+	execString(t, cmd, context.Background(), []string{"goto", srv.URL})
 
 	// Second call should reuse the same browser.
-	execString(t, cmd, context.Background(), []string{"navigate", srv.URL})
+	execString(t, cmd, context.Background(), []string{"goto", srv.URL})
 }
 
 func TestIntegration_UnifiedSessionCommands(t *testing.T) {
@@ -482,12 +482,12 @@ func TestIntegration_UnifiedSessionCommands(t *testing.T) {
 
 	execString(t, cmd, context.Background(), []string{"open", srv.URL, "--session", "s1", "--timeout", "10"})
 
-	out := execString(t, cmd, context.Background(), []string{"navigate", "s1", "xpath://*[@id='app']"})
+	out := execString(t, cmd, context.Background(), []string{"goto", "s1", "xpath://*[@id='app']"})
 	if !strings.Contains(out, "Session text") {
 		t.Fatalf("expected session text, got:\n%s", out)
 	}
 
-	out = execString(t, cmd, context.Background(), []string{"text", "s1", "#app"})
+	out = execString(t, cmd, context.Background(), []string{"goto", "s1", "#app"})
 	if !strings.Contains(out, "Session text") {
 		t.Fatalf("expected session text via alias, got:\n%s", out)
 	}
@@ -497,7 +497,7 @@ func TestIntegration_UnifiedSessionCommands(t *testing.T) {
 		t.Fatalf("expected selected HTML, got:\n%s", out)
 	}
 
-	out = execString(t, cmd, context.Background(), []string{"eval", "s1", "document.title"})
+	out = execString(t, cmd, context.Background(), []string{"evaluate", "s1", "document.title"})
 	if !strings.Contains(out, "Session Page") {
 		t.Fatalf("expected title in eval result, got:\n%s", out)
 	}
@@ -513,7 +513,7 @@ func TestIntegration_UnifiedSessionCommands(t *testing.T) {
 	execString(t, cmd, context.Background(), []string{"network", "s1", "--start"})
 	time.Sleep(100 * time.Millisecond)
 	execString(t, cmd, context.Background(), []string{"click", "s1", "#fetcher"})
-	_, _ = execStringErr(cmd, context.Background(), []string{"wait", "s1", "--idle"})
+	_, _ = execStringErr(cmd, context.Background(), []string{"wait-for", "s1", "--idle"})
 	out = execString(t, cmd, context.Background(), []string{"network", "s1", "--dump"})
 	if !strings.Contains(out, "/api/data") {
 		t.Fatalf("expected captured API request, got:\n%s", out)
@@ -521,7 +521,7 @@ func TestIntegration_UnifiedSessionCommands(t *testing.T) {
 	execString(t, cmd, context.Background(), []string{"network", "s1", "--stop"})
 
 	execString(t, cmd, context.Background(), []string{"dialog", "s1", "--arm"})
-	execString(t, cmd, context.Background(), []string{"eval", "s1", "alert('aiscan_dialog_canary')"})
+	execString(t, cmd, context.Background(), []string{"evaluate", "s1", "alert('aiscan_dialog_canary')"})
 	out = execString(t, cmd, context.Background(), []string{"dialog", "s1", "--check"})
 	if !strings.Contains(out, "aiscan_dialog_canary") {
 		t.Fatalf("expected captured dialog, got:\n%s", out)
