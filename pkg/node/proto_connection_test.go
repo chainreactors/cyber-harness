@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -62,7 +66,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 			return nil
 		},
 	}
-	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {
+	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream, nil); err != io.EOF {
 		t.Fatalf("serveAgentConnection error = %v, want EOF", err)
 	}
 	if !menuCalled {
@@ -263,5 +267,129 @@ func TestUploadWritesAbsolutePath(t *testing.T) {
 	}
 	if data, err := os.ReadFile(dest); err != nil || string(data) != body {
 		t.Fatalf("file on disk = %q, err=%v; want %q", data, err, body)
+	}
+}
+
+func overrideReconnectTiming(t *testing.T, resetAfter time.Duration, delay func(int) time.Duration) {
+	t.Helper()
+	previousResetAfter := reconnectResetAfter
+	previousDelay := reconnectDelay
+	reconnectResetAfter = resetAfter
+	reconnectDelay = delay
+	t.Cleanup(func() {
+		reconnectResetAfter = previousResetAfter
+		reconnectDelay = previousDelay
+	})
+}
+
+func TestShouldResetReconnectBackoff(t *testing.T) {
+	acceptedAt := time.Now()
+	tests := []struct {
+		name           string
+		acceptedAt     time.Time
+		disconnectedAt time.Time
+		want           bool
+	}{
+		{name: "dial failure", disconnectedAt: acceptedAt},
+		{name: "short accepted session", acceptedAt: acceptedAt, disconnectedAt: acceptedAt.Add(reconnectResetAfter - time.Second)},
+		{name: "stable accepted session", acceptedAt: acceptedAt, disconnectedAt: acceptedAt.Add(reconnectResetAfter), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldResetReconnectBackoff(tt.acceptedAt, tt.disconnectedAt); got != tt.want {
+				t.Fatalf("shouldResetReconnectBackoff() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConnectGeneratedResetsBackoffAfterStableWebSocketSession(t *testing.T) {
+	const stableAfter = 80 * time.Millisecond
+	overrideReconnectTiming(t, stableAfter, func(attempt int) time.Duration {
+		return time.Duration(1<<attempt) * 20 * time.Millisecond
+	})
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	acceptedAt := make(chan time.Time, 4)
+	closedAt := make(chan time.Time, 3)
+	serverErrors := make(chan error, 4)
+	var connections atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			serverErrors <- err
+			return
+		}
+		defer conn.Close()
+
+		first, message, err := readAgentEnvelope(conn, false)
+		core, ok := message.(*aop.ProtocolMessage)
+		if err != nil || !ok || core.GetAgentHello() == nil {
+			serverErrors <- err
+			return
+		}
+		if err := writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "backoff-runner"}}})); err != nil {
+			serverErrors <- err
+			return
+		}
+
+		connection := connections.Add(1)
+		acceptedAt <- time.Now()
+		if connection == 3 {
+			time.Sleep(stableAfter + 30*time.Millisecond)
+		}
+		if connection < 4 {
+			closedAt <- time.Now()
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- connectGenerated(ctx, connectionConfig{
+			ServerURL: server.URL,
+			WSPath:    "/ws/runner",
+			Name:      "backoff-runner",
+			NodeID:    "backoff-runner",
+			Registry:  commands.NewRegistry(),
+			Logger:    telemetry.NopLogger(),
+		})
+	}()
+
+	accepted := make([]time.Time, 4)
+	closed := make([]time.Time, 3)
+	for i := range accepted {
+		select {
+		case accepted[i] = <-acceptedAt:
+		case err := <-serverErrors:
+			t.Fatalf("server error: %v", err)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for connection %d", i+1)
+		}
+		if i < len(closed) {
+			closed[i] = <-closedAt
+		}
+	}
+
+	assertDelay := func(name string, got, want time.Duration) {
+		t.Helper()
+		if got < want-10*time.Millisecond || got > want+35*time.Millisecond {
+			t.Fatalf("%s reconnect delay = %v, want about %v", name, got, want)
+		}
+	}
+	assertDelay("first", accepted[1].Sub(closed[0]), 20*time.Millisecond)
+	assertDelay("second", accepted[2].Sub(closed[1]), 40*time.Millisecond)
+	assertDelay("after stable session", accepted[3].Sub(closed[2]), 20*time.Millisecond)
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("connection loop did not stop")
 	}
 }
