@@ -333,9 +333,9 @@ func TestRecorderNativeBuildUsesSingleSDKScript(t *testing.T) {
 		"record-native-source:",
 		"record-native-package:",
 		"MINGW% MSYS% CYGWIN%",
-		`bash ".github/native/sdk.sh" fetch`,
-		`bash ".github/native/sdk.sh" build`,
-		`bash ".github/native/sdk.sh" package`,
+		`"$(BASH)" ".github/native/sdk.sh" fetch`,
+		`"$(BASH)" ".github/native/sdk.sh" build`,
+		`"$(BASH)" ".github/native/sdk.sh" package`,
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile missing recorder build contract %q", required)
