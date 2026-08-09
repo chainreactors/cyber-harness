@@ -100,6 +100,17 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 	return &webSocketEnvelopeStream{conn: conn, json: cc.JSONFrames}, nil
 }
 
+// Package variables keep the real reconnect loop testable without waiting for
+// production-scale delays. Tests overriding them must not run in parallel.
+var (
+	reconnectResetAfter = 60 * time.Second
+	reconnectDelay      = agent.RetryDelay
+)
+
+func shouldResetReconnectBackoff(acceptedAt, disconnectedAt time.Time) bool {
+	return !acceptedAt.IsZero() && disconnectedAt.Sub(acceptedAt) >= reconnectResetAfter
+}
+
 func connectGenerated(ctx context.Context, cc connectionConfig) error {
 	logger := cc.Logger
 	if logger == nil {
@@ -112,6 +123,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 			return ctx.Err()
 		}
 		stream, err := dialProtoWebSocket(ctx, cc)
+		acceptedAt := time.Time{}
 		if err == nil {
 			done := make(chan struct{})
 			go func() {
@@ -121,14 +133,21 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 				case <-done:
 				}
 			}()
-			err = serveAgentConnection(ctx, cc, logger, stream)
+			err = serveAgentConnection(ctx, cc, logger, stream, func() {
+				acceptedAt = time.Now()
+			})
 			close(done)
 			_ = stream.Close()
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		delay := agent.RetryDelay(attempt)
+		// A successful handshake alone is insufficient. Only a connection that
+		// stayed accepted long enough clears earlier failures.
+		if shouldResetReconnectBackoff(acceptedAt, time.Now()) {
+			attempt = 0
+		}
+		delay := reconnectDelay(attempt)
 		attempt++
 		logger.Warnf("connection lost (attempt %d), retrying in %v: %v", attempt, delay, err)
 		select {
@@ -145,7 +164,7 @@ func nextEnvelopeID(prefix string) string {
 	return prefix + ":" + strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + strconv.FormatUint(envelopeSequence.Add(1), 36)
 }
 
-func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream) error {
+func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream, onAccepted func()) error {
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
@@ -176,6 +195,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	coreAccepted, ok := acceptedMessage.(*aop.ProtocolMessage)
 	if !ok || coreAccepted.GetAgentAccepted() == nil || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
 		return fmt.Errorf("expected AOP agent acceptance")
+	}
+	if onAccepted != nil {
+		onAccepted()
 	}
 
 	connectionCtx, cancelConnection := context.WithCancel(ctx)
