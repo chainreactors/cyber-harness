@@ -251,7 +251,7 @@ CGO_MODE=0
 case "$PROFILE" in
     mini) ;;
     full)
-        EXTRA_TAGS="full,record_ffmpeg${EXTRA_TAGS:+,$EXTRA_TAGS}"
+        EXTRA_TAGS="full,record_ffmpeg,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
         AISCAN_BIN="aiscan-full"
         CGO_MODE=1
