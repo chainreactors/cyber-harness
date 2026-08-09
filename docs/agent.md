@@ -351,6 +351,12 @@ playwright sessions                                   # 列出活跃会话
 
 `--record` 选项开启操作录制，可用于生成自动化测试模板。
 
+### record — 桌面/窗口截图与录屏（Windows、Linux X11 full 版）
+
+`record` 是原生 Agent Tool，而不是 bash 伪命令。它支持桌面或指定窗口截图、固定时长录制，以及异步 `start` / `stop` / `status` 会话。窗口目标可以传 Windows HWND、X11 Window ID，或使用 PID 自动解析面积最大的可见主窗口。
+
+默认输出 PNG 截图和 H.264/MP4 视频，不录制音频；Wayland、最小化窗口和不可见后台窗口不受支持。详细参数见 [record 文档](record.md)。
+
 ### subagent — 子 agent
 
 subagent 工具创建独立子 agent 处理子任务。
