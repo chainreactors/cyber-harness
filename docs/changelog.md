@@ -1,15 +1,81 @@
 # Changelog
 
-## v1.0.0 — 稳定接口基线 + 发布链路收敛 + pre-v1 清理
+## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
-v1.0.0 将当前 CLI、配置、AOP/Connect 协议和 standard/full 构建定义为首个稳定基线。CI、nightly 与正式发布共用同一套构建矩阵；Web 控制台和 cyber-ui 纳入发布验证；pre-v1 阶段保留的别名、重复字段与兼容入口不再进入 1.0。
+v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。
 
-### Release Baseline
+### New Features
 
-- standard：Linux、macOS、Windows 的 amd64/arm64
-- full：Linux amd64/arm64、macOS amd64/arm64、Windows amd64
-- `golangci-lint`、Go 测试、生成文件、前端构建、cyber-ui 测试和发布包验证均为 CI 阻塞项
-- nightly 和正式 release 复用 `.github/workflows/go-release.yml`，避免构建标签和产物矩阵漂移
+**record — 原生桌面与窗口捕获**
+
+Full 版新增原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；官方 Windows amd64 与 Linux amd64/arm64 full 产物静态链接裁剪后的 FFmpeg/libx264 SDK。
+
+- 支持 `screenshot`、固定时长 `record`，以及异步 `start` / `stop` / `status`
+- 支持桌面、Windows HWND、X11 Window ID，或通过 PID 自动选择最大的可见窗口
+- 默认捕获鼠标，视频使用 H.264/libx264 编码并封装为 MP4；最多可并行运行四个录制会话
+- 截图通过 AOP media 返回有界预览；视频通过 task-relative `Resource.uri` 与分段 `aop.file` 请求传输
+- `make full` 自动下载、校验并缓存固定版本的 recorder SDK；维护者也可从固定源码重建 SDK
+
+Wayland、macOS、Windows arm64、无图形会话的 headless 主机和 Windows session 0 暂不支持原生录制。完整限制与构建说明见 [record 文档](record.md)。
+
+**浏览器自动化与 Katana headless 复用**
+
+Playwright、nuclei headless 和 Katana 现在共享同一套 Chromium 发现逻辑。可以通过 `AISCAN_BROWSER_PATH` 显式指定浏览器，也可以自动复用系统 Chrome/Chromium/Edge，减少不同浏览器工具各自下载或选择不同运行时的问题。
+
+- headless action 新增双击、hover、focus/blur、check/uncheck、drag、scroll、viewport 和自定义 DOM event
+- 新增 URL、request、response、可见性与断言等待，以及 cookie、localStorage/sessionStorage 操作
+- 支持 reload、前进/后退、替换页面内容和更完整的文件输入、网络请求与页面状态自动化
+- Playwright recorder 与 nuclei-compatible headless 模板保持命令和参数一致
+- CI 新增真实 Chrome 的登录、重定向、认证状态和 Katana SPA 渲染 E2E
+
+**Scanner-native Artifact 与关联 Loot**
+
+扫描节点不再先把所有工具结果压平成统一文本。gogo、spray、zombie、neutron 等 scanner 会通过 AOP 发出各自的结构化 `Artifact`；服务端保留原始字段，再按需要转换为 SCO 资产和漏洞文档。
+
+- `Artifact` 保存 tool、kind、target、时间戳和 scanner-native 数据
+- 稳定 `result_id` 将 `Loot` 高价值标记关联回原始 Artifact，避免复制或丢失证据
+- 弱口令、漏洞、Web 资产、服务和指纹可以携带统一来源关系进入 Web、报告和 Agent 上下文
+- scan、agent 和独立工具事件继续写入同一份 AOP ProtoJSONL，可恢复、格式化和外部消费
+
+**Shell 内存命令组合**
+
+AIScan 注册的 scan、spray、proton 等进程内命令现在可以像普通可执行文件一样参与 shell 管道和重定向。适配层按需创建，不启动额外常驻服务，并完整传递工作目录、stdin/stdout/stderr、退出码、调用上下文与取消信号。
+
+```bash
+scan -i target -j | proton
+proton -i . | grep critical
+scan -i target -j > scan.jsonl
+```
+
+Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中断后会回收遗留 runtime，避免无效桥接进程和临时目录累积。
+
+### Improvements
+
+**发布与原生构建链路**
+
+- standard 发布 Linux、macOS、Windows 的 amd64/arm64；full 发布 Linux/macOS amd64/arm64 与 Windows amd64
+- CI、nightly 和正式 release 共用 `.github/workflows/go-release.yml`，构建标签、版本注入、压缩和平台矩阵不再漂移
+- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算；缺少预构建 SDK 时 CI 可回退到源码构建
+- full profile 恢复静态 RE2，并验证 Windows recorder/RE2 原生库没有变成运行时 DLL 依赖
+- Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
+- 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
+
+**v1 包边界与历史清理**
+
+- 终端路由从 `core/terminal` 移至 `pkg/terminal`；`core` 只保留 AIScan 领域基础设施
+- 删除 pre-v1 的重复 CLI 别名、配置字段、Playwright 命令和临时文件协议入口
+- 移除不可用 recorder backend 的占位实现；不支持原生录制的平台不会注册伪 record 工具
+- 架构测试覆盖包方向、legacy 标识、发布 profile、protobuf 字段和子模块 pin，历史债务重新出现会直接阻断 CI
+- Web 控制台和 cyber-ui viewer 纳入生成一致性、前端构建和 E2E 门禁
+
+### Bug Fixes
+
+- 修复 zombie Runner 在取消任务时同时关闭和写入 `OutputCh` 的数据竞争，避免 race detector 报错及潜在 send-on-closed-channel
+- 修复 runner 在返回前未等待清理完成，以及 Node 上报 panic operation 后遗留运行状态的问题
+- 修复 Windows shell bridge 退出后遗留 runtime、PTY/tmux 并发测试互相污染和 offset 读取依赖无关时序的问题
+- 修复 Web terminal 重连 teardown 与事件订阅并发时的状态竞争
+- 修复 Windows recorder SDK 链接环境未跨 step 保留、MSYS 主机识别错误和 x264 下载源不稳定的问题
+- 修复 cyber-ui record 卡片的 focus 状态，使录制结果在 Web 时间线中保持正确交互
 
 ### Breaking Changes
 
@@ -18,10 +84,17 @@ v1.0.0 将当前 CLI、配置、AOP/Connect 协议和 standard/full 构建定义
 - Agent Web/AOP 连接仅使用 `--server-url`；IOA 仅使用 `--ioa-url`
 - AOP 文件分段读取直接使用 `ReadRequest.offset/limit` 与 `Result.offset/eof`，不再接受编码到 path 中的 range 请求
 - evaluator 调用必须显式提供 `InitialInput`
-- 终端路由从 `core/terminal` 移至 `pkg/terminal`，作为可复用传输组件而非核心领域能力
-- 删除不可用 recorder backend 的占位实现；仅在支持原生录屏且启用 `record_ffmpeg` 的 full profile 中注册 record 工具
+- AOP tool protocol 增加规范 `Artifact` / `Loot` 消息；依赖旧临时 loot/file-range 编码的客户端需要重新生成 protobuf 并迁移
 
-迁移细节和发布平台说明见 [v1.0.0 发布与迁移](v1.0.0.md)。
+### Release Matrix
+
+| 产物 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 |
+| 原生 `record` | X11 amd64/arm64 | 不支持 | amd64 |
+
+迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
 
 ## v0.4.0 — Web 控制台升级 + Agent 上下文管理 + SCO 标准化输出 + 统一接入 API
 
