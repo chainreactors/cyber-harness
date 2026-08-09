@@ -257,7 +257,25 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		return err
 	}
 	coreAccepted, ok := acceptedMessage.(*aop.ProtocolMessage)
-	if !ok || coreAccepted.GetAgentAccepted() == nil || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
+	if !ok || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
+		return fmt.Errorf("expected AOP enrollment response")
+	}
+	if coreAccepted.GetProtocolError() != nil {
+		rejected := coreAccepted.GetProtocolError()
+		code := strings.TrimSpace(rejected.GetCode())
+		message := strings.TrimSpace(rejected.GetMessage())
+		switch {
+		case code != "" && message != "":
+			return fmt.Errorf("AOP enrollment rejected (%s): %s", code, message)
+		case code != "":
+			return fmt.Errorf("AOP enrollment rejected (%s)", code)
+		case message != "":
+			return fmt.Errorf("AOP enrollment rejected: %s", message)
+		default:
+			return fmt.Errorf("AOP enrollment rejected")
+		}
+	}
+	if coreAccepted.GetAgentAccepted() == nil {
 		return fmt.Errorf("expected AOP agent acceptance")
 	}
 	if onAccepted != nil {

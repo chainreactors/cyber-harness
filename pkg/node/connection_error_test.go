@@ -15,9 +15,31 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/gorilla/websocket"
 )
+
+type rejectingEnvelopeStream struct {
+	hello   *aop.Envelope
+	replyTo string
+}
+
+func (s *rejectingEnvelopeStream) Send(envelope *aop.Envelope) error {
+	s.hello = envelope
+	return nil
+}
+
+func (s *rejectingEnvelopeStream) Recv() (*aop.Envelope, error) {
+	replyTo := s.replyTo
+	if replyTo == "" {
+		replyTo = s.hello.GetId()
+	}
+	return aop.MustWrap("rejected", replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{
+		Code: "ALREADY_EXISTS", Message: "runner ID is already connected by another process",
+	}}}), nil
+}
 
 func TestDescribeConnectionFailure(t *testing.T) {
 	tests := []struct {
@@ -159,5 +181,34 @@ func TestDialProtoWebSocketPreservesHandshakeStatus(t *testing.T) {
 	diagnostic := describeConnectionFailure(err)
 	if !strings.Contains(diagnostic, "WebSocket authentication rejected (HTTP 401)") {
 		t.Fatalf("diagnostic = %q", diagnostic)
+	}
+}
+
+func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
+	err := serveAgentConnection(
+		context.Background(),
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
+		telemetry.NopLogger(),
+		new(rejectingEnvelopeStream),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("enrollment rejection unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "ALREADY_EXISTS") || !strings.Contains(err.Error(), "already connected") {
+		t.Fatalf("enrollment error lost the server reason: %v", err)
+	}
+}
+
+func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
+	err := serveAgentConnection(
+		context.Background(),
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
+		telemetry.NopLogger(),
+		&rejectingEnvelopeStream{replyTo: "another-request"},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "expected AOP enrollment response") {
+		t.Fatalf("uncorrelated response was accepted as an enrollment rejection: %v", err)
 	}
 }
