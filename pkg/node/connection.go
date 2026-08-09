@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/gorilla/websocket"
 )
 
 const DefaultWSPath = "/api/aop/node/ws"
@@ -39,6 +40,8 @@ type connectionConfig struct {
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
 	PTYRouter     func() (*terminal.Router, error)
+	Dialer        *websocket.Dialer
+	Liveness      websocketLiveness
 }
 
 func connect(ctx context.Context, config connectionConfig) error {
