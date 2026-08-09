@@ -277,8 +277,9 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 
 	makefile := readRepositoryFile(t, root, "Makefile")
 	for _, required := range []string{
-		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build",
-		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build",
+		"GO_LDFLAGS ?= -s -w",
+		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
+		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
 		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
 		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static",
 	} {

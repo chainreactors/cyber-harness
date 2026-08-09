@@ -24,6 +24,7 @@ FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
 FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static
 BUILD_FLAGS := -trimpath -buildvcs=false
+GO_LDFLAGS ?= -s -w
 
 UNAME_S := $(shell uname -s 2>/dev/null)
 ifeq ($(OS),Windows_NT)
@@ -76,7 +77,7 @@ frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
 standard: prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
+	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 # The full binary embeds web/static, so frontend must finish first.
@@ -106,7 +107,7 @@ else
 endif
 
 full: frontend record-native prepare
-	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(CGO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
 web-build: full
