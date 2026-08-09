@@ -318,6 +318,61 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	}
 }
 
+func TestRecorderNativeBuildUsesSingleSDKScript(t *testing.T) {
+	root := repositoryRoot(t)
+	obsoleteScripts := []string{
+		"build-" + "linux.sh",
+		"build-" + "windows.sh",
+		"fetch" + ".sh",
+		"package" + ".sh",
+		"verify-ffmpeg-" + "config.sh",
+	}
+	makefile := readRepositoryFile(t, root, "Makefile")
+	for _, required := range []string{
+		"record-native:",
+		"record-native-source:",
+		"record-native-package:",
+		"MINGW% MSYS% CYGWIN%",
+		`bash ".github/native/sdk.sh" fetch`,
+		`bash ".github/native/sdk.sh" build`,
+		`bash ".github/native/sdk.sh" package`,
+	} {
+		if !strings.Contains(makefile, required) {
+			t.Errorf("Makefile missing recorder build contract %q", required)
+		}
+	}
+
+	for _, rel := range []string{
+		"Makefile",
+		"build.sh",
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".github", "workflows", "go-release.yml"),
+		filepath.Join(".github", "workflows", "record-native.yml"),
+	} {
+		content := readRepositoryFile(t, root, rel)
+		for _, obsolete := range obsoleteScripts {
+			if strings.Contains(content, obsolete) {
+				t.Errorf("%s still references removed recorder script %q", rel, obsolete)
+			}
+		}
+	}
+	for _, obsolete := range obsoleteScripts {
+		path := filepath.Join(root, ".github", "native", obsolete)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("removed recorder script still exists: %s", relative(root, path))
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", relative(root, path), err)
+		}
+	}
+
+	sdk := readRepositoryFile(t, root, filepath.Join(".github", "native", "sdk.sh"))
+	for _, command := range []string{"fetch|build|env)", "package)"} {
+		if !strings.Contains(sdk, command) {
+			t.Errorf("recorder SDK script missing command dispatch %q", command)
+		}
+	}
+}
+
 func readRepositoryFile(t *testing.T, root, rel string) string {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join(root, rel))

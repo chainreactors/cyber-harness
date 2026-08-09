@@ -43,7 +43,7 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 | Edition | Description |
 | --- | --- |
 | **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | Full — adds playwright browser, passive recon, katana crawler |
+| **aiscan-full** | Full — adds playwright, passive recon, katana, and native recording on supported Windows/Linux systems |
 
 | OS | Arch | Standard | Full |
 | --- | --- | --- | --- |
@@ -111,7 +111,9 @@ The standalone agent executable is no longer a maintained build or release
 target. Reference wiring remains in `examples/agent` and can be run manually
 with `go run ./examples/agent --help`. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
-assets are embedded into the binary:
+assets are embedded into the binary. On supported Windows/Linux targets it
+also downloads and verifies the pinned recorder SDK; use
+`make record-native-source` to build that SDK from pinned sources instead.
 
 ```bash
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
@@ -127,7 +129,7 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 
 ### Design
 
-- **Single binary, zero dependencies** — statically-linked, drop-in deployment
+- **Single-file distribution** — bundled engines need no separate runtime install; OS graphics and system libraries still apply
 - **Minimal agent core** — composable ~160-line loop; tools, retries, evaluation are plugged in, not hardcoded
 - **Plugin architecture** — adding a new tool is one file; heavy dependencies (playwright, katana) are compile-time optional
 - **Embedded skills** — each tool carries its own usage docs and tactical guidance, loaded by the agent on demand
@@ -167,6 +169,7 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 - playwright — headless Chromium sessions, screenshots, network capture
 - katana — web crawler with standard/headless/hybrid engines
 - passive — cyberspace search (FOFA, Hunter, Shodan)
+- record — native desktop/window screenshots and H.264/MP4 recording (Windows and Linux X11)
 
 **Utilities**
 - tmux — background task sessions with incremental output delivery
@@ -243,6 +246,7 @@ llm:
 | [Scan Mode](docs/scan.md) | Pipeline, AI enhancements, output formats |
 | [Agent Mode](docs/agent.md) | Toolset, Goal Evaluation, REPL |
 | [IOA](docs/ioa.md) | Multi-agent architecture, Space/Node/Message model |
+| [Record Tool](docs/record.md) | Desktop/window capture, platform support, native builds |
 | [Reference](docs/reference.md) | Configuration, providers, flags, scanner usage, FAQ |
 | [Changelog](docs/changelog.md) | Version history |
 

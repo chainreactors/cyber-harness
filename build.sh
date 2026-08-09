@@ -299,21 +299,13 @@ if [ "$PROFILE" = "full" ]; then
     case "$HOST_OS" in
         linux|windows)
             if [ "${AISCAN_RECORD_BUILD_FROM_SOURCE:-0}" = "1" ]; then
-                bash ".github/native/build-${HOST_OS}.sh"
+                bash ".github/native/sdk.sh" build "$HOST_OS" "$HOST_ARCH"
             else
-                bash ".github/native/fetch.sh" "$HOST_OS" "$HOST_ARCH"
+                bash ".github/native/sdk.sh" fetch "$HOST_OS" "$HOST_ARCH"
             fi
-            RECORD_PREFIX="${AISCAN_RECORD_PREFIX:-$(pwd)/.cache/record-native/${HOST_OS}-${HOST_ARCH}}"
-            export PKG_CONFIG_PATH="${RECORD_PREFIX}/lib/pkgconfig"
-            export CGO_CFLAGS="-I${RECORD_PREFIX}/include"
-            export CGO_LDFLAGS="-L${RECORD_PREFIX}/lib"
-            if [ "$HOST_OS" = "windows" ]; then
-                export PKG_CONFIG="$(pwd)/.github/native/pkg-config-static.cmd"
-                export CGO_LDFLAGS="${CGO_LDFLAGS} -static -static-libgcc"
-            else
-                chmod +x ".github/native/pkg-config-static.sh"
-                export PKG_CONFIG="$(pwd)/.github/native/pkg-config-static.sh"
-            fi
+            while IFS= read -r assignment; do
+                export "$assignment"
+            done < <(bash ".github/native/sdk.sh" env "$HOST_OS" "$HOST_ARCH")
             ;;
     esac
 fi
