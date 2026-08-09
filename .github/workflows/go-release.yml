@@ -15,12 +15,33 @@ on:
         required: false
         default: master
         type: string
+      prerelease:
+        description: 'Publish immediately as a prerelease instead of creating a draft'
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+      target:
+        description: 'Branch or commit to tag if the tag does not exist'
+        required: false
+        default: master
+        type: string
+      prerelease:
+        description: 'Publish immediately as a prerelease instead of creating a draft'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag != '' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
@@ -31,6 +52,9 @@ jobs:
 
   # ── Resolve the tag once, share with all jobs ───────────────────
   prepare:
+    # Nightly tag pushes also match v*.*.*. The nightly workflow invokes this
+    # workflow explicitly with prerelease=true, so ignore the duplicate push.
+    if: github.event_name != 'push' || !contains(github.ref_name, '-nightly.')
     runs-on: ubuntu-22.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -38,7 +62,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.ref }}
+          ref: ${{ inputs.tag != '' && inputs.target || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -46,7 +70,7 @@ jobs:
         id: tag
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          if [[ -n "${{ inputs.tag }}" ]]; then
             TAG="${{ inputs.tag }}"
             TARGET="${{ inputs.target }}"
           else
@@ -58,8 +82,8 @@ jobs:
             echo "Invalid release tag: ${TAG}" >&2
             exit 1
           fi
-          if [[ "${TAG}" == *nightly* ]]; then
-            echo "Nightly tags must be released by nightly.yml: ${TAG}" >&2
+          if [[ "${TAG}" == *nightly* && "${{ inputs.prerelease }}" != "true" ]]; then
+            echo "Nightly tags require prerelease=true: ${TAG}" >&2
             exit 1
           fi
 
@@ -68,7 +92,7 @@ jobs:
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "Tag ${TAG} exists"
           else
-            if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            if [[ -z "${{ inputs.tag }}" ]]; then
               echo "Tag ${TAG} was expected to exist for a tag push event" >&2
               exit 1
             fi
@@ -429,7 +453,10 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          prev_tag=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || echo "")
+          prev_tag=$(git tag --sort=-v:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -Fxv "${TAG}" \
+            | head -1 || true)
           if [ -n "$prev_tag" ]; then
             git log --pretty=format:"- %s" "${prev_tag}..${TAG}" --no-merges | grep -v "^- ${TAG}$" | grep -v "^- docs" > /tmp/changelog.md || true
           else
@@ -444,8 +471,13 @@ jobs:
           # Delete existing release if any (replace mode)
           gh release delete "${TAG}" --yes 2>/dev/null || true
 
+          release_flags=(--draft)
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then
+            release_flags=(--prerelease)
+          fi
+
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes-file "${{ steps.changelog.outputs.path }}" \
-            --draft \
+            "${release_flags[@]}" \
             dist/release/*
