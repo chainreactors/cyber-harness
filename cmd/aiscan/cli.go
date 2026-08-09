@@ -65,13 +65,12 @@ type serveCommand struct {
 }
 
 type ioaCommand struct {
-	cfg.IOAOptions  `group:"Server Options"`
-	LegacyServerURL string         `long:"server-url" description:"Deprecated alias for --ioa-url" hidden:"true"`
-	Serve           struct{}       `command:"serve" description:"Run the standalone agent server"`
-	Spaces          struct{}       `command:"spaces" description:"List all spaces"`
-	Messages        ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context         ioaContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes           ioaNodesCmd    `command:"nodes" description:"List nodes"`
+	cfg.IOAOptions `group:"Server Options"`
+	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
+	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
+	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
+	Context        ioaContextCmd  `command:"context" description:"View message thread/context"`
+	Nodes          ioaNodesCmd    `command:"nodes" description:"List nodes"`
 }
 
 type ioaMessagesCmd struct {
@@ -390,7 +389,6 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	}
 	option.Prompt = cfg.ResolveString(manual.Prompt, option.Prompt)
 	option.TaskFile = cfg.ResolveString(manual.TaskFile, option.TaskFile)
-	option.WebURL = cfg.ResolveString(manual.WebURL, option.WebURL)
 	option.Resume = cfg.ResolveString(manual.Resume, option.Resume)
 	if manual.SaveSession {
 		option.SaveSession = true
@@ -423,9 +421,6 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 		opt.ReconOptions = cli.Web.ReconOptions
 	case "ioa":
 		opt.IOAOptions = cli.IOA.IOAOptions
-		if opt.IOAURL == "" {
-			opt.IOAURL = cli.IOA.LegacyServerURL
-		}
 	}
 
 	return opt
@@ -534,7 +529,6 @@ var scannerKnownFlags = []knownFlag{
 	}},
 	{names: []string{"--prompt", "-p"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Prompt = v }},
 	{names: []string{"--task-file"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TaskFile = v }},
-	{names: []string{"--web-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.WebURL = v }},
 	{names: []string{"--skill", "-s"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Skills = append(o.Skills, v) }},
 	{names: []string{"--provider"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Provider = v }},
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.BaseURL = v }},

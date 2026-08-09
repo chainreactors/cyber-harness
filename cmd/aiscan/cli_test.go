@@ -631,6 +631,17 @@ func TestParseCLIAgentServerURL(t *testing.T) {
 	}
 }
 
+func TestParseCLIRejectsRemovedServerURLAliases(t *testing.T) {
+	for _, args := range [][]string{
+		{"agent", "--web-url", "http://127.0.0.1:8080"},
+		{"ioa", "serve", "--server-url", "http://127.0.0.1:9999"},
+	} {
+		if _, err := parseCLI(args); err == nil {
+			t.Fatalf("parseCLI(%q) accepted a removed flag", args)
+		}
+	}
+}
+
 func TestAgentConsoleArgsForLine(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -648,7 +659,7 @@ func TestAgentConsoleArgsForLine(t *testing.T) {
 		{name: "quit", input: "/quit", wantArgs: []string{"/quit"}},
 		{name: "skill slash command preserves prompt", input: `/scan explain "scan result"`, wantArgs: []string{"/scan", `explain "scan result"`}},
 		{name: "unknown slash command", input: "/unknown", wantArgs: []string{"/unknown"}},
-		{name: "legacy skill command", input: "/skill:scan check target", wantArgs: []string{"__prompt", "/skill:scan check target"}},
+		{name: "colon-prefixed unknown command stays prompt", input: "/skill:scan check target", wantArgs: []string{"__prompt", "/skill:scan check target"}},
 	}
 
 	for _, tt := range tests {
@@ -688,7 +699,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 	parsed, err := parseCLI([]string{
 		"ioa",
 		"serve",
-		"--server-url", "http://127.0.0.1:9999",
+		"--ioa-url", "http://127.0.0.1:9999",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)

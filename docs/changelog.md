@@ -201,7 +201,7 @@ go run ./examples/acp/connectrpc --server http://127.0.0.1:8080 --token demo
 ### Breaking Changes
 
 - `llm.providers` 现在是可手动切换的 profile 列表，不再在请求失败后自动切换 Provider；使用 `llm.active_profile`、Web 设置页或 `/provider set` 显式选择
-- Agent 连接 AIScan Web/AOP 统一使用 `--server-url`；旧 `--web-url` 仅作为隐藏兼容别名。IOA 仍可通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
+- Agent 连接 AIScan Web/AOP 统一使用 `--server-url`；IOA 通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
 - 官方 Release 不再单独发布 `aiscan-agent`，请统一使用 `aiscan agent`
 - 独立的 gogo、spray、neutron、proton 等顶层 tool skill 已收敛到 `aiscan` skill；工具细节改为调用时加载 `okf/easm` 或 `okf/runtime` concept
 - 报告输出由单一 Markdown 内容调整为 `index.md` + `findings/<id>.md` 的 OKF 风格 bundle
@@ -489,7 +489,7 @@ aiscan agent --resume .aiscan/sessions/2026-06-22_scan.json
 
 ## v0.2.5 — Arsenal 工具管理 + TUI 重设计 + 命令接口统一 + PTY 平台整合
 
-新增 Arsenal（crtm）安全工具包管理器；Playwright 新增 `-s` 全局 session flag；TUI verbose 渲染全面重设计；命令接口统一为全局 OutputWriter；4 平台 PTY 文件整合为单一 go-pty wrapper。
+新增 Arsenal（crtm）安全工具包管理器；Playwright 新增 `-s` 全局 session flag；TUI verbose 渲染全面重设计；命令执行统一为 invocation 级输入输出；4 平台 PTY 文件整合为单一 go-pty wrapper。
 
 ### New Features
 
@@ -551,8 +551,8 @@ playwright -s=s1 goto
 
 **命令接口统一**
 
-- `Command.Execute` 签名简化：移除 `io.Writer` 参数，统一通过 `fmt.Fprint(commands.Output, ...)` 输出
-- `pkg/commands/output.go`：全局 `OutputWriter` + exec hooks，Registry 在每次执行前自动配置 Output（`Reset`/`Captured`）
+- Command 执行统一使用 invocation 级输入输出流，避免跨会话共享全局 writer
+- 每次伪命令调用持有独立的输入输出流和执行状态，Registry 不再切换进程级输出对象
 - `FetchTool` wrapper 移除：`fetch` 从 `RegisterTool` 转为直接 `Register` 的 Command
 - `SetExecHooks` 注入 tmux.Manager，打破 commands ↔ output 的循环依赖
 
@@ -579,7 +579,7 @@ playwright -s=s1 goto
 
 ### Breaking Changes
 
-- **`Command.Execute` 签名变更**：`Execute(ctx, args []string) error`（移除 `io.Writer` 参数），所有 pseudo-command 改用 `commands.Output` 全局 writer
+- **Command 执行模型变更**：命令通过 invocation 级输入输出流读写，不再共享进程级输出状态
 - **`FetchTool` 移除**：`fetch` 不再是独立 `AgentTool`，改为普通 `Command` 通过 `Register` 注册
 
 ---

@@ -19,7 +19,7 @@ libcstx 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulne
 
 该边界按“语义”而不是按“调用者”划分：Runner 只通过 WebSocket 接入 Web；浏览器的管理/历史查询走 ConnectRPC，但浏览器的实时 Session/Turn、命令、文件与 PTY 也走 WebSocket。Web 服务拥有 Agent Pool、调度、持久化和管理 RPC，节点只拥有自身 Runtime、工具与执行状态。
 
-Agent 对外只需要一个 `--server-url` 作为 AIScan Web/AOP 基址；旧 `--web-url` 是同一字段的兼容别名。IOA 使用独立的 `--ioa-url`，但 Web 默认托管同源 IOA，因此 Web Agent 未指定 `--ioa-url` 时自动使用 `<server-url>/ioa`。
+Agent 对外只使用 `--server-url` 作为 AIScan Web/AOP 基址。IOA 使用独立的 `--ioa-url`；Web 默认托管同源 IOA，因此 Web Agent 未指定 `--ioa-url` 时自动使用 `<server-url>/ioa`。
 
 ## 3. Namespace 所有权
 

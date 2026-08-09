@@ -7,18 +7,18 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/tmux"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	coreterminal "github.com/chainreactors/aiscan/core/terminal"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/terminal"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
 // their router directly from AgentRuntime and do not inspect the bash tool.
-func NewPTYRouter(reg *commands.CommandRegistry) *coreterminal.Router {
+func NewPTYRouter(reg *commands.CommandRegistry) *terminal.Router {
 	mgr := RegistryPTYManager(reg)
 	if mgr == nil {
-		return coreterminal.NewRuntimeRouter(nil)
+		return terminal.NewRuntimeRouter(nil)
 	}
-	return coreterminal.NewRuntimeRouter(mgr.Manager)
+	return terminal.NewRuntimeRouter(mgr.Manager)
 }
 
 // RegistryPTYManager extracts the tmux Manager from the "bash" tool in the
@@ -42,7 +42,7 @@ func RegistryPTYManager(reg *commands.CommandRegistry) *tmux.Manager {
 
 // SubscribePTYSessions subscribes to PTY session changes and broadcasts
 // session state to all active PTY streams.
-func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) func() {
+func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *terminal.Router, send func(*ptypb.ProtocolMessage)) func() {
 	if mgr == nil || router == nil || send == nil {
 		return func() {}
 	}
@@ -92,6 +92,6 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *corete
 }
 
 // BroadcastPTYSessions sends the current PTY session list to all active streams.
-func BroadcastPTYSessions(router *coreterminal.Router, send func(*ptypb.ProtocolMessage)) {
+func BroadcastPTYSessions(router *terminal.Router, send func(*ptypb.ProtocolMessage)) {
 	router.BroadcastSessions(send)
 }

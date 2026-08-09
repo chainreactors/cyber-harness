@@ -85,7 +85,7 @@ cyberhub:
   key: testkey
   mode: override
 agent:
-  web_url: http://web:8080
+  server_url: http://web:8080
 ioa:
   url: http://ioa:8765
   space: case-1
@@ -104,7 +104,7 @@ ioa:
 		{"CyberhubURL", opt.CyberhubURL, "http://hub:9000"},
 		{"CyberhubKey", opt.CyberhubKey, "testkey"},
 		{"CyberhubMode", opt.CyberhubMode, "override"},
-		{"WebURL", opt.WebURL, "http://web:8080"},
+		{"ServerURL", opt.ServerURL, "http://web:8080"},
 		{"IOAURL", opt.IOAURL, "http://ioa:8765"},
 		{"Space", opt.Space, "case-1"},
 	}
@@ -672,31 +672,6 @@ func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
 	}
 	if option.Provider != "openai" || option.APIKey != "" || option.BaseURL != "" || option.Model != "" {
 		t.Fatalf("vendor-specific LLM environment should be ignored: %#v", option.LLMOptions)
-	}
-}
-
-func TestApplyEnvironmentIgnoresLegacyAliases(t *testing.T) {
-	values := map[string]string{
-		"AISCAN_LLM_PROVIDER": "anthropic",
-		"AISCAN_LLM_BASE_URL": "https://legacy.example/v1",
-		"AISCAN_LLM_MODEL":    "legacy-model",
-		"AISCAN_LLM_API_KEY":  "legacy-key",
-		"OPENAI_BASEURL":      "https://legacy-openai.example/v1",
-		"CYBERHUB_URL":        "https://legacy-cyberhub.example",
-		"TAVILY_API_KEYS":     "legacy-tavily-key",
-	}
-	lookup := func(name string) (string, bool) {
-		value, ok := values[name]
-		return value, ok
-	}
-
-	option := Option{}
-	applyEnvironment(&option, Option{}, lookup)
-	if option.Provider != "" || option.BaseURL != "" || option.Model != "" || option.APIKey != "" {
-		t.Fatalf("legacy LLM aliases were applied: %#v", option.LLMOptions)
-	}
-	if option.CyberhubURL != "" || option.TavilyKey != "" {
-		t.Fatalf("legacy integration aliases were applied: cyberhub=%q tavily=%q", option.CyberhubURL, option.TavilyKey)
 	}
 }
 

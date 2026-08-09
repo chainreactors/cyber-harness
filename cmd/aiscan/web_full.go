@@ -182,7 +182,6 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	serverURL := &url.URL{Scheme: "http", Host: listenAddr}
 	serverURL.User = url.User(accessKey)
 	option.ServerURL = serverURL.String()
-	option.WebURL = option.ServerURL
 	if option.IOANodeID == "" && option.IOANodeName == "" {
 		option.IOANodeName = "local"
 	}

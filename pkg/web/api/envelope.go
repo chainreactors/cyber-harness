@@ -9,7 +9,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	coreterminal "github.com/chainreactors/aiscan/core/terminal"
+	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -292,7 +292,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		if !ok {
 			return fmt.Errorf("unexpected application PTY message %T", message)
 		}
-		streamID := coreterminal.StreamID(value)
+		streamID := terminal.StreamID(value)
 		if streamID == "" {
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 			return nil
@@ -301,7 +301,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("PTY is unavailable"))
 			return nil
 		}
-		nodeID := coreterminal.NodeID(value)
+		nodeID := terminal.NodeID(value)
 		stateMu.Lock()
 		route, routed := ptyRoutes[streamID]
 		stateMu.Unlock()
@@ -331,7 +331,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				}
 			}(streamID, messages)
 			if !online {
-				_ = send(streamID, "", coreterminal.NewDetached(streamID))
+				_ = send(streamID, "", terminal.NewDetached(streamID))
 			}
 		}
 		if forwardErr := backends.PTY.ForwardPTY(nodeID, value); forwardErr != nil {
@@ -339,7 +339,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			removePTY(streamID, false)
 			return nil
 		}
-		if coreterminal.IsDetach(value) {
+		if terminal.IsDetach(value) {
 			removePTY(streamID, false)
 		}
 		return nil

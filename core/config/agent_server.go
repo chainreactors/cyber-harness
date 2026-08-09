@@ -6,30 +6,22 @@ import (
 	"strings"
 )
 
-// ResolveAgentServerURLs makes --server-url the Web/AOP endpoint.
-// Deprecated --web-url is only an alias. IOA remains independently configurable
-// and falls back to the Web server's same-origin /ioa endpoint when omitted.
+// ResolveAgentServerURLs validates the Web/AOP endpoint. IOA remains
+// independently configurable and falls back to the Web server's same-origin
+// /ioa endpoint when omitted.
 func ResolveAgentServerURLs(option *Option) error {
 	if option == nil {
 		return fmt.Errorf("agent options are required")
 	}
 	serverURL := strings.TrimSpace(option.ServerURL)
-	legacyWebURL := strings.TrimSpace(option.WebURL)
-	if serverURL == "" && legacyWebURL == "" {
-		return fmt.Errorf("--server-url is required for web transport")
-	}
-	if serverURL != "" && legacyWebURL != "" && normalizeServerURL(serverURL) != normalizeServerURL(legacyWebURL) {
-		return fmt.Errorf("--server-url and deprecated --web-url refer to different AIScan servers")
-	}
 	if serverURL == "" {
-		serverURL = legacyWebURL
+		return fmt.Errorf("--server-url is required for web transport")
 	}
 	serverURL, err := validateAgentServerURL(serverURL)
 	if err != nil {
 		return err
 	}
 	option.ServerURL = serverURL
-	option.WebURL = serverURL
 	if strings.TrimSpace(option.IOAURL) == "" {
 		option.IOAURL = deriveIOAURL(serverURL)
 	}
@@ -56,8 +48,4 @@ func deriveIOAURL(serverURL string) string {
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/ioa"
 	parsed.RawPath = ""
 	return strings.TrimRight(parsed.String(), "/")
-}
-
-func normalizeServerURL(value string) string {
-	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
