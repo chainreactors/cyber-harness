@@ -37,6 +37,8 @@ community.yaml
 /aiscan-deploy.yaml
 /*.log
 /.claude/
+/.codex/
+/.playwright-cli/
 /.cache/
 # operator scan outputs dumped at repo root (screenshots, IP lists, app dumps, findings/reports)
 /*.png
