@@ -36,15 +36,17 @@ import (
 
 type webSocketEnvelopeStream struct {
 	conn *websocket.Conn
-	mu   sync.Mutex
 	json bool
 }
 
 const (
-	websocketPongWait   = 90 * time.Second
+	// Stay below common 60-second proxy and NAT idle timeouts.
 	websocketPingPeriod = 30 * time.Second
-	websocketWriteWait  = 10 * time.Second
-	reconnectResetAfter = 60 * time.Second
+	// Bound a stalled application or control-frame write.
+	websocketWriteWait = 10 * time.Second
+
+	websocketPongWait    = 3 * websocketPingPeriod
+	reconnectStableAfter = websocketPongWait + websocketPingPeriod
 )
 
 func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool) (*webSocketEnvelopeStream, error) {
@@ -108,8 +110,6 @@ func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 }
 
 func shouldResetReconnectBackoff(connectedAt, disconnectedAt time.Time) bool {
-	return !connectedAt.IsZero() && disconnectedAt.Sub(connectedAt) >= reconnectResetAfter
+	return !connectedAt.IsZero() && disconnectedAt.Sub(connectedAt) >= reconnectStableAfter
 }
 
 func connectGenerated(ctx context.Context, cc connectionConfig) error {

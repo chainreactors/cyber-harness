@@ -27,6 +27,9 @@ func TestWebsocketLivenessUsesBoundedIntervals(t *testing.T) {
 	if websocketPingPeriod >= websocketPongWait {
 		t.Fatalf("ping period %v must be shorter than pong wait %v", websocketPingPeriod, websocketPongWait)
 	}
+	if reconnectStableAfter <= websocketPongWait {
+		t.Fatalf("stable window %v must exceed pong wait %v", reconnectStableAfter, websocketPongWait)
+	}
 }
 
 func (c *deadlineRecordingConn) SetReadDeadline(deadline time.Time) error {
