@@ -2,11 +2,49 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestAgentTokenRequiresAuthenticatedSessionAndDisablesCaching(t *testing.T) {
+	service := NewService(ServiceConfig{AccessKey: "test-token"})
+	defer service.Close()
+	server := httptest.NewServer(newHandler(service, nil, nil))
+	defer server.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	assertStatus(t, client, http.MethodGet, server.URL+"/api/auth/agent-token", nil, http.StatusUnauthorized)
+	assertStatus(t, client, http.MethodPost, server.URL+"/api/auth/login", bytes.NewBufferString(`{"token":"test-token"}`), http.StatusOK)
+
+	response, err := client.Get(server.URL + "/api/auth/agent-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	if response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Pragma") != "no-cache" {
+		t.Fatalf("unsafe cache headers: Cache-Control=%q Pragma=%q", response.Header.Get("Cache-Control"), response.Header.Get("Pragma"))
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Token != "test-token" {
+		t.Fatalf("token = %q, want configured access key", body.Token)
+	}
+}
 
 func TestAccessKeyAuthBrowserSession(t *testing.T) {
 	mux := http.NewServeMux()

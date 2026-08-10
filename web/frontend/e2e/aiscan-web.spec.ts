@@ -88,6 +88,17 @@ test.describe('HTTP shell and authentication', () => {
     expect(ioa.nodes.some((node: { name?: string }) => node.name === 'aiscan.web')).toBeTruthy()
   })
 
+  test('agent token is available only to authenticated clients and is not cacheable', async ({ request }) => {
+    const unauthorized = await request.get('/api/auth/agent-token')
+    expect(unauthorized.status()).toBe(401)
+
+    const authorized = await request.get('/api/auth/agent-token', { headers: apiHeaders() })
+    expect(authorized.ok()).toBeTruthy()
+    expect(authorized.headers()['cache-control']).toBe('no-store')
+    expect(authorized.headers()['pragma']).toBe('no-cache')
+    expect(await authorized.json()).toEqual({ token: API_TOKEN })
+  })
+
   test('management RPC rejects an invalid bearer token', async ({ request }) => {
     const response = await request.post('/aiscan.rpc.system.SystemService/GetStatus', {
       headers: {
@@ -137,6 +148,52 @@ test.describe('ConnectRPC management plane', () => {
 })
 
 test.describe('single AOP WebSocket browser plane', () => {
+  test('quick connect fetches and copies the authenticated agent token on demand', async ({ page }) => {
+    await openAuthenticatedApp(page)
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+
+    let tokenRequests = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/auth/agent-token') tokenRequests++
+    })
+
+    const trigger = page.getByRole('button', { name: 'Quick connect an agent' })
+    await trigger.click()
+    const quickConnect = page.getByRole('dialog', { name: 'Download & connect an agent' })
+    await expect(quickConnect.getByText('Token configured', { exact: true })).toBeVisible()
+
+    await quickConnect.getByRole('button', { name: 'Windows' }).click()
+    const installCommand = quickConnect.locator('pre').first()
+    await expect(installCommand).toContainText('https://github.com/chainreactors/aiscan/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
+    await expect(installCommand).not.toContainText('ghfast.top')
+
+    await quickConnect.getByRole('button', { name: 'China' }).click()
+    await expect(installCommand).toContainText('https://ghfast.top/https://github.com/chainreactors/aiscan/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
+    const chinaCommand = await installCommand.innerText()
+    await installCommand.locator('..').getByRole('button').click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(chinaCommand)
+
+    await quickConnect.getByRole('button', { name: 'Global' }).click()
+    await expect(installCommand).toContainText('https://github.com/chainreactors/aiscan/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
+    await expect(installCommand).not.toContainText('ghfast.top')
+
+    const commands = quickConnect.locator('pre')
+    await expect(commands).toHaveCount(2)
+    const connectCommand = await commands.last().innerText()
+    expect(connectCommand).toContain(`http://${API_TOKEN}@`)
+    expect(connectCommand).not.toContain('ACCESS_TOKEN')
+    expect(connectCommand).toContain('NODE_NAME')
+
+    await quickConnect.locator('button').last().click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(connectCommand)
+
+    await page.keyboard.press('Escape')
+    await expect(quickConnect).toBeHidden()
+    await trigger.click()
+    await expect(quickConnect.getByText('Token configured', { exact: true })).toBeVisible()
+    expect(tokenRequests).toBe(2)
+  })
+
   test('creates a session and streams a turn through the application AOP client', async ({ page, request }) => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
