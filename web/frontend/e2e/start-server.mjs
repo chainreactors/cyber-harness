@@ -106,7 +106,13 @@ if (frontendBuild.status !== 0) {
   process.exit(frontendBuild.status ?? 1)
 }
 
-const build = spawnSync('go', ['build', '-tags', 'full', '-o', binary, './cmd/aiscan'], {
+const build = spawnSync('go', [
+  'build',
+  '-tags', 'full',
+  '-ldflags', '-X github.com/chainreactors/aiscan/core/config.Version=1.0.0-rc1',
+  '-o', binary,
+  './cmd/aiscan',
+], {
   cwd: root,
   stdio: 'inherit',
 })

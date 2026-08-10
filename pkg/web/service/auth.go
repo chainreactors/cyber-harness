@@ -114,6 +114,16 @@ func (a *Auth) RegisterRoutes(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	mux.HandleFunc("GET /api/auth/agent-token", func(w http.ResponseWriter, r *http.Request) {
+		if !a.Authenticate(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing access key"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		writeJSON(w, http.StatusOK, map[string]string{"token": a.key()})
+	})
 }
 
 func (a *Auth) key() string {

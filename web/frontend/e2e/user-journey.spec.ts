@@ -133,16 +133,19 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     await page.getByRole('button', { name: 'Quick connect an agent' }).click()
     const quickConnect = page.getByRole('dialog', { name: 'Download & connect an agent' })
     await expect(quickConnect).toBeVisible()
+    await expect(quickConnect.getByText('Token configured', { exact: true })).toBeVisible()
     const commands = quickConnect.locator('pre')
     await expect(commands).toHaveCount(2)
     for (let i = 0; i < 2; i++) {
       const command = await commands.nth(i).innerText()
       expect(command.match(/--server-url/g)).toHaveLength(1)
       expect(command).not.toContain('--web-url')
-      expect(command).toContain('ACCESS_TOKEN')
+      expect(command).not.toContain('ACCESS_TOKEN')
+      expect(command).toContain(`http://${API_TOKEN}@`)
       expect(command).toContain('NODE_NAME')
     }
     await page.keyboard.press('Escape')
+    await expect(quickConnect).toBeHidden()
 
     // Authentication renewal must restore the complete durable transcript,
     // including accepted operator messages and command input.

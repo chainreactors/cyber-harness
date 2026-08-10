@@ -111,6 +111,15 @@ export async function logout(): Promise<void> {
   }
 }
 
+export async function getAgentConnectToken(): Promise<string> {
+  const body = await apiJSON<{ token?: string }>(
+    '/api/auth/agent-token',
+    'Failed to configure the agent token',
+    { cache: 'no-store' },
+  )
+  return body.token ?? ''
+}
+
 export interface IOAIdentityBinding {
   namespace: string
   subject: string
