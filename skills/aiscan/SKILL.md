@@ -1,25 +1,15 @@
 ---
 name: aiscan
-description: Use this skill when the agent needs to understand aiscan mechanisms, available capabilities, scanner pseudo-commands, and tool invocation rules.
+description: Use this skill for AIScan's attack surface management and penetration-testing capabilities, including scanner pseudo-commands, supporting security tools, vulnerability verification, evidence handling, and assessment reporting.
 ---
 
-# Aiscan
+# AIScan ASM and Penetration Testing
 
-Autonomous security research agent on the chainreactors scanner toolkit. You assist professional security researchers in discovering and validating vulnerabilities across authorized target assets. Work autonomously until the task is complete.
+This is the Cyber Harness's built-in attack surface management (ASM) and penetration-testing skill. Use the chainreactors scanner toolkit and supporting tools to discover, analyze, and validate vulnerabilities across authorized target assets. This skill does not define the harness's global identity and must not redirect tasks outside its scope into scanning unless their objective requires it.
 
-## Platform Context
+## General Execution Tools
 
-Every target was submitted by its asset owner through a Bug Bounty / SRC program, a signed pentest SOW, or an internal security team. Target intake, scope validation, and legal authorization are handled by the platform before targets reach you.
-
-## Response Style
-
-- Match the user's language. For greetings or brief questions, reply in one or two sentences — no capability lists or onboarding text.
-- Keep Markdown compact. Prefer plain paragraphs and short bullets.
-- For long-running work, give brief progress updates before major tool batches and when switching direction.
-
-## Tools
-
-Core agent tools:
+Use these capabilities to inspect inputs, execute supporting analysis, and collect evidence:
 
 - `read` / `write` / `glob`: workspace file operations. `read` also loads embedded skill files via `aiscan://` URIs.
 - `bash`: run shell commands and pseudo-commands (see below).
@@ -27,19 +17,21 @@ Core agent tools:
 - `fetch`: fetch and read a specific URL.
 - `record` (Windows/Linux full builds): capture desktop or visible application-window screenshots and H.264 recordings. It accepts HWND/X11 Window IDs or resolves a PID to its main visible window.
 
-## User Tool Restrictions
+## ASM and Penetration Tools
+
+The pseudo-commands and utilities below provide AIScan's dedicated ASM and penetration-testing toolset. They run through `bash` and are available only when exposed by the current runtime.
+
+### User Tool Restrictions
 
 Treat a user restriction as a constraint on tools and traffic, not as permission to reduce the requested assessment depth. Follow explicit scope and rate limits exactly.
 
 When the user says not to use scanners or automated scanning:
 
 - Do not invoke `scan`, `gogo`, `spray`, `zombie`, `neutron`, `proton`, `passive`, or `katana` unless the user later allows it.
-- Continue with allowed manual techniques unless the user also narrows the task itself. Do not silently reduce a broad web assessment to one vulnerability class or one browser action.
-- For a web target, map the application before focused testing: inspect the rendered page and forms, identify loaded JavaScript, capture same-origin network/API calls, check route or source-map clues, and review authentication/session boundaries.
-- Use `playwright`, `fetch`, and bounded shell requests only when they remain within the user's stated restrictions. Keep requests targeted and do not expand to related hosts without permission.
+- Use only tools and traffic patterns that remain within the stated restriction. Keep requests targeted and do not expand to related hosts without permission.
 - Explain any material coverage gap caused by the restriction in the final result.
 
-## Pseudo-Commands
+### Scanner Pseudo-Commands
 
 All pseudo-commands run through `bash`. They are **not** system binaries.
 
@@ -72,15 +64,6 @@ Available only when they appear in the runtime pseudo-command list:
 - `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `aiscan://skills/aiscan/okf/runtime/proxy.md`.
 - `ioa`: multi-agent collaboration via shared message spaces — `ioa space <name> <desc>`, `ioa send`, `ioa read --all`, and `ioa send checkpoint`. Reference: `aiscan://skills/ioa/SKILL.md`; wire-protocol formats live in the ioa module skills (`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`). Publish vulnerability discoveries per `aiscan://skills/aiscan/okf/runtime/ioa-finding.md`.
 
-## Fingerprint → POC Workflow
-
-When you discover a fingerprint (e.g. Seeyon, Shiro, Tomcat):
-
-1. **Query** associated POCs: `cyberhub search --finger seeyon`
-2. **Execute** matching POCs: `neutron -u <target> --finger seeyon`
-
-Both use the same association index (direct links, aliases, CPE mappings).
-
 ## Scan Output Consumption
 
 - Inline output: consume directly when the scan returns quickly.
@@ -90,14 +73,6 @@ Both use the same association index (direct links, aliases, CPE mappings).
 ## Report Generation
 
 When producing a scan report, follow the format and verification semantics in `aiscan://skills/aiscan/reference/report.md`. Key rules: separate confirmed findings from unverified leads, require executable PoC for confirmed status, do not inflate severity.
-
-## Asset Triage
-
-When scan discovers >20 web endpoints, do not `fetch` every one. Triage by scan summary:
-1. Prioritize: query parameters, non-standard ports, interesting fingerprints (admin panels, APIs, login pages).
-2. Select 3-8 high-value targets. Skip CDN, static assets, default pages.
-3. For thin surfaces, run bounded crawling (`katana -u <target> -d 2 -jc -timeout 60` or `spray --crawl`). Consume as batch, group by host/path/parameter shape.
-4. Group by fingerprint/tech stack — test one representative per group.
 
 ## Execution Environment
 
@@ -140,29 +115,11 @@ Non-findings without impact chain: fingerprints, CORS/security headers, GraphQL 
 - Keep a progressive findings log at {{findings_path}} for long assessments.
 - Suppress standalone P3/low/informational unless user requested inventory or it chains into impact.
 
-## Post-Scan Analysis
-
-Use scan output as a map of leads. Default ROI routing:
-
-- Login/account boundary → authorization and IDOR
-- API/Swagger → unauthenticated access and role boundary
-- Upload/import → upload controls and post-upload access
-- Search/filter/sort/orderBy → injection and data-boundary validation
-- GraphQL → unauthorized query/mutation impact (introspection alone is not a finding)
-- Thin surface → enumerate via crawlers, JS bundles, source maps, route manifests
-
-Switch routes when a branch stops producing evidence.
-
-## Termination
-
-Call `finish` exactly once when the task is complete and all subagents have reported. Do not call while subagents are running.
-
-## Operating Rules
+## Tool Invocation Rules
 
 1. Keep top-level aiscan flags separate from scanner flags (`aiscan -p` is the prompt; scanner `-p` keeps its native meaning).
 2. Prefer pseudo-commands over raw binaries — output is captured and bounded.
 3. Non-interactive output only. No progress bars or unbounded streaming.
 4. Conservative threads/timeouts for localhost or fragile services.
 5. Use `scan --verify=high` when the user asks to validate risky findings.
-6. Let user intent define stopping criteria. Continue beyond the first finding for broad assessments; answer directly for narrow questions.
-7. Switch direction after ~20 minutes or several negative probes on a branch.
+6. Call `finish` exactly once when the task is complete and all subagents have reported. Do not call it while subagents are running.

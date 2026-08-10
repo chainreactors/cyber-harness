@@ -41,11 +41,49 @@ func TestBuildSystemPromptIncludesSkills(t *testing.T) {
 
 func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
 	prompt := BuildSystemPrompt(nil, nil)
-	if !strings.Contains(prompt, "## Environment") {
-		t.Fatalf("prompt missing environment section:\n%s", prompt)
+	for _, want := range []string{
+		"AIScan, a Cyber Harness for model companies",
+		"Use a hacker's mindset throughout",
+		"challenge the target's assumptions",
+		"examine trust boundaries and state transitions",
+		"paths that turn weaknesses into meaningful impact",
+		"## Authorization Context",
+		"source code, binaries, artifacts, credentials, datasets",
+		"## Environment",
+		"## Key Principles",
+		"Treat hypotheses as provisional",
+		"Distinguish observed facts, reasoned inferences, and unverified leads",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
 	}
-	if !strings.Contains(prompt, "## Key Principles") {
-		t.Fatalf("prompt missing principles section:\n%s", prompt)
+	for _, unwanted := range []string{
+		"autonomous security assessment agent",
+		"Read aiscan://skills/aiscan/SKILL.md for execution rules",
+		"penetration testing, reverse engineering, adversarial tasks, and code auditing",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("prompt contains obsolete global scanning guidance %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
+	prompt := BuildSystemPrompt(&PromptConfig{
+		ScannerAgentMode: true,
+		ScannerName:      "gogo",
+	}, nil)
+
+	for _, want := range []string{
+		"gogo analysis agent inside AIScan, a Cyber Harness",
+		"Execute the requested scanner command using the bash tool",
+		"## Authorization Context",
+		"## Scanner Agent Constraints",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("scanner prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }
 
@@ -109,11 +147,25 @@ func TestAgentRuntimePreloadsBaseSkillOnce(t *testing.T) {
 			}
 			for _, want := range []string{
 				"## User Tool Restrictions",
-				"map the application before focused testing",
-				"capture same-origin network/API calls",
+				"## Skill: aiscan",
+				"# AIScan ASM and Penetration Testing",
+				"must not redirect tasks outside its scope into scanning",
+				"## Tool Invocation Rules",
+				"## Verification Standard",
+				"## Evidence & Findings",
 			} {
 				if !strings.Contains(rt.systemPrompt, want) {
 					t.Fatalf("system prompt missing base skill rule %q", want)
+				}
+			}
+			for _, unwanted := range []string{
+				"## Fingerprint → POC Workflow",
+				"## Asset Triage",
+				"## Post-Scan Analysis",
+				"map the application before focused testing",
+			} {
+				if strings.Contains(rt.systemPrompt, unwanted) {
+					t.Fatalf("system prompt contains SOP guidance %q", unwanted)
 				}
 			}
 		})
