@@ -36,11 +36,49 @@ import (
 
 type webSocketEnvelopeStream struct {
 	conn *websocket.Conn
-	mu   sync.Mutex
 	json bool
 }
 
+const (
+	// Stay below common 60-second proxy and NAT idle timeouts.
+	websocketPingPeriod = 30 * time.Second
+	// Bound a stalled application or control-frame write.
+	websocketWriteWait = 10 * time.Second
+
+	websocketPongWait    = 3 * websocketPingPeriod
+	reconnectStableAfter = websocketPongWait + websocketPingPeriod
+)
+
+func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool) (*webSocketEnvelopeStream, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(websocketPongWait)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	})
+	return &webSocketEnvelopeStream{conn: conn, json: json}, nil
+}
+
+func (s *webSocketEnvelopeStream) heartbeat(ctx context.Context) {
+	ticker := time.NewTicker(websocketPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			_ = s.conn.Close()
+			return
+		case <-ticker.C:
+			if err := s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(websocketWriteWait)); err != nil {
+				_ = s.conn.Close()
+				return
+			}
+		}
+	}
+}
+
 func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
+
 func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 	_, data, err := s.conn.ReadMessage()
 	if err != nil {
@@ -72,8 +110,9 @@ func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := s.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
+		return err
+	}
 	return s.conn.WriteMessage(frame, data)
 }
 
@@ -95,9 +134,16 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 		response.Body.Close()
 	}
 	if err != nil {
+		if response != nil {
+			return nil, &websocketHandshakeError{statusCode: response.StatusCode, cause: err}
+		}
 		return nil, err
 	}
-	return &webSocketEnvelopeStream{conn: conn, json: cc.JSONFrames}, nil
+	return newWebSocketEnvelopeStream(conn, cc.JSONFrames)
+}
+
+func shouldResetReconnectBackoff(connectedAt, disconnectedAt time.Time) bool {
+	return !connectedAt.IsZero() && disconnectedAt.Sub(connectedAt) >= reconnectStableAfter
 }
 
 func connectGenerated(ctx context.Context, cc connectionConfig) error {
@@ -112,25 +158,24 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 			return ctx.Err()
 		}
 		stream, err := dialProtoWebSocket(ctx, cc)
+		connectedAt := time.Time{}
 		if err == nil {
-			done := make(chan struct{})
-			go func() {
-				select {
-				case <-ctx.Done():
-					_ = stream.Close()
-				case <-done:
-				}
-			}()
+			connectedAt = time.Now()
+			heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+			go stream.heartbeat(heartbeatCtx)
 			err = serveAgentConnection(ctx, cc, logger, stream)
-			close(done)
+			stopHeartbeat()
 			_ = stream.Close()
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if shouldResetReconnectBackoff(connectedAt, time.Now()) {
+			attempt = 0
+		}
 		delay := agent.RetryDelay(attempt)
 		attempt++
-		logger.Warnf("connection lost (attempt %d), retrying in %v: %v", attempt, delay, err)
+		logger.Warnf("connection lost (attempt %d), retrying in %v: %s", attempt, delay, describeConnectionFailure(err))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -174,10 +219,27 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		return err
 	}
 	coreAccepted, ok := acceptedMessage.(*aop.ProtocolMessage)
-	if !ok || coreAccepted.GetAgentAccepted() == nil || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
+	if !ok || acceptedEnvelope.ReplyTo != helloEnvelope.Id {
+		return fmt.Errorf("expected AOP enrollment response")
+	}
+	if coreAccepted.GetProtocolError() != nil {
+		rejected := coreAccepted.GetProtocolError()
+		code := strings.TrimSpace(rejected.GetCode())
+		message := strings.TrimSpace(rejected.GetMessage())
+		switch {
+		case code != "" && message != "":
+			return fmt.Errorf("AOP enrollment rejected (%s): %s", code, message)
+		case code != "":
+			return fmt.Errorf("AOP enrollment rejected (%s)", code)
+		case message != "":
+			return fmt.Errorf("AOP enrollment rejected: %s", message)
+		default:
+			return fmt.Errorf("AOP enrollment rejected")
+		}
+	}
+	if coreAccepted.GetAgentAccepted() == nil {
 		return fmt.Errorf("expected AOP agent acceptance")
 	}
-
 	connectionCtx, cancelConnection := context.WithCancel(ctx)
 	defer cancelConnection()
 	sendCh := make(chan *aop.Envelope, 64)
@@ -204,6 +266,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 					select {
 					case writeErr <- err:
 					default:
+					}
+					if closer, ok := stream.(io.Closer); ok {
+						_ = closer.Close()
 					}
 					cancelConnection()
 					return

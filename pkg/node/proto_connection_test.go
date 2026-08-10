@@ -3,12 +3,14 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -263,5 +265,80 @@ func TestUploadWritesAbsolutePath(t *testing.T) {
 	}
 	if data, err := os.ReadFile(dest); err != nil || string(data) != body {
 		t.Fatalf("file on disk = %q, err=%v; want %q", data, err, body)
+	}
+}
+
+func TestShouldResetReconnectBackoff(t *testing.T) {
+	connectedAt := time.Now()
+	tests := []struct {
+		name           string
+		connectedAt    time.Time
+		disconnectedAt time.Time
+		want           bool
+	}{
+		{name: "dial failure", disconnectedAt: connectedAt},
+		{name: "short session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectStableAfter - time.Second)},
+		{name: "stable session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectStableAfter), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldResetReconnectBackoff(tt.connectedAt, tt.disconnectedAt); got != tt.want {
+				t.Fatalf("shouldResetReconnectBackoff() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+type writeFailureStream struct {
+	helloID   string
+	accepted  bool
+	closed    chan struct{}
+	closeOnce sync.Once
+	sends     atomic.Int32
+	err       error
+}
+
+func (s *writeFailureStream) Send(envelope *aop.Envelope) error {
+	if s.sends.Add(1) == 1 {
+		s.helloID = envelope.GetId()
+		return nil
+	}
+	return s.err
+}
+
+func (s *writeFailureStream) Recv() (*aop.Envelope, error) {
+	if !s.accepted {
+		s.accepted = true
+		return aop.MustWrap("accepted", s.helloID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}}), nil
+	}
+	<-s.closed
+	return nil, io.ErrClosedPipe
+}
+
+func (s *writeFailureStream) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
+	wantErr := errors.New("write failed")
+	stream := &writeFailureStream{closed: make(chan struct{}), err: wantErr}
+	done := make(chan error, 1)
+	go func() {
+		done <- serveAgentConnection(context.Background(), connectionConfig{
+			Name:     "runner-1",
+			NodeID:   "runner-1",
+			Registry: commands.NewRegistry(),
+			Menu:     func() []*types.CommandSpec { return nil },
+		}, telemetry.NopLogger(), stream)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("serveAgentConnection error = %v, want %v", err, wantErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("write failure did not unblock the receive loop")
 	}
 }
