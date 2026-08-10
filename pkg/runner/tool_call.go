@@ -53,6 +53,7 @@ func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb
 	result.CallId = call.Id
 	result.Name = call.Name
 	result.DurationMs = uint64(time.Since(started).Milliseconds())
+	sanitizeToolResultUTF8(result)
 	return &aop.Event{
 		Id: runtimeEnvelopeID(), EmittedAt: timestamppb.Now(), SessionId: request.SessionId,
 		TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: result},
@@ -111,7 +112,7 @@ func (s *progressStreamer) Write(p []byte) {
 			}
 			return
 		}
-		line := string(s.buf[:idx])
+		line := sanitizeUTF8(string(s.buf[:idx]))
 		s.buf = s.buf[idx+1:]
 		s.emit(line)
 	}
@@ -121,9 +122,42 @@ func (s *progressStreamer) Flush() {
 	if s.bus == nil || len(s.buf) == 0 {
 		return
 	}
-	data := string(s.buf)
+	data := sanitizeUTF8(string(s.buf))
 	s.buf = s.buf[:0]
 	s.emit(data)
+}
+
+func sanitizeUTF8(value string) string {
+	return strings.ToValidUTF8(value, "\uFFFD")
+}
+
+// sanitizeToolResultUTF8 protects the AOP boundary from arbitrary command
+// bytes and tools that construct protobuf content directly.
+func sanitizeToolResultUTF8(result *aop.ToolResult) {
+	if result == nil {
+		return
+	}
+	result.CallId = sanitizeUTF8(result.CallId)
+	result.Name = sanitizeUTF8(result.Name)
+	for _, content := range result.Output {
+		if content == nil {
+			continue
+		}
+		switch value := content.Value.(type) {
+		case *aop.Content_Text:
+			if value.Text != nil {
+				value.Text.Text = sanitizeUTF8(value.Text.Text)
+			}
+		case *aop.Content_Reasoning:
+			if value.Reasoning != nil {
+				value.Reasoning.Text = sanitizeUTF8(value.Reasoning.Text)
+			}
+		case *aop.Content_Refusal:
+			value.Refusal = sanitizeUTF8(value.Refusal)
+		case *aop.Content_ToolResult:
+			sanitizeToolResultUTF8(value.ToolResult)
+		}
+	}
 }
 
 func (s *progressStreamer) emit(line string) {
