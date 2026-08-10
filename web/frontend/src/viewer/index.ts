@@ -51,5 +51,5 @@ export type { MessageBubbleProps, MessageBubbleVariant } from '../../cyber-ui/pa
 export type { ChatThinkingProps } from '../../cyber-ui/packages/viewer/src/components/chat/ChatThinking'
 export type { AssistantResponseProps } from '../../cyber-ui/packages/viewer/src/components/chat/AssistantResponse'
 export type { ToolCallDisplayProps, CodeCallDisplayProps, BlockingOutputDisplayProps } from '../../cyber-ui/packages/viewer/src/components/chat/ToolCallDisplay'
-export type { ChatInputProps, CommandHint, ChatAttachment, AttachmentMode, Mentionable, MentionPopupApi, PopupNavigationCommand, PopupNavigationKey } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
+export type { ChatInputProps, CommandHint, ComposerHelpContent, ComposerHelpItem, ComposerHelpPrefix, ChatAttachment, AttachmentMode, Mentionable, MentionPopupApi, PopupNavigationCommand, PopupNavigationKey } from '../../cyber-ui/packages/viewer/src/components/chat/ChatInput'
 export type { AgentVoiceCardProps } from '../../cyber-ui/packages/viewer/src/components/chat/AgentVoiceCard'

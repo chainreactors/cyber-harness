@@ -147,6 +147,22 @@ test.describe('single AOP WebSocket browser plane', () => {
     const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
 
     try {
+      await page.getByRole('button', { name: 'Input guide', exact: true }).click()
+      const inputGuide = page.getByRole('dialog', { name: 'Input guide' })
+      await expect(inputGuide).toBeVisible()
+      await expect(inputGuide.getByText('Mention context', { exact: true })).toBeVisible()
+      await expect(inputGuide.getByText('Session commands', { exact: true })).toBeVisible()
+      await expect(inputGuide.getByText('Agent tools', { exact: true })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(inputGuide).toBeHidden()
+      await page.getByRole('button', { name: 'Input guide', exact: true }).click()
+
+      await inputGuide.getByRole('button', { name: /@ Mention context/ }).click()
+      await expect(input).toHaveValue('@')
+      await expect(page.getByRole('button', { name: /Assets/ }).last()).toBeVisible()
+      await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible()
+      await input.press('Escape')
+
       await input.fill('Reply with exactly one word: PONG')
       await page.getByRole('button', { name: 'Send message' }).click()
       await expect(page.getByText('PONG', { exact: true })).toBeVisible({ timeout: 20_000 })

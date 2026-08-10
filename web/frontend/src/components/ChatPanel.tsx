@@ -36,6 +36,7 @@ import {
   summarizeArgs,
   type ChatAttachment,
   type CommandHint,
+  type ComposerHelpContent,
   type ExtensionTimelineItem,
   type Mentionable,
   type ChatInputProps,
@@ -393,6 +394,34 @@ export default function ChatPanel({
   // the server's (used for dynamic skill commands that have no i18n key).
   const [chatCommands, setChatCommands] = useState<CommandHint[]>([])
   const [toolCommands, setToolCommands] = useState<CommandHint[]>([])
+  const composerHelp = useMemo<ComposerHelpContent>(() => ({
+    label: t('composerHelpLabel'),
+    closeLabel: t('composerHelpCloseLabel'),
+    title: t('composerHelpTitle'),
+    hint: t('composerHelpHint'),
+    items: [
+      {
+        prefix: '@',
+        title: t('composerHelpMentionTitle'),
+        description: t('composerHelpMentionDescription'),
+        meta: t('composerHelpMentionMeta'),
+      },
+      {
+        prefix: '/',
+        title: t('composerHelpCommandTitle'),
+        description: t('composerHelpCommandDescription'),
+        meta: t('composerHelpAvailable', { count: chatCommands.length }),
+        disabled: chatCommands.length === 0,
+      },
+      {
+        prefix: '!',
+        title: t('composerHelpToolTitle'),
+        description: t('composerHelpToolDescription'),
+        meta: t('composerHelpAvailable', { count: toolCommands.length }),
+        disabled: toolCommands.length === 0,
+      },
+    ],
+  }), [chatCommands.length, t, toolCommands.length])
   useEffect(() => {
     if (!activeSessionID) {
       setChatCommands([])
@@ -702,6 +731,7 @@ export default function ChatPanel({
                   disabled={isBusy && !canPause}
                   commands={chatCommands}
                   toolCommands={toolCommands}
+                  composerHelp={composerHelp}
                   mentionables={mentionables}
                   renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
