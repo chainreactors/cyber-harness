@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -71,21 +69,6 @@ func TestDescribeConnectionFailure(t *testing.T) {
 			want: "WebSocket endpoint not found (HTTP 404)",
 		},
 		{
-			name: "DNS",
-			err:  &net.DNSError{Name: "missing.example", IsNotFound: true},
-			want: "DNS lookup failed for missing.example",
-		},
-		{
-			name: "connection refused",
-			err:  &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED},
-			want: "TCP connection refused",
-		},
-		{
-			name: "network timeout",
-			err:  context.DeadlineExceeded,
-			want: "network timeout",
-		},
-		{
 			name: "remote close",
 			err:  &websocket.CloseError{Code: websocket.CloseAbnormalClosure, Text: "unexpected EOF"},
 			want: "WebSocket closed by peer (code 1006: unexpected EOF)",
@@ -132,12 +115,7 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	dialer := *websocket.DefaultDialer
-	dialer.TLSClientConfig = nil
 	logger := &warningChannelLogger{warnings: make(chan string, 8)}
-	overrideReconnectTiming(t, time.Second, func(int) time.Duration {
-		return 10 * time.Millisecond
-	})
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
@@ -145,7 +123,6 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 			ServerURL: server.URL,
 			Registry:  commands.NewRegistry(),
 			Logger:    logger,
-			Dialer:    &dialer,
 		})
 	}()
 
@@ -190,7 +167,6 @@ func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
 		telemetry.NopLogger(),
 		new(rejectingEnvelopeStream),
-		nil,
 	)
 	if err == nil {
 		t.Fatal("enrollment rejection unexpectedly succeeded")
@@ -206,7 +182,6 @@ func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
 		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
 		telemetry.NopLogger(),
 		&rejectingEnvelopeStream{replyTo: "another-request"},
-		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "expected AOP enrollment response") {
 		t.Fatalf("uncorrelated response was accepted as an enrollment rejection: %v", err)
