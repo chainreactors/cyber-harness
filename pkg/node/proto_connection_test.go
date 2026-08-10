@@ -277,8 +277,8 @@ func TestShouldResetReconnectBackoff(t *testing.T) {
 		want           bool
 	}{
 		{name: "dial failure", disconnectedAt: connectedAt},
-		{name: "short session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectResetAfter - time.Second)},
-		{name: "stable session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectResetAfter), want: true},
+		{name: "short session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectStableAfter - time.Second)},
+		{name: "stable session", connectedAt: connectedAt, disconnectedAt: connectedAt.Add(reconnectStableAfter), want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
