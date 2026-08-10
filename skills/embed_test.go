@@ -36,12 +36,38 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 	if skill.Description == "" {
 		t.Fatal("description is empty")
 	}
+	for _, want := range []string{"attack surface management", "penetration-testing"} {
+		if !strings.Contains(skill.Description, want) {
+			t.Fatalf("description missing %q: %q", want, skill.Description)
+		}
+	}
 	if skill.Location != "aiscan://skills/aiscan/SKILL.md" {
 		t.Fatalf("location = %q", skill.Location)
 	}
 	body := store.ReadBody("aiscan")
 	if body == "" {
 		t.Fatal("ReadBody returned empty")
+	}
+	for _, want := range []string{
+		"# AIScan ASM and Penetration Testing",
+		"## General Execution Tools",
+		"## ASM and Penetration Tools",
+		"## Tool Invocation Rules",
+		"## Verification Standard",
+		"## Report Generation",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ReadBody missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		"## Fingerprint → POC Workflow",
+		"## Asset Triage",
+		"## Post-Scan Analysis",
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("ReadBody contains SOP guidance %q", unwanted)
+		}
 	}
 	if strings.Contains(body, "---") {
 		t.Fatalf("ReadBody contains frontmatter: %q", body)
@@ -88,7 +114,7 @@ func TestExpandCommand(t *testing.T) {
 	for _, want := range []string{
 		`<skill name="aiscan" location="aiscan://skills/aiscan/SKILL.md">`,
 		"References are relative to aiscan://skills/aiscan.",
-		"# Aiscan",
+		"# AIScan ASM and Penetration Testing",
 		"check this target",
 	} {
 		if !strings.Contains(expanded, want) {
@@ -114,7 +140,7 @@ func TestReadVirtual(t *testing.T) {
 	if !handled {
 		t.Fatal("ReadVirtual() handled = false")
 	}
-	if !strings.Contains(content, "name: aiscan") || !strings.Contains(content, "# Aiscan") {
+	if !strings.Contains(content, "name: aiscan") || !strings.Contains(content, "# AIScan ASM and Penetration Testing") {
 		t.Fatalf("unexpected content:\n%s", content)
 	}
 
