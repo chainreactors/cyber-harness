@@ -2,12 +2,9 @@ package node
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"syscall"
 
 	"github.com/gorilla/websocket"
 )
@@ -29,13 +26,7 @@ func describeConnectionFailure(err error) string {
 	}
 
 	var verificationErr *tls.CertificateVerificationError
-	var unknownAuthorityErr x509.UnknownAuthorityError
-	var hostnameErr x509.HostnameError
-	var invalidCertificateErr x509.CertificateInvalidError
-	if errors.As(err, &verificationErr) ||
-		errors.As(err, &unknownAuthorityErr) ||
-		errors.As(err, &hostnameErr) ||
-		errors.As(err, &invalidCertificateErr) {
+	if errors.As(err, &verificationErr) {
 		return fmt.Sprintf("TLS certificate verification failed: %v; install a trusted certificate or explicitly enable insecure TLS for private deployments", err)
 	}
 
@@ -49,18 +40,6 @@ func describeConnectionFailure(err error) string {
 		default:
 			return fmt.Sprintf("WebSocket handshake rejected (HTTP %d): %v", handshakeErr.statusCode, handshakeErr.cause)
 		}
-	}
-
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return fmt.Sprintf("DNS lookup failed for %s: %v", dnsErr.Name, err)
-	}
-	if errors.Is(err, syscall.ECONNREFUSED) {
-		return fmt.Sprintf("TCP connection refused: %v", err)
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return fmt.Sprintf("network timeout: %v", err)
 	}
 
 	var closeErr *websocket.CloseError

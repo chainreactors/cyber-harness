@@ -35,65 +35,47 @@ import (
 )
 
 type webSocketEnvelopeStream struct {
-	conn          *websocket.Conn
-	mu            sync.Mutex
-	json          bool
-	liveness      websocketLiveness
-	done          chan struct{}
-	heartbeatDone chan struct{}
-	closeOnce     sync.Once
-	closeErr      error
+	conn *websocket.Conn
+	mu   sync.Mutex
+	json bool
 }
 
-func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool, liveness websocketLiveness) (*webSocketEnvelopeStream, error) {
-	liveness = liveness.normalized()
-	stream := &webSocketEnvelopeStream{
-		conn:          conn,
-		json:          json,
-		liveness:      liveness,
-		done:          make(chan struct{}),
-		heartbeatDone: make(chan struct{}),
-	}
-	if err := conn.SetReadDeadline(time.Now().Add(liveness.pongWait)); err != nil {
+const (
+	websocketPongWait   = 90 * time.Second
+	websocketPingPeriod = 30 * time.Second
+	websocketWriteWait  = 10 * time.Second
+	reconnectResetAfter = 60 * time.Second
+)
+
+func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool) (*webSocketEnvelopeStream, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(websocketPongWait)); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(liveness.pongWait))
+		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 	})
-	go stream.heartbeat()
-	return stream, nil
+	return &webSocketEnvelopeStream{conn: conn, json: json}, nil
 }
 
-func (s *webSocketEnvelopeStream) heartbeat() {
-	defer close(s.heartbeatDone)
-	ticker := time.NewTicker(s.liveness.pingPeriod)
+func (s *webSocketEnvelopeStream) heartbeat(ctx context.Context) {
+	ticker := time.NewTicker(websocketPingPeriod)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.done:
+		case <-ctx.Done():
+			_ = s.conn.Close()
 			return
-		case now := <-ticker.C:
-			if err := s.conn.WriteControl(websocket.PingMessage, nil, now.Add(s.liveness.writeWait)); err != nil {
-				s.shutdown()
+		case <-ticker.C:
+			if err := s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(websocketWriteWait)); err != nil {
+				_ = s.conn.Close()
 				return
 			}
 		}
 	}
 }
 
-func (s *webSocketEnvelopeStream) shutdown() {
-	s.closeOnce.Do(func() {
-		close(s.done)
-		s.closeErr = s.conn.Close()
-	})
-}
-
-func (s *webSocketEnvelopeStream) Close() error {
-	s.shutdown()
-	<-s.heartbeatDone
-	return s.closeErr
-}
+func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
 
 func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
 	_, data, err := s.conn.ReadMessage()
@@ -128,7 +110,7 @@ func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.conn.SetWriteDeadline(time.Now().Add(s.liveness.writeWait)); err != nil {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
 		return err
 	}
 	return s.conn.WriteMessage(frame, data)
@@ -147,11 +129,7 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 	if accessKey != "" {
 		headers = http.Header{"Authorization": {"Bearer " + accessKey}}
 	}
-	dialer := cc.Dialer
-	if dialer == nil {
-		dialer = websocket.DefaultDialer
-	}
-	conn, response, err := dialer.DialContext(ctx, HTTPToWS(dialURL)+path, headers)
+	conn, response, err := websocket.DefaultDialer.DialContext(ctx, HTTPToWS(dialURL)+path, headers)
 	if response != nil && response.Body != nil {
 		response.Body.Close()
 	}
@@ -161,18 +139,11 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 		}
 		return nil, err
 	}
-	return newWebSocketEnvelopeStream(conn, cc.JSONFrames, cc.Liveness)
+	return newWebSocketEnvelopeStream(conn, cc.JSONFrames)
 }
 
-// Package variables keep the real reconnect loop testable without waiting for
-// production-scale delays. Tests overriding them must not run in parallel.
-var (
-	reconnectResetAfter = 60 * time.Second
-	reconnectDelay      = agent.RetryDelay
-)
-
-func shouldResetReconnectBackoff(acceptedAt, disconnectedAt time.Time) bool {
-	return !acceptedAt.IsZero() && disconnectedAt.Sub(acceptedAt) >= reconnectResetAfter
+func shouldResetReconnectBackoff(connectedAt, disconnectedAt time.Time) bool {
+	return !connectedAt.IsZero() && disconnectedAt.Sub(connectedAt) >= reconnectResetAfter
 }
 
 func connectGenerated(ctx context.Context, cc connectionConfig) error {
@@ -187,31 +158,22 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 			return ctx.Err()
 		}
 		stream, err := dialProtoWebSocket(ctx, cc)
-		acceptedAt := time.Time{}
+		connectedAt := time.Time{}
 		if err == nil {
-			done := make(chan struct{})
-			go func() {
-				select {
-				case <-ctx.Done():
-					_ = stream.Close()
-				case <-done:
-				}
-			}()
-			err = serveAgentConnection(ctx, cc, logger, stream, func() {
-				acceptedAt = time.Now()
-			})
-			close(done)
+			connectedAt = time.Now()
+			heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+			go stream.heartbeat(heartbeatCtx)
+			err = serveAgentConnection(ctx, cc, logger, stream)
+			stopHeartbeat()
 			_ = stream.Close()
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// A successful handshake alone is insufficient. Only a connection that
-		// stayed accepted long enough clears earlier failures.
-		if shouldResetReconnectBackoff(acceptedAt, time.Now()) {
+		if shouldResetReconnectBackoff(connectedAt, time.Now()) {
 			attempt = 0
 		}
-		delay := reconnectDelay(attempt)
+		delay := agent.RetryDelay(attempt)
 		attempt++
 		logger.Warnf("connection lost (attempt %d), retrying in %v: %s", attempt, delay, describeConnectionFailure(err))
 		select {
@@ -228,7 +190,7 @@ func nextEnvelopeID(prefix string) string {
 	return prefix + ":" + strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + strconv.FormatUint(envelopeSequence.Add(1), 36)
 }
 
-func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream, onAccepted func()) error {
+func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream) error {
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
@@ -278,10 +240,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if coreAccepted.GetAgentAccepted() == nil {
 		return fmt.Errorf("expected AOP agent acceptance")
 	}
-	if onAccepted != nil {
-		onAccepted()
-	}
-
 	connectionCtx, cancelConnection := context.WithCancel(ctx)
 	defer cancelConnection()
 	sendCh := make(chan *aop.Envelope, 64)
@@ -308,6 +266,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 					select {
 					case writeErr <- err:
 					default:
+					}
+					if closer, ok := stream.(io.Closer); ok {
+						_ = closer.Close()
 					}
 					cancelConnection()
 					return

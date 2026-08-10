@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,6 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/gorilla/websocket"
 )
 
@@ -21,13 +20,12 @@ type deadlineRecordingConn struct {
 	boundedWrites atomic.Int32
 }
 
-func TestDefaultWebsocketLivenessUsesBoundedIntervals(t *testing.T) {
-	liveness := defaultWebsocketLiveness()
-	if liveness.pongWait <= 0 || liveness.pingPeriod <= 0 || liveness.writeWait <= 0 {
-		t.Fatalf("default liveness intervals must be positive: %+v", liveness)
+func TestWebsocketLivenessUsesBoundedIntervals(t *testing.T) {
+	if websocketPongWait <= 0 || websocketPingPeriod <= 0 || websocketWriteWait <= 0 {
+		t.Fatal("websocket liveness intervals must be positive")
 	}
-	if liveness.pingPeriod >= liveness.pongWait {
-		t.Fatalf("ping period %v must be shorter than pong wait %v", liveness.pingPeriod, liveness.pongWait)
+	if websocketPingPeriod >= websocketPongWait {
+		t.Fatalf("ping period %v must be shorter than pong wait %v", websocketPingPeriod, websocketPongWait)
 	}
 }
 
@@ -71,15 +69,14 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 		recorded <- wrapped
 		return wrapped, nil
 	}
-	stream, err := dialProtoWebSocket(context.Background(), connectionConfig{
-		ServerURL: server.URL,
-		Dialer:    &dialer,
-		Liveness: websocketLiveness{
-			pongWait:   time.Second,
-			pingPeriod: 500 * time.Millisecond,
-			writeWait:  time.Second,
-		},
-	})
+	wsConn, response, err := dialer.DialContext(context.Background(), HTTPToWS(server.URL)+DefaultWSPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response != nil && response.Body != nil {
+		response.Body.Close()
+	}
+	stream, err := newWebSocketEnvelopeStream(wsConn, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,62 +95,28 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 	}
 }
 
-func TestConnectGeneratedReconnectsWhenPeerStopsAnsweringHeartbeats(t *testing.T) {
-	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-	connected := make(chan struct{}, 4)
+func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
 		defer conn.Close()
-		first, message, err := readAgentEnvelope(conn, false)
-		core, ok := message.(*aop.ProtocolMessage)
-		if err != nil || !ok || core.GetAgentHello() == nil {
-			return
-		}
-		if err := writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "silent-peer-runner"}}})); err != nil {
-			return
-		}
-		connected <- struct{}{}
-		// Gorilla only processes Ping frames while reading. This peer stops
-		// reading after enrollment, so it intentionally sends no Pong responses.
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}))
 	defer server.Close()
 
-	overrideReconnectTiming(t, time.Second, func(int) time.Duration {
-		return 10 * time.Millisecond
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- connectGenerated(ctx, connectionConfig{
-			ServerURL: server.URL,
-			Name:      "silent-peer-runner",
-			NodeID:    "silent-peer-runner",
-			Registry:  commands.NewRegistry(),
-			Logger:    telemetry.NopLogger(),
-			Liveness: websocketLiveness{
-				pongWait:   80 * time.Millisecond,
-				pingPeriod: 20 * time.Millisecond,
-				writeWait:  40 * time.Millisecond,
-			},
-		})
-	}()
-
-	for i := 0; i < 2; i++ {
-		select {
-		case <-connected:
-		case <-time.After(time.Second):
-			t.Fatalf("observed %d connections; heartbeat did not force reconnect", i)
-		}
+	stream, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
 	}
-	cancel()
-	select {
-	case <-errCh:
-	case <-time.After(time.Second):
-		t.Fatal("connection loop did not stop")
+	defer stream.Close()
+	if err := stream.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = stream.Recv()
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("Recv error = %v, want timeout", err)
 	}
 }

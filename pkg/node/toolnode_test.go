@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/base32"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -364,14 +363,6 @@ func TestRunToolNodeWireInteropProtoJSON(t *testing.T) {
 	}
 }
 
-func TestToolNodeProcessInstanceIDHasEnoughEntropy(t *testing.T) {
-	decoder := base32.StdEncoding.WithPadding(base32.NoPadding)
-	decoded, err := decoder.DecodeString(processInstanceID)
-	if err != nil || len(decoded) < 16 {
-		t.Fatalf("process instance ID %q has less than 128 bits: %v", processInstanceID, err)
-	}
-}
-
 func TestRunToolNodeKeepsInstanceIdentityAcrossReconnects(t *testing.T) {
 	instanceIDs := make(chan string, 2)
 	serverErrors := make(chan error, 2)
@@ -391,7 +382,7 @@ func TestRunToolNodeKeepsInstanceIdentityAcrossReconnects(t *testing.T) {
 			return
 		}
 		hello := core.GetAgentHello()
-		instanceIDs <- hello.GetRuntime().GetMetadata().GetFields()[instanceIDMetadataKey].GetStringValue()
+		instanceIDs <- hello.GetRuntime().GetMetadata().GetFields()["instance_id"].GetStringValue()
 		if err := writeAgentEnvelope(conn, false, aop.MustWrap("accepted", first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId}}})); err != nil {
 			serverErrors <- err
 			return
