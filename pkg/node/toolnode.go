@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"runtime"
@@ -60,14 +61,16 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		logger = telemetry.NopLogger()
 	}
 	runnerRuntime := runner.DefaultRuntimeInfo()
+	instanceID := rand.Text()
 	home, _ := os.UserHomeDir()
 	runnerRuntime.Metadata, _ = structpb.NewStruct(map[string]any{
-		"version": cfg.Version,
-		"mode":    "tool",
-		"home":    home,
-		"os":      runtime.GOOS,
-		"arch":    runtime.GOARCH,
-		"cores":   runtime.NumCPU(),
+		"version":     cfg.Version,
+		"mode":        "tool",
+		"home":        home,
+		"os":          runtime.GOOS,
+		"arch":        runtime.GOARCH,
+		"cores":       runtime.NumCPU(),
+		"instance_id": instanceID,
 	})
 	var menu func() []*types.CommandSpec
 	if !cfg.DisableCommandCatalog {
