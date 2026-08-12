@@ -26,7 +26,7 @@ Common usage:
 scan -i 10.0.0.1 --mode quick
 scan -i 10.0.0.0/24 --mode full
 scan -i 10.0.0.1:8080 --mode quick
-scan -i 10.0.0.1 --mode full --ports top1000
+scan -i 10.0.0.1 --mode full --ports top3
 scan -i http://10.0.0.1:8080 --mode quick
 scan -i https://example.com --mode quick
 
