@@ -279,6 +279,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}
 	}()
 
+	// operations tracks live tool/exec calls by id. A tool call is removed the
+	// instant its terminal is about to be sent (see handleAgentToolMessage), so
+	// this set doubles as the liveness signal the artifact-forwarding subscriber
+	// below uses to drop trailing artifacts whose call has already settled. It is
+	// declared here (rather than just above the mux) so the subscriber can see it.
+	var operationsMu sync.Mutex
+	operations := make(map[string]context.CancelFunc)
+
 	stats := NewAgentStatsTracker()
 	if cc.AgentSubscribe != nil {
 		unsubscribe := cc.AgentSubscribe(func(event *aop.Event) {
@@ -286,12 +294,28 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 				send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
 			}
 			replyTo := ""
+			isArtifact := false
 			if event.GetToolResult() != nil {
 				replyTo = event.GetToolResult().GetCallId()
 			} else if extension := event.GetExtension(); extension != nil {
 				artifact := new(toolpb.Artifact)
 				if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
 					replyTo = artifact.CallId
+					isArtifact = true
+				}
+			}
+			// A streaming tool (katana) keeps emitting artifacts from background
+			// workers after its terminal has been sent or its call was cancelled.
+			// Each such trailing artifact earns an "after terminal barrier" rejection
+			// on the control plane; at scale that floods a server core and the logs.
+			// Drop them at the source: once the call left the live set, its terminal
+			// has already been (or is being) sent, so nothing more may follow it.
+			if isArtifact && replyTo != "" {
+				operationsMu.Lock()
+				_, live := operations[replyTo]
+				operationsMu.Unlock()
+				if !live {
+					return
 				}
 			}
 			send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
@@ -349,8 +373,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}
 	}
 
-	var operationsMu sync.Mutex
-	operations := make(map[string]context.CancelFunc)
 	sendEnvelope := func(envelope *aop.Envelope) {
 		if envelope == nil {
 			return
@@ -523,6 +545,17 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	}
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	trackOperation(operationsMu, operations, operationID, taskCancel)
+	// seal removes this call from the live set so the artifact-forwarding
+	// subscriber drops anything a streaming tool emits from here on. It must run
+	// before the terminal is sent: the terminal is the last message a call may put
+	// on the wire, and a trailing artifact forwarded after it is rejected by the
+	// control plane. The deferred finishOperation still cancels taskCtx; its delete
+	// is then an idempotent no-op.
+	seal := func() {
+		operationsMu.Lock()
+		delete(operations, operationID)
+		operationsMu.Unlock()
+	}
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -533,12 +566,14 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 		defer finishOperation(operationsMu, operations, operationID, taskCancel)
 		event, err := runner.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.Progress)
 		if err != nil {
+			seal()
 			fail(err.Error())
 			return
 		}
 		if cc.AgentRuntime != nil {
 			cc.AgentRuntime.EmitEvent(event)
 		}
+		seal()
 		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
 	}()
 }
