@@ -54,6 +54,15 @@ func (b *Base) EmitArtifactResultCtx(ctx context.Context, resultID, tool, kind, 
 		b.Logger.Warnf("marshal %s artifact: %s", tool, err)
 		return
 	}
+	// One artifact event is one control-plane frame. A record that outgrows the
+	// frame is trimmed to fit here, at the sole point every tool's artifact is
+	// built, rather than dropped whole by a frame guard downstream. resultID stays
+	// keyed on the untrimmed data above, so a record's identity is stable whether
+	// or not its transport representation had to shed bulk.
+	if bounded := boundArtifactData(raw); len(bounded) < len(raw) {
+		b.Logger.Warnf("artifact budget: %s %s for %.200s trimmed %d → %d bytes", tool, kind, target, len(raw), len(bounded))
+		raw = bounded
+	}
 	invocation := coretool.InvocationFromContext(ctx)
 	artifact := &toolpb.Artifact{
 		Tool: tool, Kind: kind, Target: target, Data: raw,
