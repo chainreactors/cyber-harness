@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,6 +24,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -94,7 +98,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 		connectionConfig{Registry: commands.NewRegistry(), Logger: logger},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
-		send, &operationsMu, operations,
+		send, &operationsMu, operations, make(map[string]time.Time),
 	)
 
 	select {
@@ -113,6 +117,37 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	}
 	if got := logs.String(); !strings.Contains(got, "send event boom") || !strings.Contains(got, "op-panic") {
 		t.Fatalf("panic log = %s", got)
+	}
+}
+
+// Canceling a call does not stop a scanner that ignores its context, so the
+// hub having given up must also close that call's artifact window — otherwise
+// the rest of the crawl crosses the wire only to be rejected on arrival.
+func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
+	var operationsMu sync.Mutex
+	operations := make(map[string]context.CancelFunc)
+	sealed := make(map[string]time.Time)
+	canceled := false
+	operations["op-1"] = func() { canceled = true }
+
+	handleAgentCoreMessage(
+		context.Background(),
+		connectionConfig{Registry: commands.NewRegistry(), Logger: telemetry.NopLogger()},
+		&aop.Envelope{Id: "cancel-1"},
+		&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}},
+		func(string, protobuf.Message) { t.Error("cancel must not answer on the wire") },
+		func(*aop.Envelope) { t.Error("cancel must not reach the runtime") },
+		&operationsMu, operations, sealed,
+	)
+
+	if !canceled {
+		t.Fatal("cancel did not reach the operation")
+	}
+	if !callIsSealed(&operationsMu, sealed, "op-1") {
+		t.Fatal("canceled call was left able to emit artifacts")
+	}
+	if callIsSealed(&operationsMu, sealed, "agent-loop-call") {
+		t.Fatal("a call this connection never dispatched must not be sealed")
 	}
 }
 
@@ -340,5 +375,115 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("write failure did not unblock the receive loop")
+	}
+}
+
+type deadlineRecordingConn struct {
+	net.Conn
+	boundedReads  atomic.Int32
+	boundedWrites atomic.Int32
+}
+
+func TestWebsocketLivenessUsesBoundedIntervals(t *testing.T) {
+	if websocketPongWait <= 0 || websocketPingPeriod <= 0 || websocketWriteWait <= 0 {
+		t.Fatal("websocket liveness intervals must be positive")
+	}
+	if websocketPingPeriod >= websocketPongWait {
+		t.Fatalf("ping period %v must be shorter than pong wait %v", websocketPingPeriod, websocketPongWait)
+	}
+	if reconnectStableAfter <= websocketPongWait {
+		t.Fatalf("stable window %v must exceed pong wait %v", reconnectStableAfter, websocketPongWait)
+	}
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(deadline time.Time) error {
+	if !deadline.IsZero() {
+		c.boundedReads.Add(1)
+	}
+	return c.Conn.SetReadDeadline(deadline)
+}
+
+func (c *deadlineRecordingConn) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.IsZero() {
+		c.boundedWrites.Add(1)
+	}
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	recorded := make(chan *deadlineRecordingConn, 1)
+	dialer := *websocket.DefaultDialer
+	dialer.NetDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		wrapped := &deadlineRecordingConn{Conn: conn}
+		recorded <- wrapped
+		return wrapped, nil
+	}
+	wsConn, response, err := dialer.DialContext(context.Background(), HTTPToWS(server.URL)+DefaultWSPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response != nil && response.Body != nil {
+		response.Body.Close()
+	}
+	stream, err := newWebSocketEnvelopeStream(wsConn, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	conn := <-recorded
+	if conn.boundedReads.Load() == 0 {
+		t.Fatal("websocket dial did not install a bounded read deadline")
+	}
+	writesBefore := conn.boundedWrites.Load()
+	if err := stream.Send(&aop.Envelope{Id: "deadline-probe"}); err != nil {
+		t.Fatal(err)
+	}
+	if conn.boundedWrites.Load() <= writesBefore {
+		t.Fatal("application write did not install a bounded write deadline")
+	}
+}
+
+func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		time.Sleep(250 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	stream, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if err := stream.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = stream.Recv()
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("Recv error = %v, want timeout", err)
 	}
 }
