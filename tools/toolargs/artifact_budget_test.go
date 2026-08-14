@@ -1,10 +1,17 @@
 package toolargs
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -90,13 +97,13 @@ func TestOversizedRecordKeepsItsFieldsAndLosesOnlyBulk(t *testing.T) {
 		"response.raw":  record.Response.Raw,
 	} {
 		assert.Contains(t, cut, "aiscan: truncated, 5242880 bytes total", name)
+		assert.LessOrEqual(t, len(cut), maxArtifactStringBytes, name)
 	}
 }
 
-// data reaching this function is always json.Marshal output, so it always
-// parses and truncatedStrings always reaches its strings. The contract holds
-// even for a record whose bulk is spread across many small strings rather than
-// a few large ones: never nil, never larger than the input.
+// A per-string ceiling alone cannot bound a record whose bulk is spread across
+// many modest values. The global encoder must stop the collection while keeping
+// the projection fields that precede it.
 func TestManySmallStringsAreBoundedAndNeverDropped(t *testing.T) {
 	values := make([]any, 200000)
 	for i := range values {
@@ -109,8 +116,116 @@ func TestManySmallStringsAreBoundedAndNeverDropped(t *testing.T) {
 	bounded := boundArtifactData(data)
 
 	require.NotNil(t, bounded)
+	require.LessOrEqual(t, len(bounded), maxArtifactDataBytes, "aggregate short strings must still obey the hard budget")
 	assert.LessOrEqual(t, len(bounded), len(data), "the result is never larger than the input")
-	var probe map[string]any
+	var probe struct {
+		Endpoint string   `json:"endpoint"`
+		Rows     []string `json:"rows"`
+		Budget   struct {
+			OriginalBytes int  `json:"original_bytes"`
+			Truncated     bool `json:"truncated"`
+		} `json:"_aiscan_artifact"`
+	}
 	require.NoError(t, json.Unmarshal(bounded, &probe), "the result is always valid JSON")
-	assert.Equal(t, "http://target/list", probe["endpoint"])
+	assert.Equal(t, "http://target/list", probe.Endpoint)
+	assert.NotEmpty(t, probe.Rows, "the record must retain useful collection data")
+	assert.Less(t, len(probe.Rows), len(values), "the oversized collection must be bounded")
+	assert.Equal(t, len(data), probe.Budget.OriginalBytes)
+	assert.True(t, probe.Budget.Truncated)
+}
+
+func TestNearLimitStringsCannotGrowAnOversizedRecord(t *testing.T) {
+	values := make([]any, 9000)
+	for i := range values {
+		values[i] = strings.Repeat("A", 513)
+	}
+	data, err := json.Marshal(map[string]any{"endpoint": "http://target/list", "rows": values})
+	require.NoError(t, err)
+	require.Greater(t, len(data), maxArtifactDataBytes)
+
+	bounded := boundArtifactData(data)
+
+	require.LessOrEqual(t, len(bounded), maxArtifactDataBytes)
+	assert.Less(t, len(bounded), len(data), "a truncation marker must never make the record larger")
+	assert.True(t, json.Valid(bounded))
+}
+
+func TestTruncationMarkerFitsInsideStringBudget(t *testing.T) {
+	value := strings.Repeat("界", maxArtifactStringBytes)
+
+	encoded, ok := marshalBoundedArtifactString(value, 512)
+
+	require.True(t, ok)
+	require.LessOrEqual(t, len(encoded), 512)
+	var decoded string
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Contains(t, decoded, "aiscan: truncated")
+	assert.True(t, utf8.ValidString(decoded))
+	assert.Less(t, len(decoded), len(value))
+}
+
+func TestOversizedRecordKeepsNumberTextVerbatim(t *testing.T) {
+	data, err := json.Marshal(map[string]any{
+		"body":  strings.Repeat("A", 5<<20),
+		"port":  json.Number("9007199254740993"),
+		"ratio": json.Number("1e+09"),
+	})
+	require.NoError(t, err)
+
+	bounded := boundArtifactData(data)
+
+	decoder := json.NewDecoder(bytes.NewReader(bounded))
+	decoder.UseNumber()
+	var record map[string]any
+	require.NoError(t, decoder.Decode(&record))
+	assert.Equal(t, "9007199254740993", record["port"].(json.Number).String())
+	assert.Equal(t, "1e+09", record["ratio"].(json.Number).String())
+}
+
+func TestInvalidOversizedJSONFallsBackToBoundedRecord(t *testing.T) {
+	data := bytes.Repeat([]byte{'{'}, maxArtifactDataBytes+1)
+
+	bounded := boundArtifactData(data)
+
+	require.LessOrEqual(t, len(bounded), maxArtifactDataBytes)
+	require.True(t, json.Valid(bounded))
+	var record struct {
+		Budget struct {
+			OriginalBytes  int  `json:"original_bytes"`
+			PayloadOmitted bool `json:"payload_omitted"`
+			Truncated      bool `json:"truncated"`
+		} `json:"_aiscan_artifact"`
+	}
+	require.NoError(t, json.Unmarshal(bounded, &record))
+	assert.Equal(t, len(data), record.Budget.OriginalBytes)
+	assert.True(t, record.Budget.PayloadOmitted)
+	assert.True(t, record.Budget.Truncated)
+}
+
+func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
+	bus := eventbus.New[*aop.Event]()
+	base := &Base{Events: bus}
+	base.InitLogger(nil)
+	data := map[string]any{
+		"body":     strings.Repeat("A", 5<<20),
+		"endpoint": "http://target/bundle.js",
+	}
+	wantID := ArtifactResultID("katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
+	var artifact *toolpb.Artifact
+	unsubscribe := bus.Subscribe(func(event *aop.Event) {
+		decoded := new(toolpb.Artifact)
+		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
+			artifact = decoded
+		}
+	})
+	defer unsubscribe()
+	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{CallID: "call-1"})
+
+	base.EmitArtifactCtx(ctx, "katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
+
+	require.NotNil(t, artifact)
+	assert.Equal(t, wantID, artifact.GetResultId())
+	assert.Equal(t, "call-1", artifact.GetCallId())
+	require.LessOrEqual(t, len(artifact.GetData()), maxArtifactDataBytes)
+	assert.True(t, json.Valid(artifact.GetData()))
 }
