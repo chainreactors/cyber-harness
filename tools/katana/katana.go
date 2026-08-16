@@ -80,6 +80,10 @@ Configuration:
   -fsu               Filter crawling of similar looking URLs
   -dr                Disable following redirects
   -pc                Enable path climb (auto crawl parent paths)
+  -kb                Enable knowledge base classification
+  -kb-secrets        Enable knowledge base secret extraction
+  -kb-validate-secrets  Validate detected secrets with provider APIs
+  -kb-endpoints      Enable endpoint classification
 
 Scope:
   -fs, -field-scope  Field scope (rdn, fqdn, dn) or custom regex (default: rdn)
@@ -95,6 +99,11 @@ Filter:
   -ef, -extension-filter  Filter output for given extensions
   -mr, -match-regex  Regex to match output URL
   -fr, -filter-regex Regex to filter output URL
+  -pcs               Enable page content similarity filtering
+  -pcsm              Similarity mode: simhash, tfidf, or bm25
+  -pcsd              SimHash maximum Hamming distance (default: 3)
+  -pcst              TF-IDF/BM25 minimum score (default: 0.85)
+  -pcsn              Pages processed per similarity cluster (default: 1)
 
 Rate-Limit:
   -c, -concurrency   Number of concurrent fetchers (default: 10)
@@ -158,6 +167,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	options.Context = ctx
 
 	// Collect results via a custom output writer that captures all results,
 	// including those from the headless engine which bypasses OnResult.
@@ -206,11 +216,14 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		}
 		u = addSchemeIfNotExists(u)
 		if crawlErr := crawler.Crawl(u); crawlErr != nil {
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("katana: timed out")
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("katana: %w", ctxErr)
 			}
 			c.Logger.Warnf("katana: crawl %s: %v", u, crawlErr)
 		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("katana: %w", ctxErr)
 	}
 
 	// Write collected results.
@@ -249,8 +262,8 @@ func configureBrowserOptionsWith(options *katanatypes.Options, discover browserD
 	return nil
 }
 
-// readFlags replicates katana's cmd/katana/main.go readFlags() using goflags,
-// keeping CLI arguments 100% compatible with the upstream katana binary.
+// readFlags mirrors the crawler-relevant subset of katana's CLI using goflags.
+// Process-level commands such as update, health-check, and pprof are omitted.
 func readFlags(args []string) (*katanatypes.Options, error) {
 	options := &katanatypes.Options{}
 
@@ -297,6 +310,9 @@ func readFlags(args []string) (*katanatypes.Options, error) {
 		flagSet.BoolVarP(&options.DisableRedirects, "disable-redirects", "dr", false, "disable following redirects"),
 		flagSet.BoolVarP(&options.PathClimb, "path-climb", "pc", false, "enable path climb"),
 		flagSet.BoolVarP(&options.KnowledgeBase, "knowledge-base", "kb", false, "enable knowledge base classification"),
+		flagSet.BoolVar(&options.Secrets, "kb-secrets", false, "enable secrets extractor in the knowledge base"),
+		flagSet.BoolVar(&options.ValidateSecrets, "kb-validate-secrets", false, "validate detected secrets against their provider (sends live API calls)"),
+		flagSet.BoolVar(&options.Endpoints, "kb-endpoints", false, "enable endpoints extractor"),
 		flagSet.IntVarP(&options.MaxDomainPages, "max-domain-pages", "mdp", 0, "max pages per domain"),
 	)
 
@@ -341,6 +357,12 @@ func readFlags(args []string) (*katanatypes.Options, error) {
 		flagSet.StringVarP(&options.OutputMatchCondition, "match-condition", "mdc", "", "match response with dsl condition"),
 		flagSet.StringVarP(&options.OutputFilterCondition, "filter-condition", "fdc", "", "filter response with dsl condition"),
 		flagSet.BoolVarP(&options.DisableUniqueFilter, "disable-unique-filter", "duf", false, "disable duplicate content filtering"),
+		flagSet.BoolVarP(&options.PageContentSimilar, "page-content-similar", "pcs", false, "enable page content similarity filtering"),
+		flagSet.BoolVarP(&options.SimilarityDeduplication, "similarity-deduplication", "sdd", false, "alias for page-content-similar"),
+		flagSet.StringVarP(&options.PageContentSimilarMode, "page-content-similar-mode", "pcsm", "simhash", "similarity mode: simhash, tfidf, or bm25"),
+		flagSet.IntVarP(&options.PageContentSimilarDistance, "page-content-similar-distance", "pcsd", 3, "simhash maximum hamming distance"),
+		flagSet.StringVarP(&options.PageContentSimilarThresholdStr, "page-content-similar-threshold", "pcst", "0.85", "tfidf/bm25 minimum score"),
+		flagSet.IntVarP(&options.PageContentSimilarBudget, "page-content-similar-budget", "pcsn", 1, "pages to process per similarity cluster"),
 		flagSet.StringSliceVarP(&options.FilterPageType, "filter-page-type", "fpt", nil, "filter by page type", goflags.CommaSeparatedStringSliceOptions),
 	)
 
@@ -486,6 +508,12 @@ func (c *resultCollector) Write(r *katanaoutput.Result) error {
 }
 
 func (c *resultCollector) WriteErr(_ *katanaoutput.Error) error { return nil }
+
+func (c *resultCollector) GetResultCount() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return int64(len(c.results))
+}
 
 func (c *resultCollector) collect(r *katanaoutput.Result) {
 	if r.Request == nil || r.Request.URL == "" {

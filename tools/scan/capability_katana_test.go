@@ -13,6 +13,7 @@ import (
 	"time"
 
 	browserutil "github.com/chainreactors/aiscan/pkg/browser"
+	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 )
 
 func TestKatanaProfileExtender(t *testing.T) {
@@ -64,6 +65,61 @@ func TestRunKatanaCrawlEmitsTargets(t *testing.T) {
 		}
 	}
 	t.Logf("katana discovered %d web targets from example.com (depth=1)", targets)
+}
+
+func TestRunKatanaCrawlHonorsContextCancellation(t *testing.T) {
+	requestStarted := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case requestStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	cmd := &Command{}
+	e := targetEvent(capSprayCheck, srv.URL, newWebTarget(srv.URL, srv.URL, ""))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runKatanaCrawl(ctx, cmd, e, 1, false, func(event) {})
+		close(done)
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("Katana capability did not start the test request")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Katana capability did not stop after context cancellation")
+	}
+}
+
+func TestScanResultWriterGetResultCount(t *testing.T) {
+	writer := &scanResultWriter{}
+	const writes = 32
+	done := make(chan struct{}, writes)
+	for range writes {
+		go func() {
+			if err := writer.Write(&katanaoutput.Result{}); err != nil {
+				t.Errorf("Write() error = %v", err)
+			}
+			done <- struct{}{}
+		}()
+	}
+	for range writes {
+		<-done
+	}
+	if got := writer.GetResultCount(); got != writes {
+		t.Fatalf("GetResultCount() = %d, want %d", got, writes)
+	}
 }
 
 func TestE2EKatanaDeepRendersAuthenticatedSPA(t *testing.T) {
