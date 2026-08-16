@@ -20,23 +20,6 @@ on:
         required: false
         default: false
         type: boolean
-  workflow_call:
-    inputs:
-      tag:
-        description: 'Release tag'
-        required: true
-        type: string
-      target:
-        description: 'Branch or commit to tag if the tag does not exist'
-        required: false
-        default: master
-        type: string
-      prerelease:
-        description: 'Publish immediately as a prerelease instead of creating a draft'
-        required: false
-        default: false
-        type: boolean
-
 permissions:
   contents: write
 
@@ -52,9 +35,6 @@ jobs:
 
   # ── Resolve the tag once, share with all jobs ───────────────────
   prepare:
-    # Nightly tag pushes also match v*.*.*. The nightly workflow invokes this
-    # workflow explicitly with prerelease=true, so ignore the duplicate push.
-    if: github.event_name != 'push' || !contains(github.ref_name, '-nightly.')
     runs-on: ubuntu-22.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -82,11 +62,6 @@ jobs:
             echo "Invalid release tag: ${TAG}" >&2
             exit 1
           fi
-          if [[ "${TAG}" == *nightly* && "${{ inputs.prerelease }}" != "true" ]]; then
-            echo "Nightly tags require prerelease=true: ${TAG}" >&2
-            exit 1
-          fi
-
           git fetch --force --tags origin
 
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
