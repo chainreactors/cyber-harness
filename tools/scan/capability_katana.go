@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/projectdiscovery/gologger"
@@ -113,6 +114,7 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 	}
 
 	options := &katanatypes.Options{
+		Context:                ctx,
 		MaxDepth:               depth,
 		FieldScope:             "rdn",
 		BodyReadSize:           math.MaxInt,
@@ -203,14 +205,19 @@ func sameRootDomain(rawURL, rdn string) bool {
 }
 
 type scanResultWriter struct {
-	onResult func(*katanaoutput.Result)
+	onResult    func(*katanaoutput.Result)
+	resultCount atomic.Int64
 }
 
 func (w *scanResultWriter) Close() error { return nil }
 func (w *scanResultWriter) Write(result *katanaoutput.Result) error {
+	if result != nil {
+		w.resultCount.Add(1)
+	}
 	if w.onResult != nil {
 		w.onResult(result)
 	}
 	return nil
 }
 func (w *scanResultWriter) WriteErr(_ *katanaoutput.Error) error { return nil }
+func (w *scanResultWriter) GetResultCount() int64                { return w.resultCount.Load() }
