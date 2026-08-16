@@ -22,17 +22,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Run bounded public scanner regressions
         run: |
           go test -tags "full integration re2_cgo re2_static" -count=1 -timeout 8m -v \
             -run 'Test(ScannerPublicIntegration|FullScannerPublicIntegration)$' \
             ./tools
+
+  race-stress:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: ${{ env.ACT != 'true' }}
+
+      - name: Repeat agent and runner concurrency tests
+        run: |
+          go test -race -count=20 -timeout 15m \
+            -run 'Test(ConcurrentEmitWhileRegistering|SetProviderRaceWithRun|ResetDoesNotAllowConcurrentPrompt|StreamingProviderEmitsMessageUpdates)$' \
+            ./agent/...
+          go test -race -count=20 -timeout 15m \
+            -run 'Test(StdioSameSessionFIFOOrder|StdioSessionsRunConcurrently|StdioDrainWaitsForInFlightAndQueued|RuntimeSessionDirectLoopUsesSessionScheduler|RuntimeSessionRejectsRequestsPastPendingLimit|SessionContextCancellationStopsActiveRun|ActiveRunSteersAsyncInputWithoutSecondLifecycle)$' \
+            ./pkg/runner/...
+
+      - name: Repeat web SSE, cancellation, and reload concurrency tests
+        run: |
+          go test -race -count=20 -timeout 20m \
+            -run 'Test(BroadcastAOPEventPersistsRawEnvelope|ServeSSEWithSnapshotSubscribesBeforeReadingSnapshot|ServeSSEWithSnapshotDropsQueuedSnapshotDuplicates|SessionEventsReplayHasNoSideEffects|SessionEventsResumesAfterLastEventID|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskUsesControlChannelWhenTaskQueueIsFull|CancelTaskWaitsForSaturatedControlChannel|CompleteJobCannotOverwriteCanceledScan|BroadcastConfigReload|BroadcastConfigReloadWaitsBehindCancellationFrames|HandleConfigReloadResultUpdatesAgentStatus|SaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp|SaveConfigCommitFailureClosesCandidateAndKeepsCurrentApp|SaveConfigSerializesConcurrentCandidates)$' \
+            ./pkg/web

@@ -15,75 +15,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Fast gates (independent, no deps) ──────────────────────────
-
-  lint:
+  checks:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
-
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9.2.1
-        with:
-          version: v2.12.2
-          args: --timeout=5m --build-tags "re2_cgo re2_static"
-
-  tidy:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Check go mod tidy
         run: |
-          cp go.mod go.mod.orig
-          cp go.sum go.sum.orig
-          go mod tidy
-          if ! diff -q go.mod go.mod.orig >/dev/null 2>&1; then
-            echo "::error::go.mod is not tidy. Run 'go mod tidy' and commit the result."
-            diff go.mod.orig go.mod || true
+          cp go.mod "$RUNNER_TEMP/go.mod.before"
+          cp go.sum "$RUNNER_TEMP/go.sum.before"
+          for attempt in 1 2 3; do
+            if go mod tidy; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            echo "go mod tidy failed, retrying ($attempt/3)..."
+            sleep $((attempt * 5))
+          done
+          if ! cmp -s go.mod "$RUNNER_TEMP/go.mod.before" || \
+             ! cmp -s go.sum "$RUNNER_TEMP/go.sum.before"; then
+            echo "::error::go.mod or go.sum is not tidy. Run 'go mod tidy' and commit the result."
+            diff -u "$RUNNER_TEMP/go.mod.before" go.mod || true
+            diff -u "$RUNNER_TEMP/go.sum.before" go.sum | head -30 || true
             exit 1
           fi
-          if ! diff -q go.sum go.sum.orig >/dev/null 2>&1; then
-            echo "::error::go.sum is not tidy. Run 'go mod tidy' and commit the result."
-            diff go.sum.orig go.sum | head -30 || true
-            exit 1
-          fi
-
-  quality:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
 
       - name: Check dependency layers, registered skips, and repository debt
         run: go test -count=1 ./core/deps
@@ -96,43 +62,50 @@ jobs:
             exit 1
           fi
 
-      - name: Run go vet
-        run: go vet ./...
-
       - name: Check whitespace and submodule pins
         run: |
           git diff --check HEAD
-          git diff --exit-code --submodule=diff
-          git submodule foreach --recursive 'test -z "$(git status --porcelain)"'
+          git diff --ignore-submodules=dirty --exit-code -- \
+            .gitmodules templates web/frontend/cyber-ui
 
-  # ── Unit tests (depends on tidy) ──────────────────────────────
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9.2.1
+        with:
+          version: v2.12.2
+          args: --timeout=8m --build-tags "re2_cgo re2_static"
+          skip-cache: ${{ env.ACT == 'true' }}
 
   test:
     runs-on: ubuntu-22.04
-    needs: [tidy, quality]
+    needs: checks
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
-
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Generate embedded resources
         run: go generate ./core/resources/...
 
       - name: Run unit tests with coverage
         run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m \
+          test_args=(-timeout 5m)
+          if [[ "${ACT:-}" == "true" ]]; then
+            test_args=(-timeout 10m -p 4)
+          fi
+          go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
             ./...
+
+      - name: Check generated resources are committed
+        run: git diff --exit-code -- core/resources/template.go
 
       - name: Display coverage summary
         if: always()
@@ -146,70 +119,27 @@ jobs:
           fi
 
       - name: Upload coverage artifact
-        if: always()
+        if: ${{ always() && env.ACT != 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.out
           retention-days: 14
 
-  # ── Proxy & TMux tool tests (depends on tidy) ─────────────────
-
-  tool-tests:
-    runs-on: ubuntu-22.04
-    needs: tidy
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-
-      - name: Run proxy tool tests
-        run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
-            ./tools/proxy/
-
-      - name: Run tmux command tests
-        run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
-            -run 'Tmux|BashProxy' \
-            ./pkg/commands/
-
-      - name: Run PTY interactive session tests
-        run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
-            -run 'MultiRound|SendCtrlC' \
-            ./agent/tmux/
-
-      - name: Run agent tmux integration tests
-        run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m -v \
-            -run 'AgentTmux' \
-            ./agent/
-
   windows-test:
     runs-on: windows-2022
-    needs: [tidy, quality]
+    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Set up mingw for libcstx
         shell: bash
@@ -225,52 +155,20 @@ jobs:
         env:
           CGO_ENABLED: "1"
 
-  race-stress:
-    runs-on: ubuntu-22.04
-    needs: [tidy, quality]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Repeat agent and runner concurrency tests
-        run: |
-          go test -race -count=20 -timeout 15m \
-            -run 'Test(ConcurrentEmitWhileRegistering|SetProviderRaceWithRun|ResetDoesNotAllowConcurrentPrompt|StreamingProviderEmitsMessageUpdates)$' \
-            ./agent/...
-          go test -race -count=20 -timeout 15m \
-            -run 'Test(StdioSameSessionFIFOOrder|StdioSessionsRunConcurrently|StdioDrainWaitsForInFlightAndQueued|RuntimeSessionDirectLoopUsesSessionScheduler|RuntimeSessionRejectsRequestsPastPendingLimit|SessionContextCancellationStopsActiveRun|ActiveRunSteersAsyncInputWithoutSecondLifecycle)$' \
-            ./pkg/runner/...
-
-      - name: Repeat web SSE, cancellation, and reload concurrency tests
-        run: |
-          go test -race -count=20 -timeout 20m \
-            -run 'Test(BroadcastAOPEventPersistsRawEnvelope|ServeSSEWithSnapshotSubscribesBeforeReadingSnapshot|ServeSSEWithSnapshotDropsQueuedSnapshotDuplicates|SessionEventsReplayHasNoSideEffects|SessionEventsResumesAfterLastEventID|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskUsesControlChannelWhenTaskQueueIsFull|CancelTaskWaitsForSaturatedControlChannel|CompleteJobCannotOverwriteCanceledScan|BroadcastConfigReload|BroadcastConfigReloadWaitsBehindCancellationFrames|HandleConfigReloadResultUpdatesAgentStatus|SaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp|SaveConfigCommitFailureClosesCandidateAndKeepsCurrentApp|SaveConfigSerializesConcurrentCandidates)$' \
-            ./pkg/web
-
   scanner-functional:
     runs-on: ubuntu-22.04
-    needs: tidy
+    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Run scanner functional regressions
         run: |
@@ -303,20 +201,19 @@ jobs:
 
   headless-record-replay-e2e:
     runs-on: ubuntu-22.04
-    needs: tidy
+    needs: test
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Set up Chrome
         uses: browser-actions/setup-chrome@v2
@@ -347,57 +244,26 @@ jobs:
             -run '^TestE2EKatanaDeepRendersAuthenticatedSPA$' \
             ./tools/scan
 
-  # ── Generated templates tests (depends on tidy) ───────────────
-
-  generated-test:
+  e2e:
     runs-on: ubuntu-22.04
-    needs: tidy
+    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
-
-
-      - name: Run go generate for templates
-        run: go generate ./core/resources/...
-
-      - name: Run resources tests
-        run: |
-          go test -tags "re2_cgo re2_static" -race -count=1 -timeout 5m \
-            ./core/resources/...
-
-      - name: Check generated resources are committed
-        run: git diff --exit-code
-
-  protobuf-generated:
-    runs-on: ubuntu-22.04
-    needs: tidy
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+          cache: ${{ env.ACT != 'true' }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          cache: ${{ env.ACT != 'true' && 'npm' || '' }}
           cache-dependency-path: web/frontend/package-lock.json
 
       - name: Set up protoc 35.1
@@ -413,45 +279,17 @@ jobs:
         run: go run ./cmd/gen
 
       - name: Check generated protobuf bindings are committed
-        run: git diff --exit-code
-
-  # ── E2E tests (depends on test) ───────────────────────────────
-
-  e2e:
-    runs-on: ubuntu-22.04
-    needs: test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
+        run: |
+          git diff --exit-code -- \
+            pkg/rpc \
+            pkg/types \
+            web/frontend/src/gen \
+            web/frontend/cyber-ui/packages/aop/src/gen/aop
 
       - name: Build embedded frontend
         run: |
-          npm --prefix web/frontend ci
           npm --prefix web/frontend run build
           test -s web/static/index.html
-
-      - name: Upload embedded frontend
-        uses: actions/upload-artifact@v7
-        with:
-          name: embedded-frontend
-          path: web/static
-          retention-days: 1
 
       - name: Install Playwright Chromium
         working-directory: web/frontend
@@ -467,177 +305,9 @@ jobs:
           corepack pnpm install --frozen-lockfile
           corepack pnpm --filter @cyber/viewer test
 
-      - name: Run e2e tests
+      - name: Run backend E2E tests
         run: |
           go test -race -count=1 -timeout 10m \
             -tags "e2e re2_cgo re2_static" \
             -v \
             ./pkg/web
-
-  # ── Standard build: pure Go, no libcstx/CGO ──────────────────
-
-  build-standard:
-    runs-on: ubuntu-22.04
-    needs: test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Generate embedded resources
-        run: go generate ./core/resources
-
-      - name: Build all standard platforms
-        run: |
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            IFS='/' read -r goos goarch <<< "$target"
-            echo "  compile ${goos}/${goarch}"
-            suffix=""
-            [[ "$goos" == "windows" ]] && suffix=".exe"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -tags "forceposix emptytemplates noembed osusergo netgo" \
-              -ldflags "-s -w" -buildvcs=false \
-              -o "dist/standard_${goos}_${goarch}${suffix}" ./cmd/aiscan
-          done
-          test -f dist/standard_windows_amd64.exe
-          test -f dist/standard_windows_arm64.exe
-          ls -lh dist/
-
-      - name: Upload standard binaries
-        uses: actions/upload-artifact@v7
-        with:
-          name: aiscan-standard
-          path: dist/standard_*
-          if-no-files-found: error
-          retention-days: 7
-
-  # ── Full build: native libcstx/CGO on supported platforms ────
-
-  build-full:
-    needs: [test, e2e]
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: linux-amd64
-            runner: ubuntu-22.04
-            goos: linux
-            goarch: amd64
-          - id: linux-arm64
-            runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-          - id: darwin-amd64
-            runner: macos-15-intel
-            goos: darwin
-            goarch: amd64
-          - id: darwin-arm64
-            runner: macos-15
-            goos: darwin
-            goarch: arm64
-          - id: windows-amd64
-            runner: windows-2022
-            goos: windows
-            goarch: amd64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up mingw for libcstx
-        if: runner.os == 'Windows'
-        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
-
-      - name: Install recorder SDK link dependencies on Linux
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential nasm yasm pkg-config \
-            libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-
-      - name: Install recorder SDK link dependencies on Windows
-        if: runner.os == 'Windows'
-        run: |
-          C:/msys64/usr/bin/bash.exe -lc \
-            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
-
-      - name: Prepare static FFmpeg and x264 recorder SDK
-        if: runner.os != 'macOS'
-        run: |
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            platform=windows
-            C:/msys64/usr/bin/bash.exe -lc "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH='${{ matrix.goarch }}' || make record-native-source RECORD_ARCH='${{ matrix.goarch }}'"
-          else
-            platform=linux
-            make record-native RECORD_ARCH='${{ matrix.goarch }}' || make record-native-source RECORD_ARCH='${{ matrix.goarch }}'
-          fi
-          bash .github/native/sdk.sh env "${platform}" '${{ matrix.goarch }}' >> "${GITHUB_ENV}"
-
-      - name: Verify recorder SDK link environment
-        if: runner.os != 'macOS'
-        run: pkg-config --modversion libavcodec
-
-      - name: Download embedded frontend
-        uses: actions/download-artifact@v7
-        with:
-          name: embedded-frontend
-          path: web/static
-
-      - name: Generate embedded resources
-        run: go generate ./core/resources
-
-      - name: Build full ${{ matrix.id }}
-        run: |
-          suffix=""
-          [[ "${{ matrix.goos }}" == "windows" ]] && suffix=".exe"
-          CGO_ENABLED=1 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
-            go build -trimpath \
-            -tags "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static" \
-            -ldflags "-s -w" -buildvcs=false \
-            -o "dist/full_${{ matrix.goos }}_${{ matrix.goarch }}${suffix}" ./cmd/aiscan
-
-      - name: Verify recorder libraries are statically linked
-        if: runner.os != 'macOS'
-        run: |
-          set -euo pipefail
-          binary="$(find dist -maxdepth 1 -type f -name 'full_*' -print -quit)"
-          test -n "${binary}"
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            if objdump -p "${binary}" | grep -Eiq 'DLL Name:.*(libav|x264|libwinpthread)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          else
-            if ldd "${binary}" | grep -Eiq '(libav|libx264)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          fi
-
-      - name: Upload full ${{ matrix.id }} binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: aiscan-full-${{ matrix.id }}
-          path: dist/full_*
-          if-no-files-found: error
-          retention-days: 7

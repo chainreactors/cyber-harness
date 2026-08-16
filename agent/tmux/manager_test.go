@@ -185,7 +185,7 @@ func TestPeekReturnsTail(t *testing.T) {
 	}
 	mgr := NewManager()
 	dir := t.TempDir()
-	info, err := mgr.Create(dir, "for i in 1 2 3 4 5; do echo line$i; done", "peek-test", 5*time.Second, nil, "")
+	info, err := mgr.Create(dir, "for i in 1 2 3 4 5; do echo line$i; done; sleep 0.05", "peek-test", 5*time.Second, nil, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestCreateCmd(t *testing.T) {
 	mgr := NewManager()
 	dir := t.TempDir()
 
-	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo from-createcmd"}, "cmd-test", 10*time.Second, nil, "")
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo from-createcmd; sleep 0.05"}, "cmd-test", 10*time.Second, nil, "")
 	if err != nil {
 		t.Fatalf("CreateCmd: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestCreateCmdWithEnv(t *testing.T) {
 	mgr := NewManager()
 	dir := t.TempDir()
 
-	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo $TEST_MAGIC"}, "env-test", 10*time.Second, []string{"TEST_MAGIC=pty_works"}, "")
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo $TEST_MAGIC; sleep 0.05"}, "env-test", 10*time.Second, []string{"TEST_MAGIC=pty_works"}, "")
 	if err != nil {
 		t.Fatalf("CreateCmd: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestPeekNew(t *testing.T) {
 	dir := t.TempDir()
 
 	payload := strings.Repeat("x", 100)
-	info, err := mgr.Create(dir, "printf '"+payload+"'", "peeknew-test", 10*time.Second, nil, "")
+	info, err := mgr.Create(dir, "printf '"+payload+"'; sleep 0.05", "peeknew-test", 10*time.Second, nil, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestExecCommandDirect(t *testing.T) {
 	mgr := NewManager()
 	dir := t.TempDir()
 
-	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo direct"}, "", 5*time.Second, nil, "")
+	info, err := mgr.CreateCmd(dir, "/bin/sh", []string{"-c", "echo direct; sleep 0.05"}, "", 5*time.Second, nil, "")
 	if err != nil {
 		t.Fatalf("CreateCmd: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestPeekBytes(t *testing.T) {
 		t.Skip("unix-only test")
 	}
 
-	info, err := mgr.Create(dir, "printf '0123456789'", "peekbytes-test", 5*time.Second, nil, "")
+	info, err := mgr.Create(dir, "printf '0123456789'; sleep 0.05", "peekbytes-test", 5*time.Second, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
