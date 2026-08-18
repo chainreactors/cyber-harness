@@ -8,12 +8,21 @@ import (
 	"sort"
 	"strings"
 
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
 )
 
 type WriteTool struct {
 	workDir string
+	audit   *FileAudit
+}
+
+// WithAudit attaches the file-access audit trail. A nil recorder leaves the
+// tool unobserved.
+func (t *WriteTool) WithAudit(recorder *FileAudit) *WriteTool {
+	t.audit = recorder
+	return t
 }
 
 func NewWriteTool(workDir string) *WriteTool {
@@ -61,13 +70,13 @@ func (t *WriteTool) Execute(ctx context.Context, arguments string) (*coretool.Re
 	}
 
 	if len(args.Edits) > 0 {
-		return t.editFile(args)
+		return t.editFile(ctx, args)
 	}
 
-	return t.writeFile(args)
+	return t.writeFile(ctx, args)
 }
 
-func (t *WriteTool) writeFile(args WriteArgs) (*coretool.Result, error) {
+func (t *WriteTool) writeFile(ctx context.Context, args WriteArgs) (*coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	dir := filepath.Dir(path)
@@ -75,9 +84,23 @@ func (t *WriteTool) writeFile(args WriteArgs) (*coretool.Result, error) {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
+	// Whether the path existed decides CREATE vs WRITE, and it can only be
+	// asked before the write.
+	_, existed := os.Stat(path)
+
 	if err := os.WriteFile(path, []byte(args.Content), 0644); err != nil {
 		return nil, fmt.Errorf("write file: %w", err)
 	}
+
+	op := filepb.AccessOp_ACCESS_OP_WRITE
+	if existed != nil {
+		op = filepb.AccessOp_ACCESS_OP_CREATE
+	}
+	t.audit.RecordFile(ctx, op, path, &filepb.Access{
+		Size:   int64(len(args.Content)),
+		Bytes:  int64(len(args.Content)),
+		Digest: AuditDigest([]byte(args.Content)),
+	})
 
 	lineCount := strings.Count(args.Content, "\n") + 1
 	return coretool.TextResult(fmt.Sprintf("wrote %d bytes (%d lines) to %s", len(args.Content), lineCount, args.Path)), nil
@@ -90,7 +113,7 @@ type editMatch struct {
 	newText    string
 }
 
-func (t *WriteTool) editFile(args WriteArgs) (*coretool.Result, error) {
+func (t *WriteTool) editFile(ctx context.Context, args WriteArgs) (*coretool.Result, error) {
 	path := t.resolvePath(args.Path)
 
 	data, err := os.ReadFile(path)
@@ -205,6 +228,15 @@ func (t *WriteTool) editFile(args WriteArgs) (*coretool.Result, error) {
 	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
 		return nil, fmt.Errorf("write edited file: %w", err)
 	}
+
+	// EDIT rather than WRITE: the patch count is what distinguishes a targeted
+	// change from a file the agent replaced wholesale.
+	t.audit.RecordFile(ctx, filepb.AccessOp_ACCESS_OP_EDIT, path, &filepb.Access{
+		Size:   int64(len(result)),
+		Bytes:  int64(len(result)),
+		Edits:  uint32(len(args.Edits)),
+		Digest: AuditDigest([]byte(result)),
+	})
 
 	// Build summary
 	var summary strings.Builder
