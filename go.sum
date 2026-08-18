@@ -224,8 +224,8 @@ github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d h1:wlJ6oMbVLKr
 github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d/go.mod h1:xwbUlFoSSxLHujyb8D48o1s2DqmEAxUNfxIy0DVUmcg=
 github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721 h1:mtC+2UKpXO5Yel5JL2Ah6Z2r/X6wx4Fbii/36MmKcLI=
 github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721/go.mod h1:xvvWMcU9Fcht6GR1cc9ceAZ3/Hl2HrkoRzpeyOzx1rQ=
-github.com/chainreactors/utils/mitmproxy v0.0.0-20260722180147-5b1816060721 h1:BJh043izz46BCpNN3SJBGwEQDWW9SrKLGUFrbP5+/H0=
-github.com/chainreactors/utils/mitmproxy v0.0.0-20260722180147-5b1816060721/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
+github.com/chainreactors/utils/mitmproxy v0.0.0-20260818093021-b0af431aff73 h1:ij4Mt9XkLpO0IR6d7S7mYQpfrpOEL8ys5cYM5KZKNvo=
+github.com/chainreactors/utils/mitmproxy v0.0.0-20260818093021-b0af431aff73/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/parsers v0.0.3 h1:3ld7xG5TSvzikVOCkQHjqjHO3otjODwSwHQDkMKbu5o=
 github.com/chainreactors/utils/parsers v0.0.3/go.mod h1:bE/znJWt08n9QOORWsWu0ggB8GWfOg3+dfUMMITmwV4=
 github.com/chainreactors/utils/pty v0.0.0-20260722180147-5b1816060721 h1:gxkedbTvFEFTtel7XJEPMVh1iznfD+91woPkGBXZMNk=
