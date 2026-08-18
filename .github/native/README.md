@@ -36,3 +36,11 @@ Environment overrides:
 - `RECORD_NATIVE_OUTPUT`: package output directory (defaults to `dist/native`).
 
 When native inputs or flags change, increment `RECORD_NATIVE_VERSION` and `RECORD_NATIVE_RELEASE` together before publishing. Do not replace an existing SDK version with incompatible contents.
+
+## macOS CGO cross-build
+
+The release workflow builds both standard and full macOS binaries on an Ubuntu runner. Standard uses the normal pure-Go `CGO_ENABLED=0` cross-build. Full uses the Zig C/C++ driver with a pinned macOS SDK, `CGO_ENABLED=1`, and external Go linking so the bundled Darwin `libcstx` and RE2 archives can link against `Security`, `CoreFoundation`, `libresolv`, and libc++.
+
+The SDK version, checksum, Zig version, and minimum deployment target are pinned in `versions.env`. The SDK archive is downloaded from the versioned `joseluisq/macosx-sdks` release and verified before extraction. macOS full intentionally omits `record_ffmpeg`: native recording remains supported only by the Linux and Windows recorder SDK bundles above.
+
+No macOS GitHub Actions runner is used. Linux can validate the generated Mach-O format and architecture, but it cannot execute the release binary; runtime smoke coverage remains the responsibility of downstream macOS users or a separately authorized external test environment.

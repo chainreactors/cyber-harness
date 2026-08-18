@@ -76,9 +76,13 @@ When producing a scan report, follow the format and verification semantics in `a
 
 ## Execution Environment
 
-`bash` accepts a single `command` argument — no `background` or `timeout` fields. Every command runs in a tmux session. Pseudo-commands run in-process; others run as shell commands in a PTY. Keep invocations self-contained — no shell state carryover.
+`bash` accepts `command`, `wait`, and `timeout`. Every command runs in a tmux session. Pseudo-commands run in-process; others run as shell commands in a PTY. Keep invocations self-contained — no shell state carryover.
 
-Long-running commands auto-background after 15s, returning a session id. Incremental output arrives via inbox automatically — no polling needed.
+- `wait: 0` (default): stay in the foreground until completion.
+- `wait: N`: move a still-running command to background after N seconds and return its session id. This is not a failure or cancellation.
+- omitted `timeout`: use the 600s safety timeout. `timeout: N` cancels the command after N total seconds, including background time. `timeout: 0` disables the command timeout.
+
+Background completion is delivered through the inbox automatically. Incremental output is best-effort; completion delivery is retained with higher priority.
 
 Interactive shells (`su`, `python`, `mysql` prompts) do not work. Use "one command in → stdout out" pattern.
 

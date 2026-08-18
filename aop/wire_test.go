@@ -92,3 +92,38 @@ func TestSessionNodeIDUsesStableFieldThree(t *testing.T) {
 		t.Fatalf("node_id = %q", session.GetNodeId())
 	}
 }
+
+func FuzzEnvelopeBinaryRoundTrip(f *testing.F) {
+	wrapped, err := aop.Wrap("seed", "", &aop.Session{NodeId: "local-1"})
+	if err != nil {
+		f.Fatal(err)
+	}
+	valid, err := proto.Marshal(wrapped)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(valid)
+	f.Add([]byte{})
+	f.Add([]byte{0x0a, 0x01, 'x'})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		envelope := new(aop.Envelope)
+		if err := proto.Unmarshal(data, envelope); err != nil {
+			return
+		}
+		encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roundTrip := new(aop.Envelope)
+		if err := proto.Unmarshal(encoded, roundTrip); err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(envelope, roundTrip) {
+			t.Fatal("protobuf binary round trip changed the envelope")
+		}
+		if envelope.Payload != nil {
+			_, _ = aop.Unwrap(envelope)
+		}
+	})
+}

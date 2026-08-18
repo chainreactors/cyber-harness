@@ -20,23 +20,6 @@ on:
         required: false
         default: false
         type: boolean
-  workflow_call:
-    inputs:
-      tag:
-        description: 'Release tag'
-        required: true
-        type: string
-      target:
-        description: 'Branch or commit to tag if the tag does not exist'
-        required: false
-        default: master
-        type: string
-      prerelease:
-        description: 'Publish immediately as a prerelease instead of creating a draft'
-        required: false
-        default: false
-        type: boolean
-
 permissions:
   contents: write
 
@@ -52,9 +35,6 @@ jobs:
 
   # ── Resolve the tag once, share with all jobs ───────────────────
   prepare:
-    # Nightly tag pushes also match v*.*.*. The nightly workflow invokes this
-    # workflow explicitly with prerelease=true, so ignore the duplicate push.
-    if: github.event_name != 'push' || !contains(github.ref_name, '-nightly.')
     runs-on: ubuntu-22.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -82,11 +62,6 @@ jobs:
             echo "Invalid release tag: ${TAG}" >&2
             exit 1
           fi
-          if [[ "${TAG}" == *nightly* && "${{ inputs.prerelease }}" != "true" ]]; then
-            echo "Nightly tags require prerelease=true: ${TAG}" >&2
-            exit 1
-          fi
-
           git fetch --force --tags origin
 
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
@@ -157,6 +132,7 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
+            recorder: "false"
           - id: aiscan-full-linux-amd64
             profile: full
             runner: ubuntu-22.04
@@ -165,6 +141,7 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
             targets: "linux/amd64"
             cgo: "1"
+            recorder: "true"
           - id: aiscan-full-linux-arm64
             profile: full
             runner: ubuntu-24.04-arm
@@ -173,22 +150,17 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
             targets: "linux/arm64"
             cgo: "1"
-          - id: aiscan-full-darwin-amd64
+            recorder: "true"
+          - id: aiscan-full-darwin
             profile: full
-            runner: macos-15-intel
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
-            targets: "darwin/amd64"
-            cgo: "1"
-          - id: aiscan-full-darwin-arm64
-            profile: full
-            runner: macos-15
+            runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
-            targets: "darwin/arm64"
+            targets: "darwin/amd64 darwin/arm64"
             cgo: "1"
+            recorder: "false"
+            cross: darwin
           - id: aiscan-full-windows-amd64
             profile: full
             runner: windows-2022
@@ -197,6 +169,7 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
             targets: "windows/amd64"
             cgo: "1"
+            recorder: "true"
 
     env:
       GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}
@@ -216,25 +189,71 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Read macOS cross-toolchain versions
+        if: matrix.cross == 'darwin'
+        id: macos-cross
+        run: |
+          source .github/native/versions.env
+          echo "zig-version=${MACOS_CROSS_ZIG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sdk-version=${MACOS_CROSS_SDK_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sdk-sha256=${MACOS_CROSS_SDK_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "deployment-target=${MACOS_CROSS_DEPLOYMENT_TARGET}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Zig for macOS CGO cross-compilation
+        if: matrix.cross == 'darwin'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: ${{ steps.macos-cross.outputs.zig-version }}
+          cache-key: macos-cgo-${{ matrix.id }}
+
+      - name: Install pinned macOS SDK
+        if: matrix.cross == 'darwin'
+        env:
+          SDK_VERSION: ${{ steps.macos-cross.outputs.sdk-version }}
+          SDK_SHA256: ${{ steps.macos-cross.outputs.sdk-sha256 }}
+          DEPLOYMENT_TARGET: ${{ steps.macos-cross.outputs.deployment-target }}
+        run: |
+          set -euo pipefail
+          sdk_dir="${RUNNER_TEMP}/macos-sdk"
+          archive="${sdk_dir}/MacOSX${SDK_VERSION}.sdk.tar.xz"
+          mkdir -p "${sdk_dir}"
+          for attempt in 1 2 3; do
+            if curl --retry 3 --retry-all-errors --retry-delay 2 -fsSL \
+              "https://github.com/joseluisq/macosx-sdks/releases/download/${SDK_VERSION}/MacOSX${SDK_VERSION}.sdk.tar.xz" \
+              -o "${archive}"; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              exit 1
+            fi
+          done
+          echo "${SDK_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}" -C "${sdk_dir}"
+          sdk_root="${sdk_dir}/MacOSX${SDK_VERSION}.sdk"
+          test -d "${sdk_root}/System/Library/Frameworks"
+          test -f "${sdk_root}/usr/lib/libresolv.tbd"
+          echo "MACOS_SDKROOT=${sdk_root}" >> "${GITHUB_ENV}"
+          echo "MACOSX_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}" >> "${GITHUB_ENV}"
+
       - name: Set up mingw for libcstx
         if: runner.os == 'Windows'
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
       - name: Install recorder SDK link dependencies on Linux
-        if: matrix.profile == 'full' && runner.os == 'Linux'
+        if: matrix.recorder == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential nasm yasm pkg-config \
             libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
       - name: Install recorder SDK link dependencies on Windows
-        if: matrix.profile == 'full' && runner.os == 'Windows'
+        if: matrix.recorder == 'true' && runner.os == 'Windows'
         run: |
           C:/msys64/usr/bin/bash.exe -lc \
             "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
 
       - name: Prepare static FFmpeg and x264 recorder SDK
-        if: matrix.profile == 'full' && runner.os != 'macOS'
+        if: matrix.recorder == 'true'
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             platform=windows
@@ -248,7 +267,7 @@ jobs:
           bash .github/native/sdk.sh env "${platform}" "$(go env GOARCH)" >> "${GITHUB_ENV}"
 
       - name: Verify recorder SDK link environment
-        if: matrix.profile == 'full' && runner.os != 'macOS'
+        if: matrix.recorder == 'true'
         run: pkg-config --modversion libavcodec
 
       - name: Download embedded frontend
@@ -278,11 +297,37 @@ jobs:
             suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
             out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
+
+            link_flags="-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}"
+            if [[ "$goos" == "darwin" && "${{ matrix.cgo }}" == "1" ]]; then
+              test -n "${MACOS_SDKROOT:-}"
+              case "$goarch" in
+                amd64) zig_target=x86_64-macos ;;
+                arm64) zig_target=aarch64-macos ;;
+                *) echo "unsupported Darwin architecture ${goarch}" >&2; exit 1 ;;
+              esac
+              cross_flags="-target ${zig_target} -isysroot ${MACOS_SDKROOT} -F${MACOS_SDKROOT}/System/Library/Frameworks -L${MACOS_SDKROOT}/usr/lib -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+              export CC="zig cc ${cross_flags}"
+              export CXX="zig c++ ${cross_flags}"
+              link_flags="-linkmode external ${link_flags}"
+            else
+              unset CC CXX
+            fi
+
             CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
               go build -trimpath -tags "$TAGS" \
-              -ldflags "-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}" \
+              -ldflags "${link_flags}" \
               -buildvcs=false \
               -o "$out" "$MAIN"
+
+            if [[ "$goos" == "darwin" ]]; then
+              file_info="$(file -b "$out")"
+              echo "  ${file_info}"
+              case "$goarch" in
+                amd64) grep -Eq 'Mach-O 64-bit.*x86_64' <<< "$file_info" ;;
+                arm64) grep -Eq 'Mach-O 64-bit.*arm64' <<< "$file_info" ;;
+              esac
+            fi
           done
 
           if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
@@ -294,7 +339,7 @@ jobs:
           ls -lh "${OUTDIR}/"
 
       - name: Verify recorder libraries are statically linked
-        if: matrix.profile == 'full' && runner.os != 'macOS'
+        if: matrix.recorder == 'true'
         run: |
           set -euo pipefail
           binary="$(find dist/build -maxdepth 1 -type f -name 'aiscan-full_*' -print -quit)"

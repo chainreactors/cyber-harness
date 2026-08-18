@@ -37,6 +37,27 @@ func TestBufferedCapacity(t *testing.T) {
 	}
 }
 
+func TestHigherPriorityMessageEvictsLowerPriorityWhenFull(t *testing.T) {
+	b := NewBuffered(2)
+	if err := b.Push(NewUserMessage("low-1").WithPriority(PriorityLow)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Push(NewUserMessage("low-2").WithPriority(PriorityLow)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Push(NewUserMessage("completion").WithPriority(PriorityHigh)); err != nil {
+		t.Fatalf("high-priority push = %v", err)
+	}
+
+	msgs := b.Drain()
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if msgs[0].Priority != PriorityHigh || messageText(msgs[0].Message) != "completion" {
+		t.Fatalf("first message = %+v", msgs[0])
+	}
+}
+
 func TestBufferedClose(t *testing.T) {
 	b := NewBuffered(4)
 	b.Push(NewUserMessage("a"))

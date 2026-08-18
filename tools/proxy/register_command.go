@@ -3,12 +3,9 @@
 package proxy
 
 import (
-	"net/url"
-	"strings"
-
 	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/aiscan/core/deps"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/proxyclient"
 
 	// Register extra proxy protocols so proxyclient.NewClient can handle them.
 	_ "github.com/chainreactors/proxyclient/extra/anytls"
@@ -22,25 +19,15 @@ func init() {
 	capability.Register(capability.Descriptor{ID: "proxy", Kind: capability.KindService, Group: "proxy"})
 	commands.RegisterFactory(commands.Factory{
 		Capability: "proxy",
-		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			state := NewState(deps.ScannerProxy)
+		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
+			// The infrastructure (State + FlowStore + long-lived MITM hub) is
+			// created by InstallInfra before BuildPlan so Deps.ScannerProxy
+			// already points every tool at the stable hub address. Here we only
+			// register the verbs that observe and steer it.
+			state, store, hub := resolveInfra(d)
+
 			cmd := New(state)
-			cmd.SetOnProxyChange(func(newProxy string) {
-				// 1. update BashTool scanner proxy env (for shell commands)
-				if bt, ok := reg.GetTool("bash"); ok {
-					if bash, ok := bt.(*commands.BashTool); ok {
-						bash.SetScannerProxy(newProxy)
-					}
-				}
-				// 2. update individual scanner command proxy fields;
-				// each command passes proxy to the SDK engine via
-				// Context.SetProxy / RunOptions.ProxyDial on next execution.
-				for _, pc := range reg.All() {
-					if pc.SetProxy != nil {
-						pc.SetProxy(newProxy)
-					}
-				}
-			})
+			cmd.SetHub(hub)
 			cmd.SetCommandExecutor(reg.Run)
 			reg.Register(commands.Command{
 				Name: cmd.Name(), Usage: cmd.Usage(),
@@ -48,24 +35,30 @@ func init() {
 				Run:             cmd.Run,
 			}, "proxy")
 
-			mitmCmd := NewMitmCommand(reg)
+			mitmCmd := NewMitmCommand(reg, store, hub)
 			mitmCmd.SetCommandExecutor(reg.Run)
 			reg.Register(commands.Command{
 				Name: mitmCmd.Name(), Usage: mitmCmd.Usage(),
 				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/mitm.md",
 				Run:             mitmCmd.Run,
-			}, "proxy")
-
-			// If --proxy / config proxy is a clash:// URL, auto-activate
-			if strings.HasPrefix(strings.ToUpper(deps.ScannerProxy), "CLASH://") {
-				u, err := url.Parse(deps.ScannerProxy)
-				if err == nil {
-					dial, dialErr := proxyclient.NewClient(u)
-					if dialErr == nil {
-						state.SetAutoDial(deps.ScannerProxy, dial)
+				Close: func() {
+					if hub != nil {
+						hub.Shutdown(nil)
 					}
-				}
-			}
+				},
+			}, "proxy")
 		},
 	})
+}
+
+// resolveInfra returns the shared proxy infrastructure installed by
+// InstallInfra, or a hub-less fallback (direct egress, no capture) for build
+// paths — chiefly tests — that register the proxy group without it.
+func resolveInfra(d *commands.Deps) (*State, *FlowStore, *ProxyHub) {
+	if d.Bag != nil {
+		if infra, ok := deps.Get(d.Bag, InfraKey); ok && infra != nil {
+			return infra.State, infra.Store, infra.Hub
+		}
+	}
+	return NewState(d.ScannerProxy), NewFlowStore(10000), nil
 }

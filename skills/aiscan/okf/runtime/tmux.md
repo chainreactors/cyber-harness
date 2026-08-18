@@ -1,7 +1,7 @@
 ---
 type: Tool Playbook
 title: tmux
-description: PTY session manager built into aiscan. All bash commands run inside tmux sessions; long commands auto-background with inbox delivery.
+description: PTY session manager built into aiscan. Bash commands stay foreground by default and move to background only when the agent sets wait.
 tags: [runtime, session]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
@@ -9,7 +9,7 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 
 # tmux - Session Manager
 
-tmux is the PTY session manager built into aiscan. All `bash` commands run inside tmux sessions. Commands completing within 15 seconds return output inline; longer commands are auto-backgrounded with incremental output delivered to the agent inbox automatically.
+tmux is the PTY session manager built into aiscan. All `bash` commands run inside tmux sessions. Commands stay in the foreground by default. The agent explicitly sets `wait: N` when a still-running command should move to background after N seconds.
 
 ## Commands
 
@@ -49,12 +49,14 @@ tmux capture-pane -t <id> --full -n 100
 ```
 Re-reads the entire buffer (or last N lines of it). Use sparingly; prefer incremental or `-n` for most reads.
 
-## Auto-Background & Inbox Monitoring
+## Explicit Background & Inbox Monitoring
 
-When a `bash` command exceeds 15 seconds, it is automatically backgrounded:
+When a `bash` call sets `wait: N` and the command is still running after N seconds:
 1. The bash tool returns immediately with the session id.
 2. A **monitor goroutine** starts, pushing incremental output to the agent inbox every 10 seconds as `<session_output>` messages.
 3. When the session completes, a `<session_completion>` message is pushed to inbox with exit code and last 20 lines.
+
+With `wait: 0` or an omitted `wait`, the command remains foreground until completion. `timeout` is independent: omitted uses 600 seconds, a positive value cancels after that total runtime, and `timeout: 0` means unlimited.
 
 This means for long-running commands:
 - **You do not need to poll** with `tmux capture-pane`. Output arrives automatically via inbox.
@@ -66,8 +68,8 @@ This means for long-running commands:
 
 ### Long scan — let monitoring deliver output
 ```
-bash: gogo -i 10.0.0.0/24 -p top2
-# auto-backgrounded → session id returned
+bash: {"command":"gogo -i 10.0.0.0/24 -p top2","wait":15}
+# still running after 15s → session id returned
 # wait for inbox <session_output> messages with scan progress
 # wait for inbox <session_completion> when done
 ```

@@ -61,7 +61,20 @@ func (b *Buffered) Push(msg Message) error {
 		return ErrInboxClosed
 	}
 	if len(b.buf) >= b.capacity {
-		return ErrInboxFull
+		victim := -1
+		for i := range b.buf {
+			if b.buf[i].Priority >= msg.Priority {
+				continue
+			}
+			if victim < 0 || b.buf[i].Priority < b.buf[victim].Priority {
+				victim = i
+			}
+		}
+		if victim < 0 {
+			return ErrInboxFull
+		}
+		copy(b.buf[victim:], b.buf[victim+1:])
+		b.buf = b.buf[:len(b.buf)-1]
 	}
 	wasEmpty := len(b.buf) == 0
 	b.buf = append(b.buf, msg)

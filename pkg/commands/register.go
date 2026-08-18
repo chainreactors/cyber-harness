@@ -14,7 +14,7 @@ func init() {
 			}
 			timeout := deps.BashTimeout
 			if timeout <= 0 {
-				timeout = 300
+				timeout = defaultTimeout
 			}
 			var readers []VirtualFileReader
 			var globbers []VirtualGlobber
@@ -29,7 +29,7 @@ func init() {
 			}
 			reg.RegisterTool(NewGlobTool(workDir, globbers...))
 
-			bash := NewBashTool(workDir, timeout).WithScannerProxy(deps.ScannerProxy)
+			bash := NewBashTool(workDir, timeout).WithScannerProxy(deps.ScannerProxy).WithScannerProxyCA(deps.ScannerProxyCA).WithEgressResolver(deps.EgressResolver)
 			bash.SetCommandNames(reg.Names)
 			bash.SetCommandResolver(reg.Get)
 			reg.RegisterTool(bash)

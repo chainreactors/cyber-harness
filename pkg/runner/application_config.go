@@ -44,6 +44,7 @@ type ToolConfig struct {
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string // optional tool groups to enable
+	MitmCapture       bool     // record tool traffic through the MITM hub (default true); false = pure proxy routing
 }
 
 type IOAConfig struct {

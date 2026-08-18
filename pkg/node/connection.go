@@ -39,6 +39,9 @@ type connectionConfig struct {
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
 	PTYRouter     func() (*terminal.Router, error)
+	// ExtraNamespaces registers additional AOP namespaces on the connection mux
+	// after the built-ins (see ToolNodeConfig.ExtraNamespaces).
+	ExtraNamespaces []func(*aop.NamespaceMux) error
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

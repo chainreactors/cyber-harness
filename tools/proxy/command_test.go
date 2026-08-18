@@ -96,8 +96,6 @@ func TestSwitchNoSubscription(t *testing.T) {
 func TestClear(t *testing.T) {
 	state := NewState("socks5://127.0.0.1:1080")
 	cmd := New(state)
-	var lastProxy string
-	cmd.SetOnProxyChange(func(p string) { lastProxy = p })
 
 	out, err := runProxy(cmd, "clear")
 	if err != nil {
@@ -106,8 +104,13 @@ func TestClear(t *testing.T) {
 	if !strings.Contains(out, "cleared") {
 		t.Fatalf("expected 'cleared', got: %q", out)
 	}
-	if lastProxy != "socks5://127.0.0.1:1080" {
-		t.Fatalf("expected revert to original proxy, got: %q", lastProxy)
+	// Clear reverts the egress to the original proxy; the message reports it and
+	// the republished chain must remain usable.
+	if !strings.Contains(out, "socks5://127.0.0.1:1080") {
+		t.Fatalf("expected revert to original proxy in output, got: %q", out)
+	}
+	if state.CurrentDial() == nil {
+		t.Fatal("CurrentDial must remain non-nil after clear")
 	}
 }
 
@@ -136,12 +139,13 @@ func TestPassthroughNoExecutor(t *testing.T) {
 }
 
 func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
-	state := NewState("original://proxy")
+	state := NewState("socks5://127.0.0.1:1080")
 	cmd := New(state)
+	base := state.dialPtr()
 
-	var proxyChanges []string
-	cmd.SetOnProxyChange(func(p string) { proxyChanges = append(proxyChanges, p) })
+	var duringExec = base
 	cmd.SetCommandExecutor(func(_ context.Context, tokens []string, execution *commands.Execution) (any, error) {
+		duringExec = state.dialPtr()
 		fmt.Fprint(execution.Stdout, "executed: "+strings.Join(tokens, " "))
 		return nil, nil
 	})
@@ -153,14 +157,13 @@ func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
 	if !strings.Contains(out, "executed: echo hello") {
 		t.Fatalf("expected command output, got: %q", out)
 	}
-	if len(proxyChanges) != 2 {
-		t.Fatalf("expected 2 proxy changes (set + revert), got %d: %v", len(proxyChanges), proxyChanges)
+	// The override republishes a different chain for the duration of the wrapped
+	// command, then restores the previous one.
+	if duringExec == base {
+		t.Fatal("expected egress chain to be overridden during passthrough execution")
 	}
-	if proxyChanges[0] != "socks5://127.0.0.1:9999" {
-		t.Fatalf("first proxy change = %q, want socks5://127.0.0.1:9999", proxyChanges[0])
-	}
-	if proxyChanges[1] != "original://proxy" {
-		t.Fatalf("second proxy change = %q, want original://proxy (revert)", proxyChanges[1])
+	if state.dialPtr() != base {
+		t.Fatal("expected egress chain to be restored after passthrough")
 	}
 }
 

@@ -43,9 +43,10 @@ func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeature
 		},
 		Tools: ToolConfig{
 			Enabled:       features.ToolsEnabled,
-			BashTimeout:   300,
+			BashTimeout:   600,
 			TavilyKeys:    dc.GetSearch().GetTavilyKeys(),
 			OptionalTools: append([]string(nil), dc.GetAgent().GetTools()...),
+			MitmCapture:   true, // default-on; distribute config does not model a disable yet
 		},
 		Logger: logger,
 	}
@@ -87,10 +88,11 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 		},
 		Tools: ToolConfig{
 			Enabled:           features.ToolsEnabled,
-			BashTimeout:       300,
+			BashTimeout:       600,
 			TavilyKeys:        resolveTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
 			PlaywrightSession: option.PlaywrightSession,
 			OptionalTools:     option.Tools,
+			MitmCapture:       option.Mitm == nil || *option.Mitm, // default-on; --mitm=false / config mitm:false disables
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),

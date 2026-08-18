@@ -364,6 +364,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
+	// The reply path handed to every namespace handler. The built-in namespaces
+	// close over sendEnvelope directly and ignore this argument, which is why it
+	// could be a discard for so long; an ExtraNamespaces handler has no such
+	// closure and can only answer — or stream — through here.
+	reply := func(envelope *aop.Envelope) error {
+		sendEnvelope(envelope)
+		return nil
+	}
 	for {
 		envelope, err := stream.Recv()
 		if err != nil {
@@ -374,7 +382,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			}
 			return err
 		}
-		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, func(*aop.Envelope) error { return nil })
+		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, reply)
 		if err != nil {
 			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
 			continue
@@ -470,6 +478,14 @@ func newAgentConnectionNamespaceMux(
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	for _, register := range cc.ExtraNamespaces {
+		if register == nil {
+			continue
+		}
+		if err := register(mux); err != nil {
+			return nil, err
+		}
 	}
 	return mux, nil
 }
