@@ -8,13 +8,13 @@ v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台
 
 **record — 原生桌面与窗口捕获**
 
-Full 版新增原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；官方 Windows amd64 与 Linux amd64/arm64 full 产物静态链接裁剪后的 FFmpeg/libx264 SDK。
+新增可选的原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；SDK 和工具开发者可在 Windows amd64 与 Linux amd64/arm64 上显式链接裁剪后的 FFmpeg/libx264 SDK，官方 full 产物默认不编译该工具。
 
 - 支持 `screenshot`、固定时长 `record`，以及异步 `start` / `stop` / `status`
 - 支持桌面、Windows HWND、X11 Window ID，或通过 PID 自动选择最大的可见窗口
 - 默认捕获鼠标，视频使用 H.264/libx264 编码并封装为 MP4；最多可并行运行四个录制会话
 - 截图通过 AOP media 返回有界预览；视频通过 task-relative `Resource.uri` 与分段 `aop.file` 请求传输
-- `make full` 自动下载、校验并缓存固定版本的 recorder SDK；维护者也可从固定源码重建 SDK
+- `make record` 按需下载、校验并缓存固定版本的 recorder SDK，并构建独立的 record-enabled 产物；维护者也可从固定源码重建 SDK
 
 Wayland、macOS、Windows arm64、无图形会话的 headless 主机和 Windows session 0 暂不支持原生录制。完整限制与构建说明见 [record 文档](record.md)。
 
@@ -55,8 +55,8 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 - standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
 - CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
-- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算；缺少预构建 SDK 时 CI 可回退到源码构建
-- full profile 恢复静态 RE2，并验证 Windows recorder/RE2 原生库没有变成运行时 DLL 依赖
+- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算，并通过独立 workflow 构建发布
+- full profile 恢复静态 RE2，并验证 Windows RE2 原生库没有变成运行时 DLL 依赖
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
 - 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
 
@@ -92,7 +92,7 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 | --- | --- | --- | --- |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
 | `aiscan-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
-| 原生 `record` | X11 amd64/arm64 | 不支持 | amd64 |
+| 可选原生 `record` SDK 构建 | X11 amd64/arm64 | 不支持 | amd64 |
 
 迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
 

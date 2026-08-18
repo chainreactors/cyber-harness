@@ -132,25 +132,22 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
-            recorder: "false"
           - id: aiscan-full-linux-amd64
             profile: full
             runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
             targets: "linux/amd64"
             cgo: "1"
-            recorder: "true"
           - id: aiscan-full-linux-arm64
             profile: full
             runner: ubuntu-24.04-arm
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
             targets: "linux/arm64"
             cgo: "1"
-            recorder: "true"
           - id: aiscan-full-darwin
             profile: full
             runner: ubuntu-22.04
@@ -159,17 +156,15 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
             targets: "darwin/amd64 darwin/arm64"
             cgo: "1"
-            recorder: "false"
             cross: darwin
           - id: aiscan-full-windows-amd64
             profile: full
             runner: windows-2022
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
             targets: "windows/amd64"
             cgo: "1"
-            recorder: "true"
 
     env:
       GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}
@@ -239,37 +234,6 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
-      - name: Install recorder SDK link dependencies on Linux
-        if: matrix.recorder == 'true' && runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential nasm yasm pkg-config \
-            libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-
-      - name: Install recorder SDK link dependencies on Windows
-        if: matrix.recorder == 'true' && runner.os == 'Windows'
-        run: |
-          C:/msys64/usr/bin/bash.exe -lc \
-            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
-
-      - name: Prepare static FFmpeg and x264 recorder SDK
-        if: matrix.recorder == 'true'
-        run: |
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            platform=windows
-            C:/msys64/usr/bin/bash.exe -lc \
-              "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH=amd64 || make record-native-source RECORD_ARCH=amd64"
-          else
-            platform=linux
-            make record-native RECORD_ARCH="$(go env GOARCH)" || \
-              make record-native-source RECORD_ARCH="$(go env GOARCH)"
-          fi
-          bash .github/native/sdk.sh env "${platform}" "$(go env GOARCH)" >> "${GITHUB_ENV}"
-
-      - name: Verify recorder SDK link environment
-        if: matrix.recorder == 'true'
-        run: pkg-config --modversion libavcodec
-
       - name: Download embedded frontend
         if: matrix.profile == 'full'
         uses: actions/download-artifact@v7
@@ -337,24 +301,6 @@ jobs:
 
           echo "=== Binaries ==="
           ls -lh "${OUTDIR}/"
-
-      - name: Verify recorder libraries are statically linked
-        if: matrix.recorder == 'true'
-        run: |
-          set -euo pipefail
-          binary="$(find dist/build -maxdepth 1 -type f -name 'aiscan-full_*' -print -quit)"
-          test -n "${binary}"
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            if objdump -p "${binary}" | grep -Eiq 'DLL Name:.*(libav|x264|libwinpthread)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          else
-            if ldd "${binary}" | grep -Eiq '(libav|libx264)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

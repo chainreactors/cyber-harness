@@ -279,9 +279,11 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	for _, required := range []string{
 		"GO_LDFLAGS ?= -s -w",
 		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
-		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
+		"full: frontend prepare\n\tCGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
+		"record: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
 		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
-		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static",
+		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static",
+		"RECORD_TAGS := $(FULL_TAGS) record_ffmpeg",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile missing build profile contract %q", required)
@@ -291,12 +293,23 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	for _, required := range []string{
 		"CGO_MODE=0",
 		"CGO_MODE=1",
-		`EXTRA_TAGS="full,record_ffmpeg,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
+		`EXTRA_TAGS="full,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
 		`CGO_ENABLED="$CGO_MODE"`,
 		`OSARCH="${HOST_OS}/${HOST_ARCH}"`,
 	} {
 		if !strings.Contains(buildScript, required) {
 			t.Errorf("build.sh missing build profile contract %q", required)
+		}
+	}
+	for name, profile := range map[string]string{"Makefile full profile": makefile, "build.sh full profile": buildScript} {
+		if strings.Contains(profile, "full,record_ffmpeg") || strings.Contains(profile, "full: frontend record-native") {
+			t.Errorf("%s must not enable the optional recorder", name)
+		}
+	}
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	for _, forbidden := range []string{"record_ffmpeg", "matrix.recorder"} {
+		if strings.Contains(releaseWorkflow, forbidden) {
+			t.Errorf("release workflow must not enable the optional recorder; found %q", forbidden)
 		}
 	}
 

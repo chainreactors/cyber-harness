@@ -106,7 +106,7 @@ aiscan 构建脚本
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
   --ioa                 (已废弃, ioa serve 已集成到 aiscan 主二进制)
-  --profile PROFILE     构建配置: mini (默认, ~77MB), full (~123MB)
+  --profile PROFILE     构建配置: mini (默认), full
 
 LLM 覆盖（优先级高于 aiscan.yaml）:
   --llm-provider TYPE   openai (OpenAI-compatible) or anthropic
@@ -251,7 +251,7 @@ CGO_MODE=0
 case "$PROFILE" in
     mini) ;;
     full)
-        EXTRA_TAGS="full,record_ffmpeg,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"
+        EXTRA_TAGS="full,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
         AISCAN_BIN="aiscan-full"
         CGO_MODE=1
@@ -294,21 +294,6 @@ echo "targets:  $OSARCH"
 echo "cgo:      $CGO_MODE"
 echo "output:   $OUTPUT_DIR"
 echo ""
-
-if [ "$PROFILE" = "full" ]; then
-    case "$HOST_OS" in
-        linux|windows)
-            if [ "${AISCAN_RECORD_BUILD_FROM_SOURCE:-0}" = "1" ]; then
-                bash ".github/native/sdk.sh" build "$HOST_OS" "$HOST_ARCH"
-            else
-                bash ".github/native/sdk.sh" fetch "$HOST_OS" "$HOST_ARCH"
-            fi
-            while IFS= read -r assignment; do
-                export "$assignment"
-            done < <(bash ".github/native/sdk.sh" env "$HOST_OS" "$HOST_ARCH")
-            ;;
-    esac
-fi
 
 # ─── 编译 ────────────────────────────────────────────────────────
 
