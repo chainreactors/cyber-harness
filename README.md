@@ -42,7 +42,7 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 | Edition | Description |
 | --- | --- |
 | **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | Full — adds playwright, passive recon, katana, and native recording on supported Windows/Linux systems |
+| **aiscan-full** | Full — adds Web, playwright, passive recon, and katana |
 
 | OS | Arch | Standard | Full |
 | --- | --- | --- | --- |
@@ -110,9 +110,9 @@ The standalone agent executable is no longer a maintained build or release
 target. Reference wiring remains in `examples/agent` and can be run manually
 with `go run ./examples/agent --help`. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
-assets are embedded into the binary. On supported Windows/Linux targets it
-also downloads and verifies the pinned recorder SDK; use
-`make record-native-source` to build that SDK from pinned sources instead.
+assets are embedded into the binary. The native `record` tool is not included
+in the default full build; SDK and tool developers can build it explicitly with
+`make record`, as described in [docs/record.md](docs/record.md).
 
 ```bash
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
@@ -168,6 +168,8 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 - playwright — headless Chromium sessions, screenshots, network capture
 - katana — web crawler with standard/headless/hybrid engines
 - passive — cyberspace search (FOFA, Hunter, Shodan)
+
+**Optional SDK tools**
 - record — native desktop/window screenshots and H.264/MP4 recording (Windows and Linux X11)
 
 **Utilities**

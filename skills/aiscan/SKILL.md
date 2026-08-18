@@ -15,7 +15,7 @@ Use these capabilities to inspect inputs, execute supporting analysis, and colle
 - `bash`: run shell commands and pseudo-commands (see below).
 - `web_search`: search the web for CVEs, advisories, exploits, and documentation.
 - `fetch`: fetch and read a specific URL.
-- `record` (Windows/Linux full builds): capture desktop or visible application-window screenshots and H.264 recordings. It accepts HWND/X11 Window IDs or resolves a PID to its main visible window.
+- `record` (optional Windows/Linux SDK builds): capture desktop or visible application-window screenshots and H.264 recordings. It accepts HWND/X11 Window IDs or resolves a PID to its main visible window.
 
 ## ASM and Penetration Tools
 
