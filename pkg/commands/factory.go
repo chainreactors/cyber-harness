@@ -49,6 +49,9 @@ type Deps struct {
 	PlaywrightSession string
 	Events            aop.EventEmitter
 	Hooks             *hooks.Registry
+	// FileAudit collects what the file tools and shell executions did to the
+	// filesystem. Nil leaves them unobserved.
+	FileAudit *FileAudit
 }
 
 // Provide stores a typed dependency, allocating the bag on first use so a

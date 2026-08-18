@@ -55,6 +55,7 @@ type BashTool struct {
 	adapterMu      sync.Mutex
 	shellAdapter   *shellCommandAdapter
 	closeOnce      sync.Once
+	audit          *FileAudit
 }
 
 func NewBashTool(workDir string, timeout int) *BashTool {
@@ -62,6 +63,14 @@ func NewBashTool(workDir string, timeout int) *BashTool {
 		timeout = defaultTimeout
 	}
 	return &BashTool{workDir: workDir, timeout: timeout, tasks: tmux.NewManager()}
+}
+
+// WithAudit attaches the file-access audit trail. Shell commands are the one
+// place the runtime cannot observe a file access directly, so what this buys is
+// the work dir diff taken around every execution.
+func (t *BashTool) WithAudit(audit *FileAudit) *BashTool {
+	t.audit = audit
+	return t
 }
 
 func (t *BashTool) Manager() *tmux.Manager          { return t.tasks }
@@ -211,12 +220,19 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
 	}
-	execution, err := t.Start(ctx, command, options)
+	var result *coretool.Result
+	err = t.audit.Around(ctx, options.WorkDir, func() error {
+		execution, startErr := t.Start(ctx, command, options)
+		if startErr != nil {
+			return startErr
+		}
+		result = t.waitOrBackground(execution, ctx, inbox.FromContext(ctx), time.Duration(args.Wait)*time.Second)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx), time.Duration(args.Wait)*time.Second), nil
+	return result, nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
@@ -224,6 +240,20 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 // final session state. Non-zero exits are represented by Info.ExitCode rather
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
+	workDir := options.WorkDir
+	if workDir == "" {
+		workDir = coretool.WorkDirFromContext(ctx, t.workDir)
+	}
+	var execution *Execution
+	err := t.audit.Around(ctx, workDir, func() error {
+		var runErr error
+		execution, runErr = t.runForeground(ctx, command, options)
+		return runErr
+	})
+	return execution, err
+}
+
+func (t *BashTool) runForeground(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil, fmt.Errorf("empty command")

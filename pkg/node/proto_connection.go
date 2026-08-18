@@ -26,6 +26,7 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -301,6 +302,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if detach := attachToolProgress(cc.Progress, send); detach != nil {
 		defer detach()
 	}
+	if detach := attachFileAccess(cc.FileAudit, send); detach != nil {
+		defer detach()
+	}
 	// The catalog is the first post-handshake message the hub treats as a
 	// readiness signal. Attach event and progress subscribers before publishing
 	// it so callers cannot emit into the small acceptance-to-subscribe gap.
@@ -564,9 +568,19 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
 	switch payload := value.Message.(type) {
 	case *filepb.ProtocolMessage_ReadRequest:
-		go sendFileResult(replyTo, fileRead(payload.ReadRequest, workingDir(cc.Runtime)), send)
+		go func() {
+			base := workingDir(cc.Runtime)
+			value := fileRead(payload.ReadRequest, base)
+			sendFileResult(replyTo, value, send)
+			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_READ, base, payload.ReadRequest.GetPath(), value)
+		}()
 	case *filepb.ProtocolMessage_WriteRequest:
-		go sendFileResult(replyTo, fileWrite(payload.WriteRequest, workingDir(cc.Runtime)), send)
+		go func() {
+			base := workingDir(cc.Runtime)
+			value := fileWrite(payload.WriteRequest, base)
+			sendFileResult(replyTo, value, send)
+			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_WRITE, base, payload.WriteRequest.GetPath(), value)
+		}()
 	case *filepb.ProtocolMessage_ListRequest:
 		if !cc.RunnerFileRPC {
 			fail("file list is unavailable")
@@ -579,6 +593,9 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 			return
 		}
 		go sendFileResult(replyTo, fileMkdir(payload.MkdirRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_Configure:
+		cc.FileAudit.Configure(payload.Configure.GetWatch())
+		send(replyTo, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_State{State: cc.FileAudit.State()}})
 	case *filepb.ProtocolMessage_UploadRequest:
 		go func() {
 			if cc.Chat == nil {
@@ -595,6 +612,20 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 	default:
 		fail("unsupported AOP file message")
 	}
+}
+
+// auditControlAccess records a file request this node served for a peer. It is
+// the half of the trail no tool can report: an operator reading a workspace
+// file is a real access to it, and one nothing else would have witnessed.
+func auditControlAccess(audit *commands.FileAudit, op filepb.AccessOp, base, path string, value fileResultValue) {
+	if audit == nil || value.err != nil || path == "" {
+		return
+	}
+	audit.RecordFile(context.Background(), op, resolveFileRPCPath(base, path), &filepb.Access{
+		Source:  filepb.AccessSource_ACCESS_SOURCE_CONTROL,
+		WorkDir: base,
+		Bytes:   int64(len(value.result.GetData())),
+	})
 }
 
 func handleAgentExecMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *execpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc) {

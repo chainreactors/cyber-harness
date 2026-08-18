@@ -38,6 +38,10 @@ type App struct {
 	SkillDiagnostics  []skills.Diagnostic
 	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
+	// FileAudit is the trail the file tools and shell executions report into.
+	// It belongs to the application rather than any one transport, so a local
+	// run and a remote tool node observe the same thing.
+	FileAudit         *commands.FileAudit
 	EventBus          *eventbus.Bus[*aop.Event]
 	Events            *sessionEmitter
 	Progress          *eventbus.Bus[*toolpb.Progress]
@@ -128,7 +132,8 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
 
-	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, logger)
+	a.FileAudit = commands.NewFileAudit()
+	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, a.FileAudit, logger)
 	if rc.RecordFile != "" {
 		if err := a.StartRecording(rc.RecordFile); err != nil {
 			a.Close()
@@ -365,7 +370,7 @@ func llmConfigLabel(providerName, model string) string {
 	return providerName + "/" + model
 }
 
-func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, logger telemetry.Logger) *commands.CommandRegistry {
+func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, fileAudit *commands.FileAudit, logger telemetry.Logger) *commands.CommandRegistry {
 	cmdReg := commands.NewRegistry()
 	workDir, _ := os.Getwd()
 	deps := &commands.Deps{
@@ -378,6 +383,7 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		PlaywrightSession: rc.Tools.PlaywrightSession,
 		Hooks:             hookRegistry,
 		Events:            events,
+		FileAudit:         fileAudit,
 	}
 	// Start the long-lived proxy hub and repoint Deps.ScannerProxy at its stable
 	// address BEFORE BuildPlan, so bash and every scanner engine route through it
