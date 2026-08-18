@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/chainreactors/aiscan/tools/scan"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	ioaclient "github.com/chainreactors/ioa/client"
@@ -108,6 +109,12 @@ func registerScannerCommands(cmdReg *commands.CommandRegistry, engineSet *engine
 	if engineSet != nil {
 		commands.Provide(deps, engine.SetKey, engineSet)
 		commands.Provide(deps, resources.SetKey, engineSet.Resources)
+	}
+	// Start the long-lived proxy hub and repoint Deps.ScannerProxy before build
+	// so every tool routes through it. toolCfg.MitmCapture selects capture vs
+	// pure relay. Non-fatal: fall back to original proxy.
+	if _, err := proxytool.InstallInfra(deps, toolCfg.MitmCapture); err != nil {
+		logger.Warnf("proxy hub unavailable, tools use direct/original proxy: %s", err)
 	}
 	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner", "proxy", "ioa"}}), deps, cmdReg)
 	logger.Infof("%s", telemetry.StartupOK("scanner", strings.Join(cmdReg.GroupNames("scanner"), ",")))

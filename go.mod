@@ -335,3 +335,7 @@ replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
 
 replace github.com/chainreactors/aiscan/aop => ./aop
+
+// Local fork patch: adds Options.Dialer so a custom dialer covers plain-HTTP
+// flows too (ProxyHub multi-level proxy chain). See tools/proxy/hub.go.
+replace github.com/chainreactors/utils/mitmproxy => ../utils/mitmproxy

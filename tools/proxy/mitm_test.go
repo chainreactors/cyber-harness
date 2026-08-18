@@ -31,6 +31,13 @@ func startTestTarget(bodySize int) *httptest.Server {
 	}))
 }
 
+// newCapturingHub wraps a store in a recording ProxyHub so a bare captureAddon
+// can route flows through hub.ingest in tests without starting the hub's own
+// listener (the test attaches the addon to its own proxy).
+func newCapturingHub(store *FlowStore) *ProxyHub {
+	return NewProxyHub(nil, store, "", true)
+}
+
 // startMITMProxy creates a MITM proxy with a captureAddon and returns its address.
 func startMITMProxy(t *testing.T) (*mitmproxy.Proxy, *FlowStore, string) {
 	t.Helper()
@@ -43,7 +50,7 @@ func startMITMProxy(t *testing.T) (*mitmproxy.Proxy, *FlowStore, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.AddAddon(&captureAddon{store: store})
+	p.AddAddon(&captureAddon{hub: newCapturingHub(store)})
 	addr, _, err := p.StartAsync()
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +285,7 @@ func BenchmarkMITM_HTTPProxy(b *testing.B) {
 
 	store := NewFlowStore(b.N + 100)
 	p, _ := mitmproxy.NewProxy(&mitmproxy.Options{Addr: "127.0.0.1:0", SslInsecure: true})
-	p.AddAddon(&captureAddon{store: store})
+	p.AddAddon(&captureAddon{hub: newCapturingHub(store)})
 	addr, _, _ := p.StartAsync()
 	defer p.Shutdown(context.Background())
 
@@ -307,7 +314,7 @@ func BenchmarkMITM_CONNECT(b *testing.B) {
 
 	store := NewFlowStore(b.N + 100)
 	p, _ := mitmproxy.NewProxy(&mitmproxy.Options{Addr: "127.0.0.1:0", SslInsecure: true})
-	p.AddAddon(&captureAddon{store: store})
+	p.AddAddon(&captureAddon{hub: newCapturingHub(store)})
 	addr, _, _ := p.StartAsync()
 	defer p.Shutdown(context.Background())
 

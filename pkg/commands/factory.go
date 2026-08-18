@@ -34,8 +34,14 @@ type Deps struct {
 	SkillStore  SkillSource
 	RunnerMode  bool
 
-	Provider          provider.Provider
-	ScannerProxy      string
+	Provider       provider.Provider
+	ScannerProxy   string
+	ScannerProxyCA string // CA PEM path for the MITM hub; injected so children trust intercepted HTTPS
+	// EgressResolver, when set, supersedes ScannerProxy/ScannerProxyCA per
+	// execution: given the current tool-call id it returns the proxy URL (with
+	// the id as the proxy username, so captured flows attribute to it) and the
+	// CA path from live hub state (empty while the hub is not intercepting).
+	EgressResolver    func(callID string) (proxyURL, caPath string)
 	Logger            telemetry.Logger
 	NodeName          string
 	NodeMeta          map[string]any

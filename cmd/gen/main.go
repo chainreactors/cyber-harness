@@ -32,6 +32,7 @@ var aopProtos = []string{
 	"aop/pty/protocol.proto",
 	"aop/tool/protocol.proto",
 	"aop/sco/protocol.proto",
+	"aop/traffic/protocol.proto",
 }
 
 var typeProtos = []string{

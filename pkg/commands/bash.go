@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,30 +20,34 @@ import (
 )
 
 const (
-	defaultTimeout          = 300
-	autoBackgroundThreshold = 15 * time.Second
+	defaultTimeout          = 600
+	unlimitedTimeout        = time.Duration(1<<63 - 1)
 	streamInterval          = 100 * time.Millisecond
 	monitorInterval         = 10 * time.Second
+	completionRetryInterval = 10 * time.Millisecond
 )
 
 // BashExecOptions controls one foreground execution without mutating the
 // BashTool defaults. Runner/WebAgent transports use this entry point while the
-// agent-facing Execute method keeps its auto-background behavior.
+// agent-facing Execute method applies the explicit wait/background contract.
 type BashExecOptions struct {
-	Name     string
-	WorkDir  string
-	Env      map[string]string
-	Timeout  time.Duration
-	OnOutput func([]byte)
-	Stdin    io.Reader
-	Stdout   io.Writer
-	Stderr   io.Writer
+	Name       string
+	WorkDir    string
+	Env        map[string]string
+	Timeout    time.Duration
+	TimeoutSet bool
+	OnOutput   func([]byte)
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
 }
 
 type BashTool struct {
 	workDir        string
 	timeout        int
 	scannerProxy   string
+	scannerProxyCA string
+	egressResolver func(callID string) (proxyURL, caPath string)
 	tasks          *tmux.Manager
 	commandNames   func() []string
 	resolveCommand func(string) (Command, bool)
@@ -58,8 +64,12 @@ func NewBashTool(workDir string, timeout int) *BashTool {
 	return &BashTool{workDir: workDir, timeout: timeout, tasks: tmux.NewManager()}
 }
 
-func (t *BashTool) Manager() *tmux.Manager             { return t.tasks }
-func (t *BashTool) SetScannerProxy(proxy string)       { t.scannerProxy = proxy }
+func (t *BashTool) Manager() *tmux.Manager          { return t.tasks }
+func (t *BashTool) SetScannerProxy(proxy string)    { t.scannerProxy = proxy }
+func (t *BashTool) SetScannerProxyCA(caPath string) { t.scannerProxyCA = caPath }
+func (t *BashTool) SetEgressResolver(fn func(callID string) (string, string)) {
+	t.egressResolver = fn
+}
 func (t *BashTool) SetCommandNames(fn func() []string) { t.commandNames = fn }
 func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
 	t.resolveCommand = fn
@@ -112,6 +122,16 @@ func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
 	return t
 }
 
+func (t *BashTool) WithScannerProxyCA(caPath string) *BashTool {
+	t.scannerProxyCA = caPath
+	return t
+}
+
+func (t *BashTool) WithEgressResolver(fn func(callID string) (string, string)) *BashTool {
+	t.egressResolver = fn
+	return t
+}
+
 func (t *BashTool) Description() string {
 	desc := "Execute a shell command and return its output."
 	if t.commandNames != nil {
@@ -124,7 +144,45 @@ func (t *BashTool) Description() string {
 
 type BashArgs struct {
 	Command string `json:"command" jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands (scan, gogo, tmux, etc.): pass them directly here."`
-	Timeout int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in seconds. The command is killed when it exceeds this. Omit to use the default (300s). Commands still running after 15s are moved to background and keep running until this timeout."`
+	Wait    int    `json:"wait,omitempty" jsonschema:"minimum=0,description=Foreground wait in seconds. 0 waits until completion. A positive value moves a still-running command to background after that many seconds without canceling it."`
+	Timeout int    `json:"timeout,omitempty" jsonschema:"minimum=0,description=Maximum total command runtime in seconds. 0 means unlimited when explicitly provided. Omit to use the default (600s). The timeout continues to apply after a command moves to background."`
+
+	timeoutSet bool
+}
+
+// UnmarshalJSON preserves the distinction between an omitted timeout (use the
+// tool default) and an explicit timeout of zero (no command deadline).
+func (a *BashArgs) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Command string `json:"command"`
+		Wait    int    `json:"wait"`
+		Timeout *int   `json:"timeout"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	a.Command = raw.Command
+	a.Wait = raw.Wait
+	a.Timeout = 0
+	a.timeoutSet = raw.Timeout != nil
+	if raw.Timeout != nil {
+		a.Timeout = *raw.Timeout
+	}
+	return nil
+}
+
+func (a BashArgs) TimeoutSpecified() bool {
+	return a.timeoutSet || a.Timeout != 0
+}
+
+func (a BashArgs) Validate() error {
+	if a.Wait < 0 {
+		return fmt.Errorf("wait must be greater than or equal to 0")
+	}
+	if a.Timeout < 0 {
+		return fmt.Errorf("timeout must be greater than or equal to 0")
+	}
+	return nil
 }
 
 func (t *BashTool) Definition() *coretool.Definition {
@@ -136,6 +194,9 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 	if err != nil {
 		return nil, err
 	}
+	if err := args.Validate(); err != nil {
+		return nil, err
+	}
 
 	command := strings.TrimSpace(args.Command)
 	if command == "" {
@@ -145,17 +206,17 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 		return coretool.TextResult("ok"), nil
 	}
 
-	options := BashExecOptions{}
-	options.WorkDir = coretool.WorkDirFromContext(ctx, "")
-	if args.Timeout > 0 {
+	options := BashExecOptions{WorkDir: coretool.WorkDirFromContext(ctx, "")}
+	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
+		options.TimeoutSet = true
 	}
 	execution, err := t.Start(ctx, command, options)
 	if err != nil {
 		return nil, err
 	}
 
-	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx)), nil
+	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx), time.Duration(args.Wait)*time.Second), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
@@ -225,7 +286,7 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 
 // RunForegroundTool executes a command in the foreground and returns the
 // collected ToolResult (bounded text and media), streaming raw
-// output through options.OnOutput. Transports that must not auto-background
+// output through options.OnOutput. Transports that must remain foreground
 // (AOP tool.call) use this instead of Execute.
 func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (*coretool.Result, error) {
 	execution, err := t.RunForeground(ctx, command, options)
@@ -246,8 +307,14 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 		ctx = context.Background()
 	}
 	timeout := options.Timeout
-	if timeout <= 0 {
+	if timeout < 0 {
+		return nil, fmt.Errorf("timeout must be greater than or equal to 0")
+	}
+	if timeout == 0 && !options.TimeoutSet {
 		timeout = time.Duration(t.timeout) * time.Second
+	}
+	if timeout == 0 {
+		timeout = unlimitedTimeout
 	}
 	workDir := options.WorkDir
 	if workDir == "" {
@@ -260,7 +327,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 			if tokens, err := SplitCommandLine(left); err == nil {
 				if args, syntaxErr := stripShellSyntax(tokens[1:]); syntaxErr == nil {
 					args = normalizeNoColor(cmd.Name, args)
-					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(options.Env, nil, ""), options)
+					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
 				}
 			}
 		}
@@ -271,7 +338,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	}
 	if adapter != nil {
 		contextID := adapter.retainContext(ctx)
-		env := t.runEnv(options.Env, adapter, contextID)
+		env := t.runEnv(ctx, options.Env, adapter, contextID)
 		execution := newExecution(t.tasks, command, nil, workDir, env)
 		info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
 		if err != nil {
@@ -285,7 +352,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 		}()
 		return execution, nil
 	}
-	env := t.runEnv(options.Env, nil, "")
+	env := t.runEnv(ctx, options.Env, nil, "")
 	if cmd, ok := t.resolve(leftToken); ok {
 		tokens, err := SplitCommandLine(left)
 		if err != nil {
@@ -481,18 +548,29 @@ func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 	}
 }
 
-func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox) *coretool.Result {
+func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, targetInbox inbox.Inbox, wait time.Duration) *coretool.Result {
 	done := t.tasks.Done(execution.ID)
+	var waitTimer *time.Timer
+	var waitDone <-chan time.Time
+	if wait > 0 {
+		waitTimer = time.NewTimer(wait)
+		waitDone = waitTimer.C
+		defer waitTimer.Stop()
+	}
 	select {
 	case <-done:
 		execution.refresh()
 		return t.collectResult(execution)
-	case <-time.After(autoBackgroundThreshold):
-		info, _ := t.tasks.Get(execution.ID)
+	case <-waitDone:
+		info, ok := t.tasks.Get(execution.ID)
+		if !ok {
+			execution.refresh()
+			return t.collectResult(execution)
+		}
 		t.startMonitor(info, targetInbox)
 		return coretool.TextResult(fmt.Sprintf(
-			"Command auto-backgrounded (exceeded %s).\nsession id=%s name=%s\nIncremental output will be delivered automatically. Use `tmux kill -t %s` to stop.",
-			autoBackgroundThreshold, info.ID, info.Name, info.ID))
+			"Command moved to background after waiting %s. It is still running.\nsession id=%s name=%s\nCompletion will be delivered automatically. Use `tmux kill -t %s` to stop.",
+			wait, info.ID, info.Name, info.ID))
 	case <-ctx.Done():
 		_ = execution.Kill()
 		<-done
@@ -522,9 +600,9 @@ func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 	return result
 }
 
-func (t *BashTool) runEnv(overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
+func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
 	values := make(map[string]string)
-	for _, item := range t.proxyEnv() {
+	for _, item := range t.proxyEnv(ctx) {
 		if key, value, ok := strings.Cut(item, "="); ok {
 			values[key] = value
 		}
@@ -556,29 +634,58 @@ func (t *BashTool) runEnv(overrides map[string]string, adapter *shellCommandAdap
 	return out
 }
 
-func (t *BashTool) proxyEnv() []string {
-	if t.scannerProxy == "" {
+func (t *BashTool) proxyEnv(ctx context.Context) []string {
+	proxy, ca := t.scannerProxy, t.scannerProxyCA
+	// When an egress resolver is wired, it supersedes the static values: it tags
+	// the proxy URL with this execution's tool-call id (so the hub attributes
+	// captured flows to it) and returns the CA path from live hub state — empty
+	// while the hub is not intercepting, so a relaying child is not handed a
+	// CA-only bundle that would reject the real server certificate.
+	if t.egressResolver != nil {
+		callID := coretool.InvocationFromContext(ctx).CallID
+		proxy, ca = t.egressResolver(callID)
+	}
+	if proxy == "" {
 		return nil
 	}
-	return []string{
-		"ALL_PROXY=" + t.scannerProxy, "all_proxy=" + t.scannerProxy,
-		"HTTP_PROXY=" + t.scannerProxy, "http_proxy=" + t.scannerProxy,
-		"HTTPS_PROXY=" + t.scannerProxy, "https_proxy=" + t.scannerProxy,
+	env := []string{
+		"ALL_PROXY=" + proxy, "all_proxy=" + proxy,
+		"HTTP_PROXY=" + proxy, "http_proxy=" + proxy,
+		"HTTPS_PROXY=" + proxy, "https_proxy=" + proxy,
 	}
+	// Point common HTTP clients at the MITM hub CA so intercepted HTTPS is
+	// trusted. Tools that use the system pool or pin certs ignore these and
+	// degrade to CONNECT-metadata capture, which is acceptable.
+	if ca != "" {
+		env = append(env,
+			"CURL_CA_BUNDLE="+ca,
+			"SSL_CERT_FILE="+ca,
+			"NODE_EXTRA_CA_CERTS="+ca,
+			"REQUESTS_CA_BUNDLE="+ca,
+			"GIT_SSL_CAINFO="+ca,
+		)
+	}
+	return env
 }
 
 func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {
 	if targetInbox == nil {
 		return
 	}
+	producer := targetInbox.RegisterProducer("bash:" + info.ID)
 	t.tasks.Monitor(info.ID, monitorInterval, func(output string) {
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
 			fmt.Sprintf("<session_output id=%q name=%q>\n%s\n</session_output>", info.ID, info.Name, output))
 		msg.Priority = inbox.PriorityLow
 		msg.Meta = map[string]any{"session_id": info.ID, "session_name": info.Name, "type": "incremental"}
+		// Incremental output is best-effort. Completion below is high priority
+		// and retried so a full inbox cannot make a background task disappear.
 		_ = targetInbox.Push(msg)
 	})
 	go func() {
+		if producer != nil {
+			defer producer.Done()
+		}
 		<-t.tasks.Done(info.ID)
 		final, ok := t.tasks.Get(info.ID)
 		if !ok {
@@ -586,13 +693,31 @@ func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {
 		}
 		tail := t.tasks.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user", tmux.FormatCompletion(final, tail))
+		msg.Priority = inbox.PriorityHigh
 		msg.Meta = map[string]any{
 			"session_id":   final.ID,
 			"session_name": final.Name,
 			"exit_code":    final.ExitCode,
+			"type":         "completion",
 		}
-		_ = targetInbox.Push(msg)
+		pushCompletion(targetInbox, msg)
 	}()
+}
+
+func pushCompletion(targetInbox inbox.Inbox, msg inbox.Message) {
+	for {
+		err := targetInbox.Push(msg)
+		switch {
+		case err == nil, errors.Is(err, inbox.ErrInboxClosed):
+			return
+		case !errors.Is(err, inbox.ErrInboxFull):
+			return
+		}
+		if targetInbox.Closed() {
+			return
+		}
+		time.Sleep(completionRetryInterval)
+	}
 }
 
 func isOnlyCommentsOrBlank(cmdLine string) bool {

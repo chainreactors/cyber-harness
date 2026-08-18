@@ -21,16 +21,19 @@ import (
 
 type MitmCommand struct {
 	store       *FlowStore
+	hub         *ProxyHub
 	execCommand CommandExecutor
 	registry    *commands.CommandRegistry
-	execMu      sync.Mutex
 }
 
-func NewMitmCommand(reg *commands.CommandRegistry) *MitmCommand {
-	return &MitmCommand{
-		store:    NewFlowStore(10000),
-		registry: reg,
+// NewMitmCommand wires the mitm verbs to the long-lived hub's shared FlowStore
+// so `mitm flows/analyze/flow` query traffic captured from every tool, not just
+// a per-invocation proxy.
+func NewMitmCommand(reg *commands.CommandRegistry, store *FlowStore, hub *ProxyHub) *MitmCommand {
+	if store == nil {
+		store = NewFlowStore(10000)
 	}
+	return &MitmCommand{store: store, hub: hub, registry: reg}
 }
 
 func (c *MitmCommand) SetCommandExecutor(fn CommandExecutor) {
@@ -40,20 +43,17 @@ func (c *MitmCommand) SetCommandExecutor(fn CommandExecutor) {
 func (c *MitmCommand) Name() string { return "mitm" }
 
 func (c *MitmCommand) Usage() string {
-	return `mitm - Run a command with MITM traffic capture
+	return `mitm - Inspect traffic captured from tool execution
 
-Usage:
-  mitm <command> [args...]               Run command with traffic interception
-  mitm flows [--host X] [--last N]       List captured flows from last run
-  mitm flow <id>                         Show full flow details
-  mitm analyze [--host X] [--last N]     Summarize captured functional traffic
-  mitm clear                             Clear captured flows
+Tool traffic is captured automatically (default on). Inspect it with:
+  mitm flows [--host X] [--status 2xx] [--type json] [--last N]   List captured flows
+  mitm flow <id>                                                  Show one flow (headers + bodies)
+  mitm analyze [--host X] [--last N]                              Summarize captured traffic
+  mitm clear                                                      Clear the capture store
+  mitm <command> [args...]                                        Run a command, report flows it added
 
 Examples:
-  mitm scan -i http://example.com --mode quick
-  mitm spray -i http://target.com
-  mitm gogo -i 10.0.0.1 -p top2
-  mitm flows --last 20
+  mitm flows --host example.com --last 20
   mitm analyze --host example.com`
 }
 
@@ -63,6 +63,17 @@ func (c *MitmCommand) Run(ctx context.Context, execution *commands.Execution) (_
 	if len(args) == 0 {
 		fmt.Fprint(execution.Stdout, c.Usage())
 		return nil, nil
+	}
+
+	// In relay mode (config mitm:false) nothing is recorded; steer the model
+	// away from querying an empty store rather than returning misleading "no
+	// flows". Routing still works, so passthrough (default) stays allowed.
+	switch args[0] {
+	case "flows", "flow", "analyze":
+		if c.hub != nil && !c.hub.Capturing() {
+			fmt.Fprint(execution.Stdout, "[mitm] traffic capture is disabled (proxy routing only). Enable with config mitm: true")
+			return nil, nil
+		}
 	}
 
 	var result string
@@ -94,45 +105,18 @@ func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execut
 	if c.execCommand == nil {
 		return nil, fmt.Errorf("mitm: command executor not available")
 	}
-
-	// Scanner commands share mutable proxy configuration. Serialize captured
-	// executions so one run cannot steal another run's proxy or flows.
-	c.execMu.Lock()
-	defer c.execMu.Unlock()
-
-	state := &mitmState{store: c.store}
-	if err := state.start(); err != nil {
-		return nil, err
-	}
-
-	// Set MITM proxy on the target command only
-	targetName := args[0]
-	var prevProxy string
-	if cmd, ok := c.registry.Get(targetName); ok {
-		if cmd.SetProxy != nil {
-			if cmd.GetProxy != nil {
-				prevProxy = cmd.GetProxy()
-			}
-			cmd.SetProxy(state.proxyURL())
-			defer cmd.SetProxy(prevProxy)
-		}
-	}
-	defer state.stop()
-
+	// Every tool already routes through the long-lived hub, so the wrapped
+	// command is captured automatically. Report the flows it added. The delta
+	// is approximate under concurrency (the shared store also receives other
+	// commands' flows), which is acceptable for this summary.
+	before := c.store.Count()
 	details, err := c.execCommand(ctx, args, execution)
-
-	flowCount := len(state.Records())
-	summary := fmt.Sprintf("\n[mitm] %d flows captured.", flowCount)
-	fmt.Fprint(execution.Stdout, summary)
-	return &CaptureResult{Command: details, Flows: state.Records()}, err
-}
-
-// CaptureResult is returned as tool-result details. FlowRecord is the canonical
-// immutable traffic snapshot from utils/mitmproxy; callers should persist it
-// directly instead of translating it through another flow DTO.
-type CaptureResult struct {
-	Command any                     `json:"command,omitempty"`
-	Flows   []*mitmproxy.FlowRecord `json:"flows"`
+	added := c.store.Count() - before
+	if added < 0 {
+		added = 0
+	}
+	fmt.Fprintf(execution.Stdout, "\n[mitm] %d flows captured.", added)
+	return details, err
 }
 
 type flowQueryFlags struct {
@@ -179,65 +163,6 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// mitmState — lightweight MITM proxy lifecycle (no exported API needed)
-// ---------------------------------------------------------------------------
-
-type mitmState struct {
-	server   *mitmproxy.Proxy
-	addr     string
-	store    *FlowStore
-	recordMu sync.Mutex
-	records  []*mitmproxy.FlowRecord
-}
-
-func (s *mitmState) start() error {
-	p, err := mitmproxy.NewProxy(&mitmproxy.Options{
-		Addr:              "127.0.0.1:0",
-		SslInsecure:       true,
-		StreamLargeBodies: 10 * 1024 * 1024,
-	})
-	if err != nil {
-		return fmt.Errorf("create MITM proxy: %w", err)
-	}
-	p.AddAddon(&captureAddon{store: s.store, record: s.addRecord})
-	listenAddr, _, err := p.StartAsync()
-	if err != nil {
-		return fmt.Errorf("start MITM proxy: %w", err)
-	}
-	s.server = p
-	s.addr = listenAddr.String()
-	return nil
-}
-
-func (s *mitmState) addRecord(record *mitmproxy.FlowRecord) {
-	if record == nil {
-		return
-	}
-	s.recordMu.Lock()
-	s.records = append(s.records, record)
-	s.recordMu.Unlock()
-}
-
-func (s *mitmState) Records() []*mitmproxy.FlowRecord {
-	s.recordMu.Lock()
-	defer s.recordMu.Unlock()
-	return append([]*mitmproxy.FlowRecord(nil), s.records...)
-}
-
-func (s *mitmState) stop() {
-	if s.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = s.server.Shutdown(ctx)
-		cancel()
-		s.server = nil
-	}
-}
-
-func (s *mitmState) proxyURL() string {
-	return "http://" + s.addr
-}
-
-// ---------------------------------------------------------------------------
 // captureAddon — passive HTTP flow capture
 // ---------------------------------------------------------------------------
 
@@ -245,9 +170,18 @@ const maxBodySnip = 4096
 
 type captureAddon struct {
 	mitmproxy.BaseAddon
-	store   *FlowStore
-	record  func(*mitmproxy.FlowRecord)
+	hub     *ProxyHub
 	pending sync.Map
+}
+
+// toolIDOf returns the AOP tool-call id that opened this flow's connection, read
+// from the per-connection proxy-auth username the client injected. Empty when no
+// identity was presented (e.g. relay use or a non-Cairn client).
+func toolIDOf(f *mitmproxy.Flow) string {
+	if f != nil && f.ConnContext != nil {
+		return f.ConnContext.ProxyAuthUser
+	}
+	return ""
 }
 
 func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
@@ -255,9 +189,6 @@ func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
 }
 
 func (a *captureAddon) Response(f *mitmproxy.Flow) {
-	if a.record != nil {
-		a.record(mitmproxy.NewFlowRecord(f, 0))
-	}
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
 		if t, ok := start.(time.Time); ok {
@@ -266,6 +197,7 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 	}
 	flow := Flow{
 		Timestamp:      f.StartTime,
+		ToolID:         toolIDOf(f),
 		Method:         f.Request.Method,
 		URL:            f.Request.URL.String(),
 		Host:           f.Request.URL.Hostname(),
@@ -284,23 +216,19 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 			flow.ResponseBodySnip = snip(f.Response.Body, maxBodySnip)
 		}
 	}
-	a.store.Add(flow)
+	a.hub.ingest(flow)
 }
 
 func (a *captureAddon) RequestError(f *mitmproxy.Flow, err error) {
-	if a.record != nil {
-		record := mitmproxy.NewFlowRecord(f, 0)
-		record.Error = err.Error()
-		a.record(record)
-	}
 	var dur time.Duration
 	if start, ok := a.pending.LoadAndDelete(f.Id.String()); ok {
 		if t, ok := start.(time.Time); ok {
 			dur = time.Since(t)
 		}
 	}
-	a.store.Add(Flow{
+	a.hub.ingest(Flow{
 		Timestamp: f.StartTime,
+		ToolID:    toolIDOf(f),
 		Method:    f.Request.Method,
 		URL:       f.Request.URL.String(),
 		Host:      f.Request.URL.Hostname(),
@@ -324,6 +252,7 @@ func snip(b []byte, max int) []byte {
 
 type Flow struct {
 	ID               int
+	ToolID           string
 	Timestamp        time.Time
 	Method           string
 	URL              string
@@ -360,7 +289,9 @@ func NewFlowStore(cap int) *FlowStore {
 	return &FlowStore{flows: make([]Flow, 0, 256), cap: cap}
 }
 
-func (s *FlowStore) Add(f Flow) {
+// Add stores f, assigns it a monotonic ID, and returns the stored copy so the
+// caller can fan the ID-bearing flow out to subscribers.
+func (s *FlowStore) Add(f Flow) Flow {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
@@ -371,6 +302,7 @@ func (s *FlowStore) Add(f Flow) {
 	} else {
 		s.flows = append(s.flows, f)
 	}
+	return f
 }
 
 func (s *FlowStore) Query(opts QueryOpts) []Flow {

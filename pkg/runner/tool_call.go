@@ -71,11 +71,16 @@ func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall,
 		if err != nil {
 			return nil, err
 		}
+		if err := args.Validate(); err != nil {
+			return nil, err
+		}
 		progress := newProgressStreamer(progressBus, call.Name, callID)
-		result, err := registry.ExecuteBashForeground(ctx, args.Command, commands.BashExecOptions{
-			Timeout:  time.Duration(args.Timeout) * time.Second,
-			OnOutput: progress.Write,
-		})
+		options := commands.BashExecOptions{OnOutput: progress.Write}
+		if args.TimeoutSpecified() {
+			options.Timeout = time.Duration(args.Timeout) * time.Second
+			options.TimeoutSet = true
+		}
+		result, err := registry.ExecuteBashForeground(ctx, args.Command, options)
 		progress.Flush()
 		return result, err
 	}

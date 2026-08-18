@@ -1,4 +1,4 @@
-package archtest
+package repositorytest
 
 import (
 	"bytes"
@@ -312,9 +312,95 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	if !strings.Contains(fullConfig, "CGO_ENABLED=1") {
 		t.Error(".goreleaser.yml aiscan-full must enable CGO")
 	}
+	if !strings.Contains(fullConfig, "      - darwin\n") {
+		t.Error(".goreleaser.yml aiscan-full must publish Darwin builds")
+	}
 	for _, tag := range []string{"re2_cgo", "re2_static"} {
 		if !strings.Contains(fullConfig, "      - "+tag+"\n") {
 			t.Errorf(".goreleaser.yml aiscan-full missing build tag %q", tag)
+		}
+	}
+}
+
+func TestGitHubActionsCrossCompileDarwinWithoutMacOSRunners(t *testing.T) {
+	root := repositoryRoot(t)
+	workflowDir := filepath.Join(root, ".github", "workflows")
+	macOSRunner := regexp.MustCompile(`(?i)^(?:runs-on|runner):\s*macos(?:-|\s|$)`)
+	err := filepath.WalkDir(workflowDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || (filepath.Ext(path) != ".yml" && filepath.Ext(path) != ".yaml") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for lineNumber, line := range strings.Split(string(content), "\n") {
+			if macOSRunner.MatchString(strings.TrimSpace(line)) {
+				t.Errorf("macOS GitHub Actions runner in %s:%d", relative(root, path), lineNumber+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	standardStart := strings.Index(releaseWorkflow, "          - id: aiscan\n")
+	if standardStart < 0 {
+		t.Fatal("release workflow is missing the standard aiscan build")
+	}
+	standardConfig := releaseWorkflow[standardStart:]
+	if next := strings.Index(standardConfig[1:], "\n          - id:"); next >= 0 {
+		standardConfig = standardConfig[:next+1]
+	}
+	for _, required := range []string{
+		"runner: ubuntu-22.04",
+		"darwin/amd64",
+		"darwin/arm64",
+		`cgo: "0"`,
+	} {
+		if !strings.Contains(standardConfig, required) {
+			t.Errorf("standard release build must cross-compile Darwin on Linux; missing %q", required)
+		}
+	}
+
+	fullDarwinStart := strings.Index(releaseWorkflow, "          - id: aiscan-full-darwin\n")
+	if fullDarwinStart < 0 {
+		t.Fatal("release workflow is missing the full Darwin cross-build")
+	}
+	fullDarwinConfig := releaseWorkflow[fullDarwinStart:]
+	if next := strings.Index(fullDarwinConfig[1:], "\n          - id:"); next >= 0 {
+		fullDarwinConfig = fullDarwinConfig[:next+1]
+	}
+	for _, required := range []string{
+		"runner: ubuntu-22.04",
+		"darwin/amd64",
+		"darwin/arm64",
+		`cgo: "1"`,
+		"cross: darwin",
+		"re2_cgo",
+		"re2_static",
+	} {
+		if !strings.Contains(fullDarwinConfig, required) {
+			t.Errorf("full release build must cross-compile Darwin CGO binaries on Linux; missing %q", required)
+		}
+	}
+	if strings.Contains(fullDarwinConfig, "record_ffmpeg") {
+		t.Error("full Darwin cross-build must not enable the unsupported native recorder")
+	}
+	versions := readRepositoryFile(t, root, filepath.Join(".github", "native", "versions.env"))
+	for _, required := range []string{
+		"MACOS_CROSS_ZIG_VERSION=",
+		"MACOS_CROSS_SDK_VERSION=",
+		"MACOS_CROSS_SDK_SHA256=",
+		"MACOS_CROSS_DEPLOYMENT_TARGET=",
+	} {
+		if !strings.Contains(versions, required) {
+			t.Errorf("native versions file is missing macOS cross-build pin %q", required)
 		}
 	}
 }

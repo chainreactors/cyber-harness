@@ -22,6 +22,7 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -378,6 +379,14 @@ func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillSto
 		Hooks:             hookRegistry,
 		Events:            events,
 	}
+	// Start the long-lived proxy hub and repoint Deps.ScannerProxy at its stable
+	// address BEFORE BuildPlan, so bash and every scanner engine route through it
+	// uniformly. rc.Tools.MitmCapture selects capture (mitm on) vs pure relay
+	// (mitm off). Non-fatal: on failure tools keep the original proxy.
+	if _, err := proxytool.InstallInfra(deps, rc.Tools.MitmCapture); err != nil {
+		logger.Warnf("proxy hub unavailable, tools use direct/original proxy: %s", err)
+	}
+
 	plan := capability.Select(capability.Options{
 		Groups:        linkedToolGroups(),
 		OptionalTools: rc.Tools.OptionalTools,

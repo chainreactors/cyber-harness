@@ -70,6 +70,7 @@ type ScannerOptions struct {
 	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
 	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
 	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
+	Mitm         *bool  `long:"mitm" config:"mitm" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
 }
 
 type AgentOptions struct {

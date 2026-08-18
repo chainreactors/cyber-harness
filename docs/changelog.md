@@ -53,8 +53,8 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **发布与原生构建链路**
 
-- standard 发布 Linux、macOS、Windows 的 amd64/arm64；full 发布 Linux/macOS amd64/arm64 与 Windows amd64
-- CI、nightly 和正式 release 共用 `.github/workflows/go-release.yml`，构建标签、版本注入、压缩和平台矩阵不再漂移
+- standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
+- CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
 - recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算；缺少预构建 SDK 时 CI 可回退到源码构建
 - full profile 恢复静态 RE2，并验证 Windows recorder/RE2 原生库没有变成运行时 DLL 依赖
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
@@ -91,7 +91,7 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 | 产物 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
-| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
 | 原生 `record` | X11 amd64/arm64 | 不支持 | amd64 |
 
 迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
