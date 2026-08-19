@@ -36,27 +36,6 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: runner
-    main: ./cmd/runner
-    binary: runner
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
-
   - id: aiscan-full
     main: ./cmd/aiscan
     binary: "{{ .ProjectName }}-full"
@@ -103,15 +82,6 @@ archives:
   - id: aiscan
     ids: [aiscan]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
-      - src: docs/*
-
-  - id: runner
-    ids: [runner]
-    name_template: "runner_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
     files:

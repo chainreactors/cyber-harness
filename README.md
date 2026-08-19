@@ -43,13 +43,12 @@ From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
 | --- | --- |
 | **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
 | **aiscan-full** | Full — adds Web, playwright, passive recon, and katana |
-| **runner** | Single tag-free remote tool node |
 
-| OS | Arch | Standard | Full | Runner |
-| --- | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` | `runner_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` | `runner_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` | `runner_windows_<arch>.zip` |
+| OS | Arch | Standard | Full |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
 
 ```bash
 # Linux
