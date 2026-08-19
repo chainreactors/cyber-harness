@@ -20,6 +20,7 @@ endif
 STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
+RUNNER_BIN ?= $(BIN_DIR)/runner$(EXE)
 
 # Standard/full match release artifacts.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
@@ -50,11 +51,12 @@ RECORD_EXTRA_LDFLAGS :=
 endif
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard full record record-native record-native-source record-native-package web-build web-run web all clean
+.PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean
 
 help:
 	@echo "AIScan build targets:"
 	@echo "  make / make standard  Build the standard AIScan edition"
+	@echo "  make runner           Build the tag-free runner binary"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
 	@echo "  make web              Build the full edition and start the Web UI"
@@ -82,6 +84,10 @@ frontend:
 standard: prepare
 	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
+
+runner: prepare
+	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o "$(RUNNER_BIN)" ./cmd/runner
+	@echo "Built runner: $(RUNNER_BIN)"
 
 # Full and record-enabled binaries embed web/static, so frontend must finish first.
 record-native:
@@ -131,7 +137,7 @@ web-run:
 web: full
 	"$(FULL_BIN)" web --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
 
-all: standard full
+all: standard runner full
 
 clean:
-	rm -f "$(STANDARD_BIN)" "$(FULL_BIN)" "$(RECORD_BIN)"
+	rm -f "$(STANDARD_BIN)" "$(FULL_BIN)" "$(RECORD_BIN)" "$(RUNNER_BIN)"

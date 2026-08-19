@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -106,24 +105,6 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		FileAudit:       cfg.FileAudit,
 		JSONFrames:      cfg.JSONFrames,
 		ExtraNamespaces: cfg.ExtraNamespaces,
-	})
-}
-
-// attachFileAccess streams the file-access trail onto the file namespace.
-//
-// The observation is addressed to the tool call that produced it, so a consumer
-// can attribute it without a second lookup, and it is a push rather than a
-// reply: it must never satisfy a pending request or hold up the call it
-// describes.
-func attachFileAccess(audit *commands.FileAudit, send func(string, protobuf.Message)) func() {
-	if audit == nil {
-		return nil
-	}
-	return audit.Subscribe(func(access *filepb.Access) {
-		if access == nil {
-			return
-		}
-		send(access.GetToolId(), &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Access{Access: protobuf.CloneOf(access)}})
 	})
 }
 

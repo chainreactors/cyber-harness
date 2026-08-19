@@ -52,6 +52,60 @@ func TestRunnerDoesNotDependOnWeb(t *testing.T) {
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/rpc")
 }
 
+func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("cmd", "runner")} {
+		dir := filepath.Join(root, rel)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(string(content), "//go:build ") {
+				t.Errorf("runner source must not use build tags: %s", filepath.Join(rel, entry.Name()))
+			}
+		}
+	}
+
+	runnerDir := filepath.Join(root, "pkg", "runner")
+	entries, err := os.ReadDir(runnerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		source := strings.TrimSuffix(entry.Name(), "_test.go") + ".go"
+		if _, err := os.Stat(filepath.Join(runnerDir, source)); err != nil {
+			t.Errorf("runner test must map to exactly one source file: %s", entry.Name())
+		}
+	}
+
+	makefile := readRepositoryFile(t, root, "Makefile")
+	start := strings.Index(makefile, "runner: prepare\n")
+	if start < 0 {
+		t.Fatal("Makefile missing runner target")
+	}
+	block := makefile[start:]
+	if next := strings.Index(block, "\n\n"); next >= 0 {
+		block = block[:next]
+	}
+	if !strings.Contains(block, "./cmd/runner") {
+		t.Error("Makefile runner target must build ./cmd/runner")
+	}
+	if strings.Contains(block, "-tags") {
+		t.Error("Makefile runner target must not use build tags")
+	}
+}
+
 func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, rel := range trackedFiles(t, root) {
@@ -169,7 +223,8 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(path), "_test.go")
-		matched := false
+		_, exactErr := os.Stat(filepath.Join(filepath.Dir(path), base+".go"))
+		matched := exactErr == nil
 		for _, source := range sources[filepath.Dir(path)] {
 			if base == source {
 				matched = true
