@@ -35,7 +35,7 @@ func newTestHub(t *testing.T, capture bool) (*ProxyHub, *State, *http.Client) {
 	if err := hub.Start(caRoot); err != nil {
 		t.Fatalf("hub start: %v", err)
 	}
-	t.Cleanup(func() { hub.Shutdown(nil) })
+	t.Cleanup(func() { hub.Shutdown(context.Background()) })
 
 	pool := x509.NewCertPool()
 	if ca := hub.CAPath(); ca != "" {

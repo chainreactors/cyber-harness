@@ -287,7 +287,7 @@ func (a *App) Close() {
 			closer.Close()
 		}
 		if a.proxyInfra != nil && a.proxyInfra.Hub != nil {
-			a.proxyInfra.Hub.Shutdown(nil)
+			a.proxyInfra.Hub.Shutdown(context.Background())
 		}
 		if a.FileAudit != nil {
 			a.FileAudit.Close()

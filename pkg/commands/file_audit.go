@@ -300,14 +300,12 @@ func TakeSnapshot(root string, options AuditOptions) (AuditSnapshot, error) {
 		if !entry.Type().IsRegular() || auditIgnored(entry.Name(), ignore) {
 			return nil
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
+		if info, infoErr := entry.Info(); infoErr == nil {
+			if len(snapshot) >= max {
+				return errSnapshotTooLarge
+			}
+			snapshot[path] = auditEntry{modTime: info.ModTime().UnixNano(), size: info.Size()}
 		}
-		if len(snapshot) >= max {
-			return errSnapshotTooLarge
-		}
-		snapshot[path] = auditEntry{modTime: info.ModTime().UnixNano(), size: info.Size()}
 		return nil
 	})
 	if err != nil {
