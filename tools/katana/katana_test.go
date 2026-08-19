@@ -14,6 +14,8 @@ import (
 
 	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/projectdiscovery/katana/pkg/navigation"
+	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"
 )
 
@@ -95,6 +97,96 @@ func TestConfigureBrowserOptionsPriority(t *testing.T) {
 				t.Fatalf("UseInstalledChrome = %v, want %v", tt.options.UseInstalledChrome, tt.wantInstalled)
 			}
 		})
+	}
+}
+
+func TestReadFlagsV17CrawlerOptions(t *testing.T) {
+	options, err := readFlags([]string{
+		"-u", "https://example.com",
+		"--kb-secrets",
+		"--kb-validate-secrets",
+		"--kb-endpoints",
+		"--page-content-similar",
+		"--similarity-deduplication",
+		"--page-content-similar-mode", "bm25",
+		"--page-content-similar-distance", "7",
+		"--page-content-similar-threshold", "0.72",
+		"--page-content-similar-budget", "4",
+	})
+	if err != nil {
+		t.Fatalf("readFlags() error = %v", err)
+	}
+	if !options.Secrets || !options.ValidateSecrets || !options.Endpoints {
+		t.Fatalf("knowledge base options = (secrets=%v validate=%v endpoints=%v), want all true", options.Secrets, options.ValidateSecrets, options.Endpoints)
+	}
+	if !options.PageContentSimilar || !options.SimilarityDeduplication {
+		t.Fatalf("similarity flags = (page=%v alias=%v), want both true", options.PageContentSimilar, options.SimilarityDeduplication)
+	}
+	if options.PageContentSimilarMode != "bm25" || options.PageContentSimilarDistance != 7 || options.PageContentSimilarThresholdStr != "0.72" || options.PageContentSimilarBudget != 4 {
+		t.Fatalf("similarity options = (%q, %d, %q, %d), want (bm25, 7, 0.72, 4)", options.PageContentSimilarMode, options.PageContentSimilarDistance, options.PageContentSimilarThresholdStr, options.PageContentSimilarBudget)
+	}
+
+	defaults, err := readFlags([]string{"-u", "https://example.com"})
+	if err != nil {
+		t.Fatalf("readFlags(defaults) error = %v", err)
+	}
+	if defaults.PageContentSimilarMode != "simhash" || defaults.PageContentSimilarDistance != 3 || defaults.PageContentSimilarThresholdStr != "0.85" || defaults.PageContentSimilarBudget != 1 {
+		t.Fatalf("similarity defaults = (%q, %d, %q, %d), want (simhash, 3, 0.85, 1)", defaults.PageContentSimilarMode, defaults.PageContentSimilarDistance, defaults.PageContentSimilarThresholdStr, defaults.PageContentSimilarBudget)
+	}
+}
+
+func TestRunHonorsContextCancellation(t *testing.T) {
+	requestStarted := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case requestStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		var output bytes.Buffer
+		_, err := New().Run(ctx, &commands.Execution{
+			Args:   []string{"-u", srv.URL, "-d", "1", "-timeout", "30"},
+			Stdout: &output,
+			Stderr: &output,
+		})
+		done <- err
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("Katana did not start the test request")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Katana error = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Katana did not stop after context cancellation")
+	}
+}
+
+func TestResultCollectorGetResultCount(t *testing.T) {
+	collector := &resultCollector{}
+	result := &katanaoutput.Result{Request: &navigation.Request{URL: "https://example.com/a"}}
+	if err := collector.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := collector.Write(result); err != nil {
+		t.Fatalf("duplicate Write() error = %v", err)
+	}
+	if got := collector.GetResultCount(); got != 1 {
+		t.Fatalf("GetResultCount() = %d, want 1", got)
 	}
 }
 

@@ -22,17 +22,17 @@ Capabilities:
 Common usage:
 
 ```bash
-gogo -i 10.0.0.1 -p top100
+gogo -i 10.0.0.1 -p top2
 gogo -i 10.0.0.0/24 -p 80,443,8080
 gogo -i 10.0.0.1,10.0.0.2 -p all
-gogo -l /tmp/targets.txt -p top100
+gogo -l /tmp/targets.txt -p top2
 ```
 
 Notes:
 
 - `-i` accepts IP, CIDR, or comma-separated IPs. **NOT** `ip:port` — bare `10.0.0.1:8080` will fail with "Parse IP Failed". Use `-i 10.0.0.1 -p 8080` instead.
 - `-l` reads a target file (one IP/CIDR per line).
-- `-p` is gogo ports (`top100`, `top1000`, `all`, `-` for all 65535, or `80,443,8080`).
+- `-p` is gogo ports: presets `top1` / `top2` / `top3` (default `top1`, widening coverage), `all` (every preset port), `-` for all 65535, ranges like `10000-10100`, or explicit `80,443,8080`. An unknown name such as `top100` / `top1000` is treated as a literal port and fails with `unknown port` — run `gogo -P port` to list every preset.
 - Fingerprints and vuln hints are evidence leads; user intent decides whether to summarize, analyze, verify, compare, or plan follow-up work.
 
 ## Related concepts
