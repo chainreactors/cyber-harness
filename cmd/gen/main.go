@@ -249,9 +249,12 @@ func findGoTool(root, envName, name string) (string, error) {
 	}
 	cmd := exec.Command("go", "tool", "-n", name)
 	cmd.Dir = root
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("go tool -n %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("go tool -n %s: %w: %s", name, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("go tool -n %s: %w", name, err)
 	}
 	path := strings.Trim(strings.TrimSpace(string(output)), `"`)
 	if path == "" {
