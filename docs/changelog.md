@@ -1,26 +1,42 @@
 # Changelog
 
-## v1.0.0-rc2 — 远程执行审计 + 单版本 Runner + 可验证发布
+## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
-v1.0.0-rc2 让远程 Runner 更容易部署、审计和维护：Runner 只有一个版本，可直接连接 AIScan Web；流量、文件访问和扫描结果都有明确边界；CI 会用正式发布矩阵验证每个候选版本。
+v1.0.0-rc2 重点重构了 AIScan 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
 
 ### New Features
 
-**单版本 Runner**
+**统一 MITM 流量捕获**
 
-Runner 不再区分 full/non-full，也不需要 build tag。它与 AIScan 共用 `pkg/runner.App` 的原生运行时组装；CI 会编译并验证 Linux、macOS、Windows 的 amd64/arm64 版本，但 Runner 只供 Cairn 使用，不作为 GitHub Release 资产发布。
+- 所有工具流量统一经过常驻 Proxy Hub，HTTP 请求和 HTTPS 解密流量进入同一份捕获记录，不再为单次命令重复启动代理。
+- 捕获默认开启；`--mitm=false` 或配置 `mitm: false` 会切换为纯代理路由，不解密、不记录，也不要求工具信任 CA。
+- AOP traffic namespace 可动态切换 capture/relay、修改上游代理、查询状态，并按任务返回 Flow；切换过程无需重启监听器，也不会打断正在执行的命令。
+- 每条连接携带任务调用标识，并发扫描产生的流量可以准确归因，不再依赖容易重叠的时间窗口。
+
+开启捕获后，可直接查看和分析工具产生的流量：
 
 ```bash
-make runner
-./bin/runner --server https://aiscan.example.com --token <token> --id office-linux
+mitm flows --host example.com --last 20
+mitm flow <id>
+mitm analyze --host example.com
 ```
 
-`make all` 也会自动构建 `bin/runner`。Windows 可使用本地构建出的 `runner.exe`；除命令行参数外，也可通过 `--config` 读取配置。`runner --version` 可用于确认部署版本。
+HTTPS 捕获会向 curl、Git、Node.js、Python requests 等常用客户端注入当前 Hub CA。严格校验证书的工具访问裸 IP 时可能因证书没有 IP SAN 而失败，此时应优先使用主机名，或关闭 MITM 仅保留代理路由。
 
-**远程任务审计**
+**动态代理路由**
 
-- proxy 使用常驻的统一 capture hub，可在不重启监听器的情况下切换 relay/capture；AOP traffic namespace 可查看状态并按任务查询 HTTP/HTTPS 流量，敏感请求头会在 Runner 侧脱敏。
-- 开启 HTTPS 捕获时，工具会使用当前 Hub CA；关闭捕获后只保留流量转发，不再注入 CA。
+代理节点、订阅和单命令代理现在共用同一条实时出口链。切换节点后，新连接立即使用新出口，运行中的连接保持不受影响。
+
+```bash
+proxy auto <subscription-url> --country HK,JP --strategy adaptive
+proxy switch 3
+proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
+```
+
+支持 socks5、trojan、vless、anytls、hysteria2、shadowsocks 和 Clash 订阅；`proxy current`、`proxy test`、`proxy clear` 可用于检查和恢复出口。
+
+**文件访问审计**
+
 - read、write、edit 和远程文件 RPC 会写入任务级文件审计；shell 命令通过工作目录快照记录文件变化，并标记记录来源。
 - 审计不会阻塞任务，发生丢弃时会给出数量。shell 中未修改文件的读取无法由快照推断，因此不会被误报为已审计读取。
 
@@ -30,9 +46,9 @@ Web 会自动取得 Agent token，并根据远程执行节点的系统、架构�
 
 ### Improvements
 
-**Runner 连接稳定性**
+**远程 Node 连接稳定性**
 
-- 每个 Runner 进程携带独立实例标识，并通过存活 deadline 及时发现失效连接。
+- 每个 Node 进程携带独立实例标识，并通过存活 deadline 及时发现失效连接。
 - WebSocket 会区分连接失败原因并显示 enrollment 拒绝信息；稳定连接后会重置重连退避。
 - 连接、keep-alive 与 producer 生命周期收敛到 session，减少命令结束或重连时的遗留状态。
 
@@ -66,7 +82,7 @@ Web 会自动取得 Agent token，并根据远程执行节点的系统、架构�
 | `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
 | `checksums.txt` | — | — | — | 1 |
 
-Release 只包含 `aiscan`、`aiscan-full` 和 checksum；Runner 始终只有一个版本，没有 `runner-full`，由 `make runner` 构建后交给 Cairn 使用。
+Release 只包含 `aiscan`、`aiscan-full` 和 checksum。
 
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
