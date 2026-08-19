@@ -85,6 +85,13 @@ jobs:
             exit 1
           fi
 
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Compile public scanner regressions
+        run: |
+          go test -run '^$' -tags "full integration re2_cgo re2_static" ./tools
+
       - name: Check whitespace and submodule pins
         run: |
           git diff --check HEAD
@@ -362,3 +369,11 @@ jobs:
             -tags "e2e re2_cgo re2_static" \
             -v \
             ./pkg/web
+
+  release-verify:
+    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
+    uses: ./.github/workflows/go-release.yml
+    with:
+      tag: v0.0.0-ci.${{ github.run_id }}
+      target: ${{ github.sha }}
+      dry_run: true

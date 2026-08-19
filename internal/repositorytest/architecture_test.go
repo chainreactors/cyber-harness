@@ -104,6 +104,46 @@ func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 	if strings.Contains(block, "-tags") {
 		t.Error("Makefile runner target must not use build tags")
 	}
+
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	if count := strings.Count(releaseWorkflow, "main: ./cmd/runner"); count != 1 {
+		t.Fatalf("release workflow must contain exactly one runner build, got %d", count)
+	}
+	runnerStart := strings.Index(releaseWorkflow, "          - id: runner\n")
+	if runnerStart < 0 {
+		t.Fatal("release workflow is missing the runner build")
+	}
+	runnerBuild := releaseWorkflow[runnerStart:]
+	if next := strings.Index(runnerBuild[1:], "\n          - id:"); next >= 0 {
+		runnerBuild = runnerBuild[:next+1]
+	}
+	for _, required := range []string{
+		"profile: runner",
+		"main: ./cmd/runner",
+		"binary: runner",
+		"tags: \"\"",
+		"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64",
+	} {
+		if !strings.Contains(runnerBuild, required) {
+			t.Errorf("runner release build is missing %q", required)
+		}
+	}
+
+	goreleaser := readRepositoryFile(t, root, ".goreleaser.yml")
+	if count := strings.Count(goreleaser, "main: ./cmd/runner"); count != 1 {
+		t.Fatalf("GoReleaser must contain exactly one runner build, got %d", count)
+	}
+	runnerStart = strings.Index(goreleaser, "  - id: runner\n")
+	if runnerStart < 0 {
+		t.Fatal("GoReleaser is missing the runner build")
+	}
+	runnerBuild = goreleaser[runnerStart:]
+	if next := strings.Index(runnerBuild[1:], "\n  - id:"); next >= 0 {
+		runnerBuild = runnerBuild[:next+1]
+	}
+	if strings.Contains(runnerBuild, "\n    tags:") {
+		t.Error("GoReleaser runner build must not use build tags")
+	}
 }
 
 func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
