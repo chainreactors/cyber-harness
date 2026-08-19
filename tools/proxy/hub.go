@@ -187,7 +187,7 @@ func (h *ProxyHub) ProxyURL() string {
 // CAPath is the exported CA PEM path to advertise to children, or "" when the
 // hub is not currently MITM-decrypting HTTPS. It returns a path only while
 // capture and decrypt are both on: a child must trust the hub's CA exactly when
-// the hub forges certificates for it, and must not when HTTPS is tunnelled (a
+// the hub forges certificates for it, and must not when HTTPS is tunneled (a
 // CA-only bundle would then fail to validate the real server certificate).
 func (h *ProxyHub) CAPath() string {
 	if !(h.recording.Load() && h.decrypt.Load()) {

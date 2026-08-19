@@ -3,6 +3,8 @@
 package proxy
 
 import (
+	"context"
+
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/deps"
 	"github.com/chainreactors/aiscan/pkg/commands"
@@ -43,7 +45,7 @@ func init() {
 				Run:             mitmCmd.Run,
 				Close: func() {
 					if hub != nil {
-						hub.Shutdown(nil)
+						hub.Shutdown(context.Background())
 					}
 				},
 			}, "proxy")
