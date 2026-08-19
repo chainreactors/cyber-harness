@@ -305,6 +305,7 @@ jobs:
   e2e:
     runs-on: ubuntu-22.04
     needs: test
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -351,7 +352,20 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: web/frontend
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 10
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000"
+        run: |
+          for attempt in 1 2 3; do
+            if timeout --kill-after=15s 3m npx playwright install chromium; then
+              exit 0
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            echo "Playwright Chromium install failed, retrying ($attempt/3)..."
+            sleep $((attempt * 5))
+          done
 
       - name: Run frontend Playwright E2E
         working-directory: web/frontend
