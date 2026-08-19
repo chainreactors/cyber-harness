@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
@@ -151,6 +152,59 @@ func TestExecuteToolRequestForegroundPreservesExplicitZeroTimeout(t *testing.T) 
 	}
 	if !bash.options.TimeoutSet || bash.options.Timeout != 0 {
 		t.Fatalf("bash options = %+v, want explicit unlimited timeout", bash.options)
+	}
+}
+
+func TestProgressStreamerSanitizesInvalidUTF8(t *testing.T) {
+	progressBus := eventbus.New[*toolpb.Progress]()
+	var progress []*toolpb.Progress
+	progressBus.Subscribe(func(event *toolpb.Progress) {
+		progress = append(progress, event)
+	})
+	stream := newProgressStreamer(progressBus, "bash", "task-invalid")
+	stream.Write([]byte{'o', 'k', 0xff, '\n'})
+	stream.Write([]byte{0xe4, 0xbd})
+	stream.Write([]byte{0xa0, '\n'})
+	stream.Flush()
+
+	if len(progress) != 2 {
+		t.Fatalf("progress count = %d", len(progress))
+	}
+	if progress[0].Text != "ok\uFFFD" || progress[1].Text != "\u4f60" {
+		t.Fatalf("progress = %#v", progress)
+	}
+	for _, item := range progress {
+		if !utf8.ValidString(item.Text) {
+			t.Fatalf("progress is not valid UTF-8: %q", item.Text)
+		}
+		message := &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: item}}
+		if _, err := aop.Wrap("progress", item.CallId, message); err != nil {
+			t.Fatalf("wrap progress: %v", err)
+		}
+	}
+}
+
+type invalidTextResultExecutor struct{}
+
+func (invalidTextResultExecutor) ExecuteTool(context.Context, string, string) (*tool.Result, error) {
+	invalid := string([]byte{'r', 0xff, 's'})
+	return &tool.Result{Output: []*aop.Content{{
+		Value: &aop.Content_Text{Text: &aop.TextContent{Text: invalid}},
+	}}}, nil
+}
+
+func TestExecuteToolRequestSanitizesDirectToolResultText(t *testing.T) {
+	event, err := ExecuteToolRequest(context.Background(), "call-invalid", toolRequest(t, "call-invalid", "scan", nil), invalidTextResultExecutor{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := event.GetToolResult().GetOutput()[0].GetText().GetText()
+	if text != "r\uFFFDs" || !utf8.ValidString(text) {
+		t.Fatalf("result text = %q", text)
+	}
+	message := &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}
+	if _, err := aop.Wrap("event", "call-invalid", message); err != nil {
+		t.Fatalf("wrap result event: %v", err)
 	}
 }
 

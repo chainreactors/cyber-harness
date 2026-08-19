@@ -98,7 +98,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 		connectionConfig{Registry: commands.NewRegistry(), Logger: logger},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
-		send, &operationsMu, operations,
+		send, &operationsMu, operations, make(map[string]time.Time),
 	)
 
 	select {
@@ -117,6 +117,37 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	}
 	if got := logs.String(); !strings.Contains(got, "send event boom") || !strings.Contains(got, "op-panic") {
 		t.Fatalf("panic log = %s", got)
+	}
+}
+
+// Canceling a call does not stop a scanner that ignores its context, so the
+// hub having given up must also close that call's artifact window — otherwise
+// the rest of the crawl crosses the wire only to be rejected on arrival.
+func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
+	var operationsMu sync.Mutex
+	operations := make(map[string]context.CancelFunc)
+	sealed := make(map[string]time.Time)
+	canceled := false
+	operations["op-1"] = func() { canceled = true }
+
+	handleAgentCoreMessage(
+		context.Background(),
+		connectionConfig{Registry: commands.NewRegistry(), Logger: telemetry.NopLogger()},
+		&aop.Envelope{Id: "cancel-1"},
+		&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}},
+		func(string, protobuf.Message) { t.Error("cancel must not answer on the wire") },
+		func(*aop.Envelope) { t.Error("cancel must not reach the runtime") },
+		&operationsMu, operations, sealed,
+	)
+
+	if !canceled {
+		t.Fatal("cancel did not reach the operation")
+	}
+	if !callIsSealed(&operationsMu, sealed, "op-1") {
+		t.Fatal("canceled call was left able to emit artifacts")
+	}
+	if callIsSealed(&operationsMu, sealed, "agent-loop-call") {
+		t.Fatal("a call this connection never dispatched must not be sealed")
 	}
 }
 

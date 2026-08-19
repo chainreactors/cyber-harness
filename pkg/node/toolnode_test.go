@@ -29,6 +29,18 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 type recordingBash struct {
 	command string
 	options commands.BashExecOptions
+	events  *eventbus.Bus[*aop.Event]
+}
+
+// artifactEvent mirrors what a scanner emits from toolargs.Base: a tool
+// artifact carried as an AOP extension, correlated by the call id its
+// invocation context carries.
+func artifactEvent(callID, target string) *aop.Event {
+	extension, _ := anypb.New(&toolpb.Artifact{
+		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: target,
+		Data: []byte(`{"ip":"192.0.2.1","port":"80"}`), CallId: callID, MediaType: aop.JSONMediaType,
+	})
+	return &aop.Event{SessionId: "session-1", TurnId: "turn-1", Emitter: "gogo", Payload: &aop.Event_Extension{Extension: extension}}
 }
 
 func (*recordingBash) Name() string        { return "bash" }
@@ -41,10 +53,13 @@ func (*recordingBash) Definition() *tool.Definition {
 func (*recordingBash) Execute(context.Context, string) (*tool.Result, error) {
 	return nil, nil
 }
-func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options commands.BashExecOptions) (*tool.Result, error) {
+func (b *recordingBash) RunForegroundTool(ctx context.Context, command string, options commands.BashExecOptions) (*tool.Result, error) {
 	b.command = command
 	b.options = options
 	options.OnOutput([]byte("streamed\n"))
+	if b.events != nil {
+		b.events.Emit(artifactEvent(tool.InvocationFromContext(ctx).CallID, "192.0.2.1:80"))
+	}
 	result := tool.TextResult("streamed")
 	return result, nil
 }
@@ -183,12 +198,12 @@ func wait[T any](t *testing.T, ch <-chan T, what string) T {
 
 func TestRunToolNodeWireInterop(t *testing.T) {
 	registry := commands.NewRegistry()
-	registry.RegisterTool(&recordingBash{})
+	events := eventbus.New[*aop.Event]()
+	registry.RegisterTool(&recordingBash{events: events})
 	registry.Register(commands.Command{
 		Name: "gogo", Usage: "gogo [OPTIONS]",
 		DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
 	}, "scanner")
-	events := eventbus.New[*aop.Event]()
 	progress := eventbus.New[*toolpb.Progress]()
 	hub := newHubScript(t)
 	server := httptest.NewServer(http.HandlerFunc(hub.serveHTTP))
@@ -227,14 +242,6 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	if got := catalog.Commands[0].GetDescription(); got != "Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery." {
 		t.Fatalf("gogo description = %q", got)
 	}
-	extension, err := anypb.New(&toolpb.Artifact{
-		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: "192.0.2.1:80",
-		Data: []byte(`{"ip":"192.0.2.1","port":"80"}`), CallId: "exec-1", MediaType: aop.JSONMediaType,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	events.Emit(&aop.Event{SessionId: "session-1", TurnId: "turn-1", Emitter: "gogo", Payload: &aop.Event_Extension{Extension: extension}})
 	artifact := wait(t, hub.artifact, "tool artifact")
 	if artifact.Tool != "gogo" || artifact.Kind != toolpb.ArtifactKindService || artifact.CallId != "exec-1" || string(artifact.Data) != `{"ip":"192.0.2.1","port":"80"}` {
 		t.Fatalf("artifact = %+v data=%s", artifact, artifact.Data)
@@ -245,6 +252,16 @@ func TestRunToolNodeWireInterop(t *testing.T) {
 	result := wait(t, hub.toolResult, "tool result")
 	if result.IsError || result.CallId != "exec-1" || result.Name != "bash" {
 		t.Fatalf("tool result = %+v", result)
+	}
+	// A streaming tool keeps emitting after its terminal; those artifacts must
+	// not cross the wire behind it. An artifact for a call this connection never
+	// dispatched (the node's own agent loop, a standalone scan) still must. Both
+	// travel the same FIFO send channel, so the trailing one being dropped is
+	// exactly the untracked one arriving first.
+	events.Emit(artifactEvent("exec-1", "203.0.113.9:443"))
+	events.Emit(artifactEvent("agent-loop-call", "198.51.100.7:8080"))
+	if next := wait(t, hub.artifact, "untracked artifact"); next.Target != "198.51.100.7:8080" {
+		t.Fatalf("artifact after terminal = %+v, want the untracked call to arrive alone", next)
 	}
 	cancel()
 	select {
