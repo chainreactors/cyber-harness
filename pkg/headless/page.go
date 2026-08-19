@@ -306,9 +306,8 @@ func (p *Page) setupNativeHijack() {
 		URLPattern:   "*",
 		RequestStage: proto.FetchRequestStageResponse,
 	})
-	go func() {
-		_ = hijack.Start(p.routingRuleHandlerNative)()
-	}()
+	wait := hijack.Start(p.routingRuleHandlerNative)
+	go func() { _ = wait() }()
 	p.hijackNative = hijack
 }
 

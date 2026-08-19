@@ -42,7 +42,7 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 | 版本 | 说明 |
 | --- | --- |
 | **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | 完整版 — 额外包含 playwright、passive、katana，以及受支持 Windows/Linux 系统上的原生录屏 |
+| **aiscan-full** | 完整版 — 额外包含 Web、playwright、passive 和 katana |
 
 | 系统 | 架构 | 标准版 | 完整版 |
 | --- | --- | --- | --- |
@@ -108,8 +108,8 @@ make full                                                  # 前端 + 完整版
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
 `examples/agent`，需要时可手动运行 `go run ./examples/agent --help`。执行
 `make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
-`web/static` 嵌入 full 二进制。在受支持的 Windows/Linux 目标上，它还会下载并
-校验固定版本的录屏 SDK；使用 `make record-native-source` 可从固定源码构建该 SDK。
+`web/static` 嵌入 full 二进制。默认 full 构建不包含原生 `record` 工具；SDK 和工具
+开发者可通过 `make record` 显式构建，详见 [record 文档](docs/record.md)。
 
 ```bash
 make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # Full 构建并启动 Web UI
@@ -165,6 +165,8 @@ libstdc++、libgcc 或 winpthread DLL。
 - playwright — headless Chromium 会话、截图、网络捕获
 - katana — Web 爬虫，支持 standard/headless/hybrid 引擎
 - passive — 网络空间搜索（FOFA、Hunter、Shodan）
+
+**可选 SDK 工具**
 - record — 原生桌面/窗口截图和 H.264/MP4 录屏（Windows 与 Linux X11）
 
 **辅助工具**

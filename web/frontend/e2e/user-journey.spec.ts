@@ -105,8 +105,9 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     await terminalInput.focus()
     await terminalInput.pressSequentially('/status')
     await terminalInput.press('Enter')
-    await expect.poll(async () => page.locator('.xterm-rows').innerText(), { timeout: 20_000 }).toContain('Provider:')
-    await expect.poll(async () => (await page.locator('.xterm-rows').innerText()).replace(/\s+/g, '')).toContain(E2E_MODEL.replace(/\s+/g, ''))
+    const compactTerminalText = async () => (await page.locator('.xterm-rows').innerText()).replace(/\s+/g, '')
+    await expect.poll(compactTerminalText, { timeout: 20_000 }).toContain('Provider:')
+    await expect.poll(compactTerminalText).toContain(E2E_MODEL.replace(/\s+/g, ''))
 
     await page.getByRole('button', { name: 'Show details' }).click()
     const agentDrawer = page.getByRole('dialog').filter({ hasText: 'Agent Console' })

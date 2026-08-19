@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
 )
@@ -23,10 +24,33 @@ const (
 type ReadTool struct {
 	workDir string
 	readers []VirtualFileReader
+	audit   *FileAudit
 }
 
 type VirtualFileReader interface {
 	ReadVirtual(path string) (content string, handled bool, err error)
+}
+
+// WithAudit attaches the file-access audit trail. A nil recorder leaves the
+// tool unobserved, which is what a runtime that never wired one up gets.
+func (t *ReadTool) WithAudit(recorder *FileAudit) *ReadTool {
+	t.audit = recorder
+	return t
+}
+
+// audited records a successful read. Virtual reads never reach here: an
+// embedded skill is not a file on this machine, and reporting it as one would
+// put paths in the trail that no operator can open.
+func (t *ReadTool) audited(ctx context.Context, path string, size int64, result *coretool.Result, err error) (*coretool.Result, error) {
+	if err == nil {
+		t.audit.RecordFile(ctx, filepb.AccessOp_ACCESS_OP_READ, path, &filepb.Access{
+			Size: size,
+			// What the model actually received, which is the number that
+			// matters when the file was paginated or clipped.
+			Bytes: int64(len(coretool.ResultText(result))),
+		})
+	}
+	return result, err
 }
 
 func NewReadTool(workDir string, readers ...VirtualFileReader) *ReadTool {
@@ -84,14 +108,17 @@ func (t *ReadTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 	}
 
 	if mime := detectImageMime(resolved); mime != "" {
-		return readImageFile(resolved, args.Path, mime, info.Size())
+		result, err := readImageFile(resolved, args.Path, mime, info.Size())
+		return t.audited(ctx, resolved, info.Size(), result, err)
 	}
 
 	if isBinaryFile(resolved) {
-		return coretool.TextResult(fmt.Sprintf("[binary file: %s (%d bytes)]", args.Path, info.Size())), nil
+		result := coretool.TextResult(fmt.Sprintf("[binary file: %s (%d bytes)]", args.Path, info.Size()))
+		return t.audited(ctx, resolved, info.Size(), result, nil)
 	}
 
-	return t.readFileLines(resolved, args.Path, args.Offset, args.Limit)
+	result, err := t.readFileLines(resolved, args.Path, args.Offset, args.Limit)
+	return t.audited(ctx, resolved, info.Size(), result, err)
 }
 
 func (t *ReadTool) readFileLines(resolved, displayPath string, offset, limit int) (*coretool.Result, error) {

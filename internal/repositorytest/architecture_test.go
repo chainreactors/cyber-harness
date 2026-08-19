@@ -1,4 +1,4 @@
-package archtest
+package repositorytest
 
 import (
 	"bytes"
@@ -50,6 +50,100 @@ func TestRunnerDoesNotDependOnWeb(t *testing.T) {
 	root := repositoryRoot(t)
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/web")
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/rpc")
+}
+
+func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("cmd", "runner")} {
+		dir := filepath.Join(root, rel)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(string(content), "//go:build ") {
+				t.Errorf("runner source must not use build tags: %s", filepath.Join(rel, entry.Name()))
+			}
+		}
+	}
+
+	runnerDir := filepath.Join(root, "pkg", "runner")
+	entries, err := os.ReadDir(runnerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		source := strings.TrimSuffix(entry.Name(), "_test.go") + ".go"
+		if _, err := os.Stat(filepath.Join(runnerDir, source)); err != nil {
+			t.Errorf("runner test must map to exactly one source file: %s", entry.Name())
+		}
+	}
+
+	makefile := readRepositoryFile(t, root, "Makefile")
+	start := strings.Index(makefile, "runner: prepare\n")
+	if start < 0 {
+		t.Fatal("Makefile missing runner target")
+	}
+	block := makefile[start:]
+	if next := strings.Index(block, "\n\n"); next >= 0 {
+		block = block[:next]
+	}
+	if !strings.Contains(block, "./cmd/runner") {
+		t.Error("Makefile runner target must build ./cmd/runner")
+	}
+	if strings.Contains(block, "-tags") {
+		t.Error("Makefile runner target must not use build tags")
+	}
+
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
+	if count := strings.Count(releaseWorkflow, "main: ./cmd/runner"); count != 1 {
+		t.Fatalf("release workflow must contain exactly one runner build, got %d", count)
+	}
+	runnerStart := strings.Index(releaseWorkflow, "          - id: runner\n")
+	if runnerStart < 0 {
+		t.Fatal("release workflow is missing the runner build")
+	}
+	runnerBuild := releaseWorkflow[runnerStart:]
+	if next := strings.Index(runnerBuild[1:], "\n          - id:"); next >= 0 {
+		runnerBuild = runnerBuild[:next+1]
+	}
+	for _, required := range []string{
+		"profile: runner",
+		"main: ./cmd/runner",
+		"binary: runner",
+		"tags: \"\"",
+		"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64",
+	} {
+		if !strings.Contains(runnerBuild, required) {
+			t.Errorf("runner release build is missing %q", required)
+		}
+	}
+
+	goreleaser := readRepositoryFile(t, root, ".goreleaser.yml")
+	if count := strings.Count(goreleaser, "main: ./cmd/runner"); count != 1 {
+		t.Fatalf("GoReleaser must contain exactly one runner build, got %d", count)
+	}
+	runnerStart = strings.Index(goreleaser, "  - id: runner\n")
+	if runnerStart < 0 {
+		t.Fatal("GoReleaser is missing the runner build")
+	}
+	runnerBuild = goreleaser[runnerStart:]
+	if next := strings.Index(runnerBuild[1:], "\n  - id:"); next >= 0 {
+		runnerBuild = runnerBuild[:next+1]
+	}
+	if strings.Contains(runnerBuild, "\n    tags:") {
+		t.Error("GoReleaser runner build must not use build tags")
+	}
 }
 
 func TestGeneratedProtobufLivesInOwnedProtocolTrees(t *testing.T) {
@@ -169,7 +263,8 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(path), "_test.go")
-		matched := false
+		_, exactErr := os.Stat(filepath.Join(filepath.Dir(path), base+".go"))
+		matched := exactErr == nil
 		for _, source := range sources[filepath.Dir(path)] {
 			if base == source {
 				matched = true
@@ -279,9 +374,11 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	for _, required := range []string{
 		"GO_LDFLAGS ?= -s -w",
 		"standard: prepare\n\tCGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
-		"full: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
+		"full: frontend prepare\n\tCGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
+		"record: frontend record-native prepare\n\t$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags \"$(GO_LDFLAGS)\"",
 		"STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo",
-		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static",
+		"FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static",
+		"RECORD_TAGS := $(FULL_TAGS) record_ffmpeg",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Errorf("Makefile missing build profile contract %q", required)
@@ -291,12 +388,23 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	for _, required := range []string{
 		"CGO_MODE=0",
 		"CGO_MODE=1",
-		`EXTRA_TAGS="full,record_ffmpeg,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
+		`EXTRA_TAGS="full,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"`,
 		`CGO_ENABLED="$CGO_MODE"`,
 		`OSARCH="${HOST_OS}/${HOST_ARCH}"`,
 	} {
 		if !strings.Contains(buildScript, required) {
 			t.Errorf("build.sh missing build profile contract %q", required)
+		}
+	}
+	for name, profile := range map[string]string{"Makefile full profile": makefile, "build.sh full profile": buildScript} {
+		if strings.Contains(profile, "full,record_ffmpeg") || strings.Contains(profile, "full: frontend record-native") {
+			t.Errorf("%s must not enable the optional recorder", name)
+		}
+	}
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
+	for _, forbidden := range []string{"record_ffmpeg", "matrix.recorder"} {
+		if strings.Contains(releaseWorkflow, forbidden) {
+			t.Errorf("release workflow must not enable the optional recorder; found %q", forbidden)
 		}
 	}
 
@@ -312,9 +420,95 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 	if !strings.Contains(fullConfig, "CGO_ENABLED=1") {
 		t.Error(".goreleaser.yml aiscan-full must enable CGO")
 	}
+	if !strings.Contains(fullConfig, "      - darwin\n") {
+		t.Error(".goreleaser.yml aiscan-full must publish Darwin builds")
+	}
 	for _, tag := range []string{"re2_cgo", "re2_static"} {
 		if !strings.Contains(fullConfig, "      - "+tag+"\n") {
 			t.Errorf(".goreleaser.yml aiscan-full missing build tag %q", tag)
+		}
+	}
+}
+
+func TestGitHubActionsCrossCompileDarwinWithoutMacOSRunners(t *testing.T) {
+	root := repositoryRoot(t)
+	workflowDir := filepath.Join(root, ".github", "workflows")
+	macOSRunner := regexp.MustCompile(`(?i)^(?:runs-on|runner):\s*macos(?:-|\s|$)`)
+	err := filepath.WalkDir(workflowDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || (filepath.Ext(path) != ".yml" && filepath.Ext(path) != ".yaml") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for lineNumber, line := range strings.Split(string(content), "\n") {
+			if macOSRunner.MatchString(strings.TrimSpace(line)) {
+				t.Errorf("macOS GitHub Actions runner in %s:%d", relative(root, path), lineNumber+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
+	standardStart := strings.Index(releaseWorkflow, "          - id: aiscan\n")
+	if standardStart < 0 {
+		t.Fatal("release workflow is missing the standard aiscan build")
+	}
+	standardConfig := releaseWorkflow[standardStart:]
+	if next := strings.Index(standardConfig[1:], "\n          - id:"); next >= 0 {
+		standardConfig = standardConfig[:next+1]
+	}
+	for _, required := range []string{
+		"runner: ubuntu-22.04",
+		"darwin/amd64",
+		"darwin/arm64",
+		`cgo: "0"`,
+	} {
+		if !strings.Contains(standardConfig, required) {
+			t.Errorf("standard release build must cross-compile Darwin on Linux; missing %q", required)
+		}
+	}
+
+	fullDarwinStart := strings.Index(releaseWorkflow, "          - id: aiscan-full-darwin\n")
+	if fullDarwinStart < 0 {
+		t.Fatal("release workflow is missing the full Darwin cross-build")
+	}
+	fullDarwinConfig := releaseWorkflow[fullDarwinStart:]
+	if next := strings.Index(fullDarwinConfig[1:], "\n          - id:"); next >= 0 {
+		fullDarwinConfig = fullDarwinConfig[:next+1]
+	}
+	for _, required := range []string{
+		"runner: ubuntu-22.04",
+		"darwin/amd64",
+		"darwin/arm64",
+		`cgo: "1"`,
+		"cross: darwin",
+		"re2_cgo",
+		"re2_static",
+	} {
+		if !strings.Contains(fullDarwinConfig, required) {
+			t.Errorf("full release build must cross-compile Darwin CGO binaries on Linux; missing %q", required)
+		}
+	}
+	if strings.Contains(fullDarwinConfig, "record_ffmpeg") {
+		t.Error("full Darwin cross-build must not enable the unsupported native recorder")
+	}
+	versions := readRepositoryFile(t, root, filepath.Join(".github", "native", "versions.env"))
+	for _, required := range []string{
+		"MACOS_CROSS_ZIG_VERSION=",
+		"MACOS_CROSS_SDK_VERSION=",
+		"MACOS_CROSS_SDK_SHA256=",
+		"MACOS_CROSS_DEPLOYMENT_TARGET=",
+	} {
+		if !strings.Contains(versions, required) {
+			t.Errorf("native versions file is missing macOS cross-build pin %q", required)
 		}
 	}
 }
@@ -348,6 +542,7 @@ func TestRecorderNativeBuildUsesSingleSDKScript(t *testing.T) {
 		"build.sh",
 		filepath.Join(".github", "workflows", "ci.yml"),
 		filepath.Join(".github", "workflows", "go-release.yml"),
+		filepath.Join(".github", "workflows", "release-build.yml"),
 		filepath.Join(".github", "workflows", "record-native.yml"),
 	} {
 		content := readRepositoryFile(t, root, rel)

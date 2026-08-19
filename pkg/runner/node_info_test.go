@@ -53,7 +53,7 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	if got["!tmux"] == nil || got["!tmux"].usage != "!tmux <action>" {
 		t.Fatalf("!tmux = %+v", got["!tmux"])
 	}
-	if got["!tmux"].description != "PTY session manager built into aiscan. All bash commands run inside tmux sessions; long commands auto-background with inbox delivery." {
+	if got["!tmux"].description != "PTY session manager built into aiscan. Bash commands stay foreground by default and move to background only when the agent sets wait." {
 		t.Fatalf("!tmux description = %q", got["!tmux"].description)
 	}
 }
