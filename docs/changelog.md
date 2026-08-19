@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.0.0-rc2 — 流量与文件审计 + 单版本 Runner + 发布门禁
+
+v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与文件访问，以及发布链路的可重复验证。Runner 现在只有一个无 build tag 的实现和发行 profile，CI 会在不创建 Git tag 或 Release 的前提下复用正式发布工作流完成构建、打包和 smoke test。
+
+### New Features
+
+- AOP 新增常驻流量捕获 namespace，proxy 共享统一 capture hub，并能按任务查询捕获结果。
+- Runner 文件访问进入 task-scoped audit trail，并通过 AOP namespace 对控制面提供结构化记录。
+- 官方 Release 新增 Linux、macOS、Windows amd64/arm64 的单一 `runner` 产物。
+
+### Improvements
+
+- Runner 与 AIScan 共用 `pkg/runner.App` 的原生组装路径，删除重复 setup 与全局 hook 状态。
+- `make runner` 直接、无 build tag 地构建 `./cmd/runner`；`make all` 自动包含 runner。
+- 原生 record 工具改为显式 opt-in，默认 full 与官方 Release 不再隐式下载或链接 recorder SDK。
+- macOS full 产物由 Linux 上的 Zig 与固定 SDK 交叉编译，工具链版本和校验和固定。
+- CI 恢复 `go vet`，预编译 integration-tag 回归，并以 release dry-run 验证正式平台矩阵。
+- Release notes 优先读取本文件中的对应版本章节，回退日志也会正确以上一个 prerelease 为基线。
+
+### Bug Fixes
+
+- 修复 scanner-regression 因 integration test 遗留未使用 import 而持续无法编译的问题。
+- 合入 rc1 后的 Node WebSocket 稳定性、尾随 artifact 丢弃、UTF-8 边界清洗和 scanner artifact 体积预算修复。
+
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
 v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。

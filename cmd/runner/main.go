@@ -35,12 +35,13 @@ type options struct {
 	websocket  string
 	configFile string
 	jsonFrames bool
+	version    bool
 }
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, os.Args[1:], os.Stderr); err != nil {
+	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
@@ -49,10 +50,14 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	options, err := parseOptions(args, stderr)
 	if err != nil {
 		return err
+	}
+	if options.version {
+		fmt.Fprintf(stdout, "runner v%s\n", cfg.Version)
+		return nil
 	}
 	option := new(cfg.Option)
 	option.ConfigFile = options.configFile
@@ -99,10 +104,11 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&result.websocket, "ws-path", node.DefaultWSPath, "AOP WebSocket path")
 	flags.StringVar(&result.configFile, "config", "", "path to aiscan.yaml")
 	flags.BoolVar(&result.jsonFrames, "json", false, "use ProtoJSON WebSocket frames")
+	flags.BoolVar(&result.version, "version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return result, err
 	}
-	if strings.TrimSpace(result.server) == "" {
+	if strings.TrimSpace(result.server) == "" && !result.version {
 		return result, fmt.Errorf("--server is required")
 	}
 	return result, nil

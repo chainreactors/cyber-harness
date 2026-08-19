@@ -20,6 +20,31 @@ on:
         required: false
         default: false
         type: boolean
+      dry_run:
+        description: 'Build, package, and verify without creating a tag or release'
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Version used for build verification or release'
+        required: true
+        type: string
+      target:
+        description: 'Commit to build and optionally tag'
+        required: true
+        type: string
+      prerelease:
+        description: 'Publish immediately as a prerelease instead of creating a draft'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Build, package, and verify without creating a tag or release'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: write
 
@@ -28,7 +53,7 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# One frontend bundle + standard/full native build matrix → draft release
+# One frontend bundle + standard/full/runner build matrix -> verified bundle
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -38,6 +63,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -64,8 +90,13 @@ jobs:
           fi
           git fetch --force --tags origin
 
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            git rev-parse --verify "${TARGET}^{commit}"
+            REF="${TARGET}"
+            echo "Dry run: building ${TARGET} as ${TAG} without creating a tag"
+          elif git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "Tag ${TAG} exists"
+            REF="refs/tags/${TAG}"
           else
             if [[ -z "${{ inputs.tag }}" ]]; then
               echo "Tag ${TAG} was expected to exist for a tag push event" >&2
@@ -76,9 +107,11 @@ jobs:
             git checkout --force "${TARGET}"
             git tag -a "${TAG}" -m "Release ${TAG}"
             git push origin "refs/tags/${TAG}"
+            REF="refs/tags/${TAG}"
           fi
 
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
 
   # ── Build the embedded frontend once for every full target ─────
   frontend:
@@ -88,7 +121,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
           submodules: recursive
 
@@ -132,6 +165,14 @@ jobs:
             tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
+          - id: runner
+            profile: runner
+            runner: ubuntu-22.04
+            main: ./cmd/runner
+            binary: runner
+            tags: ""
+            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
+            cgo: "0"
           - id: aiscan-full-linux-amd64
             profile: full
             runner: ubuntu-22.04
@@ -173,7 +214,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
           submodules: recursive
@@ -278,8 +319,12 @@ jobs:
               unset CC CXX
             fi
 
+            build_args=(-trimpath)
+            if [[ -n "$TAGS" ]]; then
+              build_args+=(-tags "$TAGS")
+            fi
             CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -tags "$TAGS" \
+              go build "${build_args[@]}" \
               -ldflags "${link_flags}" \
               -buildvcs=false \
               -o "$out" "$MAIN"
@@ -296,7 +341,11 @@ jobs:
 
           if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
             version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
-            test "$version_output" = "aiscan v${VERSION}"
+            if [[ "${{ matrix.profile }}" == "runner" ]]; then
+              test "$version_output" = "runner v${VERSION}"
+            else
+              test "$version_output" = "aiscan v${VERSION}"
+            fi
           fi
 
           echo "=== Binaries ==="
@@ -319,7 +368,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Download all artifacts
@@ -408,7 +457,8 @@ jobs:
           $expectedVersion = "aiscan $env:TAG"
           $cases = @(
             @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true },
+            @{ Archive = 'runner_windows_amd64.zip'; Binary = 'runner.exe'; Full = $false; Runner = $true }
           )
 
           foreach ($case in $cases) {
@@ -419,8 +469,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "$($case.Binary) --version exited with $LASTEXITCODE"
             }
-            if ($version -ne $expectedVersion) {
-              throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
+            $caseExpectedVersion = if ($case.Runner) { "runner $env:TAG" } else { $expectedVersion }
+            if ($version -ne $caseExpectedVersion) {
+              throw "$($case.Binary) reported '$version', expected '$caseExpectedVersion'"
             }
             if ($case.Full) {
               & $binary web --help | Out-Null
@@ -433,6 +484,7 @@ jobs:
   # ── Publish release ─────────────────────────────────────────────
   release:
     needs: [prepare, package, verify-windows-release]
+    if: inputs.dry_run != true
     runs-on: ubuntu-22.04
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
@@ -440,7 +492,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Download release bundle
@@ -452,11 +504,25 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          prev_tag=$(git tag --sort=-v:refname \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+          awk -v heading="## ${TAG}" '
+            /^## / {
+              if (found) exit
+              if ($0 == heading || index($0, heading " ") == 1) {
+                found = 1
+                next
+              }
+            }
+            found { print }
+          ' docs/changelog.md > /tmp/changelog.md
+
+          prev_tag=$(git tag --merged "${TAG}^" --sort=-version:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
+            | grep -Ev 'nightly|^v0\.0\.0-ci\.' \
             | grep -Fxv "${TAG}" \
             | head -1 || true)
-          if [ -n "$prev_tag" ]; then
+          if [ -s /tmp/changelog.md ]; then
+            echo "Using curated notes from docs/changelog.md"
+          elif [ -n "$prev_tag" ]; then
             git log --pretty=format:"- %s" "${prev_tag}..${TAG}" --no-merges | grep -v "^- ${TAG}$" | grep -v "^- docs" > /tmp/changelog.md || true
           else
             git log --pretty=format:"- %s" -20 --no-merges > /tmp/changelog.md || true
