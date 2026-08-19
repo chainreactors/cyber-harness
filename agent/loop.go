@@ -201,13 +201,10 @@ func runLoop(ctx context.Context, cfg Config) (*Result, error) {
 				continue
 			}
 
-			alive := (cfg.LoopScheduler != nil && cfg.LoopScheduler.Active() > 0) ||
-				(ib != nil && ib.ActiveProducers() > 0)
-
-			if alive && ib != nil && !ib.Closed() {
-				cfg.Logger.Debugf("[turn %d] waiting for inbox (loops=%d producers=%d)",
-					turn, schedulerActive(cfg.LoopScheduler), ib.ActiveProducers())
-				hasMessage := ib.Wait(ctx)
+			if ib != nil && !ib.Closed() {
+				cfg.Logger.Debugf("[turn %d] waiting for inbox (producers=%d)",
+					turn, ib.ActiveProducers())
+				hasMessage := ib.WaitWhileActive(ctx)
 				if hasMessage {
 					continue
 				}
@@ -711,13 +708,6 @@ func logUsage(logger telemetry.Logger, usage *aop.TokenUsage) {
 				usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 		}
 	}
-}
-
-func schedulerActive(s *LoopScheduler) int {
-	if s == nil {
-		return 0
-	}
-	return s.Active()
 }
 
 // messageBuilder accumulates streamed deltas into one assistant message.

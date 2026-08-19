@@ -19,6 +19,7 @@ type Inbox interface {
 	Closed() bool
 	Len() int
 	Wait(ctx context.Context) bool
+	WaitWhileActive(ctx context.Context) bool
 	RegisterProducer(name string) *ProducerHandle
 	ActiveProducers() int
 }
@@ -156,13 +157,21 @@ func (b *Buffered) Len() int {
 }
 
 func (b *Buffered) Wait(ctx context.Context) bool {
+	return b.wait(ctx, false)
+}
+
+func (b *Buffered) WaitWhileActive(ctx context.Context) bool {
+	return b.wait(ctx, true)
+}
+
+func (b *Buffered) wait(ctx context.Context, stopWhenIdle bool) bool {
 	for {
 		b.mu.Lock()
 		if len(b.buf) > 0 {
 			b.mu.Unlock()
 			return true
 		}
-		if b.closed {
+		if b.closed || (stopWhenIdle && len(b.producers) == 0) {
 			b.mu.Unlock()
 			return false
 		}
