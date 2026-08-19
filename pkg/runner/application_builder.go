@@ -46,7 +46,6 @@ func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeature
 			BashTimeout:   600,
 			TavilyKeys:    dc.GetSearch().GetTavilyKeys(),
 			OptionalTools: append([]string(nil), dc.GetAgent().GetTools()...),
-			MitmCapture:   true, // default-on; distribute config does not model a disable yet
 		},
 		Logger: logger,
 	}
@@ -60,6 +59,7 @@ func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConf
 	}
 	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
 	rc.Tools.PlaywrightSession = option.PlaywrightSession
+	rc.Tools.MitmCapture = cloneBool(option.Mitm)
 	rc.CLISkillPaths = skillPathsFromOptions(option)
 	rc.RecordFile = option.OutputFile
 	return rc
@@ -92,7 +92,7 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 			TavilyKeys:        resolveTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
 			PlaywrightSession: option.PlaywrightSession,
 			OptionalTools:     option.Tools,
-			MitmCapture:       option.Mitm == nil || *option.Mitm, // default-on; --mitm=false / config mitm:false disables
+			MitmCapture:       cloneBool(option.Mitm),
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),
@@ -141,4 +141,12 @@ func cloneStringMap(src map[string]string) map[string]string {
 		dst[key] = value
 	}
 	return dst
+}
+
+func cloneBool(src *bool) *bool {
+	if src == nil {
+		return nil
+	}
+	value := *src
+	return &value
 }

@@ -41,67 +41,6 @@ func NewState(originalProxy string) *State {
 	return s
 }
 
-// CurrentDial returns the egress dial for the active proxy selection, or a
-// direct dial when nothing is selected. It is lock-free (single atomic load)
-// so ProxyHub can call it on every outbound connection.
-func (s *State) CurrentDial() proxyclient.Dial {
-	if p := s.chain.Load(); p != nil && *p != nil {
-		return *p
-	}
-	return proxyclient.DefaultDial
-}
-
-// WithOverrideDial temporarily republishes the egress chain to route through
-// proxyURL, returning a restore func. It backs the one-shot `proxy <url> <cmd>`
-// override: children keep pointing at the stable hub address while the hub's
-// upstream is swapped for the duration of the wrapped command.
-func (s *State) WithOverrideDial(proxyURL string) (func(), error) {
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy URL: %w", err)
-	}
-	d, err := proxyclient.NewClient(u)
-	if err != nil {
-		return nil, fmt.Errorf("create proxy client: %w", err)
-	}
-	prev := s.chain.Load()
-	dl := proxyclient.Dial(d)
-	s.chain.Store(&dl)
-	return func() { s.chain.Store(prev) }, nil
-}
-
-// publishChainLocked rebuilds the egress dial from the current selection and
-// republishes it atomically. Callers that mutate selection fields already hold
-// s.mu; it only reads those fields and stores into the lock-free atomic, so it
-// must not take s.mu itself.
-//
-// Chain base is always DefaultDial (direct from the runner host): ProxyHub is
-// the front hop, and the proxy nodes are its upstream. The clash auto dial is
-// used as-is because its own base is DefaultDial, which is exactly this host.
-func (s *State) publishChainLocked() {
-	var dial proxyclient.Dial
-	switch {
-	case s.autoDial != nil:
-		dial = s.autoDial
-	case s.singleDial != nil:
-		dial = s.singleDial
-	case s.activeNode != nil && s.activeNode.URL != nil:
-		if d, err := proxyclient.NewClient(s.activeNode.URL); err == nil {
-			dial = d
-		}
-	case s.originalProxy != "":
-		if u, err := url.Parse(s.originalProxy); err == nil {
-			if d, err := proxyclient.NewClient(u); err == nil {
-				dial = d
-			}
-		}
-	}
-	if dial == nil {
-		dial = proxyclient.DefaultDial
-	}
-	s.chain.Store(&dial)
-}
-
 func (s *State) LoadSubscription(sub *clash.Subscription, subscribeURL string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

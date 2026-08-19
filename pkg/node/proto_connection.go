@@ -26,7 +26,6 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -483,13 +482,8 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	for _, register := range cc.ExtraNamespaces {
-		if register == nil {
-			continue
-		}
-		if err := register(mux); err != nil {
-			return nil, err
-		}
+	if err := registerExtraNamespaces(mux, cc.ExtraNamespaces); err != nil {
+		return nil, err
 	}
 	return mux, nil
 }
@@ -612,20 +606,6 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 	default:
 		fail("unsupported AOP file message")
 	}
-}
-
-// auditControlAccess records a file request this node served for a peer. It is
-// the half of the trail no tool can report: an operator reading a workspace
-// file is a real access to it, and one nothing else would have witnessed.
-func auditControlAccess(audit *commands.FileAudit, op filepb.AccessOp, base, path string, value fileResultValue) {
-	if audit == nil || value.err != nil || path == "" {
-		return
-	}
-	audit.RecordFile(context.Background(), op, resolveFileRPCPath(base, path), &filepb.Access{
-		Source:  filepb.AccessSource_ACCESS_SOURCE_CONTROL,
-		WorkDir: base,
-		Bytes:   int64(len(value.result.GetData())),
-	})
 }
 
 func handleAgentExecMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *execpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc) {

@@ -40,11 +40,12 @@ type ScannerConfig struct {
 
 type ToolConfig struct {
 	Enabled           bool
+	RunnerMode        bool
 	BashTimeout       int
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string // optional tool groups to enable
-	MitmCapture       bool     // record tool traffic through the MITM hub (default true); false = pure proxy routing
+	MitmCapture       *bool    // nil defaults to capture; false keeps routing without interception
 }
 
 type IOAConfig struct {

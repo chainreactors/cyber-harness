@@ -8,14 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ProxyHub is the runner-level, long-lived MITM proxy that every tool routes
@@ -198,112 +196,6 @@ func (h *ProxyHub) CAPath() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.caPath
-}
-
-// Store is the shared capture sink the mitm query verbs read from.
-func (h *ProxyHub) Store() *FlowStore { return h.store }
-
-// ingest records and streams one captured flow. The addon calls it for every
-// observed request/response; it is a no-op while capture is off, so the always-
-// installed addon costs nothing in relay mode.
-func (h *ProxyHub) ingest(f Flow) {
-	if !h.recording.Load() {
-		return
-	}
-	stored := h.store.Add(f)
-	h.publish(&stored)
-}
-
-// publish fans one stored flow out to every subscriber. Delivery is lossy under
-// backpressure: a full subscriber channel drops the flow rather than stalling
-// capture — the FlowStore remains the complete record for later query.
-func (h *ProxyHub) publish(f *Flow) {
-	if f == nil {
-		return
-	}
-	h.subsMu.Lock()
-	if len(h.subs) == 0 {
-		h.subsMu.Unlock()
-		return
-	}
-	msg := flowToProto(f)
-	for _, ch := range h.subs {
-		select {
-		case ch <- msg:
-		default:
-		}
-	}
-	h.subsMu.Unlock()
-}
-
-// Subscribe returns a channel of captured flows (as protocol messages) and an
-// unsubscribe func. The channel is buffered; see publish for the lossy
-// backpressure contract. Cancel is idempotent and closes the channel.
-func (h *ProxyHub) Subscribe(buffer int) (<-chan *traffic.Flow, func()) {
-	if buffer <= 0 {
-		buffer = 256
-	}
-	ch := make(chan *traffic.Flow, buffer)
-	h.subsMu.Lock()
-	if h.subs == nil {
-		h.subs = make(map[int]chan *traffic.Flow)
-	}
-	id := h.nextSub
-	h.nextSub++
-	h.subs[id] = ch
-	h.subsMu.Unlock()
-
-	var once sync.Once
-	cancel := func() {
-		once.Do(func() {
-			h.subsMu.Lock()
-			if existing, ok := h.subs[id]; ok {
-				delete(h.subs, id)
-				close(existing)
-			}
-			h.subsMu.Unlock()
-		})
-	}
-	return ch, cancel
-}
-
-// flowToProto maps a captured Flow to the traffic.Flow wire message. Bodies are
-// the already-bounded snippets; the consumer applies its own evidence limits and
-// redaction.
-func flowToProto(f *Flow) *traffic.Flow {
-	if f == nil {
-		return nil
-	}
-	msg := &traffic.Flow{
-		Id:              strconv.Itoa(f.ID),
-		ToolId:          f.ToolID,
-		Method:          f.Method,
-		Url:             f.URL,
-		StatusCode:      int32(f.StatusCode),
-		RequestHeaders:  headersToProto(f.RequestHeaders),
-		ResponseHeaders: headersToProto(f.ResponseHeaders),
-		RequestBody:     f.RequestBodySnip,
-		ResponseBody:    f.ResponseBodySnip,
-		Error:           f.Error,
-		Complete:        f.Error == "" && f.StatusCode != 0,
-	}
-	if !f.Timestamp.IsZero() {
-		msg.Timestamp = timestamppb.New(f.Timestamp)
-	}
-	return msg
-}
-
-func headersToProto(h http.Header) []*traffic.Header {
-	if len(h) == 0 {
-		return nil
-	}
-	out := make([]*traffic.Header, 0, len(h))
-	for name, values := range h {
-		for _, v := range values {
-			out = append(out, &traffic.Header{Name: name, Value: v})
-		}
-	}
-	return out
 }
 
 // Shutdown stops the listener. Safe to call on a never-started hub.
