@@ -107,42 +107,18 @@ func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 
 	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
 	if count := strings.Count(releaseWorkflow, "main: ./cmd/runner"); count != 1 {
-		t.Fatalf("release workflow must contain exactly one runner build, got %d", count)
+		t.Fatalf("CI release matrix must contain exactly one runner build, got %d", count)
 	}
-	runnerStart := strings.Index(releaseWorkflow, "          - id: runner\n")
-	if runnerStart < 0 {
-		t.Fatal("release workflow is missing the runner build")
+	if !strings.Contains(releaseWorkflow, "[[ \"$base\" == runner_* ]] && continue") {
+		t.Error("release packaging must exclude runner archives")
 	}
-	runnerBuild := releaseWorkflow[runnerStart:]
-	if next := strings.Index(runnerBuild[1:], "\n          - id:"); next >= 0 {
-		runnerBuild = runnerBuild[:next+1]
-	}
-	for _, required := range []string{
-		"profile: runner",
-		"main: ./cmd/runner",
-		"binary: runner",
-		"tags: \"\"",
-		"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64",
-	} {
-		if !strings.Contains(runnerBuild, required) {
-			t.Errorf("runner release build is missing %q", required)
-		}
+	if strings.Contains(releaseWorkflow, "runner_windows_amd64.zip") {
+		t.Error("Windows release smoke must not require a runner archive")
 	}
 
 	goreleaser := readRepositoryFile(t, root, ".goreleaser.yml")
-	if count := strings.Count(goreleaser, "main: ./cmd/runner"); count != 1 {
-		t.Fatalf("GoReleaser must contain exactly one runner build, got %d", count)
-	}
-	runnerStart = strings.Index(goreleaser, "  - id: runner\n")
-	if runnerStart < 0 {
-		t.Fatal("GoReleaser is missing the runner build")
-	}
-	runnerBuild = goreleaser[runnerStart:]
-	if next := strings.Index(runnerBuild[1:], "\n  - id:"); next >= 0 {
-		runnerBuild = runnerBuild[:next+1]
-	}
-	if strings.Contains(runnerBuild, "\n    tags:") {
-		t.Error("GoReleaser runner build must not use build tags")
+	if strings.Contains(goreleaser, "main: ./cmd/runner") || strings.Contains(goreleaser, "ids: [runner]") {
+		t.Error("GoReleaser must not publish runner builds or archives")
 	}
 }
 

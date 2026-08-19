@@ -1,28 +1,72 @@
 # Changelog
 
-## v1.0.0-rc2 — 流量与文件审计 + 单版本 Runner + 发布门禁
+## v1.0.0-rc2 — 远程执行审计 + 单版本 Runner + 可验证发布
 
-v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与文件访问，以及发布链路的可重复验证。Runner 现在只有一个无 build tag 的实现和发行 profile，CI 与发布 wrapper 共用只读的 release-build workflow 完成构建、打包和 smoke test。
+v1.0.0-rc2 让远程 Runner 更容易部署、审计和维护：Runner 只有一个版本，可直接连接 AIScan Web；流量、文件访问和扫描结果都有明确边界；CI 会用正式发布矩阵验证每个候选版本。
 
 ### New Features
 
-- AOP 新增常驻流量捕获 namespace，proxy 共享统一 capture hub，并能按任务查询捕获结果。
-- Runner 文件访问进入 task-scoped audit trail，并通过 AOP namespace 对控制面提供结构化记录。
-- 官方 Release 新增 Linux、macOS、Windows amd64/arm64 的单一 `runner` 产物。
+**单版本 Runner**
+
+Runner 不再区分 full/non-full，也不需要 build tag。它与 AIScan 共用 `pkg/runner.App` 的原生运行时组装；CI 会编译并验证 Linux、macOS、Windows 的 amd64/arm64 版本，但 Runner 只供 Cairn 使用，不作为 GitHub Release 资产发布。
+
+```bash
+make runner
+./bin/runner --server https://aiscan.example.com --token <token> --id office-linux
+```
+
+`make all` 也会自动构建 `bin/runner`。Windows 可使用本地构建出的 `runner.exe`；除命令行参数外，也可通过 `--config` 读取配置。`runner --version` 可用于确认部署版本。
+
+**远程任务审计**
+
+- proxy 使用常驻的统一 capture hub，可在不重启监听器的情况下切换 relay/capture；AOP traffic namespace 可查看状态并按任务查询 HTTP/HTTPS 流量，敏感请求头会在 Runner 侧脱敏。
+- 开启 HTTPS 捕获时，工具会使用当前 Hub CA；关闭捕获后只保留流量转发，不再注入 CA。
+- read、write、edit 和远程文件 RPC 会写入任务级文件审计；shell 命令通过工作目录快照记录文件变化，并标记记录来源。
+- 审计不会阻塞任务，发生丢弃时会给出数量。shell 中未修改文件的读取无法由快照推断，因此不会被误报为已审计读取。
+
+**Web 快速连接**
+
+Web 会自动取得 Agent token，并根据远程执行节点的系统、架构和全球/中国下载源生成安装与连接命令；聊天输入框也会根据当前上下文给出操作入口。
 
 ### Improvements
 
-- Runner 与 AIScan 共用 `pkg/runner.App` 的原生组装路径，删除重复 setup 与全局 hook 状态。
-- `make runner` 直接、无 build tag 地构建 `./cmd/runner`；`make all` 自动包含 runner。
-- 原生 record 工具改为显式 opt-in，默认 full 与官方 Release 不再隐式下载或链接 recorder SDK。
-- macOS full 产物由 Linux 上的 Zig 与固定 SDK 交叉编译，工具链版本和校验和固定。
-- CI 恢复 `go vet`，预编译 integration-tag 回归，并以只读 release-build 验证正式平台矩阵。
-- Release notes 优先读取本文件中的对应版本章节，回退日志也会正确以上一个 prerelease 为基线。
+**Runner 连接稳定性**
+
+- 每个 Runner 进程携带独立实例标识，并通过存活 deadline 及时发现失效连接。
+- WebSocket 会区分连接失败原因并显示 enrollment 拒绝信息；稳定连接后会重置重连退避。
+- 连接、keep-alive 与 producer 生命周期收敛到 session，减少命令结束或重连时的遗留状态。
+
+**扫描结果与运行时边界**
+
+- scanner-native Artifact 在产生处执行体积预算；工具结束或取消后到达的尾随 Artifact 会被丢弃，避免大结果或晚到结果污染后续会话。
+- AOP 工具文本在 UTF-8 边界清洗，截断内容不会产生无效字符。
+- shell 命令默认保持前台执行；设置 `wait: N` 后，运行超过 N 秒的命令才会转入后台并通过 inbox 返回进度。默认 `timeout` 为 600 秒，显式设为 `0` 表示不限时。
+- harness prompt 与 scan skill 分离；Katana 升级到 v1.7.0，并修正 gogo/scan 文档中无效的 `top100` / `top1000` 端口 preset。
+- record 改为显式 opt-in；默认 full 和官方 Release 不再下载或链接 recorder SDK。
+- Go module 可在独立 checkout 中解析，不再依赖相邻仓库的本地目录结构；新增 Agent 架构文档，运行时与协议边界更明确。
+
+**CI 与发布**
+
+- CI 执行 `go vet`、lint 和 integration-tag 编译，并验证冷缓存 protobuf 生成。
+- 修复 headless 初始化竞态和 CDP deadline；Playwright 浏览器安装绕过易挂起的 apt mirror，并增加超时与重试。
+- release build 与发布权限分离；PR 和 master 都使用正式矩阵构建、生成 checksum，并对 Windows 产物执行启动 smoke test。
+- Release notes 会读取本文件中对应版本的章节，并以上一个 prerelease 作为回退日志基线。
 
 ### Bug Fixes
 
-- 修复 scanner-regression 因 integration test 遗留未使用 import 而持续无法编译的问题。
-- 合入 rc1 后的 Node WebSocket 稳定性、尾随 artifact 丢弃、UTF-8 边界清洗和 scanner artifact 体积预算修复。
+- 子进程退出时会排空 PTY 尾部输出，修复 `tmux capture-pane -c` 偶发返回空结果。
+- inbox 会在所有 producer 结束时正确唤醒；LoopScheduler 统一注册 producer，loop 生命周期绑定 session 而非单次命令 context。
+- 修复 integration 回归中的静态分析错误，以及 cyber-ui 文件访问协议版本未固定导致的生成漂移。
+
+### Release Matrix
+
+| 产物 | Linux | macOS | Windows | 数量 |
+| --- | --- | --- | --- | ---: |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
+| `checksums.txt` | — | — | — | 1 |
+
+Release 只包含 `aiscan`、`aiscan-full` 和 checksum；Runner 始终只有一个版本，没有 `runner-full`，由 `make runner` 构建后交给 Cairn 使用。
 
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
