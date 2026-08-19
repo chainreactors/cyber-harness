@@ -1,8 +1,10 @@
 package inbox
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestBufferedPushDrain(t *testing.T) {
@@ -171,5 +173,21 @@ func TestProducerRegistration(t *testing.T) {
 	h2.Done()
 	if b.ActiveProducers() != 0 {
 		t.Fatalf("expected 0 producers, got %d", b.ActiveProducers())
+	}
+}
+
+func TestBufferedWaitWhileActiveReturnsWhenProducersFinish(t *testing.T) {
+	b := NewBuffered(1)
+	producer := b.RegisterProducer("task")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	go producer.Done()
+
+	if b.WaitWhileActive(ctx) {
+		t.Fatal("WaitWhileActive() reported a message after the producer finished")
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("WaitWhileActive() did not return when the producer finished: %v", err)
 	}
 }

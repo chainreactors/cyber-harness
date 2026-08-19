@@ -526,6 +526,9 @@ func (m *sessionMailbox) Close()                        { m.base.Close() }
 func (m *sessionMailbox) Closed() bool                  { return m.base.Closed() }
 func (m *sessionMailbox) Len() int                      { return m.base.Len() }
 func (m *sessionMailbox) Wait(ctx context.Context) bool { return m.base.Wait(ctx) }
+func (m *sessionMailbox) WaitWhileActive(ctx context.Context) bool {
+	return m.base.WaitWhileActive(ctx)
+}
 func (m *sessionMailbox) RegisterProducer(name string) *inboxpkg.ProducerHandle {
 	return m.base.RegisterProducer(name)
 }
@@ -596,7 +599,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 	sessionCtx, cancel := context.WithCancel(ctx)
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 	mailbox := &sessionMailbox{base: baseInbox}
-	scheduler := agent.NewLoopScheduler(mailbox, rt.config.Logger)
+	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.config.Logger)
 	agentCfg := rt.config.
 		WithSystemPrompt(rt.systemPrompt).
 		WithStream(true).
@@ -628,7 +631,7 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 	rt.mu.Unlock()
 
 	if logicalID == MainREPLName && rt.option != nil && rt.option.Heartbeat > 0 {
-		_, _ = scheduler.Add(sessionCtx, agent.LoopEntry{
+		_, _ = scheduler.Add(agent.LoopEntry{
 			Name: "heartbeat", Interval: time.Duration(rt.option.Heartbeat) * time.Minute,
 			Mode:   agent.ModeInbox,
 			Prompt: "Heartbeat: review current context, check on any running sessions, and decide if action is needed.",
