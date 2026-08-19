@@ -8,14 +8,14 @@ v1.0.0-rc2 让远程 Runner 更容易部署、审计和维护：Runner 只有一
 
 **单版本 Runner**
 
-Runner 不再区分 full/non-full，也不需要 build tag。它与 AIScan 共用 `pkg/runner.App` 的原生运行时组装，官方提供 Linux、macOS、Windows 的 amd64/arm64 产物。
+Runner 不再区分 full/non-full，也不需要 build tag。它与 AIScan 共用 `pkg/runner.App` 的原生运行时组装；CI 会编译并验证 Linux、macOS、Windows 的 amd64/arm64 版本，但 Runner 只供 Cairn 使用，不作为 GitHub Release 资产发布。
 
 ```bash
 make runner
 ./bin/runner --server https://aiscan.example.com --token <token> --id office-linux
 ```
 
-`make all` 也会自动构建 `bin/runner`。Windows 可直接使用发布包中的 `runner.exe`；除命令行参数外，也可通过 `--config` 读取配置。`runner --version` 可用于确认部署版本。
+`make all` 也会自动构建 `bin/runner`。Windows 可使用本地构建出的 `runner.exe`；除命令行参数外，也可通过 `--config` 读取配置。`runner --version` 可用于确认部署版本。
 
 **远程任务审计**
 
@@ -64,10 +64,9 @@ Web 会自动取得 Agent token，并根据远程执行节点的系统、架构�
 | --- | --- | --- | --- | ---: |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
 | `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
-| `runner` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
 | `checksums.txt` | — | — | — | 1 |
 
-Runner 始终只有一个版本，没有 `runner-full`。
+Release 只包含 `aiscan`、`aiscan-full` 和 checksum；Runner 始终只有一个版本，没有 `runner-full`，由 `make runner` 构建后交给 Cairn 使用。
 
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 

@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# One frontend bundle + standard/full/runner build matrix -> verified bundle
+# One frontend bundle + standard/full/runner CI build matrix -> verified bundle
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -319,6 +319,9 @@ jobs:
           for f in dist/build/*; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
+            # Runner is built and smoke-tested in CI for Cairn, but is not a
+            # GitHub Release asset.
+            [[ "$base" == runner_* ]] && continue
             archive_name="${base%.exe}"
             binary="${base%%_*}"
             inner_name="$binary"
@@ -367,8 +370,7 @@ jobs:
           $expectedVersion = "aiscan $env:TAG"
           $cases = @(
             @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true },
-            @{ Archive = 'runner_windows_amd64.zip'; Binary = 'runner.exe'; Full = $false; Runner = $true }
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
           )
 
           foreach ($case in $cases) {
@@ -379,9 +381,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "$($case.Binary) --version exited with $LASTEXITCODE"
             }
-            $caseExpectedVersion = if ($case.Runner) { "runner $env:TAG" } else { $expectedVersion }
-            if ($version -ne $caseExpectedVersion) {
-              throw "$($case.Binary) reported '$version', expected '$caseExpectedVersion'"
+            if ($version -ne $expectedVersion) {
+              throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
             }
             if ($case.Full) {
               & $binary web --help | Out-Null
