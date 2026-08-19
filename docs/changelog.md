@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.0.0-rc2 — 流量与文件审计 + 单版本 Runner + 发布门禁
+
+v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与文件访问，以及发布链路的可重复验证。Runner 现在只有一个无 build tag 的实现和发行 profile，CI 与发布 wrapper 共用只读的 release-build workflow 完成构建、打包和 smoke test。
+
+### New Features
+
+- AOP 新增常驻流量捕获 namespace，proxy 共享统一 capture hub，并能按任务查询捕获结果。
+- Runner 文件访问进入 task-scoped audit trail，并通过 AOP namespace 对控制面提供结构化记录。
+- 官方 Release 新增 Linux、macOS、Windows amd64/arm64 的单一 `runner` 产物。
+
+### Improvements
+
+- Runner 与 AIScan 共用 `pkg/runner.App` 的原生组装路径，删除重复 setup 与全局 hook 状态。
+- `make runner` 直接、无 build tag 地构建 `./cmd/runner`；`make all` 自动包含 runner。
+- 原生 record 工具改为显式 opt-in，默认 full 与官方 Release 不再隐式下载或链接 recorder SDK。
+- macOS full 产物由 Linux 上的 Zig 与固定 SDK 交叉编译，工具链版本和校验和固定。
+- CI 恢复 `go vet`，预编译 integration-tag 回归，并以只读 release-build 验证正式平台矩阵。
+- Release notes 优先读取本文件中的对应版本章节，回退日志也会正确以上一个 prerelease 为基线。
+
+### Bug Fixes
+
+- 修复 scanner-regression 因 integration test 遗留未使用 import 而持续无法编译的问题。
+- 合入 rc1 后的 Node WebSocket 稳定性、尾随 artifact 丢弃、UTF-8 边界清洗和 scanner artifact 体积预算修复。
+
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
 v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。
@@ -8,13 +32,13 @@ v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台
 
 **record — 原生桌面与窗口捕获**
 
-Full 版新增原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；官方 Windows amd64 与 Linux amd64/arm64 full 产物静态链接裁剪后的 FFmpeg/libx264 SDK。
+新增可选的原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；SDK 和工具开发者可在 Windows amd64 与 Linux amd64/arm64 上显式链接裁剪后的 FFmpeg/libx264 SDK，官方 full 产物默认不编译该工具。
 
 - 支持 `screenshot`、固定时长 `record`，以及异步 `start` / `stop` / `status`
 - 支持桌面、Windows HWND、X11 Window ID，或通过 PID 自动选择最大的可见窗口
 - 默认捕获鼠标，视频使用 H.264/libx264 编码并封装为 MP4；最多可并行运行四个录制会话
 - 截图通过 AOP media 返回有界预览；视频通过 task-relative `Resource.uri` 与分段 `aop.file` 请求传输
-- `make full` 自动下载、校验并缓存固定版本的 recorder SDK；维护者也可从固定源码重建 SDK
+- `make record` 按需下载、校验并缓存固定版本的 recorder SDK，并构建独立的 record-enabled 产物；维护者也可从固定源码重建 SDK
 
 Wayland、macOS、Windows arm64、无图形会话的 headless 主机和 Windows session 0 暂不支持原生录制。完整限制与构建说明见 [record 文档](record.md)。
 
@@ -53,10 +77,10 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **发布与原生构建链路**
 
-- standard 发布 Linux、macOS、Windows 的 amd64/arm64；full 发布 Linux/macOS amd64/arm64 与 Windows amd64
-- CI、nightly 和正式 release 共用 `.github/workflows/go-release.yml`，构建标签、版本注入、压缩和平台矩阵不再漂移
-- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算；缺少预构建 SDK 时 CI 可回退到源码构建
-- full profile 恢复静态 RE2，并验证 Windows recorder/RE2 原生库没有变成运行时 DLL 依赖
+- standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
+- CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
+- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算，并通过独立 workflow 构建发布
+- full profile 恢复静态 RE2，并验证 Windows RE2 原生库没有变成运行时 DLL 依赖
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
 - 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
 
@@ -91,8 +115,8 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 | 产物 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
-| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 |
-| 原生 `record` | X11 amd64/arm64 | 不支持 | amd64 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
+| 可选原生 `record` SDK 构建 | X11 amd64/arm64 | 不支持 | amd64 |
 
 迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
 

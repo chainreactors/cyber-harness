@@ -49,7 +49,7 @@
     "reason": "Live multi-provider cache coverage requires explicit endpoint credentials."
   },
   {
-    "path": "archtest/architecture_test.go",
+    "path": "internal/repositorytest/architecture_test.go",
     "format": "repository governance requires a Git checkout: %v",
     "count": 1,
     "category": "external_runtime",

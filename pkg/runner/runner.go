@@ -623,10 +623,7 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	}
 
 	if option.AI && scannerArgs[0] != "scan" {
-		if ScannerWithAgentFunc == nil {
-			return fmt.Errorf("scanner agent mode not available in this build")
-		}
-		return ScannerWithAgentFunc(ctx, option, application, scannerArgs, logger)
+		return runScannerWithAgent(ctx, option, application, scannerArgs, logger)
 	}
 
 	if option.NoColor && scannerArgs[0] == "scan" && !HasScannerFlag(scannerArgs[1:], "--no-color") {

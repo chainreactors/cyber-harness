@@ -38,7 +38,13 @@ type connectionConfig struct {
 	Status        func() *aop.AgentStatus
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
-	PTYRouter     func() (*terminal.Router, error)
+	// FileAudit is the node's file-access trail, streamed on the file namespace
+	// and steerable by the peer through Configure.
+	FileAudit *commands.FileAudit
+	PTYRouter func() (*terminal.Router, error)
+	// ExtraNamespaces registers additional AOP namespaces on the connection mux
+	// after the built-ins (see ToolNodeConfig.ExtraNamespaces).
+	ExtraNamespaces []func(*aop.NamespaceMux) error
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

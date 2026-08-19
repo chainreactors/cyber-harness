@@ -325,6 +325,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if detach := attachToolProgress(cc.Progress, send); detach != nil {
 		defer detach()
 	}
+	if detach := attachFileAccess(cc.FileAudit, send); detach != nil {
+		defer detach()
+	}
 	// The catalog is the first post-handshake message the hub treats as a
 	// readiness signal. Attach event and progress subscribers before publishing
 	// it so callers cannot emit into the small acceptance-to-subscribe gap.
@@ -386,6 +389,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
+	// The reply path handed to every namespace handler. The built-in namespaces
+	// close over sendEnvelope directly and ignore this argument, which is why it
+	// could be a discard for so long; an ExtraNamespaces handler has no such
+	// closure and can only answer — or stream — through here.
+	reply := func(envelope *aop.Envelope) error {
+		sendEnvelope(envelope)
+		return nil
+	}
 	for {
 		envelope, err := stream.Recv()
 		if err != nil {
@@ -396,7 +407,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			}
 			return err
 		}
-		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, func(*aop.Envelope) error { return nil })
+		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, reply)
 		if err != nil {
 			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
 			continue
@@ -492,6 +503,9 @@ func newAgentConnectionNamespaceMux(
 		handleAgentPTYMessage(ctx, router, envelope, value, send)
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+	if err := registerExtraNamespaces(mux, cc.ExtraNamespaces); err != nil {
 		return nil, err
 	}
 	return mux, nil
@@ -595,9 +609,19 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
 	switch payload := value.Message.(type) {
 	case *filepb.ProtocolMessage_ReadRequest:
-		go sendFileResult(replyTo, fileRead(payload.ReadRequest, workingDir(cc.Runtime)), send)
+		go func() {
+			base := workingDir(cc.Runtime)
+			value := fileRead(payload.ReadRequest, base)
+			sendFileResult(replyTo, value, send)
+			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_READ, base, payload.ReadRequest.GetPath(), value)
+		}()
 	case *filepb.ProtocolMessage_WriteRequest:
-		go sendFileResult(replyTo, fileWrite(payload.WriteRequest, workingDir(cc.Runtime)), send)
+		go func() {
+			base := workingDir(cc.Runtime)
+			value := fileWrite(payload.WriteRequest, base)
+			sendFileResult(replyTo, value, send)
+			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_WRITE, base, payload.WriteRequest.GetPath(), value)
+		}()
 	case *filepb.ProtocolMessage_ListRequest:
 		if !cc.RunnerFileRPC {
 			fail("file list is unavailable")
@@ -610,6 +634,9 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 			return
 		}
 		go sendFileResult(replyTo, fileMkdir(payload.MkdirRequest, workingDir(cc.Runtime)), send)
+	case *filepb.ProtocolMessage_Configure:
+		cc.FileAudit.Configure(payload.Configure.GetWatch())
+		send(replyTo, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_State{State: cc.FileAudit.State()}})
 	case *filepb.ProtocolMessage_UploadRequest:
 		go func() {
 			if cc.Chat == nil {

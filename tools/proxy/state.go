@@ -7,9 +7,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chainreactors/proxyclient"
@@ -25,10 +27,18 @@ type State struct {
 	activeURL     string
 	autoURL       string           // clash:// URL for auto mode
 	autoDial      proxyclient.Dial // pre-built dial for auto mode
+	singleDial    proxyclient.Dial // pre-built dial for a single persistent proxy URL
+
+	// chain is the composed egress dial for the current selection, republished
+	// on every state change. ProxyHub's upstream reads it on each connection so
+	// switching nodes takes effect live without touching in-flight children.
+	chain atomic.Pointer[proxyclient.Dial]
 }
 
 func NewState(originalProxy string) *State {
-	return &State{originalProxy: originalProxy}
+	s := &State{originalProxy: originalProxy}
+	s.publishChainLocked()
+	return s
 }
 
 func (s *State) LoadSubscription(sub *clash.Subscription, subscribeURL string) {
@@ -68,6 +78,10 @@ func (s *State) Switch(nameOrIndex string) error {
 		}
 		s.activeNode = node
 		s.activeURL = node.URL.String()
+		s.autoURL = ""
+		s.autoDial = nil
+		s.singleDial = nil
+		s.publishChainLocked()
 		return nil
 	}
 
@@ -80,6 +94,10 @@ func (s *State) Switch(nameOrIndex string) error {
 			}
 			s.activeNode = &nodes[i]
 			s.activeURL = nodes[i].URL.String()
+			s.autoURL = ""
+			s.autoDial = nil
+			s.singleDial = nil
+			s.publishChainLocked()
 			return nil
 		}
 	}
@@ -91,8 +109,33 @@ func (s *State) SetAutoDial(clashURL string, dial proxyclient.Dial) {
 	defer s.mu.Unlock()
 	s.autoURL = clashURL
 	s.autoDial = dial
+	s.singleDial = nil
 	s.activeNode = nil
 	s.activeURL = ""
+	s.publishChainLocked()
+}
+
+// SetProxyURL routes egress through a single persistent proxy URL (socks5://,
+// trojan://, …). Unlike WithOverrideDial it is not scoped to one command; it
+// stays the active egress until changed or cleared.
+func (s *State) SetProxyURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	d, err := proxyclient.NewClient(u)
+	if err != nil {
+		return fmt.Errorf("create proxy client: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.singleDial = d
+	s.activeURL = rawURL
+	s.activeNode = nil
+	s.autoURL = ""
+	s.autoDial = nil
+	s.publishChainLocked()
+	return nil
 }
 
 func (s *State) ActiveProxy() string {
@@ -137,6 +180,8 @@ func (s *State) Clear() {
 	s.activeURL = ""
 	s.autoURL = ""
 	s.autoDial = nil
+	s.singleDial = nil
+	s.publishChainLocked()
 }
 
 func (s *State) TestNode(ctx context.Context, node *clash.ProxyNode) (time.Duration, error) {

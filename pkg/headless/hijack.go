@@ -75,6 +75,9 @@ func (h *Hijack) Stop() error {
 
 // FetchGetResponseBody retrieves the response body for an intercepted request.
 func FetchGetResponseBody(page *rod.Page, e *proto.FetchRequestPaused) ([]byte, error) {
+	page = page.Timeout(defaultActionTimeout)
+	defer page.CancelTimeout()
+
 	m := proto.FetchGetResponseBody{RequestID: e.RequestID}
 	r, err := m.Call(page)
 	if err != nil {
@@ -88,6 +91,9 @@ func FetchGetResponseBody(page *rod.Page, e *proto.FetchRequestPaused) ([]byte, 
 
 // FetchContinueRequest continues a paused request without modification.
 func FetchContinueRequest(page *rod.Page, e *proto.FetchRequestPaused) error {
+	page = page.Timeout(defaultActionTimeout)
+	defer page.CancelTimeout()
+
 	m := proto.FetchContinueRequest{RequestID: e.RequestID}
 	return m.Call(page)
 }
