@@ -2,7 +2,7 @@
 
 ## v1.0.0-rc2 — 流量与文件审计 + 单版本 Runner + 发布门禁
 
-v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与文件访问，以及发布链路的可重复验证。Runner 现在只有一个无 build tag 的实现和发行 profile，CI 会在不创建 Git tag 或 Release 的前提下复用正式发布工作流完成构建、打包和 smoke test。
+v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与文件访问，以及发布链路的可重复验证。Runner 现在只有一个无 build tag 的实现和发行 profile，CI 与发布 wrapper 共用只读的 release-build workflow 完成构建、打包和 smoke test。
 
 ### New Features
 
@@ -16,7 +16,7 @@ v1.0.0-rc2 聚焦远程 Runner 的原生运行时组装、可审计的流量与�
 - `make runner` 直接、无 build tag 地构建 `./cmd/runner`；`make all` 自动包含 runner。
 - 原生 record 工具改为显式 opt-in，默认 full 与官方 Release 不再隐式下载或链接 recorder SDK。
 - macOS full 产物由 Linux 上的 Zig 与固定 SDK 交叉编译，工具链版本和校验和固定。
-- CI 恢复 `go vet`，预编译 integration-tag 回归，并以 release dry-run 验证正式平台矩阵。
+- CI 恢复 `go vet`，预编译 integration-tag 回归，并以只读 release-build 验证正式平台矩阵。
 - Release notes 优先读取本文件中的对应版本章节，回退日志也会正确以上一个 prerelease 为基线。
 
 ### Bug Fixes

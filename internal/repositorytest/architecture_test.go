@@ -105,7 +105,7 @@ func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 		t.Error("Makefile runner target must not use build tags")
 	}
 
-	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
 	if count := strings.Count(releaseWorkflow, "main: ./cmd/runner"); count != 1 {
 		t.Fatalf("release workflow must contain exactly one runner build, got %d", count)
 	}
@@ -401,7 +401,7 @@ func TestBuildProfilesUseExpectedCGOModes(t *testing.T) {
 			t.Errorf("%s must not enable the optional recorder", name)
 		}
 	}
-	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
 	for _, forbidden := range []string{"record_ffmpeg", "matrix.recorder"} {
 		if strings.Contains(releaseWorkflow, forbidden) {
 			t.Errorf("release workflow must not enable the optional recorder; found %q", forbidden)
@@ -456,7 +456,7 @@ func TestGitHubActionsCrossCompileDarwinWithoutMacOSRunners(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "go-release.yml"))
+	releaseWorkflow := readRepositoryFile(t, root, filepath.Join(".github", "workflows", "release-build.yml"))
 	standardStart := strings.Index(releaseWorkflow, "          - id: aiscan\n")
 	if standardStart < 0 {
 		t.Fatal("release workflow is missing the standard aiscan build")
@@ -542,6 +542,7 @@ func TestRecorderNativeBuildUsesSingleSDKScript(t *testing.T) {
 		"build.sh",
 		filepath.Join(".github", "workflows", "ci.yml"),
 		filepath.Join(".github", "workflows", "go-release.yml"),
+		filepath.Join(".github", "workflows", "release-build.yml"),
 		filepath.Join(".github", "workflows", "record-native.yml"),
 	} {
 		content := readRepositoryFile(t, root, rel)

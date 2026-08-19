@@ -372,8 +372,7 @@ jobs:
 
   release-verify:
     needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
-    uses: ./.github/workflows/go-release.yml
+    uses: ./.github/workflows/release-build.yml
     with:
       tag: v0.0.0-ci.${{ github.run_id }}
-      target: ${{ github.sha }}
-      dry_run: true
+      ref: ${{ github.sha }}
