@@ -53,6 +53,8 @@ Supported options:
   -X, --request <method>       HTTP method
   -H, --header <line>          Extra header ("Name: value"); repeatable
   -d, --data <data>            POST body (@file to read a file); --data-raw / --data-binary
+      --data-urlencode <data>  Like -d, but percent-encode the content (name=content, name@file)
+  -F, --form <name=content>    Multipart form field; name=@file uploads a file (;type=mime), name=<file reads text
   -G, --get                    Send -d data as a query string
   -b, --cookie <data|file>     Cookie string ("k=v") or file to read
   -c, --cookie-jar <file>      Write cookies to this file after the exchange
@@ -67,6 +69,7 @@ Supported options:
   -w, --write-out <format>     After completion, print %{http_code}, %{url_effective}, ...
   -v, --verbose                Log request/response headers
   -k, --insecure               Do not verify TLS
+  -x, --proxy <url>            Use this proxy instead of the runner egress
       --connect-timeout <s>    Connection timeout, seconds
       --max-time <s>           Overall timeout, seconds
 
@@ -81,7 +84,8 @@ func (c *Command) QuickReference() string {
   curl -X POST -d 'a=1' <url>    POST form data
   curl -H 'Authorization: ...' <url>
   curl -i -L <url>               Include headers, follow redirects
-  curl -b 'sid=abc' -c jar.txt <url>   Send and persist cookies`
+  curl -b 'sid=abc' -c jar.txt <url>   Send and persist cookies
+  curl -F 'file=@a.png' <url>    Multipart form upload`
 }
 
 // Run parses the curl-shaped argument vector and performs one exchange. The

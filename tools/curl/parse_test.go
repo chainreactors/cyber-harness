@@ -128,3 +128,67 @@ func TestParseMaxRedirsDefault(t *testing.T) {
 		t.Fatalf("default max-redirs should be 50, got %d", req.MaxRedirs)
 	}
 }
+
+func TestParseForm(t *testing.T) {
+	req, err := Parse([]string{"-F", "field=value", "-F", "up=@a.txt;type=text/plain", "-F", "note=<b.txt", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != "POST" {
+		t.Fatalf("-F should imply POST, got %q", req.Method)
+	}
+	if len(req.Form) != 3 {
+		t.Fatalf("want 3 form parts, got %d", len(req.Form))
+	}
+	if req.Form[0].Name != "field" || req.Form[0].Value != "value" || req.Form[0].File {
+		t.Fatalf("plain field wrong: %+v", req.Form[0])
+	}
+	if !req.Form[1].File || req.Form[1].Value != "a.txt" || req.Form[1].Type != "text/plain" {
+		t.Fatalf("file part wrong: %+v", req.Form[1])
+	}
+	if !req.Form[2].Content || req.Form[2].Value != "b.txt" {
+		t.Fatalf("content part wrong: %+v", req.Form[2])
+	}
+}
+
+func TestParseFormRequiresName(t *testing.T) {
+	if _, err := Parse([]string{"-F", "noname", "https://x"}); err == nil {
+		t.Fatal("expected error for -F without name=")
+	}
+}
+
+func TestParseFormMixingRejected(t *testing.T) {
+	if _, err := Parse([]string{"-d", "a=1", "-F", "b=2", "https://x"}); err == nil {
+		t.Fatal("expected error combining -d and -F")
+	}
+	if _, err := Parse([]string{"-G", "-F", "b=2", "https://x"}); err == nil {
+		t.Fatal("expected error combining -G and -F")
+	}
+}
+
+func TestParseDataURLEncode(t *testing.T) {
+	req, err := Parse([]string{"--data-urlencode", "q=a b", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != "POST" || len(req.Data) != 1 || !req.Data[0].URLEncode {
+		t.Fatalf("data-urlencode wrong: %+v", req)
+	}
+}
+
+func TestParseProxy(t *testing.T) {
+	req, err := Parse([]string{"-x", "http://127.0.0.1:9000", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Proxy != "http://127.0.0.1:9000" {
+		t.Fatalf("proxy = %q", req.Proxy)
+	}
+	req, err = Parse([]string{"--proxy=127.0.0.1:9000", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Proxy != "127.0.0.1:9000" {
+		t.Fatalf("proxy = %q", req.Proxy)
+	}
+}
