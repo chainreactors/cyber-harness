@@ -89,8 +89,8 @@ func TestMITMCapture_HTTP(t *testing.T) {
 		t.Fatalf("expected 1 flow, got %d", store.Count())
 	}
 	f := store.Get(1)
-	if f.StatusCode != 200 {
-		t.Fatalf("captured flow status %d, want 200", f.StatusCode)
+	if f.Response.StatusCode != 200 {
+		t.Fatalf("captured flow status %d, want 200", f.Response.StatusCode)
 	}
 }
 
@@ -400,7 +400,13 @@ func TestMITMThroughput(t *testing.T) {
 
 func BenchmarkFlowStore_Add(b *testing.B) {
 	store := NewFlowStore(10000)
-	f := Flow{Exchange: traffic.Exchange{Method: "GET", URL: "http://example.com/", StatusCode: 200}, Host: "example.com"}
+	f := Flow{
+		Exchange: traffic.Exchange{
+			Request:  traffic.Request{Method: "GET", URL: "http://example.com/"},
+			Response: &traffic.Response{StatusCode: 200},
+		},
+		Host: "example.com",
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		store.Add(f)
@@ -412,9 +418,8 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
 			Exchange: traffic.Exchange{
-				Method:     "GET",
-				URL:        fmt.Sprintf("http://host%d.com/path%d", i%10, i),
-				StatusCode: 200 + (i%5)*100,
+				Request:  traffic.Request{Method: "GET", URL: fmt.Sprintf("http://host%d.com/path%d", i%10, i)},
+				Response: &traffic.Response{StatusCode: 200 + (i%5)*100},
 			},
 			Host: fmt.Sprintf("host%d.com", i%10),
 		})
@@ -437,12 +442,16 @@ func TestFlowStoreMemory(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
 			Exchange: traffic.Exchange{
-				Method:          "GET",
-				URL:             fmt.Sprintf("http://example.com/path/%d", i),
-				StatusCode:      200,
-				RequestHeaders:  []traffic.Pair{{Name: "User-Agent", Value: "test"}},
-				ResponseHeaders: []traffic.Pair{{Name: "Content-Type", Value: "text/html"}},
-				ResponseBody:    make([]byte, 4096),
+				Request: traffic.Request{
+					Method:  "GET",
+					URL:     fmt.Sprintf("http://example.com/path/%d", i),
+					Headers: []traffic.Pair{{Name: "User-Agent", Value: "test"}},
+				},
+				Response: &traffic.Response{
+					StatusCode: 200,
+					Headers:    []traffic.Pair{{Name: "Content-Type", Value: "text/html"}},
+					Body:       make([]byte, 4096),
+				},
 			},
 			Host:        "example.com",
 			ContentType: "text/html",

@@ -13,61 +13,89 @@ type Pair struct {
 	Value string
 }
 
-// Exchange is the canonical in-memory form of one captured HTTP
-// request/response pair. The Flow proto message is its wire view; the two are
-// one model, converted by ExchangeFromFlow and Proto.
+// Request is the request half of an exchange.
+type Request struct {
+	Method   string
+	URL      string
+	Protocol string
+	Headers  []Pair
+	Body     []byte
+}
+
+// Response is the response half of an exchange. It is optional on Exchange: a
+// request that never got a response (timeout, refused connection, one-way
+// capture) has no response half.
+type Response struct {
+	StatusCode   int
+	ReasonPhrase string
+	Headers      []Pair
+	Body         []byte
+}
+
+// Exchange is the canonical in-memory form of one captured HTTP exchange,
+// composed of a request and an optional response. The Flow proto message is
+// its wire view; the two are one model, converted by ExchangeFromFlow and
+// Proto.
 //
 // Its JSON form is the flow element of the http.exchange.v1 evidence payload,
 // where headers serialize as a name→values map for compatibility with the
 // stored contract. Order and duplicate names survive in memory; the map view
 // is the persisted projection.
 type Exchange struct {
-	ID              string
-	Method          string
-	URL             string
-	Protocol        string
-	StatusCode      int
-	ReasonPhrase    string
-	RequestHeaders  []Pair
-	ResponseHeaders []Pair
-	RequestBody     []byte
-	ResponseBody    []byte
-	Error           string
-	Complete        bool
+	ID       string
+	Request  Request
+	Response *Response
+	Error    string
+	Complete bool
 }
 
 // exchangeJSON is the persisted shape: identical field names and order to the
 // http.exchange.v1 flow element, headers as a name→values map.
 type exchangeJSON struct {
-	ID              string              `json:"id"`
-	Method          string              `json:"method"`
-	URL             string              `json:"url"`
-	Protocol        string              `json:"protocol,omitempty"`
-	StatusCode      int                 `json:"status_code"`
-	ReasonPhrase    string              `json:"reason_phrase,omitempty"`
-	RequestHeaders  map[string][]string `json:"request_headers,omitempty"`
-	ResponseHeaders map[string][]string `json:"response_headers,omitempty"`
-	RequestBody     []byte              `json:"request_body,omitempty"`
-	ResponseBody    []byte              `json:"response_body,omitempty"`
-	Error           string              `json:"error,omitempty"`
-	Complete        bool                `json:"complete"`
+	ID       string        `json:"id"`
+	Request  requestJSON   `json:"request"`
+	Response *responseJSON `json:"response,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	Complete bool          `json:"complete"`
+}
+
+type requestJSON struct {
+	Method   string              `json:"method"`
+	URL      string              `json:"url"`
+	Protocol string              `json:"protocol,omitempty"`
+	Headers  map[string][]string `json:"headers,omitempty"`
+	Body     []byte              `json:"body,omitempty"`
+}
+
+type responseJSON struct {
+	StatusCode   int                 `json:"status_code"`
+	ReasonPhrase string              `json:"reason_phrase,omitempty"`
+	Headers      map[string][]string `json:"headers,omitempty"`
+	Body         []byte              `json:"body,omitempty"`
 }
 
 func (e Exchange) MarshalJSON() ([]byte, error) {
-	return json.Marshal(exchangeJSON{
-		ID:              e.ID,
-		Method:          e.Method,
-		URL:             e.URL,
-		Protocol:        e.Protocol,
-		StatusCode:      e.StatusCode,
-		ReasonPhrase:    e.ReasonPhrase,
-		RequestHeaders:  pairsToMap(e.RequestHeaders),
-		ResponseHeaders: pairsToMap(e.ResponseHeaders),
-		RequestBody:     e.RequestBody,
-		ResponseBody:    e.ResponseBody,
-		Error:           e.Error,
-		Complete:        e.Complete,
-	})
+	wire := exchangeJSON{
+		ID: e.ID,
+		Request: requestJSON{
+			Method:   e.Request.Method,
+			URL:      e.Request.URL,
+			Protocol: e.Request.Protocol,
+			Headers:  pairsToMap(e.Request.Headers),
+			Body:     e.Request.Body,
+		},
+		Error:    e.Error,
+		Complete: e.Complete,
+	}
+	if e.Response != nil {
+		wire.Response = &responseJSON{
+			StatusCode:   e.Response.StatusCode,
+			ReasonPhrase: e.Response.ReasonPhrase,
+			Headers:      pairsToMap(e.Response.Headers),
+			Body:         e.Response.Body,
+		}
+	}
+	return json.Marshal(wire)
 }
 
 func (e *Exchange) UnmarshalJSON(data []byte) error {
@@ -76,18 +104,24 @@ func (e *Exchange) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*e = Exchange{
-		ID:              wire.ID,
-		Method:          wire.Method,
-		URL:             wire.URL,
-		Protocol:        wire.Protocol,
-		StatusCode:      wire.StatusCode,
-		ReasonPhrase:    wire.ReasonPhrase,
-		RequestHeaders:  mapToPairs(wire.RequestHeaders),
-		ResponseHeaders: mapToPairs(wire.ResponseHeaders),
-		RequestBody:     wire.RequestBody,
-		ResponseBody:    wire.ResponseBody,
-		Error:           wire.Error,
-		Complete:        wire.Complete,
+		ID: wire.ID,
+		Request: Request{
+			Method:   wire.Request.Method,
+			URL:      wire.Request.URL,
+			Protocol: wire.Request.Protocol,
+			Headers:  mapToPairs(wire.Request.Headers),
+			Body:     wire.Request.Body,
+		},
+		Error:    wire.Error,
+		Complete: wire.Complete,
+	}
+	if wire.Response != nil {
+		e.Response = &Response{
+			StatusCode:   wire.Response.StatusCode,
+			ReasonPhrase: wire.Response.ReasonPhrase,
+			Headers:      mapToPairs(wire.Response.Headers),
+			Body:         wire.Response.Body,
+		}
 	}
 	return nil
 }
@@ -132,20 +166,17 @@ func ExchangeFromFlow(f *Flow) *Exchange {
 	if f == nil {
 		return nil
 	}
-	return &Exchange{
-		ID:              f.GetId(),
-		Method:          f.GetMethod(),
-		URL:             f.GetUrl(),
-		Protocol:        f.GetProtocol(),
-		StatusCode:      int(f.GetStatusCode()),
-		ReasonPhrase:    f.GetReasonPhrase(),
-		RequestHeaders:  pairsFromProto(f.GetRequestHeaders()),
-		ResponseHeaders: pairsFromProto(f.GetResponseHeaders()),
-		RequestBody:     f.GetRequestBody(),
-		ResponseBody:    f.GetResponseBody(),
-		Error:           f.GetError(),
-		Complete:        f.GetComplete(),
+	e := &Exchange{
+		ID:       f.GetId(),
+		Request:  requestFromProto(f.GetRequest()),
+		Error:    f.GetError(),
+		Complete: f.GetComplete(),
 	}
+	if r := f.GetResponse(); r != nil {
+		resp := responseFromProto(r)
+		e.Response = &resp
+	}
+	return e
 }
 
 // Proto renders the exchange as a wire Flow. Attribution (ToolId, Timestamp)
@@ -154,19 +185,56 @@ func (e *Exchange) Proto() *Flow {
 	if e == nil {
 		return nil
 	}
-	return &Flow{
-		Id:              e.ID,
-		Method:          e.Method,
-		Url:             e.URL,
-		Protocol:        e.Protocol,
-		StatusCode:      int32(e.StatusCode),
-		ReasonPhrase:    e.ReasonPhrase,
-		RequestHeaders:  pairsToProto(e.RequestHeaders),
-		ResponseHeaders: pairsToProto(e.ResponseHeaders),
-		RequestBody:     e.RequestBody,
-		ResponseBody:    e.ResponseBody,
-		Error:           e.Error,
-		Complete:        e.Complete,
+	f := &Flow{
+		Id:       e.ID,
+		Request:  requestToProto(e.Request),
+		Error:    e.Error,
+		Complete: e.Complete,
+	}
+	if e.Response != nil {
+		f.Response = responseToProto(*e.Response)
+	}
+	return f
+}
+
+func requestFromProto(r *HttpRequest) Request {
+	if r == nil {
+		return Request{}
+	}
+	return Request{
+		Method:   r.GetMethod(),
+		URL:      r.GetUrl(),
+		Protocol: r.GetProtocol(),
+		Headers:  pairsFromProto(r.GetHeaders()),
+		Body:     r.GetBody(),
+	}
+}
+
+func responseFromProto(r *HttpResponse) Response {
+	return Response{
+		StatusCode:   int(r.GetStatusCode()),
+		ReasonPhrase: r.GetReasonPhrase(),
+		Headers:      pairsFromProto(r.GetHeaders()),
+		Body:         r.GetBody(),
+	}
+}
+
+func requestToProto(r Request) *HttpRequest {
+	return &HttpRequest{
+		Method:   r.Method,
+		Url:      r.URL,
+		Protocol: r.Protocol,
+		Headers:  pairsToProto(r.Headers),
+		Body:     r.Body,
+	}
+}
+
+func responseToProto(r Response) *HttpResponse {
+	return &HttpResponse{
+		StatusCode:   int32(r.StatusCode),
+		ReasonPhrase: r.ReasonPhrase,
+		Headers:      pairsToProto(r.Headers),
+		Body:         r.Body,
 	}
 }
 
