@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	"github.com/chainreactors/proxyclient"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
@@ -399,7 +400,7 @@ func TestMITMThroughput(t *testing.T) {
 
 func BenchmarkFlowStore_Add(b *testing.B) {
 	store := NewFlowStore(10000)
-	f := Flow{Method: "GET", URL: "http://example.com/", StatusCode: 200, Host: "example.com"}
+	f := Flow{Exchange: traffic.Exchange{Method: "GET", URL: "http://example.com/", StatusCode: 200}, Host: "example.com"}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		store.Add(f)
@@ -410,10 +411,12 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Method:     "GET",
-			URL:        fmt.Sprintf("http://host%d.com/path%d", i%10, i),
-			StatusCode: 200 + (i%5)*100,
-			Host:       fmt.Sprintf("host%d.com", i%10),
+			Exchange: traffic.Exchange{
+				Method:     "GET",
+				URL:        fmt.Sprintf("http://host%d.com/path%d", i%10, i),
+				StatusCode: 200 + (i%5)*100,
+			},
+			Host: fmt.Sprintf("host%d.com", i%10),
 		})
 	}
 	opts := QueryOpts{Host: "host5", Status: "2xx", Last: 20}
@@ -433,14 +436,16 @@ func TestFlowStoreMemory(t *testing.T) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Method:           "GET",
-			URL:              fmt.Sprintf("http://example.com/path/%d", i),
-			StatusCode:       200,
-			Host:             "example.com",
-			ContentType:      "text/html",
-			RequestHeaders:   http.Header{"User-Agent": {"test"}},
-			ResponseHeaders:  http.Header{"Content-Type": {"text/html"}},
-			ResponseBodySnip: make([]byte, 4096),
+			Exchange: traffic.Exchange{
+				Method:          "GET",
+				URL:             fmt.Sprintf("http://example.com/path/%d", i),
+				StatusCode:      200,
+				RequestHeaders:  []traffic.Pair{{Name: "User-Agent", Value: "test"}},
+				ResponseHeaders: []traffic.Pair{{Name: "Content-Type", Value: "text/html"}},
+				ResponseBody:    make([]byte, 4096),
+			},
+			Host:        "example.com",
+			ContentType: "text/html",
 		})
 	}
 
