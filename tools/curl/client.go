@@ -1,15 +1,19 @@
 package curl
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -50,6 +54,13 @@ var browserDefaults = []Header{
 // env and workDir are per-invocation; nothing here mutates the shared Command.
 func (c *Command) do(ctx context.Context, req *Request, env map[string]string, workDir string, stdout, stderr io.Writer) error {
 	proxyURL, caPath := c.egress(env)
+	if req.Proxy != "" {
+		// -x overrides the injected hub egress for this invocation only.
+		proxyURL = req.Proxy
+		if !strings.Contains(proxyURL, "://") {
+			proxyURL = "http://" + proxyURL
+		}
+	}
 
 	client, err := c.buildClient(proxyURL, caPath, req)
 	if err != nil {
@@ -217,9 +228,13 @@ func caPool(caPath string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// buildBody assembles the request body from -d parts. With -G the data is folded
-// into the URL query and no body is sent.
+// buildBody assembles the request body from -d parts or -F parts. With -G the
+// data is folded into the URL query and no body is sent. Parse already rejects
+// combining -d with -F and -G with -F.
 func buildBody(req *Request, target *url.URL, workDir string) (io.Reader, string, error) {
+	if len(req.Form) > 0 {
+		return buildForm(req.Form, workDir)
+	}
 	if len(req.Data) == 0 {
 		return nil, "", nil
 	}
@@ -232,9 +247,16 @@ func buildBody(req *Request, target *url.URL, workDir string) (io.Reader, string
 				return nil, "", fmt.Errorf("curl: (26) Failed to open %q: %w", part.Value, err)
 			}
 			value = string(raw)
-			if !part.Binary {
+			if !part.Binary && !part.URLEncode {
 				// Non-binary -d strips line breaks from file content, like curl.
 				value = strings.NewReplacer("\r", "", "\n", "").Replace(value)
+			}
+		}
+		if part.URLEncode {
+			var err error
+			value, err = encodeDataValue(value, part.File, workDir)
+			if err != nil {
+				return nil, "", err
 			}
 		}
 		segments = append(segments, value)
@@ -242,8 +264,8 @@ func buildBody(req *Request, target *url.URL, workDir string) (io.Reader, string
 	joined := strings.Join(segments, "&")
 
 	if req.Get {
-		// curl appends -d data to the query verbatim (no re-encoding); that is
-		// --data-urlencode's job, which is deferred.
+		// curl appends -d data to the query verbatim (no re-encoding); encoding
+		// is --data-urlencode's job, applied above.
 		if target.RawQuery == "" {
 			target.RawQuery = joined
 		} else {
@@ -253,6 +275,100 @@ func buildBody(req *Request, target *url.URL, workDir string) (io.Reader, string
 	}
 	return strings.NewReader(joined), "application/x-www-form-urlencoded", nil
 }
+
+// encodeDataValue applies --data-urlencode semantics to one part: the name
+// before the first '=' stays verbatim while the content is percent-encoded;
+// name@file (unreachable when File is already set) reads and encodes a file.
+func encodeDataValue(value string, fromFile bool, workDir string) (string, error) {
+	if fromFile {
+		return pctEncode(value), nil
+	}
+	if name, content, ok := strings.Cut(value, "="); ok {
+		return name + "=" + pctEncode(content), nil
+	}
+	if name, path, ok := strings.Cut(value, "@"); ok && name != "" {
+		raw, err := os.ReadFile(resolvePath(workDir, path))
+		if err != nil {
+			return "", fmt.Errorf("curl: (26) Failed to open %q: %w", path, err)
+		}
+		return name + "=" + pctEncode(string(raw)), nil
+	}
+	return pctEncode(value), nil
+}
+
+// pctEncode percent-encodes every byte outside the RFC 3986 unreserved set,
+// matching curl's --data-urlencode (space becomes %20, not +).
+func pctEncode(s string) string {
+	const upperhex = "0123456789ABCDEF"
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case 'A' <= c && c <= 'Z', 'a' <= c && c <= 'z', '0' <= c && c <= '9',
+			c == '-', c == '_', c == '.', c == '~':
+			sb.WriteByte(c)
+		default:
+			sb.WriteByte('%')
+			sb.WriteByte(upperhex[c>>4])
+			sb.WriteByte(upperhex[c&0xF])
+		}
+	}
+	return sb.String()
+}
+
+// buildForm assembles a multipart/form-data body from -F parts.
+func buildForm(parts []FormPart, workDir string) (io.Reader, string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, part := range parts {
+		switch {
+		case part.File:
+			data, err := os.ReadFile(resolvePath(workDir, part.Value))
+			if err != nil {
+				return nil, "", fmt.Errorf("curl: (26) Failed to open %q: %w", part.Value, err)
+			}
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+				formQuoteEscape.Replace(part.Name), formQuoteEscape.Replace(filepath.Base(part.Value))))
+			ct := part.Type
+			if ct == "" {
+				ct = mime.TypeByExtension(filepath.Ext(part.Value))
+			}
+			if ct == "" {
+				ct = "application/octet-stream"
+			}
+			header.Set("Content-Type", ct)
+			pw, err := w.CreatePart(header)
+			if err != nil {
+				return nil, "", fmt.Errorf("curl: form part %q: %w", part.Name, err)
+			}
+			if _, err := pw.Write(data); err != nil {
+				return nil, "", fmt.Errorf("curl: form part %q: %w", part.Name, err)
+			}
+		case part.Content:
+			data, err := os.ReadFile(resolvePath(workDir, part.Value))
+			if err != nil {
+				return nil, "", fmt.Errorf("curl: (26) Failed to open %q: %w", part.Value, err)
+			}
+			// name=<file keeps the text but drops line breaks, like curl.
+			value := strings.NewReplacer("\r", "", "\n", "").Replace(string(data))
+			if err := w.WriteField(part.Name, value); err != nil {
+				return nil, "", fmt.Errorf("curl: form part %q: %w", part.Name, err)
+			}
+		default:
+			if err := w.WriteField(part.Name, part.Value); err != nil {
+				return nil, "", fmt.Errorf("curl: form part %q: %w", part.Name, err)
+			}
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", fmt.Errorf("curl: close multipart body: %w", err)
+	}
+	return &buf, w.FormDataContentType(), nil
+}
+
+var formQuoteEscape = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
 func applyHeaders(httpReq *http.Request, req *Request, contentType string) {
 	set := make(map[string]bool)

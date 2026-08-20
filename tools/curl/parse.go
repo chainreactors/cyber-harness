@@ -18,12 +18,24 @@ type Header struct {
 // DataPart is one -d/--data family value. File means the value is a path to
 // read (@file); Binary keeps the bytes verbatim (--data-binary) while the
 // default -d strips CR/LF from file contents; Raw disables @file handling
-// (--data-raw).
+// (--data-raw); URLEncode percent-encodes the content (--data-urlencode).
 type DataPart struct {
-	Value  string
-	File   bool
-	Binary bool
-	Raw    bool
+	Value     string
+	File      bool
+	Binary    bool
+	Raw       bool
+	URLEncode bool
+}
+
+// FormPart is one -F/--form value. File means Value is a path whose bytes
+// become a file part (name=@path, optional ;type= MIME override); Content
+// means Value is a path whose text becomes the field value (name=<path).
+type FormPart struct {
+	Name    string
+	Value   string
+	File    bool
+	Content bool
+	Type    string
 }
 
 // Request is the parsed, transport-agnostic shape of one curl invocation.
@@ -32,6 +44,7 @@ type Request struct {
 	Method    string
 	Headers   []Header
 	Data      []DataPart
+	Form      []FormPart
 	Get       bool // -G: send data as query string
 	Follow    bool // -L
 	MaxRedirs int  // --max-redirs (default 50 when following)
@@ -49,6 +62,7 @@ type Request struct {
 	WriteOut  string // -w
 	Verbose   bool   // -v
 	Insecure  bool   // -k
+	Proxy     string // -x: override the egress proxy for this invocation
 
 	ConnectTimeout time.Duration // --connect-timeout
 	MaxTime        time.Duration // --max-time
@@ -58,6 +72,7 @@ type Request struct {
 var valueShort = map[byte]string{
 	'X': "request", 'H': "header", 'd': "data", 'b': "cookie", 'c': "cookie-jar",
 	'A': "user-agent", 'e': "referer", 'u': "user", 'o': "output", 'w': "write-out",
+	'F': "form", 'x': "proxy",
 }
 
 // boolShort maps short flags that take no value.
@@ -128,11 +143,17 @@ func Parse(args []string) (*Request, error) {
 	}
 
 	if r.Method == "" {
-		if len(r.Data) > 0 && !r.Get {
+		if (len(r.Data) > 0 || len(r.Form) > 0) && !r.Get {
 			r.Method = "POST"
 		} else {
 			r.Method = "GET"
 		}
+	}
+	if len(r.Form) > 0 && len(r.Data) > 0 {
+		return nil, fmt.Errorf("curl: (2) -d/--data and -F/--form cannot be combined")
+	}
+	if len(r.Form) > 0 && r.Get {
+		return nil, fmt.Errorf("curl: (2) -G cannot be used with -F/--form")
 	}
 	return r, nil
 }
@@ -193,6 +214,18 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 		return r.addData(need, DataPart{Raw: true})
 	case "data-binary":
 		return r.addData(need, DataPart{Binary: true})
+	case "data-urlencode":
+		return r.addData(need, DataPart{URLEncode: true})
+	case "form":
+		v, err := need()
+		if err != nil {
+			return err
+		}
+		part, err := parseFormPart(v)
+		if err != nil {
+			return err
+		}
+		r.Form = append(r.Form, part)
 	case "get":
 		r.Get = true
 	case "location":
@@ -259,6 +292,12 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 		r.Verbose = true
 	case "insecure":
 		r.Insecure = true
+	case "proxy":
+		v, err := need()
+		if err != nil {
+			return err
+		}
+		r.Proxy = v
 	case "connect-timeout":
 		v, err := need()
 		if err != nil {
@@ -299,6 +338,33 @@ func (r *Request) addData(need func() (string, error), tpl DataPart) error {
 	}
 	r.Data = append(r.Data, part)
 	return nil
+}
+
+// parseFormPart splits a -F value. curl requires name=content; @path attaches
+// a file (with an optional ;type= MIME override), <path reads a file's text as
+// the field value.
+func parseFormPart(raw string) (FormPart, error) {
+	name, value, ok := strings.Cut(raw, "=")
+	if !ok || name == "" {
+		return FormPart{}, fmt.Errorf("curl: (26) badly formatted form field %q, expected name=content", raw)
+	}
+	part := FormPart{Name: name}
+	switch {
+	case strings.HasPrefix(value, "@"):
+		part.File = true
+		value = value[1:]
+		if idx := strings.Index(value, ";type="); idx >= 0 {
+			part.Type = value[idx+len(";type="):]
+			value = value[:idx]
+		}
+		part.Value = value
+	case strings.HasPrefix(value, "<"):
+		part.Content = true
+		part.Value = value[1:]
+	default:
+		part.Value = value
+	}
+	return part, nil
 }
 
 // parseHeader splits a -H value into name/value, honoring curl's "Name;"

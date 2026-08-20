@@ -2,6 +2,7 @@ package curl
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -233,5 +234,95 @@ func TestBasicAuth(t *testing.T) {
 	}
 	if !ok || user != "alice" || pass != "secret" {
 		t.Fatalf("basic auth wrong: %v %q %q", ok, user, pass)
+	}
+}
+
+func TestDataURLEncode(t *testing.T) {
+	var body, ctype string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body, ctype = string(b), r.Header.Get("Content-Type")
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "q.txt"), []byte("x y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := run(t, []string{
+		"--data-urlencode", "q=a b&c=d",
+		"--data-urlencode", "file@q.txt",
+		"--data-urlencode", "plain",
+		srv.URL,
+	}, "", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "q=a%20b%26c%3Dd&file=x%20y%0A&plain"
+	if body != want {
+		t.Fatalf("body = %q, want %q", body, want)
+	}
+	if ctype != "application/x-www-form-urlencoded" {
+		t.Fatalf("content-type = %q", ctype)
+	}
+}
+
+func TestMultipartForm(t *testing.T) {
+	var field, fileName, fileContent, fileType, ctype string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctype = r.Header.Get("Content-Type")
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse multipart: %v", err)
+			return
+		}
+		field = r.FormValue("field")
+		f, fh, err := r.FormFile("up")
+		if err != nil {
+			t.Errorf("form file: %v", err)
+			return
+		}
+		defer f.Close()
+		b, _ := io.ReadAll(f)
+		fileName, fileContent, fileType = fh.Filename, string(b), fh.Header.Get("Content-Type")
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("file-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := run(t, []string{"-F", "field=value", "-F", "up=@a.txt;type=text/plain", srv.URL}, "", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(ctype, "multipart/form-data; boundary=") {
+		t.Fatalf("content-type = %q", ctype)
+	}
+	if field != "value" || fileName != "a.txt" || fileContent != "file-bytes" || fileType != "text/plain" {
+		t.Fatalf("multipart wrong: field=%q file=%q %q %q", field, fileName, fileContent, fileType)
+	}
+}
+
+func TestProxyOverride(t *testing.T) {
+	// A stand-in proxy answers directly, so a response proves -x steered the
+	// request away from the target.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.RequestURI, "http://") {
+			t.Errorf("proxy got non-absolute URI %q", r.RequestURI)
+		}
+		w.Write([]byte("via-proxy"))
+	}))
+	defer proxy.Close()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("direct"))
+	}))
+	defer target.Close()
+
+	out, _, err := run(t, []string{"-x", proxy.URL, target.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "via-proxy" {
+		t.Fatalf("body = %q, want via-proxy", out)
 	}
 }
