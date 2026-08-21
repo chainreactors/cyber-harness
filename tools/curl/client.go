@@ -88,8 +88,8 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	if trace != nil {
 		defer func() { _ = trace.Close() }()
 	}
-	responses := &responseCapture{}
-	client.Transport = &capturingTransport{base: client.Transport, capture: responses, trace: trace}
+	responses := make([]http.Response, 0, 1)
+	client.Transport = &capturingTransport{base: client.Transport, responses: &responses, trace: trace}
 
 	target, err := url.Parse(strings.TrimSpace(req.URL))
 	if err != nil || target.Scheme == "" || target.Host == "" {
@@ -161,7 +161,7 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		writeVerboseResponse(stderr, resp)
 	}
 
-	if err := dumpResponseHeaders(req, responses.all(), workDir, stdout); err != nil {
+	if err := dumpResponseHeaders(req, responses, workDir, stdout); err != nil {
 		return err
 	}
 	failed := req.Fail && resp.StatusCode >= http.StatusBadRequest
@@ -178,8 +178,8 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	defer closeOut()
 
 	if req.Include {
-		for _, response := range responses.all() {
-			writeStatusAndHeaders(out, response)
+		for i := range responses {
+			writeStatusAndHeaders(out, &responses[i])
 		}
 	}
 	if failed {
@@ -551,34 +551,10 @@ func outputWriter(req *Request, workDir string, stdout io.Writer) (io.Writer, fu
 	return file, func() { _ = file.Close() }, nil
 }
 
-type responseSnapshot struct {
-	Proto  string
-	Status string
-	Header http.Header
-}
-
-type responseCapture struct {
-	responses []responseSnapshot
-}
-
-func (c *responseCapture) add(resp *http.Response) {
-	if resp != nil {
-		c.responses = append(c.responses, responseSnapshot{
-			Proto:  resp.Proto,
-			Status: resp.Status,
-			Header: resp.Header.Clone(),
-		})
-	}
-}
-
-func (c *responseCapture) all() []responseSnapshot {
-	return c.responses
-}
-
 type capturingTransport struct {
-	base    http.RoundTripper
-	capture *responseCapture
-	trace   *asciiTrace
+	base      http.RoundTripper
+	responses *[]http.Response
+	trace     *asciiTrace
 }
 
 func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -590,8 +566,11 @@ func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 	}
 	resp, err := t.base.RoundTrip(req)
-	if err == nil && t.capture != nil {
-		t.capture.add(resp)
+	if err == nil && resp != nil && t.responses != nil {
+		captured := *resp
+		captured.Body = nil
+		captured.Header = resp.Header.Clone()
+		*t.responses = append(*t.responses, captured)
 	}
 	if err == nil && resp != nil && t.trace != nil {
 		for _, header := range traceResponseHeaderBlocks(resp) {
@@ -775,13 +754,13 @@ func traceResponseHeaderBlocks(resp *http.Response) [][]byte {
 	return blocks
 }
 
-func dumpResponseHeaders(req *Request, responses []responseSnapshot, workDir string, stdout io.Writer) error {
+func dumpResponseHeaders(req *Request, responses []http.Response, workDir string, stdout io.Writer) error {
 	if req.DumpHeader == "" {
 		return nil
 	}
 	if req.DumpHeader == "-" {
-		for _, resp := range responses {
-			writeStatusAndHeaders(stdout, resp)
+		for i := range responses {
+			writeStatusAndHeaders(stdout, &responses[i])
 		}
 		return nil
 	}
@@ -790,8 +769,8 @@ func dumpResponseHeaders(req *Request, responses []responseSnapshot, workDir str
 	if err != nil {
 		return fmt.Errorf("curl: (23) Failed to create dump-header %q: %w", req.DumpHeader, err)
 	}
-	for _, resp := range responses {
-		writeStatusAndHeaders(file, resp)
+	for i := range responses {
+		writeStatusAndHeaders(file, &responses[i])
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("curl: (23) Failed to close dump-header %q: %w", req.DumpHeader, err)
@@ -987,7 +966,7 @@ func dotSegment(raw string) string {
 	return raw
 }
 
-func writeStatusAndHeaders(w io.Writer, resp responseSnapshot) {
+func writeStatusAndHeaders(w io.Writer, resp *http.Response) {
 	fmt.Fprintf(w, "%s %s\r\n", resp.Proto, resp.Status)
 	_ = resp.Header.Write(w)
 	fmt.Fprint(w, "\r\n")
