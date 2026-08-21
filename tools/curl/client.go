@@ -174,6 +174,9 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		written, err = copyResponse(out, resp.Body, req.NoBuffer)
 	}
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("curl: (28) %w", err)
+		}
 		return fmt.Errorf("curl: (56) %w", err)
 	}
 
