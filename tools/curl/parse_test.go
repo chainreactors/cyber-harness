@@ -97,6 +97,14 @@ func TestParseTimeouts(t *testing.T) {
 	}
 }
 
+func TestParseTimeoutOverflowIsRejected(t *testing.T) {
+	for _, value := range []string{"9223372036.854775808", "1e100", "NaN", "+Inf"} {
+		if _, err := Parse([]string{"-m", value, "https://x"}); err == nil {
+			t.Fatalf("Parse accepted overflowing timeout %q", value)
+		}
+	}
+}
+
 func TestParseUnsupportedFlagErrors(t *testing.T) {
 	if _, err := Parse([]string{"--http2-prior-knowledge", "https://x"}); err == nil {
 		t.Fatal("expected error for unsupported long flag")
