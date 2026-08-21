@@ -71,7 +71,7 @@ func flowToProto(flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
-	message := flow.Exchange.Proto()
+	message := flow.Proto()
 	message.ToolId = flow.ToolID
 	if !flow.Timestamp.IsZero() {
 		message.Timestamp = timestamppb.New(flow.Timestamp)
