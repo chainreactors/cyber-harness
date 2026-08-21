@@ -1,6 +1,7 @@
 package curl
 
 import (
+	"net/url"
 	"testing"
 	"time"
 )
@@ -64,6 +65,16 @@ func TestParseShortBundle(t *testing.T) {
 	}
 }
 
+func TestParseCommonFailBundle(t *testing.T) {
+	req, err := Parse([]string{"-fsSL", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !req.Fail || !req.Silent || !req.ShowError || !req.Follow {
+		t.Fatalf("-fsSL not fully applied: %+v", req)
+	}
+}
+
 func TestParseBundleTrailingValue(t *testing.T) {
 	req, err := Parse([]string{"-so", "out.txt", "https://x"})
 	if err != nil {
@@ -94,6 +105,14 @@ func TestParseTimeouts(t *testing.T) {
 	}
 	if req.ConnectTimeout != 2500*time.Millisecond || req.MaxTime != 10*time.Second {
 		t.Fatalf("timeouts wrong: %v %v", req.ConnectTimeout, req.MaxTime)
+	}
+}
+
+func TestParseTimeoutOverflowIsRejected(t *testing.T) {
+	for _, value := range []string{"9223372036.854775808", "1e100", "NaN", "+Inf"} {
+		if _, err := Parse([]string{"-m", value, "https://x"}); err == nil {
+			t.Fatalf("Parse accepted overflowing timeout %q", value)
+		}
 	}
 }
 
@@ -190,5 +209,178 @@ func TestParseProxy(t *testing.T) {
 	}
 	if req.Proxy != "127.0.0.1:9000" {
 		t.Fatalf("proxy = %q", req.Proxy)
+	}
+}
+
+func TestParseCompatibilityFlags(t *testing.T) {
+	req, err := Parse([]string{
+		"-m", "2.5", "-D", "headers.txt", "-I", "-f", "-N",
+		"--http2", "--resolve", "example.test:8443:127.0.0.1",
+		"--path-as-is", "https://example.test:8443/a/../b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.MaxTime != 2500*time.Millisecond || req.DumpHeader != "headers.txt" {
+		t.Fatalf("short compatibility flags parsed incorrectly: %+v", req)
+	}
+	if !req.Head || req.Method != "HEAD" || !req.Include || !req.Fail || !req.NoBuffer {
+		t.Fatalf("head/fail/no-buffer parsed incorrectly: %+v", req)
+	}
+	if !req.HTTP2 || req.HTTP11 || !req.PathAsIs || len(req.Resolve) != 1 {
+		t.Fatalf("transport flags parsed incorrectly: %+v", req)
+	}
+	entry := req.Resolve[0]
+	if entry.Host != "example.test" || entry.Port != "8443" || len(entry.Addresses) != 1 || entry.Addresses[0] != "127.0.0.1" {
+		t.Fatalf("resolve parsed incorrectly: %+v", entry)
+	}
+}
+
+func TestParseTraceASCII(t *testing.T) {
+	req, err := Parse([]string{"--trace-ascii", "trace.log", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.TraceASCII != "trace.log" || req.Verbose {
+		t.Fatalf("trace-ascii parsed incorrectly: %+v", req)
+	}
+}
+
+func TestParseTraceVerboseLastOptionWins(t *testing.T) {
+	trace, err := Parse([]string{"--trace-ascii", "trace.log", "-v", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.TraceASCII != "" || !trace.Verbose {
+		t.Fatalf("verbose should disable an earlier trace: %+v", trace)
+	}
+	verbose, err := Parse([]string{"-v", "--trace-ascii", "trace.log", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verbose.TraceASCII != "trace.log" || verbose.Verbose {
+		t.Fatalf("trace should disable an earlier verbose: %+v", verbose)
+	}
+}
+
+func TestParseHTTPVersionLastOptionWins(t *testing.T) {
+	first, err := Parse([]string{"--http2", "--http1.1", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.HTTP2 || !first.HTTP11 {
+		t.Fatalf("last --http1.1 should win: %+v", first)
+	}
+	second, err := Parse([]string{"--http1.1", "--http2", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.HTTP2 || second.HTTP11 {
+		t.Fatalf("last --http2 should win: %+v", second)
+	}
+}
+
+func TestParseResolveIPv6AndTemporary(t *testing.T) {
+	req, err := Parse([]string{
+		"--resolve", "example.test:443:127.0.0.1",
+		"--resolve", "+example.test:443:[::1],127.0.0.2",
+		"--resolve", "*:80:127.0.0.3",
+		"https://example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Resolve) != 3 || req.Resolve[1].Host != "example.test" || !req.Resolve[1].Temporary || req.Resolve[1].Addresses[0] != "::1" {
+		t.Fatalf("resolve entries = %+v", req.Resolve)
+	}
+}
+
+func TestParseHeadDoesNotOverrideExplicitMethod(t *testing.T) {
+	for _, args := range [][]string{
+		{"-X", "GET", "-I", "https://x"},
+		{"-I", "-X", "POST", "https://x"},
+	} {
+		req, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if req.Method == "HEAD" || !req.MethodExplicit || !req.Head || !req.Include {
+			t.Fatalf("-I should preserve explicit method while enabling header-only mode: %+v", req)
+		}
+	}
+}
+
+func TestParseHeadRejectsRequestBody(t *testing.T) {
+	for _, args := range [][]string{
+		{"-I", "-d", "a=1", "https://x"},
+		{"-I", "-X", "POST", "-F", "a=b", "https://x"},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("Parse(%v) accepted a body with --head", args)
+		}
+	}
+}
+
+func TestParseHeadGetDataUsesQuery(t *testing.T) {
+	req, err := Parse([]string{"-I", "-G", "-d", "a=1", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != "HEAD" || !req.Head || !req.Get || len(req.Data) != 1 {
+		t.Fatalf("head GET data parsed incorrectly: %+v", req)
+	}
+}
+
+func TestNormalizeCurlURLPathRFCExamples(t *testing.T) {
+	cases := map[string]string{
+		"/a/b/c/./../../g":   "/a/g",
+		"/a/b/c/./../../g/":  "/a/g/",
+		"/a/b/c/../..":       "/a/",
+		"/a/b/c/../../..":    "/",
+		"/a/b/c/../../../g":  "/g",
+		"/a/b/c/./../../g/.": "/a/g/",
+	}
+	for input, want := range cases {
+		u, err := url.Parse("http://example.test" + input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		normalizeCurlURLPath(u)
+		if got := u.EscapedPath(); got != want {
+			t.Errorf("%s => %s, want %s", input, got, want)
+		}
+	}
+}
+
+func TestNormalizeCurlURLPathRepeatedSlashExamples(t *testing.T) {
+	cases := map[string]string{
+		"//a///b":     "/a///b",
+		"/a//../b":    "/a/b",
+		"/a/./b":      "/a/b",
+		"/../x":       "/x",
+		"/../../x":    "/x",
+		"/a//b/../c":  "/a//c",
+		"/a/%2e%2e/b": "/b",
+		"/a/%2E./b":   "/b",
+		"/a/.%2e/b":   "/b",
+	}
+	for input, want := range cases {
+		u, _ := url.Parse("http://example.test" + input)
+		normalizeCurlURLPath(u)
+		if got := u.EscapedPath(); got != want {
+			t.Errorf("%s => %s, want %s", input, got, want)
+		}
+	}
+}
+
+func TestParseVersionDoesNotNeedURL(t *testing.T) {
+	for _, args := range [][]string{{"--version"}, {"-V", "https://ignored.example"}} {
+		req, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if !req.Version {
+			t.Fatalf("Parse(%v) did not set Version: %+v", args, req)
+		}
 	}
 }
