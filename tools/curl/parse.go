@@ -2,6 +2,7 @@ package curl
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -40,14 +41,15 @@ type FormPart struct {
 
 // Request is the parsed, transport-agnostic shape of one curl invocation.
 type Request struct {
-	URL       string
-	Method    string
-	Headers   []Header
-	Data      []DataPart
-	Form      []FormPart
-	Get       bool // -G: send data as query string
-	Follow    bool // -L
-	MaxRedirs int  // --max-redirs (default 50 when following)
+	URL            string
+	Method         string
+	MethodExplicit bool // -X/--request was supplied; prevents -I changing it
+	Headers        []Header
+	Data           []DataPart
+	Form           []FormPart
+	Get            bool // -G: send data as query string
+	Follow         bool // -L
+	MaxRedirs      int  // --max-redirs (default 50 when following)
 
 	UserAgent string // -A
 	Referer   string // -e
@@ -55,30 +57,50 @@ type Request struct {
 	CookieIn  string // -b: cookie string or @file
 	CookieJar string // -c: write jar here after the exchange
 
-	Output    string // -o
-	Include   bool   // -i
-	Silent    bool   // -s
-	ShowError bool   // -S
-	WriteOut  string // -w
-	Verbose   bool   // -v
-	Insecure  bool   // -k
-	Proxy     string // -x: override the egress proxy for this invocation
+	Output     string         // -o
+	DumpHeader string         // -D: write response headers to a file (or - for stdout)
+	Include    bool           // -i
+	Head       bool           // -I/--head: issue a HEAD request and include headers
+	Silent     bool           // -s
+	ShowError  bool           // -S
+	Fail       bool           // -f/--fail: fail on HTTP 4xx/5xx
+	WriteOut   string         // -w
+	Verbose    bool           // -v
+	NoBuffer   bool           // -N/--no-buffer: stream response writes without buffering
+	Insecure   bool           // -k
+	Proxy      string         // -x: override the egress proxy for this invocation
+	HTTP2      bool           // --http2: prefer/require HTTP/2 where available
+	HTTP11     bool           // --http1.1: disable HTTP/2 negotiation
+	PathAsIs   bool           // --path-as-is: preserve dot segments in the URL path
+	Version    bool           // --version/-V: print the curl compatibility version
+	Resolve    []ResolveEntry // --resolve host:port:address, repeatable
 
 	ConnectTimeout time.Duration // --connect-timeout
 	MaxTime        time.Duration // --max-time
+}
+
+// ResolveEntry describes one --resolve mapping. Addresses are tried in order
+// when a target is dialled; the URL host (and therefore the HTTP Host and TLS
+// SNI name) remains unchanged.
+type ResolveEntry struct {
+	Host      string
+	Port      string
+	Addresses []string
+	Temporary bool // --resolve +host:... uses curl's temporary DNS lifetime
 }
 
 // valueShort maps short flags that consume a value.
 var valueShort = map[byte]string{
 	'X': "request", 'H': "header", 'd': "data", 'b': "cookie", 'c': "cookie-jar",
 	'A': "user-agent", 'e': "referer", 'u': "user", 'o': "output", 'w': "write-out",
-	'F': "form", 'x': "proxy",
+	'F': "form", 'x': "proxy", 'D': "dump-header", 'm': "max-time",
 }
 
 // boolShort maps short flags that take no value.
 var boolShort = map[byte]string{
 	'G': "get", 'L': "location", 'i': "include", 's': "silent",
-	'S': "show-error", 'v': "verbose", 'k': "insecure",
+	'S': "show-error", 'v': "verbose", 'k': "insecure", 'I': "head", 'f': "fail",
+	'N': "no-buffer", 'V': "version",
 }
 
 // Parse turns a curl argument vector into a Request, rejecting any flag outside
@@ -129,6 +151,14 @@ func Parse(args []string) (*Request, error) {
 		}
 	}
 
+	// --version is a local informational query and intentionally does not need
+	// a URL (matching curl's `curl --version` behavior).
+	if r.Version {
+		// The native curl frontend exits after printing version information and
+		// ignores any URL supplied alongside -V/--version.
+		return r, nil
+	}
+
 	if r.URL == "" {
 		switch len(urls) {
 		case 0:
@@ -143,11 +173,16 @@ func Parse(args []string) (*Request, error) {
 	}
 
 	if r.Method == "" {
-		if (len(r.Data) > 0 || len(r.Form) > 0) && !r.Get {
+		if r.Head {
+			r.Method = "HEAD"
+		} else if (len(r.Data) > 0 || len(r.Form) > 0) && !r.Get {
 			r.Method = "POST"
 		} else {
 			r.Method = "GET"
 		}
+	}
+	if r.Head {
+		r.Include = true
 	}
 	if len(r.Form) > 0 && len(r.Data) > 0 {
 		return nil, fmt.Errorf("curl: (2) -d/--data and -F/--form cannot be combined")
@@ -202,6 +237,7 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 			return err
 		}
 		r.Method = strings.ToUpper(v)
+		r.MethodExplicit = true
 	case "header":
 		v, err := need()
 		if err != nil {
@@ -276,12 +312,23 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 			return err
 		}
 		r.Output = v
+	case "dump-header":
+		v, err := need()
+		if err != nil {
+			return err
+		}
+		r.DumpHeader = v
 	case "include":
+		r.Include = true
+	case "head":
+		r.Head = true
 		r.Include = true
 	case "silent":
 		r.Silent = true
 	case "show-error":
 		r.ShowError = true
+	case "fail":
+		r.Fail = true
 	case "write-out":
 		v, err := need()
 		if err != nil {
@@ -292,6 +339,8 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 		r.Verbose = true
 	case "insecure":
 		r.Insecure = true
+	case "no-buffer":
+		r.NoBuffer = true
 	case "proxy":
 		v, err := need()
 		if err != nil {
@@ -318,6 +367,30 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 			return fmt.Errorf("curl: --max-time %w", err)
 		}
 		r.MaxTime = d
+	case "http2":
+		if r.HTTP11 {
+			return fmt.Errorf("curl: --http2 and --http1.1 are mutually exclusive")
+		}
+		r.HTTP2 = true
+	case "http1.1":
+		if r.HTTP2 {
+			return fmt.Errorf("curl: --http1.1 and --http2 are mutually exclusive")
+		}
+		r.HTTP11 = true
+	case "path-as-is":
+		r.PathAsIs = true
+	case "resolve":
+		v, err := need()
+		if err != nil {
+			return err
+		}
+		entry, err := parseResolve(v)
+		if err != nil {
+			return err
+		}
+		r.Resolve = append(r.Resolve, entry)
+	case "version":
+		r.Version = true
 	default:
 		return fmt.Errorf("curl: unsupported flag --%s", name)
 	}
@@ -386,8 +459,78 @@ func parseHeader(raw string) Header {
 
 func parseSeconds(v string) (time.Duration, error) {
 	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-	if err != nil || f < 0 {
+	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, fmt.Errorf("expects a non-negative number of seconds: %q", v)
 	}
-	return time.Duration(f * float64(time.Second)), nil
+	nanos := f * float64(time.Second)
+	if nanos > float64((1<<63)-1) {
+		return 0, fmt.Errorf("is too large: %q", v)
+	}
+	return time.Duration(nanos), nil
+}
+
+// parseResolve parses curl's host:port:address spelling. The address portion
+// may itself contain colons (for example an IPv6 literal), so only the first
+// two separators are significant. Multiple comma-separated addresses are
+// accepted and tried in order by the dialer.
+func parseResolve(raw string) (ResolveEntry, error) {
+	raw = strings.TrimSpace(raw)
+	temporaryEntry := strings.HasPrefix(raw, "+")
+	if temporaryEntry {
+		raw = strings.TrimSpace(strings.TrimPrefix(raw, "+"))
+	}
+	host, rest, ok := splitResolveHost(raw)
+	if !ok {
+		return ResolveEntry{}, fmt.Errorf("curl: --resolve expects host:port:address: %q", raw)
+	}
+	second := strings.IndexByte(rest, ':')
+	if second <= 0 || second == len(rest)-1 {
+		return ResolveEntry{}, fmt.Errorf("curl: --resolve expects host:port:address: %q", raw)
+	}
+	port := strings.TrimSpace(rest[:second])
+	addressSpec := strings.TrimSpace(rest[second+1:])
+	if host == "" || port == "" || addressSpec == "" {
+		return ResolveEntry{}, fmt.Errorf("curl: --resolve expects host:port:address: %q", raw)
+	}
+	if port != "*" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return ResolveEntry{}, fmt.Errorf("curl: --resolve has invalid port %q", port)
+		}
+	}
+	addresses := make([]string, 0, 1)
+	for _, value := range strings.Split(addressSpec, ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		// Strip optional brackets from IPv6 literals; net.JoinHostPort adds
+		// them back when constructing the dial target.
+		value = strings.TrimPrefix(value, "[")
+		value = strings.TrimSuffix(value, "]")
+		addresses = append(addresses, value)
+	}
+	if len(addresses) == 0 {
+		return ResolveEntry{}, fmt.Errorf("curl: --resolve has no address: %q", raw)
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return ResolveEntry{}, fmt.Errorf("curl: --resolve has no host: %q", raw)
+	}
+	return ResolveEntry{Host: strings.TrimSuffix(strings.ToLower(host), "."), Port: port, Addresses: addresses, Temporary: temporaryEntry}, nil
+}
+
+func splitResolveHost(raw string) (host, rest string, ok bool) {
+	if strings.HasPrefix(raw, "[") {
+		end := strings.IndexByte(raw, ']')
+		if end < 0 || end+1 >= len(raw) || raw[end+1] != ':' {
+			return "", "", false
+		}
+		return raw[:end+1], raw[end+2:], true
+	}
+	idx := strings.IndexByte(raw, ':')
+	if idx <= 0 || idx == len(raw)-1 {
+		return "", "", false
+	}
+	return raw[:idx], raw[idx+1:], true
 }

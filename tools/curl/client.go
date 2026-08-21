@@ -53,6 +53,11 @@ var browserDefaults = []Header{
 // naturalization defaults, performs the exchange, and writes curl-shaped output.
 // env and workDir are per-invocation; nothing here mutates the shared Command.
 func (c *Command) do(ctx context.Context, req *Request, env map[string]string, workDir string, stdout, stderr io.Writer) error {
+	if req.Version {
+		_, err := fmt.Fprintln(stdout, compatibilityVersion)
+		return err
+	}
+
 	proxyURL, caPath := c.egress(env)
 	if req.Proxy != "" {
 		// -x overrides the injected hub egress for this invocation only.
@@ -61,20 +66,39 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 			proxyURL = "http://" + proxyURL
 		}
 	}
+	if len(req.Resolve) > 0 && proxyURL != "" {
+		// A standard library HTTP proxy owns the destination dial and therefore
+		// cannot safely honor a local host mapping without also changing CONNECT
+		// and TLS-SNI behavior. Fail explicitly instead of silently ignoring the
+		// option (or bypassing the evidence proxy).
+		return fmt.Errorf("curl: --resolve cannot be used with a proxy")
+	}
 
 	client, err := c.buildClient(proxyURL, caPath, req)
 	if err != nil {
 		return err
 	}
+	responses := &responseCapture{}
+	client.Transport = &capturingTransport{base: client.Transport, capture: responses}
 
 	target, err := url.Parse(strings.TrimSpace(req.URL))
 	if err != nil || target.Scheme == "" || target.Host == "" {
 		return fmt.Errorf("curl: (3) URL rejected: %s", req.URL)
 	}
+	if !req.PathAsIs {
+		normalizeCurlURLPath(target)
+	}
 
 	body, contentType, err := buildBody(req, target, workDir)
 	if err != nil {
 		return err
+	}
+	if req.Head {
+		// --head suppresses the response body even when -X explicitly selects a
+		// different method (curl uses this combination for header-only probes).
+		// A HEAD transfer also never carries a request body.
+		body = nil
+		contentType = ""
 	}
 
 	if req.MaxTime > 0 {
@@ -109,6 +133,10 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		writeVerboseResponse(stderr, resp)
 	}
 
+	if err := dumpResponseHeaders(req, responses.all(), workDir, stdout); err != nil {
+		return err
+	}
+
 	out, closeOut, err := outputWriter(req, workDir, stdout)
 	if err != nil {
 		return err
@@ -116,17 +144,37 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	defer closeOut()
 
 	if req.Include {
-		writeStatusAndHeaders(out, resp)
+		for _, response := range responses.all() {
+			writeStatusAndHeaders(out, response)
+		}
 	}
-	written, err := io.Copy(out, resp.Body)
+	if req.Fail && resp.StatusCode >= http.StatusBadRequest {
+		// --fail suppresses the response body and returns curl's conventional
+		// status-22 error. Header output, cookie persistence and -w still happen.
+		if err := persistResponseCookies(c, client, req, resp, workDir); err != nil {
+			return err
+		}
+		if req.WriteOut != "" {
+			fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, 0))
+		}
+		c.emitArtifact(ctx, resp, 0)
+		return fmt.Errorf("curl: (22) The requested URL returned error: %s", resp.Status)
+	}
+	var written int64
+	if req.Head {
+		// Drain and discard a body some non-conforming servers attach to a
+		// header-only request, so the connection remains reusable.
+		written, err = io.Copy(io.Discard, resp.Body)
+		written = 0
+	} else {
+		written, err = copyResponse(out, resp.Body, req.NoBuffer)
+	}
 	if err != nil {
 		return fmt.Errorf("curl: (56) %w", err)
 	}
 
-	if req.CookieJar != "" {
-		if err := writeCookieJar(client.Jar, resp.Request.URL, resolvePath(workDir, req.CookieJar)); err != nil && !req.Silent {
-			c.Logger.Warnf("curl: write cookie jar: %s", err)
-		}
+	if err := persistResponseCookies(c, client, req, resp, workDir); err != nil {
+		return err
 	}
 
 	if req.WriteOut != "" {
@@ -177,10 +225,36 @@ func (c *Command) buildClient(proxyURL, caPath string, req *Request) (*http.Clie
 	if dialTimeout == 0 {
 		dialTimeout = 30 * time.Second
 	}
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	dialContext := dialer.DialContext
+	if len(req.Resolve) > 0 {
+		resolve := makeResolveMap(req.Resolve)
+		dialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err == nil {
+				entry, ok := lookupResolve(resolve, host, port)
+				if ok {
+					var lastErr error
+					for _, mapped := range entry.Addresses {
+						conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(mapped, port))
+						if dialErr == nil {
+							return conn, nil
+						}
+						lastErr = dialErr
+					}
+					if lastErr != nil {
+						return nil, lastErr
+					}
+				}
+			}
+			return dialer.DialContext(ctx, network, address)
+		}
+	}
+	forceHTTP2 := req.HTTP2 || !req.HTTP11
 	transport := &http.Transport{
 		TLSClientConfig:     tlsConfig,
-		DialContext:         (&net.Dialer{Timeout: dialTimeout}).DialContext,
-		ForceAttemptHTTP2:   true,
+		DialContext:         dialContext,
+		ForceAttemptHTTP2:   forceHTTP2,
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: dialTimeout,
@@ -426,6 +500,143 @@ func outputWriter(req *Request, workDir string, stdout io.Writer) (io.Writer, fu
 	return file, func() { _ = file.Close() }, nil
 }
 
+type responseCapture struct {
+	responses []*http.Response
+}
+
+func (c *responseCapture) add(resp *http.Response) {
+	if resp != nil {
+		c.responses = append(c.responses, resp)
+	}
+}
+
+func (c *responseCapture) all() []*http.Response {
+	if len(c.responses) == 0 {
+		return nil
+	}
+	return append([]*http.Response(nil), c.responses...)
+}
+
+type capturingTransport struct {
+	base    http.RoundTripper
+	capture *responseCapture
+}
+
+func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err == nil && t.capture != nil {
+		t.capture.add(resp)
+	}
+	return resp, err
+}
+
+func dumpResponseHeaders(req *Request, responses []*http.Response, workDir string, stdout io.Writer) error {
+	if req.DumpHeader == "" {
+		return nil
+	}
+	if req.DumpHeader == "-" {
+		for _, resp := range responses {
+			writeStatusAndHeaders(stdout, resp)
+		}
+		return nil
+	}
+	path := resolvePath(workDir, req.DumpHeader)
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("curl: (23) Failed to create dump-header %q: %w", req.DumpHeader, err)
+	}
+	for _, resp := range responses {
+		writeStatusAndHeaders(file, resp)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("curl: (23) Failed to close dump-header %q: %w", req.DumpHeader, err)
+	}
+	return nil
+}
+
+func persistResponseCookies(c *Command, client *http.Client, req *Request, resp *http.Response, workDir string) error {
+	if req.CookieJar == "" {
+		return nil
+	}
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+	if err := writeCookieJar(client.Jar, resp.Request.URL, resolvePath(workDir, req.CookieJar)); err != nil && !req.Silent {
+		c.Logger.Warnf("curl: write cookie jar: %s", err)
+	}
+	return nil
+}
+
+// copyResponse keeps the normal io.Copy fast path while making -N meaningful
+// for writers that expose Flush. net/http response bodies are already streamed;
+// this loop only adds an explicit flush after each chunk when requested.
+func copyResponse(dst io.Writer, src io.Reader, noBuffer bool) (int64, error) {
+	if !noBuffer {
+		return io.Copy(dst, src)
+	}
+	buf := make([]byte, 32*1024)
+	var written int64
+	for {
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			m, writeErr := dst.Write(buf[:n])
+			written += int64(m)
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if m != n {
+				return written, io.ErrShortWrite
+			}
+			flushWriter(dst)
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return written, nil
+			}
+			return written, readErr
+		}
+	}
+}
+
+type flusher interface{ Flush() }
+
+func flushWriter(w io.Writer) {
+	if f, ok := w.(flusher); ok {
+		f.Flush()
+	}
+}
+
+func makeResolveMap(entries []ResolveEntry) map[string]ResolveEntry {
+	resolved := make(map[string]ResolveEntry, len(entries))
+	for _, entry := range entries {
+		key := resolveKey(entry.Host, entry.Port)
+		// The last --resolve entry for a host/port wins, matching curl's
+		// resolver table. A leading '+' only changes the DNS-cache lifetime;
+		// this client resolves per invocation, so Temporary is informational.
+		resolved[key] = entry
+	}
+	return resolved
+}
+
+func lookupResolve(entries map[string]ResolveEntry, host, port string) (ResolveEntry, bool) {
+	for _, key := range []string{
+		resolveKey(host, port),
+		resolveKey("*", port),
+		resolveKey(host, "*"),
+		resolveKey("*", "*"),
+	} {
+		if entry, ok := entries[key]; ok {
+			return entry, true
+		}
+	}
+	return ResolveEntry{}, false
+}
+
+func resolveKey(host, port string) string {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return host + ":" + strings.TrimSpace(port)
+}
+
 func (c *Command) emitArtifact(ctx context.Context, resp *http.Response, size int64) {
 	if c.Events == nil || resp.Request == nil {
 		return
@@ -451,6 +662,75 @@ func resolvePath(workDir, path string) string {
 		return path
 	}
 	return filepath.Join(workDir, path)
+}
+
+// normalizeCurlURLPath implements the URL dot-segment cleanup performed by
+// curl unless --path-as-is is selected. It deliberately operates on the raw
+// escaped path, so an encoded "%2e" is data rather than a dot segment. Empty
+// segments are retained except when consumed by a preceding "..", matching
+// curl's treatment of repeated slashes.
+func normalizeCurlURLPath(u *url.URL) {
+	raw := u.EscapedPath()
+	if raw == "" {
+		u.Path = "/"
+		u.RawPath = ""
+		return
+	}
+	trailingSlash := strings.HasSuffix(raw, "/") || strings.HasSuffix(raw, "/.") || strings.HasSuffix(raw, "/..")
+	parts := strings.Split(raw, "/")
+	out := make([]string, 0, len(parts))
+	for i, part := range parts {
+		if i == 0 {
+			// Absolute HTTP URLs always have a leading slash. Keep an empty
+			// first segment so joining below preserves that invariant.
+			out = append(out, part)
+			continue
+		}
+		switch part {
+		case ".":
+			// A terminal dot segment implies a trailing slash.
+			if i == len(parts)-1 {
+				trailingSlash = true
+			}
+		case "..":
+			if i == len(parts)-1 {
+				trailingSlash = true
+			}
+			if len(out) > 1 {
+				// Pop one segment, including an empty segment. This is why
+				// /a//../b becomes /a/b rather than /b.
+				out = out[:len(out)-1]
+			}
+		case "":
+			// curl collapses duplicate slashes at the beginning of an HTTP
+			// path, while preserving empty segments in the middle.
+			if len(out) == 1 {
+				continue
+			}
+			out = append(out, part)
+		default:
+			out = append(out, part)
+		}
+	}
+	cleaned := strings.Join(out, "/")
+	if cleaned == "" {
+		cleaned = "/"
+	}
+	if trailingSlash && cleaned != "/" && !strings.HasSuffix(cleaned, "/") {
+		cleaned += "/"
+	}
+	decoded, err := url.PathUnescape(cleaned)
+	if err != nil {
+		// Keep the original URL if it contains malformed escaping; the request
+		// constructor will return curl's normal URL error downstream.
+		return
+	}
+	u.Path = decoded
+	if decoded == cleaned {
+		u.RawPath = ""
+	} else {
+		u.RawPath = cleaned
+	}
 }
 
 func writeStatusAndHeaders(w io.Writer, resp *http.Response) {

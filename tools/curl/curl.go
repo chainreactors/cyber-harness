@@ -2,6 +2,7 @@ package curl
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
@@ -20,6 +21,11 @@ import (
 type Command struct {
 	toolargs.Base
 }
+
+// compatibilityVersion is intentionally explicit instead of inheriting the
+// host's curl version. Agents can therefore use --version to discover that
+// they are talking to the deterministic in-process implementation.
+const compatibilityVersion = "curl 8.14.1 (aiscan pure-Go)"
 
 func New() *Command {
 	c := &Command{}
@@ -63,15 +69,24 @@ Supported options:
   -e, --referer <url>          Referer header
   -u, --user <user:password>   Basic authentication
   -o, --output <file>          Write body to file instead of stdout
+  -D, --dump-header <file>     Write response headers to a separate file
   -i, --include                Include response headers in the output
+  -I, --head                   Fetch headers only (HEAD request)
   -s, --silent                 Silent mode
   -S, --show-error             Show errors even with -s
+  -f, --fail                   Fail on HTTP 4xx/5xx responses
   -w, --write-out <format>     After completion, print %{http_code}, %{url_effective}, ...
   -v, --verbose                Log request/response headers
+  -N, --no-buffer              Stream response output without buffering
   -k, --insecure               Do not verify TLS
   -x, --proxy <url>            Use this proxy instead of the runner egress
       --connect-timeout <s>    Connection timeout, seconds
-      --max-time <s>           Overall timeout, seconds
+  -m, --max-time <s>           Overall timeout, seconds
+      --http2                  Prefer HTTP/2
+      --http1.1                Force HTTP/1.1
+      --resolve host:port:addr Route a host/port to an explicit address
+      --path-as-is             Preserve dot segments in the URL path
+      --version, -V            Print the compatibility version and exit
 
 Unlisted flags are rejected rather than silently ignored. Requests are routed
 through the runner proxy and recorded as HTTP evidence; a browser User-Agent and
@@ -84,6 +99,9 @@ func (c *Command) QuickReference() string {
   curl -X POST -d 'a=1' <url>    POST form data
   curl -H 'Authorization: ...' <url>
   curl -i -L <url>               Include headers, follow redirects
+  curl -I <url>                  HEAD request (headers only)
+  curl -D headers.txt <url>      Save response headers separately
+  curl -fsSL <url>               Follow redirects and fail on HTTP errors
   curl -b 'sid=abc' -c jar.txt <url>   Send and persist cookies
   curl -F 'file=@a.png' <url>    Multipart form upload`
 }
@@ -96,6 +114,10 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 
 	req, err := Parse(execution.Args)
 	if err != nil {
+		return nil, err
+	}
+	if req.Version {
+		_, err := fmt.Fprintln(execution.Stdout, compatibilityVersion)
 		return nil, err
 	}
 

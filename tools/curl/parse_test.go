@@ -192,3 +192,80 @@ func TestParseProxy(t *testing.T) {
 		t.Fatalf("proxy = %q", req.Proxy)
 	}
 }
+
+func TestParseCompatibilityFlags(t *testing.T) {
+	req, err := Parse([]string{
+		"-m", "2.5", "-D", "headers.txt", "-I", "-f", "-N",
+		"--http2", "--resolve", "example.test:8443:127.0.0.1",
+		"--path-as-is", "https://example.test:8443/a/../b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.MaxTime != 2500*time.Millisecond || req.DumpHeader != "headers.txt" {
+		t.Fatalf("short compatibility flags parsed incorrectly: %+v", req)
+	}
+	if !req.Head || req.Method != "HEAD" || !req.Include || !req.Fail || !req.NoBuffer {
+		t.Fatalf("head/fail/no-buffer parsed incorrectly: %+v", req)
+	}
+	if !req.HTTP2 || req.HTTP11 || !req.PathAsIs || len(req.Resolve) != 1 {
+		t.Fatalf("transport flags parsed incorrectly: %+v", req)
+	}
+	entry := req.Resolve[0]
+	if entry.Host != "example.test" || entry.Port != "8443" || len(entry.Addresses) != 1 || entry.Addresses[0] != "127.0.0.1" {
+		t.Fatalf("resolve parsed incorrectly: %+v", entry)
+	}
+}
+
+func TestParseHTTPVersionConflict(t *testing.T) {
+	for _, args := range [][]string{
+		{"--http2", "--http1.1", "https://x"},
+		{"--http1.1", "--http2", "https://x"},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("Parse(%v) accepted mutually exclusive HTTP versions", args)
+		}
+	}
+}
+
+func TestParseResolveIPv6AndTemporary(t *testing.T) {
+	req, err := Parse([]string{
+		"--resolve", "example.test:443:127.0.0.1",
+		"--resolve", "+example.test:443:[::1],127.0.0.2",
+		"--resolve", "*:80:127.0.0.3",
+		"https://example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Resolve) != 3 || req.Resolve[1].Host != "example.test" || !req.Resolve[1].Temporary || req.Resolve[1].Addresses[0] != "::1" {
+		t.Fatalf("resolve entries = %+v", req.Resolve)
+	}
+}
+
+func TestParseHeadDoesNotOverrideExplicitMethod(t *testing.T) {
+	for _, args := range [][]string{
+		{"-X", "GET", "-I", "https://x"},
+		{"-I", "-X", "POST", "https://x"},
+	} {
+		req, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if req.Method == "HEAD" || !req.MethodExplicit || !req.Head || !req.Include {
+			t.Fatalf("-I should preserve explicit method while enabling header-only mode: %+v", req)
+		}
+	}
+}
+
+func TestParseVersionDoesNotNeedURL(t *testing.T) {
+	for _, args := range [][]string{{"--version"}, {"-V", "https://ignored.example"}} {
+		req, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if !req.Version {
+			t.Fatalf("Parse(%v) did not set Version: %+v", args, req)
+		}
+	}
+}
