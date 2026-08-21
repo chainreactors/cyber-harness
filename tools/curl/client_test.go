@@ -5,10 +5,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // run is a small harness: parse args, execute against a real server, capture
@@ -324,5 +326,256 @@ func TestProxyOverride(t *testing.T) {
 	}
 	if out != "via-proxy" {
 		t.Fatalf("body = %q, want via-proxy", out)
+	}
+}
+
+func TestDumpHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Dump-Test", "yes")
+		_, _ = w.Write([]byte("body"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	out, _, err := run(t, []string{"-D", "headers.txt", srv.URL}, "", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "body" {
+		t.Fatalf("body = %q, want body", out)
+	}
+	headerData, err := os.ReadFile(filepath.Join(dir, "headers.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(headerData), "X-Dump-Test: yes") || !strings.Contains(string(headerData), "200 OK") {
+		t.Fatalf("dumped headers missing status/header:\n%s", headerData)
+	}
+}
+
+func TestDumpHeadersIncludesRedirectResponses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			w.Header().Set("X-First", "yes")
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		w.Header().Set("X-Second", "yes")
+		_, _ = w.Write([]byte("final"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	out, _, err := run(t, []string{"-L", "-D", "headers.txt", srv.URL + "/start"}, "", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "final" {
+		t.Fatalf("body = %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "headers.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "X-First: yes") || !strings.Contains(text, "X-Second: yes") || !strings.Contains(text, "302 Found") || !strings.Contains(text, "200 OK") {
+		t.Fatalf("redirect headers = %q", text)
+	}
+}
+
+func TestHeadRequest(t *testing.T) {
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		w.Header().Set("X-Head-Test", "yes")
+		_, _ = w.Write([]byte("must-not-be-returned"))
+	}))
+	defer srv.Close()
+
+	out, _, err := run(t, []string{"-I", srv.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodHead {
+		t.Fatalf("method = %q, want HEAD", method)
+	}
+	if !strings.Contains(out, "X-Head-Test: yes") || strings.Contains(out, "must-not-be-returned") {
+		t.Fatalf("head output = %q", out)
+	}
+}
+
+func TestHeadFlagKeepsExplicitMethodButSuppressesBody(t *testing.T) {
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		w.Header().Set("X-Head-Test", "yes")
+		_, _ = w.Write([]byte("must-not-be-returned"))
+	}))
+	defer srv.Close()
+
+	out, _, err := run(t, []string{"-I", "-X", "GET", srv.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodGet {
+		t.Fatalf("method = %q, want GET", method)
+	}
+	if !strings.Contains(out, "X-Head-Test: yes") || strings.Contains(out, "must-not-be-returned") {
+		t.Fatalf("header-only explicit-method output = %q", out)
+	}
+}
+
+func TestDefaultPathNormalizationAndPathAsIs(t *testing.T) {
+	paths := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	if _, _, err := run(t, []string{srv.URL + "/a/../b/./c"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, []string{"--path-as-is", srv.URL + "/a/../b/./c"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-paths; got != "/b/c" {
+		t.Fatalf("default path = %q, want /b", got)
+	}
+	if got := <-paths; got != "/a/../b/./c" {
+		t.Fatalf("--path-as-is path = %q, want /a/../b", got)
+	}
+}
+
+func TestPathNormalizationPreservesEncodedDots(t *testing.T) {
+	paths := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	if _, _, err := run(t, []string{srv.URL + "/%2e%2e/x"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-paths; got != "/%2e%2e/x" {
+		t.Fatalf("encoded dot path = %q", got)
+	}
+}
+
+func TestFailSuppressesHTTPErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not-found-body"))
+	}))
+	defer srv.Close()
+
+	out, _, err := run(t, []string{"-f", srv.URL}, "", "")
+	if err == nil || !strings.Contains(err.Error(), "(22)") {
+		t.Fatalf("error = %v, want curl status 22", err)
+	}
+	if out != "" {
+		t.Fatalf("--fail emitted response body %q", out)
+	}
+}
+
+func TestShortMaxTimeAliasBoundsTransfer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("late"))
+	}))
+	defer srv.Close()
+
+	started := time.Now()
+	_, _, err := run(t, []string{"-m", "0.01", srv.URL}, "", "")
+	if err == nil {
+		t.Fatal("-m did not enforce a transfer deadline")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("-m timeout took %s", elapsed)
+	}
+}
+
+func TestResolveMapsDialWithoutChangingHost(t *testing.T) {
+	var gotHost string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		_, _ = w.Write([]byte("resolved"))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := u.Port()
+	out, _, err := run(t, []string{
+		"--resolve", "example.test:" + port + ":127.0.0.1",
+		"http://example.test:" + port + "/path",
+	}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "resolved" {
+		t.Fatalf("body = %q", out)
+	}
+	if gotHost != "example.test:"+port {
+		t.Fatalf("Host = %q, want example.test:%s", gotHost, port)
+	}
+}
+
+func TestResolveWildcardMapsDial(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("wildcard"))
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := run(t, []string{
+		"--resolve", "*:" + u.Port() + ":127.0.0.1",
+		"http://any-host.invalid:" + u.Port() + "/",
+	}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "wildcard" {
+		t.Fatalf("wildcard resolve body = %q", out)
+	}
+}
+
+func TestHTTP11DisablesHTTP2Negotiation(t *testing.T) {
+	var proto string
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto = r.Proto
+		_, _ = w.Write([]byte("ok"))
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	if _, _, err := run(t, []string{"--http1.1", "-k", srv.URL}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if proto != "HTTP/1.1" {
+		t.Fatalf("protocol = %q, want HTTP/1.1", proto)
+	}
+}
+
+func TestHTTP2Negotiation(t *testing.T) {
+	var proto string
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto = r.Proto
+		_, _ = w.Write([]byte("ok"))
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	if _, _, err := run(t, []string{"--http2", "-k", srv.URL}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if proto != "HTTP/2.0" {
+		t.Fatalf("protocol = %q, want HTTP/2.0", proto)
 	}
 }
