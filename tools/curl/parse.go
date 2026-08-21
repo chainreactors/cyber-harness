@@ -368,14 +368,14 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 		}
 		r.MaxTime = d
 	case "http2":
-		if r.HTTP11 {
-			return fmt.Errorf("curl: --http2 and --http1.1 are mutually exclusive")
-		}
+		// curl treats repeated HTTP-version selectors as last-option-wins and
+		// emits only a diagnostic on the native frontend. The parser has no
+		// stderr channel, so retain the deterministic state without silently
+		// ignoring either recognized option.
+		r.HTTP11 = false
 		r.HTTP2 = true
 	case "http1.1":
-		if r.HTTP2 {
-			return fmt.Errorf("curl: --http1.1 and --http2 are mutually exclusive")
-		}
+		r.HTTP2 = false
 		r.HTTP11 = true
 	case "path-as-is":
 		r.PathAsIs = true

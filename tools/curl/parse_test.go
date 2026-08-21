@@ -226,14 +226,20 @@ func TestParseCompatibilityFlags(t *testing.T) {
 	}
 }
 
-func TestParseHTTPVersionConflict(t *testing.T) {
-	for _, args := range [][]string{
-		{"--http2", "--http1.1", "https://x"},
-		{"--http1.1", "--http2", "https://x"},
-	} {
-		if _, err := Parse(args); err == nil {
-			t.Fatalf("Parse(%v) accepted mutually exclusive HTTP versions", args)
-		}
+func TestParseHTTPVersionLastOptionWins(t *testing.T) {
+	first, err := Parse([]string{"--http2", "--http1.1", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.HTTP2 || !first.HTTP11 {
+		t.Fatalf("last --http1.1 should win: %+v", first)
+	}
+	second, err := Parse([]string{"--http1.1", "--http2", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.HTTP2 || second.HTTP11 {
+		t.Fatalf("last --http2 should win: %+v", second)
 	}
 }
 
