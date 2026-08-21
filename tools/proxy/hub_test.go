@@ -193,7 +193,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 	}
 	first := store.Query(QueryOpts{Last: 1})
 	if len(first) == 1 {
-		out := runMitm(t, store, hub, "flow", first[0].Exchange.ID)
+		out := runMitm(t, store, hub, "flow", first[0].ID)
 		if !strings.Contains(out, "Request Headers") {
 			t.Errorf("flow detail missing headers: %q", out)
 		}
