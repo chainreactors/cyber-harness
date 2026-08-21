@@ -65,6 +65,16 @@ func TestParseShortBundle(t *testing.T) {
 	}
 }
 
+func TestParseCommonFailBundle(t *testing.T) {
+	req, err := Parse([]string{"-fsSL", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !req.Fail || !req.Silent || !req.ShowError || !req.Follow {
+		t.Fatalf("-fsSL not fully applied: %+v", req)
+	}
+}
+
 func TestParseBundleTrailingValue(t *testing.T) {
 	req, err := Parse([]string{"-so", "out.txt", "https://x"})
 	if err != nil {
