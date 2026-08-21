@@ -709,32 +709,174 @@ func (x *Header) GetValue() string {
 	return ""
 }
 
-// Flow is one captured request/response pair. Its fields mirror the consumer's
-// http.exchange shape so a consumer can map it directly; tool_id is the AOP
-// tool-call id whose egress produced this flow.
+// HttpRequest is the request half of an exchange.
+type HttpRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Method        string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	Url           string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Protocol      string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	Headers       []*Header              `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty"`
+	Body          []byte                 `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HttpRequest) Reset() {
+	*x = HttpRequest{}
+	mi := &file_aop_traffic_protocol_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HttpRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HttpRequest) ProtoMessage() {}
+
+func (x *HttpRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aop_traffic_protocol_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HttpRequest.ProtoReflect.Descriptor instead.
+func (*HttpRequest) Descriptor() ([]byte, []int) {
+	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *HttpRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *HttpRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *HttpRequest) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *HttpRequest) GetHeaders() []*Header {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *HttpRequest) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+// HttpResponse is the response half of an exchange. It is optional on Flow: a
+// request that never got a response (timeout, refused connection, one-way
+// capture) has no response half.
+type HttpResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StatusCode    int32                  `protobuf:"varint,1,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
+	ReasonPhrase  string                 `protobuf:"bytes,2,opt,name=reason_phrase,json=reasonPhrase,proto3" json:"reason_phrase,omitempty"`
+	Headers       []*Header              `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
+	Body          []byte                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HttpResponse) Reset() {
+	*x = HttpResponse{}
+	mi := &file_aop_traffic_protocol_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HttpResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HttpResponse) ProtoMessage() {}
+
+func (x *HttpResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aop_traffic_protocol_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HttpResponse.ProtoReflect.Descriptor instead.
+func (*HttpResponse) Descriptor() ([]byte, []int) {
+	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *HttpResponse) GetStatusCode() int32 {
+	if x != nil {
+		return x.StatusCode
+	}
+	return 0
+}
+
+func (x *HttpResponse) GetReasonPhrase() string {
+	if x != nil {
+		return x.ReasonPhrase
+	}
+	return ""
+}
+
+func (x *HttpResponse) GetHeaders() []*Header {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *HttpResponse) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+// Flow is one captured request/response exchange. Its nested shape mirrors the
+// consumer's http.exchange form so a consumer can map it directly; tool_id is
+// the AOP tool-call id whose egress produced this flow. Fields 3-11 were the
+// pre-nesting flat shape.
 type Flow struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ToolId          string                 `protobuf:"bytes,2,opt,name=tool_id,json=toolId,proto3" json:"tool_id,omitempty"`
-	Method          string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	Url             string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
-	Protocol        string                 `protobuf:"bytes,5,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	StatusCode      int32                  `protobuf:"varint,6,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
-	ReasonPhrase    string                 `protobuf:"bytes,7,opt,name=reason_phrase,json=reasonPhrase,proto3" json:"reason_phrase,omitempty"`
-	RequestHeaders  []*Header              `protobuf:"bytes,8,rep,name=request_headers,json=requestHeaders,proto3" json:"request_headers,omitempty"`
-	ResponseHeaders []*Header              `protobuf:"bytes,9,rep,name=response_headers,json=responseHeaders,proto3" json:"response_headers,omitempty"`
-	RequestBody     []byte                 `protobuf:"bytes,10,opt,name=request_body,json=requestBody,proto3" json:"request_body,omitempty"`
-	ResponseBody    []byte                 `protobuf:"bytes,11,opt,name=response_body,json=responseBody,proto3" json:"response_body,omitempty"`
-	Error           string                 `protobuf:"bytes,12,opt,name=error,proto3" json:"error,omitempty"`
-	Complete        bool                   `protobuf:"varint,13,opt,name=complete,proto3" json:"complete,omitempty"`
-	Timestamp       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ToolId        string                 `protobuf:"bytes,2,opt,name=tool_id,json=toolId,proto3" json:"tool_id,omitempty"`
+	Error         string                 `protobuf:"bytes,12,opt,name=error,proto3" json:"error,omitempty"`
+	Complete      bool                   `protobuf:"varint,13,opt,name=complete,proto3" json:"complete,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Request       *HttpRequest           `protobuf:"bytes,15,opt,name=request,proto3" json:"request,omitempty"`
+	Response      *HttpResponse          `protobuf:"bytes,16,opt,name=response,proto3" json:"response,omitempty"` // absent when no response was received
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Flow) Reset() {
 	*x = Flow{}
-	mi := &file_aop_traffic_protocol_proto_msgTypes[9]
+	mi := &file_aop_traffic_protocol_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -746,7 +888,7 @@ func (x *Flow) String() string {
 func (*Flow) ProtoMessage() {}
 
 func (x *Flow) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_traffic_protocol_proto_msgTypes[9]
+	mi := &file_aop_traffic_protocol_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -759,7 +901,7 @@ func (x *Flow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Flow.ProtoReflect.Descriptor instead.
 func (*Flow) Descriptor() ([]byte, []int) {
-	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{9}
+	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Flow) GetId() string {
@@ -774,69 +916,6 @@ func (x *Flow) GetToolId() string {
 		return x.ToolId
 	}
 	return ""
-}
-
-func (x *Flow) GetMethod() string {
-	if x != nil {
-		return x.Method
-	}
-	return ""
-}
-
-func (x *Flow) GetUrl() string {
-	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
-func (x *Flow) GetProtocol() string {
-	if x != nil {
-		return x.Protocol
-	}
-	return ""
-}
-
-func (x *Flow) GetStatusCode() int32 {
-	if x != nil {
-		return x.StatusCode
-	}
-	return 0
-}
-
-func (x *Flow) GetReasonPhrase() string {
-	if x != nil {
-		return x.ReasonPhrase
-	}
-	return ""
-}
-
-func (x *Flow) GetRequestHeaders() []*Header {
-	if x != nil {
-		return x.RequestHeaders
-	}
-	return nil
-}
-
-func (x *Flow) GetResponseHeaders() []*Header {
-	if x != nil {
-		return x.ResponseHeaders
-	}
-	return nil
-}
-
-func (x *Flow) GetRequestBody() []byte {
-	if x != nil {
-		return x.RequestBody
-	}
-	return nil
-}
-
-func (x *Flow) GetResponseBody() []byte {
-	if x != nil {
-		return x.ResponseBody
-	}
-	return nil
 }
 
 func (x *Flow) GetError() string {
@@ -860,6 +939,20 @@ func (x *Flow) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Flow) GetRequest() *HttpRequest {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+func (x *Flow) GetResponse() *HttpResponse {
+	if x != nil {
+		return x.Response
+	}
+	return nil
+}
+
 type ProtocolMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Message:
@@ -875,7 +968,7 @@ type ProtocolMessage struct {
 
 func (x *ProtocolMessage) Reset() {
 	*x = ProtocolMessage{}
-	mi := &file_aop_traffic_protocol_proto_msgTypes[10]
+	mi := &file_aop_traffic_protocol_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -887,7 +980,7 @@ func (x *ProtocolMessage) String() string {
 func (*ProtocolMessage) ProtoMessage() {}
 
 func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_traffic_protocol_proto_msgTypes[10]
+	mi := &file_aop_traffic_protocol_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -900,7 +993,7 @@ func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolMessage.ProtoReflect.Descriptor instead.
 func (*ProtocolMessage) Descriptor() ([]byte, []int) {
-	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{10}
+	return file_aop_traffic_protocol_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProtocolMessage) GetMessage() isProtocolMessage_Message {
@@ -1020,24 +1113,27 @@ const file_aop_traffic_protocol_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"2\n" +
 	"\x06Header\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xed\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\x96\x01\n" +
+	"\vHttpRequest\x12\x16\n" +
+	"\x06method\x18\x01 \x01(\tR\x06method\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1a\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12-\n" +
+	"\aheaders\x18\x04 \x03(\v2\x13.aop.traffic.HeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x05 \x01(\fR\x04body\"\x97\x01\n" +
+	"\fHttpResponse\x12\x1f\n" +
+	"\vstatus_code\x18\x01 \x01(\x05R\n" +
+	"statusCode\x12#\n" +
+	"\rreason_phrase\x18\x02 \x01(\tR\freasonPhrase\x12-\n" +
+	"\aheaders\x18\x03 \x03(\v2\x13.aop.traffic.HeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x04 \x01(\fR\x04body\"\x8c\x02\n" +
 	"\x04Flow\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
-	"\atool_id\x18\x02 \x01(\tR\x06toolId\x12\x16\n" +
-	"\x06method\x18\x03 \x01(\tR\x06method\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1a\n" +
-	"\bprotocol\x18\x05 \x01(\tR\bprotocol\x12\x1f\n" +
-	"\vstatus_code\x18\x06 \x01(\x05R\n" +
-	"statusCode\x12#\n" +
-	"\rreason_phrase\x18\a \x01(\tR\freasonPhrase\x12<\n" +
-	"\x0frequest_headers\x18\b \x03(\v2\x13.aop.traffic.HeaderR\x0erequestHeaders\x12>\n" +
-	"\x10response_headers\x18\t \x03(\v2\x13.aop.traffic.HeaderR\x0fresponseHeaders\x12!\n" +
-	"\frequest_body\x18\n" +
-	" \x01(\fR\vrequestBody\x12#\n" +
-	"\rresponse_body\x18\v \x01(\fR\fresponseBody\x12\x14\n" +
+	"\atool_id\x18\x02 \x01(\tR\x06toolId\x12\x14\n" +
 	"\x05error\x18\f \x01(\tR\x05error\x12\x1a\n" +
 	"\bcomplete\x18\r \x01(\bR\bcomplete\x128\n" +
-	"\ttimestamp\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\xd5\x01\n" +
+	"\ttimestamp\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x122\n" +
+	"\arequest\x18\x0f \x01(\v2\x18.aop.traffic.HttpRequestR\arequest\x125\n" +
+	"\bresponse\x18\x10 \x01(\v2\x19.aop.traffic.HttpResponseR\bresponseJ\x04\b\x03\x10\f\"\xd5\x01\n" +
 	"\x0fProtocolMessage\x126\n" +
 	"\tconfigure\x18\n" +
 	" \x01(\v2\x16.aop.traffic.ConfigureH\x00R\tconfigure\x12*\n" +
@@ -1071,7 +1167,7 @@ func file_aop_traffic_protocol_proto_rawDescGZIP() []byte {
 }
 
 var file_aop_traffic_protocol_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_aop_traffic_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_aop_traffic_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_aop_traffic_protocol_proto_goTypes = []any{
 	(CaptureMode)(0),              // 0: aop.traffic.CaptureMode
 	(RoutingMode)(0),              // 1: aop.traffic.RoutingMode
@@ -1084,9 +1180,11 @@ var file_aop_traffic_protocol_proto_goTypes = []any{
 	(*CaptureState)(nil),          // 8: aop.traffic.CaptureState
 	(*State)(nil),                 // 9: aop.traffic.State
 	(*Header)(nil),                // 10: aop.traffic.Header
-	(*Flow)(nil),                  // 11: aop.traffic.Flow
-	(*ProtocolMessage)(nil),       // 12: aop.traffic.ProtocolMessage
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*HttpRequest)(nil),           // 11: aop.traffic.HttpRequest
+	(*HttpResponse)(nil),          // 12: aop.traffic.HttpResponse
+	(*Flow)(nil),                  // 13: aop.traffic.Flow
+	(*ProtocolMessage)(nil),       // 14: aop.traffic.ProtocolMessage
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
 }
 var file_aop_traffic_protocol_proto_depIdxs = []int32{
 	1,  // 0: aop.traffic.RoutingConfig.mode:type_name -> aop.traffic.RoutingMode
@@ -1098,18 +1196,20 @@ var file_aop_traffic_protocol_proto_depIdxs = []int32{
 	0,  // 6: aop.traffic.CaptureState.mode:type_name -> aop.traffic.CaptureMode
 	7,  // 7: aop.traffic.State.routing:type_name -> aop.traffic.RoutingState
 	8,  // 8: aop.traffic.State.capture:type_name -> aop.traffic.CaptureState
-	10, // 9: aop.traffic.Flow.request_headers:type_name -> aop.traffic.Header
-	10, // 10: aop.traffic.Flow.response_headers:type_name -> aop.traffic.Header
-	13, // 11: aop.traffic.Flow.timestamp:type_name -> google.protobuf.Timestamp
-	5,  // 12: aop.traffic.ProtocolMessage.configure:type_name -> aop.traffic.Configure
-	6,  // 13: aop.traffic.ProtocolMessage.query:type_name -> aop.traffic.Query
-	9,  // 14: aop.traffic.ProtocolMessage.state:type_name -> aop.traffic.State
-	11, // 15: aop.traffic.ProtocolMessage.flow:type_name -> aop.traffic.Flow
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	10, // 9: aop.traffic.HttpRequest.headers:type_name -> aop.traffic.Header
+	10, // 10: aop.traffic.HttpResponse.headers:type_name -> aop.traffic.Header
+	15, // 11: aop.traffic.Flow.timestamp:type_name -> google.protobuf.Timestamp
+	11, // 12: aop.traffic.Flow.request:type_name -> aop.traffic.HttpRequest
+	12, // 13: aop.traffic.Flow.response:type_name -> aop.traffic.HttpResponse
+	5,  // 14: aop.traffic.ProtocolMessage.configure:type_name -> aop.traffic.Configure
+	6,  // 15: aop.traffic.ProtocolMessage.query:type_name -> aop.traffic.Query
+	9,  // 16: aop.traffic.ProtocolMessage.state:type_name -> aop.traffic.State
+	13, // 17: aop.traffic.ProtocolMessage.flow:type_name -> aop.traffic.Flow
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_aop_traffic_protocol_proto_init() }
@@ -1117,7 +1217,7 @@ func file_aop_traffic_protocol_proto_init() {
 	if File_aop_traffic_protocol_proto != nil {
 		return
 	}
-	file_aop_traffic_protocol_proto_msgTypes[10].OneofWrappers = []any{
+	file_aop_traffic_protocol_proto_msgTypes[12].OneofWrappers = []any{
 		(*ProtocolMessage_Configure)(nil),
 		(*ProtocolMessage_Query)(nil),
 		(*ProtocolMessage_State)(nil),
@@ -1129,7 +1229,7 @@ func file_aop_traffic_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aop_traffic_protocol_proto_rawDesc), len(file_aop_traffic_protocol_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

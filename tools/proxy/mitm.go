@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
@@ -196,25 +198,33 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 		}
 	}
 	flow := Flow{
-		Timestamp:      f.StartTime,
-		ToolID:         toolIDOf(f),
-		Method:         f.Request.Method,
-		URL:            f.Request.URL.String(),
-		Host:           f.Request.URL.Hostname(),
-		Duration:       dur,
-		TLS:            f.ConnContext.ClientConn.Tls,
-		RequestHeaders: f.Request.Header.Clone(),
+		Exchange: traffic.Exchange{
+			Request: traffic.Request{
+				Method:   f.Request.Method,
+				URL:      f.Request.URL.String(),
+				Protocol: f.Request.Proto,
+				Headers:  pairsFromHTTP(f.Request.Header),
+			},
+		},
+		Timestamp: f.StartTime,
+		ToolID:    toolIDOf(f),
+		Host:      f.Request.URL.Hostname(),
+		Duration:  dur,
+		TLS:       f.ConnContext.ClientConn.Tls,
 	}
 	if len(f.Request.Body) > 0 {
-		flow.RequestBodySnip = snip(f.Request.Body, maxBodySnip)
+		flow.Request.Body = snip(f.Request.Body, maxBodySnip)
 	}
 	if f.Response != nil {
-		flow.StatusCode = f.Response.StatusCode
-		flow.ResponseHeaders = f.Response.Header.Clone()
+		flow.Response = &traffic.Response{
+			StatusCode: f.Response.StatusCode,
+			Headers:    pairsFromHTTP(f.Response.Header),
+		}
 		flow.ContentType = f.Response.Header.Get("Content-Type")
 		if len(f.Response.Body) > 0 {
-			flow.ResponseBodySnip = snip(f.Response.Body, maxBodySnip)
+			flow.Response.Body = snip(f.Response.Body, maxBodySnip)
 		}
+		flow.Complete = f.Response.StatusCode != 0
 	}
 	a.hub.ingest(flow)
 }
@@ -227,13 +237,18 @@ func (a *captureAddon) RequestError(f *mitmproxy.Flow, err error) {
 		}
 	}
 	a.hub.ingest(Flow{
+		Exchange: traffic.Exchange{
+			Request: traffic.Request{
+				Method:   f.Request.Method,
+				URL:      f.Request.URL.String(),
+				Protocol: f.Request.Proto,
+			},
+			Error: err.Error(),
+		},
 		Timestamp: f.StartTime,
 		ToolID:    toolIDOf(f),
-		Method:    f.Request.Method,
-		URL:       f.Request.URL.String(),
 		Host:      f.Request.URL.Hostname(),
 		Duration:  dur,
-		Error:     err.Error(),
 	})
 }
 
@@ -246,26 +261,42 @@ func snip(b []byte, max int) []byte {
 	return out
 }
 
+// pairsFromHTTP flattens an http.Header into the canonical pair sequence. The
+// wire order is already lost inside net/http, so names are sorted to keep the
+// stored form deterministic.
+func pairsFromHTTP(headers http.Header) []traffic.Pair {
+	if len(headers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]traffic.Pair, 0, len(headers))
+	for _, name := range names {
+		for _, value := range headers[name] {
+			out = append(out, traffic.Pair{Name: name, Value: value})
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Flow + FlowStore
 // ---------------------------------------------------------------------------
 
+// Flow is the hub's stored capture: the canonical exchange plus the hub-only
+// metadata (attribution, timing, TLS) the mitm query verbs filter and format
+// on. The wire view is Exchange.Proto with ToolID/Timestamp stamped.
 type Flow struct {
-	ID               int
-	ToolID           string
-	Timestamp        time.Time
-	Method           string
-	URL              string
-	Host             string
-	StatusCode       int
-	ContentType      string
-	Duration         time.Duration
-	RequestHeaders   http.Header
-	RequestBodySnip  []byte
-	ResponseHeaders  http.Header
-	ResponseBodySnip []byte
-	TLS              bool
-	Error            string
+	traffic.Exchange
+	ToolID      string
+	Timestamp   time.Time
+	Host        string
+	ContentType string
+	Duration    time.Duration
+	TLS         bool
 }
 
 type QueryOpts struct {
@@ -295,7 +326,7 @@ func (s *FlowStore) Add(f Flow) Flow {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
-	f.ID = s.seq
+	f.ID = strconv.Itoa(s.seq)
 	if len(s.flows) >= s.cap {
 		copy(s.flows, s.flows[1:])
 		s.flows[len(s.flows)-1] = f
@@ -314,8 +345,10 @@ func (s *FlowStore) Query(opts QueryOpts) []Flow {
 		if opts.Host != "" && !strings.Contains(strings.ToLower(f.Host), strings.ToLower(opts.Host)) {
 			continue
 		}
-		if opts.Status != "" && !matchStatus(f.StatusCode, opts.Status) {
-			continue
+		if opts.Status != "" {
+			if f.Response == nil || !matchStatus(f.Response.StatusCode, opts.Status) {
+				continue
+			}
 		}
 		if opts.CType != "" && !strings.Contains(strings.ToLower(f.ContentType), strings.ToLower(opts.CType)) {
 			continue
@@ -331,8 +364,9 @@ func (s *FlowStore) Query(opts QueryOpts) []Flow {
 func (s *FlowStore) Get(id int) *Flow {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	want := strconv.Itoa(id)
 	for i := range s.flows {
-		if s.flows[i].ID == id {
+		if s.flows[i].ID == want {
 			f := s.flows[i]
 			return &f
 		}
@@ -391,7 +425,7 @@ func formatFlowList(flows []Flow) string {
 		if idx := strings.Index(ct, ";"); idx > 0 {
 			ct = ct[:idx]
 		}
-		urlStr := f.URL
+		urlStr := f.Request.URL
 		if len(urlStr) > 50 {
 			urlStr = urlStr[:47] + "..."
 		}
@@ -399,30 +433,40 @@ func formatFlowList(flows []Flow) string {
 		if f.Error != "" {
 			errMark = " ERR"
 		}
-		sb.WriteString(fmt.Sprintf("  %-6d %-6s %-4d %-50s %-14s %dms%s\n",
-			f.ID, f.Method, f.StatusCode, urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
+		sb.WriteString(fmt.Sprintf("  %-6s %-6s %-4d %-50s %-14s %dms%s\n",
+			f.ID, f.Request.Method, statusCodeOf(&f), urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
 	}
 	return sb.String()
 }
 
+// statusCodeOf reports the response status, 0 for a request-only flow.
+func statusCodeOf(f *Flow) int {
+	if f.Response == nil {
+		return 0
+	}
+	return f.Response.StatusCode
+}
+
 func formatFlowDetail(f *Flow) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== Flow #%d ===\n", f.ID))
+	sb.WriteString(fmt.Sprintf("=== Flow #%s ===\n", f.ID))
 	sb.WriteString(fmt.Sprintf("Time: %s  Method: %s  Status: %d  Duration: %dms  TLS: %v\n",
-		f.Timestamp.Format(time.RFC3339), f.Method, f.StatusCode, f.Duration.Milliseconds(), f.TLS))
-	sb.WriteString(fmt.Sprintf("URL: %s\n", f.URL))
+		f.Timestamp.Format(time.RFC3339), f.Request.Method, statusCodeOf(f), f.Duration.Milliseconds(), f.TLS))
+	sb.WriteString(fmt.Sprintf("URL: %s\n", f.Request.URL))
 	if f.Error != "" {
 		sb.WriteString(fmt.Sprintf("Error: %s\n", f.Error))
 	}
 	sb.WriteString("\n--- Request Headers ---\n")
-	writeHeaders(&sb, f.RequestHeaders)
-	if len(f.RequestBodySnip) > 0 {
-		sb.WriteString(fmt.Sprintf("\n--- Request Body (%d bytes) ---\n%s\n", len(f.RequestBodySnip), f.RequestBodySnip))
+	writeHeaders(&sb, f.Request.Headers)
+	if len(f.Request.Body) > 0 {
+		sb.WriteString(fmt.Sprintf("\n--- Request Body (%d bytes) ---\n%s\n", len(f.Request.Body), f.Request.Body))
 	}
-	sb.WriteString("\n--- Response Headers ---\n")
-	writeHeaders(&sb, f.ResponseHeaders)
-	if len(f.ResponseBodySnip) > 0 {
-		sb.WriteString(fmt.Sprintf("\n--- Response Body (%d bytes) ---\n%s\n", len(f.ResponseBodySnip), f.ResponseBodySnip))
+	if f.Response != nil {
+		sb.WriteString("\n--- Response Headers ---\n")
+		writeHeaders(&sb, f.Response.Headers)
+		if len(f.Response.Body) > 0 {
+			sb.WriteString(fmt.Sprintf("\n--- Response Body (%d bytes) ---\n%s\n", len(f.Response.Body), f.Response.Body))
+		}
 	}
 	return sb.String()
 }
@@ -439,7 +483,7 @@ func formatFlowAnalysis(flows []Flow) string {
 	var errCount int
 	for _, f := range flows {
 		hostCounts[f.Host]++
-		statusCounts[f.StatusCode/100]++
+		statusCounts[statusCodeOf(&f)/100]++
 		if f.Error != "" {
 			errCount++
 		}
@@ -454,12 +498,12 @@ func formatFlowAnalysis(flows []Flow) string {
 	sb.WriteString("\n\n")
 
 	for _, f := range flows {
-		sb.WriteString(fmt.Sprintf("#%d [%d] %s %s (%dms)\n", f.ID, f.StatusCode, f.Method, f.URL, f.Duration.Milliseconds()))
+		sb.WriteString(fmt.Sprintf("#%s [%d] %s %s (%dms)\n", f.ID, statusCodeOf(&f), f.Request.Method, f.Request.URL, f.Duration.Milliseconds()))
 		if f.Error != "" {
 			sb.WriteString(fmt.Sprintf("  ERROR: %s\n", f.Error))
 		}
-		if len(f.ResponseBodySnip) > 0 {
-			body := string(f.ResponseBodySnip)
+		if f.Response != nil && len(f.Response.Body) > 0 {
+			body := string(f.Response.Body)
 			if len(body) > 500 {
 				body = body[:500] + "..."
 			}
@@ -469,10 +513,8 @@ func formatFlowAnalysis(flows []Flow) string {
 	return sb.String()
 }
 
-func writeHeaders(sb *strings.Builder, h http.Header) {
-	for k, vals := range h {
-		for _, v := range vals {
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, v))
-		}
+func writeHeaders(sb *strings.Builder, headers []traffic.Pair) {
+	for _, p := range headers {
+		sb.WriteString(fmt.Sprintf("  %s: %s\n", p.Name, p.Value))
 	}
 }

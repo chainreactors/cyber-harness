@@ -1,8 +1,6 @@
 package proxy
 
 import (
-	"net/http"
-	"strconv"
 	"sync"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
@@ -66,35 +64,17 @@ func (h *ProxyHub) Subscribe(buffer int) (<-chan *traffic.Flow, func()) {
 	return channel, cancel
 }
 
+// flowToProto renders a stored flow as a wire Flow: the exchange semantics go
+// through the canonical Exchange, attribution (tool id, timestamp) is stamped
+// on top.
 func flowToProto(flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
-	message := &traffic.Flow{
-		Id:              strconv.Itoa(flow.ID),
-		ToolId:          flow.ToolID,
-		Method:          flow.Method,
-		Url:             flow.URL,
-		StatusCode:      int32(flow.StatusCode),
-		RequestHeaders:  headersToProto(flow.RequestHeaders),
-		ResponseHeaders: headersToProto(flow.ResponseHeaders),
-		RequestBody:     flow.RequestBodySnip,
-		ResponseBody:    flow.ResponseBodySnip,
-		Error:           flow.Error,
-		Complete:        flow.Error == "" && flow.StatusCode != 0,
-	}
+	message := flow.Proto()
+	message.ToolId = flow.ToolID
 	if !flow.Timestamp.IsZero() {
 		message.Timestamp = timestamppb.New(flow.Timestamp)
 	}
 	return message
-}
-
-func headersToProto(headers http.Header) []*traffic.Header {
-	var result []*traffic.Header
-	for name, values := range headers {
-		for _, value := range values {
-			result = append(result, &traffic.Header{Name: name, Value: value})
-		}
-	}
-	return result
 }
