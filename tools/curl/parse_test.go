@@ -273,6 +273,17 @@ func TestParseHeadDoesNotOverrideExplicitMethod(t *testing.T) {
 	}
 }
 
+func TestParseHeadRejectsRequestBody(t *testing.T) {
+	for _, args := range [][]string{
+		{"-I", "-d", "a=1", "https://x"},
+		{"-I", "-X", "POST", "-F", "a=b", "https://x"},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("Parse(%v) accepted a body with --head", args)
+		}
+	}
+}
+
 func TestNormalizeCurlURLPathRFCExamples(t *testing.T) {
 	cases := map[string]string{
 		"/a/b/c/./../../g":   "/a/g",
