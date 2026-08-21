@@ -216,7 +216,7 @@ func (a *captureAddon) Response(f *mitmproxy.Flow) {
 		flow.Request.Body = snip(f.Request.Body, maxBodySnip)
 	}
 	if f.Response != nil {
-		flow.Exchange.Response = &traffic.Response{
+		flow.Response = &traffic.Response{
 			StatusCode: f.Response.StatusCode,
 			Headers:    pairsFromHTTP(f.Response.Header),
 		}
@@ -326,7 +326,7 @@ func (s *FlowStore) Add(f Flow) Flow {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
-	f.Exchange.ID = strconv.Itoa(s.seq)
+	f.ID = strconv.Itoa(s.seq)
 	if len(s.flows) >= s.cap {
 		copy(s.flows, s.flows[1:])
 		s.flows[len(s.flows)-1] = f
@@ -366,7 +366,7 @@ func (s *FlowStore) Get(id int) *Flow {
 	defer s.mu.RUnlock()
 	want := strconv.Itoa(id)
 	for i := range s.flows {
-		if s.flows[i].Exchange.ID == want {
+		if s.flows[i].ID == want {
 			f := s.flows[i]
 			return &f
 		}
@@ -434,7 +434,7 @@ func formatFlowList(flows []Flow) string {
 			errMark = " ERR"
 		}
 		sb.WriteString(fmt.Sprintf("  %-6s %-6s %-4d %-50s %-14s %dms%s\n",
-			f.Exchange.ID, f.Request.Method, statusCodeOf(&f), urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
+			f.ID, f.Request.Method, statusCodeOf(&f), urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
 	}
 	return sb.String()
 }
@@ -449,7 +449,7 @@ func statusCodeOf(f *Flow) int {
 
 func formatFlowDetail(f *Flow) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== Flow #%s ===\n", f.Exchange.ID))
+	sb.WriteString(fmt.Sprintf("=== Flow #%s ===\n", f.ID))
 	sb.WriteString(fmt.Sprintf("Time: %s  Method: %s  Status: %d  Duration: %dms  TLS: %v\n",
 		f.Timestamp.Format(time.RFC3339), f.Request.Method, statusCodeOf(f), f.Duration.Milliseconds(), f.TLS))
 	sb.WriteString(fmt.Sprintf("URL: %s\n", f.Request.URL))
@@ -498,7 +498,7 @@ func formatFlowAnalysis(flows []Flow) string {
 	sb.WriteString("\n\n")
 
 	for _, f := range flows {
-		sb.WriteString(fmt.Sprintf("#%s [%d] %s %s (%dms)\n", f.Exchange.ID, statusCodeOf(&f), f.Request.Method, f.Request.URL, f.Duration.Milliseconds()))
+		sb.WriteString(fmt.Sprintf("#%s [%d] %s %s (%dms)\n", f.ID, statusCodeOf(&f), f.Request.Method, f.Request.URL, f.Duration.Milliseconds()))
 		if f.Error != "" {
 			sb.WriteString(fmt.Sprintf("  ERROR: %s\n", f.Error))
 		}

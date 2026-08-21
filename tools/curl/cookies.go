@@ -36,7 +36,7 @@ func seedCookies(jar http.CookieJar, target *url.URL, spec, workDir string) erro
 		line = strings.TrimPrefix(line, "#HttpOnly_")
 		if fields := strings.Split(line, "\t"); len(fields) == 7 {
 			// domain, flag, path, secure, expiration, name, value
-			jar.SetCookies(cookieURL(fields[0], fields[2], target), []*http.Cookie{{Name: fields[5], Value: fields[6]}})
+			jar.SetCookies(cookieURL(fields[0], fields[2], target), []*http.Cookie{newCookie(fields[5], fields[6])})
 			continue
 		}
 		inline = append(inline, parseCookieString(line)...)
@@ -54,9 +54,15 @@ func parseCookieString(spec string) []*http.Cookie {
 		if !ok || name == "" {
 			continue
 		}
-		cookies = append(cookies, &http.Cookie{Name: strings.TrimSpace(name), Value: strings.TrimSpace(value)})
+		cookies = append(cookies, newCookie(strings.TrimSpace(name), strings.TrimSpace(value)))
 	}
 	return cookies
+}
+
+func newCookie(name, value string) *http.Cookie {
+	// Cookie flags are supplied by the caller's cookie source. This tool is a
+	// client-side jar, so it must not invent Secure/HttpOnly/SameSite policy.
+	return &http.Cookie{Name: name, Value: value} //nolint:gosec // G124: preserve source cookie attributes
 }
 
 func cookieURL(domain, path string, fallback *url.URL) *url.URL {
