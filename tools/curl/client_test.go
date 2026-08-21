@@ -478,6 +478,28 @@ func TestFailSuppressesHTTPErrorBody(t *testing.T) {
 	}
 }
 
+func TestFailLeavesOutputFileUntouchedWithoutInclude(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not-found-body"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "existing.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := run(t, []string{"-f", "-o", "existing.txt", srv.URL}, "", dir)
+	if err == nil || !strings.Contains(err.Error(), "(22)") {
+		t.Fatalf("error = %v, want curl status 22", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != "old" {
+		t.Fatalf("--fail changed output file: %q err=%v", data, readErr)
+	}
+}
+
 func TestShortMaxTimeAliasBoundsTransfer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(150 * time.Millisecond)

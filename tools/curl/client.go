@@ -140,6 +140,12 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	if err := dumpResponseHeaders(req, responses.all(), workDir, stdout); err != nil {
 		return err
 	}
+	failed := req.Fail && resp.StatusCode >= http.StatusBadRequest
+	if failed && !req.Include {
+		// curl leaves -o untouched (and does not create it) when --fail rejects
+		// a response, unless headers were explicitly requested with -i.
+		return c.failResponse(ctx, client, req, resp, workDir, stdout)
+	}
 
 	out, closeOut, err := outputWriter(req, workDir, stdout)
 	if err != nil {
@@ -152,17 +158,8 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 			writeStatusAndHeaders(out, response)
 		}
 	}
-	if req.Fail && resp.StatusCode >= http.StatusBadRequest {
-		// --fail suppresses the response body and returns curl's conventional
-		// status-22 error. Header output, cookie persistence and -w still happen.
-		if err := persistResponseCookies(c, client, req, resp, workDir); err != nil {
-			return err
-		}
-		if req.WriteOut != "" {
-			fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, 0))
-		}
-		c.emitArtifact(ctx, resp, 0)
-		return fmt.Errorf("curl: (22) The requested URL returned error: %s", resp.Status)
+	if failed {
+		return c.failResponse(ctx, client, req, resp, workDir, stdout)
 	}
 	var written int64
 	if req.Head {
@@ -190,6 +187,17 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 
 	c.emitArtifact(ctx, resp, written)
 	return nil
+}
+
+func (c *Command) failResponse(ctx context.Context, client *http.Client, req *Request, resp *http.Response, workDir string, stdout io.Writer) error {
+	if err := persistResponseCookies(c, client, req, resp, workDir); err != nil {
+		return err
+	}
+	if req.WriteOut != "" {
+		fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, 0))
+	}
+	c.emitArtifact(ctx, resp, 0)
+	return fmt.Errorf("curl: (22) The requested URL returned error: %s", resp.Status)
 }
 
 func isTimeoutError(err error) bool {
