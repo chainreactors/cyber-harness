@@ -109,10 +109,10 @@ func TestCaptureHTTPAndHTTPS(t *testing.T) {
 	}
 	var sawHTTP, sawHTTPSDecoded bool
 	for _, f := range flows {
-		if !f.TLS && strings.Contains(string(f.ResponseBodySnip), "plain") {
+		if !f.TLS && strings.Contains(string(f.Response.Body), "plain") {
 			sawHTTP = true
 		}
-		if f.TLS && strings.Contains(string(f.ResponseBodySnip), `"ok":true`) {
+		if f.TLS && strings.Contains(string(f.Response.Body), `"ok":true`) {
 			sawHTTPSDecoded = true // decrypted body proves real MITM
 		}
 	}
@@ -141,10 +141,10 @@ func TestCapturePostRequestBody(t *testing.T) {
 	flows := hub.Store().Query(QueryOpts{})
 	var found bool
 	for _, f := range flows {
-		if f.Method == "POST" && strings.Contains(string(f.RequestBodySnip), "payload-marker") {
+		if f.Request.Method == "POST" && strings.Contains(string(f.Request.Body), "payload-marker") {
 			found = true
-			if f.StatusCode != 201 {
-				t.Errorf("status = %d, want 201", f.StatusCode)
+			if f.Response.StatusCode != 201 {
+				t.Errorf("status = %d, want 201", f.Response.StatusCode)
 			}
 		}
 	}
@@ -193,7 +193,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 	}
 	first := store.Query(QueryOpts{Last: 1})
 	if len(first) == 1 {
-		out := runMitm(t, store, hub, "flow", fmt.Sprintf("%d", first[0].ID))
+		out := runMitm(t, store, hub, "flow", first[0].ID)
 		if !strings.Contains(out, "Request Headers") {
 			t.Errorf("flow detail missing headers: %q", out)
 		}
@@ -217,8 +217,8 @@ func TestCaptureLargeBodyIsSnipped(t *testing.T) {
 	get(t, client, srv.URL)
 
 	for _, f := range hub.Store().Query(QueryOpts{}) {
-		if len(f.ResponseBodySnip) > maxBodySnip {
-			t.Fatalf("body snip = %d, want <= %d", len(f.ResponseBodySnip), maxBodySnip)
+		if len(f.Response.Body) > maxBodySnip {
+			t.Fatalf("body snip = %d, want <= %d", len(f.Response.Body), maxBodySnip)
 		}
 	}
 }
