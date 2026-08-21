@@ -487,8 +487,8 @@ func TestShortMaxTimeAliasBoundsTransfer(t *testing.T) {
 
 	started := time.Now()
 	_, _, err := run(t, []string{"-m", "0.01", srv.URL}, "", "")
-	if err == nil {
-		t.Fatal("-m did not enforce a transfer deadline")
+	if err == nil || !strings.Contains(err.Error(), "(28)") {
+		t.Fatalf("-m timeout error = %v, want curl status 28", err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("-m timeout took %s", elapsed)

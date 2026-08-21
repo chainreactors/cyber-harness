@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -125,6 +126,9 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("curl: (28) %w", err)
+		}
 		return fmt.Errorf("curl: (7) %w", err)
 	}
 	defer resp.Body.Close()
