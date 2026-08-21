@@ -185,7 +185,7 @@ func Parse(args []string) (*Request, error) {
 	if r.Head {
 		r.Include = true
 	}
-	if r.Head && (len(r.Data) > 0 || len(r.Form) > 0) {
+	if r.Head && !r.Get && (len(r.Data) > 0 || len(r.Form) > 0) {
 		return nil, fmt.Errorf("curl: (2) cannot combine -I/--head with -d/--data or -F/--form")
 	}
 	if len(r.Form) > 0 && len(r.Data) > 0 {

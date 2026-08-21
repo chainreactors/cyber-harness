@@ -664,8 +664,7 @@ func (t *asciiTrace) block(direction, event string, data []byte) {
 		for column := 0; column < width && offset+column < len(data); column++ {
 			if offset+column+1 < len(data) && data[offset+column] == '\r' && data[offset+column+1] == '\n' {
 				// libcurl removes CRLF from the visible row but advances the
-				// offset by both raw bytes. Keep an empty row when a callback
-				// starts with CRLF, just like curl's dump() helper.
+				// offset by both raw bytes.
 				nextOffset = offset + column + 2
 				break
 			}
@@ -680,11 +679,8 @@ func (t *asciiTrace) block(direction, event string, data []byte) {
 				break
 			}
 		}
-		fmt.Fprintf(t.w, "%04x: %s\n", lineOffset, line)
-		if nextOffset <= offset {
-			// Defensive guard for malformed arithmetic; the normal paths
-			// always advance by at least one byte.
-			nextOffset = offset + 1
+		if len(line) > 0 {
+			fmt.Fprintf(t.w, "%04x: %s\n", lineOffset, line)
 		}
 		offset = nextOffset
 	}
@@ -908,10 +904,9 @@ func resolvePath(workDir, path string) string {
 }
 
 // normalizeCurlURLPath implements the URL dot-segment cleanup performed by
-// curl unless --path-as-is is selected. It deliberately operates on the raw
-// escaped path, so an encoded "%2e" is data rather than a dot segment. Empty
-// segments are retained except when consumed by a preceding "..", matching
-// curl's treatment of repeated slashes.
+// curl unless --path-as-is is selected. Dot segments are recognized after
+// unescaping the segment, so encoded forms such as %2e%2e behave like .. while
+// other escapes remain intact in the request target.
 func normalizeCurlURLPath(u *url.URL) {
 	raw := u.EscapedPath()
 	if raw == "" {
@@ -919,7 +914,7 @@ func normalizeCurlURLPath(u *url.URL) {
 		u.RawPath = ""
 		return
 	}
-	trailingSlash := strings.HasSuffix(raw, "/") || strings.HasSuffix(raw, "/.") || strings.HasSuffix(raw, "/..")
+	trailingSlash := strings.HasSuffix(raw, "/")
 	parts := strings.Split(raw, "/")
 	out := make([]string, 0, len(parts))
 	for i, part := range parts {
@@ -929,9 +924,8 @@ func normalizeCurlURLPath(u *url.URL) {
 			out = append(out, part)
 			continue
 		}
-		switch part {
+		switch dotSegment(part) {
 		case ".":
-			// A terminal dot segment implies a trailing slash.
 			if i == len(parts)-1 {
 				trailingSlash = true
 			}
@@ -974,6 +968,17 @@ func normalizeCurlURLPath(u *url.URL) {
 	} else {
 		u.RawPath = cleaned
 	}
+}
+
+func dotSegment(raw string) string {
+	decoded, err := url.PathUnescape(raw)
+	if err != nil {
+		return raw
+	}
+	if decoded == "." || decoded == ".." {
+		return decoded
+	}
+	return raw
 }
 
 func writeStatusAndHeaders(w io.Writer, resp *http.Response) {
