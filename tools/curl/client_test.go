@@ -523,6 +523,45 @@ func TestResolveMapsDialWithoutChangingHost(t *testing.T) {
 	}
 }
 
+func TestResolvePreservesTLSServerNameAndHost(t *testing.T) {
+	var gotHost string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		_, _ = w.Write([]byte("secure-resolved"))
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := run(t, []string{
+		"-k", "--resolve", "example.test:" + u.Port() + ":127.0.0.1",
+		"https://example.test:" + u.Port() + "/",
+	}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "secure-resolved" {
+		t.Fatalf("body = %q", out)
+	}
+	if gotHost != "example.test:"+u.Port() {
+		t.Fatalf("Host = %q, want example.test:%s", gotHost, u.Port())
+	}
+}
+
+func TestResolveRejectsActiveProxy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("proxy"))
+	}))
+	defer srv.Close()
+	if _, _, err := run(t, []string{
+		"--resolve", "example.test:80:127.0.0.1", "-x", srv.URL,
+		"http://example.test/",
+	}, "", ""); err == nil || !strings.Contains(err.Error(), "--resolve cannot be used with a proxy") {
+		t.Fatalf("resolve with proxy error = %v", err)
+	}
+}
+
 func TestResolveWildcardMapsDial(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("wildcard"))
