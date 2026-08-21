@@ -14,12 +14,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
@@ -79,8 +81,15 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	if err != nil {
 		return err
 	}
+	trace, err := openASCIITrace(req.TraceASCII, workDir, stdout, stderr)
+	if err != nil {
+		return err
+	}
+	if trace != nil {
+		defer func() { _ = trace.Close() }()
+	}
 	responses := &responseCapture{}
-	client.Transport = &capturingTransport{base: client.Transport, capture: responses}
+	client.Transport = &capturingTransport{base: client.Transport, capture: responses, trace: trace}
 
 	target, err := url.Parse(strings.TrimSpace(req.URL))
 	if err != nil || target.Scheme == "" || target.Host == "" {
@@ -118,6 +127,21 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		if err := seedCookies(client.Jar, target, req.CookieIn, workDir); err != nil {
 			return err
 		}
+	}
+	if trace != nil {
+		traceCtx := &httptrace.ClientTrace{
+			ConnectStart: func(network, addr string) {
+				trace.info("  Trying %s...", addr)
+			},
+			ConnectDone: func(network, addr string, connectErr error) {
+				if connectErr != nil {
+					trace.info("  Failed to connect to %s: %v", addr, connectErr)
+					return
+				}
+				trace.info("  Connected to %s", addr)
+			},
+		}
+		httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), traceCtx))
 	}
 
 	if req.Verbose && !req.Silent {
@@ -275,9 +299,14 @@ func (c *Command) buildClient(proxyURL, caPath string, req *Request) (*http.Clie
 	}
 	forceHTTP2 := req.HTTP2 || !req.HTTP11
 	transport := &http.Transport{
-		TLSClientConfig:     tlsConfig,
-		DialContext:         dialContext,
-		ForceAttemptHTTP2:   forceHTTP2,
+		TLSClientConfig:   tlsConfig,
+		DialContext:       dialContext,
+		ForceAttemptHTTP2: forceHTTP2,
+		// Trace the bytes delivered by the transport rather than an implicit
+		// auto-decompressed gzip stream. An explicit Accept-Encoding header is
+		// still honored; this only disables Go's automatic compression behavior
+		// while --trace-ascii is active.
+		DisableCompression:  req.TraceASCII != "",
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: dialTimeout,
@@ -543,14 +572,205 @@ func (c *responseCapture) all() []*http.Response {
 type capturingTransport struct {
 	base    http.RoundTripper
 	capture *responseCapture
+	trace   *asciiTrace
 }
 
 func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.trace != nil {
+		header, body := traceRequestParts(req)
+		t.trace.block("=>", "Send header", header)
+		if len(body) > 0 {
+			t.trace.block("=>", "Send data", body)
+		}
+	}
 	resp, err := t.base.RoundTrip(req)
 	if err == nil && t.capture != nil {
 		t.capture.add(resp)
 	}
+	if err == nil && resp != nil && t.trace != nil {
+		for _, header := range traceResponseHeaderBlocks(resp) {
+			t.trace.block("<=", "Recv header", header)
+		}
+		if resp.Body != nil {
+			resp.Body = &traceReadCloser{ReadCloser: resp.Body, trace: t.trace}
+		}
+	}
 	return resp, err
+}
+
+// asciiTrace is the local diagnostic sink used by --trace-ascii. It is kept
+// separate from the Hub/evidence path: tracing observes the request and
+// response but never changes attribution or transport routing.
+type asciiTrace struct {
+	mu     sync.Mutex
+	w      io.Writer
+	closef func() error
+}
+
+func openASCIITrace(path, workDir string, stdout, stderr io.Writer) (*asciiTrace, error) {
+	if path == "" {
+		return nil, nil
+	}
+	if path == "-" {
+		return &asciiTrace{w: stdout}, nil
+	}
+	if path == "%" {
+		return &asciiTrace{w: stderr}, nil
+	}
+	file, err := os.Create(resolvePath(workDir, path))
+	if err != nil {
+		return nil, fmt.Errorf("curl: (23) Failed to create trace-ascii %q: %w", path, err)
+	}
+	return &asciiTrace{w: file, closef: file.Close}, nil
+}
+
+func (t *asciiTrace) Close() error {
+	if t == nil || t.closef == nil {
+		return nil
+	}
+	return t.closef()
+}
+
+func (t *asciiTrace) info(format string, args ...any) {
+	t.writef("== Info: "+format+"\n", args...)
+}
+
+func (t *asciiTrace) writef(format string, args ...any) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, _ = fmt.Fprintf(t.w, format, args...)
+}
+
+// block renders the same useful shape as curl's ASCII trace: a direction and
+// event line followed by 64-byte offset rows with non-printable bytes shown as
+// dots. CRLF pairs become line breaks while offsets continue to count the raw
+// bytes, matching libcurl's ASCII dump callback. The wire bytes are
+// intentionally kept local and are never emitted as an HTTP artifact.
+func (t *asciiTrace) block(direction, event string, data []byte) {
+	if t == nil {
+		return
+	}
+	const width = 64
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	fmt.Fprintf(t.w, "%s %s, %d bytes (0x%x)\n", direction, event, len(data), len(data))
+	for offset := 0; offset < len(data); {
+		lineOffset := offset
+		line := make([]byte, 0, width)
+		nextOffset := offset + width
+		for column := 0; column < width && offset+column < len(data); column++ {
+			if offset+column+1 < len(data) && data[offset+column] == '\r' && data[offset+column+1] == '\n' {
+				// libcurl removes CRLF from the visible row but advances the
+				// offset by both raw bytes. Keep an empty row when a callback
+				// starts with CRLF, just like curl's dump() helper.
+				nextOffset = offset + column + 2
+				break
+			}
+			value := data[offset+column]
+			if value >= 0x20 && value < 0x80 {
+				line = append(line, value)
+			} else {
+				line = append(line, '.')
+			}
+			if offset+column+2 < len(data) && data[offset+column+1] == '\r' && data[offset+column+2] == '\n' {
+				nextOffset = offset + column + 3
+				break
+			}
+		}
+		fmt.Fprintf(t.w, "%04x: %s\n", lineOffset, line)
+		if nextOffset <= offset {
+			// Defensive guard for malformed arithmetic; the normal paths
+			// always advance by at least one byte.
+			nextOffset = offset + 1
+		}
+		offset = nextOffset
+	}
+}
+
+type traceReadCloser struct {
+	io.ReadCloser
+	trace *asciiTrace
+}
+
+func (r *traceReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 && r.trace != nil {
+		r.trace.block("<=", "Recv data", p[:n])
+	}
+	return n, err
+}
+
+func traceRequestParts(req *http.Request) (header, body []byte) {
+	if req == nil {
+		return nil, nil
+	}
+	if req.GetBody != nil {
+		if bodyReader, err := req.GetBody(); err == nil {
+			body, _ = io.ReadAll(bodyReader)
+			_ = bodyReader.Close()
+		}
+	}
+	var buf bytes.Buffer
+	proto := req.Proto
+	if proto == "" {
+		proto = "HTTP/1.1"
+	}
+	uri := "/"
+	if req.URL != nil {
+		uri = req.URL.RequestURI()
+		if uri == "" {
+			uri = "/"
+		}
+	}
+	host := req.Host
+	if host == "" && req.URL != nil {
+		host = req.URL.Host
+	}
+	fmt.Fprintf(&buf, "%s %s %s\r\n", req.Method, uri, proto)
+	fmt.Fprintf(&buf, "Host: %s\r\n", host)
+	_ = req.Header.Write(&buf)
+	if len(body) > 0 && req.ContentLength >= 0 && req.Header.Get("Content-Length") == "" {
+		fmt.Fprintf(&buf, "Content-Length: %d\r\n", req.ContentLength)
+	}
+	buf.WriteString("\r\n")
+	return buf.Bytes(), body
+}
+
+func traceResponseHeaders(resp *http.Response) []byte {
+	if resp == nil {
+		return nil
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%s %s\r\n", resp.Proto, resp.Status)
+	_ = resp.Header.Write(&buf)
+	buf.WriteString("\r\n")
+	return buf.Bytes()
+}
+
+// traceResponseHeaderBlocks mirrors libcurl's usual debug callback granularity:
+// the status line, each response header, and the terminating CRLF are separate
+// HEADER_IN blocks. Keeping the aggregate serializer above is useful for tests
+// and makes the wire representation easy to inspect before splitting.
+func traceResponseHeaderBlocks(resp *http.Response) [][]byte {
+	raw := traceResponseHeaders(resp)
+	if len(raw) == 0 {
+		return nil
+	}
+	blocks := make([][]byte, 0, 1+len(resp.Header))
+	for start := 0; start < len(raw); {
+		relEnd := bytes.Index(raw[start:], []byte("\r\n"))
+		if relEnd < 0 {
+			blocks = append(blocks, append([]byte(nil), raw[start:]...))
+			break
+		}
+		end := start + relEnd + 2
+		blocks = append(blocks, append([]byte(nil), raw[start:end]...))
+		start = end
+	}
+	return blocks
 }
 
 func dumpResponseHeaders(req *Request, responses []*http.Response, workDir string, stdout io.Writer) error {

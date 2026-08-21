@@ -1,6 +1,7 @@
 package curl
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -380,6 +381,115 @@ func TestDumpHeadersIncludesRedirectResponses(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "X-First: yes") || !strings.Contains(text, "X-Second: yes") || !strings.Contains(text, "302 Found") || !strings.Contains(text, "200 OK") {
 		t.Fatalf("redirect headers = %q", text)
+	}
+}
+
+func TestTraceASCIIFileContainsWireMarkersAndSanitizedData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Trace", "yes")
+		_, _ = w.Write([]byte("hello\x00world\xff"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	out, _, err := run(t, []string{"--trace-ascii", "trace.log", "-d", "secret=body", srv.URL}, "", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "hello\x00world\xff" {
+		t.Fatalf("response body = %q", out)
+	}
+	trace, err := os.ReadFile(filepath.Join(dir, "trace.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(trace)
+	for _, marker := range []string{"=> Send header", "=> Send data", "<= Recv header", "<= Recv data", "0000:"} {
+		if !strings.Contains(text, marker) {
+			t.Fatalf("trace missing %q:\n%s", marker, text)
+		}
+	}
+	if !strings.Contains(text, "secret=body") || !strings.Contains(text, "hello.world.") {
+		t.Fatalf("trace did not contain expected ASCII/body representation:\n%s", text)
+	}
+}
+
+func TestTraceASCIIDashAndPercentDestinations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("body"))
+	}))
+	defer srv.Close()
+
+	out, errOut, err := run(t, []string{"--trace-ascii", "-", srv.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "=> Send header") || !strings.Contains(out, "body") {
+		t.Fatalf("trace '-' should share stdout with body: %q", out)
+	}
+	if errOut != "" {
+		t.Fatalf("trace '-' wrote stderr: %q", errOut)
+	}
+
+	out, errOut, err = run(t, []string{"--trace-ascii", "%", srv.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "body" || !strings.Contains(errOut, "=> Send header") {
+		t.Fatalf("trace '%%' should use stderr: stdout=%q stderr=%q", out, errOut)
+	}
+}
+
+func TestTraceASCIIFormatterHandlesCRLFAndRawOffsets(t *testing.T) {
+	var output bytes.Buffer
+	trace := &asciiTrace{w: &output}
+	data := append(bytes.Repeat([]byte{'A'}, 64), '\r', '\n', 'B')
+	trace.block("<=", "Recv data", data)
+	text := output.String()
+	if !strings.Contains(text, "0000: "+strings.Repeat("A", 64)+"\n") {
+		t.Fatalf("first trace row = %q", text)
+	}
+	if !strings.Contains(text, "0042: B\n") {
+		t.Fatalf("CRLF did not advance the raw offset: %q", text)
+	}
+}
+
+func TestTraceASCIIResponseHeadersUseCurlCallbackBlocks(t *testing.T) {
+	resp := &http.Response{
+		Proto:  "HTTP/1.1",
+		Status: "200 OK",
+		Header: http.Header{"X-First": {"one"}, "X-Second": {"two"}},
+	}
+	blocks := traceResponseHeaderBlocks(resp)
+	if len(blocks) != 4 { // status, two fields, terminating CRLF
+		t.Fatalf("header blocks = %d, want 4: %#v", len(blocks), blocks)
+	}
+	if string(blocks[0]) != "HTTP/1.1 200 OK\r\n" || string(blocks[len(blocks)-1]) != "\r\n" {
+		t.Fatalf("header block boundaries are not curl-shaped: %#v", blocks)
+	}
+}
+
+func TestTraceASCIIIncludesRedirectTransfers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("final"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if _, _, err := run(t, []string{"-L", "--trace-ascii", "trace.log", srv.URL + "/start"}, "", dir); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := os.ReadFile(filepath.Join(dir, "trace.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(trace)
+	if strings.Count(text, "=> Send header") < 2 || strings.Count(text, "<= Recv header") < 2 {
+		t.Fatalf("redirect trace did not include both transfers:\n%s", text)
 	}
 }
 

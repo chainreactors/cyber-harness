@@ -59,6 +59,7 @@ type Request struct {
 
 	Output     string         // -o
 	DumpHeader string         // -D: write response headers to a file (or - for stdout)
+	TraceASCII string         // --trace-ascii: write an ASCII wire trace to a file
 	Include    bool           // -i
 	Head       bool           // -I/--head: issue a HEAD request and include headers
 	Silent     bool           // -s
@@ -321,6 +322,18 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 			return err
 		}
 		r.DumpHeader = v
+	case "trace-ascii":
+		v, err := need()
+		if err != nil {
+			return err
+		}
+		if v == "" {
+			return fmt.Errorf("curl: --trace-ascii requires a non-empty file")
+		}
+		// curl's trace and verbose modes are mutually exclusive; the last
+		// selector wins when command-line options are repeated.
+		r.TraceASCII = v
+		r.Verbose = false
 	case "include":
 		r.Include = true
 	case "head":
@@ -340,6 +353,7 @@ func (r *Request) applyLong(name string, need func() (string, error)) error {
 		r.WriteOut = v
 	case "verbose":
 		r.Verbose = true
+		r.TraceASCII = ""
 	case "insecure":
 		r.Insecure = true
 	case "no-buffer":
