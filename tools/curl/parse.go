@@ -463,7 +463,10 @@ func parseSeconds(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("expects a non-negative number of seconds: %q", v)
 	}
 	nanos := f * float64(time.Second)
-	if nanos > float64((1<<63)-1) {
+	// float64((1<<63)-1) rounds up to 1<<63. Use an inclusive bound so a
+	// value that would wrap time.Duration into a negative duration is rejected
+	// instead of silently turning into an effectively unbounded timeout.
+	if nanos >= float64(1<<63) {
 		return 0, fmt.Errorf("is too large: %q", v)
 	}
 	return time.Duration(nanos), nil
