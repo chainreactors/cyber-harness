@@ -189,8 +189,7 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 	if req.Head {
 		// Drain and discard a body some non-conforming servers attach to a
 		// header-only request, so the connection remains reusable.
-		written, err = io.Copy(io.Discard, resp.Body)
-		written = 0
+		_, err = io.Copy(io.Discard, resp.Body)
 	} else {
 		written, err = copyResponse(out, resp.Body, req.NoBuffer)
 	}
@@ -552,21 +551,28 @@ func outputWriter(req *Request, workDir string, stdout io.Writer) (io.Writer, fu
 	return file, func() { _ = file.Close() }, nil
 }
 
+type responseSnapshot struct {
+	Proto  string
+	Status string
+	Header http.Header
+}
+
 type responseCapture struct {
-	responses []*http.Response
+	responses []responseSnapshot
 }
 
 func (c *responseCapture) add(resp *http.Response) {
 	if resp != nil {
-		c.responses = append(c.responses, resp)
+		c.responses = append(c.responses, responseSnapshot{
+			Proto:  resp.Proto,
+			Status: resp.Status,
+			Header: resp.Header.Clone(),
+		})
 	}
 }
 
-func (c *responseCapture) all() []*http.Response {
-	if len(c.responses) == 0 {
-		return nil
-	}
-	return append([]*http.Response(nil), c.responses...)
+func (c *responseCapture) all() []responseSnapshot {
+	return c.responses
 }
 
 type capturingTransport struct {
@@ -769,7 +775,7 @@ func traceResponseHeaderBlocks(resp *http.Response) [][]byte {
 	return blocks
 }
 
-func dumpResponseHeaders(req *Request, responses []*http.Response, workDir string, stdout io.Writer) error {
+func dumpResponseHeaders(req *Request, responses []responseSnapshot, workDir string, stdout io.Writer) error {
 	if req.DumpHeader == "" {
 		return nil
 	}
@@ -981,7 +987,7 @@ func dotSegment(raw string) string {
 	return raw
 }
 
-func writeStatusAndHeaders(w io.Writer, resp *http.Response) {
+func writeStatusAndHeaders(w io.Writer, resp responseSnapshot) {
 	fmt.Fprintf(w, "%s %s\r\n", resp.Proto, resp.Status)
 	_ = resp.Header.Write(w)
 	fmt.Fprint(w, "\r\n")

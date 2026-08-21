@@ -81,7 +81,7 @@ type Request struct {
 }
 
 // ResolveEntry describes one --resolve mapping. Addresses are tried in order
-// when a target is dialled; the URL host (and therefore the HTTP Host and TLS
+// when a target is dialed; the URL host (and therefore the HTTP Host and TLS
 // SNI name) remains unchanged.
 type ResolveEntry struct {
 	Host      string
