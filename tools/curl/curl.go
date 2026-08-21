@@ -70,6 +70,7 @@ Supported options:
   -u, --user <user:password>   Basic authentication
   -o, --output <file>          Write body to file instead of stdout
   -D, --dump-header <file>     Write response headers to a separate file
+      --trace-ascii <file>     Write an ASCII trace (- stdout, % stderr)
   -i, --include                Include response headers in the output
   -I, --head                   Fetch headers only (HEAD request)
   -s, --silent                 Silent mode

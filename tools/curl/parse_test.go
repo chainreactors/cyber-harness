@@ -236,6 +236,33 @@ func TestParseCompatibilityFlags(t *testing.T) {
 	}
 }
 
+func TestParseTraceASCII(t *testing.T) {
+	req, err := Parse([]string{"--trace-ascii", "trace.log", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.TraceASCII != "trace.log" || req.Verbose {
+		t.Fatalf("trace-ascii parsed incorrectly: %+v", req)
+	}
+}
+
+func TestParseTraceVerboseLastOptionWins(t *testing.T) {
+	trace, err := Parse([]string{"--trace-ascii", "trace.log", "-v", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.TraceASCII != "" || !trace.Verbose {
+		t.Fatalf("verbose should disable an earlier trace: %+v", trace)
+	}
+	verbose, err := Parse([]string{"-v", "--trace-ascii", "trace.log", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verbose.TraceASCII != "trace.log" || verbose.Verbose {
+		t.Fatalf("trace should disable an earlier verbose: %+v", verbose)
+	}
+}
+
 func TestParseHTTPVersionLastOptionWins(t *testing.T) {
 	first, err := Parse([]string{"--http2", "--http1.1", "https://x"})
 	if err != nil {
