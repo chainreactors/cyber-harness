@@ -126,7 +126,7 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		if isTimeoutError(err) {
 			return fmt.Errorf("curl: (28) %w", err)
 		}
 		return fmt.Errorf("curl: (7) %w", err)
@@ -174,7 +174,7 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		written, err = copyResponse(out, resp.Body, req.NoBuffer)
 	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		if isTimeoutError(err) {
 			return fmt.Errorf("curl: (28) %w", err)
 		}
 		return fmt.Errorf("curl: (56) %w", err)
@@ -190,6 +190,14 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 
 	c.emitArtifact(ctx, resp, written)
 	return nil
+}
+
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // egress reads the hub proxy and CA path the runner injected into this
