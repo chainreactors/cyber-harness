@@ -449,6 +449,9 @@ func TestTraceASCIIFormatterHandlesCRLFAndRawOffsets(t *testing.T) {
 	if !strings.Contains(text, "0000: "+strings.Repeat("A", 64)+"\n") {
 		t.Fatalf("first trace row = %q", text)
 	}
+	if strings.Contains(text, "0040:") {
+		t.Fatalf("trace emitted an empty CRLF row = %q", text)
+	}
 	if !strings.Contains(text, "0042: B\n") {
 		t.Fatalf("CRLF did not advance the raw offset: %q", text)
 	}
@@ -557,8 +560,8 @@ func TestDefaultPathNormalizationAndPathAsIs(t *testing.T) {
 	}
 }
 
-func TestPathNormalizationPreservesEncodedDots(t *testing.T) {
-	paths := make(chan string, 1)
+func TestPathNormalizationHandlesEncodedDots(t *testing.T) {
+	paths := make(chan string, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths <- r.URL.EscapedPath()
 		w.WriteHeader(http.StatusNoContent)
@@ -567,8 +570,35 @@ func TestPathNormalizationPreservesEncodedDots(t *testing.T) {
 	if _, _, err := run(t, []string{srv.URL + "/%2e%2e/x"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := run(t, []string{"--path-as-is", srv.URL + "/%2e%2e/x"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-paths; got != "/x" {
+		t.Fatalf("default encoded dot path = %q, want /x", got)
+	}
 	if got := <-paths; got != "/%2e%2e/x" {
-		t.Fatalf("encoded dot path = %q", got)
+		t.Fatalf("--path-as-is encoded dot path = %q", got)
+	}
+}
+
+func TestHeadGetDataUsesQuery(t *testing.T) {
+	var method, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.RequestURI()
+		w.Header().Set("X-Head-Get", "yes")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	out, _, err := run(t, []string{"-I", "-G", "-d", "a=1", srv.URL}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodHead || path != "/?a=1" {
+		t.Fatalf("request = %s %s, want HEAD /?a=1", method, path)
+	}
+	if !strings.Contains(out, "X-Head-Get: yes") {
+		t.Fatalf("head output = %q", out)
 	}
 }
 

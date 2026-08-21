@@ -321,6 +321,16 @@ func TestParseHeadRejectsRequestBody(t *testing.T) {
 	}
 }
 
+func TestParseHeadGetDataUsesQuery(t *testing.T) {
+	req, err := Parse([]string{"-I", "-G", "-d", "a=1", "https://x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != "HEAD" || !req.Head || !req.Get || len(req.Data) != 1 {
+		t.Fatalf("head GET data parsed incorrectly: %+v", req)
+	}
+}
+
 func TestNormalizeCurlURLPathRFCExamples(t *testing.T) {
 	cases := map[string]string{
 		"/a/b/c/./../../g":   "/a/g",
@@ -344,12 +354,15 @@ func TestNormalizeCurlURLPathRFCExamples(t *testing.T) {
 
 func TestNormalizeCurlURLPathRepeatedSlashExamples(t *testing.T) {
 	cases := map[string]string{
-		"//a///b":    "/a///b",
-		"/a//../b":   "/a/b",
-		"/a/./b":     "/a/b",
-		"/../x":      "/x",
-		"/../../x":   "/x",
-		"/a//b/../c": "/a//c",
+		"//a///b":     "/a///b",
+		"/a//../b":    "/a/b",
+		"/a/./b":      "/a/b",
+		"/../x":       "/x",
+		"/../../x":    "/x",
+		"/a//b/../c":  "/a//c",
+		"/a/%2e%2e/b": "/b",
+		"/a/%2E./b":   "/b",
+		"/a/.%2e/b":   "/b",
 	}
 	for input, want := range cases {
 		u, _ := url.Parse("http://example.test" + input)
