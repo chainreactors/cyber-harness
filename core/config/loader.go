@@ -30,7 +30,7 @@ func newConfigLoader() *gkcfg.Config {
 
 func LoadConfig(filename string, v interface{}) error {
 	c := newConfigLoader()
-	if err := c.LoadFiles(filename); err != nil {
+	if err := c.LoadFilesByFormat(gkcfg.Yaml, filename); err != nil {
 		return err
 	}
 	if err := c.Decode(v); err != nil {
