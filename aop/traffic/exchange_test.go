@@ -2,8 +2,23 @@ package traffic
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/url"
 	"testing"
 )
+
+func TestExchangeFromHTTPUsesCanonicalPairs(t *testing.T) {
+	u, _ := url.Parse("https://example.test/a")
+	req := &http.Request{Method: "POST", URL: u, Proto: "HTTP/1.1", Header: http.Header{"X-Test": {"a", "b"}}}
+	resp := &http.Response{StatusCode: 201, Status: "201 Created", Header: http.Header{"Content-Type": {"application/json"}}}
+	e := ExchangeFromHTTP(req, resp, []byte("req"), []byte("resp"))
+	if e.Request.Method != "POST" || e.Request.URL != u.String() || !e.Complete {
+		t.Fatalf("unexpected exchange: %+v", e)
+	}
+	if len(e.Request.Headers) != 2 || e.Response.StatusCode != 201 || string(e.Response.Body) != "resp" {
+		t.Fatalf("unexpected canonical exchange: %+v", e)
+	}
+}
 
 func TestFlowExchangeRoundTrip(t *testing.T) {
 	flow := &Flow{
