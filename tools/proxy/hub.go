@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,13 +46,17 @@ type ProxyHub struct {
 	// connections while in-flight children are undisturbed.
 	recording atomic.Bool
 	decrypt   atomic.Bool
+	filterMu  sync.RWMutex
+	filter    QueryOpts
 
 	subsMu  sync.Mutex
-	subs    map[int]chan *traffic.Flow
+	subs    map[int]*flowSubscriber
 	nextSub int
 }
 
-const hubStreamLargeBodies = 10 * 1024 * 1024
+// Keep proxy-side buffering bounded. Bodies at or above this threshold are
+// captured through the recorder reader and written to disk incrementally.
+const hubStreamLargeBodies = 64 * 1024
 
 // NewProxyHub builds the hub around an existing State (egress source of truth)
 // and FlowStore (capture sink). Both are owned by the caller so the mitm query
@@ -68,7 +73,7 @@ func NewProxyHub(state *State, store *FlowStore, caRootPath string, capture bool
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
-	h := &ProxyHub{state: state, store: store, subs: make(map[int]chan *traffic.Flow)}
+	h := &ProxyHub{state: state, store: store, subs: make(map[int]*flowSubscriber)}
 	// The CA path is always prepared so capture can be toggled on at runtime;
 	// CAPath only advertises it to children while interception is actually on.
 	h.caPath = filepath.Join(caRootPath, "mitmproxy-ca-cert.pem")
@@ -90,6 +95,50 @@ func (h *ProxyHub) SetCapture(record, decryptHTTPS bool) {
 	h.decrypt.Store(decryptHTTPS)
 }
 
+// SetCaptureFilter applies the existing traffic FlowFilter before a flow is
+// stored or published. It deliberately lives on the hub so filtering reduces
+// both memory/disk work and subscriber traffic.
+func (h *ProxyHub) SetCaptureFilter(filter *traffic.FlowFilter) {
+	h.filterMu.Lock()
+	defer h.filterMu.Unlock()
+	if filter == nil {
+		h.filter = QueryOpts{}
+		return
+	}
+	h.filter = QueryOpts{Host: filter.GetHost(), Status: filter.GetStatus(), CType: filter.GetType()}
+}
+
+func (h *ProxyHub) captureMatches(flow Flow) bool {
+	h.filterMu.RLock()
+	f := h.filter
+	h.filterMu.RUnlock()
+	if f.Host != "" && !strings.Contains(strings.ToLower(flow.Host), strings.ToLower(f.Host)) {
+		return false
+	}
+	if f.Status != "" && (flow.Response == nil || !matchStatus(flow.Response.StatusCode, f.Status)) {
+		return false
+	}
+	if f.CType != "" && !strings.Contains(strings.ToLower(flow.ContentType), strings.ToLower(f.CType)) {
+		return false
+	}
+	return true
+}
+
+func (h *ProxyHub) captureHostAllowed(host string) bool {
+	h.filterMu.RLock()
+	hostFilter := h.filter.Host
+	h.filterMu.RUnlock()
+	return hostFilter == "" || strings.Contains(strings.ToLower(host), strings.ToLower(hostFilter))
+}
+
+func (h *ProxyHub) captureResponseAllowed(status int, contentType string) bool {
+	h.filterMu.RLock()
+	f := h.filter
+	h.filterMu.RUnlock()
+	return (f.Status == "" || matchStatus(status, f.Status)) &&
+		(f.CType == "" || strings.Contains(strings.ToLower(contentType), strings.ToLower(f.CType)))
+}
+
 // Start brings up the MITM listener on an ephemeral loopback port and exports
 // the CA certificate so external processes can trust intercepted HTTPS. It is
 // idempotent: repeated calls return the first outcome.
@@ -104,6 +153,11 @@ func (h *ProxyHub) start(caRootPath string) error {
 	if caRootPath != "" {
 		if err := os.MkdirAll(caRootPath, 0o755); err != nil {
 			return fmt.Errorf("proxy hub: create CA dir: %w", err)
+		}
+		if h.store != nil {
+			if err := h.store.SetBodyDir(filepath.Join(caRootPath, "capture")); err != nil {
+				return fmt.Errorf("proxy hub: create capture dir: %w", err)
+			}
 		}
 	}
 	server, err := mitmproxy.NewProxy(&mitmproxy.Options{
@@ -200,11 +254,15 @@ func (h *ProxyHub) CAPath() string {
 
 // Shutdown stops the listener. Safe to call on a never-started hub.
 func (h *ProxyHub) Shutdown(ctx context.Context) {
+	h.closeSubscribers()
 	h.mu.Lock()
 	server := h.server
 	h.server = nil
 	h.mu.Unlock()
 	if server == nil {
+		if h.store != nil {
+			_ = h.store.Close()
+		}
 		return
 	}
 	if ctx == nil {
@@ -213,4 +271,17 @@ func (h *ProxyHub) Shutdown(ctx context.Context) {
 		defer cancel()
 	}
 	_ = server.Shutdown(ctx)
+	if h.store != nil {
+		_ = h.store.Close()
+	}
+}
+
+func (h *ProxyHub) closeSubscribers() {
+	h.subsMu.Lock()
+	subs := h.subs
+	h.subs = make(map[int]*flowSubscriber)
+	for _, subscriber := range subs {
+		close(subscriber.done)
+	}
+	h.subsMu.Unlock()
 }

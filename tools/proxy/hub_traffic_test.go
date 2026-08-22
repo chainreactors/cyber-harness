@@ -2,11 +2,15 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
+
+	traffic "github.com/chainreactors/aiscan/aop/traffic"
 )
 
 // hubClient builds an HTTP client that routes through the hub with callID as the
@@ -120,5 +124,86 @@ func TestHubSubscribe(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no flow received on subscription")
+	}
+}
+
+func TestHubSubscribeDoesNotDropWhenConsumerIsSlow(t *testing.T) {
+	hub := NewProxyHub(NewState(""), NewFlowStore(128), "", true)
+	ch, cancel := hub.Subscribe(1)
+	defer cancel()
+
+	// Do not read while publishing. The old implementation filled the channel
+	// and silently discarded every flow after the first one; the store-backed
+	// subscriber only records a wake-up and drains its cursor in order.
+	for i := 1; i <= 64; i++ {
+		hub.ingest(Flow{Exchange: traffic.Exchange{
+			ID:       fmt.Sprintf("raw-%d", i),
+			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
+			Response: &traffic.Response{StatusCode: 200},
+		}, ToolID: "tool"})
+	}
+
+	for i := 1; i <= 64; i++ {
+		select {
+		case got := <-ch:
+			if got == nil || got.GetId() != strconv.Itoa(i) {
+				t.Fatalf("flow %d = %#v, want sequential id %d", i, got, i)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for flow %d", i)
+		}
+	}
+}
+
+func TestHubSubscribeFromReplaysRetainedFlows(t *testing.T) {
+	hub := NewProxyHub(NewState(""), NewFlowStore(8), "", true)
+	for i := 1; i <= 3; i++ {
+		hub.ingest(Flow{Exchange: traffic.Exchange{
+			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
+			Response: &traffic.Response{StatusCode: 200},
+		}})
+	}
+	ch, cancel := hub.SubscribeFrom(1, 2)
+	defer cancel()
+	for want := 2; want <= 3; want++ {
+		select {
+		case got := <-ch:
+			if got == nil || got.GetId() != strconv.Itoa(want) {
+				t.Fatalf("replayed flow = %#v, want id %d", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for replayed flow %d", want)
+		}
+	}
+}
+
+func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
+	dir := t.TempDir()
+	first := NewFlowStore(8)
+	if err := first.SetBodyDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	first.Add(Flow{
+		ToolID: "call-1", Host: "example.test", ContentType: "text/plain",
+		Exchange: traffic.Exchange{
+			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
+			Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: "body/1.resp", Size: 10, Complete: true}},
+		},
+	})
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewFlowStore(8)
+	if err := second.SetBodyDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	flows := second.Query(QueryOpts{})
+	if len(flows) != 1 || flows[0].ToolID != "call-1" {
+		t.Fatalf("reloaded flows = %#v", flows)
+	}
+	if flows[0].Response == nil || flows[0].Response.BodyRef == nil || len(flows[0].Response.Body) != 0 {
+		t.Fatalf("reloaded body metadata = %#v", flows[0].Response)
 	}
 }
