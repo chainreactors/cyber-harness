@@ -70,6 +70,7 @@ func (h *TrafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope,
 	if cap := cfg.GetCapture(); cap != nil && cap.GetMode() != traffic.CaptureMode_CAPTURE_MODE_UNSPECIFIED {
 		record := cap.GetMode() == traffic.CaptureMode_CAPTURE_MODE_RECORD
 		h.infra.Hub.SetCapture(record, cap.GetDecryptHttps())
+		h.infra.Hub.SetCaptureFilter(cap.GetFilter())
 		if record && cap.GetStream() {
 			h.startStream(ctx, env.Id, send)
 		} else {
