@@ -59,6 +59,12 @@ type stagedOutputCommand struct {
 	value string
 }
 
+type delayedCommand struct {
+	name   string
+	delay  time.Duration
+	output string
+}
+
 func (c *stagedOutputCommand) Name() string  { return c.name }
 func (c *stagedOutputCommand) Usage() string { return c.name }
 func (c *stagedOutputCommand) Run(_ context.Context, execution *Execution) (any, error) {
@@ -66,6 +72,18 @@ func (c *stagedOutputCommand) Run(_ context.Context, execution *Execution) (any,
 	time.Sleep(75 * time.Millisecond)
 	fmt.Fprint(execution.Stdout, c.value+"-second\n")
 	return nil, nil
+}
+
+func (c *delayedCommand) Run(ctx context.Context, execution *Execution) (any, error) {
+	timer := time.NewTimer(c.delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		_, err := fmt.Fprint(execution.Stdout, c.output)
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (c *outputCommand) Name() string  { return c.name }
@@ -640,6 +658,115 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	}
 }
 
+func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
+	omitted, err := tool.ParseArgs[BashArgs](`{"command":"work"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if omitted.TimeoutSpecified() {
+		t.Fatal("omitted timeout should use the tool default")
+	}
+
+	unlimited, err := tool.ParseArgs[BashArgs](`{"command":"work","timeout":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unlimited.TimeoutSpecified() || unlimited.Timeout != 0 {
+		t.Fatalf("explicit zero timeout was not preserved: %+v", unlimited)
+	}
+}
+
+func TestBashWaitZeroStaysForeground(t *testing.T) {
+	registry := NewRegistry()
+	delayed := &delayedCommand{name: "delayed", delay: 200 * time.Millisecond, output: "finished"}
+	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
+	bash := NewBashTool(t.TempDir(), 2)
+	bash.SetCommandResolver(registry.Get)
+	defer bash.Close()
+
+	started := time.Now()
+	res, err := bash.Execute(context.Background(), `{"command":"delayed","wait":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 150*time.Millisecond {
+		t.Fatalf("wait=0 returned before completion after %s", elapsed)
+	}
+	if got := tool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "background") {
+		t.Fatalf("result = %q", got)
+	}
+}
+
+func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
+	registry := NewRegistry()
+	delayed := &delayedCommand{name: "delayed", delay: 1500 * time.Millisecond, output: "finished"}
+	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
+	bash := NewBashTool(t.TempDir(), 3)
+	bash.SetCommandResolver(registry.Get)
+	defer bash.Close()
+
+	scoped := inbox.NewBuffered(8)
+	defer scoped.Close()
+	ctx := inbox.ContextWithInbox(context.Background(), scoped)
+	started := time.Now()
+	res, err := bash.Execute(ctx, `{"command":"delayed","wait":1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(started)
+	if elapsed < 800*time.Millisecond || elapsed > 1400*time.Millisecond {
+		t.Fatalf("wait=1 background transition took %s", elapsed)
+	}
+	if got := tool.ResultText(res); !strings.Contains(got, "moved to background") {
+		t.Fatalf("result = %q", got)
+	}
+	if scoped.ActiveProducers() != 1 {
+		t.Fatalf("active producers = %d, want 1", scoped.ActiveProducers())
+	}
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	foundCompletion := false
+	for !foundCompletion && scoped.Wait(waitCtx) {
+		for _, msg := range scoped.Drain() {
+			if msg.Meta["type"] == "completion" {
+				foundCompletion = true
+			}
+		}
+	}
+	if !foundCompletion {
+		t.Fatal("completion message missing")
+	}
+	deadline := time.Now().Add(time.Second)
+	for scoped.ActiveProducers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if scoped.ActiveProducers() != 0 {
+		t.Fatalf("producer remained active after completion: %d", scoped.ActiveProducers())
+	}
+}
+
+func TestBashExplicitZeroTimeoutIsUnlimited(t *testing.T) {
+	registry := NewRegistry()
+	delayed := &delayedCommand{name: "delayed", delay: 1200 * time.Millisecond, output: "finished"}
+	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
+	bash := NewBashTool(t.TempDir(), 1)
+	bash.SetCommandResolver(registry.Get)
+	defer bash.Close()
+
+	started := time.Now()
+	res, err := bash.Execute(context.Background(), `{"command":"delayed","wait":0,"timeout":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < time.Second {
+		t.Fatalf("timeout=0 did not remain unlimited; returned after %s", elapsed)
+	}
+	if got := tool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "command stopped") {
+		t.Fatalf("result = %q", got)
+	}
+}
+
 func TestBashRunTimeoutStopsSession(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
@@ -795,8 +922,13 @@ func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
 func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 	tool := NewBashTool(t.TempDir(), 5)
 	defer tool.Close()
-	scoped := inbox.NewBuffered(8)
+	scoped := inbox.NewBuffered(1)
 	defer scoped.Close()
+	low := inbox.NewMessage(inbox.OriginSession, "user", "incremental")
+	low.Priority = inbox.PriorityLow
+	if err := scoped.Push(low); err != nil {
+		t.Fatal(err)
+	}
 
 	release := make(chan struct{})
 	info, err := tool.tasks.CreateFunc(context.Background(), "scoped-inbox", 5*time.Second, func(context.Context, io.Writer) error {
@@ -807,18 +939,66 @@ func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	tool.startMonitor(info, scoped)
+	if scoped.ActiveProducers() != 1 {
+		t.Fatalf("active producers = %d, want 1", scoped.ActiveProducers())
+	}
 	close(release)
 
 	deadline := time.Now().Add(2 * time.Second)
-	received := false
-	for time.Now().Before(deadline) {
-		if len(scoped.Drain()) > 0 {
-			received = true
-			break
-		}
+	for scoped.ActiveProducers() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !received {
-		t.Fatal("scoped inbox did not receive background completion")
+	if scoped.ActiveProducers() != 0 {
+		t.Fatal("background producer was not closed")
+	}
+	receivedCompletion := false
+	for _, msg := range scoped.Drain() {
+		if msg.Meta["type"] == "completion" {
+			receivedCompletion = true
+		}
+	}
+	if !receivedCompletion {
+		t.Fatal("high-priority completion did not replace buffered incremental output")
+	}
+}
+
+func TestBashBackgroundMonitorDeliversConcurrentCompletions(t *testing.T) {
+	tool := NewBashTool(t.TempDir(), 5)
+	defer tool.Close()
+	scoped := inbox.NewBuffered(64)
+	defer scoped.Close()
+
+	const jobs = 16
+	release := make(chan struct{})
+	for i := 0; i < jobs; i++ {
+		info, err := tool.tasks.CreateFunc(context.Background(), fmt.Sprintf("job-%d", i), 5*time.Second, func(context.Context, io.Writer) error {
+			<-release
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tool.startMonitor(info, scoped)
+	}
+	if scoped.ActiveProducers() != jobs {
+		t.Fatalf("active producers = %d, want %d", scoped.ActiveProducers(), jobs)
+	}
+	close(release)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for scoped.ActiveProducers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if scoped.ActiveProducers() != 0 {
+		t.Fatalf("active producers = %d after completion", scoped.ActiveProducers())
+	}
+	completions := 0
+	for _, msg := range scoped.Drain() {
+		if msg.Meta["type"] == "completion" {
+			completions++
+		}
+	}
+	if completions != jobs {
+		t.Fatalf("completion messages = %d, want %d", completions, jobs)
 	}
 }

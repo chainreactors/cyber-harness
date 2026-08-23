@@ -118,6 +118,21 @@ ioa:
 	}
 }
 
+func TestLoadConfigIgnoresNonYamlSuffix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "aiscan.yaml.tmp-123")
+	if err := os.WriteFile(path, []byte("llm:\n  provider: openai\n  model: staged-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var opt Option
+	if err := LoadConfig(path, &opt); err != nil {
+		t.Fatalf("LoadConfig(%q): %v", path, err)
+	}
+	if opt.Model != "staged-model" {
+		t.Fatalf("Model = %q, want staged-model", opt.Model)
+	}
+}
+
 func TestLoadConfigReconNumericZeroIsExplicit(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `

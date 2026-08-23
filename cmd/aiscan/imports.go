@@ -6,6 +6,7 @@ package main
 import (
 	_ "github.com/chainreactors/aiscan/tools"
 	_ "github.com/chainreactors/aiscan/tools/arsenal"
+	_ "github.com/chainreactors/aiscan/tools/curl"
 	_ "github.com/chainreactors/aiscan/tools/gogo"
 	_ "github.com/chainreactors/aiscan/tools/ioa"
 	_ "github.com/chainreactors/aiscan/tools/neutron"

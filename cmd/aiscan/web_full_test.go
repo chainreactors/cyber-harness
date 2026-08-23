@@ -48,6 +48,16 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	if prepared.RuntimePath == "" || prepared.RuntimePath == path {
 		t.Fatalf("runtime candidate path = %q", prepared.RuntimePath)
 	}
+	if filepath.Ext(prepared.RuntimePath) != ".yaml" {
+		t.Fatalf("runtime candidate suffix = %q, want .yaml", prepared.RuntimePath)
+	}
+	var staged cfg.Option
+	if err := cfg.LoadConfig(prepared.RuntimePath, &staged); err != nil {
+		t.Fatalf("LoadConfig(%q): %v", prepared.RuntimePath, err)
+	}
+	if len(staged.Providers) == 0 || staged.Providers[0].Model != "new-model" {
+		t.Fatalf("staged providers = %+v, want new-model", staged.Providers)
+	}
 	info, err := os.Stat(prepared.RuntimePath)
 	if err != nil {
 		t.Fatal(err)

@@ -1,0 +1,393 @@
+name: release-build
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Version injected into the binaries'
+        required: true
+        type: string
+      ref:
+        description: 'Commit or tag to build'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-build-${{ inputs.ref }}
+  cancel-in-progress: false
+
+# ---------------------------------------------------------------------------
+# One frontend bundle + standard/full/runner CI build matrix -> verified bundle
+# ---------------------------------------------------------------------------
+
+jobs:
+  # ── Build the embedded frontend once for every full target ─────
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build embedded frontend
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run build
+          test -s web/static/index.html
+          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
+
+      - name: Upload embedded frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
+          retention-days: 1
+
+  # ── Parallel build matrix ───────────────────────────────────────
+  build:
+    needs: frontend
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: aiscan
+            profile: standard
+            runner: ubuntu-22.04
+            main: ./cmd/aiscan
+            binary: aiscan
+            tags: "forceposix emptytemplates noembed osusergo netgo"
+            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
+            cgo: "0"
+          - id: runner
+            profile: runner
+            runner: ubuntu-22.04
+            main: ./cmd/runner
+            binary: runner
+            tags: ""
+            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
+            cgo: "0"
+          - id: aiscan-full-linux-amd64
+            profile: full
+            runner: ubuntu-22.04
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            targets: "linux/amd64"
+            cgo: "1"
+          - id: aiscan-full-linux-arm64
+            profile: full
+            runner: ubuntu-24.04-arm
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            targets: "linux/arm64"
+            cgo: "1"
+          - id: aiscan-full-darwin
+            profile: full
+            runner: ubuntu-22.04
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            targets: "darwin/amd64 darwin/arm64"
+            cgo: "1"
+            cross: darwin
+          - id: aiscan-full-windows-amd64
+            profile: full
+            runner: windows-2022
+            main: ./cmd/aiscan
+            binary: aiscan-full
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            targets: "windows/amd64"
+            cgo: "1"
+
+    env:
+      GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Read macOS cross-toolchain versions
+        if: matrix.cross == 'darwin'
+        id: macos-cross
+        run: |
+          source .github/native/versions.env
+          echo "zig-version=${MACOS_CROSS_ZIG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sdk-version=${MACOS_CROSS_SDK_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sdk-sha256=${MACOS_CROSS_SDK_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "deployment-target=${MACOS_CROSS_DEPLOYMENT_TARGET}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Zig for macOS CGO cross-compilation
+        if: matrix.cross == 'darwin'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: ${{ steps.macos-cross.outputs.zig-version }}
+          cache-key: macos-cgo-${{ matrix.id }}
+
+      - name: Install pinned macOS SDK
+        if: matrix.cross == 'darwin'
+        env:
+          SDK_VERSION: ${{ steps.macos-cross.outputs.sdk-version }}
+          SDK_SHA256: ${{ steps.macos-cross.outputs.sdk-sha256 }}
+          DEPLOYMENT_TARGET: ${{ steps.macos-cross.outputs.deployment-target }}
+        run: |
+          set -euo pipefail
+          sdk_dir="${RUNNER_TEMP}/macos-sdk"
+          archive="${sdk_dir}/MacOSX${SDK_VERSION}.sdk.tar.xz"
+          mkdir -p "${sdk_dir}"
+          for attempt in 1 2 3; do
+            if curl --retry 3 --retry-all-errors --retry-delay 2 -fsSL \
+              "https://github.com/joseluisq/macosx-sdks/releases/download/${SDK_VERSION}/MacOSX${SDK_VERSION}.sdk.tar.xz" \
+              -o "${archive}"; then
+              break
+            fi
+            if [[ "${attempt}" == "3" ]]; then
+              exit 1
+            fi
+          done
+          echo "${SDK_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}" -C "${sdk_dir}"
+          sdk_root="${sdk_dir}/MacOSX${SDK_VERSION}.sdk"
+          test -d "${sdk_root}/System/Library/Frameworks"
+          test -f "${sdk_root}/usr/lib/libresolv.tbd"
+          echo "MACOS_SDKROOT=${sdk_root}" >> "${GITHUB_ENV}"
+          echo "MACOSX_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}" >> "${GITHUB_ENV}"
+
+      - name: Set up mingw for libcstx
+        if: runner.os == 'Windows'
+        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+
+      - name: Download embedded frontend
+        if: matrix.profile == 'full'
+        uses: actions/download-artifact@v7
+        with:
+          name: embedded-frontend
+          path: web/static
+
+      - name: Generate embedded resources
+        run: go generate ./core/resources
+
+      - name: Build binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGETS="${{ matrix.targets }}"
+          TAGS="${{ matrix.tags }}"
+          BINARY="${{ matrix.binary }}"
+          MAIN="${{ matrix.main }}"
+          VERSION="${GORELEASER_CURRENT_TAG#v}"
+          OUTDIR="dist/build"
+          mkdir -p "${OUTDIR}"
+
+          for target in $TARGETS; do
+            IFS='/' read -r goos goarch <<< "$target"
+            suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
+            out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
+            echo "  compiling ${goos}/${goarch} → ${out}"
+
+            link_flags="-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}"
+            if [[ "$goos" == "darwin" && "${{ matrix.cgo }}" == "1" ]]; then
+              test -n "${MACOS_SDKROOT:-}"
+              case "$goarch" in
+                amd64) zig_target=x86_64-macos ;;
+                arm64) zig_target=aarch64-macos ;;
+                *) echo "unsupported Darwin architecture ${goarch}" >&2; exit 1 ;;
+              esac
+              cross_flags="-target ${zig_target} -isysroot ${MACOS_SDKROOT} -F${MACOS_SDKROOT}/System/Library/Frameworks -L${MACOS_SDKROOT}/usr/lib -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+              export CC="zig cc ${cross_flags}"
+              export CXX="zig c++ ${cross_flags}"
+              link_flags="-linkmode external ${link_flags}"
+            else
+              unset CC CXX
+            fi
+
+            build_args=(-trimpath)
+            if [[ -n "$TAGS" ]]; then
+              build_args+=(-tags "$TAGS")
+            fi
+            CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
+              go build "${build_args[@]}" \
+              -ldflags "${link_flags}" \
+              -buildvcs=false \
+              -o "$out" "$MAIN"
+
+            if [[ "$goos" == "darwin" ]]; then
+              file_info="$(file -b "$out")"
+              echo "  ${file_info}"
+              case "$goarch" in
+                amd64) grep -Eq 'Mach-O 64-bit.*x86_64' <<< "$file_info" ;;
+                arm64) grep -Eq 'Mach-O 64-bit.*arm64' <<< "$file_info" ;;
+              esac
+            fi
+          done
+
+          if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
+            version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
+            if [[ "${{ matrix.profile }}" == "runner" ]]; then
+              test "$version_output" = "runner v${VERSION}"
+            else
+              test "$version_output" = "aiscan v${VERSION}"
+            fi
+          fi
+
+          echo "=== Binaries ==="
+          ls -lh "${OUTDIR}/"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.id }}
+          path: dist/build/*
+          retention-days: 1
+
+  # ── Package release ─────────────────────────────────────────────
+  package:
+    needs: build
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: dist/build
+          merge-multiple: true
+
+      - name: Install pinned UPX
+        env:
+          UPX_VERSION: 5.2.0
+          UPX_SHA256: 3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          curl -fsSL \
+            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz" \
+            -o "${archive}"
+          echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
+          echo "UPX_BIN=${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux/upx" >> "${GITHUB_ENV}"
+
+      - name: Compress Windows amd64 binaries with UPX
+        run: |
+          set -euo pipefail
+          "${UPX_BIN}" --version
+          for f in dist/build/*_windows_amd64.exe; do
+            [ -f "$f" ] || continue
+            "${UPX_BIN}" "$f"
+            "${UPX_BIN}" -t "$f"
+          done
+
+      - name: Package archives
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          for f in dist/build/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            # Runner is built and smoke-tested in CI for Cairn, but is not a
+            # GitHub Release asset.
+            [[ "$base" == runner_* ]] && continue
+            archive_name="${base%.exe}"
+            binary="${base%%_*}"
+            inner_name="$binary"
+            [[ "$base" == *.exe ]] && inner_name="${binary}.exe"
+
+            tmpdir=$(mktemp -d)
+            cp "$f" "${tmpdir}/${inner_name}"
+            cp README.md "${tmpdir}/" 2>/dev/null || true
+            cp -r docs "${tmpdir}/" 2>/dev/null || true
+            (cd "$tmpdir" && zip -r - .) > "${GITHUB_WORKSPACE}/dist/release/${archive_name}.zip"
+            rm -rf "$tmpdir"
+          done
+          ls -lh dist/release
+
+      - name: Generate checksums
+        run: |
+          cd dist/release
+          sha256sum *.zip > aiscan_checksums.txt
+          cat aiscan_checksums.txt
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release/*
+          retention-days: 1
+
+  # UPX can report a structurally valid PE that still crashes at process
+  # startup. Run the exact packaged Windows binaries before publishing them.
+  verify-windows-release:
+    needs: package
+    runs-on: windows-2022
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release
+
+      - name: Smoke test packaged Windows binaries
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedVersion = "aiscan $env:TAG"
+          $cases = @(
+            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
+          )
+
+          foreach ($case in $cases) {
+            $destination = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($case.Archive))
+            Expand-Archive -LiteralPath (Join-Path 'dist/release' $case.Archive) -DestinationPath $destination
+            $binary = Join-Path $destination $case.Binary
+            $version = (& $binary --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "$($case.Binary) --version exited with $LASTEXITCODE"
+            }
+            if ($version -ne $expectedVersion) {
+              throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
+            }
+            if ($case.Full) {
+              & $binary web --help | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                throw "$($case.Binary) web --help exited with $LASTEXITCODE"
+              }
+            }
+          }

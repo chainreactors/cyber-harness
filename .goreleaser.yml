@@ -21,9 +21,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     flags:
       - -trimpath
     tags:
@@ -44,7 +41,7 @@ builds:
     binary: "{{ .ProjectName }}-full"
     env:
       # Full links the native libcstx runtime. The official release workflow
-      # builds each target on a matching native runner.
+      # cross-compiles Darwin with Zig and a pinned macOS SDK on Linux.
       - CGO_ENABLED=1
     goos:
       - linux

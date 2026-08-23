@@ -17,11 +17,11 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -37,18 +37,26 @@ type App struct {
 	SkillDiagnostics  []skills.Diagnostic
 	IOAClient         *ioaclient.Client
 	IOAStreamClient   ioaclient.StreamAPI
-	EventBus          *eventbus.Bus[*aop.Event]
-	Events            *sessionEmitter
-	Progress          *eventbus.Bus[*toolpb.Progress]
-	Recorder          *output.JSONLRecorder
-	recorderMu        sync.Mutex
-	closeOnce         sync.Once
-	enginesReady      chan struct{}
-	enginesEnabled    bool
-	healthMu          sync.RWMutex
-	llmHealth         LLMHealth
-	loggerMu          sync.RWMutex
-	logger            telemetry.Logger
+	// FileAudit is the trail the file tools and shell executions report into.
+	// It belongs to the application rather than any one transport, so a local
+	// run and a remote tool node observe the same thing.
+	FileAudit      *commands.FileAudit
+	EventBus       *eventbus.Bus[*aop.Event]
+	Events         *sessionEmitter
+	Progress       *eventbus.Bus[*toolpb.Progress]
+	Recorder       *output.JSONLRecorder
+	deps           *commands.Deps
+	proxyInfra     *proxytool.Infra
+	cancel         context.CancelFunc
+	assemblyMu     sync.Mutex
+	recorderMu     sync.Mutex
+	closeOnce      sync.Once
+	enginesReady   chan struct{}
+	enginesEnabled bool
+	healthMu       sync.RWMutex
+	llmHealth      LLMHealth
+	loggerMu       sync.RWMutex
+	logger         telemetry.Logger
 }
 
 // LLMHealth is the latest lightweight provider connectivity check. It is kept
@@ -69,7 +77,17 @@ const (
 )
 
 func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
-	a := &App{}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	appCtx, cancel := context.WithCancel(ctx)
+	a := &App{cancel: cancel}
+	ready := false
+	defer func() {
+		if !ready {
+			cancel()
+		}
+	}()
 	logger := rc.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
@@ -127,7 +145,8 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
 
-	a.Commands = initCoreCommands(rc, a.Provider, a.Skills, a.Hooks, a.Events, logger)
+	a.FileAudit = commands.NewFileAudit()
+	a.initCommands(rc, logger)
 	if rc.RecordFile != "" {
 		if err := a.StartRecording(rc.RecordFile); err != nil {
 			a.Close()
@@ -136,21 +155,22 @@ func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
 	}
 
 	a.enginesReady = make(chan struct{})
-	a.enginesEnabled = ScannerInitFunc != nil && !rc.SkipEngines
+	a.enginesEnabled = !rc.SkipEngines
 	go func() {
 		if a.enginesEnabled {
-			ScannerInitFunc(ctx, a, rc, logger)
+			a.initScanner(appCtx, rc, logger)
 		}
 		close(a.enginesReady)
 	}()
 
 	if rc.IOA != nil {
-		if err := a.InitIOA(ctx, *rc.IOA); err != nil {
+		if err := a.InitIOA(appCtx, *rc.IOA); err != nil {
 			a.Close()
 			return nil, err
 		}
 	}
 
+	ready = true
 	return a, nil
 }
 
@@ -237,6 +257,12 @@ func (a *App) Close() {
 		return
 	}
 	a.closeOnce.Do(func() {
+		if a.cancel != nil {
+			a.cancel()
+		}
+		if a.enginesReady != nil {
+			<-a.enginesReady
+		}
 		a.recorderMu.Lock()
 		if a.Recorder != nil {
 			if err := a.Recorder.Close(); err != nil {
@@ -259,6 +285,12 @@ func (a *App) Close() {
 		}
 		if closer, ok := a.Engines.(interface{ Close() }); ok {
 			closer.Close()
+		}
+		if a.proxyInfra != nil && a.proxyInfra.Hub != nil {
+			a.proxyInfra.Hub.Shutdown(context.Background())
+		}
+		if a.FileAudit != nil {
+			a.FileAudit.Close()
 		}
 	})
 }
@@ -364,34 +396,43 @@ func llmConfigLabel(providerName, model string) string {
 	return providerName + "/" + model
 }
 
-func initCoreCommands(rc ApplicationConfig, llmProvider agent.Provider, skillStore *skills.Store, hookRegistry *hooks.Registry, events aop.EventEmitter, logger telemetry.Logger) *commands.CommandRegistry {
-	cmdReg := commands.NewRegistry()
+func (a *App) initCommands(rc ApplicationConfig, logger telemetry.Logger) {
+	a.Commands = commands.NewRegistry()
 	workDir, _ := os.Getwd()
-	deps := &commands.Deps{
+	a.deps = &commands.Deps{
 		WorkDir:           workDir,
+		RunnerMode:        rc.Tools.RunnerMode,
 		BashTimeout:       rc.Tools.BashTimeout,
-		SkillStore:        skillStore,
-		Provider:          llmProvider,
+		SkillStore:        a.Skills,
+		Provider:          a.Provider,
+		ScannerProxy:      rc.Scanner.Proxy,
 		Logger:            logger,
 		TavilyKeys:        rc.Tools.TavilyKeys,
 		PlaywrightSession: rc.Tools.PlaywrightSession,
-		Hooks:             hookRegistry,
-		Events:            events,
+		Hooks:             a.Hooks,
+		Events:            a.Events,
+		FileAudit:         a.FileAudit,
 	}
+	var err error
+	a.proxyInfra, err = proxytool.InstallInfra(a.deps, captureEnabled(rc.Tools.MitmCapture))
+	if err != nil {
+		logger.Warnf("proxy hub unavailable, tools use direct/original proxy: %s", err)
+	}
+
 	plan := capability.Select(capability.Options{
-		Groups:        linkedToolGroups(),
+		Groups:        linkedBaseGroups(),
 		OptionalTools: rc.Tools.OptionalTools,
 	})
-	commands.BuildPlan(plan, deps, cmdReg)
-	cmdReg.SetLogger(logger)
-	return cmdReg
+	commands.BuildPlan(plan, a.deps, a.Commands)
+	a.Commands.SetLogger(logger)
 }
 
-func linkedToolGroups() []string {
+func linkedBaseGroups() []string {
 	seen := make(map[string]bool)
 	var groups []string
 	for _, descriptor := range capability.All() {
-		if descriptor.Kind != capability.KindTool || descriptor.Group == "" || seen[descriptor.Group] {
+		baseService := descriptor.Kind == capability.KindService && len(descriptor.Requires) == 0
+		if (descriptor.Kind != capability.KindTool && !baseService) || descriptor.Group == "" || seen[descriptor.Group] {
 			continue
 		}
 		seen[descriptor.Group] = true
@@ -400,62 +441,16 @@ func linkedToolGroups() []string {
 	return groups
 }
 
-func executeRegistryCommand(ctx context.Context, reg *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {
-	tool, ok := reg.GetTool("bash")
-	if !ok {
-		return "", fmt.Errorf("bash tool is not registered")
-	}
-	bash, ok := tool.(*commands.BashTool)
-	if !ok {
-		return "", fmt.Errorf("registered bash tool has unexpected type")
-	}
-	var output strings.Builder
-	execution, err := bash.RunForeground(ctx, commandLine, commands.BashExecOptions{
-		Timeout:  timeout,
-		OnOutput: func(data []byte) { _, _ = output.Write(data) },
-	})
-	if err != nil {
-		return output.String(), err
-	}
-	if execution.ExitCode != 0 {
-		return output.String(), fmt.Errorf("command exited with code %d", execution.ExitCode)
-	}
-	return output.String(), nil
+func captureEnabled(configured *bool) bool {
+	return configured == nil || *configured
 }
 
-func appendDeepBrowserStep(sb *strings.Builder, name, commandLine, output string, err error) {
-	sb.WriteString("\n## ")
-	sb.WriteString(name)
-	sb.WriteString("\nCommand: `")
-	sb.WriteString(commandLine)
-	sb.WriteString("`\n")
-	if err != nil {
-		sb.WriteString("Error: ")
-		sb.WriteString(err.Error())
-		sb.WriteString("\n")
+// RegisterTrafficNamespace exposes the application's single proxy hub over AOP.
+func (a *App) RegisterTrafficNamespace(mux *aop.NamespaceMux) error {
+	if a == nil || a.proxyInfra == nil || a.proxyInfra.Hub == nil {
+		return nil
 	}
-	output = strings.TrimSpace(output)
-	if output != "" {
-		if tr := truncate.Head(output, truncate.Options{}); tr.Truncated {
-			sb.WriteString(tr.Content)
-			sb.WriteString(fmt.Sprintf("\n[step truncated: %d/%d lines]", tr.OutputLines, tr.TotalLines))
-		} else {
-			sb.WriteString(tr.Content)
-		}
-		sb.WriteString("\n")
-	}
-}
-
-func quoteCommandArg(value string) string {
-	if value == "" {
-		return `""`
-	}
-	if !strings.ContainsAny(value, " \t\r\n'\"\\") {
-		return value
-	}
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	return `"` + value + `"`
+	return proxytool.NewTrafficHandler(a.proxyInfra).Register(mux)
 }
 
 func (a *App) InitIOA(ctx context.Context, ioa IOAConfig) error {
@@ -473,13 +468,13 @@ func (a *App) InitIOA(ctx context.Context, ioa IOAConfig) error {
 		}
 	}
 	a.IOAStreamClient = client
-	if ioa.RegisterTools && a.Commands != nil {
-		deps := &commands.Deps{
-			NodeName: ioa.NodeName,
-			NodeMeta: ioa.NodeMeta,
-		}
-		commands.Provide(deps, ioatools.ClientKey, protocols.ClientAPI(client))
-		commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"ioa"}}), deps, a.Commands)
+	if ioa.RegisterTools && a.Commands != nil && a.deps != nil {
+		a.assemblyMu.Lock()
+		a.deps.NodeName = ioa.NodeName
+		a.deps.NodeMeta = ioa.NodeMeta
+		commands.Provide(a.deps, ioatools.ClientKey, protocols.ClientAPI(client))
+		commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"ioa"}}), a.deps, a.Commands)
+		a.assemblyMu.Unlock()
 	}
 	if ioa.AutoRegister {
 		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
@@ -532,77 +527,4 @@ func newIOAClient(ioa IOAConfig) (*ioaclient.Client, error) {
 		return nil, nil
 	}
 	return ioaclient.NewClient(ioa.URL, ioa.NodeID)
-}
-
-func CollectDeepBrowserArtifacts(ctx context.Context, reg *commands.CommandRegistry, targetURL string, logger telemetry.Logger) (string, error) {
-	if reg == nil || !reg.Has("playwright") {
-		return "", fmt.Errorf("playwright command unavailable; rebuild web with browser tag")
-	}
-	targetURL = strings.TrimSpace(targetURL)
-	if targetURL == "" {
-		return "", fmt.Errorf("target URL is empty")
-	}
-
-	session := fmt.Sprintf("deep%d", time.Now().UnixNano())
-	closed := false
-	defer func() {
-		if closed {
-			return
-		}
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = executeRegistryCommand(closeCtx, reg, "playwright close "+session, 5*time.Second)
-	}()
-
-	script := `(()=>JSON.stringify({url:location.href,title:document.title,forms:[...document.forms].map((f,i)=>({i,action:f.action,method:f.method,inputs:[...f.elements].map(e=>({tag:e.tagName,type:e.type,name:e.name,id:e.id,placeholder:e.placeholder}))})),buttons:[...document.querySelectorAll("button,input[type=button],input[type=submit],a")].slice(0,80).map(e=>({tag:e.tagName,text:(e.innerText||e.value||e.getAttribute("aria-label")||"").trim(),href:e.href||"",type:e.type||"",id:e.id||"",name:e.name||""})),scripts:[...document.scripts].map(s=>s.src).filter(Boolean).slice(0,50),localStorage:Object.keys(localStorage),sessionStorage:Object.keys(sessionStorage)}))()`
-	steps := []struct {
-		name    string
-		command string
-	}{
-		{"open", fmt.Sprintf("playwright open %s --session %s --op-timeout 8 --record", quoteCommandArg(targetURL), session)},
-		{"network-start", "playwright network " + session + " --start"},
-		{"reload", "playwright reload " + session},
-		{"wait-idle", "playwright wait-for " + session + " --idle"},
-		{"url", "playwright url " + session},
-		{"discover", "playwright discover " + session},
-		{"inner-text", "playwright inner-text " + session + " body"},
-		{"storage-links-scripts", fmt.Sprintf("playwright evaluate %s %s", session, quoteCommandArg(script))},
-		{"network-dump", "playwright network " + session + " --dump"},
-	}
-
-	const stepTimeout = 12 * time.Second
-	var sb strings.Builder
-	sb.WriteString("Target: ")
-	sb.WriteString(targetURL)
-	sb.WriteString("\nSession: ")
-	sb.WriteString(session)
-	sb.WriteString("\n")
-	for _, step := range steps {
-		if err := ctx.Err(); err != nil {
-			appendDeepBrowserStep(&sb, step.name, step.command, "", err)
-			break
-		}
-		out, err := executeRegistryCommand(ctx, reg, step.command, stepTimeout)
-		appendDeepBrowserStep(&sb, step.name, step.command, out, err)
-		if err != nil && logger != nil {
-			logger.Debugf("deep browser step=%s error=%q", step.name, err)
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	closeCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	out, err := executeRegistryCommand(closeCtx, reg, "playwright close "+session, 8*time.Second)
-	cancel()
-	closed = true
-	appendDeepBrowserStep(&sb, "close", "playwright close "+session, out, err)
-
-	artifact := sb.String()
-	if tr := truncate.Head(artifact, truncate.Options{}); tr.Truncated {
-		artifact = tr.Content + fmt.Sprintf(
-			"\n\n[deep browser truncated: showing %d/%d lines (%s of %s)]",
-			tr.OutputLines, tr.TotalLines, truncate.FormatSize(tr.OutputBytes), truncate.FormatSize(tr.TotalBytes))
-	}
-	return artifact, nil
 }

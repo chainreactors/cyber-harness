@@ -34,6 +34,7 @@ web/frontend/test-results/
 community.yaml
 
 # Local runtime state / operator artifacts
+.aiscan/
 /aiscan-deploy.yaml
 /*.log
 /.claude/

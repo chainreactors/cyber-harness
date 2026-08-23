@@ -19,6 +19,7 @@ type Inbox interface {
 	Closed() bool
 	Len() int
 	Wait(ctx context.Context) bool
+	WaitWhileActive(ctx context.Context) bool
 	RegisterProducer(name string) *ProducerHandle
 	ActiveProducers() int
 }
@@ -61,7 +62,20 @@ func (b *Buffered) Push(msg Message) error {
 		return ErrInboxClosed
 	}
 	if len(b.buf) >= b.capacity {
-		return ErrInboxFull
+		victim := -1
+		for i := range b.buf {
+			if b.buf[i].Priority >= msg.Priority {
+				continue
+			}
+			if victim < 0 || b.buf[i].Priority < b.buf[victim].Priority {
+				victim = i
+			}
+		}
+		if victim < 0 {
+			return ErrInboxFull
+		}
+		copy(b.buf[victim:], b.buf[victim+1:])
+		b.buf = b.buf[:len(b.buf)-1]
 	}
 	wasEmpty := len(b.buf) == 0
 	b.buf = append(b.buf, msg)
@@ -143,13 +157,21 @@ func (b *Buffered) Len() int {
 }
 
 func (b *Buffered) Wait(ctx context.Context) bool {
+	return b.wait(ctx, false)
+}
+
+func (b *Buffered) WaitWhileActive(ctx context.Context) bool {
+	return b.wait(ctx, true)
+}
+
+func (b *Buffered) wait(ctx context.Context, stopWhenIdle bool) bool {
 	for {
 		b.mu.Lock()
 		if len(b.buf) > 0 {
 			b.mu.Unlock()
 			return true
 		}
-		if b.closed {
+		if b.closed || (stopWhenIdle && len(b.producers) == 0) {
 			b.mu.Unlock()
 			return false
 		}
