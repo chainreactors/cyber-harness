@@ -139,8 +139,8 @@ func flowToProto(flow *Flow) *traffic.Flow {
 	// The hot store keeps only a preview and a file reference. A wire Flow
 	// retains the historical bytes field, so hydrate only at this boundary.
 	copy := *flow
-	copy.Exchange = flow.Exchange.Clone()
-	_ = copy.Exchange.HydrateBodies()
+	copy.Exchange = flow.Clone()
+	_ = copy.HydrateBodies()
 	message := copy.Proto()
 	message.ToolId = flow.ToolID
 	if !flow.Timestamp.IsZero() {

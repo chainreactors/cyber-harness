@@ -289,7 +289,10 @@ func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 		return nil
 	}
 	if value, ok := a.pending.Load(f.Id.String()); ok {
-		return value.(*captureState)
+		state, ok := value.(*captureState)
+		if ok {
+			return state
+		}
 	}
 	return nil
 }
@@ -316,7 +319,7 @@ func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 		flow.TLS = f.ConnContext.ClientConn.Tls
 	}
 	if f.Request != nil {
-		flow.Exchange.ID = f.Id.String()
+		flow.ID = f.Id.String()
 		flow.Request = traffic.Request{
 			Method:   f.Request.Method,
 			URL:      f.Request.URL.String(),
@@ -867,8 +870,8 @@ func (s *FlowStore) Get(id int) *Flow {
 		if s.flows[idx].ID == want {
 			f := s.flows[idx]
 			s.mu.RUnlock()
-			f.Exchange = f.Exchange.Clone()
-			_ = f.Exchange.HydrateBodies()
+			f.Exchange = f.Clone()
+			_ = f.HydrateBodies()
 			return &f
 		}
 	}
