@@ -1,0 +1,4 @@
+--container-architecture=linux/amd64
+-P ubuntu-22.04=ghcr.io/catthehacker/ubuntu:act-22.04
+--pull=false
+--container-options=--init
