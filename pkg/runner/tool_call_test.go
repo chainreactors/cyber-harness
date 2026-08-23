@@ -138,6 +138,23 @@ func TestExecuteToolRequestForeground(t *testing.T) {
 	}
 }
 
+func TestExecuteToolRequestForegroundPreservesExplicitZeroTimeout(t *testing.T) {
+	registry := commands.NewRegistry()
+	bash := &recordingBash{}
+	registry.RegisterTool(bash)
+
+	_, err := ExecuteToolRequest(context.Background(), "task-zero-timeout", toolRequest(t, "task-zero-timeout", "bash", map[string]any{
+		"command": "echo test",
+		"timeout": 0,
+	}), registry, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bash.options.TimeoutSet || bash.options.Timeout != 0 {
+		t.Fatalf("bash options = %+v, want explicit unlimited timeout", bash.options)
+	}
+}
+
 func TestProgressStreamerSanitizesInvalidUTF8(t *testing.T) {
 	progressBus := eventbus.New[*toolpb.Progress]()
 	var progress []*toolpb.Progress

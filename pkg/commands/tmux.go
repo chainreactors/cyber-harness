@@ -150,7 +150,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 }
 
 func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration) (tmux.Info, error) {
-	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout})
+	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
 	if err != nil {
 		return tmux.Info{}, err
 	}

@@ -1,5 +1,89 @@
 # Changelog
 
+## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
+
+v1.0.0-rc2 重点重构了 AIScan 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
+
+### New Features
+
+**统一 MITM 流量捕获**
+
+- 所有工具流量统一经过常驻 Proxy Hub，HTTP 请求和 HTTPS 解密流量进入同一份捕获记录，不再为单次命令重复启动代理。
+- 捕获默认开启；`--mitm=false` 或配置 `mitm: false` 会切换为纯代理路由，不解密、不记录，也不要求工具信任 CA。
+- AOP traffic namespace 可动态切换 capture/relay、修改上游代理、查询状态，并按任务返回 Flow；切换过程无需重启监听器，也不会打断正在执行的命令。
+- 每条连接携带任务调用标识，并发扫描产生的流量可以准确归因，不再依赖容易重叠的时间窗口。
+
+开启捕获后，可直接查看和分析工具产生的流量：
+
+```bash
+mitm flows --host example.com --last 20
+mitm flow <id>
+mitm analyze --host example.com
+```
+
+HTTPS 捕获会向 curl、Git、Node.js、Python requests 等常用客户端注入当前 Hub CA。严格校验证书的工具访问裸 IP 时可能因证书没有 IP SAN 而失败，此时应优先使用主机名，或关闭 MITM 仅保留代理路由。
+
+**动态代理路由**
+
+代理节点、订阅和单命令代理现在共用同一条实时出口链。切换节点后，新连接立即使用新出口，运行中的连接保持不受影响。
+
+```bash
+proxy auto <subscription-url> --country HK,JP --strategy adaptive
+proxy switch 3
+proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
+```
+
+支持 socks5、trojan、vless、anytls、hysteria2、shadowsocks 和 Clash 订阅；`proxy current`、`proxy test`、`proxy clear` 可用于检查和恢复出口。
+
+**文件访问审计**
+
+- read、write、edit 和远程文件 RPC 会写入任务级文件审计；shell 命令通过工作目录快照记录文件变化，并标记记录来源。
+- 审计不会阻塞任务，发生丢弃时会给出数量。shell 中未修改文件的读取无法由快照推断，因此不会被误报为已审计读取。
+
+**Web 快速连接**
+
+Web 会自动取得 Agent token，并根据远程执行节点的系统、架构和全球/中国下载源生成安装与连接命令；聊天输入框也会根据当前上下文给出操作入口。
+
+### Improvements
+
+**远程 Node 连接稳定性**
+
+- 每个 Node 进程携带独立实例标识，并通过存活 deadline 及时发现失效连接。
+- WebSocket 会区分连接失败原因并显示 enrollment 拒绝信息；稳定连接后会重置重连退避。
+- 连接、keep-alive 与 producer 生命周期收敛到 session，减少命令结束或重连时的遗留状态。
+
+**扫描结果与运行时边界**
+
+- scanner-native Artifact 在产生处执行体积预算；工具结束或取消后到达的尾随 Artifact 会被丢弃，避免大结果或晚到结果污染后续会话。
+- AOP 工具文本在 UTF-8 边界清洗，截断内容不会产生无效字符。
+- shell 命令默认保持前台执行；设置 `wait: N` 后，运行超过 N 秒的命令才会转入后台并通过 inbox 返回进度。默认 `timeout` 为 600 秒，显式设为 `0` 表示不限时。
+- harness prompt 与 scan skill 分离；Katana 升级到 v1.7.0，并修正 gogo/scan 文档中无效的 `top100` / `top1000` 端口 preset。
+- record 改为显式 opt-in；默认 full 和官方 Release 不再下载或链接 recorder SDK。
+- Go module 可在独立 checkout 中解析，不再依赖相邻仓库的本地目录结构；新增 Agent 架构文档，运行时与协议边界更明确。
+
+**CI 与发布**
+
+- CI 执行 `go vet`、lint 和 integration-tag 编译，并验证冷缓存 protobuf 生成。
+- 修复 headless 初始化竞态和 CDP deadline；Playwright 浏览器安装绕过易挂起的 apt mirror，并增加超时与重试。
+- release build 与发布权限分离；PR 和 master 都使用正式矩阵构建、生成 checksum，并对 Windows 产物执行启动 smoke test。
+- Release notes 会读取本文件中对应版本的章节，并以上一个 prerelease 作为回退日志基线。
+
+### Bug Fixes
+
+- 子进程退出时会排空 PTY 尾部输出，修复 `tmux capture-pane -c` 偶发返回空结果。
+- inbox 会在所有 producer 结束时正确唤醒；LoopScheduler 统一注册 producer，loop 生命周期绑定 session 而非单次命令 context。
+- 修复 integration 回归中的静态分析错误，以及 cyber-ui 文件访问协议版本未固定导致的生成漂移。
+
+### Release Matrix
+
+| 产物 | Linux | macOS | Windows | 数量 |
+| --- | --- | --- | --- | ---: |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
+| `checksums.txt` | — | — | — | 1 |
+
+Release 只包含 `aiscan`、`aiscan-full` 和 checksum。
+
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
 v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。
@@ -8,13 +92,13 @@ v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台
 
 **record — 原生桌面与窗口捕获**
 
-Full 版新增原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；官方 Windows amd64 与 Linux amd64/arm64 full 产物静态链接裁剪后的 FFmpeg/libx264 SDK。
+新增可选的原生 `record` Agent Tool，用于截取桌面或可见应用窗口，并生成 PNG 截图或 H.264/MP4 视频。它不依赖外部 ffmpeg 命令；SDK 和工具开发者可在 Windows amd64 与 Linux amd64/arm64 上显式链接裁剪后的 FFmpeg/libx264 SDK，官方 full 产物默认不编译该工具。
 
 - 支持 `screenshot`、固定时长 `record`，以及异步 `start` / `stop` / `status`
 - 支持桌面、Windows HWND、X11 Window ID，或通过 PID 自动选择最大的可见窗口
 - 默认捕获鼠标，视频使用 H.264/libx264 编码并封装为 MP4；最多可并行运行四个录制会话
 - 截图通过 AOP media 返回有界预览；视频通过 task-relative `Resource.uri` 与分段 `aop.file` 请求传输
-- `make full` 自动下载、校验并缓存固定版本的 recorder SDK；维护者也可从固定源码重建 SDK
+- `make record` 按需下载、校验并缓存固定版本的 recorder SDK，并构建独立的 record-enabled 产物；维护者也可从固定源码重建 SDK
 
 Wayland、macOS、Windows arm64、无图形会话的 headless 主机和 Windows session 0 暂不支持原生录制。完整限制与构建说明见 [record 文档](record.md)。
 
@@ -53,10 +137,10 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **发布与原生构建链路**
 
-- standard 发布 Linux、macOS、Windows 的 amd64/arm64；full 发布 Linux/macOS amd64/arm64 与 Windows amd64
-- CI、nightly 和正式 release 共用 `.github/workflows/go-release.yml`，构建标签、版本注入、压缩和平台矩阵不再漂移
-- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算；缺少预构建 SDK 时 CI 可回退到源码构建
-- full profile 恢复静态 RE2，并验证 Windows recorder/RE2 原生库没有变成运行时 DLL 依赖
+- standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
+- CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
+- recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算，并通过独立 workflow 构建发布
+- full profile 恢复静态 RE2，并验证 Windows RE2 原生库没有变成运行时 DLL 依赖
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
 - 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
 
@@ -91,8 +175,8 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 | 产物 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
-| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 |
-| 原生 `record` | X11 amd64/arm64 | 不支持 | amd64 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
+| 可选原生 `record` SDK 构建 | X11 amd64/arm64 | 不支持 | amd64 |
 
 迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
 

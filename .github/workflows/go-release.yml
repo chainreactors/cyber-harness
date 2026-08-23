@@ -20,6 +20,7 @@ on:
         required: false
         default: false
         type: boolean
+
 permissions:
   contents: write
 
@@ -27,17 +28,12 @@ concurrency:
   group: release-${{ inputs.tag != '' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
-# ---------------------------------------------------------------------------
-# One frontend bundle + standard/full native build matrix → draft release
-# ---------------------------------------------------------------------------
-
 jobs:
-
-  # ── Resolve the tag once, share with all jobs ───────────────────
   prepare:
     runs-on: ubuntu-22.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,7 +61,14 @@ jobs:
           git fetch --force --tags origin
 
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "Tag ${TAG} exists"
+            if [[ -n "${{ inputs.tag }}" ]]; then
+              tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+              target_commit="$(git rev-parse "${TARGET}^{commit}")"
+              if [[ "${tag_commit}" != "${target_commit}" ]]; then
+                echo "Tag ${TAG} points to ${tag_commit}, expected ${target_commit}" >&2
+                exit 1
+              fi
+            fi
           else
             if [[ -z "${{ inputs.tag }}" ]]; then
               echo "Tag ${TAG} was expected to exist for a tag push event" >&2
@@ -73,228 +76,21 @@ jobs:
             fi
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git checkout --force "${TARGET}"
-            git tag -a "${TAG}" -m "Release ${TAG}"
+            git tag -a "${TAG}" "${TARGET}" -m "Release ${TAG}"
             git push origin "refs/tags/${TAG}"
           fi
 
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "ref=refs/tags/${TAG}" >> "${GITHUB_OUTPUT}"
 
-  # ── Build the embedded frontend once for every full target ─────
-  frontend:
-    needs: prepare
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
-
-      - name: Build embedded frontend
-        run: |
-          npm --prefix web/frontend ci
-          npm --prefix web/frontend run build
-          test -s web/static/index.html
-          test -n "$(find web/static/assets -type f -size +0c -print -quit)"
-
-      - name: Upload embedded frontend
-        uses: actions/upload-artifact@v7
-        with:
-          name: embedded-frontend
-          path: web/static
-          retention-days: 1
-
-  # ── Parallel build matrix ───────────────────────────────────────
   build:
-    needs: [prepare, frontend]
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: aiscan
-            profile: standard
-            runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo"
-            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
-            cgo: "0"
-          - id: aiscan-full-linux-amd64
-            profile: full
-            runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
-            targets: "linux/amd64"
-            cgo: "1"
-          - id: aiscan-full-linux-arm64
-            profile: full
-            runner: ubuntu-24.04-arm
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
-            targets: "linux/arm64"
-            cgo: "1"
-          - id: aiscan-full-darwin-amd64
-            profile: full
-            runner: macos-15-intel
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
-            targets: "darwin/amd64"
-            cgo: "1"
-          - id: aiscan-full-darwin-arm64
-            profile: full
-            runner: macos-15
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
-            targets: "darwin/arm64"
-            cgo: "1"
-          - id: aiscan-full-windows-amd64
-            profile: full
-            runner: windows-2022
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite record_ffmpeg re2_cgo re2_static"
-            targets: "windows/amd64"
-            cgo: "1"
+    needs: prepare
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      ref: ${{ needs.prepare.outputs.ref }}
 
-    env:
-      GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.tag }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          submodules: recursive
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up mingw for libcstx
-        if: runner.os == 'Windows'
-        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
-
-      - name: Install recorder SDK link dependencies on Linux
-        if: matrix.profile == 'full' && runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential nasm yasm pkg-config \
-            libxcb1-dev libxcb-shm0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-
-      - name: Install recorder SDK link dependencies on Windows
-        if: matrix.profile == 'full' && runner.os == 'Windows'
-        run: |
-          C:/msys64/usr/bin/bash.exe -lc \
-            "pacman -S --noconfirm --needed git diffutils make nasm yasm pkgconf mingw-w64-x86_64-toolchain"
-
-      - name: Prepare static FFmpeg and x264 recorder SDK
-        if: matrix.profile == 'full' && runner.os != 'macOS'
-        run: |
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            platform=windows
-            C:/msys64/usr/bin/bash.exe -lc \
-              "cd '${GITHUB_WORKSPACE}'; make record-native RECORD_ARCH=amd64 || make record-native-source RECORD_ARCH=amd64"
-          else
-            platform=linux
-            make record-native RECORD_ARCH="$(go env GOARCH)" || \
-              make record-native-source RECORD_ARCH="$(go env GOARCH)"
-          fi
-          bash .github/native/sdk.sh env "${platform}" "$(go env GOARCH)" >> "${GITHUB_ENV}"
-
-      - name: Verify recorder SDK link environment
-        if: matrix.profile == 'full' && runner.os != 'macOS'
-        run: pkg-config --modversion libavcodec
-
-      - name: Download embedded frontend
-        if: matrix.profile == 'full'
-        uses: actions/download-artifact@v7
-        with:
-          name: embedded-frontend
-          path: web/static
-
-      - name: Generate embedded resources
-        run: go generate ./core/resources
-
-      - name: Build binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-          TARGETS="${{ matrix.targets }}"
-          TAGS="${{ matrix.tags }}"
-          BINARY="${{ matrix.binary }}"
-          MAIN="${{ matrix.main }}"
-          VERSION="${GORELEASER_CURRENT_TAG#v}"
-          OUTDIR="dist/build"
-          mkdir -p "${OUTDIR}"
-
-          for target in $TARGETS; do
-            IFS='/' read -r goos goarch <<< "$target"
-            suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
-            out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
-            echo "  compiling ${goos}/${goarch} → ${out}"
-            CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -tags "$TAGS" \
-              -ldflags "-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}" \
-              -buildvcs=false \
-              -o "$out" "$MAIN"
-          done
-
-          if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
-            version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
-            test "$version_output" = "aiscan v${VERSION}"
-          fi
-
-          echo "=== Binaries ==="
-          ls -lh "${OUTDIR}/"
-
-      - name: Verify recorder libraries are statically linked
-        if: matrix.profile == 'full' && runner.os != 'macOS'
-        run: |
-          set -euo pipefail
-          binary="$(find dist/build -maxdepth 1 -type f -name 'aiscan-full_*' -print -quit)"
-          test -n "${binary}"
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            if objdump -p "${binary}" | grep -Eiq 'DLL Name:.*(libav|x264|libwinpthread)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          else
-            if ldd "${binary}" | grep -Eiq '(libav|libx264)'; then
-              echo "recorder library remained dynamically linked" >&2
-              exit 1
-            fi
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.id }}
-          path: dist/build/*
-          retention-days: 1
-
-  # ── Package release ─────────────────────────────────────────────
-  package:
+  release:
     needs: [prepare, build]
     runs-on: ubuntu-22.04
     env:
@@ -303,128 +99,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
-          fetch-depth: 0
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: release-*
-          path: dist/build
-          merge-multiple: true
-
-      - name: Install pinned UPX
-        env:
-          UPX_VERSION: 5.2.0
-          UPX_SHA256: 3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
-          curl -fsSL \
-            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz" \
-            -o "${archive}"
-          echo "${UPX_SHA256}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
-          echo "UPX_BIN=${RUNNER_TEMP}/upx-${UPX_VERSION}-amd64_linux/upx" >> "${GITHUB_ENV}"
-
-      - name: Compress Windows amd64 binaries with UPX
-        run: |
-          set -euo pipefail
-          "${UPX_BIN}" --version
-          for f in dist/build/*_windows_amd64.exe; do
-            [ -f "$f" ] || continue
-            "${UPX_BIN}" "$f"
-            "${UPX_BIN}" -t "$f"
-          done
-
-      - name: Package archives
-        run: |
-          set -euo pipefail
-          mkdir -p dist/release
-          for f in dist/build/*; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f")
-            archive_name="${base%.exe}"
-            binary="${base%%_*}"
-            inner_name="$binary"
-            [[ "$base" == *.exe ]] && inner_name="${binary}.exe"
-
-            tmpdir=$(mktemp -d)
-            cp "$f" "${tmpdir}/${inner_name}"
-            cp README.md "${tmpdir}/" 2>/dev/null || true
-            cp -r docs "${tmpdir}/" 2>/dev/null || true
-            (cd "$tmpdir" && zip -r - .) > "${GITHUB_WORKSPACE}/dist/release/${archive_name}.zip"
-            rm -rf "$tmpdir"
-          done
-          ls -lh dist/release
-
-      - name: Generate checksums
-        run: |
-          cd dist/release
-          sha256sum *.zip > aiscan_checksums.txt
-          cat aiscan_checksums.txt
-
-      - name: Upload release bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-bundle
-          path: dist/release/*
-          retention-days: 1
-
-  # UPX can report a structurally valid PE that still crashes at process
-  # startup. Run the exact packaged Windows binaries before publishing them.
-  verify-windows-release:
-    needs: [prepare, package]
-    runs-on: windows-2022
-    steps:
-      - name: Download release bundle
-        uses: actions/download-artifact@v7
-        with:
-          name: release-bundle
-          path: dist/release
-
-      - name: Smoke test packaged Windows binaries
-        shell: pwsh
-        env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $expectedVersion = "aiscan $env:TAG"
-          $cases = @(
-            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
-          )
-
-          foreach ($case in $cases) {
-            $destination = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($case.Archive))
-            Expand-Archive -LiteralPath (Join-Path 'dist/release' $case.Archive) -DestinationPath $destination
-            $binary = Join-Path $destination $case.Binary
-            $version = (& $binary --version | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0) {
-              throw "$($case.Binary) --version exited with $LASTEXITCODE"
-            }
-            if ($version -ne $expectedVersion) {
-              throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
-            }
-            if ($case.Full) {
-              & $binary web --help | Out-Null
-              if ($LASTEXITCODE -ne 0) {
-                throw "$($case.Binary) web --help exited with $LASTEXITCODE"
-              }
-            }
-          }
-
-  # ── Publish release ─────────────────────────────────────────────
-  release:
-    needs: [prepare, package, verify-windows-release]
-    runs-on: ubuntu-22.04
-    env:
-      TAG: ${{ needs.prepare.outputs.tag }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Download release bundle
@@ -435,13 +110,29 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        shell: bash
         run: |
-          prev_tag=$(git tag --sort=-v:refname \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+          awk -v heading="## ${TAG}" '
+            /^## / {
+              if (found) exit
+              if ($0 == heading || index($0, heading " ") == 1) {
+                found = 1
+                next
+              }
+            }
+            found { print }
+          ' docs/changelog.md > /tmp/changelog.md
+
+          prev_tag=$(git tag --merged "${TAG}^" --sort=-version:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
+            | grep -Ev 'nightly|^v0\.0\.0-ci\.' \
             | grep -Fxv "${TAG}" \
             | head -1 || true)
-          if [ -n "$prev_tag" ]; then
-            git log --pretty=format:"- %s" "${prev_tag}..${TAG}" --no-merges | grep -v "^- ${TAG}$" | grep -v "^- docs" > /tmp/changelog.md || true
+          if [ -s /tmp/changelog.md ]; then
+            echo "Using curated notes from docs/changelog.md"
+          elif [ -n "$prev_tag" ]; then
+            git log --pretty=format:"- %s" "${prev_tag}..${TAG}" --no-merges \
+              | grep -v "^- ${TAG}$" | grep -v "^- docs" > /tmp/changelog.md || true
           else
             git log --pretty=format:"- %s" -20 --no-merges > /tmp/changelog.md || true
           fi
@@ -450,8 +141,8 @@ jobs:
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          # Delete existing release if any (replace mode)
           gh release delete "${TAG}" --yes 2>/dev/null || true
 
           release_flags=(--draft)

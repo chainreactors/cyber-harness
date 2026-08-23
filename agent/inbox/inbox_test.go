@@ -1,8 +1,10 @@
 package inbox
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestBufferedPushDrain(t *testing.T) {
@@ -34,6 +36,27 @@ func TestBufferedCapacity(t *testing.T) {
 	b.Push(NewUserMessage("b"))
 	if err := b.Push(NewUserMessage("c")); err != ErrInboxFull {
 		t.Fatalf("push beyond capacity: got %v, want ErrInboxFull", err)
+	}
+}
+
+func TestHigherPriorityMessageEvictsLowerPriorityWhenFull(t *testing.T) {
+	b := NewBuffered(2)
+	if err := b.Push(NewUserMessage("low-1").WithPriority(PriorityLow)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Push(NewUserMessage("low-2").WithPriority(PriorityLow)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Push(NewUserMessage("completion").WithPriority(PriorityHigh)); err != nil {
+		t.Fatalf("high-priority push = %v", err)
+	}
+
+	msgs := b.Drain()
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if msgs[0].Priority != PriorityHigh || messageText(msgs[0].Message) != "completion" {
+		t.Fatalf("first message = %+v", msgs[0])
 	}
 }
 
@@ -150,5 +173,21 @@ func TestProducerRegistration(t *testing.T) {
 	h2.Done()
 	if b.ActiveProducers() != 0 {
 		t.Fatalf("expected 0 producers, got %d", b.ActiveProducers())
+	}
+}
+
+func TestBufferedWaitWhileActiveReturnsWhenProducersFinish(t *testing.T) {
+	b := NewBuffered(1)
+	producer := b.RegisterProducer("task")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	go producer.Done()
+
+	if b.WaitWhileActive(ctx) {
+		t.Fatal("WaitWhileActive() reported a message after the producer finished")
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("WaitWhileActive() did not return when the producer finished: %v", err)
 	}
 }

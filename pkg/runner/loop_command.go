@@ -72,11 +72,11 @@ func (c *loopCommand) Run(ctx context.Context, execution *commands.Execution) (a
 		_, _ = fmt.Fprint(output, "All loops stopped.\n")
 		return nil, nil
 	default:
-		return nil, c.create(ctx, scheduler, output, args)
+		return nil, c.create(scheduler, output, args)
 	}
 }
 
-func (c *loopCommand) create(ctx context.Context, scheduler *agent.LoopScheduler, output io.Writer, args []string) error {
+func (c *loopCommand) create(scheduler *agent.LoopScheduler, output io.Writer, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
@@ -98,7 +98,7 @@ func (c *loopCommand) create(ctx context.Context, scheduler *agent.LoopScheduler
 		return fmt.Errorf("usage: loop <schedule> <prompt>")
 	}
 
-	name, err := scheduler.Add(ctx, entry)
+	name, err := scheduler.Add(entry)
 	if err != nil {
 		return err
 	}

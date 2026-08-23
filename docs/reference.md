@@ -84,6 +84,8 @@ cyberhub:
   url: ""
   key: ""
   mode: ""            # merge（默认）或 override
+  proxy: ""           # scanner/工具出口代理：socks5://、trojan://、vless://、clash://
+  mitm: true          # 记录工具流量（默认开）；false = 纯代理路由，不拦截/不抓包
 
 # IOA 协作
 ioa:
@@ -172,6 +174,7 @@ misc:
 | 参数 | 说明 |
 | --- | --- |
 | `--proxy` | Scanner 代理，支持 `socks5://`、`trojan://`、`vless://`、`clash://`（订阅自动负载均衡） |
+| `--mitm` | 是否记录工具流量（默认开启）。关闭后为纯代理路由，不拦截/不抓包 |
 | `--cyberhub-url` | Cyberhub 资源服务 URL |
 | `--cyberhub-key` | Cyberhub API key |
 | `--cyberhub-mode` | 资源模式：`merge`（默认）或 `override` |
@@ -255,6 +258,22 @@ aiscan scan -i http://target.example --proxy clash://https://subscribe.example/l
 ```
 
 Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详见 [Agent 模式详解](agent.md)。
+
+### 流量捕获与多级代理（MITM Hub）
+
+运行期常驻一个本地 MITM Hub 作为**统一路由底座**:所有工具(内置 curl/scanner、以及 bash 里的 curl/wget 等外部命令)的流量都经它出站。它有两层解耦——
+
+- **稳定前端**:Hub 监听固定本地地址,一次性注入到所有工具(env + 内置 client),地址不变。
+- **动态后端**:出口代理链由 `proxy` 命令驱动(节点/订阅/负载均衡),`proxy switch/auto` 只热切换 Hub 的上游,已在跑的子进程无感,存量连接也能换出口。
+
+两个命令职责分明,均为命令行优先:
+
+- `proxy` —— 管理代理(订阅、切换、负载均衡、一次性 `proxy <url> <cmd>` 直连)。
+- `mitm` —— 查看已捕获流量:`mitm flows [--host --status --type --last]`、`mitm flow <id>`、`mitm analyze`、`mitm clear`。
+
+捕获默认开启,可用 `--mitm=false` 或配置 `mitm: false` 关闭(转为纯路由,不拦截 HTTPS、不抓包、无需信任 CA)。HTTPS 捕获会为工具注入 Hub CA(`CURL_CA_BUNDLE`/`SSL_CERT_FILE` 等);对**裸 IP** 目标的 HTTPS 因证书无 IP SAN 可能被严格校验拒绝,使用主机名不受影响。
+
+作为 Cairn Runner 运行时,每次工具执行的完整流量会作为 `http.exchange.v1` 证据进入流量表(敏感头在 Runner 侧脱敏),覆盖全部工具流量而非仅漏洞相关的零散记录。
 
 ### LLM API 代理
 

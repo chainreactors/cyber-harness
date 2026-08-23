@@ -15,11 +15,31 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	coredeps "github.com/chainreactors/aiscan/core/deps"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/chainreactors/utils/parsers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+func TestAppOwnsOneSharedProxyInfrastructure(t *testing.T) {
+	app, err := NewApp(context.Background(), ApplicationConfig{SkipEngines: true, Logger: telemetry.NopLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if app.deps == nil || app.proxyInfra == nil || app.proxyInfra.Hub == nil {
+		t.Fatal("application proxy infrastructure is incomplete")
+	}
+	provided, ok := coredeps.Get(app.deps.Bag, proxytool.InfraKey)
+	if !ok || provided != app.proxyInfra {
+		t.Fatal("command factories do not share the application proxy infrastructure")
+	}
+	if app.deps.ScannerProxy != app.proxyInfra.Hub.ProxyURL() {
+		t.Fatalf("scanner proxy = %q, hub = %q", app.deps.ScannerProxy, app.proxyInfra.Hub.ProxyURL())
+	}
+}
 
 func TestLogLLMProbeStatusReady(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -355,7 +355,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 	if dir == "" {
 		dir = "."
 	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(p)+".tmp-*")
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(p)+".tmp-*.yaml")
 	if err != nil {
 		return nil, err
 	}

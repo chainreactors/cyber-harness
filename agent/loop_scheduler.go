@@ -56,6 +56,7 @@ type LoopInfo struct {
 type LoopScheduler struct {
 	mu          sync.Mutex
 	loops       map[string]*loopState
+	ctx         context.Context
 	inbox       inbox.Inbox
 	log         telemetry.Logger
 	minInterval time.Duration
@@ -64,18 +65,23 @@ type LoopScheduler struct {
 type loopState struct {
 	entry     LoopEntry
 	cancel    context.CancelFunc
+	producer  *inbox.ProducerHandle
 	fireCount int
 	lastFired time.Time
 }
 
 const DefaultMinLoopInterval = 10 * time.Second
 
-func NewLoopScheduler(ib inbox.Inbox, logger telemetry.Logger) *LoopScheduler {
+func NewLoopScheduler(ctx context.Context, ib inbox.Inbox, logger telemetry.Logger) *LoopScheduler {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
 	return &LoopScheduler{
 		loops:       make(map[string]*loopState),
+		ctx:         ctx,
 		inbox:       ib,
 		log:         logger,
 		minInterval: DefaultMinLoopInterval,
@@ -94,7 +100,7 @@ func (s *LoopScheduler) SetLogger(logger telemetry.Logger) {
 	s.mu.Unlock()
 }
 
-func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) (string, error) {
+func (s *LoopScheduler) Add(entry LoopEntry) (string, error) {
 	if strings.TrimSpace(entry.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
@@ -116,8 +122,12 @@ func (s *LoopScheduler) Add(ctx context.Context, entry LoopEntry) (string, error
 		s.mu.Unlock()
 		return "", fmt.Errorf("loop %q already exists", entry.Name)
 	}
-	loopCtx, cancel := context.WithCancel(ctx)
-	state := &loopState{entry: entry, cancel: cancel}
+	loopCtx, cancel := context.WithCancel(s.ctx)
+	state := &loopState{
+		entry:    entry,
+		cancel:   cancel,
+		producer: s.inbox.RegisterProducer("loop:" + entry.Name),
+	}
 	s.loops[entry.Name] = state
 	s.mu.Unlock()
 
@@ -136,6 +146,15 @@ func autoName(prompt string) string {
 }
 
 func (s *LoopScheduler) run(ctx context.Context, state *loopState) {
+	defer func() {
+		state.producer.Done()
+		s.mu.Lock()
+		if s.loops[state.entry.Name] == state {
+			delete(s.loops, state.entry.Name)
+		}
+		s.mu.Unlock()
+	}()
+
 	if state.entry.Cron != nil {
 		s.runCron(ctx, state)
 	} else {

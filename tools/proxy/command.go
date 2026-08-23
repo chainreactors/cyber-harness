@@ -13,21 +13,19 @@ import (
 	goflags "github.com/jessevdk/go-flags"
 )
 
-type OnProxyChange func(newProxyURL string)
-
 type CommandExecutor func(ctx context.Context, tokens []string, execution *commands.Execution) (any, error)
 
 type Command struct {
-	state         *State
-	onProxyChange OnProxyChange
-	execCommand   CommandExecutor
+	state       *State
+	hub         *ProxyHub
+	execCommand CommandExecutor
 }
 
 func New(state *State) *Command {
 	return &Command{state: state}
 }
 
-func (c *Command) SetOnProxyChange(fn OnProxyChange)     { c.onProxyChange = fn }
+func (c *Command) SetHub(hub *ProxyHub)                  { c.hub = hub }
 func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
 func (c *Command) Name() string                          { return "proxy" }
 
@@ -131,19 +129,14 @@ func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs 
 	if c.execCommand == nil {
 		return nil, fmt.Errorf("proxy passthrough not available (no command executor)")
 	}
-	if _, err := url.Parse(proxyURL); err != nil {
-		return nil, fmt.Errorf("invalid proxy URL: %w", err)
+	// Route this one command through proxyURL by temporarily swapping the hub's
+	// upstream. Children keep pointing at the stable hub address; only the
+	// egress chain changes for the duration of the wrapped command.
+	restore, err := c.state.WithOverrideDial(proxyURL)
+	if err != nil {
+		return nil, err
 	}
-
-	prev := c.state.ActiveProxy()
-	if c.onProxyChange != nil {
-		c.onProxyChange(proxyURL)
-	}
-	defer func() {
-		if c.onProxyChange != nil {
-			c.onProxyChange(prev)
-		}
-	}()
+	defer restore()
 
 	return c.execCommand(ctx, cmdArgs, execution)
 }
@@ -202,10 +195,6 @@ func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 	}
 	c.state.SetAutoDial(clashURL, dial)
 
-	if c.onProxyChange != nil {
-		c.onProxyChange(clashURL)
-	}
-
 	supported := clash.SupportedNodes(sub)
 	var sb strings.Builder
 	sb.WriteString("[proxy] auto mode enabled\n")
@@ -258,9 +247,6 @@ func (c *Command) execSwitch(args []string) (string, error) {
 		return "", err
 	}
 	newProxy := c.state.ActiveProxy()
-	if c.onProxyChange != nil {
-		c.onProxyChange(newProxy)
-	}
 	return fmt.Sprintf("[proxy] switched to %q\nProxy URL: %s", c.state.ActiveNodeName(), newProxy), nil
 }
 
@@ -316,9 +302,6 @@ func (c *Command) execCurrent() (string, error) {
 func (c *Command) execClear() (string, error) {
 	c.state.Clear()
 	original := c.state.OriginalProxy()
-	if c.onProxyChange != nil {
-		c.onProxyChange(original)
-	}
 	if original != "" {
 		return fmt.Sprintf("[proxy] cleared. Reverted to original proxy: %s", original), nil
 	}

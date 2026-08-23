@@ -41,6 +41,13 @@ type ToolNodeConfig struct {
 	// DisableCommandCatalog prevents the AIScan-specific command namespace from
 	// being sent to generic AOP hubs. Tool definitions remain in AgentHello.
 	DisableCommandCatalog bool
+	// FileAudit is the file-access trail the registry's tools report into. When
+	// set, every observation is streamed to the hub on the file namespace.
+	FileAudit *commands.FileAudit
+	// ExtraNamespaces lets a host register additional AOP namespaces on the
+	// connection mux (e.g. the traffic namespace backed by the host's proxy
+	// hub). Each registrar is applied after the built-in namespaces.
+	ExtraNamespaces []func(*aop.NamespaceMux) error
 }
 
 // RunToolNode connects to the hub as a tool-only node and serves until ctx is
@@ -82,20 +89,22 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		subscribe = cfg.Events.Subscribe
 	}
 	return connect(ctx, connectionConfig{
-		ServerURL:      cfg.ServerURL,
-		WSPath:         cfg.WSPath,
-		Name:           runnerID,
-		Token:          cfg.Token,
-		Registry:       cfg.Registry,
-		AgentSubscribe: subscribe,
-		Progress:       cfg.Progress,
-		Logger:         logger,
-		NodeID:         runnerID,
-		Runtime:        runnerRuntime,
-		Capabilities:   []string{"pty", "file", "exec", "tool", "artifact"},
-		Menu:           menu,
-		RunnerFileRPC:  true,
-		JSONFrames:     cfg.JSONFrames,
+		ServerURL:       cfg.ServerURL,
+		WSPath:          cfg.WSPath,
+		Name:            runnerID,
+		Token:           cfg.Token,
+		Registry:        cfg.Registry,
+		AgentSubscribe:  subscribe,
+		Progress:        cfg.Progress,
+		Logger:          logger,
+		NodeID:          runnerID,
+		Runtime:         runnerRuntime,
+		Capabilities:    []string{"pty", "file", "exec", "tool", "artifact"},
+		Menu:            menu,
+		RunnerFileRPC:   true,
+		FileAudit:       cfg.FileAudit,
+		JSONFrames:      cfg.JSONFrames,
+		ExtraNamespaces: cfg.ExtraNamespaces,
 	})
 }
 
