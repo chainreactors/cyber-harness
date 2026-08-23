@@ -25,6 +25,7 @@ import (
 	"time"
 
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	traffic "github.com/chainreactors/aiscan/aop/traffic"
 )
 
 // A single stable, modern Chrome identity. Keeping one fingerprint per process
@@ -208,7 +209,7 @@ func (c *Command) do(ctx context.Context, req *Request, env map[string]string, w
 		fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, written))
 	}
 
-	c.emitArtifact(ctx, resp, written)
+	c.emitArtifact(ctx, traffic.ExchangeFromHTTP(resp.Request, resp, nil, nil), written)
 	return nil
 }
 
@@ -219,7 +220,7 @@ func (c *Command) failResponse(ctx context.Context, client *http.Client, req *Re
 	if req.WriteOut != "" {
 		fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, 0))
 	}
-	c.emitArtifact(ctx, resp, 0)
+	c.emitArtifact(ctx, traffic.ExchangeFromHTTP(resp.Request, resp, nil, nil), 0)
 	return fmt.Errorf("curl: (22) The requested URL returned error: %s", resp.Status)
 }
 
@@ -861,8 +862,8 @@ func resolveKey(host, port string) string {
 	return host + ":" + strings.TrimSpace(port)
 }
 
-func (c *Command) emitArtifact(ctx context.Context, resp *http.Response, size int64) {
-	if c.Events == nil || resp.Request == nil {
+func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, size int64) {
+	if c.Events == nil || exchange == nil || exchange.Response == nil {
 		return
 	}
 	summary := struct {
@@ -871,12 +872,21 @@ func (c *Command) emitArtifact(ctx context.Context, resp *http.Response, size in
 		ContentType string `json:"content_type,omitempty"`
 		Size        int64  `json:"size"`
 	}{
-		URL:         resp.Request.URL.String(),
-		Status:      resp.StatusCode,
-		ContentType: resp.Header.Get("Content-Type"),
+		URL:         exchange.Request.URL,
+		Status:      exchange.Response.StatusCode,
+		ContentType: headerValue(exchange.Response.Headers, "Content-Type"),
 		Size:        size,
 	}
 	c.EmitArtifactCtx(ctx, "curl", toolpb.ArtifactKindWeb, summary.URL, summary)
+}
+
+func headerValue(headers []traffic.Pair, name string) string {
+	for _, h := range headers {
+		if strings.EqualFold(h.Name, name) {
+			return h.Value
+		}
+	}
+	return ""
 }
 
 // resolvePath anchors a relative file path at the tool's working directory,

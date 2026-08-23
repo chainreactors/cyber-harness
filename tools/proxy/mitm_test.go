@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,71 @@ func startTestTarget(bodySize int) *httptest.Server {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write(body)
 	}))
+}
+
+func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
+	body := strings.Repeat("streamed-body-", 32*1024)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer target.Close()
+	hub := startHub(t, true)
+
+	resp, err := hubClient(t, hub, "large-body").Get(target.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var flows []Flow
+	for time.Now().Before(deadline) {
+		flows = hub.Store().Query(QueryOpts{})
+		if len(flows) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(flows) != 1 {
+		t.Fatalf("captured flows = %d, want 1", len(flows))
+	}
+	if got := len(flows[0].Response.Body); got > maxBodySnip {
+		t.Fatalf("preview size = %d, want <= %d", got, maxBodySnip)
+	}
+	id, err := strconv.Atoi(flows[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := hub.Store().Get(id)
+	if full == nil || full.Response == nil {
+		t.Fatal("hydrated flow missing response")
+	}
+	if got := string(full.Response.Body); got != body {
+		t.Fatalf("hydrated body length/content mismatch: got %d want %d", len(got), len(body))
+	}
+	wire := flowToProto(&flows[0])
+	if got := string(wire.GetResponse().GetBody()); got != body {
+		t.Fatalf("wire body length/content mismatch: got %d want %d", len(got), len(body))
+	}
+}
+
+func TestCaptureFilterRunsBeforeStore(t *testing.T) {
+	target := startTestTarget(32)
+	defer target.Close()
+	hub := startHub(t, true)
+	hub.SetCaptureFilter(&traffic.FlowFilter{Status: "404"})
+	resp, err := hubClient(t, hub, "filter").Get(target.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	time.Sleep(100 * time.Millisecond)
+	if got := hub.Store().Count(); got != 0 {
+		t.Fatalf("filtered flow count = %d, want 0", got)
+	}
 }
 
 // newCapturingHub wraps a store in a recording ProxyHub so a bare captureAddon

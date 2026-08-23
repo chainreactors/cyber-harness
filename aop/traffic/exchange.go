@@ -2,7 +2,11 @@ package traffic
 
 import (
 	"encoding/json"
+	"net/http"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // Pair is one HTTP header line: flat, ordered, duplicates preserved. It is the
@@ -20,6 +24,7 @@ type Request struct {
 	Protocol string
 	Headers  []Pair
 	Body     []byte
+	BodyRef  *BodyRef `json:"-"`
 }
 
 // Response is the response half of an exchange. It is optional on Exchange: a
@@ -30,6 +35,32 @@ type Response struct {
 	ReasonPhrase string
 	Headers      []Pair
 	Body         []byte
+	BodyRef      *BodyRef `json:"-"`
+}
+
+// HydrateBodies loads file-backed request/response bodies into Body. It is
+// intentionally explicit so list/query paths do not allocate large payloads.
+func (e *Exchange) HydrateBodies() error {
+	if e == nil {
+		return nil
+	}
+	if e.Request.BodyRef != nil {
+		body, err := ReadBody(e.Request.BodyRef)
+		if err != nil {
+			return err
+		}
+		e.Request.Body = body
+		e.Request.BodyRef = nil
+	}
+	if e.Response != nil && e.Response.BodyRef != nil {
+		body, err := ReadBody(e.Response.BodyRef)
+		if err != nil {
+			return err
+		}
+		e.Response.Body = body
+		e.Response.BodyRef = nil
+	}
+	return nil
 }
 
 // Exchange is the canonical in-memory form of one captured HTTP exchange,
@@ -47,6 +78,90 @@ type Exchange struct {
 	Response *Response
 	Error    string
 	Complete bool
+}
+
+// Clone returns an independent exchange value, including response metadata and
+// body references. The proxy hot store uses it before hydrating a body so a
+// query or subscriber never mutates the retained preview under a read lock.
+func (e Exchange) Clone() Exchange {
+	out := e
+	out.Request.Headers = append([]Pair(nil), e.Request.Headers...)
+	out.Request.Body = append([]byte(nil), e.Request.Body...)
+	if e.Request.BodyRef != nil {
+		ref := *e.Request.BodyRef
+		out.Request.BodyRef = &ref
+	}
+	if e.Response != nil {
+		resp := *e.Response
+		resp.Headers = append([]Pair(nil), e.Response.Headers...)
+		resp.Body = append([]byte(nil), e.Response.Body...)
+		if e.Response.BodyRef != nil {
+			ref := *e.Response.BodyRef
+			resp.BodyRef = &ref
+		}
+		out.Response = &resp
+	}
+	return out
+}
+
+// ExchangeFromHTTP converts the standard library's request/response pair into
+// the canonical HTTP observation model. Callers provide body bytes explicitly
+// because the http bodies are streaming and may already have been consumed by
+// the caller (for example, by a file-backed recorder).
+func ExchangeFromHTTP(req *http.Request, resp *http.Response, requestBody, responseBody []byte) *Exchange {
+	e := &Exchange{}
+	if req != nil {
+		urlString := ""
+		if req.URL != nil {
+			urlString = req.URL.String()
+		}
+		e.Request = Request{
+			Method:   req.Method,
+			URL:      urlString,
+			Protocol: req.Proto,
+			Headers:  PairsFromHTTP(req.Header),
+			Body:     requestBody,
+		}
+	}
+	if resp != nil {
+		reason := resp.Status
+		if prefix := strconv.Itoa(resp.StatusCode) + " "; strings.HasPrefix(reason, prefix) {
+			reason = strings.TrimPrefix(reason, prefix)
+		}
+		e.Response = &Response{
+			StatusCode:   resp.StatusCode,
+			ReasonPhrase: reason,
+			Headers:      PairsFromHTTP(resp.Header),
+			Body:         responseBody,
+		}
+		e.Complete = true
+	}
+	return e
+}
+
+// WebSocketMessage is a single message observed after an HTTP WebSocket
+// handshake. WebSocket traffic is deliberately modeled separately from an
+// HTTP Exchange while sharing the same header pair representation.
+type WebSocketMessage struct {
+	Direction string
+	Type      string
+	Body      []byte
+	Timestamp time.Time
+}
+
+// WebSocketExchange contains the handshake metadata and message stream for a
+// WebSocket connection. The HTTP handshake itself can still be represented by
+// Exchange; this type is for the bidirectional messages that follow it.
+type WebSocketExchange struct {
+	ID        string
+	URL       string
+	Protocol  string
+	Headers   []Pair
+	Messages  []WebSocketMessage
+	StartTime time.Time
+	EndTime   time.Time
+	Complete  bool
+	Error     string
 }
 
 // exchangeJSON is the persisted shape: identical field names and order to the
@@ -248,6 +363,26 @@ func pairsFromProto(headers []*Header) []Pair {
 			continue
 		}
 		out = append(out, Pair{Name: h.GetName(), Value: h.GetValue()})
+	}
+	return out
+}
+
+// PairsFromHTTP converts net/http headers into the canonical deterministic
+// pair sequence used by Exchange and Flow.
+func PairsFromHTTP(headers http.Header) []Pair {
+	if len(headers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]Pair, 0, len(headers))
+	for _, name := range names {
+		for _, value := range headers[name] {
+			out = append(out, Pair{Name: name, Value: value})
+		}
 	}
 	return out
 }
