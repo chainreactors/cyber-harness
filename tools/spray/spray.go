@@ -80,7 +80,8 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if c.engine != nil {
 		c.engine.InstallResourceProvider()
 	}
-	args = c.injectProxy(args)
+	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	args = c.injectProxyURL(args, egress.ProxyURL)
 	runOpts := spraycore.RunOptions{
 		Output:        &buf,
 		DefaultConfig: ".spray.yaml",
@@ -145,13 +146,17 @@ func (c *Command) TestInjectProxy(args []string) []string {
 }
 
 func (c *Command) injectProxy(args []string) []string {
-	if c.Proxy == "" {
+	return c.injectProxyURL(args, c.Proxy)
+}
+
+func (c *Command) injectProxyURL(args []string, proxy string) []string {
+	if proxy == "" {
 		return args
 	}
 	if toolargs.HasFlag(args, "--proxy") {
 		return args
 	}
-	return append(args, "--proxy", c.Proxy)
+	return append(args, "--proxy", proxy)
 }
 
 func withDefaultNoBar(args []string) []string {

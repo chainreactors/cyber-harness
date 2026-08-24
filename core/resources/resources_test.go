@@ -3,14 +3,74 @@ package resources
 import (
 	"bytes"
 	"context"
+	"net"
+	nethttp "net/http"
 	"strings"
 	"testing"
+	"time"
 
 	fingerresources "github.com/chainreactors/fingers/resources"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	spraypkg "github.com/chainreactors/spray/pkg"
 	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
+
+func TestInitBindsNeutronProxyBeforeTemplateCompilation(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	hit := make(chan struct{}, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			hit <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+
+	set, err := Init(context.Background(), Options{Proxy: "http://" + listener.Addr().String()})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if set.Fingers != nil {
+		t.Cleanup(func() { _ = set.Fingers.Close() })
+	}
+	if set.Neutron != nil {
+		t.Cleanup(func() { _ = set.Neutron.Close() })
+	}
+	if set.Neutron == nil || set.Neutron.Count() == 0 {
+		t.Fatal("neutron engine has no compiled templates")
+	}
+	for _, template := range set.Neutron.Get() {
+		if template == nil {
+			continue
+		}
+		for _, request := range template.GetRequests() {
+			if request == nil || request.GetHTTPClient() == nil {
+				continue
+			}
+			transport, ok := request.GetHTTPClient().Transport.(*nethttp.Transport)
+			if !ok || transport.DialContext == nil {
+				t.Fatalf("template %q transport = %#v, want proxy dialer", template.Id, request.GetHTTPClient().Transport)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			conn, _ := transport.DialContext(ctx, "tcp", "example.invalid:80")
+			cancel()
+			if conn != nil {
+				_ = conn.Close()
+			}
+			select {
+			case <-hit:
+			case <-time.After(time.Second):
+				t.Fatal("compiled neutron template did not dial the configured proxy")
+			}
+			return
+		}
+	}
+	t.Fatal("compiled neutron templates contain no HTTP request")
+}
 
 func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
 	oldFingerPrePort := fingerresources.PrePort

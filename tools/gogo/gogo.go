@@ -68,7 +68,8 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	defer telemetry.RecoverAsError("gogo", &err)
 	args := execution.Args
 	args = c.normalizeArgs(args)
-	args = c.injectProxy(args)
+	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	args = c.injectProxyURL(args, egress.ProxyURL)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
@@ -109,13 +110,17 @@ func (c *Command) TestInjectProxy(args []string) []string {
 }
 
 func (c *Command) injectProxy(args []string) []string {
-	if c.Proxy == "" {
+	return c.injectProxyURL(args, c.Proxy)
+}
+
+func (c *Command) injectProxyURL(args []string, proxy string) []string {
+	if proxy == "" {
 		return args
 	}
 	if toolargs.HasFlag(args, "--proxy") {
 		return args
 	}
-	return append(args, "--proxy", c.Proxy)
+	return append(args, "--proxy", proxy)
 }
 
 // normalizeArgs adapts common agent-generated gogo arguments before handing

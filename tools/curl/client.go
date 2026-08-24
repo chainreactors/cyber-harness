@@ -26,6 +26,7 @@ import (
 
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 // A single stable, modern Chrome identity. Keeping one fingerprint per process
@@ -53,16 +54,17 @@ var browserDefaults = []Header{
 }
 
 // do runs one parsed curl request end to end: builds the client (routing through
-// the runner's MITM hub when the environment provides it), applies the browser
-// naturalization defaults, performs the exchange, and writes curl-shaped output.
-// env and workDir are per-invocation; nothing here mutates the shared Command.
-func (c *Command) do(ctx context.Context, req *Request, env map[string]string, workDir string, stdout, stderr io.Writer) error {
+// the runner's MITM hub when the resolved egress provides it), applies the
+// browser naturalization defaults, performs the exchange, and writes
+// curl-shaped output. Egress and workDir are per-invocation; nothing here
+// mutates the shared Command.
+func (c *Command) do(ctx context.Context, req *Request, egress commands.Egress, workDir string, stdout, stderr io.Writer) error {
 	if req.Version {
 		_, err := fmt.Fprintln(stdout, compatibilityVersion)
 		return err
 	}
 
-	proxyURL, caPath := c.egress(env)
+	proxyURL, caPath := egress.ProxyURL, egress.CAPath
 	if req.Proxy != "" {
 		// -x overrides the injected hub egress for this invocation only.
 		proxyURL = req.Proxy
@@ -230,29 +232,6 @@ func isTimeoutError(err error) bool {
 	}
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
-}
-
-// egress reads the hub proxy and CA path the runner injected into this
-// execution's environment. The proxy URL already carries the tool-call id as
-// its username, so captured flows attribute to this call; the CA is present
-// only while the hub is intercepting. Falls back to the static scanner proxy.
-func (c *Command) egress(env map[string]string) (proxyURL, caPath string) {
-	for _, key := range []string{"ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
-		if v := env[key]; v != "" {
-			proxyURL = v
-			break
-		}
-	}
-	for _, key := range []string{"CURL_CA_BUNDLE", "SSL_CERT_FILE"} {
-		if v := env[key]; v != "" {
-			caPath = v
-			break
-		}
-	}
-	if proxyURL == "" {
-		proxyURL = c.Proxy
-	}
-	return proxyURL, caPath
 }
 
 func (c *Command) buildClient(proxyURL, caPath string, req *Request) (*http.Client, error) {

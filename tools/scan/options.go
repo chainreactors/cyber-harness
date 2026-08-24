@@ -8,6 +8,25 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
+type invocationProxyKey struct{}
+
+func withInvocationProxy(ctx context.Context, proxy string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, invocationProxyKey{}, proxy)
+}
+
+func (c *Command) proxyForContext(ctx context.Context) string {
+	if ctx == nil {
+		return c.Proxy
+	}
+	if proxy, ok := ctx.Value(invocationProxyKey{}).(string); ok {
+		return proxy
+	}
+	return c.Proxy
+}
+
 type Option func(*Command)
 
 type DeepBrowserFunc func(ctx context.Context, targetURL string) (string, error)
