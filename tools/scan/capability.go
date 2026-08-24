@@ -96,6 +96,9 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		if !profile.Enabled(name) || !hasSpray(c.engines) {
 			return
 		}
+		// The final call-scoped route is applied in runSprayCapability, where the
+		// pipeline context is available. Keep the startup value here for direct
+		// unit callers that do not install an invocation context.
 		sopts.Proxy = c.Proxy
 		sprayBuilt = true
 		capabilities = append(capabilities, sprayCapability(c, flags, opts.Web, name, sources, sopts, c.runSprayCapability))
@@ -129,7 +132,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 			wrapRoutes(acceptsTarget(targetWeb), webSources()...),
 			capWorkers(c.engines.Capacity.Spray, flags.SprayThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.Proxy}, emit)
+				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.proxyForContext(ctx)}, emit)
 			},
 		))
 	}

@@ -3,7 +3,6 @@ package curl
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -126,15 +125,5 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if workDir == "" {
 		workDir = coretool.WorkDirFromContext(ctx, c.WorkDir)
 	}
-	return nil, c.do(ctx, req, envMap(execution.Env), workDir, execution.Stdout, execution.Stderr)
-}
-
-func envMap(env []string) map[string]string {
-	values := make(map[string]string, len(env))
-	for _, item := range env {
-		if key, value, ok := strings.Cut(item, "="); ok {
-			values[key] = value
-		}
-	}
-	return values
+	return nil, c.do(ctx, req, commands.ResolveExecutionEgress(execution, c.Proxy), workDir, execution.Stdout, execution.Stderr)
 }

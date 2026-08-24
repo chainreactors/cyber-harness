@@ -145,9 +145,11 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	options.NoColors = true
 	options.DisableUpdateCheck = true
 
-	// Inject proxy.
-	if options.Proxy == "" && c.Proxy != "" {
-		options.Proxy = c.Proxy
+	// Inject the call-scoped Runner route only when the caller did not provide
+	// an explicit -proxy option.
+	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	if options.Proxy == "" {
+		options.Proxy = egress.ProxyURL
 	}
 	if err := configureBrowserOptions(options); err != nil {
 		return nil, fmt.Errorf("katana: %w", err)

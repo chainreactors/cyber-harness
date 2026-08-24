@@ -38,6 +38,34 @@ func TestFetchExecutePreservesExplicitHTTPURL(t *testing.T) {
 	}
 }
 
+func TestFetchUsesCallScopedRunnerProxy(t *testing.T) {
+	var proxyHits int
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHits++
+		if r.URL.Path != "/through-proxy" {
+			t.Errorf("proxy request path = %q, want /through-proxy", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("proxied"))
+	}))
+	defer proxy.Close()
+
+	cmd := NewFetchCommand()
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{
+		Args:   []string{proxy.URL + "/through-proxy"},
+		Env:    []string{"ALL_PROXY=" + proxy.URL},
+		Stdout: &output,
+		Stderr: &output,
+	})
+	if err != nil {
+		t.Fatalf("fetch through call-scoped proxy: %v", err)
+	}
+	if proxyHits != 1 || !strings.Contains(output.String(), "proxied") {
+		t.Fatalf("proxy hits=%d output=%q, want one proxied response", proxyHits, output.String())
+	}
+}
+
 func TestFetchCacheHitReturnsCachedContent(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

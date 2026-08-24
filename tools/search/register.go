@@ -23,7 +23,7 @@ func init() {
 			}
 
 			reg.RegisterTool(NewWebSearchTool(d.Provider, tavily))
-			fetch := NewFetchCommand()
+			fetch := NewFetchCommand().WithProxy(d.ScannerProxy).WithProxyCA(d.ScannerProxyCA)
 			reg.Register(commands.Command{
 				Name: fetch.Name(), Usage: fetch.Usage(),
 				DescriptionPath: "aiscan://skills/aiscan/okf/runtime/fetch.md",
