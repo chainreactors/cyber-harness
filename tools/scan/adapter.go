@@ -34,7 +34,7 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, discovery disc
 		Timeout:      discovery.Timeout,
 		VersionLevel: discovery.Version,
 		Exploit:      discovery.Exploit,
-		Proxy:        c.Proxy,
+		Proxy:        c.proxyForContext(ctx),
 		Debug:        discovery.Debug,
 		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capGogoPortscan, stats))
@@ -62,6 +62,7 @@ func (c *Command) runSprayCapability(ctx context.Context, flags flags, web webOp
 		return
 	}
 	opts = applyWebStrategyOptions(flags, web, opts)
+	opts.Proxy = c.proxyForContext(ctx)
 	opts.URLs = []string{target.URL}
 	opts.Host = target.HostHeader
 	opts.Scope = webTargetScope(target)
@@ -123,7 +124,7 @@ func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, creden
 		Top:       flags.ZombieTop,
 		Users:     credentials.Users,
 		Passwords: credentials.Passwords,
-		Proxy:     c.Proxy,
+		Proxy:     c.proxyForContext(ctx),
 		Debug:     flags.Debug,
 		OnStats: func(stats sdktypes.Stats) {
 			emit(statsEvent(capZombieWeakpass, stats))
@@ -221,7 +222,7 @@ func (c *Command) runHTTPBasicAuthCapability(ctx context.Context, flags flags, i
 	if !ok || !reportableSprayResultForCapability(target.Result, target.Capability) || target.Result.Status != 401 {
 		return
 	}
-	zTarget, ok := basicAuthZombieTarget(ctx, target.Result.UrlString, target.HostHeader, flags.Timeout)
+	zTarget, ok := basicAuthZombieTarget(ctx, target.Result.UrlString, target.HostHeader, flags.Timeout, c.proxyForContext(ctx))
 	if !ok {
 		return
 	}

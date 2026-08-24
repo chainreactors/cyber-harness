@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 // run is a small harness: parse args, execute against a real server, capture
@@ -24,13 +26,12 @@ func run(t *testing.T, args []string, env, workDir string) (stdout, stderr strin
 		return "", "", perr
 	}
 	var out, errb strings.Builder
-	envMapVal := map[string]string{}
-	if env != "" {
-		k, v, _ := strings.Cut(env, "=")
-		envMapVal[k] = v
-	}
 	c := New()
-	err = c.do(context.Background(), req, envMapVal, workDir, &out, &errb)
+	var egress commands.Egress
+	if env != "" {
+		egress = commands.ResolveEgress([]string{env}, c.Proxy)
+	}
+	err = c.do(context.Background(), req, egress, workDir, &out, &errb)
 	return out.String(), errb.String(), err
 }
 
@@ -327,6 +328,28 @@ func TestProxyOverride(t *testing.T) {
 	}
 	if out != "via-proxy" {
 		t.Fatalf("body = %q, want via-proxy", out)
+	}
+}
+
+func TestRunnerEgressProxy(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.RequestURI, "http://") {
+			t.Errorf("proxy got non-absolute URI %q", r.RequestURI)
+		}
+		_, _ = w.Write([]byte("via-runner-egress"))
+	}))
+	defer proxy.Close()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("direct"))
+	}))
+	defer target.Close()
+
+	out, _, err := run(t, []string{target.URL}, "ALL_PROXY="+proxy.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "via-runner-egress" {
+		t.Fatalf("body = %q, want via-runner-egress", out)
 	}
 }
 

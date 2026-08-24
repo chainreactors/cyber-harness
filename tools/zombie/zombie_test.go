@@ -26,6 +26,20 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsInvalidCallScopedProxy(t *testing.T) {
+	cmd := New(nil).WithProxy("http://startup.example:8080")
+	var output bytes.Buffer
+	_, err := cmd.Run(context.Background(), &commands.Execution{
+		Args:   []string{"--help"},
+		Env:    []string{"ALL_PROXY=not-a-proxy"},
+		Stdout: &output,
+		Stderr: &output,
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid proxy") {
+		t.Fatalf("Run() error = %v, want invalid call-scoped proxy error", err)
+	}
+}
+
 func TestResolveRelativePathsOnlyRewritesZombieFileFlags(t *testing.T) {
 	dir := t.TempDir()
 	cmd := New(nil)

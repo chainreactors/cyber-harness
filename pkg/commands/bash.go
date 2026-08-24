@@ -675,27 +675,9 @@ func (t *BashTool) proxyEnv(ctx context.Context) []string {
 		callID := coretool.InvocationFromContext(ctx).CallID
 		proxy, ca = t.egressResolver(callID)
 	}
-	if proxy == "" {
-		return nil
-	}
-	env := []string{
-		"ALL_PROXY=" + proxy, "all_proxy=" + proxy,
-		"HTTP_PROXY=" + proxy, "http_proxy=" + proxy,
-		"HTTPS_PROXY=" + proxy, "https_proxy=" + proxy,
-	}
-	// Point common HTTP clients at the MITM hub CA so intercepted HTTPS is
-	// trusted. Tools that use the system pool or pin certs ignore these and
-	// degrade to CONNECT-metadata capture, which is acceptable.
-	if ca != "" {
-		env = append(env,
-			"CURL_CA_BUNDLE="+ca,
-			"SSL_CERT_FILE="+ca,
-			"NODE_EXTRA_CA_CERTS="+ca,
-			"REQUESTS_CA_BUNDLE="+ca,
-			"GIT_SSL_CAINFO="+ca,
-		)
-	}
-	return env
+	// Point the same common proxy/CA surface at child processes that built-in
+	// tools consume through Execution.Env.
+	return EgressEnvironment(proxy, ca)
 }
 
 func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {

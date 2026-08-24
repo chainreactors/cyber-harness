@@ -85,6 +85,8 @@ func Usage() string {
 
 func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("scan", &err)
+	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	ctx = withInvocationProxy(ctx, egress.ProxyURL)
 	out, _, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
 	if err != nil {
 		return nil, err

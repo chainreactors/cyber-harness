@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
+	"github.com/chainreactors/proxyclient"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	zombiecore "github.com/chainreactors/zombie/core"
+	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 
 type Command struct {
@@ -52,6 +56,11 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	args = ensureOutputDrain(args)
+	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	proxyDial, err := proxyDialFor(egress.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
 	if toolargs.BoolFlagEnabled(args, "--debug") {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
@@ -59,7 +68,8 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		c.Logger.Debugf("zombie debug enabled")
 	}
 	runOpts := zombiecore.RunOptions{
-		Output: &buf,
+		Output:    &buf,
+		ProxyDial: proxyDial,
 	}
 	if err := zombiecore.RunWithArgs(ctx, args, runOpts); err != nil {
 		if buf.Len() > 0 {
@@ -69,6 +79,25 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	}
 	fmt.Fprint(execution.Stdout, buf.String())
 	return nil, nil
+}
+
+func proxyDialFor(proxyURL string) (zombiepkg.DialFunc, error) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("zombie: invalid proxy %q: %w", proxyURL, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("zombie: invalid proxy %q: expected URL with scheme and host", proxyURL)
+	}
+	dial, err := proxyclient.NewClient(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("zombie: initialize proxy %q: %w", proxyURL, err)
+	}
+	return dial.DialContext, nil
 }
 
 // zombie core only starts its result consumer when a file output is present,

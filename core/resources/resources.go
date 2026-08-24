@@ -122,6 +122,14 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 	set.FingersConfig = fingers.NewConfig()
 	set.FingersConfig.FullFingers = finalFullFingers
 	set.NeutronConfig = neutron.NewConfig().WithTemplates(finalTemplates)
+	// Neutron compiles each template's HTTP transport when NewEngine runs.
+	// Carry the caller's egress proxy into the config before compilation so
+	// embedded and remote templates cannot bypass the Runner Hub. The engine
+	// package still applies the process default for compatibility with callers
+	// that construct neutron commands directly.
+	if opts.Proxy != "" {
+		set.NeutronConfig.WithProxy(opts.Proxy)
+	}
 
 	set.Fingers, err = fingers.NewEngineWithFingers(finalFullFingers)
 	if err != nil {

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
+	nethttp "net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/neutron/operators"
@@ -124,6 +127,67 @@ http:
 	out := output.String()
 	if !strings.Contains(out, "custom-poc") || strings.Contains(out, "embedded") {
 		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestExplicitTemplateLoaderBindsCallProxy(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	hit := make(chan struct{}, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			select {
+			case hit <- struct{}{}:
+			default:
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	path := filepath.Join(t.TempDir(), "custom.yml")
+	if err := os.WriteFile(path, []byte(`id: proxy-bound
+info:
+  name: proxy-bound
+  severity: info
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}'
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	proxyURL := "http://" + listener.Addr().String()
+	loaded, err := loadNeutronTemplatePaths([]string{path}, proxyURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || len(loaded[0].GetRequests()) != 1 {
+		t.Fatalf("loaded templates = %#v, want one HTTP template", loaded)
+	}
+	client := loaded[0].GetRequests()[0].GetHTTPClient()
+	if client == nil {
+		t.Fatal("compiled request has no HTTP client")
+	}
+	transport, ok := client.Transport.(*nethttp.Transport)
+	if !ok || transport.DialContext == nil {
+		t.Fatalf("compiled transport = %#v, want proxy dialer", client.Transport)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, _ := transport.DialContext(ctx, "tcp", "example.invalid:80")
+	if conn != nil {
+		_ = conn.Close()
+	}
+	select {
+	case <-hit:
+	case <-time.After(time.Second):
+		t.Fatal("compiled template did not dial the configured proxy")
 	}
 }
 

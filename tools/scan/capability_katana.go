@@ -135,8 +135,8 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 			handleResult(&r)
 		},
 	}
-	if c.Proxy != "" {
-		options.Proxy = c.Proxy
+	if proxy := c.proxyForContext(ctx); proxy != "" {
+		options.Proxy = proxy
 	}
 	if jsMode {
 		binary, err := browserutil.Discover()

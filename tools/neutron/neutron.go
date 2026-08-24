@@ -159,7 +159,12 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		return nil, fmt.Errorf("neutron: --rate-limit cannot be negative")
 	}
 
-	loadedTemplates, err := loadNeutronTemplatePaths(flags.Templates)
+	// The Runner injects a call-scoped Hub URL into Execution.Env. Resolve it
+	// before loading -t templates: the SDK binds each request transport at
+	// compile time, so a zero-proxy loader would let an explicit template dial
+	// the target directly even though the command itself has a proxy configured.
+	proxyURL := commands.ResolveExecutionEgress(execution, c.Proxy).ProxyURL
+	loadedTemplates, err := loadNeutronTemplatePaths(flags.Templates, proxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -336,11 +341,11 @@ func readNeutronTargets(inputs []string, input, listFile string) ([]string, erro
 	return out, scanner.Err()
 }
 
-func loadNeutronTemplatePaths(paths []string) ([]*templates.Template, error) {
+func loadNeutronTemplatePaths(paths []string, proxyURL string) ([]*templates.Template, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	cfg := sdkneutron.NewConfig()
+	cfg := sdkneutron.NewConfig().WithProxy(proxyURL)
 	engine, err := sdkneutron.NewEngine(cfg.WithTemplates([]*templates.Template{minimalCompilableTemplate()}))
 	if err != nil {
 		return nil, fmt.Errorf("neutron: initialize template loader: %w", err)

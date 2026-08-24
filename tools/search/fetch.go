@@ -2,10 +2,13 @@ package search
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -128,8 +131,9 @@ func (c *urlCache) Clear() {
 // ---------------------------------------------------------------------------
 
 type FetchCommand struct {
-	client *http.Client
-	cache  *urlCache
+	cache *urlCache
+	proxy string
+	ca    string
 }
 
 func (c *FetchCommand) Name() string { return "fetch" }
@@ -142,19 +146,60 @@ Useful for reading advisories, documentation, and vulnerability details.`
 }
 
 func NewFetchCommand() *FetchCommand {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-	}
 	return &FetchCommand{
-		client: &http.Client{
-			Transport: transport,
-			Timeout:   fetchTimeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
 		cache: newURLCache(),
 	}
+}
+
+// WithProxy sets the startup fallback. Each Run still resolves the
+// call-scoped Runner environment before constructing its private client.
+func (c *FetchCommand) WithProxy(proxy string) *FetchCommand {
+	c.proxy = proxy
+	return c
+}
+
+func (c *FetchCommand) WithProxyCA(ca string) *FetchCommand {
+	c.ca = ca
+	return c
+}
+
+func fetchClientForProxy(proxy, caPath string) (*http.Client, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:errcheck // DefaultTransport is always *http.Transport
+	// Never inherit an ambient process proxy; the invocation's resolved route is
+	// the sole egress authority for this request.
+	transport.Proxy = nil
+	proxy = strings.TrimSpace(proxy)
+	if proxy != "" {
+		u, err := url.Parse(proxy)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			if err == nil {
+				err = fmt.Errorf("expected URL with scheme and host")
+			}
+			return nil, fmt.Errorf("fetch: invalid proxy %q: %w", proxy, err)
+		}
+		transport.Proxy = http.ProxyURL(u)
+	}
+	if caPath = strings.TrimSpace(caPath); caPath != "" {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("fetch: read CA bundle %q: %w", caPath, err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("fetch: CA bundle %q contains no certificates", caPath)
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   fetchTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}, nil
 }
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
@@ -184,7 +229,12 @@ func (c *FetchCommand) Run(ctx context.Context, execution *commands.Execution) (
 		return nil, nil
 	}
 
-	result, redir, err := c.fetchWithRedirects(ctx, normalizedURL, 0)
+	egress := commands.ResolveExecutionEgress(execution, c.proxy)
+	client, err := fetchClientForProxy(egress.ProxyURL, egress.CAPath)
+	if err != nil {
+		return nil, err
+	}
+	result, redir, err := c.fetchWithRedirects(ctx, client, normalizedURL, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +297,7 @@ type redirectInfo struct {
 	statusCode  int
 }
 
-func (c *FetchCommand) fetchWithRedirects(ctx context.Context, targetURL string, depth int) (*fetchResult, *redirectInfo, error) {
+func (c *FetchCommand) fetchWithRedirects(ctx context.Context, client *http.Client, targetURL string, depth int) (*fetchResult, *redirectInfo, error) {
 	if depth > maxRedirects {
 		return nil, nil, fmt.Errorf("too many redirects (exceeded %d)", maxRedirects)
 	}
@@ -260,7 +310,7 @@ func (c *FetchCommand) fetchWithRedirects(ctx context.Context, targetURL string,
 	req.Header.Set("Accept", "text/markdown, text/html, text/plain, */*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
 
-	resp, err := c.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch failed: %w", err)
 	}
@@ -277,7 +327,7 @@ func (c *FetchCommand) fetchWithRedirects(ctx context.Context, targetURL string,
 		}
 
 		if isPermittedRedirect(targetURL, redirectURL) {
-			return c.fetchWithRedirects(ctx, redirectURL, depth+1)
+			return c.fetchWithRedirects(ctx, client, redirectURL, depth+1)
 		}
 		return nil, &redirectInfo{
 			originalURL: targetURL,

@@ -79,16 +79,27 @@ func NewTavilySearch(builtinKeys string) *TavilySearch {
 	return c
 }
 
-// proxyTransport builds an HTTP transport that routes through proxy when it is a
-// valid URL, falling back to the environment proxy for an empty or unparseable
-// value.
+// proxyTransport builds an HTTP transport from the configured egress. It never
+// consults the process environment: an invocation's route must not be replaced
+// by ambient proxy state, and malformed routes fail closed in Transport.Proxy.
 func proxyTransport(proxy string) *http.Transport {
-	t := &http.Transport{Proxy: http.ProxyFromEnvironment}
-	if proxy != "" {
-		if u, err := url.Parse(proxy); err == nil {
-			t.Proxy = http.ProxyURL(u)
-		}
+	t := &http.Transport{}
+	proxy = strings.TrimSpace(proxy)
+	if proxy == "" {
+		return t
 	}
+	u, err := url.Parse(proxy)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		proxyErr := err
+		if proxyErr == nil {
+			proxyErr = fmt.Errorf("expected URL with scheme and host")
+		}
+		t.Proxy = func(*http.Request) (*url.URL, error) {
+			return nil, fmt.Errorf("invalid proxy %q: %w", proxy, proxyErr)
+		}
+		return t
+	}
+	t.Proxy = http.ProxyURL(u)
 	return t
 }
 
