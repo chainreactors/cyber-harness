@@ -64,6 +64,9 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
 	}
 	cfg.Messages = a.MessagesSnapshot()
+	if err := requireProvider(cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
@@ -123,6 +126,9 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 		runCtx = providerpkg.WithFrameObserver(runCtx, cfg.emitter.providerFrame)
 	}
 	cfg.Messages = a.MessagesSnapshot()
+	if err := requireProvider(cfg); err != nil {
+		return nil, err
+	}
 	result, runErr := runLoop(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr

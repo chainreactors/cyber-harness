@@ -354,6 +354,87 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 	}
 }
 
+func TestNilProviderRunDoesNotAutoRetry(t *testing.T) {
+	rt := newBareRuntime(t, nil, nil)
+	var mu sync.Mutex
+	var events []*aop.Event
+	rt.Subscribe(func(event *aop.Event) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+	})
+	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := session.Run(context.Background(), RunInput{TurnID: "turn-1", Content: []*aop.Content{aop.Text("hello")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err == nil || !strings.Contains(err.Error(), "provider is nil") {
+		t.Fatalf("Wait() error = %v, want provider is nil", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	starts, ends := countSessionTurnLifecycle(&mu, &events, "session-1")
+	if starts != 1 || ends != 1 {
+		t.Fatalf("nil provider Run looped: starts=%d ends=%d", starts, ends)
+	}
+	if session.state.inbox.Len() != 0 {
+		t.Fatalf("inbox len = %d, want 0", session.state.inbox.Len())
+	}
+}
+
+func TestNilProviderIdlePushDoesNotLoop(t *testing.T) {
+	rt := newBareRuntime(t, nil, nil)
+	var mu sync.Mutex
+	var events []*aop.Event
+	ended := make(chan struct{}, 1)
+	rt.Subscribe(func(event *aop.Event) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+		if event.SessionId == "session-1" && event.GetTurnEnded() != nil {
+			select {
+			case ended <- struct{}{}:
+			default:
+			}
+		}
+	})
+	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.state.inbox.Push(inbox.NewSystemMessage("queued")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ended:
+	case <-time.After(200 * time.Millisecond):
+	}
+	time.Sleep(50 * time.Millisecond)
+	starts, ends := countSessionTurnLifecycle(&mu, &events, "session-1")
+	if starts > 1 || ends > 1 {
+		t.Fatalf("nil provider idle push looped: starts=%d ends=%d", starts, ends)
+	}
+}
+
+func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID string) (starts, ends int) {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, event := range *events {
+		if event.SessionId != sessionID {
+			continue
+		}
+		if event.GetTurnStarted() != nil {
+			starts++
+		}
+		if event.GetTurnEnded() != nil {
+			ends++
+		}
+	}
+	return starts, ends
+}
+
 func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.Provider) *AgentRuntime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

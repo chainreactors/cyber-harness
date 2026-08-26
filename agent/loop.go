@@ -19,9 +19,16 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-func runLoop(ctx context.Context, cfg Config) (*Result, error) {
+func requireProvider(cfg Config) error {
 	if cfg.Provider == nil {
-		return nil, fmt.Errorf("agent provider is nil")
+		return fmt.Errorf("agent provider is nil")
+	}
+	return nil
+}
+
+func runLoop(ctx context.Context, cfg Config) (*Result, error) {
+	if err := requireProvider(cfg); err != nil {
+		return nil, err
 	}
 	if cfg.Tools == nil {
 		cfg.Tools = tool.EmptyExecutor()

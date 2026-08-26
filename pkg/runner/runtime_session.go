@@ -506,11 +506,19 @@ func (m *sessionMailbox) Push(message inboxpkg.Message) error {
 
 func (m *sessionMailbox) setActive(active bool) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.active = active
 	if active {
 		m.automaticPending = false
 	}
-	pending := !active && m.base.Len() > 0 && !m.automaticPending
+}
+
+// kickAutomatic starts a run only when the session is idle and the inbox still
+// has work. Failed turns must not call this: automatic continuation drains
+// leftover input after success, it is not a retry loop.
+func (m *sessionMailbox) kickAutomatic() {
+	m.mu.Lock()
+	pending := !m.active && m.base.Len() > 0 && !m.automaticPending
 	if pending {
 		m.automaticPending = true
 	}
@@ -1151,6 +1159,9 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			}
 			emitter.end(runResult, runErr)
 			s.inbox.setActive(false)
+			if runErr == nil {
+				s.inbox.kickAutomatic()
+			}
 			s.runtime.finishRun(run, runResult, runErr)
 		},
 		reject: func(err error) {
