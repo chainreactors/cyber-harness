@@ -24,9 +24,18 @@ import (
 type SQLiteStore struct {
 	db  *sql.DB
 	orm *bun.DB
+	// maxEventsPerSession caps the durable AOP event rows one chat session may
+	// accumulate. Real sessions stay in the thousands; the cap is a capacity
+	// guard so an event storm (a retry loop once wrote 7.4M rows / 3.7GB into
+	// one session) cannot grow the database without bound. When the cap trips,
+	// one synthetic error event is persisted in its place so history replay
+	// shows why the timeline stops; live broadcast is unaffected.
+	maxEventsPerSession int64
 }
 
 const sqliteSchemaVersion = 3
+
+const DefaultMaxAOPEventsPerSession int64 = 100_000
 
 var (
 	dbJSONMarshal   = protojson.MarshalOptions{UseProtoNames: true}
@@ -53,7 +62,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		}
 		return nil, fmt.Errorf("verify sqlite foreign keys: disabled")
 	}
-	return &SQLiteStore{db: db, orm: orm}, nil
+	return &SQLiteStore{db: db, orm: orm, maxEventsPerSession: DefaultMaxAOPEventsPerSession}, nil
 }
 
 func migrate(orm *bun.DB, db *sql.DB) error {
@@ -428,9 +437,31 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if event.GetEmittedAt() != nil {
 		createdAt = event.GetEmittedAt().AsTime().UTC().Format(time.RFC3339Nano)
 	}
+	limited := false
 	err = s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := tx.NewSelect().Model((*aopEventModel)(nil)).
 			ColumnExpr("COALESCE(MAX(cursor), 0) + 1").Where("session_id = ?", sessionID).Scan(ctx, &cursor); err != nil {
+			return err
+		}
+		if s.maxEventsPerSession > 0 && cursor > s.maxEventsPerSession {
+			limited = true
+			if cursor > s.maxEventsPerSession+1 {
+				// The marker already terminates this session's history;
+				// everything past it is dropped without another row.
+				return nil
+			}
+			// Exactly one row past the cap: persist a synthetic terminal
+			// marker in place of the dropped event. The cursor sequence is
+			// serialized by this transaction (single-connection store), so
+			// the marker is written exactly once per session.
+			markerJSON, err := marshalProtoJSON(sessionEventLimitMarker(sessionID, s.maxEventsPerSession))
+			if err != nil {
+				return err
+			}
+			_, err = tx.NewInsert().Model(&aopEventModel{
+				ID: generateID(), SessionID: sessionID, Cursor: cursor,
+				Emitter: "aiscan.web", EventJSON: markerJSON, CreatedAt: createdAt,
+			}).Exec(ctx)
 			return err
 		}
 		_, err := tx.NewInsert().Model(&aopEventModel{
@@ -443,7 +474,24 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if err != nil {
 		return 0, false, err
 	}
+	if limited {
+		return 0, false, nil
+	}
 	return cursor, true, nil
+}
+
+// sessionEventLimitMarker is the synthetic AOP error event persisted as a
+// session's final row when it hits the event cap. It rides the normal error
+// payload so replaying clients render it without special cases.
+func sessionEventLimitMarker(sessionID string, limit int64) *aop.Event {
+	return &aop.Event{
+		Id: generateID(), SessionId: sessionID, Emitter: "aiscan.web",
+		EmittedAt: timestamppb.Now(),
+		Payload: &aop.Event_Error{Error: &aop.ProtocolError{
+			Code:    "session_event_limit",
+			Message: fmt.Sprintf("session reached the %d persisted event limit; further events are not stored", limit),
+		}},
+	}
 }
 
 func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]*aop.Event, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -339,6 +340,52 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s retained %d rows after session deletion", table, count)
 		}
+	}
+}
+
+func TestSQLiteStoreCapsAOPEventsPerSession(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "event-cap.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.maxEventsPerSession = 5
+	ctx := context.Background()
+	createStoredSession(t, store, "s1")
+
+	makeEvent := func(i int) *aop.Event {
+		return &aop.Event{
+			Id: fmt.Sprintf("e-%d", i), EmittedAt: timestamppb.Now(), SessionId: "s1", Emitter: "aiscan",
+			Payload: &aop.Event_Message{Message: &aop.Message{
+				Id: fmt.Sprintf("m-%d", i), Role: "assistant", Content: []*aop.Content{aop.Text(fmt.Sprintf("event %d", i))},
+			}},
+		}
+	}
+	for i := 1; i <= 5; i++ {
+		cursor, persisted, err := store.AppendAOPEvent(ctx, "s1", makeEvent(i))
+		if err != nil || !persisted || cursor != int64(i) {
+			t.Fatalf("event %d: cursor=%d persisted=%v err=%v", i, cursor, persisted, err)
+		}
+	}
+	// Everything past the cap is dropped without error so live broadcast
+	// keeps working; only one synthetic marker row is added.
+	for i := 6; i <= 10; i++ {
+		cursor, persisted, err := store.AppendAOPEvent(ctx, "s1", makeEvent(i))
+		if err != nil || persisted || cursor != 0 {
+			t.Fatalf("event %d past cap: cursor=%d persisted=%v err=%v", i, cursor, persisted, err)
+		}
+	}
+
+	events, err := store.ListAOPEvents(ctx, "s1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 6 {
+		t.Fatalf("stored events = %d, want 5 real + 1 marker", len(events))
+	}
+	marker := events[len(events)-1].GetError()
+	if marker == nil || marker.Code != "session_event_limit" {
+		t.Fatalf("final event = %+v, want session_event_limit marker", events[len(events)-1])
 	}
 }
 
