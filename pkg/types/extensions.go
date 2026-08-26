@@ -35,6 +35,16 @@ func SetCommandDetail(event *aop.Event, value *CommandDetail) error {
 	return aop.SetTypedExtension(event, value)
 }
 
+func GetSessionHistory(event *aop.Event) (*SessionHistory, bool, error) {
+	value := new(SessionHistory)
+	ok, err := aop.FindTypedExtension(event, value)
+	return value, ok, err
+}
+
+func SetSessionHistory(event *aop.Event, value *SessionHistory) error {
+	return aop.SetTypedExtension(event, value)
+}
+
 func GetCompactDetail(event *aop.Event) (*CompactDetail, bool, error) {
 	value := new(CompactDetail)
 	ok, err := aop.FindTypedExtension(event, value)

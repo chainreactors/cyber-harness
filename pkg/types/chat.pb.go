@@ -23,6 +23,101 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SessionHistory_Mode int32
+
+const (
+	SessionHistory_MODE_UNSPECIFIED SessionHistory_Mode = 0
+	SessionHistory_MODE_INHERIT     SessionHistory_Mode = 1
+	SessionHistory_MODE_SNAPSHOT    SessionHistory_Mode = 2
+)
+
+// Enum value maps for SessionHistory_Mode.
+var (
+	SessionHistory_Mode_name = map[int32]string{
+		0: "MODE_UNSPECIFIED",
+		1: "MODE_INHERIT",
+		2: "MODE_SNAPSHOT",
+	}
+	SessionHistory_Mode_value = map[string]int32{
+		"MODE_UNSPECIFIED": 0,
+		"MODE_INHERIT":     1,
+		"MODE_SNAPSHOT":    2,
+	}
+)
+
+func (x SessionHistory_Mode) Enum() *SessionHistory_Mode {
+	p := new(SessionHistory_Mode)
+	*p = x
+	return p
+}
+
+func (x SessionHistory_Mode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SessionHistory_Mode) Descriptor() protoreflect.EnumDescriptor {
+	return file_types_chat_proto_enumTypes[0].Descriptor()
+}
+
+func (SessionHistory_Mode) Type() protoreflect.EnumType {
+	return &file_types_chat_proto_enumTypes[0]
+}
+
+func (x SessionHistory_Mode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SessionHistory_Mode.Descriptor instead.
+func (SessionHistory_Mode) EnumDescriptor() ([]byte, []int) {
+	return file_types_chat_proto_rawDescGZIP(), []int{0, 0}
+}
+
+// SessionHistory is persisted as an AOP event extension. It makes transcript
+// inheritance explicit without changing the shared AOP protocol schema.
+type SessionHistory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mode          SessionHistory_Mode    `protobuf:"varint,1,opt,name=mode,proto3,enum=aiscan.chat.SessionHistory_Mode" json:"mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionHistory) Reset() {
+	*x = SessionHistory{}
+	mi := &file_types_chat_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionHistory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionHistory) ProtoMessage() {}
+
+func (x *SessionHistory) ProtoReflect() protoreflect.Message {
+	mi := &file_types_chat_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionHistory.ProtoReflect.Descriptor instead.
+func (*SessionHistory) Descriptor() ([]byte, []int) {
+	return file_types_chat_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SessionHistory) GetMode() SessionHistory_Mode {
+	if x != nil {
+		return x.Mode
+	}
+	return SessionHistory_MODE_UNSPECIFIED
+}
+
 type SessionRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Session       *aop.Session           `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
@@ -36,7 +131,7 @@ type SessionRecord struct {
 
 func (x *SessionRecord) Reset() {
 	*x = SessionRecord{}
-	mi := &file_types_chat_proto_msgTypes[0]
+	mi := &file_types_chat_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +143,7 @@ func (x *SessionRecord) String() string {
 func (*SessionRecord) ProtoMessage() {}
 
 func (x *SessionRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[0]
+	mi := &file_types_chat_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +156,7 @@ func (x *SessionRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionRecord.ProtoReflect.Descriptor instead.
 func (*SessionRecord) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{0}
+	return file_types_chat_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SessionRecord) GetSession() *aop.Session {
@@ -110,7 +205,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_types_chat_proto_msgTypes[1]
+	mi := &file_types_chat_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -122,7 +217,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[1]
+	mi := &file_types_chat_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -135,7 +230,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{1}
+	return file_types_chat_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ListSessionsRequest) GetAfterCursor() string {
@@ -169,7 +264,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_types_chat_proto_msgTypes[2]
+	mi := &file_types_chat_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -181,7 +276,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[2]
+	mi := &file_types_chat_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -194,7 +289,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{2}
+	return file_types_chat_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*SessionRecord {
@@ -220,7 +315,7 @@ type GetSessionRequest struct {
 
 func (x *GetSessionRequest) Reset() {
 	*x = GetSessionRequest{}
-	mi := &file_types_chat_proto_msgTypes[3]
+	mi := &file_types_chat_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +327,7 @@ func (x *GetSessionRequest) String() string {
 func (*GetSessionRequest) ProtoMessage() {}
 
 func (x *GetSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[3]
+	mi := &file_types_chat_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +340,7 @@ func (x *GetSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionRequest) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{3}
+	return file_types_chat_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetSessionRequest) GetSessionId() string {
@@ -264,7 +359,7 @@ type GetSessionResponse struct {
 
 func (x *GetSessionResponse) Reset() {
 	*x = GetSessionResponse{}
-	mi := &file_types_chat_proto_msgTypes[4]
+	mi := &file_types_chat_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -276,7 +371,7 @@ func (x *GetSessionResponse) String() string {
 func (*GetSessionResponse) ProtoMessage() {}
 
 func (x *GetSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[4]
+	mi := &file_types_chat_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -289,7 +384,7 @@ func (x *GetSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionResponse) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{4}
+	return file_types_chat_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetSessionResponse) GetSession() *SessionRecord {
@@ -311,7 +406,7 @@ type ResetSessionRequest struct {
 
 func (x *ResetSessionRequest) Reset() {
 	*x = ResetSessionRequest{}
-	mi := &file_types_chat_proto_msgTypes[5]
+	mi := &file_types_chat_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -323,7 +418,7 @@ func (x *ResetSessionRequest) String() string {
 func (*ResetSessionRequest) ProtoMessage() {}
 
 func (x *ResetSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[5]
+	mi := &file_types_chat_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -336,7 +431,7 @@ func (x *ResetSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetSessionRequest.ProtoReflect.Descriptor instead.
 func (*ResetSessionRequest) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{5}
+	return file_types_chat_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ResetSessionRequest) GetRequestId() string {
@@ -377,7 +472,7 @@ type ResetSessionReceipt struct {
 
 func (x *ResetSessionReceipt) Reset() {
 	*x = ResetSessionReceipt{}
-	mi := &file_types_chat_proto_msgTypes[6]
+	mi := &file_types_chat_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -389,7 +484,7 @@ func (x *ResetSessionReceipt) String() string {
 func (*ResetSessionReceipt) ProtoMessage() {}
 
 func (x *ResetSessionReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[6]
+	mi := &file_types_chat_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -402,7 +497,7 @@ func (x *ResetSessionReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetSessionReceipt.ProtoReflect.Descriptor instead.
 func (*ResetSessionReceipt) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{6}
+	return file_types_chat_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ResetSessionReceipt) GetPrevious() *aop.Session {
@@ -433,7 +528,7 @@ type ResetSessionResponse struct {
 
 func (x *ResetSessionResponse) Reset() {
 	*x = ResetSessionResponse{}
-	mi := &file_types_chat_proto_msgTypes[7]
+	mi := &file_types_chat_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +540,7 @@ func (x *ResetSessionResponse) String() string {
 func (*ResetSessionResponse) ProtoMessage() {}
 
 func (x *ResetSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[7]
+	mi := &file_types_chat_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +553,7 @@ func (x *ResetSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetSessionResponse.ProtoReflect.Descriptor instead.
 func (*ResetSessionResponse) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{7}
+	return file_types_chat_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ResetSessionResponse) GetRequestId() string {
@@ -519,7 +614,7 @@ type DeleteSessionRequest struct {
 
 func (x *DeleteSessionRequest) Reset() {
 	*x = DeleteSessionRequest{}
-	mi := &file_types_chat_proto_msgTypes[8]
+	mi := &file_types_chat_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -531,7 +626,7 @@ func (x *DeleteSessionRequest) String() string {
 func (*DeleteSessionRequest) ProtoMessage() {}
 
 func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[8]
+	mi := &file_types_chat_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -544,7 +639,7 @@ func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSessionRequest) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{8}
+	return file_types_chat_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeleteSessionRequest) GetRequestId() string {
@@ -575,7 +670,7 @@ type DeleteSessionResponse struct {
 
 func (x *DeleteSessionResponse) Reset() {
 	*x = DeleteSessionResponse{}
-	mi := &file_types_chat_proto_msgTypes[9]
+	mi := &file_types_chat_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +682,7 @@ func (x *DeleteSessionResponse) String() string {
 func (*DeleteSessionResponse) ProtoMessage() {}
 
 func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[9]
+	mi := &file_types_chat_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +695,7 @@ func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSessionResponse) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{9}
+	return file_types_chat_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteSessionResponse) GetRequestId() string {
@@ -660,7 +755,7 @@ type ListCommandsRequest struct {
 
 func (x *ListCommandsRequest) Reset() {
 	*x = ListCommandsRequest{}
-	mi := &file_types_chat_proto_msgTypes[10]
+	mi := &file_types_chat_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -672,7 +767,7 @@ func (x *ListCommandsRequest) String() string {
 func (*ListCommandsRequest) ProtoMessage() {}
 
 func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[10]
+	mi := &file_types_chat_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -685,7 +780,7 @@ func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsRequest.ProtoReflect.Descriptor instead.
 func (*ListCommandsRequest) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{10}
+	return file_types_chat_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListCommandsRequest) GetSessionId() string {
@@ -704,7 +799,7 @@ type ListCommandsResponse struct {
 
 func (x *ListCommandsResponse) Reset() {
 	*x = ListCommandsResponse{}
-	mi := &file_types_chat_proto_msgTypes[11]
+	mi := &file_types_chat_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +811,7 @@ func (x *ListCommandsResponse) String() string {
 func (*ListCommandsResponse) ProtoMessage() {}
 
 func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_chat_proto_msgTypes[11]
+	mi := &file_types_chat_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -729,7 +824,7 @@ func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsResponse.ProtoReflect.Descriptor instead.
 func (*ListCommandsResponse) Descriptor() ([]byte, []int) {
-	return file_types_chat_proto_rawDescGZIP(), []int{11}
+	return file_types_chat_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListCommandsResponse) GetCommands() []*CommandSpec {
@@ -743,7 +838,13 @@ var File_types_chat_proto protoreflect.FileDescriptor
 
 const file_types_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x10types/chat.proto\x12\vaiscan.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\x01\n" +
+	"\x10types/chat.proto\x12\vaiscan.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x89\x01\n" +
+	"\x0eSessionHistory\x124\n" +
+	"\x04mode\x18\x01 \x01(\x0e2 .aiscan.chat.SessionHistory.ModeR\x04mode\"A\n" +
+	"\x04Mode\x12\x14\n" +
+	"\x10MODE_UNSPECIFIED\x10\x00\x12\x10\n" +
+	"\fMODE_INHERIT\x10\x01\x12\x11\n" +
+	"\rMODE_SNAPSHOT\x10\x02\"\xe7\x01\n" +
 	"\rSessionRecord\x12&\n" +
 	"\asession\x18\x01 \x01(\v2\f.aop.SessionR\asession\x12\x1d\n" +
 	"\n" +
@@ -811,43 +912,47 @@ func file_types_chat_proto_rawDescGZIP() []byte {
 	return file_types_chat_proto_rawDescData
 }
 
-var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_types_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_types_chat_proto_goTypes = []any{
-	(*SessionRecord)(nil),         // 0: aiscan.chat.SessionRecord
-	(*ListSessionsRequest)(nil),   // 1: aiscan.chat.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 2: aiscan.chat.ListSessionsResponse
-	(*GetSessionRequest)(nil),     // 3: aiscan.chat.GetSessionRequest
-	(*GetSessionResponse)(nil),    // 4: aiscan.chat.GetSessionResponse
-	(*ResetSessionRequest)(nil),   // 5: aiscan.chat.ResetSessionRequest
-	(*ResetSessionReceipt)(nil),   // 6: aiscan.chat.ResetSessionReceipt
-	(*ResetSessionResponse)(nil),  // 7: aiscan.chat.ResetSessionResponse
-	(*DeleteSessionRequest)(nil),  // 8: aiscan.chat.DeleteSessionRequest
-	(*DeleteSessionResponse)(nil), // 9: aiscan.chat.DeleteSessionResponse
-	(*ListCommandsRequest)(nil),   // 10: aiscan.chat.ListCommandsRequest
-	(*ListCommandsResponse)(nil),  // 11: aiscan.chat.ListCommandsResponse
-	(*aop.Session)(nil),           // 12: aop.Session
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(*aop.Rejection)(nil),         // 14: aop.Rejection
-	(*CommandSpec)(nil),           // 15: aiscan.command.CommandSpec
+	(SessionHistory_Mode)(0),      // 0: aiscan.chat.SessionHistory.Mode
+	(*SessionHistory)(nil),        // 1: aiscan.chat.SessionHistory
+	(*SessionRecord)(nil),         // 2: aiscan.chat.SessionRecord
+	(*ListSessionsRequest)(nil),   // 3: aiscan.chat.ListSessionsRequest
+	(*ListSessionsResponse)(nil),  // 4: aiscan.chat.ListSessionsResponse
+	(*GetSessionRequest)(nil),     // 5: aiscan.chat.GetSessionRequest
+	(*GetSessionResponse)(nil),    // 6: aiscan.chat.GetSessionResponse
+	(*ResetSessionRequest)(nil),   // 7: aiscan.chat.ResetSessionRequest
+	(*ResetSessionReceipt)(nil),   // 8: aiscan.chat.ResetSessionReceipt
+	(*ResetSessionResponse)(nil),  // 9: aiscan.chat.ResetSessionResponse
+	(*DeleteSessionRequest)(nil),  // 10: aiscan.chat.DeleteSessionRequest
+	(*DeleteSessionResponse)(nil), // 11: aiscan.chat.DeleteSessionResponse
+	(*ListCommandsRequest)(nil),   // 12: aiscan.chat.ListCommandsRequest
+	(*ListCommandsResponse)(nil),  // 13: aiscan.chat.ListCommandsResponse
+	(*aop.Session)(nil),           // 14: aop.Session
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*aop.Rejection)(nil),         // 16: aop.Rejection
+	(*CommandSpec)(nil),           // 17: aiscan.command.CommandSpec
 }
 var file_types_chat_proto_depIdxs = []int32{
-	12, // 0: aiscan.chat.SessionRecord.session:type_name -> aop.Session
-	13, // 1: aiscan.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
-	13, // 2: aiscan.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: aiscan.chat.ListSessionsResponse.sessions:type_name -> aiscan.chat.SessionRecord
-	0,  // 4: aiscan.chat.GetSessionResponse.session:type_name -> aiscan.chat.SessionRecord
-	12, // 5: aiscan.chat.ResetSessionReceipt.previous:type_name -> aop.Session
-	0,  // 6: aiscan.chat.ResetSessionReceipt.current:type_name -> aiscan.chat.SessionRecord
-	6,  // 7: aiscan.chat.ResetSessionResponse.accepted:type_name -> aiscan.chat.ResetSessionReceipt
-	14, // 8: aiscan.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
-	12, // 9: aiscan.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
-	14, // 10: aiscan.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
-	15, // 11: aiscan.chat.ListCommandsResponse.commands:type_name -> aiscan.command.CommandSpec
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	0,  // 0: aiscan.chat.SessionHistory.mode:type_name -> aiscan.chat.SessionHistory.Mode
+	14, // 1: aiscan.chat.SessionRecord.session:type_name -> aop.Session
+	15, // 2: aiscan.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
+	15, // 3: aiscan.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: aiscan.chat.ListSessionsResponse.sessions:type_name -> aiscan.chat.SessionRecord
+	2,  // 5: aiscan.chat.GetSessionResponse.session:type_name -> aiscan.chat.SessionRecord
+	14, // 6: aiscan.chat.ResetSessionReceipt.previous:type_name -> aop.Session
+	2,  // 7: aiscan.chat.ResetSessionReceipt.current:type_name -> aiscan.chat.SessionRecord
+	8,  // 8: aiscan.chat.ResetSessionResponse.accepted:type_name -> aiscan.chat.ResetSessionReceipt
+	16, // 9: aiscan.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
+	14, // 10: aiscan.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
+	16, // 11: aiscan.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
+	17, // 12: aiscan.chat.ListCommandsResponse.commands:type_name -> aiscan.command.CommandSpec
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_types_chat_proto_init() }
@@ -856,11 +961,11 @@ func file_types_chat_proto_init() {
 		return
 	}
 	file_types_command_proto_init()
-	file_types_chat_proto_msgTypes[7].OneofWrappers = []any{
+	file_types_chat_proto_msgTypes[8].OneofWrappers = []any{
 		(*ResetSessionResponse_Accepted)(nil),
 		(*ResetSessionResponse_Rejected)(nil),
 	}
-	file_types_chat_proto_msgTypes[9].OneofWrappers = []any{
+	file_types_chat_proto_msgTypes[10].OneofWrappers = []any{
 		(*DeleteSessionResponse_Accepted)(nil),
 		(*DeleteSessionResponse_Rejected)(nil),
 	}
@@ -869,13 +974,14 @@ func file_types_chat_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_chat_proto_rawDesc), len(file_types_chat_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   12,
+			NumEnums:      1,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_types_chat_proto_goTypes,
 		DependencyIndexes: file_types_chat_proto_depIdxs,
+		EnumInfos:         file_types_chat_proto_enumTypes,
 		MessageInfos:      file_types_chat_proto_msgTypes,
 	}.Build()
 	File_types_chat_proto = out.File

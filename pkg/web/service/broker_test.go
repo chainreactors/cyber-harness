@@ -119,6 +119,39 @@ func TestBroadcastAOPEventPersistsCanonicalProtoJSON(t *testing.T) {
 	}
 }
 
+func TestBroadcastAOPEventDoesNotFanOutRetryWithSameEventID(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "session-retry")
+	deliveries, unsubscribe := service.SubscribeSessionEvents("session-retry")
+	defer unsubscribe()
+	event := &aop.Event{
+		Id: "event-retry", SessionId: "session-retry", Emitter: "aiscan",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "message-1", Role: "assistant", Content: []*aop.Content{aop.Text("once")}}},
+	}
+	service.BroadcastAOPEvent("session-retry", event)
+	service.BroadcastAOPEvent("session-retry", proto.Clone(event).(*aop.Event))
+
+	select {
+	case <-deliveries:
+	case <-time.After(time.Second):
+		t.Fatal("first event was not broadcast")
+	}
+	select {
+	case duplicate := <-deliveries:
+		t.Fatalf("duplicate event was broadcast: %+v", duplicate)
+	case <-time.After(50 * time.Millisecond):
+	}
+	stored, err := store.ListAOPEvents(context.Background(), "session-retry", 10)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored events = %d, err = %v; want 1", len(stored), err)
+	}
+}
+
 func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {

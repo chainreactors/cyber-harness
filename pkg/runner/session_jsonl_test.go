@@ -10,6 +10,8 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
+	types "github.com/chainreactors/aiscan/pkg/types"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -60,8 +62,55 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 	}
 }
 
+func TestLoadResumeStateRejectsEventsWithoutHistoryMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unversioned.jsonl")
+	writeSessionEvents(t, path, []*aop.Event{
+		{Id: "start", SessionId: "root", Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}}},
+		sessionTestEvent("root", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}}}),
+	})
+	if _, err := loadResumeState(path); err == nil {
+		t.Fatal("loadResumeState accepted an event stream without explicit history metadata")
+	}
+}
+
+func TestLoadResumeStateRejectsDuplicateEventIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "duplicate.jsonl")
+	start := sessionTestEvent("root", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}}})
+	start.Id = "same-event"
+	message := sessionTestEvent("root", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hello")}}}})
+	message.Id = "same-event"
+	marshal := protojson.MarshalOptions{UseProtoNames: true}
+	first, err := marshal.Marshal(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := marshal.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append(append(first, '\n'), append(second, '\n')...)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadResumeState(path); err == nil {
+		t.Fatal("loadResumeState accepted duplicate event IDs")
+	}
+}
+
 func sessionTestEvent(sessionID string, event *aop.Event) *aop.Event {
-	event.Id = "event"
+	switch payload := event.Payload.(type) {
+	case *aop.Event_SessionStarted:
+		event.Id = "event-session-started-" + sessionID
+		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
+	case *aop.Event_Message:
+		event.Id = "event-message-" + payload.Message.Id
+	case *aop.Event_ToolResult:
+		event.Id = "event-tool-result-" + payload.ToolResult.CallId
+	case *aop.Event_Extension:
+		event.Id = "event-extension-" + sessionID
+	default:
+		event.Id = "event-" + sessionID
+	}
 	event.SessionId = sessionID
 	event.TurnId = "turn-1"
 	event.Emitter = "aiscan"

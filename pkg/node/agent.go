@@ -64,19 +64,18 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		logger.Debugf("websocket transport connection to %s", dialURL)
 
 		connection := connectionConfig{
-			ServerURL:      option.ServerURL,
-			Name:           runner.ResolveIOANodeName(option),
-			Registry:       application.Commands,
-			AgentSubscribe: rt.Subscribe,
-			Progress:       application.Progress,
-			Logger:         logger,
-			Chat:           chatHandler,
-			AgentRuntime:   rt,
-			NodeID:         nodeID,
-			Runtime:        runner.DefaultRuntimeInfo(),
-			Status:         func() *aop.AgentStatus { return runner.AgentStatus(option, application) },
-			Menu:           func() []*types.CommandSpec { return runner.CommandCatalog(application) },
-			PTYRouter:      func() (*terminal.Router, error) { return NewPTYRouter(application.Commands), nil },
+			ServerURL: option.ServerURL,
+			Name:      runner.ResolveIOANodeName(option),
+			Registry:  application.Commands,
+			Agent:     rt,
+			Progress:  application.Progress,
+			Logger:    logger,
+			Chat:      chatHandler,
+			NodeID:    nodeID,
+			Runtime:   runner.DefaultRuntimeInfo(),
+			Status:    func() *aop.AgentStatus { return runner.AgentStatus(option, application) },
+			Menu:      func() []*types.CommandSpec { return runner.CommandCatalog(application) },
+			PTYRouter: func() (*terminal.Router, error) { return NewPTYRouter(application.Commands), nil },
 		}
 		_ = connect(ctx, connection)
 	}()

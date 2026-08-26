@@ -127,7 +127,11 @@ func TestEventRendererSeparatesContinuationSessionHeaders(t *testing.T) {
 }
 
 func renderEvent(event *aop.Event) *aop.Event {
-	event.Id = "e-1"
+	if message := event.GetMessage(); message != nil && message.Id != "" {
+		event.Id = "e-" + message.Id
+	} else {
+		event.Id = "e-session-started"
+	}
 	event.SessionId = "session-1"
 	event.TurnId = "turn-1"
 	event.Emitter = "aiscan"

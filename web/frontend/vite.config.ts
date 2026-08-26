@@ -4,7 +4,7 @@ import path from 'path'
 
 const backendURL = process.env.AISCAN_BACKEND_URL || 'http://127.0.0.1:8080'
 
-// Design-system primitives + the terminal view are consumed from the cyber-ui
+// Shared UI and IOA components are consumed directly from the cyber-ui
 // submodule (single source of truth for what aiscan contributes upstream). The
 // remaining composite views (markdown/viewer) stay vendored under @/ because
 // aiscan still diverges them.
@@ -23,7 +23,7 @@ export default defineConfig({
       '@cyber/cstx': path.resolve(cyberUI, 'cstx/src'),
       '@cyber/cstx-easm': path.resolve(cyberUI, 'cstx-easm/src'),
       '@cyber/viewer': path.resolve(cyberUI, 'viewer/src'),
-      '@cyber/ioa': path.resolve(__dirname, './src/compat/ioa.tsx'),
+      '@cyber/ioa': path.resolve(cyberUI, 'ioa/src'),
     },
   },
   server: {

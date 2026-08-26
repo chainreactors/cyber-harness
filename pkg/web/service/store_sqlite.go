@@ -24,18 +24,10 @@ import (
 type SQLiteStore struct {
 	db  *sql.DB
 	orm *bun.DB
-	// maxEventsPerSession caps the durable AOP event rows one chat session may
-	// accumulate. Real sessions stay in the thousands; the cap is a capacity
-	// guard so an event storm (a retry loop once wrote 7.4M rows / 3.7GB into
-	// one session) cannot grow the database without bound. When the cap trips,
-	// one synthetic error event is persisted in its place so history replay
-	// shows why the timeline stops; live broadcast is unaffected.
-	maxEventsPerSession int64
 }
 
-const sqliteSchemaVersion = 3
-
-const DefaultMaxAOPEventsPerSession int64 = 100_000
+// The shipped schema is a single canonical layout. Version drift is an error.
+const sqliteSchemaVersion = 1
 
 var (
 	dbJSONMarshal   = protojson.MarshalOptions{UseProtoNames: true}
@@ -50,9 +42,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	orm := bun.NewDB(db, sqlitedialect.New())
-	if err := migrate(orm, db); err != nil {
+	if err := initializeSchemaV1(orm, db); err != nil {
 		_ = orm.Close()
-		return nil, fmt.Errorf("migrate sqlite: %w", err)
+		return nil, fmt.Errorf("initialize sqlite schema v1: %w", err)
 	}
 	var foreignKeys int
 	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
@@ -62,10 +54,12 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		}
 		return nil, fmt.Errorf("verify sqlite foreign keys: disabled")
 	}
-	return &SQLiteStore{db: db, orm: orm, maxEventsPerSession: DefaultMaxAOPEventsPerSession}, nil
+	return &SQLiteStore{db: db, orm: orm}, nil
 }
 
-func migrate(orm *bun.DB, db *sql.DB) error {
+// initializeSchemaV1 creates the only supported schema for a brand-new empty
+// database. It never upgrades or repairs an existing database.
+func initializeSchemaV1(orm *bun.DB, db *sql.DB) error {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
@@ -74,7 +68,7 @@ func migrate(orm *bun.DB, db *sql.DB) error {
 		return nil
 	}
 	if version != 0 {
-		return fmt.Errorf("unsupported sqlite schema version %d; delete the database and restart", version)
+		return fmt.Errorf("unsupported sqlite schema version %d; database must be recreated with canonical schema v1", version)
 	}
 	var tables int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).Scan(&tables); err != nil {
@@ -125,6 +119,9 @@ func migrate(orm *bun.DB, db *sql.DB) error {
 			if _, err := index.Exec(ctx); err != nil {
 				return err
 			}
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX idx_aop_events_event_id ON chat_aop_events(session_id, event_id)`); err != nil {
+			return err
 		}
 		_, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, sqliteSchemaVersion))
 		return err
@@ -200,10 +197,10 @@ func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
 	var model scanModel
-	if err := s.orm.NewSelect().Model(&model).Column("scan_json").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
+	if err := s.orm.NewSelect().Model(&model).Column("scan_json", "report").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
 		return nil, err
 	}
-	return scanFromJSON(model.ScanJSON)
+	return scanFromModel(model)
 }
 
 func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error) {
@@ -211,12 +208,12 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error
 		limit = 50
 	}
 	var models []scanModel
-	if err := s.orm.NewSelect().Model(&models).Column("scan_json").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
+	if err := s.orm.NewSelect().Model(&models).Column("scan_json", "report").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
 		return nil, err
 	}
 	scans := make([]*types.Scan, 0, len(models))
 	for _, model := range models {
-		scan, err := scanFromJSON(model.ScanJSON)
+		scan, err := scanFromModel(model)
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +267,12 @@ func scanToModel(scan *types.Scan) (*scanModel, error) {
 	if scan == nil {
 		return nil, fmt.Errorf("scan is required")
 	}
-	raw, err := marshalProtoJSON(scan)
+	// Report is already stored in its dedicated relational column. Omitting it
+	// from the JSON snapshot avoids writing a large completed report twice while
+	// scanFromModel restores it for callers of Get/List.
+	snapshot := protobuf.CloneOf(scan)
+	snapshot.Report = ""
+	raw, err := marshalProtoJSON(snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -282,6 +284,17 @@ func scanToModel(scan *types.Scan) (*scanModel, error) {
 		Report: scan.GetReport(), Error: scan.GetError(), ScanJSON: raw,
 		CreatedAt: formatProtoTime(scan.GetCreatedAt()), UpdatedAt: formatProtoTime(scan.GetUpdatedAt()),
 	}, nil
+}
+
+func scanFromModel(model scanModel) (*types.Scan, error) {
+	scan, err := scanFromJSON(model.ScanJSON)
+	if err != nil {
+		return nil, err
+	}
+	// Report has one authoritative representation: the dedicated relational
+	// projection. The JSON snapshot is deliberately not consulted.
+	scan.Report = model.Report
+	return scan, nil
 }
 
 func scanFromJSON(raw string) (*types.Scan, error) {
@@ -429,6 +442,12 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if event == nil || event.GetMessageDelta() != nil || event.GetToolCallDelta() != nil {
 		return 0, false, nil
 	}
+	if strings.TrimSpace(sessionID) == "" {
+		return 0, false, fmt.Errorf("AOP event session_id is required")
+	}
+	if strings.TrimSpace(event.Id) == "" {
+		return 0, false, fmt.Errorf("AOP event id is required")
+	}
 	raw, err := marshalProtoJSON(event)
 	if err != nil {
 		return 0, false, err
@@ -437,61 +456,36 @@ func (s *SQLiteStore) AppendAOPEvent(ctx context.Context, sessionID string, even
 	if event.GetEmittedAt() != nil {
 		createdAt = event.GetEmittedAt().AsTime().UTC().Format(time.RFC3339Nano)
 	}
-	limited := false
 	err = s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var existing aopEventModel
+		lookupErr := tx.NewSelect().Model(&existing).Column("cursor").
+			Where("session_id = ? AND event_id = ?", sessionID, event.Id).Limit(1).Scan(ctx)
+		if lookupErr == nil {
+			cursor = existing.Cursor
+			persisted = false
+			return nil
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return lookupErr
+		}
 		if err := tx.NewSelect().Model((*aopEventModel)(nil)).
 			ColumnExpr("COALESCE(MAX(cursor), 0) + 1").Where("session_id = ?", sessionID).Scan(ctx, &cursor); err != nil {
 			return err
 		}
-		if s.maxEventsPerSession > 0 && cursor > s.maxEventsPerSession {
-			limited = true
-			if cursor > s.maxEventsPerSession+1 {
-				// The marker already terminates this session's history;
-				// everything past it is dropped without another row.
-				return nil
-			}
-			// Exactly one row past the cap: persist a synthetic terminal
-			// marker in place of the dropped event. The cursor sequence is
-			// serialized by this transaction (single-connection store), so
-			// the marker is written exactly once per session.
-			markerJSON, err := marshalProtoJSON(sessionEventLimitMarker(sessionID, s.maxEventsPerSession))
-			if err != nil {
-				return err
-			}
-			_, err = tx.NewInsert().Model(&aopEventModel{
-				ID: generateID(), SessionID: sessionID, Cursor: cursor,
-				Emitter: "aiscan.web", EventJSON: markerJSON, CreatedAt: createdAt,
-			}).Exec(ctx)
-			return err
-		}
 		_, err := tx.NewInsert().Model(&aopEventModel{
-			ID: generateID(), SessionID: sessionID, Cursor: cursor,
+			ID: generateID(), SessionID: sessionID, EventID: event.Id, Cursor: cursor,
 			TurnID: event.GetTurnId(), Emitter: event.GetEmitter(), Sequence: event.GetSeq(),
 			EventJSON: raw, CreatedAt: createdAt,
 		}).Exec(ctx)
+		if err == nil {
+			persisted = true
+		}
 		return err
 	})
 	if err != nil {
 		return 0, false, err
 	}
-	if limited {
-		return 0, false, nil
-	}
-	return cursor, true, nil
-}
-
-// sessionEventLimitMarker is the synthetic AOP error event persisted as a
-// session's final row when it hits the event cap. It rides the normal error
-// payload so replaying clients render it without special cases.
-func sessionEventLimitMarker(sessionID string, limit int64) *aop.Event {
-	return &aop.Event{
-		Id: generateID(), SessionId: sessionID, Emitter: "aiscan.web",
-		EmittedAt: timestamppb.Now(),
-		Payload: &aop.Event_Error{Error: &aop.ProtocolError{
-			Code:    "session_event_limit",
-			Message: fmt.Sprintf("session reached the %d persisted event limit; further events are not stored", limit),
-		}},
-	}
+	return cursor, persisted, nil
 }
 
 func (s *SQLiteStore) ListAOPEvents(ctx context.Context, sessionID string, limit int) ([]*aop.Event, error) {

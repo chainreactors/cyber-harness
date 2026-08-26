@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestJSONLRecorderWritesConcurrentEventsAsCompleteLines(t *testing.T) {
@@ -77,74 +77,76 @@ func TestJSONLRecorderSwitchesFilesWithoutReplayingHistory(t *testing.T) {
 	}
 }
 
-func TestJSONLRecorderStopsWritingAtSizeLimit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "capped.jsonl")
+func TestJSONLRecorderSkipsDuplicateEventIDWithinSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
 	bus := eventbus.New[*aop.Event]()
 	recorder, err := NewJSONLRecorder(bus, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder.mu.Lock()
-	recorder.maxBytes = 512
-	recorder.mu.Unlock()
-
-	const emitted = 100
-	for i := 0; i < emitted; i++ {
-		bus.Emit(jsonlTestMessage(fmt.Sprintf("event-%d", i)))
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
+	event := &aop.Event{Id: "event-retry", SessionId: "session-1", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}}
+	bus.Emit(event)
+	bus.Emit(proto.Clone(event).(*aop.Event))
+	if err := recorder.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The cap bounds the payload; only the one marker line may exceed it.
-	if info.Size() > 512+256 {
-		t.Fatalf("file size = %d, want bounded near 512", info.Size())
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "size limit reached") {
-		t.Fatalf("truncation marker missing:\n%s", data)
-	}
-	// The marker is a non-JSON comment line: the file must stay readable.
 	events, err := ReadJSONL(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) == 0 || len(events) >= emitted {
-		t.Fatalf("persisted events = %d, want partial prefix of %d", len(events), emitted)
-	}
-	if err := recorder.Close(); err == nil || !strings.Contains(err.Error(), "size limit") {
-		t.Fatalf("Close() error = %v, want size limit error", err)
+	if len(events) != 1 {
+		t.Fatalf("JSONL events = %d, want 1", len(events))
 	}
 }
 
-func TestJSONLRecorderSwitchResetsSizeBudget(t *testing.T) {
-	dir := t.TempDir()
+func TestJSONLRecorderLoadsExistingEventIDsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := jsonlTestMessage("persisted")
 	bus := eventbus.New[*aop.Event]()
-	recorder, err := NewJSONLRecorder(bus, filepath.Join(dir, "first.jsonl"))
+	first, err := NewJSONLRecorder(bus, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder.mu.Lock()
-	recorder.maxBytes = 256
-	recorder.mu.Unlock()
-	for i := 0; i < 10; i++ {
-		bus.Emit(jsonlTestMessage(fmt.Sprintf("first-%d", i)))
-	}
-	second := filepath.Join(dir, "second.jsonl")
-	if err := recorder.Switch(second); err != nil {
+	bus.Emit(event)
+	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	bus.Emit(jsonlTestMessage("after-switch"))
-	events, err := ReadJSONL(second)
+	second, err := NewJSONLRecorder(bus, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].Id != "after-switch" {
-		t.Fatalf("second file events = %#v, want the post-switch event", events)
+	bus.Emit(proto.Clone(event).(*aop.Event))
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ReadJSONL(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events after recorder restart = %d, want 1", len(events))
+	}
+}
+
+func TestScanJSONLRejectsNonEventLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.jsonl")
+	if err := os.WriteFile(path, []byte("traffic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadJSONL(path); err == nil {
+		t.Fatal("ReadJSONL accepted a non-event line")
+	}
+}
+
+func TestJSONLRecorderRejectsEventsWithoutIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	recorder, err := NewJSONLRecorder(eventbus.New[*aop.Event](), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	if err := recorder.Write(&aop.Event{SessionId: "session", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}}); err == nil {
+		t.Fatal("Write accepted an event without an id")
 	}
 }
 

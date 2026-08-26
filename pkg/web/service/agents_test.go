@@ -381,6 +381,25 @@ func TestWSDispatchAndComplete(t *testing.T) {
 	}
 }
 
+func TestDispatchToolCallPublishesSessionCallOnce(t *testing.T) {
+	sink := &evalSink{sid: "session-1", found: true}
+	pool := NewAgentPool(NewHub())
+	pool.SetSessionLookup(sink)
+	remote := &remoteAgent{
+		nodeState: newNodeState(), nodeID: "agent-1",
+		sendCh: make(chan *aop.Envelope, 1), done: make(chan struct{}),
+	}
+	pool.register(remote)
+	defer close(remote.done)
+
+	if _, err := pool.DispatchToolCall("agent-1", "task-1", &aop.ToolCall{Name: "bash"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.aopEvents) != 1 || sink.aopEvents[0].GetToolCall() == nil {
+		t.Fatalf("session tool.call events = %+v, want exactly one hub-owned call", sink.aopEvents)
+	}
+}
+
 func TestWSDispatchChatUsesAOPMessage(t *testing.T) {
 	srv, pool := setupTestServer(t)
 	conn := dialAgentWithIdentity(t, srv, "chat-worker", []string{"scan"}, "node-chat-worker",

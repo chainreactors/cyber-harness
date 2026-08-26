@@ -21,8 +21,14 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 	}
 	var cursor int64
 	if s.store != nil {
-		storedCursor, _, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
+		storedCursor, persisted, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
 		if err != nil {
+			return
+		}
+		// A positive cursor with persisted=false means this event ID was already
+		// accepted. Do not fan it out a second time. Streaming deltas are not
+		// persisted and intentionally have cursor 0, so they remain live-only.
+		if storedCursor > 0 && !persisted {
 			return
 		}
 		cursor = storedCursor

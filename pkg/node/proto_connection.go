@@ -194,6 +194,12 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	if cc.Registry == nil {
 		return fmt.Errorf("command registry is nil")
 	}
+	// Every connection gets one event endpoint. Tool-only callers may provide
+	// their own event bus; a missing endpoint is backed by a private bus so
+	// successful tool results never need a second direct-delivery path.
+	if cc.Agent == nil {
+		cc.Agent = newEventBusEndpoint(nil)
+	}
 	hello, err := BuildHello(cc.Name, cc.Registry, cc.NodeID, cc.Runtime)
 	if err != nil {
 		return err
@@ -291,8 +297,8 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	sealed := make(map[string]time.Time)
 
 	stats := NewAgentStatsTracker()
-	if cc.AgentSubscribe != nil {
-		unsubscribe := cc.AgentSubscribe(func(event *aop.Event) {
+	if cc.Agent != nil {
+		unsubscribe := cc.Agent.Subscribe(func(event *aop.Event) {
 			if next, changed := stats.Observe(event); changed {
 				send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
 			}
@@ -446,8 +452,8 @@ func newAgentConnectionNamespaceMux(
 		return nil, err
 	}
 	if err := mux.Register(&types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, _ protobuf.Message, _ aop.SendFunc) error {
-		if cc.AgentRuntime != nil {
-			cc.AgentRuntime.HandleEnvelope(ctx, envelope, sendEnvelope)
+		if agent, ok := cc.Agent.(agentControlEndpoint); ok {
+			agent.HandleEnvelope(ctx, envelope, sendEnvelope)
 			return nil
 		}
 		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "command handler is unavailable"))
@@ -542,8 +548,8 @@ func handleAgentCoreMessage(
 		cancel()
 		return
 	}
-	if cc.AgentRuntime != nil {
-		cc.AgentRuntime.HandleEnvelope(ctx, envelope, sendEnvelope)
+	if agent, ok := cc.Agent.(agentControlEndpoint); ok {
+		agent.HandleEnvelope(ctx, envelope, sendEnvelope)
 		return
 	}
 	send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "chat handler is unavailable"))
@@ -561,12 +567,9 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	if request.Call.Id == "" {
 		request.Call.Id = operationID
 	}
-	if cc.AgentRuntime != nil && request.Call.Id == operationID && strings.TrimSpace(request.Call.Name) != "" {
-		cc.AgentRuntime.EmitEvent(&aop.Event{
-			SessionId: request.SessionId, TurnId: request.TurnId, Emitter: "aiscan.agent",
-			Payload: &aop.Event_ToolCall{ToolCall: protobuf.CloneOf(request.Call)},
-		})
-	}
+	// The hub is the canonical publisher for a remotely dispatched tool.call.
+	// This node only publishes the terminal result; synthesizing the call here
+	// would duplicate the hub's session timeline entry.
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	trackOperation(operationsMu, operations, operationID, taskCancel)
 	// seal closes this call's artifact window so the forwarding subscriber drops
@@ -593,14 +596,14 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 			fail(err.Error())
 			return
 		}
-		// Seal ahead of EmitEvent too: the runtime publishes onto the same bus the
-		// forwarding subscriber reads, so on an agent node the terminal reaches the
-		// wire from inside EmitEvent, ahead of the send below.
+		// The endpoint is the single event source for the connection. Its
+		// subscriber forwards the terminal to the wire; do not send a second copy.
 		seal()
-		if cc.AgentRuntime != nil {
-			cc.AgentRuntime.EmitEvent(event)
+		if cc.Agent == nil {
+			fail("agent event endpoint is unavailable")
+			return
 		}
-		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
+		cc.Agent.EmitEvent(event)
 	}()
 }
 

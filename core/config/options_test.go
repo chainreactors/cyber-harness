@@ -33,6 +33,17 @@ func TestResolvePromptKeepsMissingPathAsNaturalLanguage(t *testing.T) {
 	}
 }
 
+func TestResolvePromptKeepsWindowsInvalidFilenameAsNaturalLanguage(t *testing.T) {
+	prompt := "check host:port and report the result"
+	got, err := ResolvePrompt(prompt)
+	if err != nil {
+		t.Fatalf("ResolvePrompt() error = %v", err)
+	}
+	if got != prompt {
+		t.Fatalf("ResolvePrompt() = %q, want %q", got, prompt)
+	}
+}
+
 func TestResolveTaskLoadsPromptFileAndAppendsInputs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task.md")
 	if err := os.WriteFile(path, []byte("inspect the exposed services"), 0o600); err != nil {

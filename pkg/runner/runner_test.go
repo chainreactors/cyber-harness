@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -116,6 +118,62 @@ func TestResumeRestoresAndAppendsAOPStream(t *testing.T) {
 			t.Fatalf("resumed session = %#v", data)
 		}
 	})
+}
+
+func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "continuation.jsonl")
+	option := &cfg.Option{MiscOptions: cfg.MiscOptions{OutputFile: path}}
+	provider := new(persistenceProvider)
+	app, runtime := newPersistenceRuntimeWithMode(t, option, provider, REPLEphemeral)
+	_ = app
+
+	root, err := runtime.OpenSession(context.Background(), SessionOptions{ID: MainREPLName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("x", 4<<20)
+	oldID := root.ID()
+	runtime.sessionEvents.Emit(&aop.Event{
+		SessionId: root.ID(), TurnId: "turn-1", Emitter: "aiscan",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
+	})
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := root.rotate(context.Background(), SessionCloseResumed, root.ID(), root.MessagesSnapshot(), ""); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if growth := after.Size() - before.Size(); growth > 64<<10 {
+		t.Fatalf("continuation appended %d bytes for inherited history", growth)
+	}
+
+	events, err := output.ReadJSONL(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childID := root.ID()
+	if childID == oldID {
+		t.Fatalf("rotation did not create a child session: %q", childID)
+	}
+	for _, event := range events {
+		if event.SessionId == childID && (event.GetMessage() != nil || event.GetToolResult() != nil) {
+			t.Fatalf("inherited history was re-emitted in child stream: %s", aop.Kind(event))
+		}
+	}
+
+	data, err := loadResumeState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Messages) != 1 || data.Messages[0].Content[0].GetText().GetText() != large {
+		t.Fatalf("resumed inherited history = %d messages, want the original large message", len(data.Messages))
+	}
 }
 
 func TestREPLResumeLoadsMainSessionContext(t *testing.T) {
@@ -251,7 +309,7 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	}
 }
 
-func TestInteractiveResumeRotatesAndBootstrapsSelectedContext(t *testing.T) {
+func TestInteractiveResumeRotatesAndUsesSelectedContext(t *testing.T) {
 	dir := t.TempDir()
 	currentPath := filepath.Join(dir, "current.jsonl")
 	resumePath := filepath.Join(dir, "selected.jsonl")
@@ -301,6 +359,19 @@ func TestInteractiveResumeRotatesAndBootstrapsSelectedContext(t *testing.T) {
 	}
 	if len(currentEvents) == 0 || currentEvents[len(currentEvents)-1].GetSessionEnded().GetReason() != string(SessionCloseResumed) {
 		t.Fatalf("current file was not closed before switch: %#v", currentEvents)
+	}
+}
+
+func TestFreshJSONLOutputRejectsNonEmptyExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateFreshJSONLOutput(&cfg.Option{MiscOptions: cfg.MiscOptions{OutputFile: path}}); err == nil {
+		t.Fatal("non-empty output file was accepted without --resume")
+	}
+	if err := validateFreshJSONLOutput(&cfg.Option{AgentOptions: cfg.AgentOptions{Resume: path}}); err != nil {
+		t.Fatalf("resume output was rejected: %v", err)
 	}
 }
 
@@ -375,6 +446,7 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 		{Id: "e-3", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "aiscan", Seq: 3, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("old assistant")}}}},
 		{Id: "e-4", EmittedAt: timestamp, SessionId: sessionID, Emitter: "aiscan", Seq: 4, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}},
 	}
+	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := eventbus.New[*aop.Event]()
 	writer, err := output.NewJSONLRecorder(bus, path)
 	if err != nil {
