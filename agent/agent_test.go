@@ -102,6 +102,18 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	}
 }
 
+func TestRunNilProviderDoesNotEnqueueInbox(t *testing.T) {
+	ib := inbox.NewBuffered(4)
+	a := NewAgent(Config{Inbox: ib})
+	_, err := a.Run(context.Background(), TextInput("hello"))
+	if err == nil || !strings.Contains(err.Error(), "provider is nil") {
+		t.Fatalf("Run() error = %v, want provider is nil", err)
+	}
+	if ib.Len() != 0 {
+		t.Fatalf("inbox len = %d, want 0", ib.Len())
+	}
+}
+
 func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 	tools := commands.NewRegistry()
 	llm := &scriptedProvider{}
