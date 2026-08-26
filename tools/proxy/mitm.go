@@ -324,11 +324,28 @@ func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 			Method:   f.Request.Method,
 			URL:      f.Request.URL.String(),
 			Protocol: f.Request.Proto,
-			Headers:  traffic.PairsFromHTTP(f.Request.Header),
+			Headers:  traffic.PairsFromHTTPWithHost(f.Request.Header, requestHost(f.Request)),
 		}
 		flow.Host = f.Request.URL.Hostname()
 	}
 	return &captureState{hub: hub, owner: nil, proxy: f.Id.String(), start: f.StartTime, flow: flow}
+}
+
+// requestHost recovers the Host header value net/http strips from Request.Header
+// into Request.Host, so the captured flow can reconstruct a complete request
+// line block. It prefers the client-sent Host (which keeps a non-default port)
+// and falls back to the URL authority.
+func requestHost(req *mitmproxy.Request) string {
+	if req == nil {
+		return ""
+	}
+	if raw := req.Raw(); raw != nil && raw.Host != "" {
+		return raw.Host
+	}
+	if req.URL != nil {
+		return req.URL.Host
+	}
+	return ""
 }
 
 func (s *captureState) setRequestBody(body []byte) {

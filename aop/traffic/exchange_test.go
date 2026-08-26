@@ -20,6 +20,35 @@ func TestExchangeFromHTTPUsesCanonicalPairs(t *testing.T) {
 	}
 }
 
+func TestPairsFromHTTPWithHost(t *testing.T) {
+	// net/http keeps Host out of the header map, so a pair sequence built from
+	// the map alone lacks it; the helper prepends it.
+	got := PairsFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, "example.test:8090")
+	if len(got) != 2 || got[0] != (Pair{Name: "Host", Value: "example.test:8090"}) {
+		t.Fatalf("Host not prepended: %#v", got)
+	}
+
+	// Empty host: nothing to add, sequence is unchanged.
+	if got := PairsFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, ""); len(got) != 1 {
+		t.Fatalf("empty host should not add a header: %#v", got)
+	}
+
+	// An existing Host header (any case) is never duplicated.
+	got = PairsFromHTTPWithHost(http.Header{"host": {"already.test"}}, "example.test")
+	if len(got) != 1 || !containsHeaderName(got, "Host") {
+		t.Fatalf("existing Host must not be duplicated: %#v", got)
+	}
+}
+
+func TestExchangeFromHTTPAddsHost(t *testing.T) {
+	u, _ := url.Parse("https://example.test:8443/a")
+	req := &http.Request{Method: "GET", URL: u, Host: "example.test:8443", Proto: "HTTP/1.1", Header: http.Header{"Accept": {"*/*"}}}
+	e := ExchangeFromHTTP(req, nil, nil, nil)
+	if len(e.Request.Headers) == 0 || e.Request.Headers[0] != (Pair{Name: "Host", Value: "example.test:8443"}) {
+		t.Fatalf("Host header not synthesized from req.Host: %#v", e.Request.Headers)
+	}
+}
+
 func TestFlowExchangeRoundTrip(t *testing.T) {
 	flow := &Flow{
 		Id:     "flow-1",
