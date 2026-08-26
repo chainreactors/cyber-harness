@@ -21,12 +21,47 @@ import (
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
+
+type singleDeliveryProbeTool struct{}
+
+func (singleDeliveryProbeTool) Name() string { return "single_delivery_probe" }
+
+func (singleDeliveryProbeTool) Description() string { return "test tool" }
+
+func (singleDeliveryProbeTool) Definition() *aop.ToolDefinition {
+	return coretool.Def("single_delivery_probe", "test tool", struct{}{})
+}
+
+func (singleDeliveryProbeTool) Execute(context.Context, string) (*coretool.Result, error) {
+	return coretool.TextResult("probe result"), nil
+}
+
+type trackingAgentEndpoint struct {
+	bus        *eventbus.Bus[*aop.Event]
+	subscribed *bool
+}
+
+func (e *trackingAgentEndpoint) Subscribe(fn func(*aop.Event)) func() {
+	*e.subscribed = true
+	return e.bus.Subscribe(fn)
+}
+
+func (e *trackingAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) }
+
+type panicAgentEndpoint struct{}
+
+func (panicAgentEndpoint) Subscribe(func(*aop.Event)) func() { return func() {} }
+func (panicAgentEndpoint) EmitEvent(*aop.Event)              { panic("send event boom") }
 
 type handshakeThenEOFStream struct {
 	helloID string
@@ -56,10 +91,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 		Name:     "runner-1",
 		NodeID:   "runner-1",
 		Registry: commands.NewRegistry(),
-		AgentSubscribe: func(func(*aop.Event)) func() {
-			subscribed = true
-			return func() {}
-		},
+		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
 			if !subscribed {
@@ -95,7 +127,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(), Logger: logger},
+		connectionConfig{Registry: commands.NewRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
 		send, &operationsMu, operations, make(map[string]time.Time),
@@ -148,6 +180,125 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 	}
 	if callIsSealed(&operationsMu, sealed, "agent-loop-call") {
 		t.Fatal("a call this connection never dispatched must not be sealed")
+	}
+}
+
+func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
+	ctx := context.Background()
+	app, err := runner.NewApp(ctx, runner.ApplicationConfig{
+		SkipEngines: true,
+		Logger:      telemetry.NopLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	rt, err := runner.NewAgentRuntime(ctx, &cfg.Option{}, telemetry.NopLogger(), &runner.RuntimeConfig{
+		ExistingApp:      app,
+		ProviderOptional: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	registry := commands.NewRegistry()
+	registry.RegisterTool(singleDeliveryProbeTool{})
+	runtimeEvents := make(chan *aop.Event, 1)
+	var runtimeToolCalls atomic.Int32
+	unsubscribe := rt.Subscribe(func(event *aop.Event) {
+		if event == nil {
+			return
+		}
+		if event.GetToolCall() != nil {
+			runtimeToolCalls.Add(1)
+		}
+		if event.GetToolResult() != nil {
+			runtimeEvents <- event
+		}
+	})
+	defer unsubscribe()
+	directMessages := make(chan protobuf.Message, 2)
+	send := func(_ string, message protobuf.Message) { directMessages <- message }
+	arguments, err := aop.JSONValue(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &toolpb.Call{Call: &aop.ToolCall{
+		Id:        "single-delivery-op",
+		Name:      "single_delivery_probe",
+		Arguments: arguments,
+	}}
+	handleAgentToolMessage(
+		ctx,
+		connectionConfig{
+			Registry: registry,
+			Logger:   telemetry.NopLogger(),
+			Agent:    rt,
+		},
+		&aop.Envelope{Id: "single-delivery-op"},
+		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
+		send,
+		&sync.Mutex{},
+		make(map[string]context.CancelFunc),
+		make(map[string]time.Time),
+	)
+
+	select {
+	case event := <-runtimeEvents:
+		if got := event.GetToolResult().GetName(); got != "single_delivery_probe" {
+			t.Fatalf("runtime tool result name = %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime tool result")
+	}
+	select {
+	case message := <-directMessages:
+		t.Fatalf("tool result was sent directly in addition to runtime event: %T", message)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := runtimeToolCalls.Load(); got != 0 {
+		t.Fatalf("remote tool request unexpectedly emitted %d tool.call events; the hub is the canonical source", got)
+	}
+}
+
+func TestToolOnlyNodeToolResultUsesEndpointDelivery(t *testing.T) {
+	registry := commands.NewRegistry()
+	registry.RegisterTool(singleDeliveryProbeTool{})
+	wireEvents := make(chan *aop.Event, 1)
+	directMessages := make(chan protobuf.Message, 1)
+	endpoint := newEventBusEndpoint(nil)
+	endpoint.Subscribe(func(event *aop.Event) {
+		wireEvents <- event
+	})
+	arguments, err := aop.JSONValue(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handleAgentToolMessage(
+		context.Background(),
+		connectionConfig{Registry: registry, Logger: telemetry.NopLogger(), Agent: endpoint},
+		&aop.Envelope{Id: "tool-only-op"},
+		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{Call: &aop.ToolCall{
+			Id: "tool-only-op", Name: "single_delivery_probe", Arguments: arguments,
+		}}}},
+		func(_ string, message protobuf.Message) { directMessages <- message },
+		&sync.Mutex{},
+		make(map[string]context.CancelFunc),
+		make(map[string]time.Time),
+	)
+	select {
+	case event := <-wireEvents:
+		if event.GetToolResult() == nil || event.GetToolResult().GetName() != "single_delivery_probe" {
+			t.Fatalf("endpoint tool result = %+v", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for endpoint tool result")
+	}
+	select {
+	case message := <-directMessages:
+		t.Fatalf("tool result bypassed the endpoint: %T", message)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

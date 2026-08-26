@@ -42,6 +42,7 @@ type aopEventModel struct {
 
 	ID        string        `bun:"id,pk"`
 	SessionID string        `bun:"session_id,notnull,unique:aop_event_cursor"`
+	EventID   string        `bun:"event_id,notnull"`
 	Cursor    int64         `bun:"cursor,notnull,unique:aop_event_cursor"`
 	TurnID    string        `bun:"turn_id,notnull"`
 	Emitter   string        `bun:"emitter,notnull"`

@@ -27,7 +27,7 @@
       "@cyber/cstx": ["./cyber-ui/packages/cstx/src"],
       "@cyber/cstx-easm": ["./cyber-ui/packages/cstx-easm/src"],
       "@cyber/viewer": ["./cyber-ui/packages/viewer/src"],
-      "@cyber/ioa": ["./src/compat/ioa.tsx"]
+      "@cyber/ioa": ["./cyber-ui/packages/ioa/src"]
     }
   },
   "include": [

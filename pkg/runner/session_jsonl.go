@@ -32,12 +32,23 @@ type resumeStream struct {
 	messageCounter int64
 	order          int
 	started        bool
+	closedReason   string
+	historyMode    types.SessionHistory_Mode
 }
 
 func loadResumeState(path string) (*resumeState, error) {
 	streams := make(map[string]*resumeStream)
+	seenEventIDs := make(map[string]struct{})
 	order := 0
 	err := output.ScanJSONL(path, func(event *aop.Event) error {
+		if event.Id == "" {
+			return fmt.Errorf("event in %s has no id", path)
+		}
+		eventKey := event.SessionId + "\x00" + event.Id
+		if _, exists := seenEventIDs[eventKey]; exists {
+			return fmt.Errorf("event id %s is duplicated in session %s", event.Id, event.SessionId)
+		}
+		seenEventIDs[eventKey] = struct{}{}
 		stream := streams[event.SessionId]
 		if stream == nil {
 			order++
@@ -49,9 +60,19 @@ func loadResumeState(path string) (*resumeState, error) {
 			stream.started = true
 			stream.parentID = payload.SessionStarted.ParentSessionId
 			stream.parentToolCall = payload.SessionStarted.ParentToolCallId
+			history, ok, err := types.GetSessionHistory(event)
+			if err != nil {
+				return fmt.Errorf("session %s has invalid history metadata: %w", event.SessionId, err)
+			}
+			if !ok || history.GetMode() == types.SessionHistory_MODE_UNSPECIFIED {
+				return fmt.Errorf("session %s has no explicit history metadata", event.SessionId)
+			}
+			stream.historyMode = history.GetMode()
 			if payload.SessionStarted.Model != "" {
 				stream.model = payload.SessionStarted.Model
 			}
+		case *aop.Event_SessionEnded:
+			stream.closedReason = payload.SessionEnded.Reason
 		case *aop.Event_Message:
 			if payload.Message == nil || (payload.Message.Role != "user" && payload.Message.Role != "assistant") {
 				return nil
@@ -88,10 +109,65 @@ func loadResumeState(path string) (*resumeState, error) {
 	if selected == nil {
 		return nil, fmt.Errorf("no resumable AOP session found in %s", path)
 	}
+	messages, counter, err := resumeStreamMessages(selected, streams)
+	if err != nil {
+		return nil, err
+	}
 	return &resumeState{
-		SessionID: selected.id, Model: selected.model, Messages: selected.messages,
-		MessageCounter: selected.messageCounter,
+		SessionID: selected.id, Model: selected.model, Messages: messages,
+		MessageCounter: counter,
 	}, nil
+}
+
+// resumeStreamMessages reconstructs the in-memory transcript without creating
+// new events for inherited history. A compacted child explicitly declares a
+// snapshot and supersedes its parent; all other sessions inherit their parent
+// transcript and only contribute their own turn messages.
+func resumeStreamMessages(selected *resumeStream, streams map[string]*resumeStream) ([]*aop.Message, int64, error) {
+	if selected == nil {
+		return nil, 0, nil
+	}
+	chain := make([]*resumeStream, 0, 4)
+	seen := make(map[string]struct{})
+	current := selected
+	for current != nil {
+		if _, ok := seen[current.id]; ok {
+			return nil, 0, fmt.Errorf("session parent cycle detected at %s", current.id)
+		}
+		seen[current.id] = struct{}{}
+		chain = append(chain, current)
+		if current.historyMode == types.SessionHistory_MODE_SNAPSHOT || current.parentID == "" || current.parentToolCall != "" {
+			break
+		}
+		// /clear and /compact deliberately reset or replace the parent context;
+		// do not resurrect the discarded history when loading the file later.
+		if parent := streams[current.parentID]; parent != nil {
+			if parent.closedReason == string(SessionCloseCleared) || parent.closedReason == string(SessionCloseCompacted) {
+				break
+			}
+			if !parent.started {
+				return nil, 0, fmt.Errorf("session %s refers to parent %s without a session.started event", current.id, current.parentID)
+			}
+		} else {
+			return nil, 0, fmt.Errorf("session %s refers to missing parent %s", current.id, current.parentID)
+		}
+		current = streams[current.parentID]
+	}
+
+	var messages []*aop.Message
+	var counter int64
+	for i := len(chain) - 1; i >= 0; i-- {
+		stream := chain[i]
+		for _, message := range stream.messages {
+			if message == nil {
+				continue
+			}
+			messages = append(messages, proto.CloneOf(message))
+			counter = max(counter, messageIDSequence(message.Id))
+		}
+		counter = max(counter, stream.messageCounter)
+	}
+	return messages, counter, nil
 }
 
 func messageIDSequence(id string) int64 {

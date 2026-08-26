@@ -84,17 +84,13 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 		skillStore, _ := skills.LoadEmbeddedStore()
 		menu = func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) }
 	}
-	var subscribe func(func(*aop.Event)) func()
-	if cfg.Events != nil {
-		subscribe = cfg.Events.Subscribe
-	}
 	return connect(ctx, connectionConfig{
 		ServerURL:       cfg.ServerURL,
 		WSPath:          cfg.WSPath,
 		Name:            runnerID,
 		Token:           cfg.Token,
 		Registry:        cfg.Registry,
-		AgentSubscribe:  subscribe,
+		Agent:           newEventBusEndpoint(cfg.Events),
 		Progress:        cfg.Progress,
 		Logger:          logger,
 		NodeID:          runnerID,
@@ -109,7 +105,8 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 }
 
 // attachToolProgress forwards ephemeral progress onto the tool protocol. Raw
-// artifacts travel as canonical AOP extension events through AgentSubscribe.
+// artifacts travel as canonical AOP extension events through the Agent
+// endpoint's single event stream.
 func attachToolProgress(progressBus *eventbus.Bus[*toolpb.Progress], send func(string, protobuf.Message)) func() {
 	if progressBus == nil {
 		return nil

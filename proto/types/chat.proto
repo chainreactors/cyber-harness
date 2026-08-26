@@ -8,6 +8,17 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
 
+// SessionHistory is persisted as an AOP event extension. It makes transcript
+// inheritance explicit without changing the shared AOP protocol schema.
+message SessionHistory {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_INHERIT = 1;
+    MODE_SNAPSHOT = 2;
+  }
+  Mode mode = 1;
+}
+
 message SessionRecord {
   aop.Session session = 1;
   string agent_name = 2;

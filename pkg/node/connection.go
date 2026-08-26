@@ -8,12 +8,51 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 const DefaultWSPath = "/api/aop/node/ws"
+
+// agentEndpoint is the sole event ingress/egress point for a node connection.
+// Agent runtimes implement the optional control method as well; tool-only
+// nodes use the eventBusEndpoint adapter below. Keeping publication and
+// subscription on one object prevents a terminal event from being sent both
+// through the runtime bus and as a direct protocol reply.
+type agentEndpoint interface {
+	Subscribe(func(*aop.Event)) func()
+	EmitEvent(*aop.Event)
+}
+
+type agentControlEndpoint interface {
+	agentEndpoint
+	HandleEnvelope(context.Context, *aop.Envelope, func(*aop.Envelope)) bool
+}
+
+type eventBusEndpoint struct {
+	bus *eventbus.Bus[*aop.Event]
+}
+
+func newEventBusEndpoint(bus *eventbus.Bus[*aop.Event]) agentEndpoint {
+	if bus == nil {
+		bus = eventbus.New[*aop.Event]()
+	}
+	return &eventBusEndpoint{bus: bus}
+}
+
+func (e *eventBusEndpoint) Subscribe(fn func(*aop.Event)) func() {
+	if e == nil || e.bus == nil {
+		return func() {}
+	}
+	return e.bus.Subscribe(fn)
+}
+
+func (e *eventBusEndpoint) EmitEvent(event *aop.Event) {
+	if e == nil || e.bus == nil || event == nil {
+		return
+	}
+	e.bus.Emit(event)
+}
 
 type connectionConfig struct {
 	ServerURL    string
@@ -24,15 +63,14 @@ type connectionConfig struct {
 
 	// JSONFrames switches the wire codec from binary protobuf to standard
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
-	JSONFrames     bool
-	Registry       *commands.CommandRegistry
-	AgentSubscribe func(func(*aop.Event)) func()
-	Progress       *eventbus.Bus[*toolpb.Progress]
-	Logger         telemetry.Logger
-	Chat           *chatAgentHandler
-	// AgentRuntime handles the AOP core/command namespaces directly via
-	// HandleEnvelope; nil on tool-only nodes, which reject chat messages.
-	AgentRuntime  *runner.AgentRuntime
+	JSONFrames bool
+	Registry   *commands.CommandRegistry
+	// Agent is the single owner of connection-side events. Implementations that
+	// also satisfy agentControlEndpoint handle core/command namespaces.
+	Agent         agentEndpoint
+	Progress      *eventbus.Bus[*toolpb.Progress]
+	Logger        telemetry.Logger
+	Chat          *chatAgentHandler
 	NodeID        string
 	Runtime       *aop.AgentRuntimeInfo
 	Status        func() *aop.AgentStatus

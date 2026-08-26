@@ -2,8 +2,8 @@
 // @generated from file types/chat.proto (package aiscan.chat, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Rejection, Session } from "../../../cyber-ui/packages/aop/src/gen/aop/chat_pb.js";
 import { file_aop_chat } from "../../../cyber-ui/packages/aop/src/gen/aop/chat_pb.js";
 import type { CommandSpec } from "./command_pb.js";
@@ -16,7 +16,53 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file types/chat.proto.
  */
 export const file_types_chat: GenFile = /*@__PURE__*/
-  fileDesc("ChB0eXBlcy9jaGF0LnByb3RvEgthaXNjYW4uY2hhdCK0AQoNU2Vzc2lvblJlY29yZBIdCgdzZXNzaW9uGAEgASgLMgwuYW9wLlNlc3Npb24SEgoKYWdlbnRfbmFtZRgCIAEoCRIQCghzY2FuX2lkcxgDIAMoCRIuCgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJSChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhQKDGFmdGVyX2N1cnNvchgBIAEoCRINCgVsaW1pdBgCIAEoDRIWCg5pbmNsdWRlX2Nsb3NlZBgDIAEoCCJZChRMaXN0U2Vzc2lvbnNSZXNwb25zZRIsCghzZXNzaW9ucxgBIAMoCzIaLmFpc2Nhbi5jaGF0LlNlc3Npb25SZWNvcmQSEwoLbmV4dF9jdXJzb3IYAiABKAkiJwoRR2V0U2Vzc2lvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCSJBChJHZXRTZXNzaW9uUmVzcG9uc2USKwoHc2Vzc2lvbhgBIAEoCzIaLmFpc2Nhbi5jaGF0LlNlc3Npb25SZWNvcmQiZAoTUmVzZXRTZXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFgoObmV3X3Nlc3Npb25faWQYAyABKAkSDQoFdGl0bGUYBCABKAkiYgoTUmVzZXRTZXNzaW9uUmVjZWlwdBIeCghwcmV2aW91cxgBIAEoCzIMLmFvcC5TZXNzaW9uEisKB2N1cnJlbnQYAiABKAsyGi5haXNjYW4uY2hhdC5TZXNzaW9uUmVjb3JkIo8BChRSZXNldFNlc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjQKCGFjY2VwdGVkGAIgASgLMiAuYWlzY2FuLmNoYXQuUmVzZXRTZXNzaW9uUmVjZWlwdEgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiPgoURGVsZXRlU2Vzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJInwKFURlbGV0ZVNlc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEiAKCGFjY2VwdGVkGAIgASgLMgwuYW9wLlNlc3Npb25IABIiCghyZWplY3RlZBgDIAEoCzIOLmFvcC5SZWplY3Rpb25IAEIJCgdvdXRjb21lIikKE0xpc3RDb21tYW5kc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCSJFChRMaXN0Q29tbWFuZHNSZXNwb25zZRItCghjb21tYW5kcxgBIAMoCzIbLmFpc2Nhbi5jb21tYW5kLkNvbW1hbmRTcGVjQjFaL2dpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9haXNjYW4vcGtnL3R5cGVzO3R5cGVzYgZwcm90bzM", [file_aop_chat, file_types_command, file_google_protobuf_timestamp]);
+  fileDesc("ChB0eXBlcy9jaGF0LnByb3RvEgthaXNjYW4uY2hhdCKDAQoOU2Vzc2lvbkhpc3RvcnkSLgoEbW9kZRgBIAEoDjIgLmFpc2Nhbi5jaGF0LlNlc3Npb25IaXN0b3J5Lk1vZGUiQQoETW9kZRIUChBNT0RFX1VOU1BFQ0lGSUVEEAASEAoMTU9ERV9JTkhFUklUEAESEQoNTU9ERV9TTkFQU0hPVBACIrQBCg1TZXNzaW9uUmVjb3JkEh0KB3Nlc3Npb24YASABKAsyDC5hb3AuU2Vzc2lvbhISCgphZ2VudF9uYW1lGAIgASgJEhAKCHNjYW5faWRzGAMgAygJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlIKE0xpc3RTZXNzaW9uc1JlcXVlc3QSFAoMYWZ0ZXJfY3Vyc29yGAEgASgJEg0KBWxpbWl0GAIgASgNEhYKDmluY2x1ZGVfY2xvc2VkGAMgASgIIlkKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEiwKCHNlc3Npb25zGAEgAygLMhouYWlzY2FuLmNoYXQuU2Vzc2lvblJlY29yZBITCgtuZXh0X2N1cnNvchgCIAEoCSInChFHZXRTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkEKEkdldFNlc3Npb25SZXNwb25zZRIrCgdzZXNzaW9uGAEgASgLMhouYWlzY2FuLmNoYXQuU2Vzc2lvblJlY29yZCJkChNSZXNldFNlc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIWCg5uZXdfc2Vzc2lvbl9pZBgDIAEoCRINCgV0aXRsZRgEIAEoCSJiChNSZXNldFNlc3Npb25SZWNlaXB0Eh4KCHByZXZpb3VzGAEgASgLMgwuYW9wLlNlc3Npb24SKwoHY3VycmVudBgCIAEoCzIaLmFpc2Nhbi5jaGF0LlNlc3Npb25SZWNvcmQijwEKFFJlc2V0U2Vzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNAoIYWNjZXB0ZWQYAiABKAsyIC5haXNjYW4uY2hhdC5SZXNldFNlc3Npb25SZWNlaXB0SAASIgoIcmVqZWN0ZWQYAyABKAsyDi5hb3AuUmVqZWN0aW9uSABCCQoHb3V0Y29tZSI+ChREZWxldGVTZXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkifAoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSIAoIYWNjZXB0ZWQYAiABKAsyDC5hb3AuU2Vzc2lvbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiKQoTTGlzdENvbW1hbmRzUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkUKFExpc3RDb21tYW5kc1Jlc3BvbnNlEi0KCGNvbW1hbmRzGAEgAygLMhsuYWlzY2FuLmNvbW1hbmQuQ29tbWFuZFNwZWNCMVovZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2Fpc2Nhbi9wa2cvdHlwZXM7dHlwZXNiBnByb3RvMw", [file_aop_chat, file_types_command, file_google_protobuf_timestamp]);
+
+/**
+ * SessionHistory is persisted as an AOP event extension. It makes transcript
+ * inheritance explicit without changing the shared AOP protocol schema.
+ *
+ * @generated from message aiscan.chat.SessionHistory
+ */
+export type SessionHistory = Message<"aiscan.chat.SessionHistory"> & {
+  /**
+   * @generated from field: aiscan.chat.SessionHistory.Mode mode = 1;
+   */
+  mode: SessionHistory_Mode;
+};
+
+/**
+ * Describes the message aiscan.chat.SessionHistory.
+ * Use `create(SessionHistorySchema)` to create a new message.
+ */
+export const SessionHistorySchema: GenMessage<SessionHistory> = /*@__PURE__*/
+  messageDesc(file_types_chat, 0);
+
+/**
+ * @generated from enum aiscan.chat.SessionHistory.Mode
+ */
+export enum SessionHistory_Mode {
+  /**
+   * @generated from enum value: MODE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: MODE_INHERIT = 1;
+   */
+  INHERIT = 1,
+
+  /**
+   * @generated from enum value: MODE_SNAPSHOT = 2;
+   */
+  SNAPSHOT = 2,
+}
+
+/**
+ * Describes the enum aiscan.chat.SessionHistory.Mode.
+ */
+export const SessionHistory_ModeSchema: GenEnum<SessionHistory_Mode> = /*@__PURE__*/
+  enumDesc(file_types_chat, 0, 0);
 
 /**
  * @generated from message aiscan.chat.SessionRecord
@@ -53,7 +99,7 @@ export type SessionRecord = Message<"aiscan.chat.SessionRecord"> & {
  * Use `create(SessionRecordSchema)` to create a new message.
  */
 export const SessionRecordSchema: GenMessage<SessionRecord> = /*@__PURE__*/
-  messageDesc(file_types_chat, 0);
+  messageDesc(file_types_chat, 1);
 
 /**
  * @generated from message aiscan.chat.ListSessionsRequest
@@ -80,7 +126,7 @@ export type ListSessionsRequest = Message<"aiscan.chat.ListSessionsRequest"> & {
  * Use `create(ListSessionsRequestSchema)` to create a new message.
  */
 export const ListSessionsRequestSchema: GenMessage<ListSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_types_chat, 1);
+  messageDesc(file_types_chat, 2);
 
 /**
  * @generated from message aiscan.chat.ListSessionsResponse
@@ -102,7 +148,7 @@ export type ListSessionsResponse = Message<"aiscan.chat.ListSessionsResponse"> &
  * Use `create(ListSessionsResponseSchema)` to create a new message.
  */
 export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_types_chat, 2);
+  messageDesc(file_types_chat, 3);
 
 /**
  * @generated from message aiscan.chat.GetSessionRequest
@@ -119,7 +165,7 @@ export type GetSessionRequest = Message<"aiscan.chat.GetSessionRequest"> & {
  * Use `create(GetSessionRequestSchema)` to create a new message.
  */
 export const GetSessionRequestSchema: GenMessage<GetSessionRequest> = /*@__PURE__*/
-  messageDesc(file_types_chat, 3);
+  messageDesc(file_types_chat, 4);
 
 /**
  * @generated from message aiscan.chat.GetSessionResponse
@@ -136,7 +182,7 @@ export type GetSessionResponse = Message<"aiscan.chat.GetSessionResponse"> & {
  * Use `create(GetSessionResponseSchema)` to create a new message.
  */
 export const GetSessionResponseSchema: GenMessage<GetSessionResponse> = /*@__PURE__*/
-  messageDesc(file_types_chat, 4);
+  messageDesc(file_types_chat, 5);
 
 /**
  * @generated from message aiscan.chat.ResetSessionRequest
@@ -168,7 +214,7 @@ export type ResetSessionRequest = Message<"aiscan.chat.ResetSessionRequest"> & {
  * Use `create(ResetSessionRequestSchema)` to create a new message.
  */
 export const ResetSessionRequestSchema: GenMessage<ResetSessionRequest> = /*@__PURE__*/
-  messageDesc(file_types_chat, 5);
+  messageDesc(file_types_chat, 6);
 
 /**
  * @generated from message aiscan.chat.ResetSessionReceipt
@@ -190,7 +236,7 @@ export type ResetSessionReceipt = Message<"aiscan.chat.ResetSessionReceipt"> & {
  * Use `create(ResetSessionReceiptSchema)` to create a new message.
  */
 export const ResetSessionReceiptSchema: GenMessage<ResetSessionReceipt> = /*@__PURE__*/
-  messageDesc(file_types_chat, 6);
+  messageDesc(file_types_chat, 7);
 
 /**
  * @generated from message aiscan.chat.ResetSessionResponse
@@ -224,7 +270,7 @@ export type ResetSessionResponse = Message<"aiscan.chat.ResetSessionResponse"> &
  * Use `create(ResetSessionResponseSchema)` to create a new message.
  */
 export const ResetSessionResponseSchema: GenMessage<ResetSessionResponse> = /*@__PURE__*/
-  messageDesc(file_types_chat, 7);
+  messageDesc(file_types_chat, 8);
 
 /**
  * @generated from message aiscan.chat.DeleteSessionRequest
@@ -246,7 +292,7 @@ export type DeleteSessionRequest = Message<"aiscan.chat.DeleteSessionRequest"> &
  * Use `create(DeleteSessionRequestSchema)` to create a new message.
  */
 export const DeleteSessionRequestSchema: GenMessage<DeleteSessionRequest> = /*@__PURE__*/
-  messageDesc(file_types_chat, 8);
+  messageDesc(file_types_chat, 9);
 
 /**
  * @generated from message aiscan.chat.DeleteSessionResponse
@@ -280,7 +326,7 @@ export type DeleteSessionResponse = Message<"aiscan.chat.DeleteSessionResponse">
  * Use `create(DeleteSessionResponseSchema)` to create a new message.
  */
 export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*@__PURE__*/
-  messageDesc(file_types_chat, 9);
+  messageDesc(file_types_chat, 10);
 
 /**
  * @generated from message aiscan.chat.ListCommandsRequest
@@ -297,7 +343,7 @@ export type ListCommandsRequest = Message<"aiscan.chat.ListCommandsRequest"> & {
  * Use `create(ListCommandsRequestSchema)` to create a new message.
  */
 export const ListCommandsRequestSchema: GenMessage<ListCommandsRequest> = /*@__PURE__*/
-  messageDesc(file_types_chat, 10);
+  messageDesc(file_types_chat, 11);
 
 /**
  * @generated from message aiscan.chat.ListCommandsResponse
@@ -314,4 +360,4 @@ export type ListCommandsResponse = Message<"aiscan.chat.ListCommandsResponse"> &
  * Use `create(ListCommandsResponseSchema)` to create a new message.
  */
 export const ListCommandsResponseSchema: GenMessage<ListCommandsResponse> = /*@__PURE__*/
-  messageDesc(file_types_chat, 11);
+  messageDesc(file_types_chat, 12);
