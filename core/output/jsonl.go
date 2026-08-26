@@ -2,6 +2,7 @@ package output
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +16,8 @@ import (
 )
 
 // ScanJSONL decodes the canonical append-only AOP event stream one line at a
-// time. Empty and non-JSON lines are ignored; malformed AOP event lines fail.
+// time. Blank lines are allowed; every non-blank line must be a complete AOP
+// event with a session and payload.
 func ScanJSONL(path string, visit func(*aop.Event) error) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -25,16 +27,19 @@ func ScanJSONL(path string, visit func(*aop.Event) error) error {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 256*1024), 64*1024*1024)
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 || line[0] != '{' {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
+		}
+		if line[0] != '{' {
+			return fmt.Errorf("AOP JSONL contains a non-event line")
 		}
 		event := new(aop.Event)
 		if err := protojson.Unmarshal(line, event); err != nil {
 			return fmt.Errorf("decode AOP JSONL event: %w", err)
 		}
-		if event.SessionId == "" || event.Payload == nil {
-			continue
+		if event.Id == "" || event.SessionId == "" || event.Payload == nil {
+			return fmt.Errorf("AOP JSONL event is missing id, session_id or payload")
 		}
 		if visit != nil {
 			if err := visit(event); err != nil {
@@ -57,30 +62,23 @@ func ReadJSONL(path string) ([]*aop.Event, error) {
 	return events, err
 }
 
-// DefaultRecorderMaxBytes caps one session's JSONL file. Legitimate sessions
-// stay in the megabytes; the cap is a last-line defense so a runaway event
-// source (a retry loop once emitted turn lifecycle pairs at microsecond
-// cadence and wrote 182GB) cannot fill the disk. It is a capacity guard, not
-// content policy: no event inspection or deduplication happens here.
-const DefaultRecorderMaxBytes int64 = 2 << 30 // 2 GiB
-
 // JSONLRecorder is the single append-only subscriber for persisted AOP events.
 type JSONLRecorder struct {
-	mu       sync.Mutex
-	file     *os.File
-	path     string
-	unsub    func()
-	err      error
-	maxBytes int64
-	size     int64
-	limited  bool
+	mu   sync.Mutex
+	file *os.File
+	path string
+	// seen is scoped to this recorder. Event IDs are unique within a session,
+	// not necessarily across independent sessions, so the key includes both.
+	seen  map[string]struct{}
+	unsub func()
+	err   error
 }
 
 func NewJSONLRecorder(bus *eventbus.Bus[*aop.Event], path string) (*JSONLRecorder, error) {
 	if bus == nil {
 		return nil, fmt.Errorf("AOP event bus is required")
 	}
-	recorder := &JSONLRecorder{maxBytes: DefaultRecorderMaxBytes}
+	recorder := &JSONLRecorder{seen: make(map[string]struct{})}
 	if err := recorder.Switch(path); err != nil {
 		return nil, err
 	}
@@ -126,29 +124,38 @@ func (r *JSONLRecorder) Switch(path string) error {
 	if err != nil {
 		return err
 	}
-	// The file is opened in append mode, so a resumed session starts with its
-	// existing size already counted against the cap.
-	var size int64
-	if info, statErr := file.Stat(); statErr == nil {
-		size = info.Size()
-	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen, err := loadJSONLIDs(clean)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
 	old := r.file
 	r.file = file
 	r.path = clean
-	r.size = size
-	r.limited = r.maxBytes > 0 && size >= r.maxBytes
-	r.mu.Unlock()
+	r.seen = seen
 	if old != nil {
 		if err := old.Close(); err != nil {
-			r.mu.Lock()
 			if r.err == nil {
 				r.err = err
 			}
-			r.mu.Unlock()
 		}
 	}
 	return nil
+}
+
+func loadJSONLIDs(path string) (map[string]struct{}, error) {
+	seen := make(map[string]struct{})
+	if err := ScanJSONL(path, func(event *aop.Event) error {
+		if event.Id != "" {
+			seen[event.SessionId+"\x00"+event.Id] = struct{}{}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return seen, nil
 }
 
 func (r *JSONLRecorder) Path() string {
@@ -164,13 +171,8 @@ func (r *JSONLRecorder) Write(event *aop.Event) error {
 	if r == nil || event == nil {
 		return nil
 	}
-	// Fast path once the cap has tripped: skip the marshal so an ongoing
-	// event storm costs almost nothing per dropped event.
-	r.mu.Lock()
-	limited := r.limited
-	r.mu.Unlock()
-	if limited {
-		return nil
+	if event.Id == "" || event.SessionId == "" || event.Payload == nil {
+		return fmt.Errorf("AOP JSONL event requires id, session_id and payload")
 	}
 	line, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(event)
 	if err != nil {
@@ -182,28 +184,22 @@ func (r *JSONLRecorder) Write(event *aop.Event) error {
 	if r.file == nil {
 		return io.ErrClosedPipe
 	}
-	if r.limited {
+	key := event.SessionId + "\x00" + event.Id
+	if _, exists := r.seen[key]; exists {
 		return nil
-	}
-	if r.maxBytes > 0 && r.size+int64(len(line)) > r.maxBytes {
-		r.limited = true
-		// Leave one non-JSON marker line as durable evidence of the
-		// truncation; ScanJSONL skips lines that do not start with '{', so
-		// the file stays readable and resumable.
-		marker := fmt.Sprintf("# aiscan: JSONL size limit reached (limit=%d bytes); subsequent events are dropped\n", r.maxBytes)
-		_, _ = r.file.Write([]byte(marker))
-		// The bus subscription stores the first Write error, so this
-		// surfaces once through Close instead of once per dropped event.
-		return fmt.Errorf("AOP JSONL %s reached the %d-byte size limit; subsequent events are dropped", r.path, r.maxBytes)
 	}
 	n, err := r.file.Write(line)
 	if err == nil && n != len(line) {
 		err = io.ErrShortWrite
 	}
-	if err == nil {
-		r.size += int64(n)
+	if err != nil {
+		return err
 	}
-	return err
+	if r.seen == nil {
+		r.seen = make(map[string]struct{})
+	}
+	r.seen[key] = struct{}{}
+	return nil
 }
 
 func (r *JSONLRecorder) Close() error {

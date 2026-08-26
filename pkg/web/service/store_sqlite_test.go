@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -63,7 +64,7 @@ func TestSQLiteStoreRejectsUnversionedSchema(t *testing.T) {
 }
 
 func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v1.db")
+	path := filepath.Join(t.TempDir(), "v2.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +79,7 @@ func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
 			updated_at TEXT NOT NULL
 		);
 		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
-		PRAGMA user_version = 1;
+		PRAGMA user_version = 2;
 	`); err != nil {
 		_ = db.Close()
 		t.Fatal(err)
@@ -87,6 +88,27 @@ func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
 
 	if _, err := NewSQLiteStore(path); err == nil {
 		t.Fatal("NewSQLiteStore() accepted an unsupported schema version")
+	}
+}
+
+func TestSQLiteStoreRejectsHistoricalSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "historical.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE historical_data (id TEXT PRIMARY KEY);
+		PRAGMA user_version = 3;
+	`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	_ = db.Close()
+	if _, err := NewSQLiteStore(path); err == nil || !strings.Contains(err.Error(), "unsupported sqlite schema version") {
+		t.Fatalf("NewSQLiteStore() error = %v, want unsupported historical schema", err)
 	}
 }
 
@@ -152,6 +174,54 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 		if e.GetMessageDelta() != nil {
 			t.Fatalf("delta was persisted: %+v", e)
 		}
+	}
+}
+
+func TestSQLiteStoreAppendAOPEventIsIdempotentByEventID(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "aop-idempotency.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "s1")
+	event := &aop.Event{
+		Id: "event-retry", SessionId: "s1", Emitter: "aiscan",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("once")}}},
+	}
+	firstCursor, firstPersisted, err := store.AppendAOPEvent(context.Background(), "s1", event)
+	if err != nil || !firstPersisted || firstCursor != 1 {
+		t.Fatalf("first append = cursor:%d persisted:%v err:%v", firstCursor, firstPersisted, err)
+	}
+	var storedEventID string
+	if err := store.db.QueryRow(`SELECT event_id FROM chat_aop_events WHERE session_id = ?`, "s1").Scan(&storedEventID); err != nil {
+		t.Fatal(err)
+	}
+	if storedEventID != event.Id {
+		t.Fatalf("stored event id = %q, want %q", storedEventID, event.Id)
+	}
+	secondCursor, secondPersisted, err := store.AppendAOPEvent(context.Background(), "s1", proto.Clone(event).(*aop.Event))
+	if err != nil || secondPersisted || secondCursor != firstCursor {
+		t.Fatalf("retry append = cursor:%d persisted:%v err:%v", secondCursor, secondPersisted, err)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM chat_aop_events WHERE session_id = ?`, "s1").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("persisted event count = %d, want 1", count)
+	}
+}
+
+func TestSQLiteStoreRejectsAOPEventWithoutIdentity(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "missing-event-id.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, _, err := store.AppendAOPEvent(context.Background(), "s1", &aop.Event{
+		SessionId: "s1", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}},
+	}); err == nil {
+		t.Fatal("AppendAOPEvent accepted an event without an id")
 	}
 }
 
@@ -225,6 +295,42 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	}
 	if obsoleteColumns != 0 {
 		t.Fatal("obsolete scan_proto BLOB column still exists")
+	}
+}
+
+func TestSQLiteStoreDoesNotDuplicateLargeReportInSnapshot(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "report-dedup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	report := strings.Repeat("report-line\n", 4<<20/12)
+	scan := &types.Scan{
+		Id: "scan-report-dedup", Target: "example.com", Mode: "quick", Report: report,
+		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+	}
+	if err := store.Create(context.Background(), scan); err != nil {
+		t.Fatal(err)
+	}
+	var snapshotBytes, reportBytes int
+	var raw string
+	if err := store.db.QueryRow(`SELECT scan_json, length(scan_json), length(report) FROM scans WHERE id = ?`, scan.Id).
+		Scan(&raw, &snapshotBytes, &reportBytes); err != nil {
+		t.Fatal(err)
+	}
+	if reportBytes != len(report) {
+		t.Fatalf("report column bytes = %d, want %d", reportBytes, len(report))
+	}
+	if strings.Contains(raw, "report-line") || snapshotBytes >= len(report) {
+		t.Fatalf("scan_json still duplicates the large report: snapshot_bytes=%d report_bytes=%d", snapshotBytes, reportBytes)
+	}
+	got, err := store.Get(context.Background(), scan.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Report != report {
+		t.Fatalf("Get() report bytes = %d, want %d", len(got.Report), len(report))
 	}
 }
 
@@ -340,52 +446,6 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s retained %d rows after session deletion", table, count)
 		}
-	}
-}
-
-func TestSQLiteStoreCapsAOPEventsPerSession(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "event-cap.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	store.maxEventsPerSession = 5
-	ctx := context.Background()
-	createStoredSession(t, store, "s1")
-
-	makeEvent := func(i int) *aop.Event {
-		return &aop.Event{
-			Id: fmt.Sprintf("e-%d", i), EmittedAt: timestamppb.Now(), SessionId: "s1", Emitter: "aiscan",
-			Payload: &aop.Event_Message{Message: &aop.Message{
-				Id: fmt.Sprintf("m-%d", i), Role: "assistant", Content: []*aop.Content{aop.Text(fmt.Sprintf("event %d", i))},
-			}},
-		}
-	}
-	for i := 1; i <= 5; i++ {
-		cursor, persisted, err := store.AppendAOPEvent(ctx, "s1", makeEvent(i))
-		if err != nil || !persisted || cursor != int64(i) {
-			t.Fatalf("event %d: cursor=%d persisted=%v err=%v", i, cursor, persisted, err)
-		}
-	}
-	// Everything past the cap is dropped without error so live broadcast
-	// keeps working; only one synthetic marker row is added.
-	for i := 6; i <= 10; i++ {
-		cursor, persisted, err := store.AppendAOPEvent(ctx, "s1", makeEvent(i))
-		if err != nil || persisted || cursor != 0 {
-			t.Fatalf("event %d past cap: cursor=%d persisted=%v err=%v", i, cursor, persisted, err)
-		}
-	}
-
-	events, err := store.ListAOPEvents(ctx, "s1", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 6 {
-		t.Fatalf("stored events = %d, want 5 real + 1 marker", len(events))
-	}
-	marker := events[len(events)-1].GetError()
-	if marker == nil || marker.Code != "session_event_limit" {
-		t.Fatalf("final event = %+v, want session_event_limit marker", events[len(events)-1])
 	}
 }
 

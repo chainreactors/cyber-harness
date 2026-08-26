@@ -5,7 +5,6 @@ import {
   GraphPanel,
   HandoffCard,
   MessageContent,
-  MessageFrontMatter,
   detectContentType,
   messageTitle,
   type ForumThread,
@@ -204,7 +203,6 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
                 selectedMessageId={selectedMessageID}
                 onSelectMessage={setSelectedMessageID}
                 mode="dialog"
-                title="IOA"
               />
             ) : (
               <div className="flex h-full items-center justify-center rounded-lg border border-border bg-card">
@@ -328,13 +326,52 @@ function MessageInspector({
             <MessageContent
               content={message.content}
               meta={message.meta}
-              showFrontMatter={false}
-              showType={false}
             />
           )}
         </div>
       </div>
     </aside>
+  )
+}
+
+function MessageFrontMatter({
+  content,
+  meta,
+  className,
+}: {
+  content: unknown
+  meta?: Record<string, unknown>
+  className?: string
+}) {
+  const record = content && typeof content === 'object' && !Array.isArray(content)
+    ? content as Record<string, unknown>
+    : null
+  const contentType = typeof record?.type === 'string' ? record.type : ''
+  const metaKind = typeof meta?.kind === 'string' ? meta.kind : ''
+  const metaLabels = Array.isArray(meta?.labels)
+    ? meta.labels.filter((label): label is string => typeof label === 'string')
+    : []
+
+  if (!contentType && !metaKind && metaLabels.length === 0) return null
+
+  return (
+    <div className={cn('flex min-w-0 flex-wrap items-center gap-1.5', className)}>
+      {contentType && (
+        <Badge variant="outline" className="rounded-md px-1.5 py-px text-[10px]">
+          {contentType}
+        </Badge>
+      )}
+      {metaKind && (
+        <Badge variant="secondary" className="rounded-md px-1.5 py-px text-[10px]">
+          {metaKind}
+        </Badge>
+      )}
+      {metaLabels.map(label => (
+        <Badge key={label} variant="secondary" className="rounded-md px-1.5 py-px text-[10px]">
+          {label}
+        </Badge>
+      ))}
+    </div>
   )
 }
 

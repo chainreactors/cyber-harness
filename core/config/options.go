@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/chainreactors/aiscan/skills"
@@ -241,6 +242,12 @@ func ResolvePrompt(value string) (string, error) {
 		return prompt, nil
 	}
 	if err != nil {
+		// Natural-language prompts frequently contain punctuation that is not
+		// legal in a Windows filename (for example `host:port`). An invalid
+		// filename is evidence that this is text, not a prompt-file request.
+		if runtime.GOOS == "windows" && strings.ContainsAny(prompt, `<>:"|?*`) {
+			return prompt, nil
+		}
 		return "", fmt.Errorf("stat prompt file %s: %w", prompt, err)
 	}
 	if !info.Mode().IsRegular() {

@@ -37,6 +37,11 @@ type SessionOptions struct {
 	ParentToolCallID string
 	AgentName        string
 	Messages         []*aop.Message
+	// HistorySnapshot marks Messages as a new persisted transcript snapshot.
+	// Ordinary continuations keep the in-memory context and refer to their
+	// parent session instead; replaying those messages as events would append
+	// every large tool result again to JSONL and the durable event stream.
+	HistorySnapshot bool
 }
 
 type SessionCloseReason string
@@ -154,8 +159,12 @@ func (e *sessionEmitter) Emit(event *aop.Event) {
 	e.bus.Emit(event)
 }
 
-func (e *sessionEmitter) sessionStarted(sessionID, agentName string, started *aop.SessionStarted) {
-	e.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}})
+func (e *sessionEmitter) sessionStarted(sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
+	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
+		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
+	}
+	e.Emit(event)
 }
 
 func (e *sessionEmitter) sessionEnded(sessionID, agentName, reason string) {
@@ -646,10 +655,14 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		})
 	}
 	go rt.runSession(state)
+	historyMode := types.SessionHistory_MODE_INHERIT
+	if options.HistorySnapshot {
+		historyMode = types.SessionHistory_MODE_SNAPSHOT
+	}
 	rt.sessionEvents.sessionStarted(id, agentName, &aop.SessionStarted{
 		Model: rt.config.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
-	})
-	if options.ParentSessionID != "" && options.ParentToolCallID == "" && len(options.Messages) > 0 {
+	}, historyMode)
+	if options.HistorySnapshot && len(options.Messages) > 0 {
 		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
 	}
 	return public, nil
@@ -1036,7 +1049,7 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	newID := rt.nextContinuationID(logicalID)
 	continuation, err := rt.OpenSession(ctx, SessionOptions{
 		ID: newID, LogicalID: logicalID, ParentSessionID: parentSessionID,
-		AgentName: agentName, Messages: prepared,
+		AgentName: agentName, Messages: prepared, HistorySnapshot: reason == SessionCloseCompacted,
 	})
 	if err != nil {
 		return nil, err

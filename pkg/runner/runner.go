@@ -22,6 +22,7 @@ import (
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/tui"
+	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 	ioaclient "github.com/chainreactors/ioa/client"
@@ -101,6 +102,26 @@ func samePath(left, right string) bool {
 	return left == right
 }
 
+func validateFreshJSONLOutput(option *cfg.Option) error {
+	if option == nil || strings.TrimSpace(option.Resume) != "" || strings.TrimSpace(option.OutputFile) == "" {
+		return nil
+	}
+	info, err := os.Stat(option.OutputFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat AOP JSONL output %s: %w", option.OutputFile, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("AOP JSONL output %s is a directory", option.OutputFile)
+	}
+	if info.Size() > 0 {
+		return fmt.Errorf("AOP JSONL output %s already exists and is not empty; use --resume to append an existing session", option.OutputFile)
+	}
+	return nil
+}
+
 // RunOutput is the presentation sink an entry point may attach to a runtime.
 // The runtime never constructs one — CLI/TUI hosts inject it; headless hosts
 // (stdio, WebSocket nodes, the web hub) leave it nil.
@@ -132,6 +153,10 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		runtimeCancel()
 		return nil, fmt.Errorf("agent runtime option is required")
 	}
+	if err := validateFreshJSONLOutput(option); err != nil {
+		runtimeCancel()
+		return nil, err
+	}
 	rt := &AgentRuntime{
 		ctx:      runtimeCtx,
 		cancel:   runtimeCancel,
@@ -157,7 +182,6 @@ func NewAgentRuntime(ctx context.Context, option *cfg.Option, logger telemetry.L
 		rt.option.OutputFile = recordPath
 		rt.recordPath = recordPath
 	}
-
 	if rc != nil && rc.ExistingApp != nil {
 		rt.app = rc.ExistingApp
 	} else {
@@ -650,7 +674,7 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	}
 	startedAt := time.Now()
 	if application.Events != nil {
-		application.Events.sessionStarted(sessionID, emitter, &aop.SessionStarted{})
+		application.Events.sessionStarted(sessionID, emitter, &aop.SessionStarted{}, types.SessionHistory_MODE_INHERIT)
 		application.Events.Emit(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
 			Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}},

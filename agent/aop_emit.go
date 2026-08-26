@@ -102,6 +102,7 @@ func (e *aopEmitter) sessionStart(model string) {
 	event := &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
 		Model: model, ParentSessionId: e.parentSessionID, ParentToolCallId: e.parentToolCallID,
 	}}}
+	_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	if e.delegation != nil {
 		e.emitWithExt(event, e.delegation)
 		return
