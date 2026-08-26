@@ -57,20 +57,30 @@ func ReadJSONL(path string) ([]*aop.Event, error) {
 	return events, err
 }
 
+// DefaultRecorderMaxBytes caps one session's JSONL file. Legitimate sessions
+// stay in the megabytes; the cap is a last-line defense so a runaway event
+// source (a retry loop once emitted turn lifecycle pairs at microsecond
+// cadence and wrote 182GB) cannot fill the disk. It is a capacity guard, not
+// content policy: no event inspection or deduplication happens here.
+const DefaultRecorderMaxBytes int64 = 2 << 30 // 2 GiB
+
 // JSONLRecorder is the single append-only subscriber for persisted AOP events.
 type JSONLRecorder struct {
-	mu    sync.Mutex
-	file  *os.File
-	path  string
-	unsub func()
-	err   error
+	mu       sync.Mutex
+	file     *os.File
+	path     string
+	unsub    func()
+	err      error
+	maxBytes int64
+	size     int64
+	limited  bool
 }
 
 func NewJSONLRecorder(bus *eventbus.Bus[*aop.Event], path string) (*JSONLRecorder, error) {
 	if bus == nil {
 		return nil, fmt.Errorf("AOP event bus is required")
 	}
-	recorder := &JSONLRecorder{}
+	recorder := &JSONLRecorder{maxBytes: DefaultRecorderMaxBytes}
 	if err := recorder.Switch(path); err != nil {
 		return nil, err
 	}
@@ -116,10 +126,18 @@ func (r *JSONLRecorder) Switch(path string) error {
 	if err != nil {
 		return err
 	}
+	// The file is opened in append mode, so a resumed session starts with its
+	// existing size already counted against the cap.
+	var size int64
+	if info, statErr := file.Stat(); statErr == nil {
+		size = info.Size()
+	}
 	r.mu.Lock()
 	old := r.file
 	r.file = file
 	r.path = clean
+	r.size = size
+	r.limited = r.maxBytes > 0 && size >= r.maxBytes
 	r.mu.Unlock()
 	if old != nil {
 		if err := old.Close(); err != nil {
@@ -146,6 +164,14 @@ func (r *JSONLRecorder) Write(event *aop.Event) error {
 	if r == nil || event == nil {
 		return nil
 	}
+	// Fast path once the cap has tripped: skip the marshal so an ongoing
+	// event storm costs almost nothing per dropped event.
+	r.mu.Lock()
+	limited := r.limited
+	r.mu.Unlock()
+	if limited {
+		return nil
+	}
 	line, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal AOP JSONL event: %w", err)
@@ -156,9 +182,26 @@ func (r *JSONLRecorder) Write(event *aop.Event) error {
 	if r.file == nil {
 		return io.ErrClosedPipe
 	}
+	if r.limited {
+		return nil
+	}
+	if r.maxBytes > 0 && r.size+int64(len(line)) > r.maxBytes {
+		r.limited = true
+		// Leave one non-JSON marker line as durable evidence of the
+		// truncation; ScanJSONL skips lines that do not start with '{', so
+		// the file stays readable and resumable.
+		marker := fmt.Sprintf("# aiscan: JSONL size limit reached (limit=%d bytes); subsequent events are dropped\n", r.maxBytes)
+		_, _ = r.file.Write([]byte(marker))
+		// The bus subscription stores the first Write error, so this
+		// surfaces once through Close instead of once per dropped event.
+		return fmt.Errorf("AOP JSONL %s reached the %d-byte size limit; subsequent events are dropped", r.path, r.maxBytes)
+	}
 	n, err := r.file.Write(line)
 	if err == nil && n != len(line) {
 		err = io.ErrShortWrite
+	}
+	if err == nil {
+		r.size += int64(n)
 	}
 	return err
 }
