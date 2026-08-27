@@ -119,7 +119,7 @@ func ExchangeFromHTTP(req *http.Request, resp *http.Response, requestBody, respo
 			Method:   req.Method,
 			URL:      urlString,
 			Protocol: req.Proto,
-			Headers:  PairsFromHTTP(req.Header),
+			Headers:  PairsFromHTTPWithHost(req.Header, req.Host),
 			Body:     requestBody,
 		}
 	}
@@ -385,6 +385,31 @@ func PairsFromHTTP(headers http.Header) []Pair {
 		}
 	}
 	return out
+}
+
+// containsHeaderName reports whether pairs already carry a header with this
+// name, compared case-insensitively.
+func containsHeaderName(pairs []Pair, name string) bool {
+	for _, p := range pairs {
+		if strings.EqualFold(p.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// PairsFromHTTPWithHost is PairsFromHTTP plus the Host header net/http hides.
+// The standard library parses the request-line authority into Request.Host and
+// deletes "Host" from Request.Header, so a pair sequence built from the header
+// map alone never carries it. When host is non-empty and no Host header is
+// already present, it is prepended — Host conventionally leads the field block —
+// so a request reconstructed from these pairs is complete and replayable.
+func PairsFromHTTPWithHost(headers http.Header, host string) []Pair {
+	pairs := PairsFromHTTP(headers)
+	if host == "" || containsHeaderName(pairs, "Host") {
+		return pairs
+	}
+	return append([]Pair{{Name: "Host", Value: host}}, pairs...)
 }
 
 func pairsToProto(pairs []Pair) []*Header {
