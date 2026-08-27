@@ -153,6 +153,42 @@ func TestCapturePostRequestBody(t *testing.T) {
 	}
 }
 
+// TestCaptureIncludesHostHeader guards the Host reconstruction: net/http parses
+// the request-line authority into Request.Host and drops "Host" from the header
+// map, so a flow whose headers came straight off that map would have no Host
+// line and could not be replayed. The capture path must put it back.
+func TestCaptureIncludesHostHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	want, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	hub, _, client := newTestHub(t, true)
+
+	if body := get(t, client, srv.URL); body != "" {
+		_ = body // body is empty; the request headers are what we assert on
+	}
+
+	flows := hub.Store().Query(QueryOpts{})
+	var host string
+	for _, f := range flows {
+		for _, h := range f.Request.Headers {
+			if strings.EqualFold(h.Name, "Host") {
+				host = h.Value
+			}
+		}
+	}
+	if host == "" {
+		t.Fatal("captured request carried no Host header")
+	}
+	if host != want.Host {
+		t.Errorf("Host = %q, want %q", host, want.Host)
+	}
+}
+
 func TestCaptureFiltersAndVerbs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ok", func(w http.ResponseWriter, r *http.Request) {
