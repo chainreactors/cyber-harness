@@ -54,6 +54,9 @@ func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb
 	result.Name = call.Name
 	result.DurationMs = uint64(time.Since(started).Milliseconds())
 	sanitizeToolResultUTF8(result)
+	// Bound inline output to the model-context budget; oversized results are
+	// spilled to disk and replaced with a preview plus a reference.
+	boundToolResultOutput(ctx, result)
 	return &aop.Event{
 		Id: runtimeEnvelopeID(), EmittedAt: timestamppb.Now(), SessionId: request.SessionId,
 		TurnId: request.TurnId, Emitter: "aiscan.agent", Payload: &aop.Event_ToolResult{ToolResult: result},
