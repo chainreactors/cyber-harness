@@ -149,7 +149,7 @@ aiscan agent -p "检查 Web 应用漏洞" -i http://target.example \
   -e "每个发现的漏洞必须附带可复现的 curl 命令"
 
 # REPL 中动态启用/关闭
-aiscan> /eval 扫描结果必须覆盖 top100 端口
+aiscan> /eval 扫描结果必须覆盖 `gogo -P port` 列出的当前运行时端口预设
 aiscan> 扫描 192.168.1.1
 aiscan> /eval off
 ```
@@ -211,7 +211,7 @@ aiscan> /report 根据上次扫描结果生成报告
 `!` 前缀直接执行命令，绕过 LLM。所有注册的 scanner 伪命令和 shell 命令均可使用，支持 Ctrl+C / Escape 取消。
 
 ```text
-aiscan> !gogo -i 192.168.1.0/24 -p top100
+aiscan> !gogo -i 192.168.1.0/24 -p top2
 aiscan> !scan -i http://target.example
 aiscan> !cyberhub list poc --severity critical
 aiscan> !neutron -u http://target.example -s high
@@ -419,7 +419,7 @@ aiscan --ai -p "<分析意图>" <scanner> [scanner 参数...]
 
 ```bash
 # gogo 结果由 agent 分析
-aiscan --ai -p "只提取高风险暴露面，并给出证据" gogo -i 192.168.1.0/24 -p top100
+aiscan --ai -p "只提取高风险暴露面，并给出证据" gogo -i 192.168.1.0/24 -p top2
 
 # spray 结果分析
 aiscan --ai -p "判断这些 Web 指纹是否值得进一步验证" spray -u http://target.example --finger

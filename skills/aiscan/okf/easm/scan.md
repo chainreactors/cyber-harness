@@ -41,6 +41,8 @@ scan -i 10.0.0.1 --mode full --deep
 scan -i 10.0.0.1 -j
 ```
 
+`scan -j` enables scan-level JSON Lines output. It is not the same flag as direct `gogo -j`, which takes a previous-results input file. Likewise, `--mode full` is a scan profile, not a direct `gogo -p full` preset.
+
 **CRITICAL: `-i` vs `-l`**:
 - `-i` is for one inline target per flag: IP, CIDR, IP:port, URL, or domain. Repeat `-i` for multiple inline targets.
 - `-l` is for target list files (one target per line). **Always use `-l` when scanning from a file.**
