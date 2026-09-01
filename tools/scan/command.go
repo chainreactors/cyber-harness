@@ -34,9 +34,9 @@ type flags struct {
 	Deep            bool     `long:"deep" description:"Run deep AI testing for discovered websites and fingerprinted assets"`
 	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
 	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
-	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines"`
+	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines (direct gogo uses -o jl)"`
 	NoColor         bool     `long:"no-color" description:"Disable ANSI colors in terminal output"`
-	Ports           string   `long:"ports" description:"Ports for gogo scanning; defaults to all in quick and - in full"`
+	Ports           string   `long:"ports" description:"Runtime gogo port preset/tag/alias, range, or explicit ports; defaults to all in quick and - in full"`
 	Threads         int      // derived from Thread; not a CLI flag
 	Timeout         int      `long:"timeout" description:"Per-probe timeout in seconds" default:"5"`
 	SprayThreads    int      // derived from Thread; not a CLI flag
