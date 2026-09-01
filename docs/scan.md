@@ -105,7 +105,7 @@ scan 提供 `quick` 和 `full` 两种预设模式，通过 `--mode` 参数选择
 | `--mode` | 扫描模式：`quick` 或 `full` | `quick` |
 | `--thread` | 总并发预算，自动按比例分配给各引擎 | `1000` |
 | `--timeout` | 每个探测的超时秒数 | `5` |
-| `--ports` | gogo 端口集合（`top100`/`all`/`-`/自定义） | quick: `all` |
+| `--ports` | gogo 端口集合（当前资源的 `top1`/`top2`/`top3`/`all`/`-`/自定义） | quick: `all` |
 | `--dict` | spray 字典文件，可重复 | |
 | `--rule` | spray 变形规则文件，可重复 | |
 | `--word` | spray 词汇生成 DSL 表达式 | |
@@ -221,7 +221,7 @@ aiscan -F scan_result.jsonl -o markdown -f report.md   # 输出到文件
 
 ```bash
 # 自定义端口范围
-aiscan scan -i 10.0.0.0/24 --ports top100
+aiscan scan -i 10.0.0.0/24 --ports top3
 aiscan scan -i 10.0.0.0/24 --ports 80,443,8080,8443,9090
 aiscan scan -i 10.0.0.10 --ports -
 

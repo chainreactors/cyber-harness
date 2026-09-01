@@ -53,15 +53,25 @@ func (c *Command) Usage() string {
 func (c *Command) QuickReference() string {
 	return `### gogo — host, port, service, and banner discovery
   -i <ip/cidr>   Target (IP, CIDR, or comma-separated). NOT ip:port — use -i IP -p PORT.
-  -p <ports>     Presets: top1, top2, top100, top1000, all, - (65535), or 80,443,8080
+  -p <ports>     Runtime port preset/tag/alias, range, or explicit ports (currently observed: top1, top2, top3, all, -; use -P port to list presets)
   -l <file>      Target file (one IP/CIDR per line)
-  -o jl          JSON Lines output (do NOT use -j for JSON output; -j is a JSON input file)
+  -t, --thread <n> Concurrent worker count
+  -o <format>    Command-line output format (JSON Lines: jl)
+  -f <file>      Output filename
+  -O <format>    File output format (JSON Lines: jl)
+  -j <json-file> Previous-results JSON input file (value required; not output)
+  -P port        Print the current runtime port presets
+  NOTE: Do not infer top100/top1000/top2k/top12k/full as port presets from another release; use -P port for the current runtime list.
+  NOTE: "total ports: 1" means the normalized plan has one port; it does not mean a complete port scan.
+  See aiscan://skills/aiscan/okf/easm/gogo.md for the full command contract.
   -e             Enable exploit/neutron scan
   -v             Enable active fingerprint scan
   Examples:
-    gogo -i 10.0.0.1 -p top100
+    gogo -i 10.0.0.1 -p top2
     gogo -i 10.0.0.0/24 -p 80,443,8080
-    gogo -l targets.txt -p top2 -ev`
+    gogo -l targets.txt -p top2 -ev
+    gogo -i 10.0.0.1 -p top2 -o jl
+    gogo -i 10.0.0.1 -p top2 -f results.jsonl -O jl`
 }
 
 func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
@@ -124,8 +134,10 @@ func (c *Command) injectProxyURL(args []string, proxy string) []string {
 }
 
 // normalizeArgs adapts common agent-generated gogo arguments before handing
-// them to the upstream parser. gogo's -j/--json is an input file, while agents
-// often use it as a boolean JSON-output flag; treat valueless -j as -o jl.
+// them to the upstream parser. gogo's -j/--json is an input file, while older
+// agents sometimes used it as a boolean JSON-output flag; treat valueless -j
+// as -o jl only as a compatibility fallback. The canonical prompt contract
+// tells agents to use gogo's native flags explicitly.
 func (c *Command) normalizeArgs(args []string) []string {
 	out := make([]string, 0, len(args)+2)
 	for i := 0; i < len(args); i++ {

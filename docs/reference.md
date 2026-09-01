@@ -290,7 +290,7 @@ aiscan agent --llm-proxy http://127.0.0.1:7890 -p "检查目标" -i http://targe
 ### gogo：服务发现
 
 ```bash
-aiscan gogo -i 192.168.1.0/24 -p top100
+aiscan gogo -i 192.168.1.0/24 -p top2
 aiscan gogo -i 10.0.0.10 -p 80,443,8080
 aiscan gogo -i targets.txt -p all
 ```
@@ -518,7 +518,7 @@ aiscan scan -i 127.0.0.1 --no-color              # 禁用颜色
 ### 扫描太慢
 
 ```bash
-aiscan scan -i 192.168.1.0/24 --port top100      # 缩小端口范围
+aiscan scan -i 192.168.1.0/24 --ports top3       # 缩小端口范围
 aiscan scan -i 192.168.1.0/24 --thread 500        # 降低并发
 ```
 
