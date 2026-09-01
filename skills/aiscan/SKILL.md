@@ -68,7 +68,7 @@ Available only when they appear in the runtime pseudo-command list:
 
 - Inline output: consume directly when the scan returns quickly.
 - Session id: use `tmux capture-pane -t <id>` to read. See tmux reference.
-- Use `-j` for machine-readable JSON Lines output. Do not assume a result file exists unless you passed an output flag.
+- Output flags are scanner-specific; use the loaded scanner playbook rather than transferring a flag from another command. In particular, direct `gogo` uses a value-bearing `-j <json-file>` as previous-results input and `-o jl` (or `-f <path> -O jl`) for JSON Lines, while the `scan` wrapper uses valueless `-j` for JSON Lines output.
 
 ## Report Generation
 

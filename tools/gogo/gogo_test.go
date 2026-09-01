@@ -50,6 +50,27 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	}
 }
 
+func TestQuickReferenceUsesCurrentFlagAndPresetContract(t *testing.T) {
+	quick := New(nil).QuickReference()
+	for _, want := range []string{
+		"-t, --thread <n>",
+		"-o <format>",
+		"-f <file>",
+		"-O <format>",
+		"-j <json-file>",
+		"-P port",
+		"Runtime port preset/tag/alias, range, or explicit ports (currently observed: top1, top2, top3, all, -",
+		"Do not infer top100/top1000/top2k/top12k/full as port presets from another release",
+	} {
+		if !strings.Contains(quick, want) {
+			t.Fatalf("QuickReference missing %q: %s", want, quick)
+		}
+	}
+	if strings.Contains(quick, "Presets: top1, top2, top100") {
+		t.Fatalf("QuickReference still advertises obsolete presets: %s", quick)
+	}
+}
+
 func TestNormalizeArgsKeepsOutputFormatsAndResolvesFiles(t *testing.T) {
 	dir := t.TempDir()
 	cmd := New(nil)
