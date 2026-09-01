@@ -78,11 +78,21 @@ func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
 	for _, want := range []string{
 		"gogo analysis agent inside AIScan, a Cyber Harness",
 		"Execute the requested scanner command using the bash tool",
+		"selected scanner's documented output flags",
+		"Scanner flags are command-specific",
 		"## Authorization Context",
 		"## Scanner Agent Constraints",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("scanner prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, unwanted := range []string{
+		"Run scanners with -j flag to get JSON",
+		"re-run the scanner with `-j` flag to get JSON output",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("scanner prompt contains ambiguous output guidance %q:\n%s", unwanted, prompt)
 		}
 	}
 }
