@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -95,6 +97,91 @@ func TestCaptureFilterRunsBeforeStore(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := hub.Store().Count(); got != 0 {
 		t.Fatalf("filtered flow count = %d, want 0", got)
+	}
+}
+
+func TestFlowStoreEvictsBodyFiles(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFlowStore(1)
+	if err := store.SetBodyDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	write := func(name string) string {
+		t.Helper()
+		path := filepath.Join(dir, "body", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	add := func(path string) {
+		store.Add(Flow{Exchange: traffic.Exchange{
+			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
+			Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: path, Size: 1}},
+		}})
+	}
+	first := write("first.resp")
+	add(first)
+	second := write("second.resp")
+	add(second)
+
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("evicted body still exists: %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("retained body missing: %v", err)
+	}
+}
+
+func TestFlowStoreBodyBudgetAndStartupPrune(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFlowStoreWithLimits(8, 10)
+	if err := store.SetBodyDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, size int) string {
+		t.Helper()
+		path := filepath.Join(dir, "body", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first := write("budget-first.resp", 6)
+	store.Add(Flow{Exchange: traffic.Exchange{Response: &traffic.Response{BodyRef: &traffic.BodyRef{Path: first, Size: 6}}}})
+	second := write("budget-second.resp", 6)
+	store.Add(Flow{Exchange: traffic.Exchange{Response: &traffic.Response{BodyRef: &traffic.BodyRef{Path: second, Size: 6}}}})
+	if store.Count() != 1 {
+		t.Fatalf("count=%d, want one flow after budget eviction", store.Count())
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("budget-evicted body still exists: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(dir, "body", "orphan.resp.part")
+	if err := os.WriteFile(orphan, []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewFlowStoreWithLimits(8, 10)
+	if err := reloaded.SetBodyDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.Close()
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("startup orphan still exists: %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("live body removed at startup: %v", err)
 	}
 }
 

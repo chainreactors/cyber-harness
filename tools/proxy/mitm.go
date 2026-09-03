@@ -173,6 +173,12 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 
 const maxBodySnip = 4096
 
+// Bound durable capture without changing the bytes forwarded through the
+// proxy. Each request/response keeps at most 8 MiB; the ring keeps at most 2
+// GiB of retained body data in total.
+const maxBodyCaptureBytes int64 = 8 << 20
+const defaultMaxBodyBytes int64 = 2 << 30
+
 type captureAddon struct {
 	mitmproxy.BaseAddon
 	hub     *ProxyHub
@@ -609,7 +615,7 @@ func (s *FlowStore) bodySink(proxyID, side string) (*traffic.BodySink, error) {
 	if dir == "" {
 		return nil, nil
 	}
-	return traffic.NewBodySink(filepath.Join(dir, "body"), proxyID+"."+side, maxBodySnip)
+	return traffic.NewBodySinkWithLimit(filepath.Join(dir, "body"), proxyID+"."+side, maxBodySnip, maxBodyCaptureBytes)
 }
 
 type QueryOpts struct {
@@ -620,24 +626,39 @@ type QueryOpts struct {
 }
 
 type FlowStore struct {
-	mu        sync.RWMutex
-	flows     []Flow
-	head      int
-	size      int
-	seq       int
-	cap       int
-	bodyDir   string
-	indexPath string
-	indexFile *os.File
-	indexMu   sync.Mutex
-	indexErr  error
+	mu           sync.RWMutex
+	flows        []Flow
+	head         int
+	size         int
+	seq          int
+	cap          int
+	bodyBytes    int64
+	maxBodyBytes int64
+	bodyDir      string
+	indexPath    string
+	indexFile    *os.File
+	indexMu      sync.Mutex
+	indexErr     error
 }
 
 func NewFlowStore(cap int) *FlowStore {
+	return NewFlowStoreWithLimits(cap, defaultMaxBodyBytes)
+}
+
+// NewFlowStoreWithLimits sets the retained body budget. A non-positive budget
+// disables only the aggregate limit; each proxy body is still capped.
+func NewFlowStoreWithLimits(cap int, maxBodyBytes int64) *FlowStore {
 	if cap <= 0 {
 		cap = 10000
 	}
-	return &FlowStore{flows: make([]Flow, cap), cap: cap}
+	if maxBodyBytes < 0 {
+		maxBodyBytes = 0
+	}
+	return &FlowStore{
+		flows:        make([]Flow, cap),
+		cap:          cap,
+		maxBodyBytes: maxBodyBytes,
+	}
 }
 
 // SetBodyDir enables disk-backed request/response bodies for flows captured by
@@ -668,6 +689,7 @@ func (s *FlowStore) SetBodyDir(dir string) error {
 	s.indexPath = indexPath
 	s.indexFile = file
 	s.mu.Unlock()
+	s.pruneBodyFiles()
 	return nil
 }
 
@@ -675,6 +697,105 @@ func (s *FlowStore) BodyDir() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bodyDir
+}
+
+func flowBodyRefs(flow Flow) []*traffic.BodyRef {
+	refs := make([]*traffic.BodyRef, 0, 2)
+	if flow.Request.BodyRef != nil {
+		refs = append(refs, flow.Request.BodyRef)
+	}
+	if flow.Response != nil && flow.Response.BodyRef != nil {
+		refs = append(refs, flow.Response.BodyRef)
+	}
+	return refs
+}
+
+func flowBodySize(flow Flow) int64 {
+	var size int64
+	for _, ref := range flowBodyRefs(flow) {
+		if ref != nil && ref.Size > 0 {
+			size += ref.Size
+		}
+	}
+	return size
+}
+
+func bodyPath(root, raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if !filepath.IsAbs(raw) {
+		raw = filepath.Join(root, raw)
+	}
+	return filepath.Clean(raw)
+}
+
+func removeBodyPath(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+	if strings.HasSuffix(path, ".part") {
+		_ = os.Remove(strings.TrimSuffix(path, ".part"))
+	} else {
+		_ = os.Remove(path + ".part")
+	}
+}
+
+func (s *FlowStore) removeFlowBodies(flow Flow) {
+	s.mu.RLock()
+	root := s.bodyDir
+	s.mu.RUnlock()
+	if root == "" {
+		return
+	}
+	for _, ref := range flowBodyRefs(flow) {
+		if ref != nil {
+			removeBodyPath(bodyPath(root, ref.Path))
+		}
+	}
+}
+
+// pruneBodyFiles reconciles the body subtree with the flows retained in the
+// ring. It runs at startup so files left by a crash or an older ring are not
+// carried forward forever.
+func (s *FlowStore) pruneBodyFiles() {
+	s.mu.RLock()
+	root := s.bodyDir
+	live := make(map[string]struct{})
+	for n := 0; n < s.size; n++ {
+		flow := s.flows[(s.head+n)%s.cap]
+		for _, ref := range flowBodyRefs(flow) {
+			if ref != nil {
+				path := bodyPath(root, ref.Path)
+				if path != "" {
+					if abs, err := filepath.Abs(path); err == nil {
+						live[abs] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if root == "" {
+		return
+	}
+	_ = filepath.Walk(filepath.Join(root, "body"), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		absolute, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return absErr
+		}
+		if _, ok := live[absolute]; !ok {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // IndexError reports a metadata append failure. The in-memory/ring capture is
@@ -718,18 +839,29 @@ func (s *FlowStore) After(id int) []Flow { return s.after(id) }
 // Add stores f, assigns it a monotonic ID, and returns the stored copy so the
 // caller can fan the ID-bearing flow out to subscribers.
 func (s *FlowStore) Add(f Flow) Flow {
+	incomingBytes := flowBodySize(f)
+	var evicted []Flow
 	s.mu.Lock()
 	s.seq++
 	f.ID = strconv.Itoa(s.seq)
-	idx := (s.head + s.size) % s.cap
-	if s.size == s.cap {
-		idx = s.head
+	for s.size > 0 && (s.size == s.cap ||
+		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
+		evicted = append(evicted, s.flows[s.head])
+		s.bodyBytes -= flowBodySize(s.flows[s.head])
+		if s.bodyBytes < 0 {
+			s.bodyBytes = 0
+		}
 		s.head = (s.head + 1) % s.cap
-	} else {
-		s.size++
+		s.size--
 	}
+	idx := (s.head + s.size) % s.cap
 	s.flows[idx] = f
+	s.size++
+	s.bodyBytes += incomingBytes
 	s.mu.Unlock()
+	for _, old := range evicted {
+		s.removeFlowBodies(old)
+	}
 	s.appendIndex(f)
 	return f
 }
@@ -843,14 +975,20 @@ func (s *FlowStore) putLocked(f Flow) {
 	if seq := flowSequence(f.ID); seq > s.seq {
 		s.seq = seq
 	}
-	idx := (s.head + s.size) % s.cap
-	if s.size == s.cap {
-		idx = s.head
+	incomingBytes := flowBodySize(f)
+	for s.size > 0 && (s.size == s.cap ||
+		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
+		s.bodyBytes -= flowBodySize(s.flows[s.head])
+		if s.bodyBytes < 0 {
+			s.bodyBytes = 0
+		}
 		s.head = (s.head + 1) % s.cap
-	} else {
-		s.size++
+		s.size--
 	}
+	idx := (s.head + s.size) % s.cap
 	s.flows[idx] = f
+	s.size++
+	s.bodyBytes += incomingBytes
 }
 
 func (s *FlowStore) Query(opts QueryOpts) []Flow {
@@ -907,6 +1045,7 @@ func (s *FlowStore) Clear() {
 	}
 	s.head = 0
 	s.size = 0
+	s.bodyBytes = 0
 	s.mu.Unlock()
 	s.indexMu.Lock()
 	s.indexErr = nil

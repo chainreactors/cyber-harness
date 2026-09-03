@@ -15,7 +15,9 @@ import (
 // only the configured preview; callers that need the complete payload can
 // hydrate it from Path.
 type BodyRef struct {
-	Path      string `json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
+	// Size is the number of bytes observed from the stream. When Truncated is
+	// true, Path contains only the retained prefix.
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256,omitempty"`
 	Complete  bool   `json:"complete"`
@@ -31,16 +33,27 @@ type BodySink struct {
 	file       *os.File
 	hash       hash.Hash
 	size       int64
+	storedSize int64
+	maxBytes   int64
 	preview    []byte
 	previewMax int
 	err        error
 	closed     bool
 	complete   bool
+	truncated  bool
 }
 
 // NewBodySink creates <name>.part in dir and atomically publishes it as name
 // when Close(true) succeeds. The directory is created when needed.
 func NewBodySink(dir, name string, previewMax int) (*BodySink, error) {
+	return NewBodySinkWithLimit(dir, name, previewMax, 0)
+}
+
+// NewBodySinkWithLimit is NewBodySink with an optional maximum number of
+// bytes retained on disk. Bytes beyond the limit are consumed by Reader and
+// counted in BodyRef.Size, but are not written; BodyRef.Truncated marks the
+// resulting file as a prefix.
+func NewBodySinkWithLimit(dir, name string, previewMax int, maxBytes int64) (*BodySink, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("traffic: body directory is empty")
 	}
@@ -62,6 +75,7 @@ func NewBodySink(dir, name string, previewMax int) (*BodySink, error) {
 		finalPath:  finalPath,
 		file:       f,
 		hash:       h,
+		maxBytes:   maxBytes,
 		previewMax: previewMax,
 	}, nil
 }
@@ -79,22 +93,57 @@ func (s *BodySink) Write(p []byte) (int, error) {
 	if s.err != nil {
 		return 0, s.err
 	}
+	if s.maxBytes > 0 {
+		// Keep consuming the source stream so capture never changes proxy
+		// forwarding, but persist only the configured prefix.
+		s.size += int64(len(p))
+		remaining := s.maxBytes - s.storedSize
+		if remaining <= 0 {
+			s.truncated = true
+			return len(p), nil
+		}
+		writeLen := len(p)
+		if int64(writeLen) > remaining {
+			writeLen = int(remaining)
+			s.truncated = true
+		}
+		n, err := s.file.Write(p[:writeLen])
+		if n > 0 {
+			s.storedSize += int64(n)
+			_, _ = s.hash.Write(p[:n])
+			s.appendPreviewLocked(p[:n])
+		}
+		if err == nil && n != writeLen {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			s.err = err
+			return n, err
+		}
+		return len(p), nil
+	}
 	n, err := s.file.Write(p)
 	if n > 0 {
 		s.size += int64(n)
+		s.storedSize += int64(n)
 		_, _ = s.hash.Write(p[:n])
-		if len(s.preview) < s.previewMax {
-			end := len(p)
-			if remaining := s.previewMax - len(s.preview); end > remaining {
-				end = remaining
-			}
-			s.preview = append(s.preview, p[:end]...)
-		}
+		s.appendPreviewLocked(p[:n])
 	}
 	if err != nil {
 		s.err = err
 	}
 	return n, err
+}
+
+func (s *BodySink) appendPreviewLocked(p []byte) {
+	if len(s.preview) >= s.previewMax || len(p) == 0 {
+		return
+	}
+	end := len(p)
+	if remaining := s.previewMax - len(s.preview); end > remaining {
+		end = remaining
+	}
+	s.preview = append(s.preview, p[:end]...)
 }
 
 // Reader wraps r so body bytes are captured as they pass through the proxy.
@@ -186,7 +235,7 @@ func (s *BodySink) refLocked() BodyRef {
 		Size:      s.size,
 		SHA256:    digest,
 		Complete:  s.complete,
-		Truncated: false,
+		Truncated: s.truncated,
 	}
 }
 
