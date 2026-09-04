@@ -54,3 +54,13 @@ func TestMediaHelpersPreserveDataAndURI(t *testing.T) {
 		t.Fatalf("video media = %+v", media)
 	}
 }
+
+func TestTextNormalizesTruncatedUTF8BeforeProtoEncoding(t *testing.T) {
+	content := Text(string([]byte{'o', 'k', ':', 0xe7}))
+	if got := content.GetText().GetText(); got != "ok:\uFFFD" {
+		t.Fatalf("text = %q, want valid UTF-8 replacement", got)
+	}
+	if _, err := protojson.Marshal(content); err != nil {
+		t.Fatalf("marshal normalized text: %v", err)
+	}
+}
