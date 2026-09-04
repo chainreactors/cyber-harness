@@ -17,6 +17,7 @@ import (
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
@@ -62,6 +63,61 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 	if got := logs.String(); !strings.Contains(got, "before boom") || !strings.Contains(got, "call-first") {
 		t.Fatalf("panic log = %s", got)
 	}
+}
+
+func TestToolResultEventNormalizesInvalidUTF8(t *testing.T) {
+	tools := commands.NewRegistry()
+	tools.RegisterTool(invalidUTF8Tool{})
+	var emitted *aop.Event
+	cfg := Config{
+		Tools: tools,
+		Bus: testBus(func(event *aop.Event) {
+			if event.GetToolResult() != nil {
+				emitted = event
+			}
+		}),
+	}.init()
+	args, _ := aop.JSONValue(map[string]any{})
+	assistant := &assistantTurn{
+		message: &aop.Message{Role: "assistant"},
+		toolCalls: []*aop.ToolCall{{
+			Id: "call-invalid-utf8", Name: "echo", Arguments: args,
+		}},
+	}
+
+	batch, err := executeToolCalls(context.Background(), cfg, cfg.emitter, assistant, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emitted == nil {
+		t.Fatal("tool.result was not emitted")
+	}
+	if got := emitted.GetToolResult().GetOutput()[0].GetText().GetText(); got != "ok:\uFFFD" {
+		t.Fatalf("event output = %q, want valid UTF-8 replacement", got)
+	}
+	if _, err := protojson.Marshal(emitted); err != nil {
+		t.Fatalf("marshal tool.result: %v", err)
+	}
+	message := &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: emitted}}
+	if _, err := aop.Wrap("event", "call-invalid-utf8", message); err != nil {
+		t.Fatalf("wrap tool.result: %v", err)
+	}
+	if got := tool.ResultText(provider.MessageToolResult(batch.messages[0])); got != "ok:\uFFFD" {
+		t.Fatalf("transcript output = %q, want valid UTF-8 replacement", got)
+	}
+}
+
+type invalidUTF8Tool struct{}
+
+func (invalidUTF8Tool) Name() string        { return "echo" }
+func (invalidUTF8Tool) Description() string { return "returns raw text" }
+func (invalidUTF8Tool) Definition() *aop.ToolDefinition {
+	return tool.Def("echo", "returns raw text", struct{}{})
+}
+func (invalidUTF8Tool) Execute(context.Context, string) (*tool.Result, error) {
+	return &tool.Result{Output: []*aop.Content{{
+		Value: &aop.Content_Text{Text: &aop.TextContent{Text: string([]byte{'o', 'k', ':', 0xe7})}},
+	}}}, nil
 }
 
 func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
