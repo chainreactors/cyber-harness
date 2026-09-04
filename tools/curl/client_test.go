@@ -3,6 +3,7 @@ package curl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
@@ -47,6 +51,50 @@ func TestGetWritesBody(t *testing.T) {
 	}
 	if out != "hello" {
 		t.Fatalf("body = %q", out)
+	}
+}
+
+func TestResponseEmitsAIScanArtifact(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("hello"))
+	}))
+	defer srv.Close()
+
+	bus := eventbus.New[*aop.Event]()
+	var artifact *toolpb.Artifact
+	bus.Subscribe(func(event *aop.Event) {
+		decoded := new(toolpb.Artifact)
+		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
+			artifact = decoded
+		}
+	})
+	req, err := Parse([]string{srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+	if err := New().WithEvents(bus).do(context.Background(), req, commands.Egress{}, "", &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if artifact == nil {
+		t.Fatal("response did not emit an artifact")
+	}
+	expectedURL := srv.URL + "/"
+	if artifact.Tool != "aiscan" || artifact.Kind != toolpb.ArtifactKindWeb || artifact.Target != expectedURL {
+		t.Fatalf("artifact metadata = %+v", artifact)
+	}
+	var summary struct {
+		URL         string `json:"url"`
+		Status      int    `json:"status"`
+		ContentType string `json:"content_type"`
+		BodyLength  int64  `json:"body_length"`
+	}
+	if err := json.Unmarshal(artifact.Data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.URL != expectedURL || summary.Status != http.StatusOK || summary.ContentType != "text/plain" || summary.BodyLength != 5 {
+		t.Fatalf("artifact data = %+v", summary)
 	}
 }
 
