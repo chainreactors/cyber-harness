@@ -84,7 +84,7 @@ func (h *TrafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send a
 	if q.GetFlows() {
 		for _, f := range h.infra.Store.Query(queryOptsFromFilter(q.GetFilter())) {
 			flow := f
-			if err := h.sendFlow(env.Id, send, flowToProto(&flow)); err != nil {
+			if err := h.sendFlow(env.Id, send, h.infra.Store.flowToProto(&flow)); err != nil {
 				return err
 			}
 		}
