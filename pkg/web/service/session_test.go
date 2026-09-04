@@ -154,6 +154,71 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	}
 }
 
+func acceptCancelTurnRequests(pool *AgentPool, agent *remoteAgent) {
+	agent.send = func(envelope *aop.Envelope) error {
+		agent.sendCh <- envelope
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			return err
+		}
+		protocol, ok := message.(*aop.ProtocolMessage)
+		if !ok || protocol.GetCancelTurnRequest() == nil {
+			return nil
+		}
+		request := protocol.GetCancelTurnRequest()
+		pool.handleAgentEnvelope(agent, aop.MustWrap(generateID(), envelope.GetId(), &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: &aop.CancelTurnResponse{
+			Outcome: &aop.CancelTurnResponse_Accepted{Accepted: &aop.TurnReceipt{
+				SessionId: request.GetSessionId(),
+				TurnId:    request.GetTurnId(),
+				State:     "canceled",
+			}},
+		}}}))
+		return nil
+	}
+}
+
+func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := NewService(ServiceConfig{Store: store})
+	defer service.Close()
+	pool := NewAgentPool(service.Hub())
+	service.SetAgentPool(pool)
+	fake := &remoteAgent{
+		nodeState: newNodeState(),
+		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
+		done: make(chan struct{}),
+	}
+	fake.openSessions["session-1"] = struct{}{}
+	pool.agents[fake.nodeID] = fake
+	acceptCancelTurnRequests(pool, fake)
+
+	server := service.api.Sessions
+	ctx := context.Background()
+	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: fake.nodeID}); err != nil || opened.GetAccepted() == nil {
+		t.Fatalf("open = %v, %v", opened, err)
+	}
+	if _, tracked := service.TaskSession("automatic-turn"); tracked {
+		t.Fatal("automatic turn unexpectedly registered as a Web task")
+	}
+
+	canceled, err := server.CancelTurn(ctx, "cancel-automatic", &aop.CancelTurnRequest{SessionId: "session-1", TurnId: "automatic-turn"})
+	if err != nil || canceled.GetAccepted().GetTurnId() != "automatic-turn" {
+		t.Fatalf("CancelTurn = %v, %v", canceled, err)
+	}
+	message, err := aop.Unwrap(<-fake.sendCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := message.(*aop.ProtocolMessage).GetCancelTurnRequest()
+	if request.GetSessionId() != "session-1" || request.GetTurnId() != "automatic-turn" {
+		t.Fatalf("cancel frame = %v", request)
+	}
+}
+
 func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
 	if err != nil {
@@ -170,6 +235,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 		done: make(chan struct{}),
 	}
 	pool.agents[fake.nodeID] = fake
+	acceptCancelTurnRequests(pool, fake)
 	server := service.api.Sessions
 	ctx := context.Background()
 	if opened, err := server.OpenSession(ctx, "open-1", &aop.OpenSessionRequest{SessionId: "session-1", NodeId: fake.nodeID}); err != nil || opened.GetAccepted() == nil {
@@ -208,6 +274,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	if request.GetSessionId() != "session-1" || request.GetTurnId() != "turn-1" {
 		t.Fatalf("cancel frame = %v", request)
 	}
+	pool.handleAgentEnvelope(fake, turnEndEnvelope(t, "turn-1", "session-1", "canceled"))
 	fake.mu.Lock()
 	_, firstPending := fake.tasks["turn-1"]
 	_, secondPending := fake.tasks["turn-2"]
@@ -235,6 +302,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	if _, err := server.CancelTurn(ctx, "cancel-2", &aop.CancelTurnRequest{SessionId: "session-1", TurnId: "turn-2"}); err != nil {
 		t.Fatal(err)
 	}
+	pool.handleAgentEnvelope(fake, turnEndEnvelope(t, "turn-2", "session-1", "canceled"))
 }
 
 func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
