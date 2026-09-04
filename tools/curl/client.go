@@ -849,14 +849,15 @@ func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, 
 		URL         string `json:"url"`
 		Status      int    `json:"status"`
 		ContentType string `json:"content_type,omitempty"`
-		Size        int64  `json:"size"`
+		BodyLength  int64  `json:"body_length"`
 	}{
 		URL:         exchange.Request.URL,
 		Status:      exchange.Response.StatusCode,
 		ContentType: headerValue(exchange.Response.Headers, "Content-Type"),
-		Size:        size,
+		BodyLength:  size,
 	}
-	c.EmitArtifactCtx(ctx, "curl", toolpb.ArtifactKindWeb, summary.URL, summary)
+	// Compact HTTP observations use CSTX's generic AIScan artifact schema.
+	c.EmitArtifactCtx(ctx, "aiscan", toolpb.ArtifactKindWeb, summary.URL, summary)
 }
 
 func headerValue(headers []traffic.Pair, name string) string {
