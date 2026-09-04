@@ -11,10 +11,20 @@ import (
 func (h *ProxyHub) Store() *FlowStore { return h.store }
 
 func (h *ProxyHub) ingest(flow Flow) {
+	if h.store == nil {
+		return
+	}
 	if !h.recording.Load() {
+		// Capture can be disabled while a request is in flight. Its sinks have
+		// already been closed by captureState.finish, so release the files even
+		// though the flow is intentionally not admitted to the ring.
+		h.store.cleanupFlowBodies(flow)
 		return
 	}
 	if !h.captureMatches(flow) {
+		// Filters are evaluated after the body has been observed. Do not leave
+		// a filtered flow's durable body behind when it never reaches the ring.
+		h.store.cleanupFlowBodies(flow)
 		return
 	}
 	stored := h.store.Add(flow)
@@ -105,7 +115,7 @@ func (s *flowSubscriber) run() {
 		flows := s.hub.store.after(s.cursor)
 		for i := range flows {
 			flow := flows[i]
-			message := flowToProto(&flow)
+			message := s.hub.store.flowToProto(&flow)
 			select {
 			case s.out <- message:
 				s.cursor = flowSequence(flow.ID)
@@ -133,6 +143,18 @@ func flowSequence(id string) int {
 // through the canonical Exchange, attribution (tool id, timestamp) is stamped
 // on top.
 func flowToProto(flow *Flow) *traffic.Flow {
+	return renderFlowToProto(nil, flow)
+}
+
+// flowToProto hydrates through the store's body read lock when rendering an
+// internal stream/query response. The lock keeps ring eviction from deleting a
+// file between the copy and the read. The package-level helper above remains
+// for callers/tests that do not have a store handle.
+func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
+	return renderFlowToProto(s, flow)
+}
+
+func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
@@ -140,7 +162,11 @@ func flowToProto(flow *Flow) *traffic.Flow {
 	// retains the historical bytes field, so hydrate only at this boundary.
 	copy := *flow
 	copy.Exchange = flow.Clone()
-	_ = copy.HydrateBodies()
+	if store != nil {
+		_ = store.hydrate(&copy)
+	} else {
+		_ = copy.HydrateBodies()
+	}
 	message := copy.Proto()
 	message.ToolId = flow.ToolID
 	if !flow.Timestamp.IsZero() {

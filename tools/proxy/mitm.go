@@ -173,6 +173,15 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 
 const maxBodySnip = 4096
 
+// Keep a single captured request/response from becoming an unbounded disk
+// allocation. The full observed size remains in BodyRef.Size; only the prefix
+// up to this limit is retained in the body file.
+const maxBodyCaptureBytes int64 = 8 << 20
+
+// Retain a bounded amount of body data across the ring. A value of zero on a
+// custom FlowStore means unlimited (the default is deliberately finite).
+const defaultMaxBodyBytes int64 = 2 << 30
+
 type captureAddon struct {
 	mitmproxy.BaseAddon
 	hub     *ProxyHub
@@ -486,6 +495,7 @@ func (s *captureState) finish(err error) {
 	}
 	s.finished = true
 	complete := err == nil && s.flow.Response != nil && s.flow.Response.StatusCode != 0
+	var truncationNotices []string
 	if err == nil && s.captureErr != nil {
 		err = s.captureErr
 	}
@@ -493,6 +503,10 @@ func (s *captureState) finish(err error) {
 		ref, closeErr := s.reqSink.Close(complete)
 		s.flow.Request.BodyRef = &ref
 		s.flow.Request.Body = s.reqSink.Preview()
+		if ref.Truncated {
+			truncationNotices = append(truncationNotices,
+				fmt.Sprintf("request body truncated (%d/%d bytes retained)", ref.StoredSize, ref.Size))
+		}
 		if closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -504,6 +518,10 @@ func (s *captureState) finish(err error) {
 		}
 		s.flow.Response.BodyRef = &ref
 		s.flow.Response.Body = s.respSink.Preview()
+		if ref.Truncated {
+			truncationNotices = append(truncationNotices,
+				fmt.Sprintf("response body truncated (%d/%d bytes retained)", ref.StoredSize, ref.Size))
+		}
 		if closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -515,6 +533,13 @@ func (s *captureState) finish(err error) {
 	}
 	if err != nil {
 		s.flow.Error = err.Error()
+	}
+	if len(truncationNotices) > 0 {
+		notice := strings.Join(truncationNotices, "; ")
+		if s.flow.Error != "" {
+			s.flow.Error += "; "
+		}
+		s.flow.Error += notice
 	}
 	s.flow.Complete = complete
 	s.flow.Duration = time.Since(s.start)
@@ -609,7 +634,7 @@ func (s *FlowStore) bodySink(proxyID, side string) (*traffic.BodySink, error) {
 	if dir == "" {
 		return nil, nil
 	}
-	return traffic.NewBodySink(filepath.Join(dir, "body"), proxyID+"."+side, maxBodySnip)
+	return traffic.NewBodySinkWithLimit(filepath.Join(dir, "body"), proxyID+"."+side, maxBodySnip, maxBodyCaptureBytes)
 }
 
 type QueryOpts struct {
@@ -619,34 +644,61 @@ type QueryOpts struct {
 	Last   int
 }
 
+// FlowStore owns the retained flow ring and its file-backed body lifecycle.
+// bodyMu coordinates body-file readers with retention cleanup. The ring may
+// evict a flow while a subscriber is hydrating a copy of it; keeping both
+// operations in this lock prevents an otherwise silent read race.
 type FlowStore struct {
-	mu        sync.RWMutex
-	flows     []Flow
-	head      int
-	size      int
-	seq       int
-	cap       int
-	bodyDir   string
-	indexPath string
-	indexFile *os.File
-	indexMu   sync.Mutex
-	indexErr  error
+	mu           sync.RWMutex
+	bodyMu       sync.RWMutex
+	flows        []Flow
+	head         int
+	size         int
+	seq          int
+	cap          int
+	bodyBytes    int64
+	maxBodyBytes int64
+	bodyRefs     map[string]int
+	bodyDir      string
+	indexPath    string
+	indexFile    *os.File
+	indexMu      sync.Mutex
+	indexErr     error
 }
 
 func NewFlowStore(cap int) *FlowStore {
+	return NewFlowStoreWithLimits(cap, defaultMaxBodyBytes)
+}
+
+// NewFlowStoreWithLimits is NewFlowStore with an explicit retained-body byte
+// budget. maxBodyBytes <= 0 disables the aggregate budget; per-body capture is
+// still capped by the proxy's BodySink policy.
+func NewFlowStoreWithLimits(cap int, maxBodyBytes int64) *FlowStore {
 	if cap <= 0 {
 		cap = 10000
 	}
-	return &FlowStore{flows: make([]Flow, cap), cap: cap}
+	if maxBodyBytes < 0 {
+		maxBodyBytes = 0
+	}
+	return &FlowStore{
+		flows:        make([]Flow, cap),
+		cap:          cap,
+		maxBodyBytes: maxBodyBytes,
+		bodyRefs:     make(map[string]int),
+	}
 }
 
 // SetBodyDir enables disk-backed request/response bodies for flows captured by
 // this store. The directory is intentionally configured by the runner rather
 // than by the traffic protocol, keeping the storage policy local to the tool.
+// Existing body files are reconciled with the retained ring before capture
+// starts, so crash leftovers do not survive indefinitely.
 func (s *FlowStore) SetBodyDir(dir string) error {
 	if dir == "" {
 		return nil
 	}
+	s.bodyMu.Lock()
+	defer s.bodyMu.Unlock()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -668,6 +720,11 @@ func (s *FlowStore) SetBodyDir(dir string) error {
 	s.indexPath = indexPath
 	s.indexFile = file
 	s.mu.Unlock()
+	// loadIndex runs before bodyDir is installed so it can reuse the existing
+	// decoder. Rebuild the path index once the directory is known, then remove
+	// files left by prior crashes or flows that have fallen out of the ring.
+	s.rebuildBodyRefsLocked()
+	s.pruneUnreferencedBodiesLocked()
 	return nil
 }
 
@@ -675,6 +732,239 @@ func (s *FlowStore) BodyDir() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bodyDir
+}
+
+// hydrate loads file-backed bodies while holding the store's body read lock.
+// Readers operate on a flow copy, so retention cleanup can safely remove an
+// evicted flow's files as soon as no in-flight store read still needs them.
+func (s *FlowStore) hydrate(flow *Flow) error {
+	if flow == nil {
+		return nil
+	}
+	s.bodyMu.RLock()
+	defer s.bodyMu.RUnlock()
+	return flow.HydrateBodies()
+}
+
+func flowBodyRefs(flow Flow) []*traffic.BodyRef {
+	refs := make([]*traffic.BodyRef, 0, 2)
+	if flow.Request.BodyRef != nil {
+		refs = append(refs, flow.Request.BodyRef)
+	}
+	if flow.Response != nil && flow.Response.BodyRef != nil {
+		refs = append(refs, flow.Response.BodyRef)
+	}
+	return refs
+}
+
+func bodyStoredSize(ref *traffic.BodyRef) int64 {
+	if ref == nil {
+		return 0
+	}
+	// StoredSize was added after the original index format. Fall back to Size
+	// for old records, where Size was the on-disk byte count. A truncated
+	// record from an intermediate writer may not carry StoredSize; counting its
+	// observed Size is conservative and keeps the aggregate budget bounded.
+	if ref.StoredSize > 0 {
+		return ref.StoredSize
+	}
+	if ref.Size > 0 {
+		return ref.Size
+	}
+	return 0
+}
+
+func flowBodyStoredSize(flow Flow) int64 {
+	seen := make(map[string]struct{}, 2)
+	var total int64
+	for _, ref := range flowBodyRefs(flow) {
+		if ref == nil {
+			continue
+		}
+		key := ref.Path
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		if n := bodyStoredSize(ref); n > 0 {
+			total += n
+		}
+	}
+	return total
+}
+
+// resolveBodyPath only permits cleanup inside the store's dedicated body
+// directory. BodyRef values are persisted metadata, so rejecting paths that
+// escape that directory avoids turning retention into an arbitrary file delete.
+func resolveBodyPath(root, raw string) (string, bool) {
+	if root == "" || raw == "" {
+		return "", false
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	bodyRoot := filepath.Join(root, "body")
+	path := raw
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(bodyRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return path, true
+}
+
+func bodyPathVariants(path string) []string {
+	if strings.HasSuffix(path, ".part") {
+		return []string{path, strings.TrimSuffix(path, ".part")}
+	}
+	return []string{path, path + ".part"}
+}
+
+func bodyRefPaths(root string, flow Flow) []string {
+	seen := make(map[string]struct{}, 4)
+	paths := make([]string, 0, 4)
+	for _, ref := range flowBodyRefs(flow) {
+		if ref == nil {
+			continue
+		}
+		path, ok := resolveBodyPath(root, ref.Path)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func (s *FlowStore) addBodyRefsLocked(flow Flow) {
+	if s.bodyRefs == nil {
+		s.bodyRefs = make(map[string]int)
+	}
+	for _, path := range bodyRefPaths(s.bodyDir, flow) {
+		s.bodyRefs[path]++
+	}
+}
+
+func (s *FlowStore) removeBodyRefsLocked(flow Flow) []string {
+	paths := bodyRefPaths(s.bodyDir, flow)
+	if len(paths) == 0 || len(s.bodyRefs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths)*2)
+	var removable []string
+	for _, path := range paths {
+		count := s.bodyRefs[path]
+		if count <= 1 {
+			delete(s.bodyRefs, path)
+			for _, candidate := range bodyPathVariants(path) {
+				if _, exists := seen[candidate]; exists {
+					continue
+				}
+				seen[candidate] = struct{}{}
+				removable = append(removable, candidate)
+			}
+		} else {
+			s.bodyRefs[path] = count - 1
+		}
+	}
+	return removable
+}
+
+// cleanupBodyPaths removes files after the caller has dropped their ring
+// references. The body write lock serializes this I/O with hydration; the
+// reference-count recheck closes the race with a concurrently reused path.
+func (s *FlowStore) cleanupBodyPaths(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	unique := make(map[string]struct{}, len(paths))
+	s.bodyMu.Lock()
+	defer s.bodyMu.Unlock()
+	s.mu.RLock()
+	bodyDir := s.bodyDir
+	var removable []string
+	for _, path := range paths {
+		if _, seen := unique[path]; seen || s.bodyRefs[path] > 0 {
+			continue
+		}
+		if _, ok := resolveBodyPath(bodyDir, path); !ok {
+			continue
+		}
+		unique[path] = struct{}{}
+		removable = append(removable, path)
+	}
+	s.mu.RUnlock()
+	for _, path := range removable {
+		_ = os.Remove(path)
+	}
+}
+
+// cleanupFlowBodies releases a flow which was observed but never admitted to
+// the ring (for example because capture was toggled off or a filter rejected
+// it). It is deliberately best-effort: cleanup failure must not affect proxy
+// forwarding.
+func (s *FlowStore) cleanupFlowBodies(flow Flow) {
+	s.mu.RLock()
+	actual := bodyRefPaths(s.bodyDir, flow)
+	s.mu.RUnlock()
+	paths := make([]string, 0, len(actual)*2)
+	for _, path := range actual {
+		paths = append(paths, bodyPathVariants(path)...)
+	}
+	s.cleanupBodyPaths(paths)
+}
+
+func (s *FlowStore) rebuildBodyRefsLocked() {
+	s.mu.Lock()
+	s.bodyRefs = make(map[string]int)
+	s.bodyBytes = 0
+	for n := 0; n < s.size; n++ {
+		idx := (s.head + n) % s.cap
+		flow := s.flows[idx]
+		s.addBodyRefsLocked(flow)
+		s.bodyBytes += flowBodyStoredSize(flow)
+	}
+	s.mu.Unlock()
+}
+
+func (s *FlowStore) pruneUnreferencedBodiesLocked() {
+	s.mu.RLock()
+	bodyDir := s.bodyDir
+	live := make(map[string]struct{}, len(s.bodyRefs))
+	for path := range s.bodyRefs {
+		live[path] = struct{}{}
+	}
+	s.mu.RUnlock()
+	if bodyDir == "" {
+		return
+	}
+	bodyRoot := filepath.Join(bodyDir, "body")
+	_ = filepath.Walk(bodyRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		absolute, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return nil
+		}
+		if _, ok := live[absolute]; !ok {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // IndexError reports a metadata append failure. The in-memory/ring capture is
@@ -718,18 +1008,35 @@ func (s *FlowStore) After(id int) []Flow { return s.after(id) }
 // Add stores f, assigns it a monotonic ID, and returns the stored copy so the
 // caller can fan the ID-bearing flow out to subscribers.
 func (s *FlowStore) Add(f Flow) Flow {
+	incomingBytes := flowBodyStoredSize(f)
+	var cleanup []string
+	s.bodyMu.RLock()
 	s.mu.Lock()
 	s.seq++
 	f.ID = strconv.Itoa(s.seq)
-	idx := (s.head + s.size) % s.cap
-	if s.size == s.cap {
-		idx = s.head
+	// Evict until both dimensions of the retention policy fit. A single flow
+	// may exceed a custom aggregate budget; it is retained as the newest flow
+	// rather than being silently discarded.
+	for s.size > 0 && (s.size == s.cap ||
+		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
+		idx := s.head
+		victim := s.flows[idx]
+		cleanup = append(cleanup, s.removeBodyRefsLocked(victim)...)
+		s.bodyBytes -= flowBodyStoredSize(victim)
+		if s.bodyBytes < 0 {
+			s.bodyBytes = 0
+		}
 		s.head = (s.head + 1) % s.cap
-	} else {
-		s.size++
+		s.size--
 	}
+	idx := (s.head + s.size) % s.cap
 	s.flows[idx] = f
+	s.size++
+	s.bodyBytes += incomingBytes
+	s.addBodyRefsLocked(f)
 	s.mu.Unlock()
+	s.bodyMu.RUnlock()
+	s.cleanupBodyPaths(cleanup)
 	s.appendIndex(f)
 	return f
 }
@@ -843,14 +1150,24 @@ func (s *FlowStore) putLocked(f Flow) {
 	if seq := flowSequence(f.ID); seq > s.seq {
 		s.seq = seq
 	}
-	idx := (s.head + s.size) % s.cap
-	if s.size == s.cap {
-		idx = s.head
+	incomingBytes := flowBodyStoredSize(f)
+	for s.size > 0 && (s.size == s.cap ||
+		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
+		idx := s.head
+		victim := s.flows[idx]
+		s.bodyBytes -= flowBodyStoredSize(victim)
+		if s.bodyBytes < 0 {
+			s.bodyBytes = 0
+		}
+		s.removeBodyRefsLocked(victim)
 		s.head = (s.head + 1) % s.cap
-	} else {
-		s.size++
+		s.size--
 	}
+	idx := (s.head + s.size) % s.cap
 	s.flows[idx] = f
+	s.size++
+	s.bodyBytes += incomingBytes
+	s.addBodyRefsLocked(f)
 }
 
 func (s *FlowStore) Query(opts QueryOpts) []Flow {
@@ -880,6 +1197,11 @@ func (s *FlowStore) Query(opts QueryOpts) []Flow {
 }
 
 func (s *FlowStore) Get(id int) *Flow {
+	// Hold the body read lock across the lookup and hydration. Otherwise an
+	// eviction could copy a flow, delete its file, and win the race before the
+	// caller has loaded the body.
+	s.bodyMu.RLock()
+	defer s.bodyMu.RUnlock()
 	s.mu.RLock()
 	want := strconv.Itoa(id)
 	for n := 0; n < s.size; n++ {
@@ -897,6 +1219,8 @@ func (s *FlowStore) Get(id int) *Flow {
 }
 
 func (s *FlowStore) Clear() {
+	s.bodyMu.Lock()
+	defer s.bodyMu.Unlock()
 	s.mu.Lock()
 	bodyDir := s.bodyDir
 	indexFile := s.indexFile
@@ -907,6 +1231,8 @@ func (s *FlowStore) Clear() {
 	}
 	s.head = 0
 	s.size = 0
+	s.bodyBytes = 0
+	s.bodyRefs = make(map[string]int)
 	s.mu.Unlock()
 	s.indexMu.Lock()
 	s.indexErr = nil
@@ -929,8 +1255,10 @@ func (s *FlowStore) Clear() {
 	}
 }
 
-// Close releases the append-only metadata handle. Body files are deliberately
-// retained so a caller can inspect a capture after the proxy listener stops.
+// Close releases the append-only metadata handle. Body files belonging to the
+// retained ring are deliberately kept so a caller can inspect a capture after
+// the proxy listener stops; the next SetBodyDir startup sweep removes files
+// which are no longer reachable.
 func (s *FlowStore) Close() error {
 	s.mu.Lock()
 	file := s.indexFile
