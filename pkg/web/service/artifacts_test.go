@@ -51,3 +51,42 @@ func TestCSTXArtifactIngestorNormalizesOnServer(t *testing.T) {
 		t.Fatalf("normalized types = %v", types)
 	}
 }
+
+func TestCSTXArtifactIngestorNormalizesAIScanWebSummary(t *testing.T) {
+	store := &artifactTestStore{}
+	ingestor, err := NewArtifactIngestor(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ingestor.Close() })
+
+	err = ingestor.IngestArtifact(context.Background(), &toolpb.Artifact{
+		CallId: "curl-1", Tool: "aiscan",
+		Data: []byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.operationID != "curl-1" {
+		t.Fatalf("operation = %q", store.operationID)
+	}
+	types := make(map[string]bool)
+	for _, raw := range store.nodes {
+		var node struct {
+			Type        string `json:"cstx_type"`
+			StatusCode  int    `json:"status_code"`
+			BodyLength  int64  `json:"body_length"`
+			ContentType string `json:"content_type"`
+		}
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatal(err)
+		}
+		types[node.Type] = true
+		if node.StatusCode != 200 || node.BodyLength != 5 || node.ContentType != "text/plain" {
+			t.Fatalf("normalized node = %+v", node)
+		}
+	}
+	if !types["url"] || !types["app"] {
+		t.Fatalf("normalized types = %v", types)
+	}
+}
