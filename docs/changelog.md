@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
+
+本次候选版本汇总 rc2 之后的改动，重点改善流量数据的存储边界、Web 会话的稳定性以及发布产物验证。
+
+### Improvements
+
+- HTTP 流量使用统一 Exchange 结构，支持选择性订阅、有界捕获、body 文件存储与回收。
+- 限制工具内联结果、JSONL 文件和会话 SQLite 事件的大小或数量，减少长期会话的资源占用。
+- 避免 AOP 事件重复持久化，规范协议边界的 UTF-8 文本，修复失败回合重复自动继续的问题。
+- Web 取消请求由运行时处理；前台命令继承调用工作目录。资产面板支持分页，并更新聊天时间线与回复完成时间展示。
+- 内置 curl 补充常用参数兼容行为，并统一响应快照和 Web 资产摘要。
+
+### CI and Release
+
+- 修复连接结束后仍可能发送排队消息的竞态，增加连接关闭重复回归。
+- 后端 E2E 覆盖整个 Web 包树，修正周常 Web 并发测试迁移后的包路径和测试名。
+- 发布前检查目标提交已经通过完整 CI；已公开的同名 Release 不再删除重建。
+- 修复 Linux/macOS ZIP 内二进制执行权限，增加 Linux amd64/arm64 解包启动与 checksum 验证。
+
+### Release Matrix
+
+- `aiscan`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
+- `aiscan-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
+- 校验文件：`aiscan_checksums.txt`。`runner` 参与构建验证，不作为 Release 附件发布。
+
 ## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
 v1.0.0-rc2 重点重构了 AIScan 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。

@@ -329,6 +329,11 @@ jobs:
 
             tmpdir=$(mktemp -d)
             cp "$f" "${tmpdir}/${inner_name}"
+            # Artifact downloads reset files to 0644; restore executable mode
+            # before recording Unix permissions in the release ZIP.
+            if [[ "$base" != *.exe ]]; then
+              chmod 755 "${tmpdir}/${inner_name}"
+            fi
             cp README.md "${tmpdir}/" 2>/dev/null || true
             cp -r docs "${tmpdir}/" 2>/dev/null || true
             (cd "$tmpdir" && zip -r - .) > "${GITHUB_WORKSPACE}/dist/release/${archive_name}.zip"
@@ -348,6 +353,42 @@ jobs:
           name: release-bundle
           path: dist/release/*
           retention-days: 1
+
+  verify-linux-release:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: release-bundle
+          path: dist/release
+
+      - name: Verify checksums and packaged Linux binaries
+        env:
+          TAG: ${{ inputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          (cd dist/release && sha256sum -c aiscan_checksums.txt)
+          test "$(find dist/release -name '*.zip' | wc -l)" -eq 11
+          for binary in aiscan aiscan-full; do
+            destination="${RUNNER_TEMP}/${binary}"
+            unzip -q "dist/release/${binary}_linux_${ARCH}.zip" -d "$destination"
+            test -x "${destination}/${binary}"
+            test "$("${destination}/${binary}" --version)" = "aiscan ${TAG}"
+            if [[ "$binary" == "aiscan-full" ]]; then
+              "${destination}/${binary}" web --help >/dev/null
+            fi
+          done
 
   # UPX can report a structurally valid PE that still crashes at process
   # startup. Run the exact packaged Windows binaries before publishing them.

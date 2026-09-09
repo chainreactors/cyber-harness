@@ -163,12 +163,44 @@ func TestConnectionHandlerFailureConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer connection.Close()
 	err = connection.Run(&aop.Envelope{Id: "first"}, func(context.Context, *aop.Envelope, aop.SendFunc) error { return want })
 	if !errors.Is(err, want) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if err := connection.Send(&aop.Envelope{Id: "after"}); !errors.Is(err, want) {
 		t.Fatalf("Send() after handler error = %v", err)
+	}
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	if len(stream.sent) != 0 {
+		t.Fatalf("sent %d envelopes after handler failure", len(stream.sent))
+	}
+}
+
+func TestConnectionShutdownRejectsQueuedWrites(t *testing.T) {
+	stream := newConnectionTestStream()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Start the writer only after requests have queued and shutdown has begun.
+	connection := &Connection{
+		ctx: ctx, cancel: cancel, stream: stream,
+		outbound: make(chan writeRequest, 2),
+		done:     make(chan struct{}), writerDone: make(chan struct{}),
+	}
+	want := errors.New("handler failed")
+	for _, id := range []string{"one", "two"} {
+		connection.outbound <- writeRequest{
+			envelope: &aop.Envelope{Id: id}, result: make(chan error, 1),
+		}
+	}
+	connection.stop(want)
+	connection.writeLoop()
+	if len(stream.sent) != 0 {
+		t.Fatalf("wrote %d queued envelopes after shutdown", len(stream.sent))
+	}
+	if err := connection.Send(&aop.Envelope{Id: "after"}); !errors.Is(err, want) {
+		t.Fatalf("Send() after shutdown = %v, want %v", err, want)
 	}
 }
 
