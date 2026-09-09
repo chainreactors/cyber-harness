@@ -1,124 +1,135 @@
 package proxy
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"strconv"
-	"sync"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (h *ProxyHub) Store() *FlowStore { return h.store }
 
-func (h *ProxyHub) ingest(flow Flow) {
-	if !h.recording.Load() {
-		return
-	}
-	if !h.captureMatches(flow) {
-		return
-	}
-	stored := h.store.Add(flow)
-	h.publish(&stored)
-}
+func (h *ProxyHub) ingest(flow Flow) { h.ingestFiles(flow, [2]*os.File{}) }
 
-func (h *ProxyHub) publish(flow *Flow) {
-	if flow == nil {
+func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
+	if h.store == nil {
 		return
 	}
 	h.subsMu.Lock()
-	for _, subscriber := range h.subs {
-		// The capture path never sends into a subscriber's bounded output
-		// channel. A single wake-up is enough: the subscriber owns a cursor
-		// and drains every FlowStore entry after it, in order. This keeps a
-		// slow Cairn connection from silently dropping observations or
-		// blocking the proxy response path.
-		subscriber.signal()
+	defer h.subsMu.Unlock()
+	if h.closed || !h.recording.Load() || !h.captureMatches(flow) {
+		removeCaptureFiles(files)
+		return
 	}
-	h.subsMu.Unlock()
+	h.store.addFiles(flow, files)
 }
 
+// Subscribe preserves the historical channel API. New consumers should use
+// SubscribeFlows and deliver directly from the eventbus handler.
 func (h *ProxyHub) Subscribe(buffer int) (<-chan *traffic.Flow, func()) {
-	return h.SubscribeFrom(h.store.Sequence(), buffer)
+	return h.SubscribeFrom(-1, buffer)
 }
 
-// SubscribeFrom starts a reliable FlowStore-backed subscription after the
-// supplied numeric flow id. It is useful for reconnecting consumers that have
-// persisted their last seen id. The normal Subscribe path starts at the
-// current tail and observes only new flows.
+// SubscribeFrom queues only metadata; its output is unbuffered. Oversized
+// replay terminates the subscription rather than silently skipping entries.
 func (h *ProxyHub) SubscribeFrom(after int, buffer int) (<-chan *traffic.Flow, func()) {
+	out := make(chan *traffic.Flow)
+	ctx, stop := context.WithCancel(context.Background())
 	if buffer <= 0 {
 		buffer = 256
 	}
-	channel := make(chan *traffic.Flow, buffer)
-	subscriber := &flowSubscriber{
-		hub:    h,
-		out:    channel,
-		wake:   make(chan struct{}, 1),
-		done:   make(chan struct{}),
-		cursor: after,
+	sub, err := h.SubscribeFlows(after, eventbus.SubscribeOptions[Flow]{Buffer: buffer}, func(flow Flow) error {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		message := h.store.flowToProto(&flow)
+		select {
+		case out <- message:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	if err != nil {
+		stop()
+		close(out)
+		return out, func() {}
+	}
+	go func() { <-sub.Stopped(); stop(); <-sub.Done(); close(out) }()
+	return out, func() { stop(); sub.Cancel() }
+}
+
+// SubscribeFlows is a native eventbus subscription: filters run before
+// admission; a serial handler receives owned metadata and may stream or write
+// it. Body hydration is the consumer's choice. after < 0 starts at the tail.
+// Filters must be pure, fast, and must not reenter the hub/store.
+func (h *ProxyHub) SubscribeFlows(after int, opts eventbus.SubscribeOptions[Flow], handler func(Flow) error) (*eventbus.Subscription[Flow], error) {
+	if opts.MaxBytes == 0 {
+		opts.MaxBytes = 4 << 20
+	}
+	opts.Size = flowMetadataSize
+	opts.Clone = cloneFlowMetadata
+	// A private admission bus lets replay target this consumer only. Register
+	// the live forwarding subscription under the same lock as Add and replay.
+	bus := eventbus.New[Flow]()
+	sub, err := bus.SubscribeAsync(opts, handler)
+	if err != nil {
+		return nil, err
 	}
 	h.subsMu.Lock()
-	if h.subs == nil {
-		h.subs = make(map[int]*flowSubscriber)
-	}
+	h.store.publishMu.Lock()
+	unsub := h.store.events.Subscribe(bus.Emit)
 	id := h.nextSub
 	h.nextSub++
-	h.subs[id] = subscriber
+	if h.subs == nil {
+		h.subs = make(map[int]func())
+	}
+	h.subs[id] = sub.Cancel
+	if h.closed {
+		sub.Cancel()
+	} else if after >= 0 {
+		for _, flow := range h.store.after(after) {
+			bus.Emit(flow)
+		}
+	}
+	h.store.publishMu.Unlock()
 	h.subsMu.Unlock()
-	go subscriber.run()
+	go func() {
+		<-sub.Stopped()
+		unsub()
+		h.subsMu.Lock()
+		delete(h.subs, id)
+		h.subsMu.Unlock()
+	}()
+	return sub, nil
+}
 
-	var once sync.Once
-	cancel := func() {
-		once.Do(func() {
-			h.subsMu.Lock()
-			if existing, ok := h.subs[id]; ok {
-				delete(h.subs, id)
-				close(existing.done)
-			}
-			h.subsMu.Unlock()
-		})
+func cloneFlowMetadata(flow Flow) Flow {
+	flow.Exchange = flow.Clone()
+	return flow
+}
+
+// Includes previews and variable-sized headers/strings, plus conservative
+// fixed overhead. There is also an independent event count limit.
+func flowMetadataSize(flow Flow) int64 {
+	size := int64(1024 + len(flow.ID) + len(flow.ToolID) + len(flow.Host) + len(flow.ContentType) + len(flow.Error))
+	size += int64(len(flow.Request.URL) + len(flow.Request.Method) + len(flow.Request.Protocol) + len(flow.Request.Body))
+	for _, pair := range flow.Request.Headers {
+		size += int64(len(pair.Name) + len(pair.Value) + 64)
 	}
-	return channel, cancel
-}
-
-// flowSubscriber turns a store cursor into the historical channel API. The
-// output remains bounded; back-pressure is isolated to this worker and never
-// reaches the MITM request/response callbacks.
-type flowSubscriber struct {
-	hub    *ProxyHub
-	out    chan *traffic.Flow
-	wake   chan struct{}
-	done   chan struct{}
-	cursor int
-}
-
-func (s *flowSubscriber) signal() {
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
-}
-
-func (s *flowSubscriber) run() {
-	defer close(s.out)
-	for {
-		flows := s.hub.store.after(s.cursor)
-		for i := range flows {
-			flow := flows[i]
-			message := flowToProto(&flow)
-			select {
-			case s.out <- message:
-				s.cursor = flowSequence(flow.ID)
-			case <-s.done:
-				return
-			}
-		}
-		select {
-		case <-s.done:
-			return
-		case <-s.wake:
+	if flow.Response != nil {
+		size += int64(len(flow.Response.Body) + len(flow.Response.ReasonPhrase))
+		for _, pair := range flow.Response.Headers {
+			size += int64(len(pair.Name) + len(pair.Value) + 64)
 		}
 	}
+
+	return size
 }
 
 func flowSequence(id string) int {
@@ -133,14 +144,32 @@ func flowSequence(id string) int {
 // through the canonical Exchange, attribution (tool id, timestamp) is stamped
 // on top.
 func flowToProto(flow *Flow) *traffic.Flow {
+	return renderFlowToProto(nil, flow)
+}
+
+// flowToProto hydrates through the store's body read lock when rendering an
+// internal stream/query response. The lock keeps ring eviction from deleting a
+// file between the copy and the read. The package-level helper above remains
+// for callers/tests that do not have a store handle.
+func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
+	return renderFlowToProto(s, flow)
+}
+
+func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
-	// The hot store keeps only a preview and a file reference. A wire Flow
-	// retains the historical bytes field, so hydrate only at this boundary.
+	// The hot Flow contains only previews. File ownership stays in the store;
+	// load bytes only at this boundary, never into a subscriber queue.
 	copy := *flow
 	copy.Exchange = flow.Clone()
-	_ = copy.HydrateBodies()
+	if store != nil {
+		if err := store.hydrate(&copy); err != nil {
+			copy.Complete = false
+			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
+		}
+
+	}
 	message := copy.Proto()
 	message.ToolId = flow.ToolID
 	if !flow.Timestamp.IsZero() {

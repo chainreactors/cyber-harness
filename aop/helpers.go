@@ -3,6 +3,7 @@ package aop
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -71,8 +72,9 @@ func FindTypedExtension(event *Event, target proto.Message) (bool, error) {
 	return false, nil
 }
 
+// Text converts arbitrary textual input into protobuf-safe UTF-8 content.
 func Text(text string) *Content {
-	return &Content{Value: &Content_Text{Text: &TextContent{Text: text}}}
+	return &Content{Value: &Content_Text{Text: &TextContent{Text: strings.ToValidUTF8(text, "\uFFFD")}}}
 }
 
 func Reasoning(text string) *Content {
