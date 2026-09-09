@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
@@ -176,11 +179,11 @@ const maxBodySnip = 4096
 // Keep a single captured request/response from becoming an unbounded disk
 // allocation. The full observed size remains in BodyRef.Size; only the prefix
 // up to this limit is retained in the body file.
-const maxBodyCaptureBytes int64 = 8 << 20
+const maxBodyCaptureBytes = cfg.DefaultBodyMaxBytes
 
 // Retain a bounded amount of body data across the ring. A value of zero on a
 // custom FlowStore means unlimited (the default is deliberately finite).
-const defaultMaxBodyBytes int64 = 2 << 30
+const defaultMaxBodyBytes = cfg.DefaultBodyRetentionBytes
 
 type captureAddon struct {
 	mitmproxy.BaseAddon
@@ -214,112 +217,61 @@ func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
 		return
 	}
 	state := newCaptureState(a.hub, f)
-	state.owner = a
+	f.Stream = true // Capture observes native streams; no buffered-body branch.
 	a.pending.Store(f.Id.String(), state)
-}
-
-func (a *captureAddon) Request(f *mitmproxy.Flow) {
-	if state := a.state(f); state != nil && f.Request != nil {
-		state.setRequestBody(f.Request.Body)
-	}
 }
 
 func (a *captureAddon) Responseheaders(f *mitmproxy.Flow) {
 	if state := a.state(f); state != nil && f.Response != nil {
 		if !a.hub.captureResponseAllowed(f.Response.StatusCode, f.Response.Header.Get("Content-Type")) {
+			a.pending.Delete(f.Id.String())
 			state.discard()
 			return
 		}
-		state.setResponseMeta(f.Response.StatusCode, f.Response.Header)
+		state.flow.Response = &traffic.Response{StatusCode: f.Response.StatusCode, Headers: traffic.PairsFromHTTP(f.Response.Header)}
+		state.flow.ContentType = f.Response.Header.Get("Content-Type")
 	}
 }
 
-func (a *captureAddon) Response(f *mitmproxy.Flow) {
+// FlowFinished is the only completion path for buffered, streamed and failed
+// exchanges. Forwarding errors and end time are owned by the proxy engine.
+func (a *captureAddon) FlowFinished(f *mitmproxy.Flow) {
 	if state := a.state(f); state != nil {
-		if f.Request != nil {
-			state.setRequestBody(f.Request.Body)
-		}
-		if f.Response != nil {
-			state.setResponseMeta(f.Response.StatusCode, f.Response.Header)
-			state.setResponseBody(f.Response.Body)
-		}
-		state.finish(nil)
+		a.pending.Delete(f.Id.String())
+		state.finish(f.Error)
 	}
 }
 
 func (a *captureAddon) StreamRequestModifier(f *mitmproxy.Flow, in io.Reader) io.Reader {
 	if state := a.state(f); state != nil {
-		return state.requestReader(in)
+		return state.bodyReader(in, "req")
 	}
 	return in
 }
-
 func (a *captureAddon) StreamResponseModifier(f *mitmproxy.Flow, in io.Reader) io.Reader {
 	if state := a.state(f); state != nil {
-		return state.responseReader(in)
+		return state.bodyReader(in, "resp")
 	}
 	return in
 }
-
-func (a *captureAddon) RequestError(f *mitmproxy.Flow, err error) {
-	if state := a.state(f); state != nil {
-		state.finish(err)
-	}
-}
-
-func (a *captureAddon) HTTPConnectError(f *mitmproxy.Flow, err error) {
-	if state := a.state(f); state != nil {
-		state.finish(err)
-	} else if f != nil {
-		// CONNECT failures can occur before the normal HTTP exchange starts.
-		state := newCaptureState(a.hub, f)
-		state.owner = a
-		state.finish(err)
-	}
-}
-
-func (a *captureAddon) SSEEnd(f *mitmproxy.Flow) {
-	if state := a.state(f); state != nil {
-		state.finish(nil)
-	}
-}
-
-func (a *captureAddon) WebSocketEnd(f *mitmproxy.Flow) {
-	// WebSocket messages have a separate traffic.WebSocketExchange model. The
-	// HTTP capture state must still be released when the upgraded connection
-	// ends, otherwise a long-lived socket leaks its pending entry.
-	if f != nil {
-		a.pending.Delete(f.Id.String())
-	}
-}
-
 func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 	if f == nil {
 		return nil
 	}
 	if value, ok := a.pending.Load(f.Id.String()); ok {
-		state, ok := value.(*captureState)
-		if ok {
-			return state
-		}
+		state, _ := value.(*captureState)
+		return state
 	}
 	return nil
 }
 
 type captureState struct {
-	owner *captureAddon
-	hub   *ProxyHub
-	proxy string
-	start time.Time
-
-	mu           sync.Mutex
-	finished     bool
-	flow         Flow
-	reqSink      *traffic.BodySink
-	respSink     *traffic.BodySink
-	captureErr   error
-	reqCaptured  bool
-	respCaptured bool
+	hub               *ProxyHub
+	mu                sync.Mutex
+	finished          bool
+	flow              Flow
+	reqSink, respSink *bodyRecorder
+	captureErr        error
 }
 
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
@@ -329,21 +281,11 @@ func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 	}
 	if f.Request != nil {
 		flow.ID = f.Id.String()
-		flow.Request = traffic.Request{
-			Method:   f.Request.Method,
-			URL:      f.Request.URL.String(),
-			Protocol: f.Request.Proto,
-			Headers:  traffic.PairsFromHTTPWithHost(f.Request.Header, requestHost(f.Request)),
-		}
+		flow.Request = traffic.Request{Method: f.Request.Method, URL: f.Request.URL.String(), Protocol: f.Request.Proto, Headers: traffic.PairsFromHTTPWithHost(f.Request.Header, requestHost(f.Request))}
 		flow.Host = f.Request.URL.Hostname()
 	}
-	return &captureState{hub: hub, owner: nil, proxy: f.Id.String(), start: f.StartTime, flow: flow}
+	return &captureState{hub: hub, flow: flow}
 }
-
-// requestHost recovers the Host header value net/http strips from Request.Header
-// into Request.Host, so the captured flow can reconstruct a complete request
-// line block. It prefers the client-sent Host (which keeps a non-default port)
-// and falls back to the URL authority.
 func requestHost(req *mitmproxy.Request) string {
 	if req == nil {
 		return ""
@@ -356,137 +298,26 @@ func requestHost(req *mitmproxy.Request) string {
 	}
 	return ""
 }
-
-func (s *captureState) setRequestBody(body []byte) {
-	if len(body) == 0 {
-		return
-	}
+func (s *captureState) bodyReader(in io.Reader, side string) io.Reader {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.finished || s.reqCaptured {
-		return
-	}
-	s.reqCaptured = true
-	if s.reqSink == nil {
-		var err error
-		s.reqSink, err = s.hub.store.bodySink(s.proxy, "req")
-		if err != nil {
-			s.captureErr = err
-		}
-	}
-	if s.reqSink != nil {
-		_, _ = s.reqSink.Write(body)
-		s.flow.Request.Body = s.reqSink.Preview()
-		return
-	}
-	s.flow.Request.Body = appendPreview(s.flow.Request.Body, body, maxBodySnip)
-}
-
-func (s *captureState) setResponseMeta(status int, headers http.Header) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.finished {
-		return
-	}
-	var body []byte
-	var bodyRef *traffic.BodyRef
-	if s.flow.Response != nil {
-		body = s.flow.Response.Body
-		bodyRef = s.flow.Response.BodyRef
-	}
-	s.flow.Response = &traffic.Response{
-		StatusCode: status, Headers: traffic.PairsFromHTTP(headers),
-		Body: body, BodyRef: bodyRef,
-	}
-	s.flow.ContentType = headers.Get("Content-Type")
-}
-
-func (s *captureState) setResponseBody(body []byte) {
-	if len(body) == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.finished || s.respCaptured {
-		return
-	}
-	s.respCaptured = true
-	if s.respSink == nil {
-		var err error
-		s.respSink, err = s.hub.store.bodySink(s.proxy, "resp")
-		if err != nil {
-			s.captureErr = err
-		}
-	}
-	if s.respSink != nil {
-		_, _ = s.respSink.Write(body)
-		if s.flow.Response == nil {
-			s.flow.Response = &traffic.Response{}
-		}
-		s.flow.Response.Body = s.respSink.Preview()
-		return
-	}
-	if s.flow.Response == nil {
-		s.flow.Response = &traffic.Response{}
-	}
-	s.flow.Response.Body = appendPreview(s.flow.Response.Body, body, maxBodySnip)
-}
-
-func (s *captureState) requestReader(in io.Reader) io.Reader {
-	s.mu.Lock()
-	if s.reqCaptured {
-		s.mu.Unlock()
+	if s.finished || in == nil {
 		return in
 	}
-	if s.reqSink == nil {
+	sink := &s.reqSink
+	if side == "resp" {
+		sink = &s.respSink
+	}
+	if *sink == nil {
 		var err error
-		s.reqSink, err = s.hub.store.bodySink(s.proxy, "req")
+		*sink, err = s.hub.store.bodySink(s.flow.ID, side)
 		if err != nil {
 			s.captureErr = err
+			*sink = &bodyRecorder{release: func() {}}
 		}
 	}
-	s.reqCaptured = true
-	sink := s.reqSink
-	s.mu.Unlock()
-	if sink == nil {
-		return &previewReader{src: in, add: func(p []byte) {
-			s.mu.Lock()
-			s.flow.Request.Body = appendPreview(s.flow.Request.Body, p, maxBodySnip)
-			s.mu.Unlock()
-		}}
-	}
-	return sink.Reader(in)
+	return io.TeeReader(in, *sink)
 }
-
-func (s *captureState) responseReader(in io.Reader) io.Reader {
-	s.mu.Lock()
-	if s.respCaptured {
-		s.mu.Unlock()
-		return in
-	}
-	if s.respSink == nil {
-		var err error
-		s.respSink, err = s.hub.store.bodySink(s.proxy, "resp")
-		if err != nil {
-			s.captureErr = err
-		}
-	}
-	s.respCaptured = true
-	sink := s.respSink
-	s.mu.Unlock()
-	if sink == nil {
-		return &finishReader{src: &previewReader{src: in, add: func(p []byte) {
-			s.mu.Lock()
-			if s.flow.Response == nil {
-				s.flow.Response = &traffic.Response{}
-			}
-			s.flow.Response.Body = appendPreview(s.flow.Response.Body, p, maxBodySnip)
-			s.mu.Unlock()
-		}}, done: func(err error) { s.finish(err) }}
-	}
-	return &finishReader{src: sink.Reader(in), done: func(err error) { s.finish(err) }}
-}
-
 func (s *captureState) finish(err error) {
 	s.mu.Lock()
 	if s.finished {
@@ -494,77 +325,88 @@ func (s *captureState) finish(err error) {
 		return
 	}
 	s.finished = true
-	complete := err == nil && s.flow.Response != nil && s.flow.Response.StatusCode != 0
-	var truncationNotices []string
-	if err == nil && s.captureErr != nil {
-		err = s.captureErr
+	if !s.flow.Timestamp.IsZero() {
+		s.flow.Duration = time.Since(s.flow.Timestamp)
 	}
+	async := (s.reqSink != nil && s.reqSink.sub != nil) || (s.respSink != nil && s.respSink.sub != nil)
+	s.mu.Unlock()
+	if async {
+		s.hub.finalize(s.completeCapture, err)
+	} else {
+		s.completeCapture(err)
+	}
+}
+func (s *captureState) completeCapture(err error) {
 	if s.reqSink != nil {
-		ref, closeErr := s.reqSink.Close(complete)
-		s.flow.Request.BodyRef = &ref
-		s.flow.Request.Body = s.reqSink.Preview()
-		if ref.Truncated {
-			truncationNotices = append(truncationNotices,
-				fmt.Sprintf("request body truncated (%d/%d bytes retained)", ref.StoredSize, ref.Size))
-		}
-		if closeErr != nil && err == nil {
-			err = closeErr
-		}
+		defer s.reqSink.release()
 	}
 	if s.respSink != nil {
-		ref, closeErr := s.respSink.Close(complete)
+		defer s.respSink.release()
+	}
+	s.mu.Lock()
+	err = errors.Join(err, s.captureErr)
+	complete := err == nil && s.flow.Response != nil && s.flow.Response.StatusCode != 0
+	var notices []string
+	capture := func(sink *bodyRecorder, side string, body *[]byte, ref **traffic.BodyRef) {
+		if sink == nil {
+			return
+		}
+		value, closeErr := sink.Close(complete)
+		*body = sink.Preview()
+		if value.Path != "" {
+			*ref = &value
+		}
+		err = errors.Join(err, closeErr)
+		if value.Truncated {
+			notice := fmt.Sprintf("%s body truncated (%d/%d bytes retained)", side, value.StoredSize, value.Size)
+			if sink.sub == nil {
+				notice += " (preview only; local storage disabled or unavailable)"
+			}
+			notices = append(notices, notice)
+		}
+	}
+	capture(s.reqSink, "request", &s.flow.Request.Body, &s.flow.Request.BodyRef)
+	if s.respSink != nil {
 		if s.flow.Response == nil {
 			s.flow.Response = &traffic.Response{}
 		}
-		s.flow.Response.BodyRef = &ref
-		s.flow.Response.Body = s.respSink.Preview()
-		if ref.Truncated {
-			truncationNotices = append(truncationNotices,
-				fmt.Sprintf("response body truncated (%d/%d bytes retained)", ref.StoredSize, ref.Size))
-		}
-		if closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}
-	if err != nil {
-		// A body write/close failure is part of the observation outcome. Do not
-		// publish a complete exchange whose file-backed payload is incomplete.
-		complete = false
+		capture(s.respSink, "response", &s.flow.Response.Body, &s.flow.Response.BodyRef)
 	}
 	if err != nil {
 		s.flow.Error = err.Error()
 	}
-	if len(truncationNotices) > 0 {
-		notice := strings.Join(truncationNotices, "; ")
+	if len(notices) > 0 {
 		if s.flow.Error != "" {
 			s.flow.Error += "; "
 		}
-		s.flow.Error += notice
+		s.flow.Error += strings.Join(notices, "; ")
 	}
-	s.flow.Complete = complete
-	s.flow.Duration = time.Since(s.start)
+	s.flow.Complete = complete && err == nil && len(notices) == 0
 	flow := s.flow
 	s.mu.Unlock()
 	s.hub.ingest(flow)
-	// Keep the pending map bounded even when mitmproxy does not issue a later
-	// lifecycle callback for a failed/streaming connection.
-	if s.owner != nil {
-		s.owner.pending.Delete(s.proxy)
-	}
 }
-
 func (s *captureState) discard() {
 	s.mu.Lock()
-	if s.reqSink != nil {
-		_ = s.reqSink.Discard()
-	}
-	if s.respSink != nil {
-		_ = s.respSink.Discard()
+	if s.finished {
+		s.mu.Unlock()
+		return
 	}
 	s.finished = true
+	req, resp := s.reqSink, s.respSink
 	s.mu.Unlock()
-	if s.owner != nil {
-		s.owner.pending.Delete(s.proxy)
+	cleanup := func(error) {
+		if req != nil {
+			_ = req.Discard()
+		}
+		if resp != nil {
+			_ = resp.Discard()
+		}
+	}
+	if (req != nil && req.sub != nil) || (resp != nil && resp.sub != nil) {
+		s.hub.finalize(cleanup, nil)
+	} else {
+		cleanup(nil)
 	}
 }
 
@@ -576,37 +418,6 @@ func appendPreview(dst, src []byte, max int) []byte {
 		src = src[:max-len(dst)]
 	}
 	return append(dst, src...)
-}
-
-type previewReader struct {
-	src io.Reader
-	add func([]byte)
-}
-
-func (r *previewReader) Read(p []byte) (int, error) {
-	n, err := r.src.Read(p)
-	if n > 0 {
-		r.add(p[:n])
-	}
-	return n, err
-}
-
-type finishReader struct {
-	src  io.Reader
-	done func(error)
-	once sync.Once
-}
-
-func (r *finishReader) Read(p []byte) (int, error) {
-	n, err := r.src.Read(p)
-	if err != nil {
-		finishErr := err
-		if err == io.EOF {
-			finishErr = nil
-		}
-		r.once.Do(func() { r.done(finishErr) })
-	}
-	return n, err
 }
 
 // ---------------------------------------------------------------------------
@@ -629,12 +440,17 @@ type Flow struct {
 // bodySink creates a file-backed capture when the runner configured a body
 // directory. Tests and embedded users can leave it empty and retain the
 // bounded in-memory preview behavior.
-func (s *FlowStore) bodySink(proxyID, side string) (*traffic.BodySink, error) {
+func (s *FlowStore) bodySink(proxyID, side string) (*bodyRecorder, error) {
 	dir := s.BodyDir()
 	if dir == "" {
-		return nil, nil
+		return &bodyRecorder{release: func() {}}, nil
 	}
-	return traffic.NewBodySinkWithLimit(filepath.Join(dir, "body"), proxyID+"."+side, maxBodySnip, maxBodyCaptureBytes)
+	select {
+	case s.bodySlots <- struct{}{}:
+		return newBodyRecorder(filepath.Join(dir, "body"), proxyID+"."+side, s.bodyMaxBytes, func() { <-s.bodySlots })
+	default:
+		return nil, fmt.Errorf("traffic: concurrent body recorder limit exceeded")
+	}
 }
 
 type QueryOpts struct {
@@ -649,6 +465,11 @@ type QueryOpts struct {
 // evict a flow while a subscriber is hydrating a copy of it; keeping both
 // operations in this lock prevents an otherwise silent read race.
 type FlowStore struct {
+	publishMu    sync.Mutex
+	events       eventbus.Bus[Flow]
+	indexSub     *eventbus.Subscription[Flow]
+	bodyMaxBytes int64
+	bodySlots    chan struct{}
 	mu           sync.RWMutex
 	bodyMu       sync.RWMutex
 	flows        []Flow
@@ -681,6 +502,8 @@ func NewFlowStoreWithLimits(cap int, maxBodyBytes int64) *FlowStore {
 		maxBodyBytes = 0
 	}
 	return &FlowStore{
+		bodyMaxBytes: maxBodyCaptureBytes,
+		bodySlots:    make(chan struct{}, 16),
 		flows:        make([]Flow, cap),
 		cap:          cap,
 		maxBodyBytes: maxBodyBytes,
@@ -696,6 +519,13 @@ func NewFlowStoreWithLimits(cap int, maxBodyBytes int64) *FlowStore {
 func (s *FlowStore) SetBodyDir(dir string) error {
 	if dir == "" {
 		return nil
+	}
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if s.indexSub != nil {
+		if err := s.indexSub.Close(context.Background()); err != nil {
+			return err
+		}
 	}
 	s.bodyMu.Lock()
 	defer s.bodyMu.Unlock()
@@ -725,7 +555,7 @@ func (s *FlowStore) SetBodyDir(dir string) error {
 	// files left by prior crashes or flows that have fallen out of the ring.
 	s.rebuildBodyRefsLocked()
 	s.pruneUnreferencedBodiesLocked()
-	return nil
+	return s.subscribeIndex()
 }
 
 func (s *FlowStore) BodyDir() string {
@@ -953,12 +783,15 @@ func (s *FlowStore) pruneUnreferencedBodiesLocked() {
 	}
 	bodyRoot := filepath.Join(bodyDir, "body")
 	_ = filepath.Walk(bodyRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || info.IsDir() {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
 			return nil
 		}
 		absolute, absErr := filepath.Abs(path)
 		if absErr != nil {
-			return nil
+			return absErr
 		}
 		if _, ok := live[absolute]; !ok {
 			_ = os.Remove(path)
@@ -971,6 +804,13 @@ func (s *FlowStore) pruneUnreferencedBodiesLocked() {
 // still usable when the optional index cannot be written, but callers can
 // surface this diagnostic instead of mistaking the index for durable storage.
 func (s *FlowStore) IndexError() error {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if s.indexSub != nil {
+		if err := s.indexSub.Err(); err != nil {
+			return err
+		}
+	}
 	s.indexMu.Lock()
 	defer s.indexMu.Unlock()
 	return s.indexErr
@@ -1008,6 +848,27 @@ func (s *FlowStore) After(id int) []Flow { return s.after(id) }
 // Add stores f, assigns it a monotonic ID, and returns the stored copy so the
 // caller can fan the ID-bearing flow out to subscribers.
 func (s *FlowStore) Add(f Flow) Flow {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	// Bound previews before cloning so external callers cannot make the ring
+	// or admission queue retain an entire body allocation.
+	if len(f.Request.Body) > maxBodySnip {
+		f.Request.Body = f.Request.Body[:maxBodySnip]
+		if f.Request.BodyRef == nil {
+			f.Complete = false
+			f.Error += "; request body truncated (preview only)"
+		}
+	}
+	if f.Response != nil && len(f.Response.Body) > maxBodySnip {
+		resp := *f.Response
+		f.Response = &resp
+		f.Response.Body = f.Response.Body[:maxBodySnip]
+		if f.Response.BodyRef == nil {
+			f.Complete = false
+			f.Error += "; response body truncated (preview only)"
+		}
+	}
+	f = cloneFlowMetadata(f)
 	incomingBytes := flowBodyStoredSize(f)
 	var cleanup []string
 	s.bodyMu.RLock()
@@ -1037,16 +898,29 @@ func (s *FlowStore) Add(f Flow) Flow {
 	s.mu.Unlock()
 	s.bodyMu.RUnlock()
 	s.cleanupBodyPaths(cleanup)
-	s.appendIndex(f)
+	s.events.Emit(f)
 	return f
 }
 
-func (s *FlowStore) appendIndex(f Flow) {
+func (s *FlowStore) subscribeIndex() error {
+	sub, err := s.events.SubscribeAsync(eventbus.SubscribeOptions[Flow]{
+		Buffer: 256, MaxBytes: 4 << 20, Size: flowMetadataSize, Clone: cloneFlowMetadata,
+	}, s.appendIndex)
+	s.indexSub = sub
+	return err
+}
+
+func (s *FlowStore) appendIndex(f Flow) error {
 	s.mu.RLock()
 	file := s.indexFile
 	s.mu.RUnlock()
 	if file == nil {
-		return
+		return io.ErrClosedPipe
+	}
+	f = cloneFlowMetadata(f)
+	f.Request.Body = nil
+	if f.Response != nil {
+		f.Response.Body = nil
 	}
 	record := map[string]any{
 		"id": f.ID, "tool_id": f.ToolID, "timestamp": f.Timestamp,
@@ -1064,13 +938,16 @@ func (s *FlowStore) appendIndex(f Flow) {
 		line = append(line, '\n')
 		s.indexMu.Lock()
 		defer s.indexMu.Unlock()
-		if _, err = file.Write(line); err == nil {
-			err = file.Sync()
+		var n int
+		n, err = file.Write(line)
+		if err == nil && n != len(line) {
+			err = io.ErrShortWrite
 		}
 		if err != nil && s.indexErr == nil {
 			s.indexErr = err
 		}
 	}
+	return err
 }
 
 func (s *FlowStore) loadIndex(path string) error {
@@ -1210,7 +1087,10 @@ func (s *FlowStore) Get(id int) *Flow {
 			f := s.flows[idx]
 			s.mu.RUnlock()
 			f.Exchange = f.Clone()
-			_ = f.HydrateBodies()
+			if err := f.HydrateBodies(); err != nil {
+				f.Complete = false
+				f.Error += fmt.Sprintf("; body unavailable: %v", err)
+			}
 			return &f
 		}
 	}
@@ -1219,10 +1099,19 @@ func (s *FlowStore) Get(id int) *Flow {
 }
 
 func (s *FlowStore) Clear() {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if s.indexSub != nil {
+		_ = s.indexSub.Close(context.Background())
+	}
 	s.bodyMu.Lock()
 	defer s.bodyMu.Unlock()
 	s.mu.Lock()
 	bodyDir := s.bodyDir
+	var bodyPaths []string
+	for path := range s.bodyRefs {
+		bodyPaths = append(bodyPaths, path)
+	}
 	indexFile := s.indexFile
 	indexPath := s.indexPath
 	s.indexFile = nil
@@ -1243,15 +1132,21 @@ func (s *FlowStore) Clear() {
 		s.indexMu.Unlock()
 	}
 	if bodyDir != "" {
-		_ = os.RemoveAll(bodyDir)
-		_ = os.MkdirAll(bodyDir, 0o755)
+		for _, path := range bodyPaths {
+			_ = os.Remove(path)
+		}
 		if indexPath != "" {
-			if file, err := os.OpenFile(indexPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			if file, err := os.OpenFile(indexPath, os.O_CREATE|os.O_TRUNC|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
 				s.mu.Lock()
 				s.indexFile = file
 				s.mu.Unlock()
+			} else {
+				s.indexMu.Lock()
+				s.indexErr = err
+				s.indexMu.Unlock()
 			}
 		}
+		_ = s.subscribeIndex()
 	}
 }
 
@@ -1260,16 +1155,22 @@ func (s *FlowStore) Clear() {
 // the proxy listener stops; the next SetBodyDir startup sweep removes files
 // which are no longer reachable.
 func (s *FlowStore) Close() error {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	var recordErr error
+	if s.indexSub != nil {
+		recordErr = s.indexSub.Close(context.Background())
+	}
 	s.mu.Lock()
 	file := s.indexFile
 	s.indexFile = nil
 	s.mu.Unlock()
 	if file == nil {
-		return nil
+		return recordErr
 	}
 	s.indexMu.Lock()
 	defer s.indexMu.Unlock()
-	return file.Close()
+	return errors.Join(recordErr, file.Sync(), file.Close())
 }
 
 func (s *FlowStore) Count() int {

@@ -75,6 +75,14 @@ type JSONLRecorder struct {
 }
 
 func NewJSONLRecorder(bus *eventbus.Bus[*aop.Event], path string) (*JSONLRecorder, error) {
+	return NewJSONLRecorderWithFilter(bus, path, nil)
+}
+
+// NewJSONLRecorderWithFilter selects events before serialization. This journal
+// intentionally stays synchronous: callers rely on Emit/Switch as visibility
+// boundaries. Independent traffic file/stream consumers use bounded async
+// subscriptions on their own typed bus.
+func NewJSONLRecorderWithFilter(bus *eventbus.Bus[*aop.Event], path string, filter func(*aop.Event) bool) (*JSONLRecorder, error) {
 	if bus == nil {
 		return nil, fmt.Errorf("AOP event bus is required")
 	}
@@ -82,7 +90,7 @@ func NewJSONLRecorder(bus *eventbus.Bus[*aop.Event], path string) (*JSONLRecorde
 	if err := recorder.Switch(path); err != nil {
 		return nil, err
 	}
-	recorder.unsub = bus.Subscribe(func(event *aop.Event) {
+	recorder.unsub = bus.SubscribeFiltered(filter, func(event *aop.Event) {
 		if err := recorder.Write(event); err != nil {
 			recorder.mu.Lock()
 			if recorder.err == nil {

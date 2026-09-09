@@ -260,7 +260,7 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 	}
 	defer store.Close()
 	hub := NewProxyHub(nil, store, "", true)
-	sink, err := traffic.NewBodySinkWithLimit(filepath.Join(dir, "body"), "limited.resp", 4, 4)
+	sink, err := newBodyRecorder(filepath.Join(dir, "body"), "limited.resp", 4, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,12 +271,10 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
 		}},
-		respSink:     sink,
-		respCaptured: true,
-		start:        time.Now(),
+		respSink: sink,
 	}
 	state.finish(nil)
-	flows := store.Query(QueryOpts{})
+	flows := waitForFlows(t, store, 1)
 	if len(flows) != 1 {
 		t.Fatalf("captured flows = %d, want 1", len(flows))
 	}
@@ -382,7 +380,7 @@ func TestMITMCapture_HTTP(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	if store.Count() != 1 {
+	if len(waitForFlows(t, store, 1)) != 1 {
 		t.Fatalf("expected 1 flow, got %d", store.Count())
 	}
 	f := store.Get(1)
