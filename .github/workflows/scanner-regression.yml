@@ -60,11 +60,15 @@ jobs:
             -run 'Test(StdioSameSessionFIFOOrder|StdioSessionsRunConcurrently|StdioDrainWaitsForInFlightAndQueued|RuntimeSessionDirectLoopUsesSessionScheduler|RuntimeSessionRejectsRequestsPastPendingLimit|SessionContextCancellationStopsActiveRun|ActiveRunSteersAsyncInputWithoutSecondLifecycle)$' \
             ./pkg/runner/...
 
-      - name: Repeat web SSE, cancellation, and reload concurrency tests
+      - name: Repeat web events, cancellation, and reload concurrency tests
         run: |
           go test -race -count=20 -timeout 20m \
-            -run 'Test(BroadcastAOPEventPersistsRawEnvelope|ServeSSEWithSnapshotSubscribesBeforeReadingSnapshot|ServeSSEWithSnapshotDropsQueuedSnapshotDuplicates|SessionEventsReplayHasNoSideEffects|SessionEventsResumesAfterLastEventID|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskUsesControlChannelWhenTaskQueueIsFull|CancelTaskWaitsForSaturatedControlChannel|CompleteJobCannotOverwriteCanceledScan|BroadcastConfigReload|BroadcastConfigReloadWaitsBehindCancellationFrames|HandleConfigReloadResultUpdatesAgentStatus|SaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp|SaveConfigCommitFailureClosesCandidateAndKeepsCurrentApp|SaveConfigSerializesConcurrentCandidates)$' \
+            -run '^Test(BroadcastAOPEventPersistsCanonicalProtoJSON|BroadcastAOPEventDoesNotFanOutRetryWithSameEventID|ListEventsReplayHasNoSideEffects|WatchEventsResumesAfterCursor|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskQueuesBehindFullSendChannel|CancelTaskWaitsForSaturatedSendChannel|CompleteScanCannotOverwriteCanceledScan|BroadcastConfigReloadUsesApplicationFIFO|BroadcastConfigReloadWaitsInFIFOOrder|HandleConfigReloadResultUpdatesAgentStatus)$' \
             ./pkg/web/service
+          go test -race -count=20 -timeout 5m \
+            -run '^Test(SaveConfigBuildFailureKeepsCommittedConfigAndSkipsApply|SaveConfigCommitFailureClosesCandidate|SaveConfigSerializesConcurrentCandidates)$' \
+            ./pkg/web/api
+          go test -race -count=100 -timeout 2m ./pkg/web
 
       - name: Fuzz AOP envelope decoding
         working-directory: aop
