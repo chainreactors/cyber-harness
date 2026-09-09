@@ -1,24 +1,24 @@
 # Changelog
 
-## v1.0.0-rc3 — 流量审计、curl 扩展与 Web 稳定性
+## v1.0.0-rc3 — 流量、curl 和 Web 工作台更新
 
-RC3 延续 rc2 的流量审计和动态代理能力，重点改善扫描过程中流量、结果和会话的可见性与稳定性。
+### 具体修改
 
-### 用户可见变化
-
-- **流量记录更完整**：HTTP/HTTPS 请求统一展示请求与响应，支持按任务订阅流量；较大的响应会写入可回收的 body 文件，避免单条记录撑大会话。
-- **代理和 MITM 更可靠**：切换代理节点不会影响已有连接，新连接使用最新出口；Host、响应体和 HTTPS 流量在 Web 流程中保持一致。
-- **内置 curl 更接近常用 curl**：新增 `-x/--proxy`、`-F/--form`、`--data-urlencode`、请求 tracing、HTTP 版本、超时和 TLS 相关兼容行为，失败时保留可用的响应与输出信息。
-- **扫描结果更安全**：工具输出、JSONL 和会话事件都有大小边界；取消或结束任务后到达的结果不会混入后续会话，失败回合也不会重复自动执行。
-- **Web 工作台更清晰**：资产面板支持分页，聊天时间线和回复完成时间显示更准确；取消远程扫描会及时返回，前台命令继续使用当前调用目录。
-- **终端和 Agent 重连更稳定**：终端在 Agent 重连后可以继续发现会话，断线时会明确显示 detached 状态；连接关闭后不会再发送排队中的消息。
-- **前端依赖和协议保持同步**：更新聊天时间线、IOA 控制台和流量视图使用的协议版本，减少前后端版本不一致导致的空白或旧数据。
+- 流量模型新增 `Exchange`，一条 Flow 同时保存 request 和 response；代理层支持按订阅选择 Flow，并把超过内存预算的 response body 写入文件。
+- 修复代理捕获中的 Host 丢失问题；切换代理出口只影响新连接，已有连接继续完成；MITM body 文件在 Flow 删除后回收。
+- curl 工具新增 `-x/--proxy`、`-F/--form`、`--data-urlencode`、ASCII trace；补充 `--http1.0/--http1.1/--http2`、HEAD 请求校验、超时返回码 28、TLS/resolve 处理和失败输出保留。
+- 工具结果新增 64 KiB 内联上限；JSONL 文件和每个会话的 SQLite 事件数量有上限；取消任务后迟到的 Artifact 不再写入会话。
+- 失败的 Agent turn 不再自动重复执行；AOP 文本在协议边界统一清洗为合法 UTF-8。
+- Web 资产列表改为分页；聊天时间线和回复完成时间使用新的时间字段；curl、gogo、scan 统一使用 Web 资产摘要。
+- 取消远程扫描通过运行时控制通道立即处理；前台 shell 命令继承调用方工作目录。
+- Agent 重连后，已打开的终端会重新发送 `pty.list`；Agent 断线向浏览器发送 `pty.detached`；连接关闭时丢弃排队发送。
+- 更新 cyber-ui 子模块、聊天时间线和 IOA 控制台的协议生成代码，修复前后端版本漂移。
 
 ### 发布产物
 
 - `aiscan`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
 - `aiscan-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
-- 每个 ZIP 均附带 `README.md` 和 `docs`；`aiscan_checksums.txt` 提供 SHA-256 校验值。
+- `aiscan_checksums.txt` 包含 11 个 ZIP 的 SHA-256；`runner` 仅用于构建验证，不作为 Release 附件。
 ## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
 v1.0.0-rc2 重点重构了 AIScan 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
