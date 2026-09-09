@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
@@ -12,17 +13,19 @@ import (
 
 func (h *ProxyHub) Store() *FlowStore { return h.store }
 
-func (h *ProxyHub) ingest(flow Flow) {
+func (h *ProxyHub) ingest(flow Flow) { h.ingestFiles(flow, [2]*os.File{}) }
+
+func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 	if h.store == nil {
 		return
 	}
 	h.subsMu.Lock()
 	defer h.subsMu.Unlock()
 	if h.closed || !h.recording.Load() || !h.captureMatches(flow) {
-		h.store.cleanupFlowBodies(flow)
+		removeCaptureFiles(files)
 		return
 	}
-	h.store.Add(flow)
+	h.store.addFiles(flow, files)
 }
 
 // Subscribe preserves the historical channel API. New consumers should use
@@ -125,9 +128,7 @@ func flowMetadataSize(flow Flow) int64 {
 			size += int64(len(pair.Name) + len(pair.Value) + 64)
 		}
 	}
-	for _, ref := range flowBodyRefs(flow) {
-		size += int64(len(ref.Path) + len(ref.SHA256) + 128)
-	}
+
 	return size
 }
 
@@ -158,8 +159,8 @@ func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
-	// The hot store keeps only a preview and a file reference. A wire Flow
-	// retains the historical bytes field, so hydrate only at this boundary.
+	// The hot Flow contains only previews. File ownership stays in the store;
+	// load bytes only at this boundary, never into a subscriber queue.
 	copy := *flow
 	copy.Exchange = flow.Clone()
 	if store != nil {
@@ -167,11 +168,7 @@ func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 			copy.Complete = false
 			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
 		}
-	} else {
-		if err := copy.HydrateBodies(); err != nil {
-			copy.Complete = false
-			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
-		}
+
 	}
 	message := copy.Proto()
 	message.ToolId = flow.ToolID

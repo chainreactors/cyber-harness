@@ -59,7 +59,6 @@ func InstallInfra(d *commands.Deps, capture bool, storage ...cfg.TrafficOptions)
 	}
 
 	store := NewFlowStoreWithLimits(10000, config.BodyRetentionBytes)
-	store.bodyMaxBytes = config.BodyMaxBytes
 	caRoot := filepath.Join(d.WorkDir, ".aiscan", "mitm")
 	hub := NewProxyHub(state, store, caRoot, capture)
 	hub.storage = config

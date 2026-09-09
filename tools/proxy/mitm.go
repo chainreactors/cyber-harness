@@ -2,13 +2,11 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,7 +14,6 @@ import (
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
@@ -177,7 +174,7 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 const maxBodySnip = 4096
 
 // Keep a single captured request/response from becoming an unbounded disk
-// allocation. The full observed size remains in BodyRef.Size; only the prefix
+// allocation. The adapter reports the observed size on truncation; only the prefix
 // up to this limit is retained in the body file.
 const maxBodyCaptureBytes = cfg.DefaultBodyMaxBytes
 
@@ -202,7 +199,7 @@ func toolIDOf(f *mitmproxy.Flow) string {
 }
 
 func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
-	if a.hub == nil || !a.hub.recording.Load() || f == nil || f.Request == nil {
+	if a.hub == nil || a.hub.stopping.Load() || !a.hub.recording.Load() || f == nil || f.Request == nil {
 		return
 	}
 	if f.Request.URL != nil && !a.hub.captureHostAllowed(f.Request.URL.Hostname()) {
@@ -266,12 +263,14 @@ func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 }
 
 type captureState struct {
-	hub               *ProxyHub
-	mu                sync.Mutex
-	finished          bool
-	flow              Flow
-	reqSink, respSink *bodyRecorder
-	captureErr        error
+	hub          *ProxyHub
+	mu           sync.Mutex
+	finished     bool
+	flow         Flow
+	bodies       [2]*bodyStream
+	finishFiles  [2]func(bool) (*os.File, error)
+	releaseFiles [2]func()
+	captureErr   error
 }
 
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
@@ -304,110 +303,106 @@ func (s *captureState) bodyReader(in io.Reader, side string) io.Reader {
 	if s.finished || in == nil {
 		return in
 	}
-	sink := &s.reqSink
+	i := 0
 	if side == "resp" {
-		sink = &s.respSink
+		i = 1
 	}
-	if *sink == nil {
+	if s.bodies[i] == nil {
+		s.bodies[i] = &bodyStream{}
 		var err error
-		*sink, err = s.hub.store.bodySink(s.flow.ID, side)
-		if err != nil {
-			s.captureErr = err
-			*sink = &bodyRecorder{release: func() {}}
-		}
+		s.finishFiles[i], s.releaseFiles[i], err = s.hub.recordBody(s.bodies[i])
+		s.captureErr = errors.Join(s.captureErr, err)
 	}
-	return io.TeeReader(in, *sink)
+	return io.TeeReader(in, s.bodies[i])
 }
-func (s *captureState) finish(err error) {
+
+// finish freezes observation on the MITM callback. Only the AIScan adapter
+// waits for file consumers; the native Flow lifecycle never waits for them.
+func (s *captureState) finish(err error) { s.finishCapture(err, false) }
+func (s *captureState) discard()         { s.finishCapture(nil, true) }
+
+func (s *captureState) finishCapture(err error, discard bool) {
 	s.mu.Lock()
 	if s.finished {
 		s.mu.Unlock()
 		return
 	}
 	s.finished = true
+	for _, body := range s.bodies {
+		if body != nil {
+			body.Close()
+		}
+	}
 	if !s.flow.Timestamp.IsZero() {
 		s.flow.Duration = time.Since(s.flow.Timestamp)
 	}
-	async := (s.reqSink != nil && s.reqSink.sub != nil) || (s.respSink != nil && s.respSink.sub != nil)
+	hasFiles := s.finishFiles[0] != nil || s.finishFiles[1] != nil
 	s.mu.Unlock()
-	if async {
-		s.hub.finalize(s.completeCapture, err)
+	finish := func(err error) { s.completeCapture(err, discard) }
+	if hasFiles {
+		s.hub.finalize(finish, err)
 	} else {
-		s.completeCapture(err)
+		finish(err)
 	}
 }
-func (s *captureState) completeCapture(err error) {
-	if s.reqSink != nil {
-		defer s.reqSink.release()
+
+func (s *captureState) completeCapture(err error, discard bool) {
+	for _, release := range s.releaseFiles {
+		if release != nil {
+			defer release()
+		}
 	}
-	if s.respSink != nil {
-		defer s.respSink.release()
-	}
-	s.mu.Lock()
 	err = errors.Join(err, s.captureErr)
-	complete := err == nil && s.flow.Response != nil && s.flow.Response.StatusCode != 0
-	var notices []string
-	capture := func(sink *bodyRecorder, side string, body *[]byte, ref **traffic.BodyRef) {
-		if sink == nil {
-			return
+	flow := s.flow
+	var files [2]*os.File
+	for i, stream := range s.bodies {
+		if stream == nil {
+			continue
 		}
-		value, closeErr := sink.Close(complete)
-		*body = sink.Preview()
-		if value.Path != "" {
-			*ref = &value
+		preview, observed := stream.snapshot()
+		stored := int64(len(preview))
+		if finish := s.finishFiles[i]; finish != nil {
+			file, fileErr := finish(discard)
+			files[i] = file
+			err = errors.Join(err, fileErr)
+			stored = 0
+			if file != nil {
+				info, statErr := os.Stat(file.Name())
+				err = errors.Join(err, statErr)
+				if statErr == nil {
+					stored = info.Size()
+				}
+			}
 		}
-		err = errors.Join(err, closeErr)
-		if value.Truncated {
-			notice := fmt.Sprintf("%s body truncated (%d/%d bytes retained)", side, value.StoredSize, value.Size)
-			if sink.sub == nil {
+		if i == 0 {
+			flow.Request.Body = preview
+		} else {
+			if flow.Response == nil {
+				flow.Response = &traffic.Response{}
+			}
+			flow.Response.Body = preview
+		}
+		if stored < observed {
+			side := "request"
+			if i == 1 {
+				side = "response"
+			}
+			notice := fmt.Sprintf("%s body truncated (%d/%d bytes retained)", side, stored, observed)
+			if s.finishFiles[i] == nil {
 				notice += " (preview only; local storage disabled or unavailable)"
 			}
-			notices = append(notices, notice)
+			err = errors.Join(err, errors.New(notice))
 		}
 	}
-	capture(s.reqSink, "request", &s.flow.Request.Body, &s.flow.Request.BodyRef)
-	if s.respSink != nil {
-		if s.flow.Response == nil {
-			s.flow.Response = &traffic.Response{}
-		}
-		capture(s.respSink, "response", &s.flow.Response.Body, &s.flow.Response.BodyRef)
-	}
-	if err != nil {
-		s.flow.Error = err.Error()
-	}
-	if len(notices) > 0 {
-		if s.flow.Error != "" {
-			s.flow.Error += "; "
-		}
-		s.flow.Error += strings.Join(notices, "; ")
-	}
-	s.flow.Complete = complete && err == nil && len(notices) == 0
-	flow := s.flow
-	s.mu.Unlock()
-	s.hub.ingest(flow)
-}
-func (s *captureState) discard() {
-	s.mu.Lock()
-	if s.finished {
-		s.mu.Unlock()
+	if discard {
+		removeCaptureFiles(files)
 		return
 	}
-	s.finished = true
-	req, resp := s.reqSink, s.respSink
-	s.mu.Unlock()
-	cleanup := func(error) {
-		if req != nil {
-			_ = req.Discard()
-		}
-		if resp != nil {
-			_ = resp.Discard()
-		}
+	if err != nil {
+		flow.Error = err.Error()
 	}
-	if (req != nil && req.sub != nil) || (resp != nil && resp.sub != nil) {
-		s.hub.finalize(cleanup, nil)
-	} else {
-		cleanup(nil)
-	}
+	flow.Complete = err == nil && flow.Response != nil && flow.Response.StatusCode != 0
+	s.hub.ingestFiles(flow, files)
 }
 
 func appendPreview(dst, src []byte, max int) []byte {
@@ -437,22 +432,6 @@ type Flow struct {
 	TLS         bool
 }
 
-// bodySink creates a file-backed capture when the runner configured a body
-// directory. Tests and embedded users can leave it empty and retain the
-// bounded in-memory preview behavior.
-func (s *FlowStore) bodySink(proxyID, side string) (*bodyRecorder, error) {
-	dir := s.BodyDir()
-	if dir == "" {
-		return &bodyRecorder{release: func() {}}, nil
-	}
-	select {
-	case s.bodySlots <- struct{}{}:
-		return newBodyRecorder(filepath.Join(dir, "body"), proxyID+"."+side, s.bodyMaxBytes, func() { <-s.bodySlots })
-	default:
-		return nil, fmt.Errorf("traffic: concurrent body recorder limit exceeded")
-	}
-}
-
 type QueryOpts struct {
 	Host   string
 	Status string
@@ -464,721 +443,6 @@ type QueryOpts struct {
 // bodyMu coordinates body-file readers with retention cleanup. The ring may
 // evict a flow while a subscriber is hydrating a copy of it; keeping both
 // operations in this lock prevents an otherwise silent read race.
-type FlowStore struct {
-	publishMu    sync.Mutex
-	events       eventbus.Bus[Flow]
-	indexSub     *eventbus.Subscription[Flow]
-	bodyMaxBytes int64
-	bodySlots    chan struct{}
-	mu           sync.RWMutex
-	bodyMu       sync.RWMutex
-	flows        []Flow
-	head         int
-	size         int
-	seq          int
-	cap          int
-	bodyBytes    int64
-	maxBodyBytes int64
-	bodyRefs     map[string]int
-	bodyDir      string
-	indexPath    string
-	indexFile    *os.File
-	indexMu      sync.Mutex
-	indexErr     error
-}
-
-func NewFlowStore(cap int) *FlowStore {
-	return NewFlowStoreWithLimits(cap, defaultMaxBodyBytes)
-}
-
-// NewFlowStoreWithLimits is NewFlowStore with an explicit retained-body byte
-// budget. maxBodyBytes <= 0 disables the aggregate budget; per-body capture is
-// still capped by the proxy's BodySink policy.
-func NewFlowStoreWithLimits(cap int, maxBodyBytes int64) *FlowStore {
-	if cap <= 0 {
-		cap = 10000
-	}
-	if maxBodyBytes < 0 {
-		maxBodyBytes = 0
-	}
-	return &FlowStore{
-		bodyMaxBytes: maxBodyCaptureBytes,
-		bodySlots:    make(chan struct{}, 16),
-		flows:        make([]Flow, cap),
-		cap:          cap,
-		maxBodyBytes: maxBodyBytes,
-		bodyRefs:     make(map[string]int),
-	}
-}
-
-// SetBodyDir enables disk-backed request/response bodies for flows captured by
-// this store. The directory is intentionally configured by the runner rather
-// than by the traffic protocol, keeping the storage policy local to the tool.
-// Existing body files are reconciled with the retained ring before capture
-// starts, so crash leftovers do not survive indefinitely.
-func (s *FlowStore) SetBodyDir(dir string) error {
-	if dir == "" {
-		return nil
-	}
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	if s.indexSub != nil {
-		if err := s.indexSub.Close(context.Background()); err != nil {
-			return err
-		}
-	}
-	s.bodyMu.Lock()
-	defer s.bodyMu.Unlock()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	indexPath := filepath.Join(dir, "flows.jsonl")
-	if err := s.loadIndex(indexPath); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(indexPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("proxy flow store: open metadata index: %w", err)
-	}
-	s.mu.Lock()
-	if s.indexFile != nil {
-		s.indexMu.Lock()
-		_ = s.indexFile.Close()
-		s.indexMu.Unlock()
-	}
-	s.bodyDir = dir
-	s.indexPath = indexPath
-	s.indexFile = file
-	s.mu.Unlock()
-	// loadIndex runs before bodyDir is installed so it can reuse the existing
-	// decoder. Rebuild the path index once the directory is known, then remove
-	// files left by prior crashes or flows that have fallen out of the ring.
-	s.rebuildBodyRefsLocked()
-	s.pruneUnreferencedBodiesLocked()
-	return s.subscribeIndex()
-}
-
-func (s *FlowStore) BodyDir() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.bodyDir
-}
-
-// hydrate loads file-backed bodies while holding the store's body read lock.
-// Readers operate on a flow copy, so retention cleanup can safely remove an
-// evicted flow's files as soon as no in-flight store read still needs them.
-func (s *FlowStore) hydrate(flow *Flow) error {
-	if flow == nil {
-		return nil
-	}
-	s.bodyMu.RLock()
-	defer s.bodyMu.RUnlock()
-	return flow.HydrateBodies()
-}
-
-func flowBodyRefs(flow Flow) []*traffic.BodyRef {
-	refs := make([]*traffic.BodyRef, 0, 2)
-	if flow.Request.BodyRef != nil {
-		refs = append(refs, flow.Request.BodyRef)
-	}
-	if flow.Response != nil && flow.Response.BodyRef != nil {
-		refs = append(refs, flow.Response.BodyRef)
-	}
-	return refs
-}
-
-func bodyStoredSize(ref *traffic.BodyRef) int64 {
-	if ref == nil {
-		return 0
-	}
-	// StoredSize was added after the original index format. Fall back to Size
-	// for old records, where Size was the on-disk byte count. A truncated
-	// record from an intermediate writer may not carry StoredSize; counting its
-	// observed Size is conservative and keeps the aggregate budget bounded.
-	if ref.StoredSize > 0 {
-		return ref.StoredSize
-	}
-	if ref.Size > 0 {
-		return ref.Size
-	}
-	return 0
-}
-
-func flowBodyStoredSize(flow Flow) int64 {
-	seen := make(map[string]struct{}, 2)
-	var total int64
-	for _, ref := range flowBodyRefs(flow) {
-		if ref == nil {
-			continue
-		}
-		key := ref.Path
-		if key != "" {
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-		}
-		if n := bodyStoredSize(ref); n > 0 {
-			total += n
-		}
-	}
-	return total
-}
-
-// resolveBodyPath only permits cleanup inside the store's dedicated body
-// directory. BodyRef values are persisted metadata, so rejecting paths that
-// escape that directory avoids turning retention into an arbitrary file delete.
-func resolveBodyPath(root, raw string) (string, bool) {
-	if root == "" || raw == "" {
-		return "", false
-	}
-	root, err := filepath.Abs(root)
-	if err != nil {
-		return "", false
-	}
-	bodyRoot := filepath.Join(root, "body")
-	path := raw
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return "", false
-	}
-	rel, err := filepath.Rel(bodyRoot, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return path, true
-}
-
-func bodyPathVariants(path string) []string {
-	if strings.HasSuffix(path, ".part") {
-		return []string{path, strings.TrimSuffix(path, ".part")}
-	}
-	return []string{path, path + ".part"}
-}
-
-func bodyRefPaths(root string, flow Flow) []string {
-	seen := make(map[string]struct{}, 4)
-	paths := make([]string, 0, 4)
-	for _, ref := range flowBodyRefs(flow) {
-		if ref == nil {
-			continue
-		}
-		path, ok := resolveBodyPath(root, ref.Path)
-		if !ok {
-			continue
-		}
-		if _, exists := seen[path]; exists {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-	return paths
-}
-
-func (s *FlowStore) addBodyRefsLocked(flow Flow) {
-	if s.bodyRefs == nil {
-		s.bodyRefs = make(map[string]int)
-	}
-	for _, path := range bodyRefPaths(s.bodyDir, flow) {
-		s.bodyRefs[path]++
-	}
-}
-
-func (s *FlowStore) removeBodyRefsLocked(flow Flow) []string {
-	paths := bodyRefPaths(s.bodyDir, flow)
-	if len(paths) == 0 || len(s.bodyRefs) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(paths)*2)
-	var removable []string
-	for _, path := range paths {
-		count := s.bodyRefs[path]
-		if count <= 1 {
-			delete(s.bodyRefs, path)
-			for _, candidate := range bodyPathVariants(path) {
-				if _, exists := seen[candidate]; exists {
-					continue
-				}
-				seen[candidate] = struct{}{}
-				removable = append(removable, candidate)
-			}
-		} else {
-			s.bodyRefs[path] = count - 1
-		}
-	}
-	return removable
-}
-
-// cleanupBodyPaths removes files after the caller has dropped their ring
-// references. The body write lock serializes this I/O with hydration; the
-// reference-count recheck closes the race with a concurrently reused path.
-func (s *FlowStore) cleanupBodyPaths(paths []string) {
-	if len(paths) == 0 {
-		return
-	}
-	unique := make(map[string]struct{}, len(paths))
-	s.bodyMu.Lock()
-	defer s.bodyMu.Unlock()
-	s.mu.RLock()
-	bodyDir := s.bodyDir
-	var removable []string
-	for _, path := range paths {
-		if _, seen := unique[path]; seen || s.bodyRefs[path] > 0 {
-			continue
-		}
-		if _, ok := resolveBodyPath(bodyDir, path); !ok {
-			continue
-		}
-		unique[path] = struct{}{}
-		removable = append(removable, path)
-	}
-	s.mu.RUnlock()
-	for _, path := range removable {
-		_ = os.Remove(path)
-	}
-}
-
-// cleanupFlowBodies releases a flow which was observed but never admitted to
-// the ring (for example because capture was toggled off or a filter rejected
-// it). It is deliberately best-effort: cleanup failure must not affect proxy
-// forwarding.
-func (s *FlowStore) cleanupFlowBodies(flow Flow) {
-	s.mu.RLock()
-	actual := bodyRefPaths(s.bodyDir, flow)
-	s.mu.RUnlock()
-	paths := make([]string, 0, len(actual)*2)
-	for _, path := range actual {
-		paths = append(paths, bodyPathVariants(path)...)
-	}
-	s.cleanupBodyPaths(paths)
-}
-
-func (s *FlowStore) rebuildBodyRefsLocked() {
-	s.mu.Lock()
-	s.bodyRefs = make(map[string]int)
-	s.bodyBytes = 0
-	for n := 0; n < s.size; n++ {
-		idx := (s.head + n) % s.cap
-		flow := s.flows[idx]
-		s.addBodyRefsLocked(flow)
-		s.bodyBytes += flowBodyStoredSize(flow)
-	}
-	s.mu.Unlock()
-}
-
-func (s *FlowStore) pruneUnreferencedBodiesLocked() {
-	s.mu.RLock()
-	bodyDir := s.bodyDir
-	live := make(map[string]struct{}, len(s.bodyRefs))
-	for path := range s.bodyRefs {
-		live[path] = struct{}{}
-	}
-	s.mu.RUnlock()
-	if bodyDir == "" {
-		return
-	}
-	bodyRoot := filepath.Join(bodyDir, "body")
-	_ = filepath.Walk(bodyRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info == nil || info.IsDir() {
-			return nil
-		}
-		absolute, absErr := filepath.Abs(path)
-		if absErr != nil {
-			return absErr
-		}
-		if _, ok := live[absolute]; !ok {
-			_ = os.Remove(path)
-		}
-		return nil
-	})
-}
-
-// IndexError reports a metadata append failure. The in-memory/ring capture is
-// still usable when the optional index cannot be written, but callers can
-// surface this diagnostic instead of mistaking the index for durable storage.
-func (s *FlowStore) IndexError() error {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	if s.indexSub != nil {
-		if err := s.indexSub.Err(); err != nil {
-			return err
-		}
-	}
-	s.indexMu.Lock()
-	defer s.indexMu.Unlock()
-	return s.indexErr
-}
-
-// Sequence returns the newest assigned flow id. It does not change when the
-// ring is cleared, so a reconnecting consumer can safely use it as a cursor.
-func (s *FlowStore) Sequence() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.seq
-}
-
-// after returns the ordered flows whose ids are greater than id. The ring is
-// deliberately the source of truth for replay; callers that ask for an id
-// older than the retained window receive the oldest retained flow onward.
-func (s *FlowStore) after(id int) []Flow {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Flow, 0, s.size)
-	for n := 0; n < s.size; n++ {
-		idx := (s.head + n) % s.cap
-		flow := s.flows[idx]
-		if flowSequence(flow.ID) > id {
-			result = append(result, flow)
-		}
-	}
-	return result
-}
-
-// After returns a replay window for callers that need to recover from a
-// reconnect. The returned slice is ordered by the store's monotonic id.
-func (s *FlowStore) After(id int) []Flow { return s.after(id) }
-
-// Add stores f, assigns it a monotonic ID, and returns the stored copy so the
-// caller can fan the ID-bearing flow out to subscribers.
-func (s *FlowStore) Add(f Flow) Flow {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	// Bound previews before cloning so external callers cannot make the ring
-	// or admission queue retain an entire body allocation.
-	if len(f.Request.Body) > maxBodySnip {
-		f.Request.Body = f.Request.Body[:maxBodySnip]
-		if f.Request.BodyRef == nil {
-			f.Complete = false
-			f.Error += "; request body truncated (preview only)"
-		}
-	}
-	if f.Response != nil && len(f.Response.Body) > maxBodySnip {
-		resp := *f.Response
-		f.Response = &resp
-		f.Response.Body = f.Response.Body[:maxBodySnip]
-		if f.Response.BodyRef == nil {
-			f.Complete = false
-			f.Error += "; response body truncated (preview only)"
-		}
-	}
-	f = cloneFlowMetadata(f)
-	incomingBytes := flowBodyStoredSize(f)
-	var cleanup []string
-	s.bodyMu.RLock()
-	s.mu.Lock()
-	s.seq++
-	f.ID = strconv.Itoa(s.seq)
-	// Evict until both dimensions of the retention policy fit. A single flow
-	// may exceed a custom aggregate budget; it is retained as the newest flow
-	// rather than being silently discarded.
-	for s.size > 0 && (s.size == s.cap ||
-		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
-		idx := s.head
-		victim := s.flows[idx]
-		cleanup = append(cleanup, s.removeBodyRefsLocked(victim)...)
-		s.bodyBytes -= flowBodyStoredSize(victim)
-		if s.bodyBytes < 0 {
-			s.bodyBytes = 0
-		}
-		s.head = (s.head + 1) % s.cap
-		s.size--
-	}
-	idx := (s.head + s.size) % s.cap
-	s.flows[idx] = f
-	s.size++
-	s.bodyBytes += incomingBytes
-	s.addBodyRefsLocked(f)
-	s.mu.Unlock()
-	s.bodyMu.RUnlock()
-	s.cleanupBodyPaths(cleanup)
-	s.events.Emit(f)
-	return f
-}
-
-func (s *FlowStore) subscribeIndex() error {
-	sub, err := s.events.SubscribeAsync(eventbus.SubscribeOptions[Flow]{
-		Buffer: 256, MaxBytes: 4 << 20, Size: flowMetadataSize, Clone: cloneFlowMetadata,
-	}, s.appendIndex)
-	s.indexSub = sub
-	return err
-}
-
-func (s *FlowStore) appendIndex(f Flow) error {
-	s.mu.RLock()
-	file := s.indexFile
-	s.mu.RUnlock()
-	if file == nil {
-		return io.ErrClosedPipe
-	}
-	f = cloneFlowMetadata(f)
-	f.Request.Body = nil
-	if f.Response != nil {
-		f.Response.Body = nil
-	}
-	record := map[string]any{
-		"id": f.ID, "tool_id": f.ToolID, "timestamp": f.Timestamp,
-		"host": f.Host, "content_type": f.ContentType, "duration": int64(f.Duration),
-		"tls": f.TLS, "exchange": f.Exchange,
-	}
-	if f.Request.BodyRef != nil {
-		record["request_body_ref"] = f.Request.BodyRef
-	}
-	if f.Response != nil && f.Response.BodyRef != nil {
-		record["response_body_ref"] = f.Response.BodyRef
-	}
-	line, err := json.Marshal(record)
-	if err == nil {
-		line = append(line, '\n')
-		s.indexMu.Lock()
-		defer s.indexMu.Unlock()
-		var n int
-		n, err = file.Write(line)
-		if err == nil && n != len(line) {
-			err = io.ErrShortWrite
-		}
-		if err != nil && s.indexErr == nil {
-			s.indexErr = err
-		}
-	}
-	return err
-}
-
-func (s *FlowStore) loadIndex(path string) error {
-	file, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("proxy flow store: open metadata index: %w", err)
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	decoder.UseNumber()
-	for {
-		var record map[string]json.RawMessage
-		err := decoder.Decode(&record)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			// A torn final append must not make the whole capture unreadable.
-			break
-		}
-		var flow Flow
-		if err := decodeIndexRecord(record, &flow); err != nil {
-			continue
-		}
-		s.mu.Lock()
-		s.putLocked(flow)
-		s.mu.Unlock()
-	}
-	return nil
-}
-
-func decodeIndexRecord(record map[string]json.RawMessage, flow *Flow) error {
-	decode := func(key string, dst any) error {
-		raw, ok := record[key]
-		if !ok {
-			return fmt.Errorf("missing %s", key)
-		}
-		return json.Unmarshal(raw, dst)
-	}
-	if err := decode("id", &flow.ID); err != nil {
-		return err
-	}
-	if err := decode("exchange", &flow.Exchange); err != nil {
-		return err
-	}
-	_ = decode("tool_id", &flow.ToolID)
-	_ = decode("timestamp", &flow.Timestamp)
-	_ = decode("host", &flow.Host)
-	_ = decode("content_type", &flow.ContentType)
-	var duration int64
-	if decode("duration", &duration) == nil {
-		flow.Duration = time.Duration(duration)
-	}
-	_ = decode("tls", &flow.TLS)
-	if raw, ok := record["request_body_ref"]; ok {
-		var ref traffic.BodyRef
-		if json.Unmarshal(raw, &ref) == nil {
-			flow.Request.BodyRef = &ref
-		}
-	}
-	if raw, ok := record["response_body_ref"]; ok && flow.Response != nil {
-		var ref traffic.BodyRef
-		if json.Unmarshal(raw, &ref) == nil {
-			flow.Response.BodyRef = &ref
-		}
-	}
-	return nil
-}
-
-func (s *FlowStore) putLocked(f Flow) {
-	if f.ID == "" {
-		return
-	}
-	if seq := flowSequence(f.ID); seq > s.seq {
-		s.seq = seq
-	}
-	incomingBytes := flowBodyStoredSize(f)
-	for s.size > 0 && (s.size == s.cap ||
-		(s.maxBodyBytes > 0 && s.bodyBytes+incomingBytes > s.maxBodyBytes)) {
-		idx := s.head
-		victim := s.flows[idx]
-		s.bodyBytes -= flowBodyStoredSize(victim)
-		if s.bodyBytes < 0 {
-			s.bodyBytes = 0
-		}
-		s.removeBodyRefsLocked(victim)
-		s.head = (s.head + 1) % s.cap
-		s.size--
-	}
-	idx := (s.head + s.size) % s.cap
-	s.flows[idx] = f
-	s.size++
-	s.bodyBytes += incomingBytes
-	s.addBodyRefsLocked(f)
-}
-
-func (s *FlowStore) Query(opts QueryOpts) []Flow {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Flow, 0, s.size)
-	for n := 0; n < s.size; n++ {
-		idx := (s.head + n) % s.cap
-		f := &s.flows[idx]
-		if opts.Host != "" && !strings.Contains(strings.ToLower(f.Host), strings.ToLower(opts.Host)) {
-			continue
-		}
-		if opts.Status != "" {
-			if f.Response == nil || !matchStatus(f.Response.StatusCode, opts.Status) {
-				continue
-			}
-		}
-		if opts.CType != "" && !strings.Contains(strings.ToLower(f.ContentType), strings.ToLower(opts.CType)) {
-			continue
-		}
-		result = append(result, *f)
-	}
-	if opts.Last > 0 && len(result) > opts.Last {
-		result = result[len(result)-opts.Last:]
-	}
-	return result
-}
-
-func (s *FlowStore) Get(id int) *Flow {
-	// Hold the body read lock across the lookup and hydration. Otherwise an
-	// eviction could copy a flow, delete its file, and win the race before the
-	// caller has loaded the body.
-	s.bodyMu.RLock()
-	defer s.bodyMu.RUnlock()
-	s.mu.RLock()
-	want := strconv.Itoa(id)
-	for n := 0; n < s.size; n++ {
-		idx := (s.head + n) % s.cap
-		if s.flows[idx].ID == want {
-			f := s.flows[idx]
-			s.mu.RUnlock()
-			f.Exchange = f.Clone()
-			if err := f.HydrateBodies(); err != nil {
-				f.Complete = false
-				f.Error += fmt.Sprintf("; body unavailable: %v", err)
-			}
-			return &f
-		}
-	}
-	s.mu.RUnlock()
-	return nil
-}
-
-func (s *FlowStore) Clear() {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	if s.indexSub != nil {
-		_ = s.indexSub.Close(context.Background())
-	}
-	s.bodyMu.Lock()
-	defer s.bodyMu.Unlock()
-	s.mu.Lock()
-	bodyDir := s.bodyDir
-	var bodyPaths []string
-	for path := range s.bodyRefs {
-		bodyPaths = append(bodyPaths, path)
-	}
-	indexFile := s.indexFile
-	indexPath := s.indexPath
-	s.indexFile = nil
-	for i := range s.flows {
-		s.flows[i] = Flow{}
-	}
-	s.head = 0
-	s.size = 0
-	s.bodyBytes = 0
-	s.bodyRefs = make(map[string]int)
-	s.mu.Unlock()
-	s.indexMu.Lock()
-	s.indexErr = nil
-	s.indexMu.Unlock()
-	if indexFile != nil {
-		s.indexMu.Lock()
-		_ = indexFile.Close()
-		s.indexMu.Unlock()
-	}
-	if bodyDir != "" {
-		for _, path := range bodyPaths {
-			_ = os.Remove(path)
-		}
-		if indexPath != "" {
-			if file, err := os.OpenFile(indexPath, os.O_CREATE|os.O_TRUNC|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
-				s.mu.Lock()
-				s.indexFile = file
-				s.mu.Unlock()
-			} else {
-				s.indexMu.Lock()
-				s.indexErr = err
-				s.indexMu.Unlock()
-			}
-		}
-		_ = s.subscribeIndex()
-	}
-}
-
-// Close releases the append-only metadata handle. Body files belonging to the
-// retained ring are deliberately kept so a caller can inspect a capture after
-// the proxy listener stops; the next SetBodyDir startup sweep removes files
-// which are no longer reachable.
-func (s *FlowStore) Close() error {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	var recordErr error
-	if s.indexSub != nil {
-		recordErr = s.indexSub.Close(context.Background())
-	}
-	s.mu.Lock()
-	file := s.indexFile
-	s.indexFile = nil
-	s.mu.Unlock()
-	if file == nil {
-		return recordErr
-	}
-	s.indexMu.Lock()
-	defer s.indexMu.Unlock()
-	return errors.Join(recordErr, file.Sync(), file.Close())
-}
-
-func (s *FlowStore) Count() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.size
-}
-
 func matchStatus(code int, pattern string) bool {
 	p := strings.ToLower(strings.TrimSpace(pattern))
 	switch p {
