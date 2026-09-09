@@ -814,6 +814,15 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	if opened := readBrowserPTY(t, browserConn, "opened").GetOpened(); opened.GetStreamId() != streamID {
 		t.Fatalf("opened stream = %s, want %s", opened.GetStreamId(), streamID)
 	}
+	// PTY events are relayed by a separate goroutine. A local application
+	// request/reply also proves the original forwarding handler has returned.
+	barrierID := generateID()
+	writeAgentEnvelope(t, browserConn, wrapMessage(t, barrierID, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: &aop.AgentStats{}}}))
+	barrier := readHubEnvelope(t, browserConn)
+	barrierMessage, ok := unwrapEnvelope(t, barrier).(*aop.ProtocolMessage)
+	if !ok || barrier.GetReplyTo() != barrierID || barrierMessage.GetProtocolError().GetCode() != "UNSUPPORTED_MESSAGE" {
+		t.Fatalf("application barrier reply = %+v, want unsupported message for %s", barrier, barrierID)
+	}
 
 	if err := agentConn.Close(); err != nil {
 		t.Fatalf("close agent: %v", err)
@@ -822,13 +831,7 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	if err := browserConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("set detached read deadline: %v", err)
 	}
-	var detached *ptypb.Detached
-	for detached == nil {
-		message := ptyMessageFromEnvelope(readHubEnvelope(t, browserConn))
-		if message.GetDetached() != nil {
-			detached = message.GetDetached()
-		}
-	}
+	detached := readBrowserPTY(t, browserConn, "detached").GetDetached()
 	if err := browserConn.SetReadDeadline(time.Time{}); err != nil {
 		t.Fatalf("clear detached read deadline: %v", err)
 	}
