@@ -32,9 +32,13 @@ type ProxyHub struct {
 	state        *State
 	store        *FlowStore
 	storage      cfg.TrafficOptions
+	bodySlots    chan struct{} // file consumers, held through publication/cleanup
 	finalizeMu   sync.Mutex
 	finalizing   sync.WaitGroup
 	shuttingDown bool
+	stopping     atomic.Bool
+	shutdownOnce sync.Once
+	shutdownDone chan struct{}
 
 	mu        sync.Mutex
 	server    *mitmproxy.Proxy
@@ -65,7 +69,7 @@ type ProxyHub struct {
 const hubStreamLargeBodies = 64 * 1024
 
 // NewProxyHub builds the hub around an existing State (egress source of truth)
-// and FlowStore (capture sink). Both are owned by the caller so the mitm query
+// and FlowStore (completed captures). Both are owned by the caller so the mitm query
 // verbs and the hub share one store.
 //
 // capture selects the mode. The hub is ALWAYS the routing substrate — tools
@@ -79,7 +83,7 @@ func NewProxyHub(state *State, store *FlowStore, caRootPath string, capture bool
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
-	h := &ProxyHub{state: state, store: store, subs: make(map[int]func())}
+	h := &ProxyHub{state: state, store: store, subs: make(map[int]func()), bodySlots: make(chan struct{}, 16), shutdownDone: make(chan struct{})}
 	// The CA path is always prepared so capture can be toggled on at runtime;
 	// CAPath only advertises it to children while interception is actually on.
 	h.caPath = filepath.Join(caRootPath, "mitmproxy-ca-cert.pem")
@@ -265,6 +269,17 @@ func (h *ProxyHub) Shutdown(ctx context.Context) {
 		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 	}
+	h.stopping.Store(true)
+	h.shutdownOnce.Do(func() { go func() { defer close(h.shutdownDone); h.shutdown(ctx) }() })
+	select {
+	case <-h.shutdownDone:
+	case <-ctx.Done():
+	}
+}
+
+// Blocking filesystem calls retain their cleanup owner after the caller's
+// deadline. Neither the caller nor a late MITM callback waits for file I/O.
+func (h *ProxyHub) shutdown(ctx context.Context) {
 	h.mu.Lock()
 	server := h.server
 	h.server = nil
@@ -273,7 +288,7 @@ func (h *ProxyHub) Shutdown(ctx context.Context) {
 		h.waitFinalizers(ctx)
 		h.closeSubscribers()
 		if h.store != nil {
-			_ = h.store.Close()
+			_ = h.store.closeContext(ctx)
 		}
 		return
 	}
@@ -281,7 +296,7 @@ func (h *ProxyHub) Shutdown(ctx context.Context) {
 	h.waitFinalizers(ctx)
 	h.closeSubscribers()
 	if h.store != nil {
-		_ = h.store.Close()
+		_ = h.store.closeContext(ctx)
 	}
 }
 
@@ -291,7 +306,7 @@ func (h *ProxyHub) finalize(fn func(error), err error) {
 	h.finalizeMu.Lock()
 	if h.shuttingDown {
 		h.finalizeMu.Unlock()
-		fn(err)
+		go fn(err)
 		return
 	}
 	h.finalizing.Add(1)

@@ -77,7 +77,7 @@ func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
 	if got := string(full.Response.Body); got != body {
 		t.Fatalf("hydrated body length/content mismatch: got %d want %d", len(got), len(body))
 	}
-	wire := flowToProto(&flows[0])
+	wire := hub.Store().flowToProto(&flows[0])
 	if got := string(wire.GetResponse().GetBody()); got != body {
 		t.Fatalf("wire body length/content mismatch: got %d want %d", len(got), len(body))
 	}
@@ -89,14 +89,14 @@ func TestLargeResponseBodyIsCappedOnDisk(t *testing.T) {
 	hub := startHub(t, true)
 	getThrough(t, hubClient(t, hub, "body-cap"), target.URL)
 	flows := waitForFlows(t, hub.Store(), 1)
-	if len(flows) != 1 || flows[0].Response == nil || flows[0].Response.BodyRef == nil {
-		t.Fatalf("captured flow missing body reference: %#v", flows)
+	if len(flows) != 1 || flows[0].Response == nil {
+		t.Fatalf("captured flow missing response: %#v", flows)
 	}
-	ref := flows[0].Response.BodyRef
-	if !ref.Truncated || ref.Size <= ref.StoredSize || ref.StoredSize > maxBodyCaptureBytes {
-		t.Fatalf("body ref = %+v, want capped/truncated capture", ref)
+	stored := hub.Store().files[flows[0].ID][1]
+	if stored < 0 || stored > maxBodyCaptureBytes {
+		t.Fatalf("stored bytes = %d", stored)
 	}
-	info, err := os.Stat(ref.Path)
+	info, err := os.Stat(hub.Store().bodyPath(flows[0].ID, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,20 +145,20 @@ func TestFlowStoreEvictionRemovesBodyFiles(t *testing.T) {
 		return path
 	}
 	firstPath := writeBody("first.resp")
-	store.Add(Flow{Exchange: traffic.Exchange{
+	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
 		Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-		Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: firstPath, Complete: true}},
-	}})
+		Response: &traffic.Response{StatusCode: 200},
+	}}, firstPath)
 	secondPath := writeBody("second.resp")
-	store.Add(Flow{Exchange: traffic.Exchange{
+	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
 		Request:  traffic.Request{Method: "GET", URL: "https://example.test/2"},
-		Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: secondPath, Complete: true}},
-	}})
+		Response: &traffic.Response{StatusCode: 200},
+	}}, secondPath)
 
-	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(store.bodyPath("1", 1)); !os.IsNotExist(err) {
 		t.Fatalf("evicted body still exists: stat err = %v", err)
 	}
-	if _, err := os.Stat(secondPath); err != nil {
+	if _, err := os.Stat(store.bodyPath("2", 1)); err != nil {
 		t.Fatalf("retained body was removed: %v", err)
 	}
 }
@@ -183,15 +183,15 @@ func TestFlowStoreBodyBudgetEvictsOldest(t *testing.T) {
 		return path
 	}
 	firstPath := write("budget-first.resp", 6)
-	store.Add(Flow{Exchange: traffic.Exchange{
+	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
 		Request:  traffic.Request{Method: "GET", URL: "https://example.test/1"},
-		Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: firstPath, Size: 6, StoredSize: 6, Complete: true}},
-	}})
+		Response: &traffic.Response{StatusCode: 200},
+	}}, firstPath)
 	secondPath := write("budget-second.resp", 6)
-	store.Add(Flow{Exchange: traffic.Exchange{
+	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
 		Request:  traffic.Request{Method: "GET", URL: "https://example.test/2"},
-		Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: secondPath, Size: 6, StoredSize: 6, Complete: true}},
-	}})
+		Response: &traffic.Response{StatusCode: 200},
+	}}, secondPath)
 
 	if got := store.Count(); got != 1 {
 		t.Fatalf("budget-retained flow count = %d, want 1", got)
@@ -199,10 +199,10 @@ func TestFlowStoreBodyBudgetEvictsOldest(t *testing.T) {
 	if got := store.bodyBytes; got > 10 {
 		t.Fatalf("retained body bytes = %d, want <= 10", got)
 	}
-	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(store.bodyPath("1", 1)); !os.IsNotExist(err) {
 		t.Fatalf("budget-evicted body still exists: stat err = %v", err)
 	}
-	if _, err := os.Stat(secondPath); err != nil {
+	if _, err := os.Stat(store.bodyPath("2", 1)); err != nil {
 		t.Fatalf("budget-retained body missing: %v", err)
 	}
 }
@@ -220,18 +220,18 @@ func TestFlowStoreStartupPrunesUnreferencedBodies(t *testing.T) {
 	if err := os.WriteFile(path, []byte("live"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	first.Add(Flow{Exchange: traffic.Exchange{
+	addTestBody(t, first, Flow{Exchange: traffic.Exchange{
 		Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-		Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: path, Size: 4, StoredSize: 4, Complete: true}},
-	}})
+		Response: &traffic.Response{StatusCode: 200},
+	}}, path)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	orphan := filepath.Join(dir, "body", "orphan.resp.part")
+	orphan := filepath.Join(dir, "body", "capture-orphan")
 	if err := os.WriteFile(orphan, []byte("orphan"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	orphanFinal := filepath.Join(dir, "body", "orphan-final.resp")
+	orphanFinal := filepath.Join(dir, "body", "999.resp")
 	if err := os.WriteFile(orphanFinal, []byte("orphan"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestFlowStoreStartupPrunesUnreferencedBodies(t *testing.T) {
 	if _, err := os.Stat(orphanFinal); !os.IsNotExist(err) {
 		t.Fatalf("startup orphan final still exists: stat err = %v", err)
 	}
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(second.bodyPath("1", 1)); err != nil {
 		t.Fatalf("startup pruner removed live body: %v", err)
 	}
 }
@@ -260,19 +260,15 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 	}
 	defer store.Close()
 	hub := NewProxyHub(nil, store, "", true)
-	sink, err := newBodyRecorder(filepath.Join(dir, "body"), "limited.resp", 4, func() {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = sink.Write([]byte("abcdefgh"))
+	hub.storage.BodyMaxBytes = 4
 	state := &captureState{
 		hub: hub,
 		flow: Flow{Exchange: traffic.Exchange{
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
 		}},
-		respSink: sink,
 	}
+	_, _ = io.Copy(io.Discard, state.bodyReader(strings.NewReader("abcdefgh"), "resp"))
 	state.finish(nil)
 	flows := waitForFlows(t, store, 1)
 	if len(flows) != 1 {
@@ -313,10 +309,15 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 			if err := os.WriteFile(path, []byte("discard me"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			hub.ingest(Flow{Host: "drop.test", Exchange: traffic.Exchange{
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = file.Close()
+			hub.ingestFiles(Flow{Host: "drop.test", Exchange: traffic.Exchange{
 				Request:  traffic.Request{Method: "GET", URL: "https://drop.test/"},
-				Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: path, Complete: true}},
-			}})
+				Response: &traffic.Response{StatusCode: 200},
+			}}, [2]*os.File{nil, file})
 			if got := store.Count(); got != 0 {
 				t.Fatalf("rejected flow count = %d, want 0", got)
 			}
@@ -762,4 +763,17 @@ func TestFlowStoreMemory(t *testing.T) {
 func mustParseProxyURL(raw string) *url.URL {
 	u, _ := url.Parse(raw)
 	return u
+}
+
+// addTestBody transfers an actual closed file to the store, just like capture.
+func addTestBody(t *testing.T, store *FlowStore, flow Flow, path string) Flow {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return store.addFiles(flow, [2]*os.File{nil, file})
 }
