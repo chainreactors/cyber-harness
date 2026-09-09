@@ -954,7 +954,7 @@ type mockBrowserAgent struct { //nolint:unused // referenced by agents_e2e_test.
 
 func dialMockAgent(t *testing.T, srv *httptest.Server, name string) *mockBrowserAgent { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	conn := dialAOPWebSocket(t, srv)
+	conn := dialNodeWebSocket(t, srv)
 	writeAgentEnvelope(t, conn, wrapMessage(t, generateID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: &aop.AgentHello{
 		NodeId: "node-" + name, Name: name,
 	}}}))
