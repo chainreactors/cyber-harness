@@ -37,7 +37,7 @@ jobs:
       ref: ${{ steps.tag.outputs.ref }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag != '' && inputs.target || github.ref }}
           fetch-depth: 0
@@ -117,13 +117,13 @@ jobs:
       TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Download release bundle
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: release-bundle
           path: dist/release
