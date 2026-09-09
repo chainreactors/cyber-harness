@@ -822,7 +822,13 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	if err := browserConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("set detached read deadline: %v", err)
 	}
-	detached := readBrowserPTY(t, browserConn, "detached").GetDetached()
+	var detached *ptypb.Detached
+	for detached == nil {
+		message := ptyMessageFromEnvelope(readHubEnvelope(t, browserConn))
+		if message.GetDetached() != nil {
+			detached = message.GetDetached()
+		}
+	}
 	if err := browserConn.SetReadDeadline(time.Time{}); err != nil {
 		t.Fatalf("clear detached read deadline: %v", err)
 	}
