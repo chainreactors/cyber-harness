@@ -2,6 +2,7 @@ package runner
 
 import (
 	"github.com/chainreactors/aiscan/agent"
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -46,6 +47,7 @@ type ToolConfig struct {
 	PlaywrightSession string
 	OptionalTools     []string // optional tool groups to enable
 	MitmCapture       *bool    // nil defaults to capture; false keeps routing without interception
+	TrafficStorage    cfg.TrafficOptions
 }
 
 type IOAConfig struct {

@@ -520,6 +520,28 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestBashRunForegroundHonorsInvocationWorkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell assertions are unix-only")
+	}
+	defaultDir := t.TempDir()
+	invocationDir := t.TempDir()
+	bash := NewBashTool(defaultDir, 5)
+	defer bash.Close()
+
+	var output bytes.Buffer
+	ctx := tool.ContextWithInvocation(context.Background(), tool.Invocation{WorkDir: invocationDir})
+	_, err := bash.RunForeground(ctx, "pwd", BashExecOptions{
+		OnOutput: func(data []byte) { _, _ = output.Write(data) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filepath.ToSlash(strings.TrimSpace(output.String())); !strings.Contains(got, "/"+filepath.Base(invocationDir)) {
+		t.Fatalf("foreground cwd = %q, want it to run in %q", got, invocationDir)
+	}
+}
+
 func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 	root := t.TempDir()
 	commandsByName := map[string]Command{

@@ -156,3 +156,24 @@ func jsonlTestMessage(id string) *aop.Event {
 		Payload: &aop.Event_Message{Message: &aop.Message{Role: "assistant", Content: []*aop.Content{aop.Text(id)}}},
 	}
 }
+
+func TestJSONLRecorderSelectiveSubscription(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selected.jsonl")
+	bus := eventbus.New[*aop.Event]()
+	recorder, err := NewJSONLRecorderWithFilter(bus, path, func(e *aop.Event) bool {
+		return e != nil && e.Id == "keep"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.Emit(nil)
+	bus.Emit(jsonlTestMessage("ignore"))
+	bus.Emit(jsonlTestMessage("keep"))
+	if err := recorder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ReadJSONL(path)
+	if err != nil || len(events) != 1 || events[0].Id != "keep" {
+		t.Fatalf("%v %v", events, err)
+	}
+}

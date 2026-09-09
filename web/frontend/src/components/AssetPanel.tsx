@@ -270,6 +270,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
           onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) },
           onDrop: handleDrop,
         }}
+        bodyClassName="flex flex-col"
       >
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
@@ -321,11 +322,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     enableSearch: true,
                     enableFieldSearch: true,
                     enableSorting: true,
-                    // No pager: render every asset of the active type in one
-                    // scrollable list (the panel body caps height and scrolls) so a
-                    // small pool isn't hidden behind a "1-N of N" bar. Very large
-                    // imports scroll rather than page.
-                    enablePagination: false,
+                    enablePagination: true,
                     enableColumnResize: true,
                     enableRowSelection: true,
                     enableColoredTypes: true,
@@ -335,6 +332,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     typeFilterKey: 'cstx_type',
                     rowIdKey: 'cstx_id',
                     compact: true,
+                    pageSize: 50,
                     // Classic table. The mixed "All" tab is a union of every asset
                     // type's schema, so type-specific columns (Port, URL, Frameworks…)
                     // are blank for most rows and push the table past the panel width.
@@ -349,6 +347,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     sparseColumnThreshold: 0.5,
                     sparseMinColumns: 8,
                     columnsExclude: EXCLUDE_COLUMNS,
+                    paginationMode: 'client',
                     batchActions: BATCH_ACTIONS,
                   }}
                   onAction={handleAction}

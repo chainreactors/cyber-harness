@@ -38,6 +38,7 @@ type taskResult struct {
 	Output string
 	File   *filepb.Result
 	Err    string
+	Code   string
 	Turn   int
 }
 
@@ -405,6 +406,13 @@ func (p *AgentPool) DispatchCloseSession(nodeID, requestID string, request *aop.
 		return nil, fmt.Errorf("close session envelope id and session_id are required")
 	}
 	return p.dispatchMessage(nodeID, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionRequest{CloseSessionRequest: request}})
+}
+
+func (p *AgentPool) DispatchCancelTurn(nodeID, requestID string, request *aop.CancelTurnRequest) (<-chan taskResult, error) {
+	if request == nil || strings.TrimSpace(requestID) == "" || strings.TrimSpace(request.SessionId) == "" || strings.TrimSpace(request.TurnId) == "" {
+		return nil, fmt.Errorf("cancel turn envelope id, session_id, and turn_id are required")
+	}
+	return p.dispatchMessage(nodeID, requestID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnRequest{CancelTurnRequest: request}})
 }
 
 // ensureSessionOpen optimistically marks sessionID open on the node and sends

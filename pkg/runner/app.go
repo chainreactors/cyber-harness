@@ -77,6 +77,11 @@ const (
 )
 
 func NewApp(ctx context.Context, rc ApplicationConfig) (*App, error) {
+	storage, err := rc.Tools.TrafficStorage.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	rc.Tools.TrafficStorage = storage
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -414,7 +419,7 @@ func (a *App) initCommands(rc ApplicationConfig, logger telemetry.Logger) {
 		FileAudit:         a.FileAudit,
 	}
 	var err error
-	a.proxyInfra, err = proxytool.InstallInfra(a.deps, captureEnabled(rc.Tools.MitmCapture))
+	a.proxyInfra, err = proxytool.InstallInfra(a.deps, captureEnabled(rc.Tools.MitmCapture), rc.Tools.TrafficStorage)
 	if err != nil {
 		logger.Warnf("proxy hub unavailable, tools use direct/original proxy: %s", err)
 	}

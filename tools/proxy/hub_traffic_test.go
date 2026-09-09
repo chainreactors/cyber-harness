@@ -2,15 +2,19 @@ package proxy
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
 // hubClient builds an HTTP client that routes through the hub with callID as the
@@ -56,6 +60,7 @@ func startHub(t *testing.T, capture bool) *ProxyHub {
 	t.Helper()
 	caRoot := t.TempDir()
 	hub := NewProxyHub(NewState(""), NewFlowStore(1000), caRoot, capture)
+	hub.storage = cfg.TrafficOptions{BodyStorage: "disk"}
 	if err := hub.Start(caRoot); err != nil {
 		t.Fatalf("start hub: %v", err)
 	}
@@ -127,25 +132,45 @@ func TestHubSubscribe(t *testing.T) {
 	}
 }
 
-func TestHubSubscribeDoesNotDropWhenConsumerIsSlow(t *testing.T) {
+func TestHubSlowSubscriberStopsWithoutAffectingHealthySubscriber(t *testing.T) {
 	hub := NewProxyHub(NewState(""), NewFlowStore(128), "", true)
-	ch, cancel := hub.Subscribe(1)
-	defer cancel()
+	gate := make(chan struct{})
+	slow, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 1}, func(Flow) error { <-gate; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slow.Cancel()
+	healthyFlows := make(chan *traffic.Flow, 128)
+	healthy, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 128}, func(f Flow) error {
+		healthyFlows <- flowToProto(&f)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer healthy.Cancel()
 
-	// Do not read while publishing. The old implementation filled the channel
-	// and silently discarded every flow after the first one; the store-backed
-	// subscriber only records a wake-up and drains its cursor in order.
+	// Both queues are bounded. A consumer that cannot keep up is explicitly
+	// terminated rather than silently skipping observations.
 	for i := 1; i <= 64; i++ {
 		hub.ingest(Flow{Exchange: traffic.Exchange{
-			ID:       fmt.Sprintf("raw-%d", i),
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
 		}, ToolID: "tool"})
 	}
+	close(gate)
+	select {
+	case <-slow.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow subscriber did not stop")
+	}
+	if !errors.Is(slow.Err(), eventbus.ErrOverflow) {
+		t.Fatalf("slow error = %v", slow.Err())
+	}
 
 	for i := 1; i <= 64; i++ {
 		select {
-		case got := <-ch:
+		case got := <-healthyFlows:
 			if got == nil || got.GetId() != strconv.Itoa(i) {
 				t.Fatalf("flow %d = %#v, want sequential id %d", i, got, i)
 			}
@@ -183,13 +208,17 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	if err := first.SetBodyDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	first.Add(Flow{
+	path := filepath.Join(dir, "body", "capture-reload")
+	if err := os.WriteFile(path, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	addTestBody(t, first, Flow{
 		ToolID: "call-1", Host: "example.test", ContentType: "text/plain",
 		Exchange: traffic.Exchange{
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: "body/1.resp", Size: 10, Complete: true}},
+			Response: &traffic.Response{StatusCode: 200},
 		},
-	})
+	}, path)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +232,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	if len(flows) != 1 || flows[0].ToolID != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}
-	if flows[0].Response == nil || flows[0].Response.BodyRef == nil || len(flows[0].Response.Body) != 0 {
+	if flows[0].Response == nil || second.files[flows[0].ID][1] != 10 || len(flows[0].Response.Body) != 0 {
 		t.Fatalf("reloaded body metadata = %#v", flows[0].Response)
 	}
 }

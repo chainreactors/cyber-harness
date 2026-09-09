@@ -189,14 +189,19 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 		}
 
 	case *aop.ProtocolMessage_CancelTurnResponse:
-		// The local waiter is closed when cancellation is enqueued.
+		result := taskResult{}
+		if rejected := payload.CancelTurnResponse.GetRejected(); rejected != nil {
+			result.Code = rejected.Code
+			result.Err = rejected.Message
+		}
+		p.finishAgentTask(agent, correlationID, result)
 
 	case *aop.ProtocolMessage_Event:
 		p.forwardAOPFrame(agent, correlationID, payload.Event)
 
 	case *aop.ProtocolMessage_ProtocolError:
 		if payload.ProtocolError != nil {
-			p.finishAgentTask(agent, correlationID, taskResult{Err: payload.ProtocolError.Message})
+			p.finishAgentTask(agent, correlationID, taskResult{Code: payload.ProtocolError.Code, Err: payload.ProtocolError.Message})
 		}
 	}
 }

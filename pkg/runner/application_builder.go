@@ -60,6 +60,7 @@ func MergeOptionExtras(rc ApplicationConfig, option *cfg.Option) ApplicationConf
 	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
 	rc.Tools.PlaywrightSession = option.PlaywrightSession
 	rc.Tools.MitmCapture = cloneBool(option.Mitm)
+	rc.Tools.TrafficStorage = option.TrafficOptions
 	rc.CLISkillPaths = skillPathsFromOptions(option)
 	rc.RecordFile = option.OutputFile
 	return rc
@@ -93,6 +94,7 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 			PlaywrightSession: option.PlaywrightSession,
 			OptionalTools:     option.Tools,
 			MitmCapture:       cloneBool(option.Mitm),
+			TrafficStorage:    option.TrafficOptions,
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),

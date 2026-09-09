@@ -258,6 +258,9 @@ func (t *BashTool) runForeground(ctx context.Context, command string, options Ba
 	if command == "" {
 		return nil, fmt.Errorf("empty command")
 	}
+	if options.WorkDir == "" {
+		options.WorkDir = coretool.WorkDirFromContext(ctx, "")
+	}
 	if isOnlyCommentsOrBlank(command) {
 		if options.OnOutput != nil {
 			options.OnOutput([]byte("ok"))
