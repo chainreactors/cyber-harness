@@ -64,7 +64,7 @@ jobs:
         run: |
           go test -race -count=20 -timeout 20m \
             -run 'Test(BroadcastAOPEventPersistsRawEnvelope|ServeSSEWithSnapshotSubscribesBeforeReadingSnapshot|ServeSSEWithSnapshotDropsQueuedSnapshotDuplicates|SessionEventsReplayHasNoSideEffects|SessionEventsResumesAfterLastEventID|CancelRemoteScanStopsAgentAndPreservesCanceledStatus|CancelQueuedScanDoesNotWaitForConcurrencySlot|CancelTaskUsesControlChannelWhenTaskQueueIsFull|CancelTaskWaitsForSaturatedControlChannel|CompleteJobCannotOverwriteCanceledScan|BroadcastConfigReload|BroadcastConfigReloadWaitsBehindCancellationFrames|HandleConfigReloadResultUpdatesAgentStatus|SaveConfigBuildFailureKeepsCommittedConfigAndCurrentApp|SaveConfigCommitFailureClosesCandidateAndKeepsCurrentApp|SaveConfigSerializesConcurrentCandidates)$' \
-            ./pkg/web
+            ./pkg/web/service
 
       - name: Fuzz AOP envelope decoding
         working-directory: aop
