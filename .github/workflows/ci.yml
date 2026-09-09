@@ -382,7 +382,8 @@ jobs:
           go test -race -count=1 -timeout 10m \
             -tags "e2e re2_cgo re2_static" \
             -v \
-            ./pkg/web/...
+            ./pkg/web ./pkg/web/api
+          go test -race -count=1 -timeout 10m ./pkg/web/service
 
       - name: Repeat connection shutdown regressions
         run: go test -race -count=100 -timeout 2m ./pkg/web
