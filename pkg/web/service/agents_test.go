@@ -806,6 +806,14 @@ func TestWSTerminalRebindsAfterAgentReconnect(t *testing.T) {
 	writeBrowserPTYOpen(t, browserConn, &ptypb.Open{StreamId: "term-1", NodeId: nodeID})
 	open := readAgentPTY(t, agentConn, "open").GetOpen()
 	streamID := open.GetStreamId()
+	// Establish the terminal before disconnecting. Closing during the initial
+	// forward can legitimately report a forwarding error before detached.
+	writeAgentPTY(t, agentConn, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
+		StreamId: streamID, Session: &ptypb.Session{Id: "resident-repl", Kind: "repl"},
+	}}})
+	if opened := readBrowserPTY(t, browserConn, "opened").GetOpened(); opened.GetStreamId() != streamID {
+		t.Fatalf("opened stream = %s, want %s", opened.GetStreamId(), streamID)
+	}
 
 	if err := agentConn.Close(); err != nil {
 		t.Fatalf("close agent: %v", err)
