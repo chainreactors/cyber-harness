@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -206,13 +208,17 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	if err := first.SetBodyDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	first.Add(Flow{
+	path := filepath.Join(dir, "body", "capture-reload")
+	if err := os.WriteFile(path, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	addTestBody(t, first, Flow{
 		ToolID: "call-1", Host: "example.test", ContentType: "text/plain",
 		Exchange: traffic.Exchange{
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200, BodyRef: &traffic.BodyRef{Path: "body/1.resp", Size: 10, Complete: true}},
+			Response: &traffic.Response{StatusCode: 200},
 		},
-	})
+	}, path)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +232,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	if len(flows) != 1 || flows[0].ToolID != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}
-	if flows[0].Response == nil || flows[0].Response.BodyRef == nil || len(flows[0].Response.Body) != 0 {
+	if flows[0].Response == nil || second.files[flows[0].ID][1] != 10 || len(flows[0].Response.Body) != 0 {
 		t.Fatalf("reloaded body metadata = %#v", flows[0].Response)
 	}
 }

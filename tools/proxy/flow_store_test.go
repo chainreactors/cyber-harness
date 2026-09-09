@@ -45,7 +45,7 @@ func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
 		t.Fatalf("flows=%d", len(flows))
 	}
 	f := flows[0]
-	if f.Response.BodyRef != nil || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
+	if hub.Store().files[f.ID][1] >= 0 || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
 		t.Fatalf("unexpected preview: %+v", f)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "capture")); !os.IsNotExist(err) {
@@ -53,38 +53,47 @@ func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
 	}
 }
 
-func TestBodyRecorderOwnsChunksAndPublishesCompletedReference(t *testing.T) {
-	released := false
-	r, err := newBodyRecorder(t.TempDir(), "body", 8, func() { released = true })
+func TestFileConsumerOwnsChunksAndClosesBeforePublication(t *testing.T) {
+	store := NewFlowStore(8)
+	if err := store.SetBodyDir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hub := NewProxyHub(nil, store, "", true)
+	hub.storage.BodyMaxBytes = 8
+	stream := &bodyStream{}
+	finish, release, err := hub.recordBody(stream)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
 	p := []byte("abcdefghijk")
-	_, _ = r.Write(p)
+	_, _ = stream.Write(p)
 	p[0] = 'X'
-	ref, err := r.Close(true)
+	stream.Close()
+	file, err := finish(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.release()
-	data, err := os.ReadFile(ref.Path)
-	if err != nil || string(data) != "abcdefgh" || ref.Size != 11 || !ref.Truncated || !released {
-		t.Fatalf("ref=%+v data=%q err=%v released=%v", ref, data, err, released)
+	data, err := os.ReadFile(file.Name())
+	if err != nil || string(data) != "abcdefgh" {
+		t.Fatalf("data=%q err=%v", data, err)
 	}
-	if strings.HasSuffix(ref.Path, ".part") {
-		t.Fatal("completed ref still names temporary file")
+	if _, err = file.Write([]byte("x")); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("file is not closed: %v", err)
 	}
-	again, err := r.Close(true)
-	if err != nil || ref != again {
-		t.Fatal("Close is not idempotent")
+	again, err := finish(false)
+	if err != nil || file != again {
+		t.Fatal("finalization is not idempotent")
 	}
+	removeCaptureFiles([2]*os.File{nil, file})
 }
 
-func TestBodyRecorderOverflowDoesNotBlockWriter(t *testing.T) {
-	r := &bodyRecorder{limit: 4 << 20, release: func() {}}
+func TestBodySubscriberOverflowDoesNotBlockWriter(t *testing.T) {
+	stream := &bodyStream{}
 	gate := make(chan struct{})
 	entered := make(chan struct{})
-	sub, err := r.bus.SubscribeAsync(eventbus.SubscribeOptions[[]byte]{Buffer: 1}, func([]byte) error {
+	sub, err := stream.events.SubscribeAsync(eventbus.SubscribeOptions[[]byte]{Buffer: 1, Clone: func(p []byte) []byte { return bytes.Clone(p) }}, func([]byte) error {
 		close(entered)
 		<-gate
 		return nil
@@ -92,20 +101,21 @@ func TestBodyRecorderOverflowDoesNotBlockWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.sub = sub
-	_, _ = r.Write([]byte("a"))
+	_, _ = stream.Write([]byte("a"))
 	<-entered
 	done := make(chan struct{})
-	go func() { _, _ = r.Write(make([]byte, 2<<20)); close(done) }()
+	go func() { _, _ = stream.Write(make([]byte, 2<<20)); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("disk subscriber blocked producer")
 	}
 	close(gate)
-	ref, err := r.Close(true)
-	if !errors.Is(err, eventbus.ErrOverflow) || ref.Complete || !ref.Truncated {
-		t.Fatalf("%+v, %v", ref, err)
+	stream.Close()
+	err = sub.Close(context.Background())
+	preview, size := stream.snapshot()
+	if !errors.Is(err, eventbus.ErrOverflow) || size != 1+2<<20 || len(preview) != maxBodySnip {
+		t.Fatalf("size=%d preview=%d, %v", size, len(preview), err)
 	}
 }
 
@@ -121,7 +131,7 @@ func TestFlowSubscriptionFiltersBeforeReadingBodies(t *testing.T) {
 	defer sub.Cancel()
 	for i := 0; i < 10; i++ {
 		hub.ingest(Flow{ToolID: "ignored", Exchange: traffic.Exchange{
-			Response: &traffic.Response{BodyRef: &traffic.BodyRef{Path: "missing"}},
+			Response: &traffic.Response{},
 		}})
 	}
 	hub.ingest(Flow{ToolID: "selected"})
@@ -159,9 +169,18 @@ func TestTrafficJournalContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
 
 func TestMissingBodyIsReportedAsIncomplete(t *testing.T) {
 	s := NewFlowStore(1)
-	f := Flow{Exchange: traffic.Exchange{Complete: true, Response: &traffic.Response{
-		BodyRef: &traffic.BodyRef{Path: filepath.Join(t.TempDir(), "missing")},
-	}}}
+	if err := s.SetBodyDir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	path := filepath.Join(s.BodyDir(), "body", "capture-missing")
+	if err := os.WriteFile(path, []byte("body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f := addTestBody(t, s, Flow{Exchange: traffic.Exchange{Complete: true, Response: &traffic.Response{StatusCode: 200}}}, path)
+	if err := os.Remove(s.bodyPath(f.ID, 1)); err != nil {
+		t.Fatal(err)
+	}
 	wire := s.flowToProto(&f)
 	if wire.Complete || !strings.Contains(wire.Error, "body unavailable") {
 		t.Fatalf("wire=%v", wire)
