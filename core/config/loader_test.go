@@ -16,6 +16,18 @@ func writeTestConfig(t *testing.T, dir, content string) string {
 	return path
 }
 
+func TestLoadTrafficStoragePreservesMITMBoolean(t *testing.T) {
+	path := writeTestConfig(t, t.TempDir(), "cyberhub:\n  mitm: false\ntraffic:\n  body_storage: disk\n  body_max_bytes: 1024\n  body_retention_bytes: 4096\n")
+	var option Option
+	if err := LoadConfig(path, &option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" ||
+		option.BodyMaxBytes != 1024 || option.BodyRetentionBytes != 4096 {
+		t.Fatalf("traffic options not loaded: %+v; mitm=%v", option.TrafficOptions, option.Mitm)
+	}
+}
+
 func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	dst := Option{}
 	dst.Provider = "cli-provider"

@@ -10,6 +10,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 	protobuf "google.golang.org/protobuf/proto"
@@ -100,32 +101,39 @@ func (h *TrafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send a
 // correlated to replyTo until the connection context ends or capture is
 // reconfigured. A prior stream is replaced.
 func (h *TrafficHandler) startStream(ctx context.Context, replyTo string, send aop.SendFunc) {
-	ch, cancelSub := h.infra.Hub.Subscribe(256)
-	streamCtx, cancelCtx := context.WithCancel(ctx)
-
+	streamCtx, cancel := context.WithCancel(ctx)
+	sub, err := h.infra.Hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{
+		Buffer: 256,
+		OnError: func(err error) {
+			if streamCtx.Err() == nil {
+				_ = h.replyState(replyTo, send, fmt.Sprintf("traffic stream stopped: %v", err))
+			}
+		},
+	}, func(flow Flow) error {
+		select {
+		case <-streamCtx.Done():
+			return nil
+		default:
+		}
+		return h.sendFlow(replyTo, send, h.infra.Store.flowToProto(&flow))
+	})
+	if err != nil {
+		cancel()
+		_ = h.replyState(replyTo, send, err.Error())
+		return
+	}
 	h.mu.Lock()
 	if h.stopStream != nil {
 		h.stopStream()
 	}
-	h.stopStream = func() {
-		cancelCtx()
-		cancelSub()
-	}
+	h.stopStream = func() { cancel(); sub.Cancel() }
 	h.mu.Unlock()
-
 	go func() {
-		for {
-			select {
-			case <-streamCtx.Done():
-				return
-			case flow, ok := <-ch:
-				if !ok {
-					return
-				}
-				if err := h.sendFlow(replyTo, send, flow); err != nil {
-					return
-				}
-			}
+		defer cancel()
+		select {
+		case <-streamCtx.Done():
+			sub.Cancel()
+		case <-sub.Done():
 		}
 	}()
 }
@@ -160,6 +168,12 @@ func (h *TrafficHandler) replyState(replyTo string, send aop.SendFunc, errMsg st
 }
 
 func (h *TrafficHandler) snapshot(errMsg string) *traffic.State {
+	if err := h.infra.Store.IndexError(); err != nil {
+		if errMsg != "" {
+			errMsg += "; "
+		}
+		errMsg += "traffic metadata recorder stopped: " + err.Error()
+	}
 	s := h.infra.State
 	mode := traffic.CaptureMode_CAPTURE_MODE_RELAY
 	if h.infra.Hub.Capturing() {

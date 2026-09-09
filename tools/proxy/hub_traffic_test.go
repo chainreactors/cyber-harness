@@ -2,7 +2,7 @@ package proxy
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,6 +11,8 @@ import (
 	"time"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
 // hubClient builds an HTTP client that routes through the hub with callID as the
@@ -56,6 +58,7 @@ func startHub(t *testing.T, capture bool) *ProxyHub {
 	t.Helper()
 	caRoot := t.TempDir()
 	hub := NewProxyHub(NewState(""), NewFlowStore(1000), caRoot, capture)
+	hub.storage = cfg.TrafficOptions{BodyStorage: "disk"}
 	if err := hub.Start(caRoot); err != nil {
 		t.Fatalf("start hub: %v", err)
 	}
@@ -127,25 +130,45 @@ func TestHubSubscribe(t *testing.T) {
 	}
 }
 
-func TestHubSubscribeDoesNotDropWhenConsumerIsSlow(t *testing.T) {
+func TestHubSlowSubscriberStopsWithoutAffectingHealthySubscriber(t *testing.T) {
 	hub := NewProxyHub(NewState(""), NewFlowStore(128), "", true)
-	ch, cancel := hub.Subscribe(1)
-	defer cancel()
+	gate := make(chan struct{})
+	slow, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 1}, func(Flow) error { <-gate; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slow.Cancel()
+	healthyFlows := make(chan *traffic.Flow, 128)
+	healthy, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 128}, func(f Flow) error {
+		healthyFlows <- flowToProto(&f)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer healthy.Cancel()
 
-	// Do not read while publishing. The old implementation filled the channel
-	// and silently discarded every flow after the first one; the store-backed
-	// subscriber only records a wake-up and drains its cursor in order.
+	// Both queues are bounded. A consumer that cannot keep up is explicitly
+	// terminated rather than silently skipping observations.
 	for i := 1; i <= 64; i++ {
 		hub.ingest(Flow{Exchange: traffic.Exchange{
-			ID:       fmt.Sprintf("raw-%d", i),
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
 		}, ToolID: "tool"})
 	}
+	close(gate)
+	select {
+	case <-slow.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow subscriber did not stop")
+	}
+	if !errors.Is(slow.Err(), eventbus.ErrOverflow) {
+		t.Fatalf("slow error = %v", slow.Err())
+	}
 
 	for i := 1; i <= 64; i++ {
 		select {
-		case got := <-ch:
+		case got := <-healthyFlows:
 			if got == nil || got.GetId() != strconv.Itoa(i) {
 				t.Fatalf("flow %d = %#v, want sequential id %d", i, got, i)
 			}

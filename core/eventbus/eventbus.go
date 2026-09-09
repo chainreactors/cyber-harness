@@ -1,3 +1,4 @@
+// Package eventbus provides application-owned, typed event subscriptions.
 package eventbus
 
 import "sync"
@@ -13,10 +14,10 @@ type Bus[T any] struct {
 	next int
 }
 
-func New[T any]() *Bus[T] {
-	return &Bus[T]{}
-}
+func New[T any]() *Bus[T] { return &Bus[T]{} }
 
+// Subscribe preserves synchronous delivery. Handlers run outside the bus lock
+// and must synchronize their own state when producers emit concurrently.
 func (b *Bus[T]) Subscribe(handler func(T)) func() {
 	b.mu.Lock()
 	id := b.next
@@ -26,12 +27,25 @@ func (b *Bus[T]) Subscribe(handler func(T)) func() {
 	return func() { b.unsubscribe(id) }
 }
 
+// SubscribeFiltered preserves synchronous delivery for consumers that need an
+// immediate visibility boundary (for example a journal before a file switch).
+// Use SubscribeAsync for independently bounded, non-blocking consumers.
+func (b *Bus[T]) SubscribeFiltered(filter func(T) bool, handler func(T)) func() {
+	return b.Subscribe(func(event T) {
+		if filter == nil || filter(event) {
+			handler(event)
+		}
+	})
+}
+
 func (b *Bus[T]) unsubscribe(id int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for i, s := range b.subs {
 		if s.id == id {
-			b.subs = append(b.subs[:i], b.subs[i+1:]...)
+			copy(b.subs[i:], b.subs[i+1:])
+			b.subs[len(b.subs)-1] = entry[T]{}
+			b.subs = b.subs[:len(b.subs)-1]
 			return
 		}
 	}
@@ -39,13 +53,9 @@ func (b *Bus[T]) unsubscribe(id int) {
 
 func (b *Bus[T]) Emit(event T) {
 	b.mu.RLock()
-	snapshot := make([]func(T), len(b.subs))
-	for i, s := range b.subs {
-		snapshot[i] = s.handler
-	}
+	snapshot := append([]entry[T](nil), b.subs...)
 	b.mu.RUnlock()
-
-	for _, h := range snapshot {
-		h(event)
+	for _, s := range snapshot {
+		s.handler(event)
 	}
 }

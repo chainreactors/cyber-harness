@@ -14,6 +14,7 @@ import (
 	"time"
 
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	cfg "github.com/chainreactors/aiscan/core/config"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
 
@@ -28,8 +29,12 @@ import (
 // hub.dial is installed as mitmproxy Options.Dialer so it covers plain HTTP as
 // well as HTTPS/CONNECT (see the local mitmproxy fork patch adding that field).
 type ProxyHub struct {
-	state *State
-	store *FlowStore
+	state        *State
+	store        *FlowStore
+	storage      cfg.TrafficOptions
+	finalizeMu   sync.Mutex
+	finalizing   sync.WaitGroup
+	shuttingDown bool
 
 	mu        sync.Mutex
 	server    *mitmproxy.Proxy
@@ -50,8 +55,9 @@ type ProxyHub struct {
 	filter    QueryOpts
 
 	subsMu  sync.Mutex
-	subs    map[int]*flowSubscriber
+	subs    map[int]func()
 	nextSub int
+	closed  bool
 }
 
 // Keep proxy-side buffering bounded. Bodies at or above this threshold are
@@ -73,7 +79,7 @@ func NewProxyHub(state *State, store *FlowStore, caRootPath string, capture bool
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
-	h := &ProxyHub{state: state, store: store, subs: make(map[int]*flowSubscriber)}
+	h := &ProxyHub{state: state, store: store, subs: make(map[int]func())}
 	// The CA path is always prepared so capture can be toggled on at runtime;
 	// CAPath only advertises it to children while interception is actually on.
 	h.caPath = filepath.Join(caRootPath, "mitmproxy-ca-cert.pem")
@@ -154,7 +160,7 @@ func (h *ProxyHub) start(caRootPath string) error {
 		if err := os.MkdirAll(caRootPath, 0o755); err != nil {
 			return fmt.Errorf("proxy hub: create CA dir: %w", err)
 		}
-		if h.store != nil {
+		if h.store != nil && h.storage.BodyStorage == "disk" {
 			if err := h.store.SetBodyDir(filepath.Join(caRootPath, "capture")); err != nil {
 				return fmt.Errorf("proxy hub: create capture dir: %w", err)
 			}
@@ -254,34 +260,64 @@ func (h *ProxyHub) CAPath() string {
 
 // Shutdown stops the listener. Safe to call on a never-started hub.
 func (h *ProxyHub) Shutdown(ctx context.Context) {
-	h.closeSubscribers()
-	h.mu.Lock()
-	server := h.server
-	h.server = nil
-	h.mu.Unlock()
-	if server == nil {
-		if h.store != nil {
-			_ = h.store.Close()
-		}
-		return
-	}
 	if ctx == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 	}
+	h.mu.Lock()
+	server := h.server
+	h.server = nil
+	h.mu.Unlock()
+	if server == nil {
+		h.waitFinalizers(ctx)
+		h.closeSubscribers()
+		if h.store != nil {
+			_ = h.store.Close()
+		}
+		return
+	}
 	_ = server.Shutdown(ctx)
+	h.waitFinalizers(ctx)
+	h.closeSubscribers()
 	if h.store != nil {
 		_ = h.store.Close()
+	}
+}
+
+// Active body recorders bound the number of asynchronous finalizers. The lock
+// closes admission before Wait, avoiding WaitGroup Add/Wait races at shutdown.
+func (h *ProxyHub) finalize(fn func(error), err error) {
+	h.finalizeMu.Lock()
+	if h.shuttingDown {
+		h.finalizeMu.Unlock()
+		fn(err)
+		return
+	}
+	h.finalizing.Add(1)
+	h.finalizeMu.Unlock()
+	go func() { defer h.finalizing.Done(); fn(err) }()
+}
+
+func (h *ProxyHub) waitFinalizers(ctx context.Context) {
+	h.finalizeMu.Lock()
+	h.shuttingDown = true
+	h.finalizeMu.Unlock()
+	done := make(chan struct{})
+	go func() { h.finalizing.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
 
 func (h *ProxyHub) closeSubscribers() {
 	h.subsMu.Lock()
 	subs := h.subs
-	h.subs = make(map[int]*flowSubscriber)
+	h.subs = make(map[int]func())
 	for _, subscriber := range subs {
-		close(subscriber.done)
+		subscriber()
 	}
+	h.closed = true
 	h.subsMu.Unlock()
 }

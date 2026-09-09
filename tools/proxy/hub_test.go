@@ -103,7 +103,7 @@ func TestCaptureHTTPAndHTTPS(t *testing.T) {
 		t.Fatalf("https body = %q", body)
 	}
 
-	flows := hub.Store().Query(QueryOpts{})
+	flows := waitForFlows(t, hub.Store(), 2)
 	if len(flows) < 2 {
 		t.Fatalf("want >=2 flows, got %d", len(flows))
 	}
@@ -138,7 +138,7 @@ func TestCapturePostRequestBody(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	flows := hub.Store().Query(QueryOpts{})
+	flows := waitForFlows(t, hub.Store(), 1)
 	var found bool
 	for _, f := range flows {
 		if f.Request.Method == "POST" && strings.Contains(string(f.Request.Body), "payload-marker") {
@@ -172,7 +172,7 @@ func TestCaptureIncludesHostHeader(t *testing.T) {
 		_ = body // body is empty; the request headers are what we assert on
 	}
 
-	flows := hub.Store().Query(QueryOpts{})
+	flows := waitForFlows(t, hub.Store(), 1)
 	var host string
 	for _, f := range flows {
 		for _, h := range f.Request.Headers {
@@ -210,6 +210,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 	}
 
 	store := hub.Store()
+	waitForFlows(t, store, 3)
 	if got := len(store.Query(QueryOpts{Status: "404"})); got != 1 {
 		t.Errorf("status 404 filter = %d, want 1", got)
 	}
@@ -252,7 +253,7 @@ func TestCaptureLargeBodyIsSnipped(t *testing.T) {
 	hub, _, client := newTestHub(t, true)
 	get(t, client, srv.URL)
 
-	for _, f := range hub.Store().Query(QueryOpts{}) {
+	for _, f := range waitForFlows(t, hub.Store(), 1) {
 		if len(f.Response.Body) > maxBodySnip {
 			t.Fatalf("body snip = %d, want <= %d", len(f.Response.Body), maxBodySnip)
 		}
@@ -276,6 +277,7 @@ func TestCaptureConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	waitForFlows(t, hub.Store(), n)
 	if got := hub.Store().Count(); got != n {
 		t.Errorf("captured %d flows, want %d", got, n)
 	}
@@ -293,7 +295,7 @@ func TestCaptureConnectionError(t *testing.T) {
 	}
 	// The failed upstream is recorded as a flow carrying the error.
 	var sawErr bool
-	for _, f := range hub.Store().Query(QueryOpts{}) {
+	for _, f := range waitForFlows(t, hub.Store(), 1) {
 		if f.Error != "" {
 			sawErr = true
 		}
