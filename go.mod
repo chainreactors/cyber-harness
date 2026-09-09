@@ -31,7 +31,7 @@ require (
 	github.com/chainreactors/tui/console v0.0.0-20260712082522-2ba36ad7841f
 	github.com/chainreactors/tui/readline v0.0.0-20260723062039-ed89e758c21b
 	github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d
-	github.com/chainreactors/utils/mitmproxy v0.0.0-20260818093021-b0af431aff73
+	github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873
 	github.com/chainreactors/utils/parsers v0.0.3
 	github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059
 	github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,15 @@ type Infra struct {
 // capture selects the hub mode (see NewProxyHub): true records traffic (mitm
 // on), false is a pure routing relay (mitm off). Routing works in both, so
 // `proxy` keeps managing egress either way; only capture is gated.
-func InstallInfra(d *commands.Deps, capture bool) (*Infra, error) {
+func InstallInfra(d *commands.Deps, capture bool, storage ...cfg.TrafficOptions) (*Infra, error) {
+	var config cfg.TrafficOptions
+	if len(storage) > 0 {
+		config = storage[0]
+	}
+	config, err := config.Normalize()
+	if err != nil {
+		return nil, err
+	}
 	originalProxy := d.ScannerProxy
 	state := NewState(originalProxy)
 
@@ -49,9 +58,10 @@ func InstallInfra(d *commands.Deps, capture bool) (*Infra, error) {
 		}
 	}
 
-	store := NewFlowStore(10000)
+	store := NewFlowStoreWithLimits(10000, config.BodyRetentionBytes)
 	caRoot := filepath.Join(d.WorkDir, ".aiscan", "mitm")
 	hub := NewProxyHub(state, store, caRoot, capture)
+	hub.storage = config
 
 	infra := &Infra{State: state, Store: store, Hub: hub}
 	commands.Provide(d, InfraKey, infra)

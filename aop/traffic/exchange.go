@@ -24,7 +24,6 @@ type Request struct {
 	Protocol string
 	Headers  []Pair
 	Body     []byte
-	BodyRef  *BodyRef `json:"-"`
 }
 
 // Response is the response half of an exchange. It is optional on Exchange: a
@@ -35,32 +34,6 @@ type Response struct {
 	ReasonPhrase string
 	Headers      []Pair
 	Body         []byte
-	BodyRef      *BodyRef `json:"-"`
-}
-
-// HydrateBodies loads file-backed request/response bodies into Body. It is
-// intentionally explicit so list/query paths do not allocate large payloads.
-func (e *Exchange) HydrateBodies() error {
-	if e == nil {
-		return nil
-	}
-	if e.Request.BodyRef != nil {
-		body, err := ReadBody(e.Request.BodyRef)
-		if err != nil {
-			return err
-		}
-		e.Request.Body = body
-		e.Request.BodyRef = nil
-	}
-	if e.Response != nil && e.Response.BodyRef != nil {
-		body, err := ReadBody(e.Response.BodyRef)
-		if err != nil {
-			return err
-		}
-		e.Response.Body = body
-		e.Response.BodyRef = nil
-	}
-	return nil
 }
 
 // Exchange is the canonical in-memory form of one captured HTTP exchange,
@@ -81,24 +54,18 @@ type Exchange struct {
 }
 
 // Clone returns an independent exchange value, including response metadata and
-// body references. The proxy hot store uses it before hydrating a body so a
+// body bytes. The proxy hot store uses it before loading files so a
 // query or subscriber never mutates the retained preview under a read lock.
 func (e Exchange) Clone() Exchange {
 	out := e
 	out.Request.Headers = append([]Pair(nil), e.Request.Headers...)
 	out.Request.Body = append([]byte(nil), e.Request.Body...)
-	if e.Request.BodyRef != nil {
-		ref := *e.Request.BodyRef
-		out.Request.BodyRef = &ref
-	}
+
 	if e.Response != nil {
 		resp := *e.Response
 		resp.Headers = append([]Pair(nil), e.Response.Headers...)
 		resp.Body = append([]byte(nil), e.Response.Body...)
-		if e.Response.BodyRef != nil {
-			ref := *e.Response.BodyRef
-			resp.BodyRef = &ref
-		}
+
 		out.Response = &resp
 	}
 	return out

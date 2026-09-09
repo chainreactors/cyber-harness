@@ -136,30 +136,50 @@ func (s *Service) finishSessionTask(taskID string) bool {
 }
 
 func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) error {
-	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
 		return err
 	}
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" {
 		return ErrTurnNotFound
 	}
+	// The Runtime owns turn lifecycle, including automatic turns that were
+	// never dispatched through the Web service.
+	nodeID := session.GetSession().GetNodeId()
+	if s.agents == nil || nodeID == "" {
+		return managementapi.Errorf(managementapi.CodeUnavailable, "node is not connected")
+	}
+	resultCh, err := s.agents.DispatchCancelTurn(nodeID, generateID(), &aop.CancelTurnRequest{
+		SessionId: sessionID,
+		TurnId:    turnID,
+	})
+	if err != nil {
+		return managementapi.NewError(managementapi.CodeUnavailable, err)
+	}
+	timer := time.NewTimer(agentControlTimeout)
+	defer timer.Stop()
+	select {
+	case result, ok := <-resultCh:
+		if !ok {
+			return managementapi.Errorf(managementapi.CodeUnavailable, "node disconnected while canceling turn")
+		}
+		if result.Err != "" {
+			if result.Code == string(managementapi.CodeNotFound) {
+				return ErrTurnNotFound
+			}
+			return managementapi.Errorf(managementapi.CodeFailedPrecondition, "%s", result.Err)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return managementapi.Errorf(managementapi.CodeUnavailable, "node timed out while canceling turn")
+	}
 	s.mu.Lock()
-	sid, pending := s.taskSessions[turnID]
-	nodeID := s.taskNodeIDs[turnID]
-	if pending && sid == sessionID {
+	if s.taskSessions[turnID] == sessionID {
 		s.taskCanceled[turnID] = true
-	} else {
-		pending = false
 	}
 	s.mu.Unlock()
-	if !pending {
-		return ErrTurnNotFound
-	}
-	if s.agents != nil && nodeID != "" {
-		if err := s.agents.CancelTask(nodeID, turnID, sessionID); err != nil {
-			return err
-		}
-	}
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
 		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "canceled"}},

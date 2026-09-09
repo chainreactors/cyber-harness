@@ -86,7 +86,7 @@
   {
     "path": "pkg/commands/bash_test.go",
     "format": "shell assertions are unix-only",
-    "count": 5,
+    "count": 6,
     "category": "platform",
     "reason": "Assertions depend on POSIX shell syntax and command behavior."
   },

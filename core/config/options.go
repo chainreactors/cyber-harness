@@ -15,6 +15,7 @@ var Version = "dev"
 type Option struct {
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
+	TrafficOptions `group:"Traffic Options" config:"traffic"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	IOAOptions     `group:"Server Options" config:"ioa"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
@@ -72,6 +73,12 @@ type ScannerOptions struct {
 	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
 	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
 	Mitm         *bool  `long:"mitm" config:"mitm" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
+}
+
+type TrafficOptions struct {
+	BodyStorage        string `long:"mitm-body-storage" config:"body_storage" description:"Local traffic body storage: none (bounded previews, default) or disk"`
+	BodyMaxBytes       int64  `long:"mitm-body-max-bytes" config:"body_max_bytes" description:"Maximum saved bytes per body (0 = 8 MiB)"`
+	BodyRetentionBytes int64  `long:"mitm-body-retention-bytes" config:"body_retention_bytes" description:"Retained body byte budget (0 = 2 GiB)"`
 }
 
 type AgentOptions struct {

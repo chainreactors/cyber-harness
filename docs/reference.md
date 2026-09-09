@@ -273,7 +273,7 @@ Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详�
 
 捕获默认开启,可用 `--mitm=false` 或配置 `mitm: false` 关闭(转为纯路由,不拦截 HTTPS、不抓包、无需信任 CA)。HTTPS 捕获会为工具注入 Hub CA(`CURL_CA_BUNDLE`/`SSL_CERT_FILE` 等);对**裸 IP** 目标的 HTTPS 因证书无 IP SAN 可能被严格校验拒绝,使用主机名不受影响。
 
-作为 Cairn Runner 运行时,每次工具执行的完整流量会作为 `http.exchange.v1` 证据进入流量表(敏感头在 Runner 侧脱敏),覆盖全部工具流量而非仅漏洞相关的零散记录。
+作为 Cairn Runner 运行时,每次工具执行的流量元数据和 body 前缀会作为 `http.exchange.v1` 证据进入流量表(敏感头在 Runner 侧脱敏),覆盖全部工具流量而非仅漏洞相关的零散记录。单个 request/response body 最多保留 8 MiB,超出部分会在 Flow 的 error 中标记为 truncated;保留中的 body 总量默认不超过 2 GiB,淘汰流量时对应文件会一并回收。
 
 ### LLM API 代理
 
