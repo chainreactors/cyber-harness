@@ -74,6 +74,13 @@ func (c *Connection) Send(envelope *aop.Envelope) error {
 	if envelope == nil {
 		return fmt.Errorf("AOP envelope is required")
 	}
+	// A closed connection and a buffered outbound queue can both be ready.
+	// Check termination before select so sends started after stop always fail.
+	select {
+	case <-c.done:
+		return c.terminalError()
+	default:
+	}
 	request := writeRequest{envelope: envelope, result: make(chan error, 1)}
 	select {
 	case c.outbound <- request:
@@ -165,12 +172,24 @@ func (c *Connection) writeLoop() {
 	for {
 		select {
 		case request := <-c.outbound:
+			// Do not write queued requests selected concurrently with shutdown.
+			select {
+			case <-c.done:
+				request.result <- c.terminalError()
+				return
+			case <-c.ctx.Done():
+				c.stop(c.ctx.Err())
+				request.result <- c.terminalError()
+				return
+			default:
+			}
 			err := c.stream.Send(request.envelope)
-			request.result <- err
 			if err != nil {
 				c.stop(err)
+				request.result <- err
 				return
 			}
+			request.result <- err
 		case <-c.ctx.Done():
 			c.stop(c.ctx.Err())
 			return
