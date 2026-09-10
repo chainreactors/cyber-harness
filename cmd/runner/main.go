@@ -14,6 +14,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	_ "github.com/chainreactors/aiscan/tools"
@@ -115,8 +116,8 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	return result, nil
 }
 
-func newApplication(ctx context.Context, option *cfg.Option, logger telemetry.Logger) (*runner.App, error) {
-	config := runner.AppConfig(option, runner.RuntimeFeatures{ToolsEnabled: true}, logger)
+func newApplication(ctx context.Context, option *cfg.Option, logger telemetry.Logger) (*apppkg.App, error) {
+	config := apppkg.AppConfig(option, apppkg.RuntimeFeatures{ToolsEnabled: true}, logger)
 	config.Tools.RunnerMode = true
-	return runner.NewApp(ctx, config)
+	return apppkg.New(ctx, config)
 }

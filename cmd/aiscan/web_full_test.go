@@ -13,7 +13,7 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -84,7 +84,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 
 func TestWireWebAppBindsRawArtifactsForReloadedApp(t *testing.T) {
 	bus := eventbus.New[*aop.Event]()
-	application := &runner.App{EventBus: bus}
+	application := &apppkg.App{EventBus: bus}
 	ingestor := &recordingArtifactIngestor{}
 
 	wireWebApp(application, ingestor)

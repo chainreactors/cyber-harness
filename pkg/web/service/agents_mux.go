@@ -105,21 +105,6 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	return mux, nil
 }
 
-func (p *AgentPool) handleAgentEnvelope(agent *remoteAgent, envelope *aop.Envelope) {
-	mux, err := p.newAgentNamespaceMux(agent)
-	if err != nil {
-		return
-	}
-	p.dispatchAgentEnvelope(context.Background(), mux, envelope)
-}
-
-func (p *AgentPool) dispatchAgentEnvelope(ctx context.Context, mux *aop.NamespaceMux, envelope *aop.Envelope) {
-	if mux == nil || envelope == nil {
-		return
-	}
-	_, _ = mux.Dispatch(ctx, envelope, func(*aop.Envelope) error { return nil })
-}
-
 func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Envelope, value *aop.ProtocolMessage) {
 	if agent == nil || envelope == nil || value == nil {
 		return

@@ -8,10 +8,57 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	"github.com/chainreactors/aiscan/skills"
 	protobuf "google.golang.org/protobuf/proto"
 )
+
+func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
+	app := &apppkg.App{
+		Commands: commands.NewRegistry(), Skills: &skills.Store{},
+		EventBus: eventbus.New[*aop.Event](),
+	}
+	defer app.Close()
+	rt, err := runtimepkg.New(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{ExistingApp: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	// Only open a session: no provider, tool execution or external target.
+	stream := &namespaceReplyStream{
+		sent: make(chan *aop.Envelope, 32),
+		payload: aop.MustWrap("open-embedded", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{
+			OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "embedded"},
+		}}),
+	}
+	err = serveAgentConnection(context.Background(), connectionConfig{
+		Name: "embedded", NodeID: "embedded", Registry: app.Commands, Agent: rt, Control: rt,
+	}, telemetry.NopLogger(), stream)
+	if err != io.EOF {
+		t.Fatalf("connection: %v", err)
+	}
+	for len(stream.sent) > 0 {
+		envelope := <-stream.sent
+		if envelope.ReplyTo != "open-embedded" {
+			continue
+		}
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, ok := message.(*aop.ProtocolMessage)
+		if !ok || response.GetOpenSessionResponse().GetAccepted().GetId() != "embedded" {
+			t.Fatalf("runtime control was not connected: %v", message)
+		}
+		return
+	}
+	t.Fatal("runtime control response never reached the connection")
+}
 
 // namespaceReplyStream drives one connection through the handshake, delivers a
 // single message addressed to an extra namespace, then blocks until the

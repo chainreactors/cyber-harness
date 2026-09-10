@@ -9,8 +9,8 @@ import (
 	agentprobe "github.com/chainreactors/aiscan/agent/probe"
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	configpkg "github.com/chainreactors/aiscan/core/config"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	probe "github.com/chainreactors/aiscan/pkg/probe"
-	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -30,16 +30,16 @@ type PreparedConfig struct {
 
 type ConfigOptions struct {
 	Store     ConfigStore
-	Build     func(context.Context, *PreparedConfig) (*runner.App, error)
-	Apply     func(*runner.App)
+	Build     func(context.Context, *PreparedConfig) (*apppkg.App, error)
+	Apply     func(*apppkg.App)
 	Broadcast func(*types.DistributeConfig)
 }
 
 type Config struct {
 	mu        sync.Mutex
 	store     ConfigStore
-	build     func(context.Context, *PreparedConfig) (*runner.App, error)
-	apply     func(*runner.App)
+	build     func(context.Context, *PreparedConfig) (*apppkg.App, error)
+	apply     func(*apppkg.App)
 	broadcast func(*types.DistributeConfig)
 }
 
@@ -141,7 +141,7 @@ func (c *Config) Save(ctx context.Context, config *types.DistributeConfig) (*typ
 	if err := ValidateLLMConfig(prepared.Config.GetLlm()); err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
-	var next *runner.App
+	var next *apppkg.App
 	if c.build != nil {
 		next, err = c.build(ctx, prepared)
 		if err != nil {

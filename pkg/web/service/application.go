@@ -6,13 +6,13 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 )
 
 type managedApp struct {
-	app     *runner.App
+	app     *apppkg.App
 	refs    int
 	retired bool
 	closed  bool
@@ -21,17 +21,18 @@ type managedApp struct {
 func (s *Service) aiAvailable() bool {
 	app, release := s.acquireApp()
 	defer release()
-	return app != nil && app.Provider != nil
+	provider, _ := app.ProviderState()
+	return provider != nil
 }
 
-func wrapManagedApp(app *runner.App) *managedApp {
+func wrapManagedApp(app *apppkg.App) *managedApp {
 	if app == nil {
 		return nil
 	}
 	return &managedApp{app: app}
 }
 
-func retireManagedApp(ref *managedApp) *runner.App {
+func retireManagedApp(ref *managedApp) *apppkg.App {
 	if ref == nil || ref.closed {
 		return nil
 	}
@@ -43,7 +44,7 @@ func retireManagedApp(ref *managedApp) *runner.App {
 	return ref.app
 }
 
-func (s *Service) acquireApp() (*runner.App, func()) {
+func (s *Service) acquireApp() (*apppkg.App, func()) {
 	if s == nil {
 		return nil, func() {}
 	}
@@ -60,7 +61,7 @@ func (s *Service) acquireApp() (*runner.App, func()) {
 	var once sync.Once
 	return ref.app, func() {
 		once.Do(func() {
-			var closeApp *runner.App
+			var closeApp *apppkg.App
 			s.appMu.Lock()
 			ref.refs--
 			if ref.refs == 0 && ref.retired && !ref.closed {
@@ -75,7 +76,7 @@ func (s *Service) acquireApp() (*runner.App, func()) {
 	}
 }
 
-func (s *Service) swapApp(next *runner.App) {
+func (s *Service) swapApp(next *apppkg.App) {
 	if s == nil || next == nil {
 		return
 	}

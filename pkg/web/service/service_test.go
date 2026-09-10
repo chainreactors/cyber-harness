@@ -1,18 +1,19 @@
 package service
 
 import (
-	"connectrpc.com/connect"
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	"github.com/chainreactors/aiscan/pkg/runner"
-	types "github.com/chainreactors/aiscan/pkg/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
+
+	"connectrpc.com/connect"
+	aop "github.com/chainreactors/aiscan/aop"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	rpc "github.com/chainreactors/aiscan/pkg/rpc"
+	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
@@ -254,9 +255,9 @@ type recordingCloser struct {
 	done chan struct{}
 }
 
-func newRecordingApp() (*runner.App, <-chan struct{}) {
+func newRecordingApp() (*apppkg.App, <-chan struct{}) {
 	closer := &recordingCloser{done: make(chan struct{})}
-	return &runner.App{Engines: closer}, closer.done
+	return &apppkg.App{Engines: closer}, closer.done
 }
 
 func (c *recordingCloser) Close() {

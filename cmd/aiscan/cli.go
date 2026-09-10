@@ -16,6 +16,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -187,7 +188,7 @@ func aiscan() {
 			os.Exit(1)
 		}
 	case cfg.RunModeIOASpaces, cfg.RunModeIOAMessages, cfg.RunModeIOAContext, cfg.RunModeIOANodes:
-		if err := runner.RunIOAClientCommand(ctx, parsed.Mode, &option, parsed.IOAArgs, logger); err != nil {
+		if err := console.RunIOAClientCommand(ctx, parsed.Mode, &option, parsed.IOAArgs, logger); err != nil {
 			logger.Errorf("server command failed: %s", err)
 			os.Exit(1)
 		}

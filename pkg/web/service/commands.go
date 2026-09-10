@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -85,9 +84,20 @@ func (s *Service) SessionMenu(sessionID string) []*types.CommandSpec {
 		agentSpecs = agent.commandSpecs()
 	}
 	if len(agentSpecs) == 0 {
-		// Fall back to the static agent-scope menu when no agent is bound.
-		r := &tui.AgentConsole{}
-		agentSpecs = tui.WebMenuSpecs(r.StaticCommands())
+		// This is the web's offline menu, not an executable terminal console.
+		agentSpecs = []*types.CommandSpec{
+			{Name: "/help", Description: "查看命令面板"},
+			{Name: "/status", Description: "查看模型、渲染模式、Server 和 skills"},
+			{Name: "/clear", Description: "清空当前会话上下文"},
+			{Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)"},
+			{Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])"},
+			{Name: "/provider", Description: "查看/管理 LLM provider 配置"},
+			{Name: "/model", Description: "查看/切换当前 provider 的模型"},
+			{Name: "/spaces", Description: "List all spaces"},
+			{Name: "/messages", Description: "List start messages in a space"},
+			{Name: "/context", Description: "View message thread/context"},
+			{Name: "/nodes", Description: "List nodes (optionally scoped to a space)"},
+		}
 	}
 	return append(hubSpecs, agentSpecs...)
 }

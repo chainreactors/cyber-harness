@@ -8,6 +8,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -15,18 +16,12 @@ import (
 const DefaultWSPath = "/api/aop/node/ws"
 
 // agentEndpoint is the sole event ingress/egress point for a node connection.
-// Agent runtimes implement the optional control method as well; tool-only
-// nodes use the eventBusEndpoint adapter below. Keeping publication and
+// Tool-only nodes use the eventBusEndpoint adapter below. Keeping publication and
 // subscription on one object prevents a terminal event from being sent both
 // through the runtime bus and as a direct protocol reply.
 type agentEndpoint interface {
 	Subscribe(func(*aop.Event)) func()
 	EmitEvent(*aop.Event)
-}
-
-type agentControlEndpoint interface {
-	agentEndpoint
-	HandleEnvelope(context.Context, *aop.Envelope, func(*aop.Envelope)) bool
 }
 
 type eventBusEndpoint struct {
@@ -65,8 +60,9 @@ type connectionConfig struct {
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
 	JSONFrames bool
 	Registry   *commands.CommandRegistry
-	// Agent is the single owner of connection-side events. Implementations that
-	// also satisfy agentControlEndpoint handle core/command namespaces.
+	// Agent owns connection-side events. Control borrows the product runtime;
+	// nil denotes a tool-only node. No optional interface selects routing.
+	Control       *runtimepkg.AgentRuntime
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
 	Logger        telemetry.Logger

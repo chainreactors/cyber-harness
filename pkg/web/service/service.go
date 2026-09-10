@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -23,9 +23,9 @@ type PreparedConfig = managementapi.PreparedConfig
 
 type ServiceConfig struct {
 	Store         *SQLiteStore
-	App           *runner.App
+	App           *apppkg.App
 	ConfigStore   ConfigStore
-	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*runner.App, error)
+	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*apppkg.App, error)
 	AgentPool     *AgentPool
 	Artifacts     ArtifactIngestor
 	MaxConcurrent int
@@ -176,14 +176,15 @@ func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 func (s *Service) Status() *types.SystemStatus {
 	app, release := s.acquireApp()
+	provider, providerConfig := app.ProviderState()
 	status := &types.SystemStatus{
 		Version:      config.Version,
-		LlmAvailable: app != nil && app.Provider != nil,
+		LlmAvailable: provider != nil,
 	}
 	if app != nil {
-		status.LlmProvider = app.ProviderConfig.Provider
-		status.LlmModel = app.ProviderConfig.Model
-		status.LlmApiKeyConfigured = strings.TrimSpace(app.ProviderConfig.APIKey) != ""
+		status.LlmProvider = providerConfig.Provider
+		status.LlmModel = providerConfig.Model
+		status.LlmApiKeyConfigured = strings.TrimSpace(providerConfig.APIKey) != ""
 	}
 	release()
 	if response, err := s.api.Config.GetConfig(context.Background(), &types.GetConfigRequest{}); err == nil {

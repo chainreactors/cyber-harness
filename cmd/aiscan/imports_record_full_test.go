@@ -9,7 +9,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 )
 
 func TestRecordFullCapabilitySet(t *testing.T) {
@@ -20,8 +20,8 @@ func TestRecordFullCapabilitySet(t *testing.T) {
 }
 
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	app, err := runner.NewApp(context.Background(), runner.ApplicationConfig{
-		Tools:       runner.ToolConfig{BashTimeout: 1},
+	app, err := apppkg.New(context.Background(), apppkg.Config{
+		Tools:       apppkg.ToolConfig{BashTimeout: 1},
 		Logger:      telemetry.NopLogger(),
 		SkipEngines: true,
 	})

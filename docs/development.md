@@ -559,20 +559,8 @@ agent_background: true
 完成后调用 finish 工具报告发现。
 ```
 
-Agent 类型 Skill 通过 `skills.Store.AgentTypes()` 收集，注入到 `SubAgentTool` 中：
-
-```go
-// pkg/runner/runner.go
-subAgentTool := agent.NewSubAgentTool(parentAgent, ib, func(name string) (agent.AgentType, error) {
-    s, ok := rt.App.Skills.ByName(name)
-    if !ok || !s.Agent { return error }
-    return agent.AgentType{
-        FormattedPrompt: rt.App.Skills.FormatInvocation(s, ""),
-        Model:           s.AgentModel,
-        Background:      s.AgentBackground,
-    }
-})
-```
+Agent 类型 Skill 的解析与装配位于 `pkg/runtime/runner.go`，使用 App 持有的
+`skills.Store`。`pkg/runner` 负责入口组合；此处不再维护另一份构造示例，具体签名以实现为准。
 
 ### 3.5 Skill 引用机制
 

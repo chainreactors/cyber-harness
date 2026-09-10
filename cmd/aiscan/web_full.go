@@ -20,6 +20,7 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -54,7 +55,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("init aiscan: %s", err)
 	}
 
-	if application.Provider == nil {
+	if provider, _ := application.ProviderState(); provider == nil {
 		logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in aiscan.yaml or env"))
 	}
 
@@ -69,7 +70,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		AppFactory: func(ctx context.Context, prepared *webservice.PreparedConfig) (*runner.App, error) {
+		AppFactory: func(ctx context.Context, prepared *webservice.PreparedConfig) (*apppkg.App, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -80,13 +81,13 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			}
 			// The candidate app runs exactly the proto config being committed —
 			// no second parse of the staged YAML through cfg.Option.
-			appCfg := runner.AppConfigFromDistribute(prepared.Config, runner.RuntimeFeatures{
+			appCfg := apppkg.AppConfigFromDistribute(prepared.Config, apppkg.RuntimeFeatures{
 				ProviderEnabled:  true,
 				ProviderOptional: true,
 				ToolsEnabled:     true,
 				AIEnabled:        true,
 			}, logger)
-			appCfg = runner.MergeOptionExtras(appCfg, &candidateOption)
+			appCfg = apppkg.MergeOptionExtras(appCfg, &candidateOption)
 			candidate, err := initWebAppFromConfig(ctx, appCfg)
 			if err != nil {
 				return nil, err
@@ -191,7 +192,7 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	return option, nil
 }
 
-func wireWebApp(application *runner.App, ingestor webservice.ArtifactIngestor) {
+func wireWebApp(application *apppkg.App, ingestor webservice.ArtifactIngestor) {
 	if application == nil || ingestor == nil || application.EventBus == nil {
 		return
 	}
@@ -239,12 +240,12 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*runner.App, error) {
+func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*apppkg.App, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := runner.AppConfig(&option, runner.RuntimeFeatures{
+	appCfg := apppkg.AppConfig(&option, apppkg.RuntimeFeatures{
 		ProviderEnabled:  true,
 		ProviderOptional: true,
 		ToolsEnabled:     true,
@@ -253,11 +254,11 @@ func initWebApp(ctx context.Context, baseOption *cfg.Option, logger telemetry.Lo
 	return initWebAppFromConfig(ctx, appCfg)
 }
 
-func initWebAppFromConfig(ctx context.Context, appCfg runner.ApplicationConfig) (*runner.App, error) {
+func initWebAppFromConfig(ctx context.Context, appCfg apppkg.Config) (*apppkg.App, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
-	app, err := runner.NewApp(ctx, appCfg)
+	app, err := apppkg.New(ctx, appCfg)
 	if err != nil {
 		return nil, err
 	}

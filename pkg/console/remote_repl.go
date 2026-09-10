@@ -1,0 +1,90 @@
+package console
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/pkg/commands"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	"github.com/chainreactors/aiscan/pkg/tui"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
+	"github.com/chainreactors/utils/pty"
+)
+
+const MainREPLName = "main-repl"
+
+// REPL owns the console task's cancellation and completion. Its Runtime and
+// Bash manager are borrowed; neither is closed when the console detaches.
+type REPL struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func StartPersistent(rt *runtimepkg.AgentRuntime, option *cfg.Option) (*REPL, error) {
+	if rt == nil || rt.App() == nil {
+		return nil, fmt.Errorf("main repl requires a runtime")
+	}
+	manager := bashManager(rt.App().Commands)
+	if manager == nil {
+		return nil, fmt.Errorf("pty manager unavailable")
+	}
+	ctx, cancel := context.WithCancel(rt.Context())
+	r := &REPL{cancel: cancel, done: make(chan struct{})}
+	session, err := rt.OpenSession(ctx, runtimepkg.SessionOptions{ID: MainREPLName})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if option == nil {
+		option = &cfg.Option{}
+	}
+	control := rlterm.NewControl(true, 80, 24)
+	info, err := manager.CreateInteractiveFuncWithOptions(ctx, MainREPLName, "aiscan repl", pty.InteractiveOptions{
+		Timeout: 0, StripANSI: false, Resize: control.SetSize,
+	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
+		defer close(r.done)
+		defer rt.CloseSession(context.Background(), MainREPLName, runtimepkg.SessionCloseCompleted)
+		for {
+			err := tui.RunRemoteAgentConsoleWithControl(replCtx, option, consoleAppInfoForSession(rt, session), session.Agent(), input, output, control, rt.Subscribe)
+			if replCtx.Err() != nil {
+				return replCtx.Err()
+			}
+			if err != nil {
+				return err
+			}
+		}
+	})
+	if err != nil {
+		cancel()
+		_ = rt.CloseSession(context.Background(), MainREPLName, runtimepkg.SessionCloseError)
+		return nil, err
+	}
+	manager.SetKind(info.ID, "repl")
+	return r, nil
+}
+
+func (r *REPL) Close() {
+	if r == nil {
+		return
+	}
+	r.cancel()
+	<-r.done
+}
+
+func bashManager(reg *commands.CommandRegistry) *tmuxpkg.Manager {
+	if reg == nil {
+		return nil
+	}
+	tool, ok := reg.GetTool("bash")
+	if !ok {
+		return nil
+	}
+	bash, ok := tool.(*commands.BashTool)
+	if !ok {
+		return nil
+	}
+	return bash.Manager()
+}
