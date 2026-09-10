@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -102,7 +101,7 @@ func (e *Engine) Init() error {
 		Set("disable-notifications").
 		Set("mute-audio").
 		Set("window-size", "1920,1080")
-	binary, err := browserutil.Discover()
+	binary, err := Discover()
 	if err != nil {
 		return fmt.Errorf("headless: browser discovery failed: %w", err)
 	}

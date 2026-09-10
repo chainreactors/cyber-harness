@@ -287,6 +287,17 @@ Factory 追加注册，Command/Tool 同名时覆盖；这些已有行为本次�
 
 ## 7. 代码导航
 
+仓库级架构守卫和跨包系统场景统一放在顶层 `harness/`，由 `make harness`
+或 `go test ./harness/...` 驱动。当前包括架构约束与真实子进程的 AOP Stdio
+往返和退出验证；完整产品流程仍需相应系统场景覆盖。详见 [Harness 说明](../harness/README.md)。
+
+LLM 连通性检查与模型列表查询属于 `agent/provider` 的共享能力，由 App、Console
+和 Web 复用，不再单设 `agent/probe` 包。
+
+`pkg/headless` 统一承载浏览器发现与执行能力。`discovery.go` 不受 `full` 标签
+限制，供 Playwright、Katana 和引擎共用；生命周期、页面动作与模板执行文件
+保留 `full` 标签。标准构建只包含浏览器发现，完整构建同时提供执行引擎。
+
 | 关注点 | 实现位置 |
 | --- | --- |
 | PiAgent API 与状态 | `agent/agent.go`、`agent/types.go` |

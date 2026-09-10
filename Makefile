@@ -51,7 +51,7 @@ RECORD_EXTRA_LDFLAGS :=
 endif
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean
+.PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean harness
 
 help:
 	@echo "AIScan build targets:"
@@ -65,12 +65,16 @@ help:
 	@echo "  make record-native-source  Build the recorder SDK from pinned sources"
 	@echo "  make record-native-package Package a source-built recorder SDK"
 	@echo "  make proto-gen        Regenerate all AOP and AIScan protobuf bindings"
+	@echo "  make harness          Run repository guards and system scenarios"
 	@echo "  make all              Build the standard and full editions"
 	@echo ""
 	@echo "Variables:"
 	@echo "  BIN_DIR=path          Binary output directory (default: $(BIN_DIR))"
 	@echo "  WEB_ADDR=host:port    Web listen address (default: $(WEB_ADDR))"
 	@echo "  WEB_TOKEN=token       Optional fixed Web access token"
+
+harness:
+	$(GO) test -count=1 ./harness/...
 
 prepare:
 	mkdir -p "$(BIN_DIR)"

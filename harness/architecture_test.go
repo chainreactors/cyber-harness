@@ -1,4 +1,4 @@
-package repositorytest
+package harness
 
 import (
 	"bytes"
@@ -296,7 +296,6 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 		"pkg/app/ownership_test.go":  true,
 		"pkg/host/example_test.go":   true,
 		"pkg/host/lifecycle_test.go": true,
-		"pkg/host/process_test.go":   true,
 		"pkg/runtime/stdio_test.go":  true,
 	}
 	allowedSuffixes := map[string]bool{
@@ -320,7 +319,8 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 		if !strings.HasSuffix(path, "_test.go") {
 			continue
 		}
-		if standalone[filepath.ToSlash(rel)] {
+		// Repository scenarios span production files and have no matching source.
+		if strings.HasPrefix(rel, "harness/") || standalone[filepath.ToSlash(rel)] {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(path), "_test.go")
@@ -776,6 +776,14 @@ func trackedFiles(t *testing.T, root string) []string {
 	if err != nil {
 		t.Skipf("repository governance requires a Git checkout: %v", err)
 	}
+	// Include new harness scenarios before staging, without scanning unrelated
+	// untracked workspace artifacts elsewhere in the repository.
+	cmd = exec.Command("git", "-C", root, "ls-files", "-z", "--others", "--exclude-standard", "--", "harness/")
+	added, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list new harness files: %v", err)
+	}
+	data = append(data, added...)
 	var files []string
 	for _, raw := range bytes.Split(data, []byte{0}) {
 		if len(raw) == 0 {

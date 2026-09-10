@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	agentprobe "github.com/chainreactors/aiscan/agent/probe"
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	configpkg "github.com/chainreactors/aiscan/core/config"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
@@ -78,7 +77,7 @@ func (c *Config) ActivateProfile(ctx context.Context, request *types.ActivatePro
 }
 
 func (c *Config) TestLLM(ctx context.Context, request *types.LLMProbeRequest) (*types.LLMProbeResult, error) {
-	result, err := agentprobe.TestLLM(ctx, request, c.storedLLMAPIKey(ctx, request.GetProfileId()))
+	result, err := agentprovider.TestLLM(ctx, request, c.storedLLMAPIKey(ctx, request.GetProfileId()))
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
@@ -86,7 +85,7 @@ func (c *Config) TestLLM(ctx context.Context, request *types.LLMProbeRequest) (*
 }
 
 func (c *Config) ListModels(ctx context.Context, request *types.LLMProbeRequest) (*types.ListModelsResult, error) {
-	result, err := agentprobe.ListLLMModels(ctx, request, c.storedLLMAPIKey(ctx, request.GetProfileId()))
+	result, err := agentprovider.ListLLMModels(ctx, request, c.storedLLMAPIKey(ctx, request.GetProfileId()))
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}

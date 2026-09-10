@@ -1,4 +1,4 @@
-package host
+package harness
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/pkg/host"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -24,8 +25,8 @@ func TestStdioChildProcess(t *testing.T) {
 			return send(aop.Reply(request.Id, message))
 		})
 		if err == nil {
-			h := New(context.Background(), mux)
-			err = h.Serve(NewStdio(os.Stdin, os.Stdout))
+			h := host.New(context.Background(), mux)
+			err = h.Serve(host.NewStdio(os.Stdin, os.Stdout))
 			h.Close()
 		}
 		if err != nil {
@@ -43,7 +44,7 @@ func TestStdioChildProcess(t *testing.T) {
 	cmd := exec.CommandContext(ctx, bin, "-test.run=^TestStdioChildProcess$")
 	cmd.Env = append(os.Environ(), helper+"=1")
 	var input, output, stderr bytes.Buffer
-	writer := NewStdio(bytes.NewReader(nil), &input)
+	writer := host.NewStdio(bytes.NewReader(nil), &input)
 	for _, id := range []string{"first", "second"} {
 		if err := writer.Send(aop.MustWrap(id, "", aop.NewProtocolError("ECHO", id))); err != nil {
 			t.Fatal(err)
@@ -53,7 +54,7 @@ func TestStdioChildProcess(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("child: %v, stderr: %s", err, stderr.String())
 	}
-	reader := NewStdio(&output, io.Discard)
+	reader := host.NewStdio(&output, io.Discard)
 	for _, id := range []string{"first", "second"} {
 		response, err := reader.Recv()
 		if err != nil {
