@@ -274,6 +274,16 @@ func TestWebManagementAPIBoundary(t *testing.T) {
 
 func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	root := repositoryRoot(t)
+	// Cross-cutting ownership and lifecycle tests intentionally do not have a
+	// one-to-one production source file. They exercise a package boundary or a
+	// resource lifetime assembled from several files.
+	standalone := map[string]bool{
+		"pkg/app/ownership_test.go":  true,
+		"pkg/host/example_test.go":   true,
+		"pkg/host/lifecycle_test.go": true,
+		"pkg/host/process_test.go":   true,
+		"pkg/runtime/stdio_test.go":  true,
+	}
 	allowedSuffixes := map[string]bool{
 		"default": true, "e2e": true, "full": true, "integration": true,
 		"native": true, "unix": true, "windows": true,
@@ -293,6 +303,9 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	for _, rel := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		if !strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		if standalone[filepath.ToSlash(rel)] {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(path), "_test.go")
