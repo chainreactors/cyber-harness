@@ -29,6 +29,9 @@ const (
 type Descriptor struct {
 	ID   ID
 	Kind Kind
+	// DependsOn names capabilities that must be active before this one.
+	// It is a lifecycle edge, not a service lookup mechanism.
+	DependsOn []ID
 	// Group is the command-factory group; empty means the ID is the group.
 	Group string
 	// CLIName is the top-level command name; empty means not CLI-facing.
