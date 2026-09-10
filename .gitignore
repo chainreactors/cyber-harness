@@ -61,3 +61,4 @@ web/static-stale/
 /scripts/
 /scan_report.md
 aiscan.yaml
+.runlogs/harness/

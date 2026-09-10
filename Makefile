@@ -51,7 +51,7 @@ RECORD_EXTRA_LDFLAGS :=
 endif
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean harness
+.PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean harness harness-llm check-architecture
 
 help:
 	@echo "AIScan build targets:"
@@ -65,7 +65,9 @@ help:
 	@echo "  make record-native-source  Build the recorder SDK from pinned sources"
 	@echo "  make record-native-package Package a source-built recorder SDK"
 	@echo "  make proto-gen        Regenerate all AOP and AIScan protobuf bindings"
-	@echo "  make harness          Run repository guards and system scenarios"
+	@echo "  make harness          Run user scenarios against the real product process"
+	@echo "  make harness-llm      Run real LLM scenarios (requires explicit credentials)"
+	@echo "  make check-architecture  Run static repository and dependency guards"
 	@echo "  make all              Build the standard and full editions"
 	@echo ""
 	@echo "Variables:"
@@ -74,7 +76,21 @@ help:
 	@echo "  WEB_TOKEN=token       Optional fixed Web access token"
 
 harness:
-	$(GO) test -count=1 ./harness/...
+	$(GO) test -count=1 -v -timeout 5m ./harness/...
+
+harness-llm:
+	$(GO) test -tags live_llm -run '^TestLiveLLM' -count=1 -v -timeout 8m ./harness/...
+
+.PHONY: harness-llm-ioa
+harness-llm-ioa:
+	$(GO) test -tags live_llm -run '^TestLiveLLMMultiAgentIOAThreadAndIsolation$$' -count=1 -v -timeout 5m ./harness/...
+
+.PHONY: harness-llm-subagent
+harness-llm-subagent:
+	$(GO) test -tags live_llm -run '^TestLiveLLMParentDelegatesIOASiblings$$' -count=1 -v -timeout 5m ./harness/...
+
+check-architecture:
+	$(GO) test -count=1 . ./core/deps
 
 prepare:
 	mkdir -p "$(BIN_DIR)"

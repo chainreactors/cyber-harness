@@ -1,3 +1,4 @@
-// Package harness contains repository-wide architecture guards and system scenarios.
-// Scenarios drive public boundaries and own their fixtures and process lifetimes.
+// Package harness verifies user workflows against a freshly built product process.
+// Scenarios use public HTTP and stdio interfaces, isolated workspaces and real
+// persistence. Live IOA scenarios use independent model operators and processes.
 package harness
