@@ -74,8 +74,8 @@ jobs:
             exit 1
           fi
 
-      - name: Run repository harness and dependency guards
-        run: go test -count=1 ./harness/... ./core/deps
+      - name: Check repository architecture and dependencies
+        run: go test -count=1 . ./core/deps
 
       - name: Ensure the standard CLI does not depend on libcstx
         run: |
@@ -137,10 +137,12 @@ jobs:
           if [[ "${ACT:-}" == "true" ]]; then
             test_args=(-timeout 10m -p 4)
           fi
+          package_list="$(go list ./...)"
+          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/aiscan/harness\(/\|$\)')
           go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
-            ./...
+            "${packages[@]}"
 
       - name: Enforce coverage floor
         run: |
@@ -183,6 +185,111 @@ jobs:
             coverage.out
             aop/coverage.out
           retention-days: 14
+
+  harness-offline:
+    name: Harness without LLM (${{ matrix.os }}, seed ${{ matrix.seed }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+        seed: [101, 20260910]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      AISCAN_HARNESS_SEED: ${{ matrix.seed }}
+      AISCAN_HARNESS_STEPS: "48"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: ${{ env.ACT != 'true' }}
+      - name: Set up Windows native compiler
+        if: runner.os == 'Windows'
+        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+      - name: Run real product scenarios without model credentials
+        env:
+          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness
+        run: |
+          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
+          set -o pipefail
+          go test -race -count=1 -shuffle=on -json -timeout 8m ./harness/... \
+            | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
+      - name: Upload harness evidence
+        if: ${{ always() && env.ACT != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: harness-offline-${{ matrix.os }}-${{ matrix.seed }}
+          path: ${{ runner.temp }}/harness
+          retention-days: 14
+
+  harness-live:
+    name: Harness with real LLM
+    # Never expose model credentials to pull-request code, including fork PRs.
+    if: github.event_name != 'pull_request'
+    needs: harness-offline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: ${{ env.ACT != 'true' }}
+      - name: Run live model requests, recovery, IOA and subagent delegation tasks
+        env:
+          AISCAN_HARNESS_LLM_API_KEY: ${{ secrets.AISCAN_HARNESS_LLM_API_KEY }}
+          AISCAN_HARNESS_LLM_BASE_URL: ${{ vars.AISCAN_HARNESS_LLM_BASE_URL }}
+          AISCAN_HARNESS_LLM_MODEL: ${{ vars.AISCAN_HARNESS_LLM_MODEL }}
+          AISCAN_HARNESS_LLM_PROVIDER: ${{ vars.AISCAN_HARNESS_LLM_PROVIDER }}
+          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness-live
+        run: |
+          for name in AISCAN_HARNESS_LLM_API_KEY AISCAN_HARNESS_LLM_BASE_URL AISCAN_HARNESS_LLM_MODEL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required live harness setting: $name"
+              exit 1
+            fi
+          done
+          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
+          set -o pipefail
+          go test -race -tags live_llm -run '^TestLiveLLM' -count=1 -shuffle=on \
+            -json -timeout 8m ./harness/... | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
+      - name: Upload live harness evidence
+        if: ${{ always() && env.ACT != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: harness-live-llm
+          path: ${{ runner.temp }}/harness-live
+          retention-days: 14
+
+  harness-gate:
+    name: Harness acceptance
+    if: always()
+    needs: [harness-offline, harness-live]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every selected harness suite to pass
+        env:
+          OFFLINE_RESULT: ${{ needs.harness-offline.result }}
+          LIVE_RESULT: ${{ needs.harness-live.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          [[ "$OFFLINE_RESULT" == success ]] || exit 1
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            [[ "$LIVE_RESULT" == skipped ]] || exit 1
+            echo "Offline harness passed; real LLM verification runs on master pushes and manual dispatches."
+          else
+            [[ "$LIVE_RESULT" == success ]] || exit 1
+          fi
 
   windows-test:
     runs-on: windows-2022
@@ -388,7 +495,7 @@ jobs:
         run: go test -race -count=100 -timeout 2m ./pkg/web
 
   release-verify:
-    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
+    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e, harness-gate]
     uses: ./.github/workflows/release-build.yml
     with:
       tag: v0.0.0-ci.${{ github.run_id }}

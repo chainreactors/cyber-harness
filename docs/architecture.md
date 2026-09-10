@@ -287,9 +287,10 @@ Factory 追加注册，Command/Tool 同名时覆盖；这些已有行为本次�
 
 ## 7. 代码导航
 
-仓库级架构守卫和跨包系统场景统一放在顶层 `harness/`，由 `make harness`
-或 `go test ./harness/...` 驱动。当前包括架构约束与真实子进程的 AOP Stdio
-往返和退出验证；完整产品流程仍需相应系统场景覆盖。详见 [Harness 说明](../harness/README.md)。
+顶层 `harness/` 通过当前源码构建的产品进程验收用户工作流，由 `make harness`
+驱动，覆盖配置保存、并发客户端、异常退出恢复和用户退出确认。静态架构守卫位于
+根目录 `architecture_test.go`，由 `make check-architecture` 单独运行；协议回显
+属于 Host 包测试。详见 [Harness 说明](../harness/README.md)。
 
 LLM 连通性检查与模型列表查询属于 `agent/provider` 的共享能力，由 App、Console
 和 Web 复用，不再单设 `agent/probe` 包。

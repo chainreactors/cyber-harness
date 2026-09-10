@@ -1,4 +1,4 @@
-package harness
+package aiscan_test
 
 import (
 	"bytes"
@@ -293,9 +293,11 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	// one-to-one production source file. They exercise a package boundary or a
 	// resource lifetime assembled from several files.
 	standalone := map[string]bool{
+		"architecture_test.go":       true,
 		"pkg/app/ownership_test.go":  true,
 		"pkg/host/example_test.go":   true,
 		"pkg/host/lifecycle_test.go": true,
+		"pkg/host/process_test.go":   true,
 		"pkg/runtime/stdio_test.go":  true,
 	}
 	allowedSuffixes := map[string]bool{
@@ -778,7 +780,7 @@ func trackedFiles(t *testing.T, root string) []string {
 	}
 	// Include new harness scenarios before staging, without scanning unrelated
 	// untracked workspace artifacts elsewhere in the repository.
-	cmd = exec.Command("git", "-C", root, "ls-files", "-z", "--others", "--exclude-standard", "--", "harness/")
+	cmd = exec.Command("git", "-C", root, "ls-files", "-z", "--others", "--exclude-standard", "--", "harness/", "architecture_test.go")
 	added, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("list new harness files: %v", err)

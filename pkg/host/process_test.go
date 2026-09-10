@@ -1,4 +1,4 @@
-package harness
+package host_test
 
 import (
 	"bytes"
