@@ -52,9 +52,66 @@ func TestRunnerDoesNotDependOnWeb(t *testing.T) {
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/rpc")
 }
 
+func TestToolsDoNotDependOnHostsOrPresentation(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, forbidden := range []string{"pkg/app", "pkg/runtime", "pkg/console", "pkg/host", "pkg/runner", "pkg/tui", "pkg/web", "pkg/node", "cmd"} {
+		assertNoImportPrefix(t, filepath.Join(root, "tools"), modulePath+"/"+forbidden)
+	}
+}
+
+func TestAppOwnsResourcesWithoutRuntimeOrPresentation(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, forbidden := range []string{"pkg/runtime", "pkg/console", "pkg/host", "pkg/runner", "pkg/tui", "pkg/web", "pkg/node", "cmd"} {
+		assertNoImportPrefix(t, filepath.Join(root, "pkg", "app"), modulePath+"/"+forbidden)
+	}
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "web", "api"), modulePath+"/pkg/runner")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "web", "service"), modulePath+"/pkg/runner")
+}
+
+func TestCommunicationHostOnlyDependsOnProtocol(t *testing.T) {
+	root := repositoryRoot(t)
+	dir := filepath.Join(root, "pkg", "host")
+	assertNoFirstPartyImports(t, dir, map[string]bool{
+		"agent": true, "core": true, "pkg": true, "tools": true, "cmd": true, "skills": true,
+	})
+}
+
+func TestTUIDoesNotDependOnRunner(t *testing.T) {
+	assertNoImportPrefix(t, filepath.Join(repositoryRoot(t), "pkg", "tui"), modulePath+"/pkg/runner")
+}
+
+func TestRuntimeAndReplayDoNotImportPresentation(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
+		assertNoImportPrefix(t, filepath.Join(root, "pkg", "runtime"), modulePath+"/"+forbidden)
+	}
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/tui")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "console"), modulePath+"/pkg/runner")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "node"), modulePath+"/pkg/runner")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "web"), modulePath+"/pkg/tui")
+}
+
+func TestRuntimeDependencyClosureIsHeadless(t *testing.T) {
+	root := repositoryRoot(t)
+	cmd := exec.Command("go", "list", "-deps", "./pkg/runtime")
+	cmd.Dir = root
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime dependencies: %v\n%s", err, data)
+	}
+	for _, dep := range strings.Fields(string(data)) {
+		for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
+			prefix := modulePath + "/" + forbidden
+			if dep == prefix || strings.HasPrefix(dep, prefix+"/") {
+				t.Errorf("runtime transitively depends on %s", dep)
+			}
+		}
+	}
+}
+
 func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("cmd", "runner")} {
+	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("pkg", "runtime"), filepath.Join("pkg", "console"), filepath.Join("cmd", "runner")} {
 		dir := filepath.Join(root, rel)
 		entries, err := os.ReadDir(dir)
 		if err != nil {

@@ -609,17 +609,6 @@ func (r *AgentConsole) allCommands() []Command {
 	return cmds
 }
 
-// StaticCommands returns the non-skill REPL commands (builtin + provider + IOA).
-// Safe to call on a zero-value receiver — the returned Command.Run closures are
-// unusable, but the metadata (Name, Aliases, Description, Hidden) is correct.
-func (r *AgentConsole) StaticCommands() []Command {
-	var cmds []Command
-	cmds = append(cmds, r.builtinCommands()...)
-	cmds = append(cmds, r.providerCommands()...)
-	cmds = append(cmds, r.ioaCommands()...)
-	return cmds
-}
-
 func (r *AgentConsole) builtinCommands() []Command {
 	return []Command{
 		{

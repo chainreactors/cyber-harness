@@ -25,8 +25,9 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
@@ -164,7 +165,7 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 	handleAgentCoreMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(), Logger: telemetry.NopLogger()},
+		nil,
 		&aop.Envelope{Id: "cancel-1"},
 		&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}},
 		func(string, protobuf.Message) { t.Error("cancel must not answer on the wire") },
@@ -185,7 +186,7 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app, err := runner.NewApp(ctx, runner.ApplicationConfig{
+	app, err := apppkg.New(ctx, apppkg.Config{
 		SkipEngines: true,
 		Logger:      telemetry.NopLogger(),
 	})
@@ -193,7 +194,7 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app.Close()
-	rt, err := runner.NewAgentRuntime(ctx, &cfg.Option{}, telemetry.NopLogger(), &runner.RuntimeConfig{
+	rt, err := runtimepkg.New(ctx, &cfg.Option{}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{
 		ExistingApp:      app,
 		ProviderOptional: true,
 	})

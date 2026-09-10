@@ -12,8 +12,8 @@ import (
 	"time"
 
 	configpkg "github.com/chainreactors/aiscan/core/config"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/probe"
-	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -246,9 +246,9 @@ type recordingCloser struct {
 	done chan struct{}
 }
 
-func newRecordingApp() (*runner.App, <-chan struct{}) {
+func newRecordingApp() (*apppkg.App, <-chan struct{}) {
 	closer := &recordingCloser{done: make(chan struct{})}
-	return &runner.App{Engines: closer}, closer.done
+	return &apppkg.App{Engines: closer}, closer.done
 }
 
 func (c *recordingCloser) Close() {
@@ -266,13 +266,13 @@ func TestSaveConfigBuildFailureKeepsCommittedConfigAndSkipsApply(t *testing.T) {
 	store := &transactionalConfigStore{cfg: configForModel("old-model")}
 	config := NewConfig(ConfigOptions{
 		Store: store,
-		Build: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
+		Build: func(_ context.Context, prepared *PreparedConfig) (*apppkg.App, error) {
 			if got := activeModel(prepared.Config); got != "new-model" {
 				t.Fatalf("candidate model = %q", got)
 			}
 			return nil, errors.New("candidate build failed")
 		},
-		Apply: func(*runner.App) { t.Fatal("apply called after build failure") },
+		Apply: func(*apppkg.App) { t.Fatal("apply called after build failure") },
 	})
 
 	if _, err := config.Save(context.Background(), configForModel("new-model")); err == nil {
@@ -295,10 +295,10 @@ func TestSaveConfigCommitFailureClosesCandidate(t *testing.T) {
 	candidateApp, candidateClosed := newRecordingApp()
 	config := NewConfig(ConfigOptions{
 		Store: store,
-		Build: func(context.Context, *PreparedConfig) (*runner.App, error) {
+		Build: func(context.Context, *PreparedConfig) (*apppkg.App, error) {
 			return candidateApp, nil
 		},
-		Apply: func(*runner.App) { t.Fatal("apply called after commit failure") },
+		Apply: func(*apppkg.App) { t.Fatal("apply called after commit failure") },
 	})
 
 	if _, err := config.Save(context.Background(), configForModel("new-model")); err == nil {
@@ -317,7 +317,7 @@ func TestSaveConfigSerializesConcurrentCandidates(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	config := NewConfig(ConfigOptions{
 		Store: store,
-		Build: func(_ context.Context, prepared *PreparedConfig) (*runner.App, error) {
+		Build: func(_ context.Context, prepared *PreparedConfig) (*apppkg.App, error) {
 			model := activeModel(prepared.Config)
 			entered <- model
 			if model == "first-model" {

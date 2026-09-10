@@ -15,8 +15,8 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/output"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"

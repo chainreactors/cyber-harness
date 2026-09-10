@@ -13,7 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	protobuf "google.golang.org/protobuf/proto"
@@ -67,7 +67,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	runnerRuntime := runner.DefaultRuntimeInfo()
+	runnerRuntime := runtimepkg.DefaultRuntimeInfo()
 	instanceID := rand.Text()
 	home, _ := os.UserHomeDir()
 	runnerRuntime.Metadata, _ = structpb.NewStruct(map[string]any{
@@ -82,7 +82,7 @@ func RunToolNode(ctx context.Context, cfg ToolNodeConfig) error {
 	var menu func() []*types.CommandSpec
 	if !cfg.DisableCommandCatalog {
 		skillStore, _ := skills.LoadEmbeddedStore()
-		menu = func() []*types.CommandSpec { return runner.RegistryCommandCatalog(cfg.Registry, skillStore) }
+		menu = func() []*types.CommandSpec { return runtimepkg.RegistryCommandCatalog(cfg.Registry, skillStore) }
 	}
 	return connect(ctx, connectionConfig{
 		ServerURL:       cfg.ServerURL,

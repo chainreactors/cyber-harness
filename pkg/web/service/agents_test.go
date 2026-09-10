@@ -1777,3 +1777,18 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 		t.Fatal("run did not converge on the reconnected agent")
 	}
 }
+
+func (p *AgentPool) handleAgentEnvelope(agent *remoteAgent, envelope *aop.Envelope) {
+	mux, err := p.newAgentNamespaceMux(agent)
+	if err != nil {
+		return
+	}
+	p.dispatchAgentEnvelope(context.Background(), mux, envelope)
+}
+
+func (p *AgentPool) dispatchAgentEnvelope(ctx context.Context, mux *aop.NamespaceMux, envelope *aop.Envelope) {
+	if mux == nil || envelope == nil {
+		return
+	}
+	_, _ = mux.Dispatch(ctx, envelope, func(*aop.Envelope) error { return nil })
+}

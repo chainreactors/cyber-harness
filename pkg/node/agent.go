@@ -12,7 +12,9 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/pkg/console"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -30,23 +32,30 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	appConfig := runner.AppConfig(option, runner.RuntimeFeatures{
+	appConfig := apppkg.AppConfig(option, apppkg.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
 	}, logger)
 	appConfig.IOA = remoteIOAConfig(option)
-	application, err := runner.NewApp(ctx, appConfig)
+	application, err := apppkg.New(ctx, appConfig)
 	if err != nil {
 		return err
 	}
 	defer application.Close()
-	runner.ApplyResolvedProviderOptions(option, application.ProviderConfig)
-	rt, err := runner.NewAgentRuntime(ctx, option, logger, &runner.RuntimeConfig{
-		ExistingApp: application, REPLMode: runner.REPLPersistent,
+	_, providerConfig := application.ProviderState()
+	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
+	option.SaveSession = true
+	rt, err := runtimepkg.New(ctx, option, logger, &runtimepkg.RuntimeConfig{
+		ExistingApp: application, PrimarySessionID: console.MainREPLName,
 	})
 	if err != nil {
 		return err
 	}
 	defer rt.Close()
+	repl, err := console.StartPersistent(rt, option)
+	if err != nil {
+		return err
+	}
+	defer repl.Close()
 
 	chatHandler := &chatAgentHandler{
 		rt:     rt,
@@ -65,22 +74,23 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 		connection := connectionConfig{
 			ServerURL: option.ServerURL,
-			Name:      runner.ResolveIOANodeName(option),
+			Name:      runtimepkg.ResolveIOANodeName(option),
 			Registry:  application.Commands,
 			Agent:     rt,
+			Control:   rt,
 			Progress:  application.Progress,
 			Logger:    logger,
 			Chat:      chatHandler,
 			NodeID:    nodeID,
-			Runtime:   runner.DefaultRuntimeInfo(),
-			Status:    func() *aop.AgentStatus { return runner.AgentStatus(option, application) },
-			Menu:      func() []*types.CommandSpec { return runner.CommandCatalog(application) },
+			Runtime:   runtimepkg.DefaultRuntimeInfo(),
+			Status:    func() *aop.AgentStatus { return runtimepkg.AgentStatus(option, application) },
+			Menu:      func() []*types.CommandSpec { return runtimepkg.CommandCatalog(application) },
 			PTYRouter: func() (*terminal.Router, error) { return NewPTYRouter(application.Commands), nil },
 		}
 		_ = connect(ctx, connection)
 	}()
 
-	if application.Provider == nil {
+	if provider, _ := application.ProviderState(); provider == nil {
 		select {
 		case <-chatHandler.ready:
 		case <-ctx.Done():
@@ -88,7 +98,7 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 			return nil
 		}
 	}
-	if application.Provider == nil {
+	if provider, _ := application.ProviderState(); provider == nil {
 		logger.Warnf("no LLM provider configured; remote REPL and PTY are available, autonomous agent loop is disabled")
 		<-ctx.Done()
 		<-connectionDone
@@ -106,15 +116,15 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return nil
 	}
 
-	_, err = rt.EnsureSession(runner.SessionOptions{ID: "startup"})
+	_, err = rt.EnsureSession(runtimepkg.SessionOptions{ID: "startup"})
 	if err != nil {
 		return err
 	}
-	run, err := rt.RunSession(ctx, "startup", runner.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
+	run, err := rt.RunSession(ctx, "startup", runtimepkg.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
 	if err == nil {
 		_, err = run.Wait()
 	}
-	_ = rt.CloseSession(context.Background(), "startup", runner.SessionCloseCompleted)
+	_ = rt.CloseSession(context.Background(), "startup", runtimepkg.SessionCloseCompleted)
 
 	<-connectionDone
 	return err
@@ -132,12 +142,12 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 
 // ---------------------------------------------------------------------------
 // chatAgentHandler implements the connection's upload and config-reload hooks.
-// AOP core/command messages are dispatched by rt.HandleEnvelope directly.
+// AOP core/command handlers are registered on the existing connection mux.
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
-	rt        *runner.AgentRuntime
-	app       *runner.App
+	rt        *runtimepkg.AgentRuntime
+	app       *apppkg.App
 	option    *cfg.Option
 	logger    telemetry.Logger
 	ready     chan struct{}
@@ -169,14 +179,14 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 			close(h.ready)
 		}
 	})
-	provider, model, err := runner.ReloadRuntimeConfig(config, h.rt, h.app, h.option, h.logger)
+	provider, model, err := runtimepkg.ReloadRuntimeConfig(config, h.rt, h.option, h.logger)
 	result := &types.ReloadResult{Ok: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}
 	result.Provider = provider.Name()
-	return result, runner.AgentStatus(h.option, h.app)
+	return result, runtimepkg.AgentStatus(h.option, h.app)
 }
 
 // ---------------------------------------------------------------------------
@@ -206,11 +216,11 @@ func webNodeID(option *cfg.Option) (string, error) {
 	return "", fmt.Errorf("node_id is required; set --node-id or --node-name")
 }
 
-func remoteIOAConfig(option *cfg.Option) *runner.IOAConfig {
+func remoteIOAConfig(option *cfg.Option) *apppkg.IOAConfig {
 	if option == nil || option.IOAURL == "" {
 		return nil
 	}
-	return &runner.IOAConfig{
+	return &apppkg.IOAConfig{
 		URL:           option.IOAURL,
 		NodeID:        option.IOANodeID,
 		NodeName:      option.IOANodeName,
