@@ -76,8 +76,18 @@ func TestCommunicationHostOnlyDependsOnProtocol(t *testing.T) {
 	})
 }
 
-func TestTUIDoesNotDependOnRunner(t *testing.T) {
-	assertNoImportPrefix(t, filepath.Join(repositoryRoot(t), "pkg", "tui"), modulePath+"/pkg/runner")
+func TestConsoleHasNoLegacyTUIBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, tree := range []string{"pkg", "cmd"} {
+		assertNoImportPrefix(t, filepath.Join(root, tree), modulePath+"/pkg/tui")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "pkg", "tui"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("legacy TUI package must be removed")
+	}
 }
 
 func TestRuntimeAndReplayDoNotImportPresentation(t *testing.T) {
@@ -126,6 +136,11 @@ func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if strings.HasPrefix(string(content), "//go:build ") {
+				// Terminal input has actual platform requirements; product
+				// modes must still share one Console implementation.
+				if rel == filepath.Join("pkg", "console") && (entry.Name() == "escape_unix.go" || entry.Name() == "escape_other.go") {
+					continue
+				}
 				t.Errorf("runner source must not use build tags: %s", filepath.Join(rel, entry.Name()))
 			}
 		}

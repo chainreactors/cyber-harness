@@ -15,15 +15,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ToolExecutor is the minimal surface a tool call dispatcher needs.
-// *commands.CommandRegistry implements it.
-type ToolExecutor interface {
-	ExecuteTool(context.Context, string, string) (*tool.Result, error)
-}
-
 // ExecuteToolRequest runs one canonical AOP tool call against the executor
 // and wraps the outcome as a ToolResult event correlated to operationID.
-func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor ToolExecutor, progressBus *eventbus.Bus[*toolpb.Progress]) (*aop.Event, error) {
+func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb.Call, executor *commands.CommandRegistry, progressBus *eventbus.Bus[*toolpb.Progress]) (*aop.Event, error) {
 	if request == nil || request.Call == nil || operationID == "" {
 		return nil, fmt.Errorf("tool call correlation is invalid")
 	}
@@ -65,12 +59,12 @@ func ExecuteToolRequest(ctx context.Context, operationID string, request *toolpb
 
 // executeCall runs the tool call. Tools with foreground capability publish
 // ephemeral progress while running; all other tools take the plain ExecuteTool path.
-func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall, progressBus *eventbus.Bus[*toolpb.Progress], callID string) (*tool.Result, error) {
+func executeCall(ctx context.Context, executor *commands.CommandRegistry, call *aop.ToolCall, progressBus *eventbus.Bus[*toolpb.Progress], callID string) (*tool.Result, error) {
 	arguments := call.GetArguments().GetData()
 	if len(arguments) == 0 {
 		arguments = []byte("{}")
 	}
-	if registry, ok := executor.(*commands.CommandRegistry); ok && call.Name == "bash" {
+	if call.Name == "bash" {
 		args, err := tool.ParseArgs[commands.BashArgs](string(arguments))
 		if err != nil {
 			return nil, err
@@ -84,7 +78,7 @@ func executeCall(ctx context.Context, executor ToolExecutor, call *aop.ToolCall,
 			options.Timeout = time.Duration(args.Timeout) * time.Second
 			options.TimeoutSet = true
 		}
-		result, err := registry.ExecuteBashForeground(ctx, args.Command, options)
+		result, err := executor.ExecuteBashForeground(ctx, args.Command, options)
 		progress.Flush()
 		return result, err
 	}

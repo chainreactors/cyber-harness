@@ -7,7 +7,6 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	ioaclient "github.com/chainreactors/ioa/client"
 )
 
@@ -27,13 +26,13 @@ func RunIOAClientCommand(ctx context.Context, mode cfg.RunMode, option *cfg.Opti
 	}
 	switch mode {
 	case cfg.RunModeIOASpaces:
-		return tui.RunIOASpaces(ctx, client, option, os.Stdout, os.Stderr)
+		return RunIOASpaces(ctx, client, option, os.Stdout, os.Stderr)
 	case cfg.RunModeIOAMessages:
-		return tui.RunIOAMessages(ctx, client, option, args, os.Stdout, os.Stderr)
+		return RunIOAMessages(ctx, client, option, args, os.Stdout, os.Stderr)
 	case cfg.RunModeIOAContext:
-		return tui.RunIOAContext(ctx, client, option, args, os.Stdout, os.Stderr)
+		return RunIOAContext(ctx, client, option, args, os.Stdout, os.Stderr)
 	case cfg.RunModeIOANodes:
-		return tui.RunIOANodes(ctx, client, option, args, os.Stdout, os.Stderr)
+		return RunIOANodes(ctx, client, option, args, os.Stdout, os.Stderr)
 	default:
 		return fmt.Errorf("unknown server mode: %s", mode)
 	}

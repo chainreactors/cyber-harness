@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"fmt"
@@ -97,21 +97,21 @@ type LiveView struct {
 	stop     chan struct{}
 	done     chan struct{}
 
-	sink func(string) // event-driven readline footer
+	bridge *readlineConsoleBridge // event-driven readline footer
 }
 
 func NewLiveView(w io.Writer, accent string) *LiveView {
 	return &LiveView{w: w, accent: accent}
 }
 
-// SetStatusSink renders the live line through an external inline-composer
+// setReadlineBridge renders the live line through an external inline-composer
 // footer instead of writing cursor-control sequences directly to the terminal.
-func (v *LiveView) SetStatusSink(sink func(string)) {
+func (v *LiveView) setReadlineBridge(bridge *readlineConsoleBridge) {
 	if v == nil {
 		return
 	}
 	v.mu.Lock()
-	v.sink = sink
+	v.bridge = bridge
 	v.mu.Unlock()
 }
 
@@ -123,7 +123,7 @@ func (v *LiveView) EventDriven() bool {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return v.sink != nil
+	return v.bridge != nil
 }
 
 func (v *LiveView) Update(lines []string) {
@@ -175,7 +175,7 @@ func (v *LiveView) Start() {
 	v.stop = make(chan struct{})
 	v.done = make(chan struct{})
 	interval := defaultFrames.FPS
-	if v.sink != nil {
+	if v.bridge != nil {
 		// The composer interval is independent from other terminal renderers so
 		// it can be tuned without changing tool/output animation globally.
 		interval = readlineFooterInterval
@@ -214,8 +214,8 @@ func (v *LiveView) render(frame string) {
 
 func (v *LiveView) renderLocked(frame string) {
 	v.frame = frame
-	if v.sink != nil {
-		v.renderSinkLocked(frame)
+	if v.bridge != nil {
+		v.renderReadlineLocked(frame)
 		return
 	}
 	if v.hidden {
@@ -250,16 +250,16 @@ func (v *LiveView) renderLocked(frame string) {
 	v.rendered = len(lines)
 }
 
-func (v *LiveView) renderSinkLocked(frame string) {
+func (v *LiveView) renderReadlineLocked(frame string) {
 	if len(v.lines) == 0 {
-		v.sink("")
+		v.bridge.UpdateStatus("")
 		return
 	}
 	lines := make([]string, 0, len(v.lines))
 	for _, line := range v.lines {
 		lines = append(lines, v.expandLineLocked(line, frame))
 	}
-	v.sink(strings.Join(lines, "\n"))
+	v.bridge.UpdateStatus(strings.Join(lines, "\n"))
 }
 
 func (v *LiveView) expandLineLocked(line, frame string) string {
@@ -282,7 +282,7 @@ func (v *LiveView) WithHidden(fn func()) {
 		}
 		return
 	}
-	if v.sink != nil {
+	if v.bridge != nil {
 		if fn != nil {
 			fn()
 		}
@@ -330,13 +330,13 @@ func (v *LiveView) Stop() {
 	v.hidden = false
 	n := v.rendered
 	v.rendered = 0
-	sink := v.sink
+	bridge := v.bridge
 	close(v.stop)
 	done := v.done
 	v.mu.Unlock()
 	<-done
-	if sink != nil {
-		sink("")
+	if bridge != nil {
+		bridge.UpdateStatus("")
 		return
 	}
 	if n > 0 {

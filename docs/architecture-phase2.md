@@ -1,6 +1,6 @@
 # 第二阶段：收拢终端交互，删除旧执行边界
 
-状态：设计，尚未实施。基线提交：`88a59ccd`。
+状态：第二阶段实现完成，专项测试、race、AOP 模块测试和构建通过；全仓测试仍有既有 Katana 浏览器 E2E 失败。基线提交：`88a59ccd`。实际验收见文末。
 
 ## 目标与决定
 
@@ -75,7 +75,7 @@ Cobra 注册表既用于补全、帮助也用于终端命令分派。Runtime 业
 - attachment context：终端任务整体生命周期。
 - submit context/cancel：当前终端提交批次的取消根；所有从该终端提交的 Run 和状态命令都派生自它。
 - WaitGroup：只等待本终端已接受 Run 的结果观察协程结束，不负责派发任务。
-- 必要的互斥：保护批次替换、关闭准入和显示登记；不在持锁时等待 Run、调用输出或关闭 Runtime。
+- 必要的互斥：保护批次替换、关闭准入和显示登记；事件显示与预览更新在同一锁下排序，避免过期预览覆盖新状态。不在持锁时提交 Session 操作、等待 Run 或关闭 Runtime。
 
 | 动作 | 明确行为 |
 | --- | --- |
@@ -158,3 +158,31 @@ RunInput、Session、Run、REPL 不删除：它们分别表达实际执行参数
 - 所有入口明确清理次序 Console → Runtime → App，构造失败关闭已创建资源；共享 App 的 Runtime 关闭不销毁 App。
 
 这部分是下一份独立实施方案的范围；本方案交付点是 Console 机制收拢及上述遗留删除完成，不把整个产品都变成通用可注入框架。
+
+## 实施与验收记录（2026-09-10）
+
+内部 `pkg/tui` 已移除，交互实现归入 `pkg/console`。AgentConsole 直接持有 Runtime/Session，
+普通输入和命令分别使用 Session.Run/Command；Runtime 是唯一执行队列。Console 的预览 map
+只存文本，submit context 管理本终端的取消范围，WaitGroup 等待本终端工作，均不参与任务分派。
+
+AppInfo、展示层 Session/Controller、订阅函数参数、可执行闭包候补队列、RunResult、ToolExecutor、
+readline 状态回调字段及 Runtime 重复 EventBus/Logger 分发已删除，没有增加替代接口或 DTO。
+readline bridge 保留缓冲、互斥和 ready 状态，用于整行提交及坐标就绪后刷新；直接调用具体 Shell。
+Run.Wait 返回原有 agent.Result，正常、取消、错误及重复等待已验证。
+
+输出统一从 AOP 事件收尾，保留空结果提示、quiet 最终正文及错误显示；取消只显示停止提示。
+新增测试覆盖相邻轮次输出顺序、空结果不重放前一正文、取消隔离、Runtime FIFO/限额、
+stop 后新输入、并发关闭准入及借用 Session 的存活。既有恢复、模型选择和终端行为测试已迁移。
+
+| 检查 | 结果 |
+| --- | --- |
+| Console、Runtime、cmd/aiscan、Node、repositorytest | 通过 |
+| `go test -race ./pkg/app ./pkg/runtime ./pkg/console ./pkg/host ./pkg/node ./pkg/web/...` | 通过 |
+| AOP 模块内 `go test ./...` | 通过 |
+| CGO_ENABLED=0 构建 cmd/aiscan 和 cmd/runner | 通过 |
+| CGO_ENABLED=1、`full sqlite re2_cgo re2_static` 构建 cmd/aiscan | 通过 |
+| `git diff --check` 与暂存差异检查 | 通过 |
+| 全仓 `go test ./...` | 未全部通过：仅 tools/katana 的 TestE2EHeadlessReusesDiscoveredBrowser 失败，提示 browser never reached the authenticated workspace；与已记录基线一致 |
+
+本次未进行人工终端交互验收；终端行为结论来自自动化回归测试。App 构造权及 Runtime.New
+双所有权仍属于第七节的后续范围，不能将本阶段完成解释为全部产品依赖已消除。

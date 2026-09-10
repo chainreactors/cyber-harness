@@ -19,15 +19,15 @@ import (
 
 type aopTestExecutor struct{}
 
-func (aopTestExecutor) ExecuteTool(_ context.Context, name, arguments string) (*tool.Result, error) {
-	return tool.TextResult(name + ":" + arguments), nil
+func (aopTestExecutor) Execute(_ context.Context, arguments string) (*tool.Result, error) {
+	return tool.TextResult("echo:" + arguments), nil
 }
 
 type structuredResultExecutor struct {
 	err error
 }
 
-func (e structuredResultExecutor) ExecuteTool(context.Context, string, string) (*tool.Result, error) {
+func (e structuredResultExecutor) Execute(context.Context, string) (*tool.Result, error) {
 	return &tool.Result{
 		Output: []*aop.Content{
 			aop.Text("partial"),
@@ -48,7 +48,7 @@ func toolRequest(t *testing.T, id, name string, arguments map[string]any) *toolp
 }
 
 func TestExecuteToolRequestPreservesStructuredResult(t *testing.T) {
-	event, err := ExecuteToolRequest(context.Background(), "call-structured", toolRequest(t, "call-structured", "scan", nil), structuredResultExecutor{}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-structured", toolRequest(t, "call-structured", "scan", nil), testRegistry(structuredResultExecutor{}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestExecuteToolRequestPreservesStructuredResult(t *testing.T) {
 }
 
 func TestExecuteToolRequestUsesExecutionErrorText(t *testing.T) {
-	event, err := ExecuteToolRequest(context.Background(), "call-error", toolRequest(t, "call-error", "scan", nil), structuredResultExecutor{err: errors.New("failed")}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-error", toolRequest(t, "call-error", "scan", nil), testRegistry(structuredResultExecutor{err: errors.New("failed")}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestExecuteToolRequestUsesExecutionErrorText(t *testing.T) {
 }
 
 func TestExecuteToolRequest(t *testing.T) {
-	event, err := ExecuteToolRequest(context.Background(), "call-1", toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"}), aopTestExecutor{}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-1", toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"}), testRegistry(aopTestExecutor{}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestExecuteToolRequest(t *testing.T) {
 
 func TestExecuteToolRequestRejectsMismatchedCorrelation(t *testing.T) {
 	request := toolRequest(t, "call-1", "echo", map[string]any{"value": "hello"})
-	if _, err := ExecuteToolRequest(context.Background(), "other", request, aopTestExecutor{}, nil); err == nil {
+	if _, err := ExecuteToolRequest(context.Background(), "other", request, testRegistry(aopTestExecutor{}), nil); err == nil {
 		t.Fatal("expected correlation error")
 	}
 }
@@ -186,7 +186,7 @@ func TestProgressStreamerSanitizesInvalidUTF8(t *testing.T) {
 
 type invalidTextResultExecutor struct{}
 
-func (invalidTextResultExecutor) ExecuteTool(context.Context, string, string) (*tool.Result, error) {
+func (invalidTextResultExecutor) Execute(context.Context, string) (*tool.Result, error) {
 	invalid := string([]byte{'r', 0xff, 's'})
 	return &tool.Result{Output: []*aop.Content{{
 		Value: &aop.Content_Text{Text: &aop.TextContent{Text: invalid}},
@@ -194,7 +194,7 @@ func (invalidTextResultExecutor) ExecuteTool(context.Context, string, string) (*
 }
 
 func TestExecuteToolRequestSanitizesDirectToolResultText(t *testing.T) {
-	event, err := ExecuteToolRequest(context.Background(), "call-invalid", toolRequest(t, "call-invalid", "scan", nil), invalidTextResultExecutor{}, nil)
+	event, err := ExecuteToolRequest(context.Background(), "call-invalid", toolRequest(t, "call-invalid", "scan", nil), testRegistry(invalidTextResultExecutor{}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,4 +235,26 @@ func TestExecuteToolRequestForegroundPanicIsReturnedWithoutStack(t *testing.T) {
 	if got := logs.String(); !strings.Contains(got, "foreground boom") || !strings.Contains(got, "goroutine") {
 		t.Fatalf("panic log = %s", got)
 	}
+}
+
+func (aopTestExecutor) Name() string                 { return "echo" }
+func (aopTestExecutor) Description() string          { return "test" }
+func (aopTestExecutor) Definition() *tool.Definition { return tool.Def("echo", "test", struct{}{}) }
+
+func (structuredResultExecutor) Name() string        { return "scan" }
+func (structuredResultExecutor) Description() string { return "test" }
+func (structuredResultExecutor) Definition() *tool.Definition {
+	return tool.Def("scan", "test", struct{}{})
+}
+
+func (invalidTextResultExecutor) Name() string        { return "scan" }
+func (invalidTextResultExecutor) Description() string { return "test" }
+func (invalidTextResultExecutor) Definition() *tool.Definition {
+	return tool.Def("scan", "test", struct{}{})
+}
+
+func testRegistry(t tool.Tool) *commands.CommandRegistry {
+	reg := commands.NewRegistry()
+	reg.RegisterTool(t)
+	return reg
 }

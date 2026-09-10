@@ -247,7 +247,7 @@ AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通�
 
 Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，经同一个 EventBus 流式追加到 ProtoJSONL。`-r` 从该文件恢复上下文并继续追加；`/resume` 关闭旧 session 后切换到目标文件；`/clear` 和 `/compact` 仅在当前文件内创建 continuation session。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
 
-**文件**: `pkg/tui/banner.go`, `pkg/tui/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/runtime/session_jsonl.go`
+**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/runtime/session_jsonl.go`
 
 ---
 

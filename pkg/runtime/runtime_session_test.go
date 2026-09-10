@@ -79,8 +79,15 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	if run.TurnID() != "turn-1" {
 		t.Fatalf("turn id = %q", run.TurnID())
 	}
-	if _, err := run.Wait(); err != nil {
+	result, err := run.Wait()
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result == nil || result.Output != "done" || result.Stop != agent.StopReasonCompleted {
+		t.Fatalf("completed result = %+v", result)
+	}
+	if again, err := run.Wait(); again != result || err != nil {
+		t.Fatalf("second Wait() = %p, %v; want same result %p", again, err, result)
 	}
 
 	var turnEvents []*aop.Event
@@ -179,8 +186,12 @@ func TestSessionContextCancellationStopsActiveRun(t *testing.T) {
 	}
 
 	cancelSession()
-	if _, err := run.Wait(); !errors.Is(err, context.Canceled) {
+	result, err := run.Wait()
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run error = %v, want context canceled", err)
+	}
+	if result == nil || result.Stop != agent.StopReasonCanceled || !errors.Is(result.Err, context.Canceled) {
+		t.Fatalf("canceled result = %+v", result)
 	}
 }
 
@@ -364,8 +375,12 @@ func TestNilProviderRunDoesNotAutoRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run.Wait(); err == nil || !strings.Contains(err.Error(), "provider is nil") {
+	result, err := run.Wait()
+	if err == nil || !strings.Contains(err.Error(), "provider is nil") {
 		t.Fatalf("Wait() error = %v, want provider is nil", err)
+	}
+	if result == nil || result.Stop != agent.StopReasonError || result.Err != err {
+		t.Fatalf("failed result = %+v, want error %v", result, err)
 	}
 	time.Sleep(50 * time.Millisecond)
 	starts, ends := countSessionTurnLifecycle(&mu, &events, "session-1")
@@ -439,7 +454,6 @@ func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.
 	rt := &AgentRuntime{
 		primarySessionID: "main-repl", app: application, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		bus:    publicBus,
 		config: agent.Config{Provider: provider, Tools: reg, Bus: application, Logger: telemetry.NopLogger()},
 	}
 	t.Cleanup(rt.Close)

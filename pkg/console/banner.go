@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"fmt"
@@ -299,7 +299,7 @@ func (r *AgentConsole) providerModel() (string, string) {
 	if r == nil {
 		return "", ""
 	}
-	pc := r.appInfo.ProviderConfig
+	pc := r.providerConfig()
 	return pc.Provider, pc.Model
 }
 
@@ -311,7 +311,7 @@ func (r *AgentConsole) renderHelp() string {
 		if c.Hidden {
 			continue
 		}
-		rows = append(rows, helpRow{Command: c.Name, Detail: c.Description})
+		rows = append(rows, helpRow{Command: c.Name(), Detail: c.Short})
 	}
 	rows = append(rows, helpRow{})
 	rows = append(rows, helpRow{Command: "普通文本", Detail: "直接发送自然语言任务"})
@@ -320,20 +320,12 @@ func (r *AgentConsole) renderHelp() string {
 }
 
 func (r *AgentConsole) renderStatus() string {
-	colorEnabled := r.output != nil && r.output.color.Enabled
-	info := CollectStatus(r.replSession(), r.sessionSummary(), agentConsoleHistoryPath())
-	detailBudget := r.bannerWidth() - 4 - helpRowCommandWidth
-	rows := []helpRow{
-		{Command: "model", Detail: info.Provider + " / " + info.Model},
-		{Command: "render", Detail: info.Mode},
-		{Command: "task", Detail: info.Task},
-		{Command: "server", Detail: info.IOA},
-		{Command: "history", Detail: truncMiddle(info.History, detailBudget)},
+	server := "disabled"
+	if r.option != nil && r.option.IOAURL != "" {
+		server = redactIOAURL(r.option.IOAURL)
 	}
-	if info.Skills != "" {
-		rows = append(rows, helpRow{Command: "skills", Detail: info.Skills})
-	}
-	return r.renderPanel("status", renderHelpRows(rows, colorEnabled), colorEnabled)
+	rows := []helpRow{{Command: "render", Detail: r.sessionSummary()}, {Command: "server", Detail: server}, {Command: "history", Detail: agentConsoleHistoryPath()}}
+	return r.renderPanel("terminal", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
 }
 
 type helpRow struct {

@@ -6,7 +6,6 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
@@ -35,12 +34,5 @@ func AttachLocalREPL(ctx context.Context, rt *runtimepkg.AgentRuntime, option *c
 	if option == nil {
 		option = &cfg.Option{}
 	}
-	return tui.RunAgentConsoleWithTerminal(
-		ctx,
-		option,
-		consoleAppInfoForSession(rt, sess),
-		sess.Agent(),
-		rlterm.Local(),
-		rt.Subscribe,
-	)
+	return newAgentConsole(ctx, rt, sess, option, rlterm.Local()).Start()
 }

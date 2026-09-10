@@ -1,6 +1,6 @@
 //go:build unix
 
-package tui
+package console
 
 import (
 	"os"

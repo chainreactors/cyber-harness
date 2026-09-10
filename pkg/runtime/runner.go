@@ -13,7 +13,6 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
@@ -25,29 +24,28 @@ import (
 // ---------------------------------------------------------------------------
 
 type AgentRuntime struct {
-	primarySessionID string
-	app              *apppkg.App
-	nodeName         string
-	systemPrompt     string
-	heartbeat        time.Duration
-	config           agent.Config
-	bus              *eventbus.Bus[*aop.Event]
-	resumeMessages   []*aop.Message
-	resumeSessionID  string
-	recordPath       string
-	ctx              context.Context
-	cancel           context.CancelFunc
-	providerMu       sync.Mutex
-	mu               sync.RWMutex
-	sessions         map[string]*sessionState
-	runs             map[string]*Run
-	requestSeq       uint64
-	closeOnce        sync.Once
-	wg               sync.WaitGroup
-	operations       sync.WaitGroup
-	maxPending       int
-	ownsApp          bool
-	cleanup          func()
+	primarySessionID   string
+	app                *apppkg.App
+	nodeName           string
+	systemPrompt       string
+	heartbeat          time.Duration
+	config             agent.Config
+	resumeMessages     []*aop.Message
+	resumeSessionID    string
+	recordPath         string
+	ctx                context.Context
+	cancel             context.CancelFunc
+	providerMu         sync.Mutex
+	mu                 sync.RWMutex
+	sessions           map[string]*sessionState
+	runs               map[string]*Run
+	requestSeq         uint64
+	closeOnce          sync.Once
+	wg                 sync.WaitGroup
+	operations         sync.WaitGroup
+	maxPending         int
+	ownsApp            bool
+	unsubscribeHandoff func()
 }
 
 func ResolveJSONLRecordPath(option *cfg.Option) string {
@@ -249,20 +247,6 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 	rt.systemPrompt = BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
-	rt.bus = publicBus
-
-	var ioaCancel func()
-	var handoffCancel func()
-
-	rt.cleanup = func() {
-		if handoffCancel != nil {
-			handoffCancel()
-		}
-		if ioaCancel != nil {
-			ioaCancel()
-		}
-	}
-
 	rt.config = agent.Config{
 		Provider:              provider,
 		Tools:                 rt.app.Commands,
@@ -298,7 +282,7 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 	if ioaSpace == "" && rc != nil && rc.IOA != nil {
 		ioaSpace = rc.IOA.Space
 	}
-	handoffCancel = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
+	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
 	rt.app.Commands.RegisterTool(subAgentTool)
 	loop := newLoopCommand()
 	rt.app.Commands.Register(cmdpkg.Command{
@@ -316,12 +300,10 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 		if err != nil {
 			logger.Warnf("ioa space resolve: %s", err)
 		} else {
-			ioaCtx, cancel := context.WithCancel(rt.ctx)
-			ioaCancel = cancel
 			rt.wg.Add(1)
 			telemetry.SafeGo("ioa-space-subscription", func() {
 				defer rt.wg.Done()
-				subscribeIOASpace(ioaCtx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
+				subscribeIOASpace(rt.ctx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
 			})
 		}
 	}
@@ -357,8 +339,8 @@ func (rt *AgentRuntime) Close() {
 		}
 		rt.wg.Wait()
 		rt.operations.Wait()
-		if rt.cleanup != nil {
-			rt.cleanup()
+		if rt.unsubscribeHandoff != nil {
+			rt.unsubscribeHandoff()
 		}
 		if rt.ownsApp && rt.app != nil {
 			rt.app.Close()
@@ -379,9 +361,6 @@ func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
 	}
 	rt.mu.Lock()
 	rt.config.Logger = logger
-	if sl, ok := rt.config.Tools.(interface{ SetLogger(telemetry.Logger) }); ok {
-		sl.SetLogger(logger)
-	}
 	for _, sess := range rt.sessions {
 		sess.agent.SetLogger(logger)
 	}
