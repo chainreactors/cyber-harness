@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	browserutil "github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/projectdiscovery/katana/pkg/navigation"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"

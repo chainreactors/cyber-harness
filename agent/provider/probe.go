@@ -1,4 +1,4 @@
-package probe
+package provider
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -38,7 +36,7 @@ func ListLLMModels(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey
 		apiKey = strings.TrimSpace(storedAPIKey)
 	}
 
-	cfg := agent.ProviderConfig{
+	cfg := ProviderConfig{
 		Provider: strings.TrimSpace(req.GetProvider()),
 		BaseURL:  strings.TrimSpace(req.GetBaseUrl()),
 		APIKey:   apiKey,
@@ -48,7 +46,7 @@ func ListLLMModels(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey
 
 	result := new(types.ListModelsResult)
 
-	prov, err := agent.NewProvider(&cfg)
+	prov, err := NewProvider(&cfg)
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
@@ -65,7 +63,7 @@ func ListLLMModels(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey
 
 	models, err := lister.ListModels(probeCtx)
 	if err != nil {
-		var apiErr *agent.APIError
+		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
 			result.Ok = true
 			return result, nil
@@ -92,7 +90,7 @@ func TestLLM(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey strin
 		apiKey = strings.TrimSpace(storedAPIKey)
 	}
 
-	cfg := agent.ProviderConfig{
+	cfg := ProviderConfig{
 		Provider: strings.TrimSpace(req.GetProvider()),
 		BaseURL:  strings.TrimSpace(req.GetBaseUrl()),
 		APIKey:   apiKey,
@@ -108,7 +106,7 @@ func TestLLM(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey strin
 		return result, nil
 	}
 
-	prov, err := agent.NewProvider(&cfg)
+	prov, err := NewProvider(&cfg)
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
@@ -119,9 +117,9 @@ func TestLLM(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey strin
 
 	maxTokens := 16
 	start := time.Now()
-	resp, err := prov.ChatCompletion(probeCtx, &agent.ChatCompletionRequest{
+	resp, err := prov.ChatCompletion(probeCtx, &ChatCompletionRequest{
 		Model:     cfg.Model,
-		Messages:  []*aop.Message{provider.TextMessage("user", "ping")},
+		Messages:  []*aop.Message{TextMessage("user", "ping")},
 		MaxTokens: maxTokens,
 	})
 	result.LatencyMs = time.Since(start).Milliseconds()
@@ -135,6 +133,6 @@ func TestLLM(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey strin
 	}
 
 	result.Ok = true
-	result.Reply = strings.TrimSpace(provider.MessageText(resp.Choices[0].Message))
+	result.Reply = strings.TrimSpace(MessageText(resp.Choices[0].Message))
 	return result, nil
 }

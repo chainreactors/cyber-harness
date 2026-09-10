@@ -74,8 +74,8 @@ jobs:
             exit 1
           fi
 
-      - name: Check dependency layers, registered skips, and repository debt
-        run: go test -count=1 ./internal/repositorytest ./core/deps
+      - name: Run repository harness and dependency guards
+        run: go test -count=1 ./harness/... ./core/deps
 
       - name: Ensure the standard CLI does not depend on libcstx
         run: |

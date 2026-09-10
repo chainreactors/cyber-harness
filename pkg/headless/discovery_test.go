@@ -1,4 +1,4 @@
-package browser
+package headless
 
 import (
 	"errors"

@@ -16,7 +16,7 @@ import (
 
 	"github.com/carapace-sh/carapace"
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/probe"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
@@ -1026,7 +1026,7 @@ func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error)
 	}
 	listCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
 	defer cancel()
-	result, err := probe.ListLLMModels(listCtx, req, "")
+	result, err := provider.ListLLMModels(listCtx, req, "")
 	if err != nil {
 		return nil, err
 	}

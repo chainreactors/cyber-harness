@@ -10,7 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/browser"
+	browserutil "github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/projectdiscovery/gologger"
 	"github.com/projectdiscovery/gologger/levels"
 	"github.com/projectdiscovery/katana/pkg/engine"

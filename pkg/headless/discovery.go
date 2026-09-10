@@ -1,5 +1,6 @@
-// Package browser centralizes browser binary discovery for AIScan's browser-backed engines.
-package browser
+// Package headless provides shared browser discovery and, with the full build
+// tag, browser lifecycle management and page action execution.
+package headless
 
 import (
 	"fmt"

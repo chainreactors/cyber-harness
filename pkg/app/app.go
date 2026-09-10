@@ -12,7 +12,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/hooks"
-	"github.com/chainreactors/aiscan/agent/probe"
+	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
@@ -383,7 +383,7 @@ func logLLMProbeStatus(ctx context.Context, provCfg agent.ProviderConfig, logger
 	probeCtx, cancel := context.WithTimeout(ctx, startupLLMProbeTimeout)
 	defer cancel()
 
-	result, err := probe.TestLLM(probeCtx, &types.LLMProbeRequest{
+	result, err := provider.TestLLM(probeCtx, &types.LLMProbeRequest{
 		Provider: provCfg.Provider,
 		BaseUrl:  provCfg.BaseURL,
 		ApiKey:   provCfg.APIKey,

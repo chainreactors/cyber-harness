@@ -16,8 +16,8 @@ import (
 
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/truncate"
-	browserutil "github.com/chainreactors/aiscan/pkg/browser"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -570,7 +570,7 @@ func (c *Command) getOrLaunchBrowser() (*rod.Browser, error) {
 			Set("disable-dev-shm-usage").
 			Set("ignore-certificate-errors").
 			Set("allow-insecure-localhost")
-		binary, err := browserutil.Discover()
+		binary, err := headless.Discover()
 		if err != nil {
 			return nil, fmt.Errorf("playwright: browser discovery failed: %w", err)
 		}
