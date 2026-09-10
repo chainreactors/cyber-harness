@@ -12,9 +12,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/runner"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	"github.com/chainreactors/aiscan/skills"
 	goflags "github.com/jessevdk/go-flags"
 )
@@ -640,59 +638,6 @@ func TestParseCLIRejectsRemovedServerURLAliases(t *testing.T) {
 			t.Fatalf("parseCLI(%q) accepted a removed flag", args)
 		}
 	}
-}
-
-func TestAgentConsoleArgsForLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantArgs []string
-	}{
-		{name: "empty", input: "  ", wantArgs: nil},
-		{name: "prompt", input: " scan localhost ", wantArgs: []string{"__prompt", "scan localhost"}},
-		{name: "quoted prompt is preserved", input: `explain "scan result"`, wantArgs: []string{"__prompt", `explain "scan result"`}},
-		{name: "help", input: "/help", wantArgs: []string{"/help"}},
-		{name: "reset", input: "/reset", wantArgs: []string{"/reset"}},
-		{name: "continue", input: "/continue", wantArgs: []string{"/continue"}},
-		{name: "resume", input: "/resume 1", wantArgs: []string{"/resume", "1"}},
-		{name: "exit", input: "/exit", wantArgs: []string{"/exit"}},
-		{name: "quit", input: "/quit", wantArgs: []string{"/quit"}},
-		{name: "skill slash command preserves prompt", input: `/scan explain "scan result"`, wantArgs: []string{"/scan", `explain "scan result"`}},
-		{name: "unknown slash command", input: "/unknown", wantArgs: []string{"/unknown"}},
-		{name: "colon-prefixed unknown command stays prompt", input: "/skill:scan check target", wantArgs: []string{"__prompt", "/skill:scan check target"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotArgs, err := tui.AgentConsoleArgsForLine(tt.input)
-			if err != nil {
-				t.Fatalf("AgentConsoleArgsForLine() error = %v", err)
-			}
-			if !reflect.DeepEqual(gotArgs, tt.wantArgs) {
-				t.Fatalf("AgentConsoleArgsForLine() = %#v, want %#v", gotArgs, tt.wantArgs)
-			}
-		})
-	}
-}
-
-func TestAgentConsoleRegistersSkillsAsCommands(t *testing.T) {
-	store, diagnostics := skills.LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
-	}
-	repl := tui.NewAgentConsole(context.Background(), &cfg.Option{}, tui.AppInfo{Skills: store}, nil, nil)
-	_ = repl // console created successfully
-}
-
-func TestAgentConsolePromptCommandRunsAgent(t *testing.T) {
-	store, diagnostics := skills.LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
-	}
-	llm := &fakeConsoleProvider{}
-	session := agent.NewAgent(agent.Config{Provider: llm, Tools: commands.NewRegistry()})
-	repl := tui.NewAgentConsole(context.Background(), &cfg.Option{}, tui.AppInfo{Skills: store}, session, nil)
-	_ = repl // console created successfully — full REPL test requires readline
 }
 
 func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {

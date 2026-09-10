@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"encoding/json"
@@ -50,8 +50,7 @@ type AgentOutput struct {
 	verbosity int
 	policy    cfg.OutputPolicy
 
-	stream  *StreamWriter
-	aborted bool
+	stream *StreamWriter
 
 	// Stats (tool call/error counts tracked here; token usage comes from events).
 	agentStart     time.Time
@@ -63,7 +62,6 @@ type AgentOutput struct {
 	// and usage totals for the turn-end / session-end stat lines.
 	deltas        map[string]*deltaAccumulator
 	lastAssistant *aop.Message
-	hasAssistant  bool
 	turnUsage     *aop.TokenUsage
 	totalUsage    *aop.TokenUsage
 	turnToolCalls int
@@ -176,16 +174,16 @@ func (o *AgentOutput) SetContextWindow(tokens int) {
 // SetReadlineMode commits finalized output above the current prompt and sends
 // transient status frames through readline's composer. The terminal still owns
 // scrollback; the 100ms animation only redraws the active composer.
-func (o *AgentOutput) SetReadlineMode(output io.Writer, status func(string)) {
-	if o == nil || output == nil {
+func (o *AgentOutput) SetReadlineMode(bridge *readlineConsoleBridge) {
+	if o == nil || bridge == nil {
 		return
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.readline = true
-	o.stream.stdout = output
-	o.stream.stderr = output
-	o.live.view.SetStatusSink(status)
+	o.stream.stdout = bridge
+	o.stream.stderr = bridge
+	o.live.view.setReadlineBridge(bridge)
 }
 
 // ---------------------------------------------------------------------------
@@ -308,41 +306,6 @@ func (o *AgentOutput) Start(label, text string) {
 	}
 }
 
-func (o *AgentOutput) Empty() {
-	if o == nil || o.quiet() {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if !o.aborted {
-		o.stopLive()
-		o.stream.Flush()
-		fmt.Fprintln(o.Stderr(), o.dim("No output."))
-	}
-}
-
-func (o *AgentOutput) Final(content string) {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.aborted {
-		return
-	}
-	o.stopLive()
-	if o.stream.Streamed() {
-		o.stream.Flush()
-		o.stream.Reset()
-		return
-	}
-	if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
-		fmt.Fprintln(o.Stdout(), rendered)
-	}
-}
-
-// SetInbox updates the transient preview of prompts waiting behind the active
-// run without stopping the live status.
 func (o *AgentOutput) SetInbox(items []string) {
 	if o == nil {
 		return
@@ -352,61 +315,6 @@ func (o *AgentOutput) SetInbox(items []string) {
 	running := o.live.Running()
 	render := o.canAnimate() && (running || len(items) > 0)
 	o.live.SetInbox(items, render)
-}
-
-func (o *AgentOutput) Stopping() {
-	if o == nil || o.quiet() {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.stopLive()
-	o.stream.Flush()
-}
-
-func (o *AgentOutput) Stopped() {
-	if o == nil || o.quiet() {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.stopLive()
-	o.stream.Flush()
-	fmt.Fprintln(o.Stderr(), o.dim("Task stopped."))
-}
-
-func (o *AgentOutput) Error(err error) {
-	if o == nil || err == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if !o.aborted {
-		o.stopLive()
-		o.stream.Flush()
-		fmt.Fprintf(o.Stderr(), "error: %s\n", err)
-	}
-}
-
-func (o *AgentOutput) AbortCurrentRun() {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.live.Reset()
-	o.stream.Flush()
-	o.stream.Reset()
-	o.aborted = true
-}
-
-func (o *AgentOutput) EnsureStreamNewline() {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.stream.EnsureNewline()
 }
 
 func (o *AgentOutput) SetInteractiveInputActive(active bool) {
@@ -426,13 +334,13 @@ func (o *AgentOutput) SetInteractiveInputActive(active bool) {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) HandleEvent(event *aop.Event) {
-	if o == nil {
+	if o == nil || event == nil {
 		return
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.aborted {
-		return
+	if event.GetTurnStarted() != nil {
+		o.beginRun()
 	}
 	switch payload := event.Payload.(type) {
 	case *aop.Event_SessionStarted:
@@ -446,7 +354,6 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		o.totalUsage = nil
 		o.turnToolCalls = 0
 		o.lastAssistant = nil
-		o.hasAssistant = false
 		if o.canAnimate() {
 			o.live.BeginTurn(o.runCount)
 		}
@@ -497,7 +404,6 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		delete(o.deltas, data.Id)
 		if data.Role == "assistant" {
 			o.lastAssistant = data
-			o.hasAssistant = true
 			if event.TurnId == "" {
 				if content := strings.TrimSpace(messagePartText(data, false)); content != "" {
 					if rendered := renderAgentMarkdown(content, o.Markdown()); rendered != "" {
@@ -609,6 +515,16 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		o.stopLive()
 		o.turnEnd(o.runCount)
 		o.agentEnd(data)
+		switch {
+		case data.StopReason == string(agent.StopReasonCanceled):
+			if !o.quiet() {
+				fmt.Fprintln(o.Stderr(), o.dim("Task stopped."))
+			}
+		case data.Error != nil && data.Error.Message != "":
+			fmt.Fprintf(o.Stderr(), "error: %s\n", data.Error.Message)
+		case !o.quiet() && o.stream.ContentPrinted() == 0 && strings.TrimSpace(messagePartText(o.lastAssistant, false)) == "":
+			fmt.Fprintln(o.Stderr(), o.dim("No output."))
+		}
 	case *aop.Event_SessionEnded:
 		o.stopLive()
 	case *aop.Event_Status:
@@ -803,13 +719,11 @@ func (o *AgentOutput) stopLive() {
 
 func (o *AgentOutput) beginRun() {
 	o.stream.Reset()
-	o.aborted = false
 	o.live.Reset()
 	o.toolCallCount = 0
 	o.toolErrorCount = 0
 	o.deltas = make(map[string]*deltaAccumulator)
 	o.lastAssistant = nil
-	o.hasAssistant = false
 	o.turnUsage = nil
 	o.totalUsage = nil
 	o.turnToolCalls = 0
@@ -840,13 +754,10 @@ func (o *AgentOutput) coloredElapsed(started time.Time) string {
 // ---------------------------------------------------------------------------
 
 func (o *AgentOutput) turnEnd(turn int) {
-	if o.quiet() {
-		return
-	}
 	o.stream.Flush()
 	w := o.Stderr()
 
-	if o.policy.ShowReasoning() && o.stream.ReasoningPrinted() == 0 {
+	if !o.quiet() && o.policy.ShowReasoning() && o.stream.ReasoningPrinted() == 0 {
 		if reasoning := strings.TrimSpace(messagePartText(o.lastAssistant, true)); reasoning != "" {
 			o.renderThinkingBlock(w, reasoning)
 		}
@@ -1105,3 +1016,5 @@ func messagePartText(msg *aop.Message, reasoning bool) string {
 	}
 	return sb.String()
 }
+
+func (o *AgentOutput) Close() { o.mu.Lock(); defer o.mu.Unlock(); o.stopLive(); o.stream.Flush() }

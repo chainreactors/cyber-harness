@@ -9,7 +9,6 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
-	"github.com/chainreactors/aiscan/pkg/tui"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -48,7 +47,7 @@ func StartPersistent(rt *runtimepkg.AgentRuntime, option *cfg.Option) (*REPL, er
 		defer close(r.done)
 		defer rt.CloseSession(context.Background(), MainREPLName, runtimepkg.SessionCloseCompleted)
 		for {
-			err := tui.RunRemoteAgentConsoleWithControl(replCtx, option, consoleAppInfoForSession(rt, session), session.Agent(), input, output, control, rt.Subscribe)
+			err := runRemoteConsole(replCtx, rt, session, option, input, output, control)
 			if replCtx.Err() != nil {
 				return replCtx.Err()
 			}

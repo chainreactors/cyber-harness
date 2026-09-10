@@ -12,6 +12,7 @@ Runtime 仍是本产品的运行核心，会使用 App、Skills、Commands 和�
 - `New`：沿用现有 `RuntimeConfig`。`ExistingApp` 表示借用；未提供时创建并拥有 App。
 - `OpenSession` / `EnsureSession` / `CloseSession`：会话身份、上下文与生命周期。
 - `Session.Run` / `RunSession` / `CancelSessionRun`：运行调度、取消与结果等待。
+- `Run.Wait`：直接返回 `(*agent.Result, error)`；完成结果视为只读，未执行即取消也返回相同结果类型。
 - `Session.Command` / `Session.Resume`：状态命令和已有 JSONL 历史恢复。
 - `RegisterNamespaces` 及既有 core/command handlers：向调用方的 `aop.NamespaceMux` 注册协议行为。
 - `Subscribe`：观察 App 的原始 AOP 事件；订阅者负责调用返回的 unsubscribe。

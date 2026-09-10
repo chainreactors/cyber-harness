@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"io"
@@ -18,7 +18,8 @@ type readlineConsoleBridge struct {
 	// state is intentionally single-writer even though agent events are async.
 	renderMu sync.Mutex
 	raw      io.Writer
-	active   func() bool
+	active   bool
+	shell    *readline.Shell
 	pending  strings.Builder
 	// version tracks status changes across Readline() boundaries. A status that
 	// arrives during prompt startup is redrawn only after coordinates are ready.
@@ -26,22 +27,17 @@ type readlineConsoleBridge struct {
 	version          uint64
 	displayedVersion uint64
 	ready            bool
-	commit           func(string) error
-	redraw           func()
 }
 
 // newReadlineConsoleBridge binds permanent output and transient status updates
 // to one readline shell without taking ownership of terminal scrollback.
-func newReadlineConsoleBridge(shell *readline.Shell, raw io.Writer, active func() bool) *readlineConsoleBridge {
-	b := &readlineConsoleBridge{raw: raw, active: active}
-	if shell != nil {
-		b.commit = func(text string) error {
-			_, err := shell.PrintTransientf("%s", text)
-			return err
-		}
-		b.redraw = shell.RefreshPrimaryWithoutAutocomplete
-	}
-	return b
+func newReadlineConsoleBridge(shell *readline.Shell, raw io.Writer) *readlineConsoleBridge {
+	return &readlineConsoleBridge{shell: shell, raw: raw}
+}
+func (b *readlineConsoleBridge) SetActive(active bool) {
+	b.mu.Lock()
+	b.active = active
+	b.mu.Unlock()
 }
 
 // Write commits newline-complete output above the active prompt. Incomplete
@@ -51,7 +47,7 @@ func (b *readlineConsoleBridge) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	b.mu.Lock()
-	active := b.active != nil && b.active() && b.commit != nil
+	active := b.active && b.shell != nil
 	if !active {
 		pending := b.pending.String()
 		b.pending.Reset()
@@ -84,12 +80,12 @@ func (b *readlineConsoleBridge) Write(p []byte) (int, error) {
 	remainder := text[lastNL+1:]
 	b.pending.Reset()
 	b.pending.WriteString(remainder)
-	commit := b.commit
+	shell := b.shell
 	b.mu.Unlock()
 
 	b.renderMu.Lock()
 	defer b.renderMu.Unlock()
-	if err := commit(complete); err != nil {
+	if _, err := shell.PrintTransientf("%s", complete); err != nil {
 		return len(p), err
 	}
 	return len(p), nil
@@ -104,12 +100,12 @@ func (b *readlineConsoleBridge) UpdateStatus(text string) {
 	b.mu.Lock()
 	b.status = text
 	b.version++
-	redraw := b.redraw
-	active := redraw != nil && b.ready && b.active != nil && b.active()
+	shell := b.shell
+	active := shell != nil && b.ready && b.active
 	b.mu.Unlock()
 	if active {
 		b.renderMu.Lock()
-		redraw()
+		shell.RefreshPrimaryWithoutAutocomplete()
 		b.renderMu.Unlock()
 	}
 }
@@ -134,12 +130,12 @@ func (b *readlineConsoleBridge) SetReady(ready bool) {
 	}
 	b.mu.Lock()
 	b.ready = ready
-	redraw := b.redraw
-	shouldRedraw := ready && redraw != nil && b.displayedVersion != b.version
+	shell := b.shell
+	shouldRedraw := ready && shell != nil && b.displayedVersion != b.version
 	b.mu.Unlock()
 	if shouldRedraw {
 		b.renderMu.Lock()
-		redraw()
+		shell.RefreshPrimaryWithoutAutocomplete()
 		b.renderMu.Unlock()
 	}
 }

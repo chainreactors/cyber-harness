@@ -91,7 +91,11 @@ func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := consoleAppInfoForSession(rt, session).Run(context.Background(), "hello", false)
+	run, err := session.Run(context.Background(), runtimepkg.RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.Wait()
 	if err != nil {
 		t.Fatal(err)
 	}

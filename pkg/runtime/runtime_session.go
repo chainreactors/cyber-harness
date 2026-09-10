@@ -65,13 +65,6 @@ type RunInput struct {
 	automatic bool
 }
 
-type RunResult struct {
-	Output        string
-	Stop          agent.StopReason
-	Usage         *aop.TokenUsage
-	ContextTokens int
-}
-
 const (
 	CommandPresentationPlain        = "plain"
 	CommandPresentationPreformatted = "preformatted"
@@ -89,7 +82,7 @@ type Run struct {
 	done      chan struct{}
 	cancel    context.CancelFunc
 	mu        sync.Mutex
-	result    RunResult
+	result    *agent.Result
 	err       error
 }
 
@@ -100,9 +93,11 @@ func (r *Run) TurnID() string {
 	return r.turnID
 }
 
-func (r *Run) Wait() (RunResult, error) {
+// Wait returns the completed Agent result. The result and its messages are
+// read-only; all waiters observe the same completed value.
+func (r *Run) Wait() (*agent.Result, error) {
 	if r == nil {
-		return RunResult{}, fmt.Errorf("run is nil")
+		return nil, fmt.Errorf("run is nil")
 	}
 	<-r.done
 	r.mu.Lock()
@@ -110,7 +105,7 @@ func (r *Run) Wait() (RunResult, error) {
 	return r.result, r.err
 }
 
-func (r *Run) finish(result RunResult, err error) {
+func (r *Run) finish(result *agent.Result, err error) {
 	r.mu.Lock()
 	r.result, r.err = result, err
 	r.mu.Unlock()
@@ -146,8 +141,8 @@ func (s *sessionState) emitTurnStarted(turnID string) {
 	s.runtime.app.Emit(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
-func (s *sessionState) emitTurnEnded(turnID string, result RunResult, runErr error) {
-	ended := &aop.TurnEnded{StopReason: string(result.Stop), Usage: result.Usage, ContextTokens: uint64(max(result.ContextTokens, 0))}
+func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr error) {
+	ended := &aop.TurnEnded{StopReason: string(result.Stop), Usage: result.TotalUsage, ContextTokens: uint64(max(result.ContextTokens, 0))}
 	if runErr != nil {
 		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
@@ -711,10 +706,10 @@ func (rt *AgentRuntime) findSessionLocked(sessionID string) (string, *sessionSta
 }
 
 func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) func() {
-	if rt == nil || rt.bus == nil || fn == nil {
+	if rt == nil || rt.app == nil || rt.app.EventBus == nil || fn == nil {
 		return func() {}
 	}
-	return rt.bus.Subscribe(fn)
+	return rt.app.EventBus.Subscribe(fn)
 }
 
 // EmitEvent publishes an already-formed runtime event through the App-owned
@@ -1099,18 +1094,12 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			s.inbox.setActive(true)
 			s.emitTurnStarted(turnID)
 			result, runErr := s.executeRun(runCtx, turnID, input)
-			runResult := RunResult{}
-			if result != nil {
-				runResult = RunResult{
-					Output:        result.Output,
-					Stop:          result.Stop,
-					Usage:         result.TotalUsage,
-					ContextTokens: result.ContextTokens,
+			runResult := result
+			if runResult == nil {
+				runResult = &agent.Result{Stop: agent.StopReasonError, Err: runErr}
+				if errors.Is(runErr, context.Canceled) {
+					runResult.Stop = agent.StopReasonCanceled
 				}
-			} else if errors.Is(runErr, context.Canceled) {
-				runResult.Stop = agent.StopReasonCanceled
-			} else {
-				runResult.Stop = agent.StopReasonError
 			}
 			s.emitTurnEnded(turnID, runResult, runErr)
 			s.inbox.setActive(false)
@@ -1120,7 +1109,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 			s.runtime.finishRun(run, runResult, runErr)
 		},
 		reject: func(err error) {
-			result := RunResult{Stop: agent.StopReasonCanceled}
+			result := &agent.Result{Stop: agent.StopReasonCanceled, Err: err}
 			if !errors.Is(err, context.Canceled) {
 				result.Stop = agent.StopReasonError
 			}
@@ -1199,34 +1188,31 @@ func (s *sessionState) admit(ctx context.Context, operation *sessionOperation) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	opCtx, cancel := context.WithCancel(s.ctx)
-	operation.ctx, operation.cancel = opCtx, cancel
+	// Caller cancellation must reach queued work synchronously. Relaying it
+	// through a goroutine can let the next operation run before cancellation.
+	opCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.ctx, cancel)
+	operation.ctx = opCtx
+	operation.cancel = func() { stop(); cancel() }
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		cancel()
+		operation.cancel()
 		return fmt.Errorf("session %q is closed", s.id)
 	}
 	if s.pending >= s.runtime.pendingLimit() {
 		s.mu.Unlock()
-		cancel()
+		operation.cancel()
 		return fmt.Errorf("session %q pending limit reached (%d)", s.id, s.runtime.pendingLimit())
 	}
 	s.pending++
 	s.mu.Unlock()
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancel()
-		case <-opCtx.Done():
-		}
-	}()
 	select {
 	case s.ops <- operation:
 		return nil
 	case <-s.ctx.Done():
 		s.releaseOperation()
-		cancel()
+		operation.cancel()
 		return s.ctx.Err()
 	}
 }
@@ -1320,7 +1306,7 @@ func (rt *AgentRuntime) releaseRun(run *Run) {
 	rt.operations.Done()
 }
 
-func (rt *AgentRuntime) finishRun(run *Run, result RunResult, err error) {
+func (rt *AgentRuntime) finishRun(run *Run, result *agent.Result, err error) {
 	if run == nil {
 		return
 	}

@@ -1,4 +1,4 @@
-package tui
+package console
 
 import (
 	"strings"
@@ -158,8 +158,8 @@ func TestRenderBoxTableClipsWideIntermediateColumns(t *testing.T) {
 }
 
 func TestProviderModelDoesNotDependOnCommands(t *testing.T) {
-	r := &AgentConsole{}
-	r.appInfo.ProviderConfig = agent.ProviderConfig{Provider: "anthropic", Model: "claude-test"}
+	r := &AgentConsole{runtime: newConsoleRuntime(t, nil)}
+	r.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "anthropic", Model: "claude-test"})
 	provider, model := r.providerModel()
 	if provider != "anthropic" || model != "claude-test" {
 		t.Fatalf("providerModel = %q/%q, want anthropic/claude-test", provider, model)

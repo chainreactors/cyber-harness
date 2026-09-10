@@ -1,10 +1,11 @@
-package tui
+package console
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +21,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -98,26 +100,27 @@ type consoleTextTool struct {
 func (t *consoleTextTool) Name() string                 { return "bash" }
 func (t *consoleTextTool) Description() string          { return "console output test tool" }
 func (t *consoleTextTool) Definition() *tool.Definition { return &tool.Definition{} }
+func (t *consoleTextTool) RunForeground(context.Context, string, commands.BashExecOptions) (*tool.Result, error) {
+	return tool.TextResult(t.output), nil
+}
 func (t *consoleTextTool) Execute(context.Context, string) (*tool.Result, error) {
 	return tool.TextResult(t.output), nil
 }
 
 func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	registry := commands.NewRegistry()
-	registry.RegisterTool(&consoleTextTool{output: "DIRECT_OK"})
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{Commands: registry}, nil, &stdout, &stderr)
-
-	if _, err := repl.ExecuteLineAndWait("!printf DIRECT_OK"); err != nil {
-		t.Fatalf("bang command: %v", err)
+	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	repl.runtime.App().Commands.RegisterTool(&consoleTextTool{output: "DIRECT_OK"})
+	if _, err := executeAndWait(repl, "!printf DIRECT_OK"); err != nil {
+		t.Fatal(err)
 	}
-	if got := stdout.String(); got != "DIRECT_OK\n" {
-		t.Fatalf("stdout = %q, want a prompt-safe trailing newline", got)
+	if got := stdout.String(); !strings.HasSuffix(got, "DIRECT_OK\n") {
+		t.Fatalf("output = %q", got)
 	}
 }
 
 func TestAgentReadlineBackspaceBindings(t *testing.T) {
-	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)
+	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.Config.GetBool("menu-complete-display-prefix") {
 		t.Fatal("menu-complete-display-prefix should stay enabled so completion replaces the typed prefix")
@@ -146,7 +149,7 @@ func TestAgentReadlineBackspaceBindings(t *testing.T) {
 }
 
 func TestAgentReadlinePendingBracketedPaste(t *testing.T) {
-	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)
+	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.HandleBracketedPastePending("[200~demo_reqresp\x1b[201~") {
 		t.Fatal("pending bracketed paste was not handled")
@@ -157,7 +160,7 @@ func TestAgentReadlinePendingBracketedPaste(t *testing.T) {
 }
 
 func TestAgentReadlinePendingMultilinePasteReference(t *testing.T) {
-	repl := NewAgentConsole(context.Background(), &cfg.Option{}, AppInfo{}, nil, nil)
+	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.HandleBracketedPastePending("[200~alpha\nbeta\x1b[201~") {
 		t.Fatal("pending bracketed paste was not handled")
@@ -203,60 +206,47 @@ func TestSplitCompletionPath(t *testing.T) {
 }
 
 func TestReadlineDoesNotSuppressLiveStatusWhileTaskRuns(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{}, agent.NewAgent(agent.Config{}), &stdout, &stderr)
-	repl.controller.mu.Lock()
-	repl.controller.running = true
-	repl.controller.mu.Unlock()
-
+	var stdout, stderr syncedBuffer
+	p := &gateProvider{release: make(chan struct{})}
+	repl := newTestConsole(t, &cfg.Option{}, p, &stdout, &stderr)
+	if err := repl.submitPrompt("hello", false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return p.calls.Load() == 1 }, "provider")
 	repl.setReadlineActive(true)
-
 	repl.output.mu.Lock()
 	active := repl.output.interactiveInputActive
 	repl.output.mu.Unlock()
 	if active {
-		t.Fatal("running task should keep live status enabled")
+		t.Fatal("running task suppressed live status")
 	}
 }
 
 func TestAgentConsoleRefreshesAgentAfterRuntimeResumeAndClear(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.jsonl")
 	var stdout, stderr bytes.Buffer
-	oldAgent := agent.NewAgent(agent.Config{SessionID: "old"})
-	resumedAgent := agent.NewAgent(agent.Config{SessionID: "resumed"})
-	clearedAgent := agent.NewAgent(agent.Config{SessionID: "cleared"})
-	active := oldAgent
-	info := AppInfo{
-		Run: func(context.Context, string, bool) (*agent.Result, error) { return &agent.Result{}, nil },
-		Command: func(_ context.Context, line string) error {
-			if line == "/clear" {
-				active = clearedAgent
-			}
-			return nil
-		},
-		Resume: func(context.Context, string) (int, error) {
-			active = resumedAgent
-			return 2, nil
-		},
-		ActiveAgent: func() *agent.Agent { return active },
+	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	handle := repl.session
+	oldAgent := handle.Agent()
+	writeConsoleSession(t, path, "test", time.Now(), agent.TextMessage("user", "history"))
+	if _, err := executeAndWait(repl, "/resume "+path); err != nil {
+		t.Fatal(err)
 	}
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, info, oldAgent, &stdout, &stderr)
-	if _, err := repl.ExecuteLineAndWait("/resume session.jsonl"); err != nil {
-		t.Fatalf("runtime /resume: %v", err)
+	resumedAgent := handle.Agent()
+	if oldAgent == resumedAgent || repl.session != handle {
+		t.Fatal("resume did not rotate through the existing handle")
 	}
-	if repl.agent != resumedAgent || repl.controller.session != resumedAgent {
-		t.Fatal("console did not switch to the resumed runtime agent")
+	if _, err := executeAndWait(repl, "/clear"); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := repl.ExecuteLineAndWait("/clear"); err != nil {
-		t.Fatalf("runtime /clear: %v", err)
-	}
-	if repl.agent != clearedAgent || repl.controller.session != clearedAgent {
-		t.Fatal("console did not switch to the cleared continuation agent")
+	if handle.Agent() == resumedAgent || len(handle.MessagesSnapshot()) != 0 {
+		t.Fatal("clear did not rotate session")
 	}
 }
 
 func TestAgentConsoleCtrlCWarnsAndClearsInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{}, nil, &stdout, &stderr)
+	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	repl.console.Shell().Line().Set([]rune("exit")...)
 
 	repl.handleCtrlC()
@@ -294,21 +284,11 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	option := &cfg.Option{}
-	session := agent.NewAgent(agent.Config{Model: "model-a"})
-	var changed agent.ProviderConfig
-	repl := NewAgentConsoleWithWriters(context.Background(), option, AppInfo{
-		ProviderConfig: agent.ProviderConfig{
-			Provider: "openai",
-			BaseURL:  srv.URL + "/v1",
-			APIKey:   "sk-test",
-			Model:    "model-a",
-		},
-		OnProviderChange: func(_ agent.Provider, providerConfig agent.ProviderConfig) {
-			changed = providerConfig
-		},
-	}, session, &stdout, &stderr)
+	repl := newTestConsole(t, option, nil, &stdout, &stderr)
+	repl.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "openai", BaseURL: srv.URL + "/v1", APIKey: "sk-test", Model: "model-a"})
+	session := repl.session.Agent()
 
-	if _, err := repl.ExecuteLineAndWait("/model"); err != nil {
+	if _, err := executeAndWait(repl, "/model"); err != nil {
 		t.Fatalf("/model: %v\nstderr=%s", err, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "model-a  active") || !strings.Contains(out, "model-b") {
@@ -317,9 +297,10 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if _, err := repl.ExecuteLineAndWait("/model 2"); err != nil {
+	if _, err := executeAndWait(repl, "/model 2"); err != nil {
 		t.Fatalf("/model 2: %v\nstderr=%s", err, stderr.String())
 	}
+	changed := repl.providerConfig()
 	if changed.Model != "model-b" {
 		t.Fatalf("changed model = %q, want model-b", changed.Model)
 	}
@@ -343,17 +324,9 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	)
 	var stdout, stderr bytes.Buffer
 	prov := &captureConsoleProvider{}
-	session := agent.NewAgent(agent.Config{Provider: prov, Model: "test-model"})
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{
-		Resume: func(context.Context, string) (int, error) {
-			session.LoadMessages([]*aop.Message{
-				agent.TextMessage("user", "previous user"), agent.TextMessage("assistant", "previous assistant"),
-			})
-			return 2, nil
-		},
-	}, session, &stdout, &stderr)
+	repl := newTestConsole(t, &cfg.Option{}, prov, &stdout, &stderr)
 
-	if _, err := repl.ExecuteLineAndWait("/resume " + path); err != nil {
+	if _, err := executeAndWait(repl, "/resume "+path); err != nil {
 		t.Fatalf("/resume: %v\nstderr=%s", err, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "Resumed 2 messages") {
@@ -362,7 +335,7 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if _, err := repl.ExecuteLineAndWait("new prompt"); err != nil {
+	if _, err := executeAndWait(repl, "new prompt"); err != nil {
 		t.Fatalf("prompt after resume: %v\nstderr=%s", err, stderr.String())
 	}
 	if len(prov.requests) == 0 {
@@ -381,19 +354,19 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if _, err := repl.ExecuteLineAndWait("/clear"); err != nil {
+	if _, err := executeAndWait(repl, "/clear"); err != nil {
 		t.Fatalf("/clear: %v\nstderr=%s", err, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "Context cleared.") {
 		t.Fatalf("clear output = %q", out)
 	}
-	if messages := session.MessagesSnapshot(); len(messages) != 0 {
+	if messages := repl.session.MessagesSnapshot(); len(messages) != 0 {
 		t.Fatalf("messages after clear = %d, want 0", len(messages))
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if _, err := repl.ExecuteLineAndWait("after clear"); err != nil {
+	if _, err := executeAndWait(repl, "after clear"); err != nil {
 		t.Fatalf("prompt after clear: %v\nstderr=%s", err, stderr.String())
 	}
 	if len(prov.requests) != 2 {
@@ -422,18 +395,10 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 	writeConsoleSession(t, newPath, "new-model", time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC), agent.TextMessage("user", "new message"))
 
 	var stdout, stderr bytes.Buffer
-	session := agent.NewAgent(agent.Config{})
-	saved := []SavedSession{
-		{Path: newPath, Model: "new-model", Messages: 1, UpdatedAt: time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)},
-		{Path: oldPath, Model: "old-model", Messages: 1, UpdatedAt: time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)},
-	}
-	repl := NewAgentConsoleWithWriters(context.Background(), &cfg.Option{}, AppInfo{
-		ListSessions: func() ([]SavedSession, error) { return saved, nil },
-		Resume:       func(context.Context, string) (int, error) { return 1, nil },
-	}, session, &stdout, &stderr)
+	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	repl.sessionDir = dir
 
-	if _, err := repl.ExecuteLineAndWait("/resume list"); err != nil {
+	if _, err := executeAndWait(repl, "/resume list"); err != nil {
 		t.Fatalf("/resume list: %v\nstderr=%s", err, stderr.String())
 	}
 	listOut := stdout.String()
@@ -446,7 +411,7 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if _, err := repl.ExecuteLineAndWait("/resume 1"); err != nil {
+	if _, err := executeAndWait(repl, "/resume 1"); err != nil {
 		t.Fatalf("/resume 1: %v\nstderr=%s", err, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "Resumed 1 messages from "+newPath) {
@@ -460,6 +425,9 @@ func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, 
 		Id: "e-1", SessionId: "console-session", Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
 		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: model}},
 	}}
+	if err := types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT}); err != nil {
+		t.Fatal(err)
+	}
 	for i, message := range messages {
 		message.Id = fmt.Sprintf("m-%d", i+1)
 		events = append(events, &aop.Event{
@@ -482,5 +450,38 @@ func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, 
 	}
 	if err := os.Chtimes(path, updatedAt, updatedAt); err != nil {
 		t.Fatalf("set session time: %v", err)
+	}
+}
+
+func TestAgentConsoleArgsForLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantArgs []string
+	}{
+		{name: "empty", input: "  ", wantArgs: nil},
+		{name: "prompt", input: " scan localhost ", wantArgs: []string{"__prompt", "scan localhost"}},
+		{name: "quoted prompt is preserved", input: `explain "scan result"`, wantArgs: []string{"__prompt", `explain "scan result"`}},
+		{name: "help", input: "/help", wantArgs: []string{"/help"}},
+		{name: "reset", input: "/reset", wantArgs: []string{"/reset"}},
+		{name: "continue", input: "/continue", wantArgs: []string{"/continue"}},
+		{name: "resume", input: "/resume 1", wantArgs: []string{"/resume", "1"}},
+		{name: "exit", input: "/exit", wantArgs: []string{"/exit"}},
+		{name: "quit", input: "/quit", wantArgs: []string{"/quit"}},
+		{name: "skill slash command preserves prompt", input: `/scan explain "scan result"`, wantArgs: []string{"/scan", `explain "scan result"`}},
+		{name: "unknown slash command", input: "/unknown", wantArgs: []string{"/unknown"}},
+		{name: "colon-prefixed unknown command stays prompt", input: "/skill:scan check target", wantArgs: []string{"__prompt", "/skill:scan check target"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotArgs, err := AgentConsoleArgsForLine(tt.input)
+			if err != nil {
+				t.Fatalf("AgentConsoleArgsForLine() error = %v", err)
+			}
+			if !reflect.DeepEqual(gotArgs, tt.wantArgs) {
+				t.Fatalf("AgentConsoleArgsForLine() = %#v, want %#v", gotArgs, tt.wantArgs)
+			}
+		})
 	}
 }

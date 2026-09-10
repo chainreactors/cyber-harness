@@ -241,7 +241,7 @@ DTO、Sink、Transport 接口或业务包装对象。产品负责注册业务处
 Runtime 不因协议辅助函数依赖 Host。详见 [Host 使用说明](../pkg/host/README.md)。
 
 Session 执行与 JSONL 恢复位于 `pkg/runtime`，其传递依赖不包含 TUI、Console、Host 或入口包。
-`pkg/console` 拥有本地/远程 REPL、静态输出及其订阅，并绑定现有 TUI。
+`pkg/console` 拥有本地/远程 REPL、静态输出及其订阅，直接使用 Runtime/Session 和外部终端库。
 `pkg/runner` 负责模式选择、Scanner 直接入口和 IOA 服务端启动；Node/Web 保留各自的传输装配。
 
 | 边界 | 约束 |
@@ -249,7 +249,6 @@ Session 执行与 JSONL 恢复位于 `pkg/runtime`，其传递依赖不包含 TU
 | `agent/` | 不导入具体工具或入口包；当前 `pkg/types` 产品扩展依赖保留 |
 | `pkg/host/` | 仅依赖 AOP、protobuf 和标准库；通信与业务生命周期分离 |
 | `tools/` | 不导入 Runner、TUI、Web、Node 或 `cmd/` |
-| `pkg/tui/` | 通过现有 `AppInfo` 数据和函数字段调用会话，不导入 Runner |
 | `pkg/app/` | 拥有 Provider、CommandRegistry、Skills、Hooks、EventBus、引擎、IOA、Recorder 等产品资源 |
 | `pkg/runtime/` | 拥有 Session/Run/Inbox/调度与 JSONL 恢复；借用或创建 App |
 | `pkg/console/` | 拥有终端任务及展示订阅，直接使用具体 Runtime 和 Session |
@@ -260,7 +259,9 @@ Provider 字段由 App 私有持有，构建与健康探测由 App 负责，Runt
 Web 的配置管理直接引用 App。详见 [App 使用说明](../pkg/app/README.md)。
 
 已有 `tool.Executor` 隔离模型循环与工具注册表。`RunOutput` 已删除；Runtime 不保存展示、
-PTY、REPL 模式或 CLI Option。既有 TUI `AppInfo` 的绑定集中在 Console 内，未新增接口或传输结构。
+PTY、REPL 模式或 CLI Option。Console 直接持有 Runtime/Session，输入由 Session 准入，
+Runtime 是唯一执行队列。Console 仅保存输入预览文本，通过自己的 context 取消并等待自身工作。
+展示由原始 AOP 事件驱动，`Run.Wait()` 直接返回 `*agent.Result`，不再次打印正文。
 Web 的离线命令菜单由 Web 自己持有，不再为取得菜单构造空 TUI Console。
 
 | 资源 | 创建与关闭者 | 借用关系 |

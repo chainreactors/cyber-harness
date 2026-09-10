@@ -1,9 +1,8 @@
-package tui
+package console
 
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,11 +17,11 @@ import (
 	"github.com/carapace-sh/carapace"
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/probe"
+	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -49,8 +48,8 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	appInfo        AppInfo
-	agent          *agent.Agent
+	runtime        *runtimepkg.AgentRuntime
+	session        *runtimepkg.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -58,7 +57,6 @@ type AgentConsole struct {
 	readlineBridge *readlineConsoleBridge
 	stdout         io.Writer
 	stderr         io.Writer
-	controller     *interactiveRunController
 	// readlineActive is true only while the foreground goroutine is blocked in
 	// Readline. Async agent output can then refresh the prompt without changing
 	// the input buffer or creating a duplicate prompt between reads.
@@ -66,20 +64,31 @@ type AgentConsole struct {
 	// startupNotice, when set, is rendered once below the welcome banner (e.g.
 	// an IOA-unavailable degradation warning). Set by the caller before Start.
 	startupNotice string
-	evalCriteria  string
 	sessionDir    string
 
-	directMu     sync.Mutex
-	directCancel context.CancelFunc
-	pendingExit  atomic.Bool
-	onExit       func()
+	inputID              string
+	inputSeq             uint64
+	workMu               sync.Mutex
+	work                 sync.WaitGroup
+	active               int
+	closed               bool
+	cancel               context.CancelFunc
+	submitCtx            context.Context
+	submitCancel         context.CancelFunc
+	unsubscribe          func()
+	closeOnce            sync.Once
+	previews             map[string]string
+	compactContextTokens int
+	compactContextWindow int
+	pendingExit          atomic.Bool
 }
 
-func NewAgentConsole(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput) *AgentConsole {
-	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, nil)
-}
-
-func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, output *AgentOutput, t *rlterm.Terminal) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *runtimepkg.AgentRuntime, session *runtimepkg.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
+	if option == nil {
+		option = &cfg.Option{}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	submitCtx, submitCancel := context.WithCancel(ctx)
 	if t == nil {
 		t = rlterm.Local()
 	}
@@ -92,13 +101,7 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 
 	stdout := t.Out
 	stderr := t.Err
-	if output == nil {
-		if t.Control == nil {
-			output = NewAgentOutput(option)
-		} else {
-			output = NewAgentOutputWithWriters(option, stdout, stderr, isTerminal)
-		}
-	}
+	output := NewAgentOutputWithWriters(option, stdout, stderr, isTerminal)
 
 	if stdout == nil {
 		stdout = output.Stdout()
@@ -118,22 +121,25 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	}
 
 	repl := &AgentConsole{
-		ctx:      ctx,
-		option:   option,
-		appInfo:  appInfo,
-		agent:    session,
-		console:  c,
-		terminal: t,
-		menu:     menu,
-		output:   output,
-		stdout:   stdout,
-		stderr:   stderr,
+		ctx:          ctx,
+		option:       option,
+		runtime:      rt,
+		session:      session,
+		cancel:       cancel,
+		submitCtx:    submitCtx,
+		submitCancel: submitCancel,
+		previews:     make(map[string]string),
+		inputID:      aop.EnvelopeID(),
+		console:      c,
+		terminal:     t,
+		menu:         menu,
+		output:       output,
+		stdout:       stdout,
+		stderr:       stderr,
 	}
 	if isTerminal && isLocalAgentTerminal(t) && resolveRenderMode(renderModeValue(option)) == ModeInteractive {
-		bridge := newReadlineConsoleBridge(c.Shell(), t.Out, func() bool {
-			return repl.readlineActive.Load()
-		})
-		output.SetReadlineMode(bridge, bridge.UpdateStatus)
+		bridge := newReadlineConsoleBridge(c.Shell(), t.Out)
+		output.SetReadlineMode(bridge)
 		repl.readlineBridge = bridge
 		c.Shell().OnReadlineReady = func() {
 			bridge.SetReady(true)
@@ -147,11 +153,9 @@ func NewAgentConsoleWithTerminal(ctx context.Context, option *cfg.Option, appInf
 	menu.Prompt().Primary = func() string {
 		return agentComposerPrompt(output, repl.readlineBridge)
 	}
-	if option != nil && option.EvalCriteria != "" {
-		repl.evalCriteria = option.EvalCriteria
-	}
-	repl.controller = newInteractiveRunController(ctx, repl.agent, output)
-	repl.controller.SetOnFinish(repl.refreshPromptAfterAsyncRun)
+	repl.workMu.Lock()
+	repl.unsubscribe = rt.Subscribe(repl.handleEvent)
+	repl.workMu.Unlock()
 	repl.configureCompletionKey()
 	repl.configureInterruptKey()
 	repl.configureCtrlCKey()
@@ -171,51 +175,15 @@ func isLocalAgentTerminal(t *rlterm.Terminal) bool {
 	return inOK && outOK && in == os.Stdin && out == os.Stdout
 }
 
-// NewAgentConsoleWithWriters builds a non-interactive console that executes
-// individual REPL lines against the same command implementation as the TUI.
-func NewAgentConsoleWithWriters(ctx context.Context, option *cfg.Option, appInfo AppInfo, session *agent.Agent, stdout, stderr io.Writer) *AgentConsole {
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	if stderr == nil {
-		stderr = stdout
-	}
-	control := rlterm.NewControl(false, 80, 24)
-	terminal := rlterm.Stream(strings.NewReader(""), stdout, stderr, control)
-	output := NewStaticAgentOutputWithWriters(option, stdout, stderr, false)
-	return NewAgentConsoleWithTerminal(ctx, option, appInfo, session, output, terminal)
-}
-
-// ExecuteLineAndWait runs one REPL input line and waits for any async agent run
-// started by that line. It is used by the web chat bridge so slash and bang
-// commands do not drift from the interactive console behavior.
-func (r *AgentConsole) ExecuteLineAndWait(line string) (bool, error) {
-	done, err := r.handleInputLine(line)
-	if r.controller != nil {
-		r.controller.Wait()
-	}
-	return done, err
-}
-
-func (r *AgentConsole) SetEvalCriteria(criteria string) {
-	if r == nil {
-		return
-	}
-	r.evalCriteria = criteria
-	r.syncEvalToController()
-}
-
-func (r *AgentConsole) EvalCriteria() string {
-	if r == nil {
-		return ""
-	}
-	return r.evalCriteria
-}
-
 func (r *AgentConsole) Start() error {
+	defer r.Close()
 	r.activateConsoleLogger()
+	if r.option.EvalCriteria != "" {
+		if err := r.command("/eval " + r.option.EvalCriteria); err != nil {
+			return err
+		}
+	}
 	r.renderBanner()
-	defer r.stopController()
 	if r.fastInputEnabled() {
 		return r.startFastInput()
 	}
@@ -232,15 +200,7 @@ func (r *AgentConsole) activateConsoleLogger() {
 		Output: r.stderr,
 		Color:  r.option == nil || !r.option.NoColor,
 	})
-	if r.appInfo.OnLoggerChange != nil {
-		r.appInfo.OnLoggerChange(consoleLogger)
-	}
-	if r.agent != nil {
-		r.agent.SetLogger(consoleLogger)
-	}
-	if r.appInfo.Commands != nil {
-		r.appInfo.Commands.SetLogger(consoleLogger)
-	}
+	r.runtime.SetLogger(consoleLogger)
 }
 
 func (r *AgentConsole) startFastInput() error {
@@ -385,11 +345,14 @@ func (r *AgentConsole) setReadlineActive(active bool) {
 		return
 	}
 	r.readlineActive.Store(active)
+	if r.readlineBridge != nil {
+		r.readlineBridge.SetActive(active)
+	}
 	if !active && r.readlineBridge != nil {
 		r.readlineBridge.SetReady(false)
 	}
 	if r.output != nil {
-		r.output.SetInteractiveInputActive(active && (r.controller == nil || !r.controller.Running()))
+		r.output.SetInteractiveInputActive(active && !r.Running())
 	}
 }
 
@@ -401,82 +364,18 @@ func (r *AgentConsole) resolvePastedText(input string) (string, string) {
 }
 
 func (r *AgentConsole) handleInputLine(line string) (bool, error) {
-	if r.appInfo.Run != nil && r.appInfo.Command != nil {
-		return r.handleRuntimeInputLine(line)
+	if err := r.ctx.Err(); err != nil {
+		return false, err
 	}
 	args, err := AgentConsoleArgsForLine(line)
-	if err != nil {
+	if err != nil || len(args) == 0 {
 		return false, err
 	}
-	if len(args) == 0 {
-		return false, nil
-	}
-
-	if err := r.executeArgs(r.ctx, args); err != nil {
-		if errors.Is(err, errAgentConsoleExit) {
-			return true, nil
-		}
-		return false, err
-	}
-	return false, nil
-}
-
-func (r *AgentConsole) handleRuntimeInputLine(line string) (bool, error) {
-	text := strings.TrimSpace(line)
-	if text == "" {
-		return false, nil
-	}
-	switch text {
-	case "/exit", "/quit":
+	err = r.executeArgs(r.ctx, args)
+	if errors.Is(err, errAgentConsoleExit) {
 		return true, nil
-	case "/stop":
-		if !r.InterruptCurrentRun() {
-			fmt.Fprintln(r.stderr, "No running task.")
-		}
-		return false, nil
-	case "/continue":
-		return false, r.controller.submit("continue", "", func(ctx context.Context) (*agent.Result, error) {
-			return r.appInfo.Run(ctx, "", true)
-		})
 	}
-	if strings.HasPrefix(text, "/followup ") {
-		prompt := strings.TrimSpace(strings.TrimPrefix(text, "/followup "))
-		return false, r.controller.submit("follow-up", prompt, func(ctx context.Context) (*agent.Result, error) {
-			return r.appInfo.Run(ctx, prompt, false)
-		})
-	}
-	if runtimeTUICommand(text) {
-		args, err := AgentConsoleArgsForLine(text)
-		if err != nil {
-			return false, err
-		}
-		return false, r.executeArgs(r.ctx, args)
-	}
-	if strings.HasPrefix(text, "!") {
-		return false, r.appInfo.Command(r.ctx, text)
-	}
-	if !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "/skill:") {
-		display, prompt := r.resolvePastedText(text)
-		return false, r.controller.submit("prompt", display, func(ctx context.Context) (*agent.Result, error) {
-			return r.appInfo.Run(ctx, prompt, false)
-		})
-	}
-	err := r.appInfo.Command(r.ctx, text)
-	r.refreshRuntimeSession()
 	return false, err
-}
-
-func runtimeTUICommand(line string) bool {
-	name := strings.Fields(strings.TrimSpace(line))
-	if len(name) == 0 {
-		return false
-	}
-	switch name[0] {
-	case "/help", "/resume", "/provider", "/model", "/spaces", "/messages", "/context", "/nodes":
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *AgentConsole) promptString() string {
@@ -532,23 +431,6 @@ func (r *AgentConsole) executeArgs(ctx context.Context, args []string) error {
 	return root.Execute()
 }
 
-func (r *AgentConsole) replSession() *Session {
-	s := &Session{
-		Ctx:          r.ctx,
-		Option:       r.option,
-		AppInfo:      r.appInfo,
-		Agent:        r.agent,
-		Controller:   r.ensureController(),
-		EvalCriteria: r.evalCriteria,
-		ResolveInput: r.resolvePastedText,
-	}
-	s.OnEvalChange = func(criteria string) {
-		r.evalCriteria = criteria
-		r.syncEvalToController()
-	}
-	return s
-}
-
 func (r *AgentConsole) rootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use: "agent", Short: "aiscan interactive agent",
@@ -562,7 +444,7 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 	root.AddCommand(&cobra.Command{
 		Use: agentPromptCommandName, Hidden: true, Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return RunPrompt(r.replSession(), "prompt", args[0])
+			return r.submitPrompt(args[0], false)
 		},
 	})
 	root.AddCommand(&cobra.Command{
@@ -571,7 +453,7 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 		DisableFlagParsing: true,
 		Args:               cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			return r.executeBashDirect(c.Context(), args[0])
+			return r.command("!" + args[0])
 		},
 	})
 	for _, name := range r.pseudoCommandNames() {
@@ -581,13 +463,13 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 			Short:              n,
 			DisableFlagParsing: true,
 			RunE: func(c *cobra.Command, args []string) error {
-				return r.executeBashDirect(c.Context(), n+" "+strings.Join(args, " "))
+				return r.command("!" + n + " " + strings.Join(args, " "))
 			},
 		})
 	}
 
 	for _, cmd := range r.allCommands() {
-		root.AddCommand(wrapCommand(cmd, r.replSession()))
+		root.AddCommand(cmd)
 	}
 
 	carapace.Gen(root).PositionalAnyCompletion(
@@ -599,189 +481,66 @@ func (r *AgentConsole) rootCommand() *cobra.Command {
 	return root
 }
 
-func (r *AgentConsole) allCommands() []Command {
-	s := r.replSession()
-	var cmds []Command
-	cmds = append(cmds, r.builtinCommands()...)
-	cmds = append(cmds, SkillCommands(s)...)
+func (r *AgentConsole) allCommands() []*cobra.Command {
+	cmds := r.builtinCommands()
+	cmds = append(cmds, r.skillCommands()...)
 	cmds = append(cmds, r.providerCommands()...)
-	cmds = append(cmds, r.ioaCommands()...)
+	return append(cmds, r.ioaCommands()...)
+}
+
+func (r *AgentConsole) builtinCommands() []*cobra.Command {
+	cmds := []*cobra.Command{
+		{Use: "/help", Short: "查看命令面板", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { fmt.Fprint(r.stdout, r.renderHelp()); return nil }},
+		{Use: "/resume", Short: "恢复已保存会话 (/resume 选择，/resume <path|#index>)", DisableFlagParsing: true, RunE: func(_ *cobra.Command, args []string) error {
+			raw := strings.TrimSpace(strings.Join(args, " "))
+			if raw == "" && r.interactivePickerEnabled() {
+				return r.resumeSessionInteractive()
+			}
+			if raw == "" || raw == "list" {
+				text, err := r.renderSessions()
+				if err == nil {
+					fmt.Fprint(r.stdout, text)
+				}
+				return err
+			}
+			return r.resumeSession(raw)
+		}},
+		{Use: "/stop", Short: "停止本终端提交的当前和排队任务", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+			if !r.InterruptCurrentRun() {
+				fmt.Fprintln(r.stderr, "No running task.")
+			}
+			return nil
+		}},
+		{Use: "/continue", Short: "继续当前会话", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { return r.submitPrompt("", true) }},
+		{Use: "/followup", Short: "排队到当前任务结束后再发送", DisableFlagParsing: true, Args: cobra.MinimumNArgs(1), RunE: func(_ *cobra.Command, args []string) error { return r.submitPrompt(strings.Join(args, " "), false) }},
+		{Use: "/exit", Aliases: []string{"/quit"}, Short: "退出交互模式", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { return errAgentConsoleExit }},
+	}
+	for _, name := range []string{"/status", "/clear", "/compact", "/eval", "/loop"} {
+		cmd := &cobra.Command{Use: name, Short: "Runtime " + name[1:], DisableFlagParsing: true}
+		if name == "/eval" {
+			cmd.Aliases = []string{"/goal"}
+		}
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			if err := r.command(c.Name() + " " + strings.Join(args, " ")); err != nil {
+				return err
+			}
+			if c.Name() == "/status" {
+				fmt.Fprint(r.stdout, r.renderStatus())
+			}
+			return nil
+		}
+		cmds = append(cmds, cmd)
+	}
 	return cmds
 }
 
-func (r *AgentConsole) builtinCommands() []Command {
-	return []Command{
+func (r *AgentConsole) providerCommands() []*cobra.Command {
+	return []*cobra.Command{
 		{
-			Name: "/help", Description: "查看命令面板",
-			Args: ArgsNone,
-			Run: func(_ context.Context, _ *Session, _ []string) error {
-				fmt.Fprint(r.stdout, r.renderHelp())
-				return nil
-			},
-		},
-		{
-			Name: "/status", Description: "查看模型、渲染模式、Server 和 skills",
-			Args: ArgsNone,
-			Run: func(_ context.Context, _ *Session, _ []string) error {
-				fmt.Fprint(r.stdout, r.renderStatus())
-				return nil
-			},
-		},
-		{
-			Name: "/clear", Description: "清空当前会话上下文",
-			Args: ArgsNone,
-			Run: func(_ context.Context, s *Session, _ []string) error {
-				if s.Controller != nil && s.Controller.Running() {
-					return fmt.Errorf("task is running — use /stop first")
-				}
-				s.Agent.Reset()
-				fmt.Fprintln(r.stdout, "Context cleared.")
-				return nil
-			},
-		},
-		{
-			Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)",
-			Args: ArgsOptional,
-			Run: func(_ context.Context, _ *Session, args []string) error {
-				raw := strings.TrimSpace(strings.Join(args, " "))
-				if raw == "" {
-					if r.interactivePickerEnabled() {
-						return r.resumeSessionInteractive()
-					}
-					sessions, err := r.renderSessions()
-					if err != nil {
-						return err
-					}
-					fmt.Fprint(r.stdout, sessions)
-					return nil
-				}
-				if raw == "list" {
-					sessions, err := r.renderSessions()
-					if err != nil {
-						return err
-					}
-					fmt.Fprint(r.stdout, sessions)
-					return nil
-				}
-				return r.resumeSession(raw)
-			},
-		},
-		{
-			Name: "/stop", Description: "停止当前正在运行的任务",
-			Args: ArgsNone,
-			Run: func(_ context.Context, _ *Session, _ []string) error {
-				if !r.InterruptCurrentRun() {
-					fmt.Fprintln(r.stderr, "No running task.")
-				}
-				return nil
-			},
-		},
-		{
-			Name: "/continue", Description: "继续当前会话",
-			Args: ArgsNone,
-			Run: func(_ context.Context, s *Session, _ []string) error {
-				if s.Controller == nil {
-					return fmt.Errorf("agent controller is not configured")
-				}
-				return s.Controller.Continue()
-			},
-		},
-		{
-			Name: "/followup", Description: "排队到当前任务结束后再发送",
-			Args: ArgsExact1,
-			Run: func(ctx context.Context, s *Session, args []string) error {
-				return RunPrompt(s, "follow-up", args[0])
-			},
-		},
-		{
-			Name: "/eval", Aliases: []string{"/goal"}, Description: "设置/查看/关闭 goal evaluation (/eval off 关闭)",
-			Args: ArgsOptional,
-			Run: func(_ context.Context, s *Session, args []string) error {
-				text := strings.TrimSpace(strings.Join(args, " "))
-				switch text {
-				case "":
-					if s.EvalCriteria == "" {
-						fmt.Fprintln(r.stdout, "Goal evaluation: off")
-					} else {
-						fmt.Fprintf(r.stdout, "Goal evaluation: on\n  criteria: %s\n", s.EvalCriteria)
-					}
-				case "off":
-					s.EvalCriteria = ""
-					if s.OnEvalChange != nil {
-						s.OnEvalChange("")
-					}
-					fmt.Fprintln(r.stdout, "Goal evaluation disabled.")
-				default:
-					s.EvalCriteria = text
-					if s.OnEvalChange != nil {
-						s.OnEvalChange(text)
-					}
-					fmt.Fprintf(r.stdout, "Goal evaluation enabled: %s\n", text)
-				}
-				return nil
-			},
-		},
-		{
-			Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])",
-			Args: ArgsOptional,
-			Run: func(ctx context.Context, s *Session, args []string) error {
-				if s.Controller != nil && s.Controller.Running() {
-					return fmt.Errorf("task is running — use /stop first")
-				}
-				if len(s.Agent.MessagesSnapshot()) < 4 {
-					fmt.Fprintln(r.stdout, "Nothing to compact (too few messages).")
-					return nil
-				}
-				instructions := strings.TrimSpace(strings.Join(args, " "))
-				result, err := s.Agent.Compact(ctx, agent.CompactConfig{
-					CustomInstructions: instructions,
-				})
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(r.stdout, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
-					result.TokensBefore, result.TokensAfter, result.KeptMessages)
-				return nil
-			},
-		},
-		{
-			Name: "/loop", Description: "定时循环任务 (/loop 30s <prompt> | /loop list | /loop stop <name>)",
-			Args: ArgsOptional,
-			Run: func(ctx context.Context, s *Session, args []string) error {
-				tool, ok := s.AppInfo.Commands.GetTool("bash")
-				if !ok {
-					return fmt.Errorf("bash tool not registered")
-				}
-				bash, ok := tool.(*commands.BashTool)
-				if !ok {
-					return fmt.Errorf("registered bash tool has unexpected type")
-				}
-				if len(args) == 0 {
-					args = []string{"list"}
-				}
-				_, err := bash.RunForeground(ctx, commands.JoinCommandLine("loop", args), commands.BashExecOptions{
-					OnOutput: func(data []byte) { _, _ = r.stdout.Write(data) },
-				})
-				return err
-			},
-		},
-		{
-			Name: "/exit", Aliases: []string{"/quit"}, Description: "退出交互模式",
-			Args: ArgsNone,
-			Run: func(_ context.Context, _ *Session, _ []string) error {
-				return errAgentConsoleExit
-			},
-		},
-	}
-}
-
-func (r *AgentConsole) providerCommands() []Command {
-	return []Command{
-		{
-			Name:        "/provider",
-			Description: "查看/管理 LLM provider 配置",
-			Args:        ArgsOptional,
-			Run: func(_ context.Context, _ *Session, args []string) error {
+			Use:                "/provider",
+			Short:              "查看/管理 LLM provider 配置",
+			DisableFlagParsing: true,
+			RunE: func(c *cobra.Command, args []string) error {
 				fields := splitArgs(args)
 				if len(fields) == 0 || (len(fields) == 1 && fields[0] == "list") {
 					fmt.Fprint(r.stdout, r.renderProviders())
@@ -797,10 +556,11 @@ func (r *AgentConsole) providerCommands() []Command {
 			},
 		},
 		{
-			Name:        "/model",
-			Description: "查看/切换当前 provider 的模型",
-			Args:        ArgsOptional,
-			Run: func(ctx context.Context, _ *Session, args []string) error {
+			Use:                "/model",
+			Short:              "查看/切换当前 provider 的模型",
+			DisableFlagParsing: true,
+			RunE: func(c *cobra.Command, args []string) error {
+				ctx := c.Context()
 				fields := splitArgs(args)
 				if len(fields) == 0 {
 					if r.interactivePickerEnabled() {
@@ -834,12 +594,13 @@ func (r *AgentConsole) providerCommands() []Command {
 	}
 }
 
-func (r *AgentConsole) ioaCommands() []Command {
-	return []Command{
+func (r *AgentConsole) ioaCommands() []*cobra.Command {
+	return []*cobra.Command{
 		{
-			Name: "/spaces", Description: "List all spaces",
-			Args: ArgsNone,
-			Run: func(ctx context.Context, _ *Session, _ []string) error {
+			Use: "/spaces", Short: "List all spaces",
+			Args: cobra.NoArgs,
+			RunE: func(c *cobra.Command, _ []string) error {
+				ctx := c.Context()
 				client, err := r.ioaClient()
 				if err != nil {
 					return err
@@ -848,9 +609,10 @@ func (r *AgentConsole) ioaCommands() []Command {
 			},
 		},
 		{
-			Name: "/messages", Description: "List start messages in a space",
-			Args: ArgsExact1,
-			Run: func(ctx context.Context, _ *Session, args []string) error {
+			Use: "/messages", Short: "List start messages in a space",
+			Args: cobra.ExactArgs(1), DisableFlagParsing: true,
+			RunE: func(c *cobra.Command, args []string) error {
+				ctx := c.Context()
 				client, err := r.ioaClient()
 				if err != nil {
 					return err
@@ -859,9 +621,10 @@ func (r *AgentConsole) ioaCommands() []Command {
 			},
 		},
 		{
-			Name: "/context", Description: "View message thread/context",
-			Args: ArgsOptional,
-			Run: func(ctx context.Context, _ *Session, args []string) error {
+			Use: "/context", Short: "View message thread/context",
+			DisableFlagParsing: true,
+			RunE: func(c *cobra.Command, args []string) error {
+				ctx := c.Context()
 				fields := splitArgs(args)
 				if len(fields) < 2 {
 					return fmt.Errorf("usage: /context <space> <message-id>")
@@ -874,9 +637,10 @@ func (r *AgentConsole) ioaCommands() []Command {
 			},
 		},
 		{
-			Name: "/nodes", Description: "List nodes (optionally scoped to a space)",
-			Args: ArgsOptional,
-			Run: func(ctx context.Context, _ *Session, args []string) error {
+			Use: "/nodes", Short: "List nodes (optionally scoped to a space)",
+			DisableFlagParsing: true,
+			RunE: func(c *cobra.Command, args []string) error {
+				ctx := c.Context()
 				client, err := r.ioaClient()
 				if err != nil {
 					return err
@@ -891,89 +655,11 @@ func (r *AgentConsole) ioaCommands() []Command {
 	}
 }
 
-// wrapCommand converts a Command into a cobra.Command. No special-case logic —
-// every Command's Run is self-contained.
-func wrapCommand(cmd Command, s *Session) *cobra.Command {
-	cc := &cobra.Command{
-		Use:   cmd.Name,
-		Short: cmd.Description,
-	}
-	if len(cmd.Aliases) > 0 {
-		cc.Aliases = cmd.Aliases
-	}
-	cc.Hidden = cmd.Hidden
-	switch cmd.Args {
-	case ArgsNone:
-		cc.Args = cobra.NoArgs
-	case ArgsExact1:
-		cc.Args = cobra.ExactArgs(1)
-		cc.DisableFlagParsing = true
-	case ArgsOptional:
-		cc.DisableFlagParsing = true
-	}
-	if cmd.Run != nil {
-		run := cmd.Run
-		cc.RunE = func(c *cobra.Command, args []string) error {
-			return run(c.Context(), s, args)
-		}
-	}
-	return cc
-}
-
 func (r *AgentConsole) ensureOutput() *AgentOutput {
 	if r.output == nil {
 		r.output = NewAgentOutput(r.option)
 	}
 	return r.output
-}
-
-func (r *AgentConsole) ensureController() *interactiveRunController {
-	if r.controller == nil {
-		r.controller = newInteractiveRunController(r.ctx, r.agent, r.ensureOutput())
-		r.controller.SetOnFinish(r.refreshPromptAfterAsyncRun)
-	}
-	r.syncEvalToController()
-	return r.controller
-}
-
-func (r *AgentConsole) refreshRuntimeSession() {
-	if r == nil || r.appInfo.ActiveAgent == nil {
-		return
-	}
-	active := r.appInfo.ActiveAgent()
-	if active == nil || active == r.agent {
-		return
-	}
-	r.agent = active
-	if r.controller != nil {
-		r.controller.SetSession(active)
-	}
-}
-
-func (r *AgentConsole) syncEvalToController() {
-	if r.controller == nil {
-		return
-	}
-	if r.evalCriteria == "" {
-		r.controller.Eval = nil
-		return
-	}
-	model := ""
-	if r.option != nil {
-		model = r.option.EvalModel
-	}
-	if model == "" && r.appInfo.Commands != nil {
-		model = r.appInfo.ProviderConfig.Model
-	}
-	var prov agent.Provider
-	if r.appInfo.Commands != nil {
-		prov = r.appInfo.Provider
-	}
-	r.controller.Eval = &EvalSettings{
-		Criteria: r.evalCriteria,
-		Model:    model,
-		Provider: prov,
-	}
 }
 
 func (r *AgentConsole) refreshPromptAfterAsyncRun() {
@@ -996,14 +682,11 @@ func (r *AgentConsole) refreshPromptAfterAsyncRun() {
 }
 
 func (r *AgentConsole) promptCompactIfNeeded() {
-	c := r.controller
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
+	c := r
+	c.workMu.Lock()
 	ctxTokens, ctxWindow := c.compactContextTokens, c.compactContextWindow
 	c.compactContextTokens, c.compactContextWindow = 0, 0
-	c.mu.Unlock()
+	c.workMu.Unlock()
 	if ctxTokens == 0 {
 		return
 	}
@@ -1018,54 +701,17 @@ func (r *AgentConsole) promptCompactIfNeeded() {
 		answer = strings.TrimSpace(strings.ToLower(line))
 	}
 	if answer == "y" || answer == "yes" {
-		result, err := r.agent.Compact(r.ctx, agent.CompactConfig{})
-		if err != nil {
+		if err := r.command("/compact"); err != nil {
 			fmt.Fprintf(r.stderr, "Compact failed: %s\n", err)
-		} else {
-			fmt.Fprintf(r.stderr, "Compacted: ~%d → ~%d tokens (%d messages kept)\n",
-				result.TokensBefore, result.TokensAfter, result.KeptMessages)
 		}
 	}
 }
 
-func (r *AgentConsole) setDirectCancel(fn context.CancelFunc) {
-	r.directMu.Lock()
-	r.directCancel = fn
-	r.directMu.Unlock()
-}
-
-// InterruptCurrentRun stops the current agent run or direct command.
-func (r *AgentConsole) InterruptCurrentRun() bool {
-	if r.controller != nil && r.controller.Stop() {
-		r.ensureOutput().Stopping()
-		return true
-	}
-	r.directMu.Lock()
-	cancel := r.directCancel
-	r.directMu.Unlock()
-	if cancel != nil {
-		cancel()
-		return true
-	}
-	return false
-}
-
-func (r *AgentConsole) stopController() {
-	if r.controller != nil {
-		r.controller.StopAndWait()
-	}
-}
-
-func (r *AgentConsole) SetOnExit(fn func()) {
-	r.onExit = fn
-}
-
 func (r *AgentConsole) forceExit() {
-	r.stopController()
-	if r.onExit != nil {
-		r.onExit()
-	}
-	os.Exit(0)
+	r.cancel()
+	// Called on readline's key handling goroutine, so acceptance is serialized
+	// with input processing and exits only this Console, never the host process.
+	r.console.Shell().History.Accept(false, false, io.EOF)
 }
 
 func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {
@@ -1086,33 +732,26 @@ func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {
 }
 
 func (r *AgentConsole) renderProviders() string {
-	colorEnabled := r.output != nil && r.output.color.Enabled
-	info := CollectStatus(r.replSession(), "", "")
-	if len(info.Providers) == 0 {
+	_, pc := r.runtime.App().ProviderState()
+	if pc.Provider == "" {
 		return "\n  No providers configured.\n\n"
 	}
-	var rows []helpRow
-	for i, p := range info.Providers {
-		status := "○ configured"
-		if p.Active {
-			status = "● active"
-		}
-		label := fmt.Sprintf("#%d  %s", i+1, p.Name)
-		detail := fmt.Sprintf("%-24s %s", p.Model, status)
-		rows = append(rows, helpRow{Command: label, Detail: detail})
+	rows := []helpRow{{Command: "#1  " + pc.Provider, Detail: pc.Model + "  ● active"}}
+	for i, p := range r.runtime.App().ProviderFallbacks {
+		rows = append(rows, helpRow{Command: fmt.Sprintf("#%d  %s", i+2, p.Provider.Name()), Detail: p.Model + "  ○ configured"})
 	}
-	return r.renderPanel("providers", renderHelpRows(rows, colorEnabled), colorEnabled)
+	return r.renderPanel("providers", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
 }
 
 func (r *AgentConsole) configureProvider(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: /provider set --provider openai --base-url <url> --api-key <key> --model <model>")
 	}
-	if r.controller != nil && r.controller.Running() {
+	if r.Running() {
 		return fmt.Errorf("cannot change provider while a task is running")
 	}
 
-	pc := r.appInfo.ProviderConfig
+	pc := r.providerConfig()
 	for i := 0; i < len(args); i++ {
 		key := args[i]
 		value := ""
@@ -1157,24 +796,21 @@ func (r *AgentConsole) configureProvider(args []string) error {
 const modelListTimeout = 10 * time.Second
 
 func (r *AgentConsole) resumeSession(path string) error {
-	if r.controller != nil && r.controller.Running() {
+	if r.Running() {
 		return fmt.Errorf("cannot resume while a task is running")
 	}
-	if r.agent == nil {
+	if r.session == nil {
 		return fmt.Errorf("agent session is not configured")
 	}
 	path, err := r.resolveSessionSelection(path)
 	if err != nil {
 		return err
 	}
-	if r.appInfo.Resume == nil {
-		return fmt.Errorf("session resume is unavailable")
-	}
-	messages, err := r.appInfo.Resume(r.ctx, path)
+
+	messages, err := r.session.Resume(r.ctx, path)
 	if err != nil {
 		return err
 	}
-	r.refreshRuntimeSession()
 	fmt.Fprintf(r.stdout, "Resumed %d messages from %s\n", messages, path)
 	return nil
 }
@@ -1201,17 +837,18 @@ func (r *AgentConsole) renderSessions() (string, error) {
 }
 
 func (r *AgentConsole) listSavedSessions() ([]SavedSession, error) {
-	if r.appInfo.ListSessions == nil {
-		return nil, fmt.Errorf("session listing is unavailable")
+	dir := r.sessionDir
+	if dir == "" {
+		dir = cfg.DataSubDir("sessions")
 	}
-	return r.appInfo.ListSessions()
+	return listSavedSessions(dir)
 }
 
 func (r *AgentConsole) resumeSessionInteractive() error {
-	if r.controller != nil && r.controller.Running() {
+	if r.Running() {
 		return fmt.Errorf("cannot resume while a task is running")
 	}
-	if r.agent == nil {
+	if r.session == nil {
 		return fmt.Errorf("agent session is not configured")
 	}
 	sessions, err := r.listSavedSessions()
@@ -1266,9 +903,7 @@ func (r *AgentConsole) resolveSessionSelection(selector string) (string, error) 
 	}
 	sessions, err := r.listSavedSessions()
 	if err != nil {
-		if r.appInfo.ListSessions == nil {
-			return selector, nil
-		}
+
 		return "", err
 	}
 	for _, session := range sessions {
@@ -1300,14 +935,14 @@ func (r *AgentConsole) renderModels(ctx context.Context) (string, error) {
 	}
 	if len(models) == 0 {
 		return r.renderPanel("models", renderHelpRows([]helpRow{
-			{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + r.appInfo.ProviderConfig.Model},
+			{Command: "current", Detail: r.providerConfig().Provider + " / " + r.providerConfig().Model},
 			{Command: "models", Detail: "none returned"},
 		}, colorEnabled), colorEnabled), nil
 	}
 
-	current := strings.TrimSpace(r.appInfo.ProviderConfig.Model)
+	current := strings.TrimSpace(r.providerConfig().Model)
 	rows := []helpRow{
-		{Command: "current", Detail: r.appInfo.ProviderConfig.Provider + " / " + valueOrDash(current)},
+		{Command: "current", Detail: r.providerConfig().Provider + " / " + valueOrDash(current)},
 	}
 	for i, model := range models {
 		command := fmt.Sprintf("#%d", i+1)
@@ -1321,7 +956,7 @@ func (r *AgentConsole) renderModels(ctx context.Context) (string, error) {
 }
 
 func (r *AgentConsole) configureModel(ctx context.Context, selector string) error {
-	if r.controller != nil && r.controller.Running() {
+	if r.Running() {
 		return fmt.Errorf("cannot change model while a task is running")
 	}
 	selector = strings.TrimSpace(strings.TrimPrefix(selector, "#"))
@@ -1341,7 +976,7 @@ func (r *AgentConsole) configureModel(ctx context.Context, selector string) erro
 }
 
 func (r *AgentConsole) configureModelInteractive(ctx context.Context) error {
-	if r.controller != nil && r.controller.Running() {
+	if r.Running() {
 		return fmt.Errorf("cannot change model while a task is running")
 	}
 	models, err := r.listProviderModels(ctx)
@@ -1357,7 +992,7 @@ func (r *AgentConsole) configureModelInteractive(ctx context.Context) error {
 		return nil
 	}
 	width, height := r.pickerSize()
-	selected, ok, err := runModelPicker(models, r.appInfo.ProviderConfig.Model, width, height)
+	selected, ok, err := runModelPicker(models, r.providerConfig().Model, width, height)
 	if err != nil {
 		return err
 	}
@@ -1368,7 +1003,7 @@ func (r *AgentConsole) configureModelInteractive(ctx context.Context) error {
 }
 
 func (r *AgentConsole) applyModel(model string) error {
-	pc := r.appInfo.ProviderConfig
+	pc := r.providerConfig()
 	pc.Model = model
 	resolved, err := r.applyProviderConfig(pc)
 	if err != nil {
@@ -1379,7 +1014,7 @@ func (r *AgentConsole) applyModel(model string) error {
 }
 
 func (r *AgentConsole) listProviderModels(ctx context.Context) ([]string, error) {
-	pc := r.appInfo.ProviderConfig
+	pc := r.providerConfig()
 	if strings.TrimSpace(pc.Provider) == "" && strings.TrimSpace(pc.BaseURL) == "" {
 		return nil, fmt.Errorf("provider not configured")
 	}
@@ -1462,7 +1097,7 @@ func (r *AgentConsole) pickerSize() (int, int) {
 }
 
 func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.ProviderConfig, error) {
-	if pc.Model != r.appInfo.ProviderConfig.Model {
+	if pc.Model != r.providerConfig().Model {
 		pc.Images = nil
 		pc.ContextWindow = 0
 	}
@@ -1475,14 +1110,7 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 		return agent.ProviderConfig{}, err
 	}
 
-	r.appInfo.Provider = prov
-	r.appInfo.ProviderConfig = *resolved
-	if r.appInfo.OnProviderChange != nil {
-		r.appInfo.OnProviderChange(prov, *resolved)
-	}
-	if r.agent != nil {
-		r.agent.SetProviderConfig(prov, *resolved)
-	}
+	r.runtime.SetProvider(prov, *resolved)
 	contextWindow := resolved.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = agent.ModelContextWindow(resolved.Model)
@@ -1497,52 +1125,17 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 		r.option.ContextWindow = resolved.ContextWindow
 		r.option.LLMProxy = resolved.Proxy
 	}
-	r.syncEvalToController()
 
 	return *resolved, nil
 }
 
 func (r *AgentConsole) pseudoCommandNames() []string {
-	if r.appInfo.Commands == nil {
+	if r.runtime.App().Commands == nil {
 		return nil
 	}
-	return r.appInfo.Commands.Names()
+	return r.runtime.App().Commands.Names()
 }
 
-// executeBashDirect runs a command line directly through the command registry,
-// bypassing the LLM agent. Pseudo-commands (gogo, cyberhub, etc.) and shell
-// commands are both supported, matching the "! command" REPL prefix.
-func (r *AgentConsole) executeBashDirect(ctx context.Context, cmdLine string) error {
-	reg := r.appInfo.Commands
-	if reg == nil {
-		return fmt.Errorf("command registry not available")
-	}
-	directCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	r.setDirectCancel(cancel)
-	defer r.setDirectCancel(nil)
-
-	if tool, ok := reg.GetTool("bash"); ok {
-		payload, err := json.Marshal(map[string]string{"command": cmdLine})
-		if err != nil {
-			return err
-		}
-		result, err := tool.Execute(directCtx, string(payload))
-		if err != nil {
-			return err
-		}
-		if text := coretool.ResultText(result); text != "" {
-			fmt.Fprint(r.stdout, text)
-			if !strings.HasSuffix(text, "\n") {
-				fmt.Fprintln(r.stdout)
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("bash tool is not registered")
-}
-
-// splitArgs splits a single-element args slice (from DisableFlagParsing) into fields.
 func splitArgs(args []string) []string {
 	if len(args) == 0 {
 		return nil
@@ -1619,4 +1212,12 @@ func (r *AgentConsole) atNodeCompleteAction(c carapace.Context) carapace.Action 
 
 func agentConsoleHistoryPath() string {
 	return filepath.Join(cfg.DataSubDir(""), "agent_history")
+}
+
+func (r *AgentConsole) providerConfig() agent.ProviderConfig {
+	if r == nil || r.runtime == nil {
+		return agent.ProviderConfig{}
+	}
+	_, pc := r.runtime.App().ProviderState()
+	return pc
 }

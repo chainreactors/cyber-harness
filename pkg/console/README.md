@@ -1,6 +1,6 @@
 # Console：终端任务与展示所有权
 
-Console 直接接收 `*runtime.AgentRuntime` 和 `*runtime.Session`，内部使用现有 TUI。
+Console 直接接收 `*runtime.AgentRuntime` 和 `*runtime.Session`，使用外部终端库 `github.com/chainreactors/tui`。
 Runtime 不保存输出接口、PTY Manager 或终端模式；`RunOutput` 已删除。
 
 - `AttachLocalREPL(ctx, rt, option)`：直接使用进程终端，避免把 readline 控制序列写入可重放 PTY 缓冲。
@@ -12,8 +12,13 @@ Runtime 不保存输出接口、PTY Manager 或终端模式；`RunOutput` 已删
 终端任务结束；它们不包装 Runtime 数据，也不关闭借用的 Runtime、App 或 Bash Manager。
 `Close` 可重复调用，Runtime 取消也会传播到终端任务。
 
-现有 TUI 的 `AppInfo` 绑定集中在 `console.go`，未新增 Sink、DTO 或另一套回调接口。
+交互实现已直接位于 `pkg/console`，不再通过 AppInfo、Sink、DTO 或另一套回调接口连接 Runtime。
 Session/Turn 事件、Provider 安装和 JSONL 恢复仍由其实际所有者处理，Console 只负责显示与交互。
+
+Session 是唯一执行入口，Runtime 的有界队列决定准入和顺序。Console 只保存按 Turn ID
+登记的输入预览文本；`Run.Wait()` 用于等待完成，正文与错误统一由 AOP 事件显示。
+`/stop` 和 Ctrl-C 取消当前终端提交的运行及排队任务，随后允许新输入，不取消同一 Session
+中其他入口的工作。Console 关闭时停止准入、取消并等待自己的工作，再注销展示订阅。
 
 入口负责在创建 Runtime 前指定 `PrimarySessionID: MainREPLName` 与录制选项。
 释放顺序为 `REPL.Close()` → `Runtime.Close()` → 调用方拥有的 `App.Close()`。
