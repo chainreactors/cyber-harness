@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,47 +18,70 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/edition"
+	"github.com/chainreactors/aiscan/pkg/fileaudit"
+	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
+	"github.com/chainreactors/aiscan/pkg/toolset/terminaltools"
+	filetools "github.com/chainreactors/aiscan/pkg/toolset/workspacefiles"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	arsenaltools "github.com/chainreactors/aiscan/tools/arsenal"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
-	ioaclient "github.com/chainreactors/ioa/client"
-	"github.com/chainreactors/ioa/protocols"
+	searchtools "github.com/chainreactors/aiscan/tools/search"
 )
 
 type App struct {
+	config            Config
 	provider          agent.Provider
 	providerConfig    agent.ProviderConfig
 	ProviderFallbacks []agent.ProviderEntry
-	Commands          *commands.CommandRegistry
+	Commands          *commands.Registry
+	Tools             tool.Executor
+	toolRegistry      *toolregistry.Registry
+	Bash              *commands.BashTool
 	Hooks             *hooks.Registry
 	Engines           any
 	Skills            *skills.Store
 	SkillDiagnostics  []skills.Diagnostic
-	IOAClient         *ioaclient.Client
-	IOAStreamClient   ioaclient.StreamAPI
-	// FileAudit is the trail the file tools and shell executions report into.
+	// fileAudit is the trail the file tools and shell executions report into.
 	// It belongs to the application rather than any one transport, so a local
 	// run and a remote tool node observe the same thing.
-	FileAudit        *commands.FileAudit
+	fileAudit        *fileaudit.Audit
 	EventBus         *eventbus.Bus[*aop.Event]
 	eventMu          sync.Mutex
 	eventSeq         map[string]uint64
 	Progress         *eventbus.Bus[*toolpb.Progress]
 	Recorder         *output.JSONLRecorder
-	deps             *commands.Deps
+	workDir          string
+	toolConfig       ToolConfig
+	scannerConfig    ScannerConfig
+	resourceSet      *resources.Set
+	proxyURL         string
+	proxyCA          string
+	egressResolver   func(callID string) (proxyURL, caPath string)
 	proxyInfra       *proxytool.Infra
+	extensions       *extension.Set
+	extensionContext *extension.Context
+	serviceDisposes  []extension.Dispose
 	ctx              context.Context
 	cancel           context.CancelFunc
-	ioaTasks         sync.WaitGroup
 	closed           bool
 	assemblyMu       sync.Mutex
 	recorderMu       sync.Mutex
 	closeOnce        sync.Once
+	closeDone        chan struct{}
+	closeErr         error
+	lifecycle        sync.Mutex
+	loaded           bool
+	closing          bool
 	enginesReady     chan struct{}
+	enginesErr       error
 	enginesEnabled   bool
 	providerMu       sync.RWMutex
 	providerRevision uint64
@@ -65,6 +89,8 @@ type App struct {
 	loggerMu         sync.RWMutex
 	logger           telemetry.Logger
 }
+
+var _ extension.Extension = (*App)(nil)
 
 // LLMHealth is the latest lightweight provider connectivity check. It is kept
 // separately from ProviderConfig: a syntactically valid configuration can still
@@ -83,42 +109,73 @@ const (
 	LLMHealthFailed        = "failed"
 )
 
-func New(ctx context.Context, rc Config) (*App, error) {
-	storage, err := rc.Tools.TrafficStorage.Normalize()
-	if err != nil {
-		return nil, err
+// New constructs an inert application around concrete modules owned by its
+// profile. Provider probing, filesystem discovery, tool publication and engine
+// startup begin in Load.
+func New(rc Config, fileAudit *fileaudit.Audit, proxyInfra *proxytool.Infra) *App {
+	if rc.Capabilities.Empty() {
+		rc.Capabilities = edition.Catalog()
 	}
-	rc.Tools.TrafficStorage = storage
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	appCtx, cancel := context.WithCancel(ctx)
-	a := &App{ctx: appCtx, cancel: cancel}
-	ready := false
-	defer func() {
-		if !ready {
-			a.Close()
-		}
-	}()
 	logger := rc.Logger
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	a.logger = logger
-	logger = a.Logger()
-	a.Hooks = hooks.New()
-	a.Hooks.SetErrorSink(func(he *hooks.HandlerError) {
-		if len(he.Stack) > 0 {
-			a.Logger().Errorf("hook panic kind=%s source=%s panic=%v\n%s", he.Kind, he.Source, he.Panic, he.Stack)
-			return
+	toolRuntime := toolregistry.New()
+	a := &App{
+		config: rc, fileAudit: fileAudit, proxyInfra: proxyInfra, logger: logger,
+		Hooks: hooks.New(), EventBus: eventbus.New[*aop.Event](),
+		Progress: eventbus.New[*toolpb.Progress](), Commands: commands.NewRegistry(),
+		Tools: toolRuntime, toolRegistry: toolRuntime, enginesReady: make(chan struct{}), closeDone: make(chan struct{}),
+	}
+	return a
+}
+
+// Load activates the fixed application composition. ctx bounds startup only;
+// the application owns its lifetime context until Close.
+func (a *App) Load(ctx context.Context) error {
+	if a == nil {
+		return fmt.Errorf("application is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
+	if a.loaded {
+		return nil
+	}
+	if a.closing {
+		return fmt.Errorf("application is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	appCtx, cancel := context.WithCancel(context.Background())
+	a.ctx, a.cancel = appCtx, cancel
+	rootContext := extension.NewRootContext()
+	a.extensionContext, _ = rootContext.Child(extension.RuntimeScope)
+	if d, err := extension.Provide(a.extensionContext, AppContextKey, a); err == nil {
+		a.serviceDisposes = append(a.serviceDisposes, d)
+	}
+	if d, err := extension.Provide(a.extensionContext, CommandsServiceKey, a.Commands); err == nil {
+		a.serviceDisposes = append(a.serviceDisposes, d)
+	}
+	if d, err := extension.Provide(a.extensionContext, ToolsServiceKey, a.Tools); err == nil {
+		a.serviceDisposes = append(a.serviceDisposes, d)
+	}
+	if d, err := extension.Provide(a.extensionContext, extension.NewServiceKey[*hooks.Registry]("hooks"), a.Hooks); err == nil {
+		a.serviceDisposes = append(a.serviceDisposes, d)
+	}
+	enginesDone := false
+	defer func() {
+		if !enginesDone {
+			close(a.enginesReady)
 		}
-		a.Logger().Warnf("hook failed kind=%s source=%s error=%q", he.Kind, he.Source, he.Err)
-	})
+	}()
 
-	a.EventBus = eventbus.New[*aop.Event]()
-	a.Progress = eventbus.New[*toolpb.Progress]()
-
-	store, diagnostics := skills.LoadAll(rc.CLISkillPaths)
+	logger := a.Logger()
+	rc := a.config
+	store, diagnostics := skills.LoadAll(rc.CLISkillPaths, rc.Capabilities)
 	a.Skills = store
 	a.SkillDiagnostics = diagnostics
 
@@ -131,7 +188,7 @@ func New(ctx context.Context, rc Config) (*App, error) {
 		if err != nil {
 			a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured, Error: err.Error(), CheckedAt: time.Now()})
 			if !rc.Provider.Optional {
-				return nil, err
+				return err
 			}
 			logger.Debugf("provider not configured: %s", err)
 		} else {
@@ -155,34 +212,58 @@ func New(ctx context.Context, rc Config) (*App, error) {
 	if !rc.Provider.Enabled {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
+	if a.provider != nil {
+		if d, err := extension.Provide(a.extensionContext, ProviderServiceKey, a.provider); err == nil {
+			a.serviceDisposes = append(a.serviceDisposes, d)
+		}
+	}
 
-	a.FileAudit = commands.NewFileAudit()
-	a.initCommands(rc, logger)
+	if err := a.toolRegistry.Load(ctx); err != nil {
+		return fmt.Errorf("load tool registry: %w", err)
+	}
+	if err := a.initCommands(rc, logger); err != nil {
+		return err
+	}
+	if a.Skills != nil {
+		if d, err := extension.Provide(a.extensionContext, SkillsServiceKey, a.Skills); err == nil {
+			a.serviceDisposes = append(a.serviceDisposes, d)
+		}
+	}
+	if a.fileAudit != nil {
+		if d, err := extension.Provide(a.extensionContext, AuditServiceKey, a.fileAudit); err == nil {
+			a.serviceDisposes = append(a.serviceDisposes, d)
+		}
+	}
+	if a.Bash != nil {
+		if d, err := extension.Provide(a.extensionContext, BashServiceKey, a.Bash); err == nil {
+			a.serviceDisposes = append(a.serviceDisposes, d)
+		}
+	}
 	if rc.RecordFile != "" {
 		if err := a.StartRecording(rc.RecordFile); err != nil {
-			a.Close()
-			return nil, err
+			return err
 		}
 	}
 
-	a.enginesReady = make(chan struct{})
 	a.enginesEnabled = !rc.SkipEngines
-	go func() {
-		if a.enginesEnabled {
-			a.initScanner(appCtx, rc, logger)
-		}
-		close(a.enginesReady)
-	}()
-
-	if rc.IOA != nil {
-		if err := a.InitIOA(appCtx, *rc.IOA); err != nil {
-			a.Close()
-			return nil, err
+	if a.enginesEnabled {
+		a.enginesErr = a.initScanner(ctx, rc, logger)
+	}
+	if a.Engines != nil {
+		if d, err := extension.Provide(a.extensionContext, EnginesServiceKey, a.Engines); err == nil {
+			a.serviceDisposes = append(a.serviceDisposes, d)
 		}
 	}
-
-	ready = true
-	return a, nil
+	close(a.enginesReady)
+	enginesDone = true
+	if a.enginesErr != nil {
+		return a.enginesErr
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.loaded = true
+	return nil
 }
 
 func (a *App) Logger() telemetry.Logger {
@@ -202,9 +283,6 @@ func (a *App) SetLogger(logger telemetry.Logger) {
 	a.loggerMu.Lock()
 	a.logger = logger
 	a.loggerMu.Unlock()
-	if a.Commands != nil {
-		a.Commands.SetLogger(a.Logger())
-	}
 }
 
 func (a *App) currentLogger() telemetry.Logger {
@@ -257,57 +335,103 @@ func (l appLogger) Importantf(format string, args ...any) {
 func (a *App) WaitEngines(ctx context.Context) error {
 	select {
 	case <-a.enginesReady:
-		return nil
+		return a.enginesErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (a *App) Close() {
+func (a *App) Close(ctx context.Context) error {
 	if a == nil {
-		return
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.lifecycle.Lock()
+	if a.closeDone == nil {
+		a.closeDone = make(chan struct{})
+	}
+	done := a.closeDone
+	a.lifecycle.Unlock()
 	a.closeOnce.Do(func() {
+		a.lifecycle.Lock()
+		a.closing = true
+		waitEngines := a.loaded
+		a.lifecycle.Unlock()
 		if a.cancel != nil {
 			a.cancel()
 		}
 		a.assemblyMu.Lock()
 		a.closed = true
 		a.assemblyMu.Unlock()
-		a.ioaTasks.Wait()
-		if a.enginesReady != nil {
-			<-a.enginesReady
-		}
-		a.recorderMu.Lock()
-		if a.Recorder != nil {
-			if err := a.Recorder.Close(); err != nil {
-				a.Logger().Warnf("close AOP JSONL recorder: %s", err)
+		go func() {
+			defer close(a.closeDone)
+			var closeErr error
+			if waitEngines && a.enginesReady != nil {
+				<-a.enginesReady
 			}
-			a.Recorder = nil
-		}
-		a.recorderMu.Unlock()
-		if a.Commands != nil {
-			for _, t := range a.Commands.Tools() {
-				if closer, ok := t.(interface{ Close() }); ok {
-					closer.Close()
+			if a.extensions != nil {
+				if err := a.extensions.Close(context.Background()); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close application extensions: %w", err))
 				}
 			}
-			for _, cmd := range a.Commands.All() {
-				if cmd.Close != nil {
-					cmd.Close()
+			for i := len(a.serviceDisposes) - 1; i >= 0; i-- {
+				a.serviceDisposes[i]()
+			}
+			a.serviceDisposes = nil
+			if a.Commands != nil {
+				if err := a.Commands.Close(context.Background()); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close command registry: %w", err))
 				}
 			}
-		}
-		if closer, ok := a.Engines.(interface{ Close() }); ok {
-			closer.Close()
-		}
-		if a.proxyInfra != nil && a.proxyInfra.Hub != nil {
-			a.proxyInfra.Hub.Shutdown(context.Background())
-		}
-		if a.FileAudit != nil {
-			a.FileAudit.Close()
-		}
+			if a.toolRegistry != nil {
+				if err := a.toolRegistry.Close(context.Background()); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close tool registry: %w", err))
+					a.Logger().Warnf("close tool registry: %s", err)
+				}
+			}
+			a.recorderMu.Lock()
+			if a.Recorder != nil {
+				if err := a.Recorder.Close(); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close AOP JSONL recorder: %w", err))
+					a.Logger().Warnf("close AOP JSONL recorder: %s", err)
+				}
+				a.Recorder = nil
+			}
+			a.recorderMu.Unlock()
+			if closer, ok := a.Engines.(interface{ Close() }); ok {
+				closer.Close()
+			}
+			a.lifecycle.Lock()
+			a.loaded = false
+			a.closeErr = closeErr
+			a.lifecycle.Unlock()
+		}()
 	})
+	select {
+	case <-done:
+	default:
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+		}
+	}
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
+	err := a.closeErr
+	a.closeErr = nil
+	return err
+}
+
+// ExtensionContext exposes the active runtime context to extensions and
+// embedders. It is nil before Load and after Close.
+func (a *App) ExtensionContext() *extension.Context {
+	if a == nil {
+		return nil
+	}
+	return a.extensionContext
 }
 
 func (a *App) StartRecording(path string) error {
@@ -421,42 +545,126 @@ func llmConfigLabel(providerName, model string) string {
 	return providerName + "/" + model
 }
 
-func (a *App) initCommands(rc Config, logger telemetry.Logger) {
-	a.Commands = commands.NewRegistry()
-	workDir, _ := os.Getwd()
-	a.deps = &commands.Deps{
-		WorkDir:           workDir,
-		RunnerMode:        rc.Tools.RunnerMode,
-		BashTimeout:       rc.Tools.BashTimeout,
-		SkillStore:        a.Skills,
-		Provider:          a.provider,
-		ScannerProxy:      rc.Scanner.Proxy,
-		Logger:            logger,
-		TavilyKeys:        rc.Tools.TavilyKeys,
-		PlaywrightSession: rc.Tools.PlaywrightSession,
-		Hooks:             a.Hooks,
-		Events:            a,
-		FileAudit:         a.FileAudit,
+func providerWebSearch(model agent.Provider) func(context.Context, string, int) (string, error) {
+	searcher, ok := model.(provider.WebSearchProvider)
+	if !ok {
+		return nil
 	}
-	var err error
-	a.proxyInfra, err = proxytool.InstallInfra(a.deps, captureEnabled(rc.Tools.MitmCapture), rc.Tools.TrafficStorage)
-	if err != nil {
-		logger.Warnf("proxy hub unavailable, tools use direct/original proxy: %s", err)
+	return func(ctx context.Context, query string, maxResults int) (string, error) {
+		response, err := searcher.WebSearch(ctx, query, maxResults)
+		if err != nil {
+			return "", err
+		}
+		var text strings.Builder
+		fmt.Fprintf(&text, "Web search results for: %s\n\n", query)
+		if len(response.Results) == 0 && response.Summary == "" {
+			text.WriteString("No results found.\n")
+			return text.String(), nil
+		}
+		for index, result := range response.Results {
+			fmt.Fprintf(&text, "[%d] %s\n    URL: %s\n\n", index+1, result.Title, result.URL)
+		}
+		if response.Summary != "" {
+			text.WriteString("Summary:\n")
+			text.WriteString(response.Summary)
+			text.WriteByte('\n')
+		}
+		return text.String(), nil
 	}
-
-	plan := capability.Select(capability.Options{
-		Groups:        linkedBaseGroups(),
-		OptionalTools: rc.Tools.OptionalTools,
-	})
-	commands.BuildPlan(plan, a.deps, a.Commands)
-	a.Commands.SetLogger(logger)
 }
 
-func linkedBaseGroups() []string {
+func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
+	workDir, _ := os.Getwd()
+	a.workDir = workDir
+	a.toolConfig = rc.Tools
+	a.scannerConfig = rc.Scanner
+	a.proxyURL = rc.Scanner.Proxy
+	var err error
+	var extensionEntries []extension.Entry
+	if a.proxyInfra != nil && a.proxyInfra.Hub != nil && a.proxyInfra.Hub.ProxyURL() != "" {
+		a.proxyURL = a.proxyInfra.Hub.ProxyURL()
+		a.proxyCA = a.proxyInfra.Hub.CAPath()
+		a.egressResolver = a.proxyInfra.Egress
+	}
+
+	plan := rc.Capabilities.Select(capability.Options{
+		Groups:        linkedBaseGroups(rc.Capabilities),
+		OptionalTools: rc.Tools.OptionalTools,
+	})
+	if plan.Has("core") {
+		workspace, workspaceErr := filetools.NewWorkspace(a.toolRegistry, "workspace", workDir, a.Skills, a.fileAudit, rc.Tools.RunnerMode)
+		if workspaceErr != nil {
+			return workspaceErr
+		}
+		terminal, terminalErr := terminaltools.New(a.toolRegistry, a.Commands, terminaltools.Config{
+			Directory: workDir, Timeout: rc.Tools.BashTimeout,
+			Proxy: a.proxyURL, ProxyCA: a.proxyCA, Egress: a.egressResolver, Audit: a.fileAudit,
+		})
+		if terminalErr != nil {
+			return terminalErr
+		}
+		a.Bash = terminal.Bash()
+		extensionEntries = append(extensionEntries,
+			extension.Entry{ID: "workspace", Extension: workspace},
+			extension.Entry{ID: "terminal", Extension: terminal},
+		)
+		subagent := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
+			if a.Skills == nil {
+				return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
+			}
+			skill, ok := a.Skills.ByName(name)
+			if !ok {
+				return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
+			}
+			if !skill.Agent {
+				return agent.AgentType{}, fmt.Errorf("skill %q is not configured as an agent type", name)
+			}
+			return agent.AgentType{
+				FormattedPrompt: a.Skills.FormatInvocation(skill, ""),
+				Model:           skill.AgentModel, Background: skill.AgentBackground,
+			}, nil
+		})
+		if err := a.toolRegistry.Register("subagent", subagent); err != nil {
+			return fmt.Errorf("register subagent tool: %w", err)
+		}
+	}
+	if plan.Has("proxy") {
+		if err := proxytool.Register(a.Commands, a.proxyInfra, rc.Scanner.Proxy); err != nil {
+			return err
+		}
+	}
+	if plan.Has("arsenal") {
+		if err := arsenaltools.Register(a.Commands); err != nil {
+			logger.Warnf("arsenal init: %v", err)
+		}
+	}
+	if plan.Has("search") {
+		if err := searchtools.Register(a.Commands, a.toolRegistry, providerWebSearch(a.provider), rc.Tools.TavilyKeys, a.proxyURL, a.proxyCA, nil, nil); err != nil {
+			return err
+		}
+	}
+	entries, err := editionToolEntries(a, rc, plan)
+	if err != nil {
+		return err
+	}
+	extensionEntries = append(extensionEntries, entries...)
+	if len(extensionEntries) > 0 {
+		a.extensions, err = extension.NewWithContext(a.extensionContext, extensionEntries...)
+		if err != nil {
+			return err
+		}
+		if err := a.extensions.Load(a.ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkedBaseGroups(catalog capability.Catalog) []string {
 	seen := make(map[string]bool)
 	var groups []string
-	for _, descriptor := range capability.All() {
-		baseService := descriptor.Kind == capability.KindService && len(descriptor.Requires) == 0
+	for _, descriptor := range catalog.All() {
+		baseService := descriptor.Kind == capability.KindService
 		if (descriptor.Kind != capability.KindTool && !baseService) || descriptor.Group == "" || seen[descriptor.Group] {
 			continue
 		}
@@ -464,108 +672,6 @@ func linkedBaseGroups() []string {
 		groups = append(groups, descriptor.Group)
 	}
 	return groups
-}
-
-func captureEnabled(configured *bool) bool {
-	return configured == nil || *configured
-}
-
-// RegisterTrafficNamespace exposes the application's single proxy hub over AOP.
-func (a *App) RegisterTrafficNamespace(mux *aop.NamespaceMux) error {
-	if a == nil || a.proxyInfra == nil || a.proxyInfra.Hub == nil {
-		return nil
-	}
-	return proxytool.NewTrafficHandler(a.proxyInfra).Register(mux)
-}
-
-func (a *App) InitIOA(ctx context.Context, ioa IOAConfig) error {
-	a.assemblyMu.Lock()
-	defer a.assemblyMu.Unlock()
-	if a.closed || a.ctx == nil || a.ctx.Err() != nil {
-		return fmt.Errorf("application is closed or uninitialized")
-	}
-	// Initial setup honors the caller; retries belong to the application.
-	if ctx == nil {
-		ctx = a.ctx
-	}
-	setupCtx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(a.ctx, cancel)
-	defer stop()
-	defer cancel()
-	ctx = setupCtx
-	client, err := newIOAClient(ioa)
-	if err != nil {
-		return err
-	}
-	if client == nil {
-		return nil
-	}
-	a.IOAClient = client
-	if ioa.Identity != nil {
-		if err := client.Bind(ioa.Identity); err != nil {
-			return fmt.Errorf("bind ioa identity: %w", err)
-		}
-	}
-	a.IOAStreamClient = client
-	if ioa.RegisterTools && a.Commands != nil && a.deps != nil {
-		a.deps.NodeName = ioa.NodeName
-		a.deps.NodeMeta = ioa.NodeMeta
-		commands.Provide(a.deps, ioatools.ClientKey, protocols.ClientAPI(client))
-		commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"ioa"}}), a.deps, a.Commands)
-	}
-	if ioa.AutoRegister {
-		if err := client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta); err != nil {
-			a.Logger().Warnf("ioa registration pending: %s", err)
-			a.ioaTasks.Add(1)
-			telemetry.SafeGo("ioa-registration-retry", func() {
-				defer a.ioaTasks.Done()
-				a.retryIOARegistration(a.ctx, client, ioa)
-			})
-			return nil
-		}
-	}
-	a.configureIOASpace(ctx, client, ioa)
-	return nil
-}
-
-func (a *App) retryIOARegistration(ctx context.Context, client *ioaclient.Client, ioa IOAConfig) {
-	for attempt := 0; ; attempt++ {
-		delay := agent.RetryDelay(attempt)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-		if client.EnsureRegistered(ctx, ioa.NodeName, "", ioa.NodeMeta) == nil {
-			a.Logger().Infof("ioa node registered: %s", client.NodeID())
-			a.configureIOASpace(ctx, client, ioa)
-			return
-		}
-	}
-}
-
-func (a *App) configureIOASpace(ctx context.Context, client *ioaclient.Client, ioa IOAConfig) {
-	if ioa.Space != "" && client != nil && client.Bound() {
-		info, err := client.Space(ctx, ioa.Space, "aiscan agent")
-		if err == nil {
-			a.setIOASpace(info.ID)
-		}
-	}
-}
-
-func (a *App) setIOASpace(spaceID string) {
-	for _, cmd := range a.Commands.All() {
-		if cmd.SetDefaultSpace != nil {
-			cmd.SetDefaultSpace(spaceID)
-		}
-	}
-}
-
-func newIOAClient(ioa IOAConfig) (*ioaclient.Client, error) {
-	if ioa.URL == "" {
-		return nil, nil
-	}
-	return ioaclient.NewClient(ioa.URL, ioa.NodeID)
 }
 
 func samePath(left, right string) bool {
