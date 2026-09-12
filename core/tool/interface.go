@@ -16,10 +16,18 @@ type Tool interface {
 }
 
 // Executor is the minimal interface the agent loop needs to
-// discover and invoke tools. CommandRegistry satisfies it directly.
+// discover and invoke tools. Registry satisfies it directly.
 type Executor interface {
 	ToolDefinitions() []*aop.ToolDefinition
 	ExecuteTool(ctx context.Context, name, arguments string) (*Result, error)
+}
+
+// Registrar is the narrow extension-facing registration surface. It owns
+// admission and draining semantics for an owner, but it does not expose tool
+// execution or lifecycle operations to consumers.
+type Registrar interface {
+	Register(owner string, tools ...Tool) error
+	UnregisterOwner(context.Context, string) error
 }
 
 // EmptyExecutor returns an Executor with no tools.

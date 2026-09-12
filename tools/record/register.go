@@ -3,32 +3,79 @@
 package record
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 
-	"github.com/chainreactors/aiscan/core/capability"
 	coreconfig "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/extension"
+	coretool "github.com/chainreactors/aiscan/core/tool"
+	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
-func init() {
-	capability.Register(capability.Descriptor{
-		ID: "record", Kind: capability.KindTool, Group: "record",
-		Optional: true, Default: true,
-	})
-	commands.RegisterFactory(commands.Factory{
-		Capability: "record",
-		Build: func(deps *commands.Deps, reg *commands.CommandRegistry) {
-			maxConcurrent, err := maxConcurrentFromEnvironment(os.LookupEnv)
-			if err != nil {
-				deps.GetLogger().Warnf("record config: %s; using default %d", err, defaultMaxConcurrent)
-				maxConcurrent = defaultMaxConcurrent
-			}
-			reg.RegisterTool(New(
-				deps.WorkDir,
-				coreconfig.DataSubDir("record"),
-				maxConcurrent,
-				newPlatformBackend(),
-			))
-		},
-	})
+type Extension struct {
+	mu         sync.Mutex
+	registry   coretool.Registrar
+	workDir    string
+	tool       *Tool
+	registered bool
+	closed     bool
+}
+
+var _ extension.Extension = (*Extension)(nil)
+
+func NewExtension(registry coretool.Registrar, workDir string) (*Extension, error) {
+	if registry == nil || strings.TrimSpace(workDir) == "" {
+		return nil, fmt.Errorf("record extension requires a tool registry and working directory")
+	}
+	return &Extension{registry: registry, workDir: workDir}, nil
+}
+
+func (m *Extension) Load(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return toolregistry.ErrUnavailable
+	}
+	if m.registered {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	maxConcurrent, err := maxConcurrentFromEnvironment(os.LookupEnv)
+	if err != nil {
+		return fmt.Errorf("record config: %w", err)
+	}
+	recorder := New(m.workDir, coreconfig.DataSubDir("record"), maxConcurrent, newPlatformBackend())
+	if err := m.registry.Register("record", recorder); err != nil {
+		recorder.Close()
+		return fmt.Errorf("register record tool: %w", err)
+	}
+	m.tool = recorder
+	m.registered = true
+	return nil
+}
+
+func (m *Extension) Close(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil
+	}
+	if m.registered {
+		if err := m.registry.UnregisterOwner(ctx, "record"); err != nil {
+			return errors.Join(extension.ErrCloseIncomplete, err)
+		}
+		m.registered = false
+	}
+	if m.tool != nil {
+		m.tool.Close()
+		m.tool = nil
+	}
+	m.closed = true
+	return nil
 }
