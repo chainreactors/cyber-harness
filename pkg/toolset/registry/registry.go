@@ -71,7 +71,17 @@ func New() *Registry {
 
 // Load enables registration and execution. ctx bounds this operation only;
 // canceling it after Load returns does not stop the registry.
-func (r *Registry) Load(ctx context.Context) error {
+func (r *Registry) Load(scope *extension.Context) error {
+	ctx := scope.Init()
+	return r.loadContext(ctx)
+}
+
+// LoadContext activates a registry assembled outside a Set. New code should
+// place Registry in an extension.Set; this helper keeps legacy App assembly
+// explicit while the product profile is migrated.
+func (r *Registry) LoadContext(ctx context.Context) error { return r.loadContext(ctx) }
+
+func (r *Registry) loadContext(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {

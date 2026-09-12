@@ -67,8 +67,6 @@ type App struct {
 	egressResolver   func(callID string) (proxyURL, caPath string)
 	proxyInfra       *proxytool.Infra
 	extensions       *extension.Set
-	extensionContext *extension.Context
-	serviceDisposes  []extension.Dispose
 	ctx              context.Context
 	cancel           context.CancelFunc
 	closed           bool
@@ -132,7 +130,8 @@ func New(rc Config, fileAudit *fileaudit.Audit, proxyInfra *proxytool.Infra) *Ap
 
 // Load activates the fixed application composition. ctx bounds startup only;
 // the application owns its lifetime context until Close.
-func (a *App) Load(ctx context.Context) error {
+func (a *App) Load(scope *extension.Context) error {
+	ctx := scope.Init()
 	if a == nil {
 		return fmt.Errorf("application is required")
 	}
@@ -152,20 +151,6 @@ func (a *App) Load(ctx context.Context) error {
 	}
 	appCtx, cancel := context.WithCancel(context.Background())
 	a.ctx, a.cancel = appCtx, cancel
-	rootContext := extension.NewRootContext()
-	a.extensionContext, _ = rootContext.Child(extension.RuntimeScope)
-	if d, err := extension.Provide(a.extensionContext, AppContextKey, a); err == nil {
-		a.serviceDisposes = append(a.serviceDisposes, d)
-	}
-	if d, err := extension.Provide(a.extensionContext, CommandsServiceKey, a.Commands); err == nil {
-		a.serviceDisposes = append(a.serviceDisposes, d)
-	}
-	if d, err := extension.Provide(a.extensionContext, ToolsServiceKey, a.Tools); err == nil {
-		a.serviceDisposes = append(a.serviceDisposes, d)
-	}
-	if d, err := extension.Provide(a.extensionContext, extension.NewServiceKey[*hooks.Registry]("hooks"), a.Hooks); err == nil {
-		a.serviceDisposes = append(a.serviceDisposes, d)
-	}
 	enginesDone := false
 	defer func() {
 		if !enginesDone {
@@ -212,32 +197,11 @@ func (a *App) Load(ctx context.Context) error {
 	if !rc.Provider.Enabled {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
-	if a.provider != nil {
-		if d, err := extension.Provide(a.extensionContext, ProviderServiceKey, a.provider); err == nil {
-			a.serviceDisposes = append(a.serviceDisposes, d)
-		}
-	}
-
-	if err := a.toolRegistry.Load(ctx); err != nil {
+	if err := a.toolRegistry.LoadContext(ctx); err != nil {
 		return fmt.Errorf("load tool registry: %w", err)
 	}
 	if err := a.initCommands(rc, logger); err != nil {
 		return err
-	}
-	if a.Skills != nil {
-		if d, err := extension.Provide(a.extensionContext, SkillsServiceKey, a.Skills); err == nil {
-			a.serviceDisposes = append(a.serviceDisposes, d)
-		}
-	}
-	if a.fileAudit != nil {
-		if d, err := extension.Provide(a.extensionContext, AuditServiceKey, a.fileAudit); err == nil {
-			a.serviceDisposes = append(a.serviceDisposes, d)
-		}
-	}
-	if a.Bash != nil {
-		if d, err := extension.Provide(a.extensionContext, BashServiceKey, a.Bash); err == nil {
-			a.serviceDisposes = append(a.serviceDisposes, d)
-		}
 	}
 	if rc.RecordFile != "" {
 		if err := a.StartRecording(rc.RecordFile); err != nil {
@@ -248,11 +212,6 @@ func (a *App) Load(ctx context.Context) error {
 	a.enginesEnabled = !rc.SkipEngines
 	if a.enginesEnabled {
 		a.enginesErr = a.initScanner(ctx, rc, logger)
-	}
-	if a.Engines != nil {
-		if d, err := extension.Provide(a.extensionContext, EnginesServiceKey, a.Engines); err == nil {
-			a.serviceDisposes = append(a.serviceDisposes, d)
-		}
 	}
 	close(a.enginesReady)
 	enginesDone = true
@@ -376,10 +335,6 @@ func (a *App) Close(ctx context.Context) error {
 					closeErr = errors.Join(closeErr, fmt.Errorf("close application extensions: %w", err))
 				}
 			}
-			for i := len(a.serviceDisposes) - 1; i >= 0; i-- {
-				a.serviceDisposes[i]()
-			}
-			a.serviceDisposes = nil
 			if a.Commands != nil {
 				if err := a.Commands.Close(context.Background()); err != nil {
 					closeErr = errors.Join(closeErr, fmt.Errorf("close command registry: %w", err))
@@ -423,15 +378,6 @@ func (a *App) Close(ctx context.Context) error {
 	err := a.closeErr
 	a.closeErr = nil
 	return err
-}
-
-// ExtensionContext exposes the active runtime context to extensions and
-// embedders. It is nil before Load and after Close.
-func (a *App) ExtensionContext() *extension.Context {
-	if a == nil {
-		return nil
-	}
-	return a.extensionContext
 }
 
 func (a *App) StartRecording(path string) error {
@@ -649,7 +595,7 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 	}
 	extensionEntries = append(extensionEntries, entries...)
 	if len(extensionEntries) > 0 {
-		a.extensions, err = extension.NewWithContext(a.extensionContext, extensionEntries...)
+		a.extensions, err = extension.New(extensionEntries...)
 		if err != nil {
 			return err
 		}
