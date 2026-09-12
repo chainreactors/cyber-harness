@@ -15,20 +15,23 @@ import (
 	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
-func newRegistry(workDir string) (*toolregistry.Registry, *commands.BashTool) {
+func newRegistry(workDir string) (*toolregistry.Registry, *commands.BashTool, *extension.Set) {
 	tools := toolregistry.New()
 	set, err := extension.New(extension.Entry{ID: "registry", Extension: tools})
 	if err != nil {
 		panic(err)
 	}
 	if err := set.Load(context.Background()); err != nil {
+		_ = set.Close(context.Background())
 		panic(err)
 	}
 	bash := commands.NewBashTool(workDir, 300)
 	if _, err := tools.Register("rmcp", bash); err != nil {
+		_ = set.Close(context.Background())
+		bash.Close()
 		panic(err)
 	}
-	return tools, bash
+	return tools, bash, set
 }
 
 func main() {
@@ -53,9 +56,9 @@ func main() {
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: os.Stderr})
 
 	workDir, _ := os.Getwd()
-	tools, bash := newRegistry(workDir)
-	defer tools.Close(context.Background())
+	tools, bash, set := newRegistry(workDir)
 	defer bash.Close()
+	defer set.Close(context.Background())
 
 	logger.Infof("rmcp tools ready: bash (workdir %s)", workDir)
 	if err := toolnode.Run(ctx, toolnode.Config{
