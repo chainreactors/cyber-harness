@@ -44,6 +44,7 @@ type App struct {
 	Commands          *commands.Registry
 	Tools             tool.Executor
 	toolRegistry      *toolregistry.Registry
+	registrySet       *extension.Set
 	Bash              *commands.BashTool
 	Hooks             *hooks.Registry
 	Engines           any
@@ -197,7 +198,12 @@ func (a *App) Load(scope *extension.Context) error {
 	if !rc.Provider.Enabled {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
-	if err := a.toolRegistry.LoadContext(ctx); err != nil {
+	registrySet, err := extension.New(extension.Entry{ID: "tool-registry", Extension: a.toolRegistry})
+	if err != nil {
+		return err
+	}
+	a.registrySet = registrySet
+	if err := a.registrySet.Load(ctx); err != nil {
 		return fmt.Errorf("load tool registry: %w", err)
 	}
 	if err := a.initCommands(rc, logger); err != nil {
@@ -340,8 +346,8 @@ func (a *App) Close(ctx context.Context) error {
 					closeErr = errors.Join(closeErr, fmt.Errorf("close command registry: %w", err))
 				}
 			}
-			if a.toolRegistry != nil {
-				if err := a.toolRegistry.Close(context.Background()); err != nil {
+			if a.registrySet != nil {
+				if err := a.registrySet.Close(context.Background()); err != nil {
 					closeErr = errors.Join(closeErr, fmt.Errorf("close tool registry: %w", err))
 					a.Logger().Warnf("close tool registry: %s", err)
 				}
