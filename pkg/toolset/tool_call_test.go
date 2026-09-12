@@ -3,6 +3,7 @@ package toolset
 import (
 	"context"
 	"errors"
+	"github.com/chainreactors/aiscan/core/extension"
 	"strings"
 	"testing"
 	"time"
@@ -260,12 +261,16 @@ func (invalidTextResultExecutor) Definition() *tool.Definition {
 func testRegistry(t testing.TB, value tool.Tool) *toolregistry.Registry {
 	t.Helper()
 	reg := toolregistry.New()
-	if err := reg.Load(context.Background()); err != nil {
+	set, err := extension.New(extension.Entry{ID: "registry", Extension: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reg.Register("test", value); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = reg.Close(context.Background()) })
+	t.Cleanup(func() { _ = set.Close(context.Background()) })
 	return reg
 }
