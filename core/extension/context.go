@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/chainreactors/aiscan/core/tool"
 	"sync"
 	"sync/atomic"
 )
@@ -18,16 +19,35 @@ var ownerSequence atomic.Uint64
 // and ongoing work have separate cancellation signals. There is no service
 // lookup, event dispatch, or business scope hierarchy in this type.
 type Context struct {
-	init     context.Context
-	lifetime context.Context
-	cancel   context.CancelFunc
-	owner    string
-	mu       sync.Mutex
-	effects  []*effect
-	stopped  bool
-	stopOnce sync.Once
-	stopErr  error
+	init      context.Context
+	lifetime  context.Context
+	cancel    context.CancelFunc
+	owner     string
+	mu        sync.Mutex
+	effects   []*effect
+	stopped   bool
+	stopOnce  sync.Once
+	stopErr   error
+	tools     *toolCatalog
+	installed bool
 }
+
+// RegisterTools declares tools during Load only. Set owns their publication,
+// cancellation and drain; extensions only close their own business resources.
+func (c *Context) RegisterTools(tools ...tool.Tool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped || c.installed || c.tools == nil {
+		return ErrToolsUnavailable
+	}
+	return c.tools.register(tools...)
+}
+
+// Executor borrows this host's catalog. It is inactive until the whole Set has
+// loaded, and never grants registration or lifecycle ownership.
+func (c *Context) Executor() tool.Executor { return c.tools }
+
+func (c *Context) finishLoad() { c.mu.Lock(); c.installed = true; c.mu.Unlock() }
 
 type effect struct {
 	once    sync.Once

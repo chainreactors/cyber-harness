@@ -50,12 +50,13 @@ type Set struct {
 	items   map[string]*item
 	order   []string
 	closing bool
+	tools   *toolCatalog
 }
 
 // New validates and orders entries without calling extensions. Entries must not
 // contain typed nils or reuse an instance across entries or Sets.
 func New(entries ...Entry) (*Set, error) {
-	s := &Set{gate: make(chan struct{}, 1), items: make(map[string]*item, len(entries))}
+	s := &Set{gate: make(chan struct{}, 1), items: make(map[string]*item, len(entries)), tools: newToolCatalog()}
 	for _, e := range entries {
 		if e.ID == "" || e.Extension == nil {
 			return nil, fmt.Errorf("extension entry requires id and extension")
@@ -130,23 +131,30 @@ func (s *Set) Load(ctx context.Context) error {
 		}
 		if err := ctx.Err(); err != nil {
 			s.closing = true
+			s.tools.stop()
 			return errors.Join(err, s.closeReverse(ctx, started))
 		}
 		it.state = loadingState
 		started = append(started, id)
 		if it.ctx == nil {
 			it.ctx = newContext(ctx, id)
+			it.ctx.tools = s.tools
 		}
-		if err := it.extension.Load(it.ctx); err != nil {
+		loadErr := it.extension.Load(it.ctx)
+		it.ctx.finishLoad()
+		if err := loadErr; err != nil {
 			s.closing = true
+			s.tools.stop()
 			return errors.Join(fmt.Errorf("load extension %s: %w", id, err), s.closeReverse(ctx, started))
 		}
 		if err := ctx.Err(); err != nil {
 			s.closing = true
+			s.tools.stop()
 			return errors.Join(err, s.closeReverse(ctx, started))
 		}
 		it.state = activeState
 	}
+	s.tools.activate()
 	return nil
 }
 func (s *Set) Close(ctx context.Context) error {
@@ -155,6 +163,10 @@ func (s *Set) Close(ctx context.Context) error {
 	}
 	defer func() { <-s.gate }()
 	s.closing = true
+	s.tools.stop()
+	if err := s.tools.drain(ctx); err != nil {
+		return err
+	}
 	return s.closeReverse(ctx, s.order)
 }
 func (s *Set) closeReverse(ctx context.Context, ids []string) error {

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,7 +17,6 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coredeps "github.com/chainreactors/aiscan/core/deps"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/chainreactors/utils/parsers"
@@ -23,21 +24,29 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-func TestAppOwnsOneSharedProxyInfrastructure(t *testing.T) {
-	app, err := New(context.Background(), Config{SkipEngines: true, Logger: telemetry.NopLogger()})
+func TestAppBorrowsOneSharedProxyInfrastructure(t *testing.T) {
+	infra, err := proxytool.NewHub(t.TempDir(), "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer app.Close()
-	if app.deps == nil || app.proxyInfra == nil || app.proxyInfra.Hub == nil {
+
+	infraSet := extensiontest.Set(t, extension.Entry{ID: "infra", Extension: infra})
+	if err := infraSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = infraSet.Close(context.Background()) })
+	app := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, infra)
+
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer appSet.Close(context.Background())
+	if app.proxyHub == nil {
 		t.Fatal("application proxy infrastructure is incomplete")
 	}
-	provided, ok := coredeps.Get(app.deps.Bag, proxytool.InfraKey)
-	if !ok || provided != app.proxyInfra {
-		t.Fatal("command factories do not share the application proxy infrastructure")
-	}
-	if app.deps.ScannerProxy != app.proxyInfra.Hub.ProxyURL() {
-		t.Fatalf("scanner proxy = %q, hub = %q", app.deps.ScannerProxy, app.proxyInfra.Hub.ProxyURL())
+	if app.proxyURL != app.proxyHub.ProxyURL() {
+		t.Fatalf("scanner proxy = %q, hub = %q", app.proxyURL, app.proxyHub.ProxyURL())
 	}
 }
 
@@ -128,11 +137,13 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	app, err := New(context.Background(), Config{
+	app := New(Config{
 		RecordFile: path, SkipEngines: true, Logger: telemetry.NopLogger(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	}, nil, nil)
+
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 
 	app.Emit(&aop.Event{
@@ -161,7 +172,9 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
 	})
-	app.Close()
+	if err := appSet.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	file, err := os.Open(path)
 	if err != nil {

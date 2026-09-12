@@ -16,25 +16,10 @@ type Tool interface {
 }
 
 // Executor is the minimal interface the agent loop needs to
-// discover and invoke tools. Registry satisfies it directly.
+// discover and invoke tools. The extension host provides it.
 type Executor interface {
 	ToolDefinitions() []*aop.ToolDefinition
 	ExecuteTool(ctx context.Context, name, arguments string) (*Result, error)
-}
-
-// Registration is the lease for one atomically published tool group.
-// Revoke synchronously stops admission and requests cancellation without
-// waiting. Close revokes and waits for accepted calls; an incomplete wait
-// reports extension.ErrCloseIncomplete and may be retried.
-type Registration interface {
-	Revoke()
-	Close(context.Context) error
-}
-
-// Registrar publishes tools without exposing execution or registry lifecycle.
-// Failed registration returns no lease and must not alter existing owners.
-type Registrar interface {
-	Register(owner string, tools ...Tool) (Registration, error)
 }
 
 // EmptyExecutor returns an Executor with no tools.

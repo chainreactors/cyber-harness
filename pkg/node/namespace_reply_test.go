@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"io"
 	"testing"
 	"time"
@@ -9,26 +11,31 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
-	"github.com/chainreactors/aiscan/skills"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := &apppkg.App{
-		Commands: commands.NewRegistry(), Skills: &skills.Store{},
-		EventBus: eventbus.New[*aop.Event](),
+	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	defer app.Close()
-	rt, err := runtimepkg.New(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{ExistingApp: app})
+	defer appSet.Close(context.Background())
+	rt, err := runtimepkg.New(app, nil, &cfg.Option{}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Close()
+
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer rtSet.Close(context.Background())
 	// Only open a session: no provider, tool execution or external target.
 	stream := &namespaceReplyStream{
 		sent: make(chan *aop.Envelope, 32),
@@ -117,7 +124,7 @@ func TestExtraNamespaceRepliesReachTheWire(t *testing.T) {
 		Registry: commands.NewRegistry(),
 		ExtraNamespaces: []func(*aop.NamespaceMux) error{
 			func(mux *aop.NamespaceMux) error {
-				return mux.Register(&trafficpb.ProtocolMessage{}, func(
+				return mux.Register("test", &trafficpb.ProtocolMessage{}, func(
 					_ context.Context, envelope *aop.Envelope, _ protobuf.Message, send aop.SendFunc,
 				) error {
 					reply, err := aop.Wrap("reply-1", envelope.GetId(), &trafficpb.ProtocolMessage{

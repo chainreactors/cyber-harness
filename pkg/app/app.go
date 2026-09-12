@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	files "github.com/chainreactors/aiscan/tools/files"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,16 +27,15 @@ import (
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
+	searchtools "github.com/chainreactors/aiscan/pkg/exts/search"
+	terminaltools "github.com/chainreactors/aiscan/pkg/exts/terminal"
+	toolsext "github.com/chainreactors/aiscan/pkg/exts/tools"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
-	"github.com/chainreactors/aiscan/pkg/toolset/terminaltools"
-	workspacefiles "github.com/chainreactors/aiscan/pkg/toolset/workspacefiles"
+	"github.com/chainreactors/aiscan/pkg/shellaudit"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	arsenaltools "github.com/chainreactors/aiscan/tools/arsenal"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
-	searchtools "github.com/chainreactors/aiscan/tools/search"
 )
 
 type App struct {
@@ -44,8 +45,6 @@ type App struct {
 	ProviderFallbacks []agent.ProviderEntry
 	Commands          *commands.Registry
 	Tools             tool.Executor
-	toolRegistry      *toolregistry.Registry
-	registrySet       *extension.Set
 	Bash              *commands.BashTool
 	Hooks             *hooks.Registry
 	Engines           any
@@ -59,7 +58,7 @@ type App struct {
 	eventMu          sync.Mutex
 	eventSeq         map[string]uint64
 	Progress         *eventbus.Bus[*toolpb.Progress]
-	Recorder         *output.JSONLRecorder
+	Recorder         *output.JSONLRecorder // Borrowed; the profile owns its lifecycle.
 	workDir          string
 	toolConfig       ToolConfig
 	scannerConfig    ScannerConfig
@@ -67,7 +66,7 @@ type App struct {
 	proxyURL         string
 	proxyCA          string
 	egressResolver   func(callID string) (proxyURL, caPath string)
-	proxyInfra       *proxytool.Infra
+	proxyHub         *proxytool.ProxyHub
 	extensions       *extension.Set
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -112,7 +111,7 @@ const (
 // New constructs an inert application around concrete modules owned by its
 // profile. Provider probing, filesystem discovery, tool publication and engine
 // startup begin in Load.
-func New(rc Config, fileAudit *fileaudit.Audit, proxyInfra *proxytool.Infra) *App {
+func New(rc Config, fileAudit *fileaudit.Audit, proxyHub *proxytool.ProxyHub) *App {
 	if rc.Capabilities.Empty() {
 		rc.Capabilities = edition.Catalog()
 	}
@@ -120,12 +119,11 @@ func New(rc Config, fileAudit *fileaudit.Audit, proxyInfra *proxytool.Infra) *Ap
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	toolRuntime := toolregistry.New()
 	a := &App{
-		config: rc, fileAudit: fileAudit, proxyInfra: proxyInfra, logger: logger,
+		config: rc, fileAudit: fileAudit, proxyHub: proxyHub, logger: logger,
 		Hooks: hooks.New(), EventBus: eventbus.New[*aop.Event](),
 		Progress: eventbus.New[*toolpb.Progress](), Commands: commands.NewRegistry(),
-		Tools: toolRuntime, toolRegistry: toolRuntime, enginesReady: make(chan struct{}), closeDone: make(chan struct{}),
+		Tools: tool.EmptyExecutor(), enginesReady: make(chan struct{}), closeDone: make(chan struct{}),
 	}
 	return a
 }
@@ -199,15 +197,7 @@ func (a *App) Load(scope *extension.Context) error {
 	if !rc.Provider.Enabled {
 		a.setLLMHealth(LLMHealth{State: LLMHealthNotConfigured})
 	}
-	registrySet, err := extension.New(extension.Entry{ID: "tool-registry", Extension: a.toolRegistry})
-	if err != nil {
-		return err
-	}
-	a.registrySet = registrySet
-	if err := a.registrySet.Load(ctx); err != nil {
-		return fmt.Errorf("load tool registry: %w", err)
-	}
-	if err := a.initCommands(rc, logger); err != nil {
+	if err := a.initCommands(ctx, rc, logger); err != nil {
 		return err
 	}
 	if rc.RecordFile != "" {
@@ -347,21 +337,6 @@ func (a *App) Close(ctx context.Context) error {
 					closeErr = errors.Join(closeErr, fmt.Errorf("close command registry: %w", err))
 				}
 			}
-			if a.registrySet != nil {
-				if err := a.registrySet.Close(context.Background()); err != nil {
-					closeErr = errors.Join(closeErr, fmt.Errorf("close tool registry: %w", err))
-					a.Logger().Warnf("close tool registry: %s", err)
-				}
-			}
-			a.recorderMu.Lock()
-			if a.Recorder != nil {
-				if err := a.Recorder.Close(); err != nil {
-					closeErr = errors.Join(closeErr, fmt.Errorf("close AOP JSONL recorder: %w", err))
-					a.Logger().Warnf("close AOP JSONL recorder: %s", err)
-				}
-				a.Recorder = nil
-			}
-			a.recorderMu.Unlock()
 			if closer, ok := a.Engines.(interface{ Close() }); ok {
 				closer.Close()
 			}
@@ -398,18 +373,16 @@ func (a *App) StartRecording(path string) error {
 	}
 	a.recorderMu.Lock()
 	defer a.recorderMu.Unlock()
-	if a.Recorder != nil {
-		if !samePath(a.Recorder.Path(), path) {
-			return fmt.Errorf("AOP JSONL already records to %s", a.Recorder.Path())
+	if a.Recorder == nil {
+		return fmt.Errorf("AOP recorder is not installed")
+	}
+	if current := a.Recorder.Path(); current != "" {
+		if !samePath(current, path) {
+			return fmt.Errorf("AOP JSONL already records to %s", current)
 		}
 		return nil
 	}
-	recorder, err := output.NewJSONLRecorder(a.EventBus, path)
-	if err != nil {
-		return err
-	}
-	a.Recorder = recorder
-	return nil
+	return a.Recorder.Switch(path)
 }
 
 func (a *App) SwitchRecording(path string) error {
@@ -424,12 +397,7 @@ func (a *App) SwitchRecording(path string) error {
 	a.recorderMu.Lock()
 	defer a.recorderMu.Unlock()
 	if a.Recorder == nil {
-		recorder, err := output.NewJSONLRecorder(a.EventBus, path)
-		if err != nil {
-			return err
-		}
-		a.Recorder = recorder
-		return nil
+		return fmt.Errorf("AOP recorder is not installed")
 	}
 	if samePath(a.Recorder.Path(), path) {
 		return nil
@@ -526,7 +494,7 @@ func providerWebSearch(model agent.Provider) func(context.Context, string, int) 
 	}
 }
 
-func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
+func (a *App) initCommands(ctx context.Context, rc Config, logger telemetry.Logger) error {
 	workDir, _ := os.Getwd()
 	a.workDir = workDir
 	a.toolConfig = rc.Tools
@@ -534,10 +502,10 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 	a.proxyURL = rc.Scanner.Proxy
 	var err error
 	var extensionEntries []extension.Entry
-	if a.proxyInfra != nil && a.proxyInfra.Hub != nil && a.proxyInfra.Hub.ProxyURL() != "" {
-		a.proxyURL = a.proxyInfra.Hub.ProxyURL()
-		a.proxyCA = a.proxyInfra.Hub.CAPath()
-		a.egressResolver = a.proxyInfra.Egress
+	if a.proxyHub != nil && a.proxyHub.ProxyURL() != "" {
+		a.proxyURL = a.proxyHub.ProxyURL()
+		a.proxyCA = a.proxyHub.CAPath()
+		a.egressResolver = a.proxyHub.Egress
 	}
 
 	plan := rc.Capabilities.Select(capability.Options{
@@ -545,25 +513,34 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	if plan.Has("core") {
-		workspaceTools, workspaceErr := workspacefiles.Tools(workDir, a.Skills, a.fileAudit, rc.Tools.RunnerMode)
+		fileConfig := files.Config{Directory: workDir}
+		if a.fileAudit != nil {
+			fileConfig.Observe = a.fileAudit.ObserveFile
+		}
+		workspace, workspaceErr := fileext.New(fileConfig)
 		if workspaceErr != nil {
 			return workspaceErr
 		}
-		workspace, workspaceErr := toolgroup.New(a.toolRegistry, workspaceTools...)
-		if workspaceErr != nil {
-			return workspaceErr
-		}
-		terminal, terminalErr := terminaltools.New(a.toolRegistry, a.Commands, terminaltools.Config{
+		terminal, terminalErr := terminaltools.New(a.Commands, terminaltools.Config{
 			Directory: workDir, Timeout: rc.Tools.BashTimeout,
-			Proxy: a.proxyURL, ProxyCA: a.proxyCA, Egress: a.egressResolver, Audit: a.fileAudit,
+			Proxy: a.proxyURL, ProxyCA: a.proxyCA, Egress: a.egressResolver,
 		})
 		if terminalErr != nil {
 			return terminalErr
 		}
 		a.Bash = terminal.Bash()
+		var terminalDependencies []string
+		if a.fileAudit != nil {
+			observer, err := shellaudit.New(a.Bash, a.fileAudit)
+			if err != nil {
+				return err
+			}
+			extensionEntries = append(extensionEntries, extension.Entry{ID: "shell-audit", Extension: observer})
+			terminalDependencies = append(terminalDependencies, "shell-audit")
+		}
 		extensionEntries = append(extensionEntries,
-			extension.Entry{ID: "workspace", Extension: workspace},
-			extension.Entry{ID: "terminal", Extension: terminal},
+			extension.Entry{ID: "files", Extension: workspace},
+			extension.Entry{ID: "terminal", DependsOn: terminalDependencies, Extension: terminal},
 		)
 		subagent := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
 			if a.Skills == nil {
@@ -581,12 +558,14 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 				Model:           skill.AgentModel, Background: skill.AgentBackground,
 			}, nil
 		})
-		if _, err := a.toolRegistry.Register("subagent", subagent); err != nil {
-			return fmt.Errorf("register subagent tool: %w", err)
+		subagentExtension, err := toolsext.New(subagent)
+		if err != nil {
+			return err
 		}
+		extensionEntries = append(extensionEntries, extension.Entry{ID: "subagent", Extension: subagentExtension})
 	}
 	if plan.Has("proxy") {
-		if err := proxytool.Register(a.Commands, a.proxyInfra, rc.Scanner.Proxy); err != nil {
+		if err := proxytool.Register(a.Commands, a.proxyHub, rc.Scanner.Proxy); err != nil {
 			return err
 		}
 	}
@@ -596,9 +575,11 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 		}
 	}
 	if plan.Has("search") {
-		if err := searchtools.Register(a.Commands, a.toolRegistry, providerWebSearch(a.provider), rc.Tools.TavilyKeys, a.proxyURL, a.proxyCA, nil, nil); err != nil {
+		search, err := searchtools.New(a.Commands, providerWebSearch(a.provider), rc.Tools.TavilyKeys, a.proxyURL, a.proxyCA, nil, nil)
+		if err != nil {
 			return err
 		}
+		extensionEntries = append(extensionEntries, extension.Entry{ID: "search", Extension: search})
 	}
 	entries, err := editionToolEntries(a, rc, plan)
 	if err != nil {
@@ -610,9 +591,10 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 		if err != nil {
 			return err
 		}
-		if err := a.extensions.Load(a.ctx); err != nil {
+		if err := a.extensions.Load(ctx); err != nil {
 			return err
 		}
+		a.Tools = a.extensions.Executor()
 	}
 	return nil
 }

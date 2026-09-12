@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/chainreactors/aiscan/core/extension"
 	"io"
 	"net"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
@@ -34,6 +36,13 @@ import (
 )
 
 type singleDeliveryProbeTool struct{}
+
+var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+func testToolExecutor(t *testing.T, tools ...coretool.Tool) coretool.Executor {
+	t.Helper()
+	return extensiontest.Tools(t, tools...)
+}
 
 func (singleDeliveryProbeTool) Name() string { return "single_delivery_probe" }
 
@@ -52,7 +61,7 @@ type trackingAgentEndpoint struct {
 	subscribed *bool
 }
 
-func (e *trackingAgentEndpoint) Subscribe(fn func(*aop.Event)) func() {
+func (e *trackingAgentEndpoint) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
 	*e.subscribed = true
 	return e.bus.Subscribe(fn)
 }
@@ -61,8 +70,8 @@ func (e *trackingAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) 
 
 type panicAgentEndpoint struct{}
 
-func (panicAgentEndpoint) Subscribe(func(*aop.Event)) func() { return func() {} }
-func (panicAgentEndpoint) EmitEvent(*aop.Event)              { panic("send event boom") }
+func (panicAgentEndpoint) Subscribe(func(*aop.Event)) *eventbus.Subscription[*aop.Event] { return nil }
+func (panicAgentEndpoint) EmitEvent(*aop.Event)                                          { panic("send event boom") }
 
 type handshakeThenEOFStream struct {
 	helloID string
@@ -186,25 +195,28 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app, err := apppkg.New(ctx, apppkg.Config{
+	app := apppkg.New(apppkg.Config{
 		SkipEngines: true,
 		Logger:      telemetry.NopLogger(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer app.Close()
-	rt, err := runtimepkg.New(ctx, &cfg.Option{}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{
-		ExistingApp:      app,
-		ProviderOptional: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rt.Close()
+	}, nil, nil)
 
-	registry := commands.NewRegistry()
-	registry.RegisterTool(singleDeliveryProbeTool{})
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer appSet.Close(context.Background())
+	rt, err := runtimepkg.New(app, nil, &cfg.Option{}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rtSet.Close(context.Background())
+
+	registry := testToolExecutor(t, singleDeliveryProbeTool{})
 	runtimeEvents := make(chan *aop.Event, 1)
 	var runtimeToolCalls atomic.Int32
 	unsubscribe := rt.Subscribe(func(event *aop.Event) {
@@ -218,7 +230,7 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 			runtimeEvents <- event
 		}
 	})
-	defer unsubscribe()
+	defer unsubscribe.Cancel()
 	directMessages := make(chan protobuf.Message, 2)
 	send := func(_ string, message protobuf.Message) { directMessages <- message }
 	arguments, err := aop.JSONValue(map[string]any{})
@@ -233,7 +245,7 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 	handleAgentToolMessage(
 		ctx,
 		connectionConfig{
-			Registry: registry,
+			Executor: registry,
 			Logger:   telemetry.NopLogger(),
 			Agent:    rt,
 		},
@@ -264,8 +276,7 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 }
 
 func TestToolOnlyNodeToolResultUsesEndpointDelivery(t *testing.T) {
-	registry := commands.NewRegistry()
-	registry.RegisterTool(singleDeliveryProbeTool{})
+	registry := testToolExecutor(t, singleDeliveryProbeTool{})
 	wireEvents := make(chan *aop.Event, 1)
 	directMessages := make(chan protobuf.Message, 1)
 	endpoint := newEventBusEndpoint(nil)
@@ -278,7 +289,7 @@ func TestToolOnlyNodeToolResultUsesEndpointDelivery(t *testing.T) {
 	}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: registry, Logger: telemetry.NopLogger(), Agent: endpoint},
+		connectionConfig{Executor: registry, Logger: telemetry.NopLogger(), Agent: endpoint},
 		&aop.Envelope{Id: "tool-only-op"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{Call: &aop.ToolCall{
 			Id: "tool-only-op", Name: "single_delivery_probe", Arguments: arguments,
@@ -336,7 +347,7 @@ func TestExecRequestReportsExitCode(t *testing.T) {
 }
 
 func TestDefaultAgentRuntimeDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
-	hello, err := BuildHello("agent", commands.NewRegistry(), "agent", nil)
+	hello, err := BuildHello("agent", coretool.EmptyExecutor(), "agent", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

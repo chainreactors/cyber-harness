@@ -2,21 +2,84 @@ package app
 
 import (
 	"context"
-	"io"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/extension"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+type closeSignal struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func TestNewIsInertUntilLoad(t *testing.T) {
+	a := New(Config{SkipEngines: true}, nil, nil)
+	if a.ctx != nil || a.Skills != nil || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
+		t.Fatal("New exposed initialized application resources before Load")
+	}
+	if err := a.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
+	ready := make(chan struct{})
+	a := &App{enginesReady: ready, closeDone: make(chan struct{}), loaded: true}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := a.Close(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Close error = %v, want context cancellation", err)
+	}
+	select {
+	case <-a.closeDone:
+		t.Fatal("Close released the application before engine assembly stopped")
+	default:
+	}
+	close(ready)
+	if err := a.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s *closeSignal) Close() { s.once.Do(func() { close(s.done) }) }
+
+func TestCloseReportsRecorderFailureOnceAfterReleasingResources(t *testing.T) {
+	a := New(Config{SkipEngines: true}, nil, nil)
+	t.Cleanup(func() { _ = a.Close(context.Background()) })
+	if err := a.StartRecording(filepath.Join(t.TempDir(), "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	// Feed an invalid event through the actual synchronous recorder subscription.
+	a.EventBus.Emit(&aop.Event{})
+	closed := make(chan struct{})
+	a.Engines = &closeSignal{done: closed}
+	err := a.Close(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "requires id, session_id and payload") || errors.Is(err, extension.ErrCloseIncomplete) {
+		t.Fatalf("Close = %v", err)
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("terminal recording error prevented resource release")
+	}
+	if a.Recorder != nil {
+		t.Fatal("closed recorder remains owned")
+	}
+	if err := a.Close(t.Context()); err != nil {
+		t.Fatalf("terminal error repeated: %v", err)
+	}
+}
 
 func TestEmitConcurrentProducersAndReentrantSubscriber(t *testing.T) {
 	a := &App{EventBus: eventbus.New[*aop.Event]()}
@@ -107,15 +170,16 @@ func TestReloadProviderPreservesNewerStateAndBuildFailure(t *testing.T) {
 	}
 }
 
-func TestCloseWaitsForAssemblyBeforeReleasingCommands(t *testing.T) {
+func TestCloseWaitsForAssemblyBeforeReleasingResources(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, release := make(chan struct{}), make(chan struct{})
 	var unblock sync.Once
 	defer unblock.Do(func() { close(release) })
-	commandsClosed := make(chan struct{})
-	reg := commands.NewRegistry()
-	reg.Register(commands.Command{Name: "inert", Close: func() { close(commandsClosed) }}, "test")
-	a := &App{ctx: ctx, cancel: cancel, enginesReady: ready, enginesEnabled: true, Commands: reg}
+	resourcesClosed := make(chan struct{})
+	a := &App{
+		ctx: ctx, cancel: cancel, enginesReady: ready, enginesEnabled: true,
+		Engines: &closeSignal{done: resourcesClosed}, closeDone: make(chan struct{}), loaded: true,
+	}
 	if got := a.ScannerState(); got != "loading" {
 		t.Fatalf("state = %q", got)
 	}
@@ -125,11 +189,11 @@ func TestCloseWaitsForAssemblyBeforeReleasingCommands(t *testing.T) {
 		close(ready)
 	}()
 	done := make(chan struct{})
-	go func() { a.Close(); close(done) }()
+	go func() { _ = a.Close(context.Background()); close(done) }()
 	<-ctx.Done()
 	select {
-	case <-commandsClosed:
-		t.Fatal("commands closed while assembly still owns them")
+	case <-resourcesClosed:
+		t.Fatal("resources closed while assembly still owns them")
 	default:
 	}
 	unblock.Do(func() { close(release) })
@@ -139,59 +203,17 @@ func TestCloseWaitsForAssemblyBeforeReleasingCommands(t *testing.T) {
 		t.Fatal("Close did not finish after assembly stopped")
 	}
 	select {
-	case <-commandsClosed:
+	case <-resourcesClosed:
 	default:
-		t.Fatal("App did not close owned commands")
+		t.Fatal("App did not close owned resources")
 	}
-	a.Close()
+	if err := a.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.StartRecording(filepath.Join(t.TempDir(), "late.jsonl")); err == nil {
 		t.Fatal("closed App reopened its recorder")
 	}
 	if err := a.SwitchRecording(filepath.Join(t.TempDir(), "late.jsonl")); err == nil {
 		t.Fatal("closed App switched its recorder")
-	}
-}
-
-func TestIOARetryOutlivesCallerAndStopsWithApp(t *testing.T) {
-	var calls atomic.Int32
-	retrying, canceled := make(chan struct{}), make(chan struct{})
-	stopServer := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		if calls.Add(1) == 1 {
-			http.Error(w, "try later", http.StatusServiceUnavailable)
-			return
-		}
-		close(retrying)
-		select {
-		case <-r.Context().Done():
-			close(canceled)
-		case <-stopServer:
-		}
-	}))
-	defer srv.Close()
-	defer close(stopServer)
-	ctx, cancel := context.WithCancel(context.Background())
-	a := &App{ctx: ctx, cancel: cancel}
-	defer a.Close()
-	caller, cancelCaller := context.WithCancel(context.Background())
-	defer cancelCaller()
-	if err := a.InitIOA(caller, IOAConfig{URL: srv.URL, AutoRegister: true}); err != nil {
-		t.Fatal(err)
-	}
-	cancelCaller()
-	select {
-	case <-retrying:
-	case <-time.After(5 * time.Second):
-		t.Fatal("caller cancellation stopped application registration retries")
-	}
-	a.Close()
-	select {
-	case <-canceled:
-	case <-time.After(time.Second):
-		t.Fatal("App close did not cancel the in-flight registration")
-	}
-	if err := a.InitIOA(context.Background(), IOAConfig{URL: srv.URL}); err == nil {
-		t.Fatal("closed App admitted another registration")
 	}
 }

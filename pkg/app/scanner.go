@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,11 +13,18 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/truncate"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	toolcatalog "github.com/chainreactors/aiscan/tools"
+	curltools "github.com/chainreactors/aiscan/tools/curl"
+	gotools "github.com/chainreactors/aiscan/tools/gogo"
+	neutrontools "github.com/chainreactors/aiscan/tools/neutron"
+	protontools "github.com/chainreactors/aiscan/tools/proton"
 	"github.com/chainreactors/aiscan/tools/scan"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
+	spraytools "github.com/chainreactors/aiscan/tools/spray"
+	zombietools "github.com/chainreactors/aiscan/tools/zombie"
 )
 
-func (a *App) initScanner(ctx context.Context, rc Config, logger telemetry.Logger) {
+func (a *App) initScanner(ctx context.Context, rc Config, logger telemetry.Logger) error {
 	engineSet := initEngines(ctx, rc.Scanner, logger)
 	a.Engines = engineSet
 
@@ -24,8 +32,9 @@ func (a *App) initScanner(ctx context.Context, rc Config, logger telemetry.Logge
 	provider, providerConfig := a.ProviderState()
 	if rc.Scanner.AIEnabled && provider != nil {
 		parent := agent.NewAgent(agent.Config{
+			Loop:          agent.StandardLoop{},
 			Provider:      provider,
-			Tools:         a.Commands,
+			Tools:         a.Tools,
 			Model:         providerConfig.Model,
 			MaxTokens:     providerConfig.MaxTokens,
 			ContextWindow: providerConfig.ContextWindow,
@@ -35,7 +44,7 @@ func (a *App) initScanner(ctx context.Context, rc Config, logger telemetry.Logge
 		options = append(options,
 			scan.WithParent(parent),
 			scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-				return CollectDeepBrowserArtifacts(ctx, a.Commands, targetURL, logger)
+				return CollectDeepBrowserArtifacts(ctx, a.Commands, a.Bash, targetURL, logger)
 			}),
 		)
 		if a.Skills != nil {
@@ -52,13 +61,62 @@ func (a *App) initScanner(ctx context.Context, rc Config, logger telemetry.Logge
 
 	a.assemblyMu.Lock()
 	defer a.assemblyMu.Unlock()
-	commands.Provide(a.deps, scan.OptsKey, options)
 	if engineSet != nil {
-		commands.Provide(a.deps, engine.SetKey, engineSet)
-		commands.Provide(a.deps, resources.SetKey, engineSet.Resources)
+		a.resourceSet = engineSet.Resources
 	}
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), a.deps, a.Commands)
+	plan := a.config.Capabilities.Select(capability.Options{Groups: []string{"scanner"}})
+	if plan.Has("curl") {
+		if err := curltools.Register(a.Commands, logger, a.proxyURL, a); err != nil {
+			return err
+		}
+	}
+	if plan.Has("gogo") {
+		if err := gotools.Register(a.Commands, engineSet, logger, a.proxyURL, a); err != nil {
+			if errors.Is(err, commands.ErrDuplicateCommand) {
+				return err
+			}
+			logger.Warnf("gogo unavailable: %v", err)
+		}
+	}
+	if plan.Has("neutron") {
+		if err := neutrontools.Register(a.Commands, engineSet, logger, a.proxyURL, a); err != nil {
+			if errors.Is(err, commands.ErrDuplicateCommand) {
+				return err
+			}
+			logger.Warnf("neutron unavailable: %v", err)
+		}
+	}
+	if plan.Has("spray") {
+		if err := spraytools.Register(a.Commands, engineSet, logger, a.proxyURL, a); err != nil {
+			if errors.Is(err, commands.ErrDuplicateCommand) {
+				return err
+			}
+			logger.Warnf("spray unavailable: %v", err)
+		}
+	}
+	if plan.Has("zombie") {
+		if err := zombietools.Register(a.Commands, engineSet, logger, a.proxyURL, a); err != nil {
+			if errors.Is(err, commands.ErrDuplicateCommand) {
+				return err
+			}
+			logger.Warnf("zombie unavailable: %v", err)
+		}
+	}
+	if plan.Has("proton") {
+		if err := protontools.Register(a.Commands, a.workDir, a.resourceSet, logger, a.proxyURL, a); err != nil {
+			return err
+		}
+	}
+	if plan.Has("scan") {
+		if err := toolcatalog.RegisterScan(a.Commands, engineSet, options, a.proxyURL, a); err != nil {
+			logger.Warnf("scan unavailable: %v", err)
+		}
+	}
+	if err := registerEditionScanners(a, plan, engineSet, logger); err != nil {
+		return err
+	}
 	logger.Infof("%s", telemetry.StartupOK("scanner", strings.Join(a.Commands.GroupNames("scanner"), ",")))
+	return nil
 }
 
 func initEngines(ctx context.Context, scanner ScannerConfig, logger telemetry.Logger) *engine.Set {
@@ -82,14 +140,9 @@ func initEngines(ctx context.Context, scanner ScannerConfig, logger telemetry.Lo
 	return engineSet
 }
 
-func executeRegistryCommand(ctx context.Context, registry *commands.CommandRegistry, commandLine string, timeout time.Duration) (string, error) {
-	tool, ok := registry.GetTool("bash")
-	if !ok {
+func executeRegistryCommand(ctx context.Context, registry *commands.Registry, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
+	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
-	}
-	bash, ok := tool.(*commands.BashTool)
-	if !ok {
-		return "", fmt.Errorf("registered bash tool has unexpected type")
 	}
 	var output strings.Builder
 	execution, err := bash.RunForeground(ctx, commandLine, commands.BashExecOptions{
@@ -101,8 +154,12 @@ func executeRegistryCommand(ctx context.Context, registry *commands.CommandRegis
 	if err != nil {
 		return output.String(), err
 	}
-	if execution.ExitCode != 0 {
-		return output.String(), fmt.Errorf("command exited with code %d", execution.ExitCode)
+	info, retained := execution.Session()
+	if !retained && execution.ID != "" {
+		return output.String(), fmt.Errorf("command session %s is no longer available", execution.ID)
+	}
+	if info.ExitCode != 0 {
+		return output.String(), fmt.Errorf("command exited with code %d", info.ExitCode)
 	}
 	return output.String(), nil
 }
@@ -142,7 +199,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func CollectDeepBrowserArtifacts(ctx context.Context, registry *commands.CommandRegistry, targetURL string, logger telemetry.Logger) (string, error) {
+func CollectDeepBrowserArtifacts(ctx context.Context, registry *commands.Registry, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}
@@ -159,7 +216,7 @@ func CollectDeepBrowserArtifacts(ctx context.Context, registry *commands.Command
 		}
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = executeRegistryCommand(closeCtx, registry, "playwright close "+session, 5*time.Second)
+		_, _ = executeRegistryCommand(closeCtx, registry, bash, "playwright close "+session, 5*time.Second)
 	}()
 
 	script := `(()=>JSON.stringify({url:location.href,title:document.title,forms:[...document.forms].map((f,i)=>({i,action:f.action,method:f.method,inputs:[...f.elements].map(e=>({tag:e.tagName,type:e.type,name:e.name,id:e.id,placeholder:e.placeholder}))})),buttons:[...document.querySelectorAll("button,input[type=button],input[type=submit],a")].slice(0,80).map(e=>({tag:e.tagName,text:(e.innerText||e.value||e.getAttribute("aria-label")||"").trim(),href:e.href||"",type:e.type||"",id:e.id||"",name:e.name||""})),scripts:[...document.scripts].map(s=>s.src).filter(Boolean).slice(0,50),localStorage:Object.keys(localStorage),sessionStorage:Object.keys(sessionStorage)}))()`
@@ -185,7 +242,7 @@ func CollectDeepBrowserArtifacts(ctx context.Context, registry *commands.Command
 			appendDeepBrowserStep(&output, step.name, step.command, "", err)
 			break
 		}
-		content, err := executeRegistryCommand(ctx, registry, step.command, 12*time.Second)
+		content, err := executeRegistryCommand(ctx, registry, bash, step.command, 12*time.Second)
 		appendDeepBrowserStep(&output, step.name, step.command, content, err)
 		if err != nil {
 			if logger != nil {
@@ -196,7 +253,7 @@ func CollectDeepBrowserArtifacts(ctx context.Context, registry *commands.Command
 	}
 
 	closeCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	content, err := executeRegistryCommand(closeCtx, registry, "playwright close "+session, 8*time.Second)
+	content, err := executeRegistryCommand(closeCtx, registry, bash, "playwright close "+session, 8*time.Second)
 	cancel()
 	closed = true
 	appendDeepBrowserStep(&output, "close", "playwright close "+session, content, err)

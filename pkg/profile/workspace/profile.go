@@ -5,18 +5,17 @@ package workspace
 import (
 	"context"
 	"fmt"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	files "github.com/chainreactors/aiscan/tools/files"
 	"slices"
 	"sync"
 
+	filepb "github.com/chainreactors/aiscan/aop/file"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	"github.com/chainreactors/aiscan/pkg/files"
 	"github.com/chainreactors/aiscan/pkg/recording"
-	"github.com/chainreactors/aiscan/pkg/skillmount"
-	"github.com/chainreactors/aiscan/pkg/toolset/filetools"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
+	skillmount "github.com/chainreactors/aiscan/pkg/exts/skills"
 )
 
 type Config struct {
@@ -31,7 +30,6 @@ type Config struct {
 type Profile struct {
 	mu              sync.RWMutex
 	set             *extension.Set
-	registry        *registry.Registry
 	selected        []string
 	skills          *skillmount.Extension
 	active, closing bool
@@ -66,42 +64,37 @@ func New(config Config) (*Profile, error) {
 	if !seen["skills"] && config.SkillsDirectory != "" {
 		return nil, fmt.Errorf("skills directory configured without skills extension")
 	}
-	f, err := files.New(config.Files)
-	if err != nil {
-		return nil, err
-	}
-	r := registry.New()
-	p := &Profile{registry: r, selected: selected}
-	entries := []extension.Entry{{ID: "registry", Extension: r}, {ID: "filesystem", Extension: f}}
-	dependencies := []string{"registry", "filesystem"}
+	p := &Profile{selected: selected}
+	entries := []extension.Entry{}
+	dependencies := []string{}
+	fileConfig := config.Files
 	if seen["file-audit"] {
-		audit, err := fileaudit.NewWithFiles(f)
-		if err != nil {
-			return nil, err
-		}
+		audit := fileaudit.New()
 		journal := recording.NewFileLog(audit, config.AuditLog)
 		entries = append(entries,
 			extension.Entry{ID: "file-journal", Extension: journal},
-			extension.Entry{ID: "file-audit", DependsOn: []string{"filesystem", "file-journal"}, Extension: audit})
+			extension.Entry{ID: "file-audit", DependsOn: []string{"file-journal"}, Extension: audit})
 		dependencies = append(dependencies, "file-audit")
+		previous := fileConfig.Observe
+		fileConfig.Observe = func(ctx context.Context, op filepb.AccessOp, path string, data []byte, size int64, err error, edits uint32) {
+			if previous != nil {
+				previous(ctx, op, path, data, size, err, edits)
+			}
+			audit.ObserveFile(ctx, op, path, data, size, err, edits)
+		}
 	}
+	f, err := fileext.New(fileConfig)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, extension.Entry{ID: "files", DependsOn: dependencies, Extension: f})
 	if seen["skills"] {
 		p.skills, err = skillmount.New(f, config.SkillsDirectory)
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"filesystem"}, Extension: p.skills})
-		dependencies = append(dependencies, "skills")
+		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"files"}, Extension: p.skills})
 	}
-	definitions, err := filetools.Tools(f)
-	if err != nil {
-		return nil, err
-	}
-	fileTools, err := toolgroup.New(r, definitions...)
-	if err != nil {
-		return nil, err
-	}
-	entries = append(entries, extension.Entry{ID: "files", DependsOn: dependencies, Extension: fileTools})
 	p.set, err = extension.New(entries...)
 	if err != nil {
 		return nil, err
@@ -114,7 +107,7 @@ func (p *Profile) Load(ctx context.Context) error {
 	closing := p.closing
 	p.mu.RUnlock()
 	if closing {
-		return registry.ErrUnavailable
+		return extension.ErrToolsUnavailable
 	}
 	if err := p.set.Load(ctx); err != nil {
 		return err
@@ -122,7 +115,7 @@ func (p *Profile) Load(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closing {
-		return registry.ErrUnavailable
+		return extension.ErrToolsUnavailable
 	}
 	p.active = true
 	return nil
@@ -132,9 +125,9 @@ func (p *Profile) Executor() (tool.Executor, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if !p.active || p.closing {
-		return nil, registry.ErrUnavailable
+		return nil, extension.ErrToolsUnavailable
 	}
-	return p.registry, nil
+	return p.set.Executor(), nil
 }
 
 // Installed reports the complete selection only while the entire composition

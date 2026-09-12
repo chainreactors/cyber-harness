@@ -12,10 +12,10 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/extension"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
 	. "github.com/chainreactors/aiscan/pkg/fileaudit"
-	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
-	filetools "github.com/chainreactors/aiscan/pkg/toolset/workspacefiles"
+	"github.com/chainreactors/aiscan/tools/files"
+	"testing/fstest"
 )
 
 // collector drains an audit trail into a slice. Observations are published on
@@ -376,25 +376,13 @@ func TestReadToolDoesNotRecordVirtualReads(t *testing.T) {
 
 type staticVirtualReader map[string]string
 
-func (r staticVirtualReader) ReadVirtual(path string) (string, bool, error) {
-	content, ok := r[path]
-	return content, ok, nil
-}
-
-func (r staticVirtualReader) GlobVirtual(string) ([]string, bool) { return nil, false }
-
-func workspaceTools(t *testing.T, directory string, source filetools.WorkspaceSource, audit *Audit) *toolregistry.Registry {
+func workspaceTools(t *testing.T, directory string, source staticVirtualReader, audit *Audit) coretool.Executor {
 	t.Helper()
-	registry := toolregistry.New()
-	definitions, err := filetools.Tools(directory, source, audit, false)
+	value, err := fileext.New(files.Config{Directory: directory, Observe: audit.ObserveFile})
 	if err != nil {
 		t.Fatal(err)
 	}
-	module, err := toolgroup.New(registry, definitions...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "registry", Extension: registry}, extension.Entry{ID: "workspace", DependsOn: []string{"registry"}, Extension: module})
+	set, err := extension.New(extension.Entry{ID: "files", Extension: value})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,5 +394,14 @@ func workspaceTools(t *testing.T, directory string, source filetools.WorkspaceSo
 			t.Error(err)
 		}
 	})
-	return registry
+	if source != nil {
+		mounted := fstest.MapFS{}
+		for name, content := range source {
+			mounted[name[len("aiscan://"):]] = &fstest.MapFile{Data: []byte(content)}
+		}
+		if err := value.Mount("aiscan://", mounted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return set.Executor()
 }
