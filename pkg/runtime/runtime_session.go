@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/evaluator"
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	toolpkg "github.com/chainreactors/aiscan/core/tool"
@@ -39,6 +40,9 @@ type SessionOptions struct {
 	// parent session instead; replaying those messages as events would append
 	// every large tool result again to JSONL and the durable event stream.
 	HistorySnapshot bool
+	// Loop overrides the Runtime composition for this session. The selected
+	// instance is fixed for the lifetime of the session.
+	Loop agent.Loop
 }
 
 type SessionCloseReason string
@@ -304,17 +308,19 @@ func (s *commandSession) statusText() string {
 	scannerNames := []string(nil)
 	skillState := "not loaded"
 	if app != nil {
-		if app.Commands != nil {
-			for _, registered := range app.Commands.Tools() {
-				if registered != nil && strings.TrimSpace(registered.Name()) != "" {
-					toolNames = append(toolNames, registered.Name())
+		if app.Tools != nil {
+			for _, definition := range app.Tools.ToolDefinitions() {
+				if definition != nil && strings.TrimSpace(definition.Name) != "" {
+					toolNames = append(toolNames, definition.Name)
 				}
 			}
-			commandNames = app.Commands.Names()
-			scannerNames = app.Commands.GroupNames("scanner")
 			if len(toolNames) > 0 {
 				toolState = "ready"
 			}
+		}
+		if app.Commands != nil {
+			commandNames = app.Commands.Names()
+			scannerNames = app.Commands.GroupNames("scanner")
 		}
 		scannerState = app.ScannerState()
 		if app.Skills != nil {
@@ -399,12 +405,8 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if command == "" {
 		return commandOutcome{err: fmt.Errorf("command is required after !")}
 	}
-	registry := s.state.runtime.app.Commands
-	if registry == nil {
-		return commandOutcome{err: fmt.Errorf("command registry is not available")}
-	}
-	bash, ok := registry.GetTool("bash")
-	if !ok {
+	bash := s.state.runtime.app.Bash
+	if bash == nil {
 		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
 	}
 	payload, _ := json.Marshal(commands.BashArgs{Command: command})
@@ -515,8 +517,8 @@ type sessionState struct {
 }
 
 func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("agent runtime is not configured")
+	if err := rt.ready(); err != nil {
+		return nil, err
 	}
 	if ctx == nil {
 		ctx = rt.ctx
@@ -566,6 +568,9 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 		WithSessionID(id).
 		WithAgentName(agentName).
 		WithBus(rt.app)
+	if options.Loop != nil {
+		agentCfg.Loop = options.Loop
+	}
 	agentCfg.ParentSessionID = options.ParentSessionID
 	agentCfg.ParentToolCallID = options.ParentToolCallID
 	agentCfg.LoopScheduler = scheduler
@@ -614,8 +619,8 @@ func (rt *AgentRuntime) OpenSession(ctx context.Context, options SessionOptions)
 // Runtime lifetime. It is idempotent so a transport reconnect can safely
 // announce the same logical Session again.
 func (rt *AgentRuntime) EnsureSession(options SessionOptions) (*Session, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("agent runtime is not configured")
+	if err := rt.ready(); err != nil {
+		return nil, err
 	}
 	id := strings.TrimSpace(options.ID)
 	logicalID := strings.TrimSpace(options.LogicalID)
@@ -705,9 +710,9 @@ func (rt *AgentRuntime) findSessionLocked(sessionID string) (string, *sessionSta
 	return "", nil
 }
 
-func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) func() {
+func (rt *AgentRuntime) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
 	if rt == nil || rt.app == nil || rt.app.EventBus == nil || fn == nil {
-		return func() {}
+		return nil
 	}
 	return rt.app.EventBus.Subscribe(fn)
 }

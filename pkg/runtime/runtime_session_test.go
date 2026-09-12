@@ -16,12 +16,13 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	terminaltools "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -66,7 +67,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	rt := newBareRuntime(t, nil, provider)
 	var all []*aop.Event
 	unsubscribe := rt.Subscribe(func(event *aop.Event) { all = append(all, event) })
-	defer unsubscribe()
+	defer unsubscribe.Cancel()
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
@@ -127,7 +128,7 @@ func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
 	events := make(chan *aop.Event, 16)
 	unsubscribe := rt.Subscribe(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) })
-	defer unsubscribe()
+	defer unsubscribe.Cancel()
 
 	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{SessionId: "session-1"})
 	if opened.GetAccepted() == nil {
@@ -197,7 +198,6 @@ func TestSessionContextCancellationStopsActiveRun(t *testing.T) {
 
 func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	registry := commands.NewRegistry()
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger()}, registry)
 	rt := newBareRuntime(t, registry, nil)
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
@@ -232,15 +232,6 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 
 func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 	registry := commands.NewRegistry()
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{
-		WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger(),
-	}, registry)
-	for _, tool := range registry.Tools() {
-		tool := tool
-		if closer, ok := tool.(interface{ Close() }); ok {
-			t.Cleanup(closer.Close)
-		}
-	}
 	rt := newBareRuntime(t, registry, nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -443,36 +434,40 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 	return starts, ends
 }
 
-func newBareRuntime(t *testing.T, reg *commands.CommandRegistry, provider agent.Provider) *AgentRuntime {
+func newBareRuntime(t *testing.T, reg *commands.Registry, provider agent.Provider) *AgentRuntime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	if reg == nil {
 		reg = commands.NewRegistry()
 	}
+	terminal, err := terminaltools.New(reg, terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminalSet := extensiontest.Load(t, ctx, terminal)
+	tools := terminalSet.Executor()
+	bash := terminal.Bash()
 	publicBus := eventbus.New[*aop.Event]()
-	application := &apppkg.App{Commands: reg, EventBus: publicBus}
+	application := &apppkg.App{Commands: reg, Tools: tools, Bash: bash, EventBus: publicBus}
 	rt := &AgentRuntime{
 		primarySessionID: "main-repl", app: application, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		config: agent.Config{Provider: provider, Tools: reg, Bus: application, Logger: telemetry.NopLogger()},
+		config:    agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
+		closeDone: make(chan struct{}), loaded: true,
 	}
-	t.Cleanup(rt.Close)
+	t.Cleanup(func() {
+		_ = terminalSet.Close(context.Background())
+		_ = reg.Close(context.Background())
+	})
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	return rt
 }
 
 func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
 	reg := commands.NewRegistry()
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"core"}}), &commands.Deps{WorkDir: t.TempDir(), BashTimeout: 5, Logger: telemetry.NopLogger()}, reg)
 	loop := newLoopCommand()
-	reg.Register(commands.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run}, "loop")
+	reg.Register("loop", "loop", commands.Command{Name: loop.Name(), Usage: loop.Usage(), Run: loop.Run})
 	rt := newBareRuntime(t, reg, nil)
-	t.Cleanup(func() {
-		for _, tool := range reg.Tools() {
-			if closer, ok := tool.(interface{ Close() }); ok {
-				closer.Close()
-			}
-		}
-	})
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "chat-1"})
 	if err != nil {

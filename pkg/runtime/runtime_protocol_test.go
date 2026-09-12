@@ -35,7 +35,7 @@ func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 		}()
 	}
 	close(start)
-	rt.Close()
+	_ = rt.Close(context.Background())
 	callers.Wait()
 	if len(replies) != 32 {
 		t.Fatalf("got %d replies, want 32", len(replies))
@@ -44,14 +44,14 @@ func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 
 func TestInlineHostBorrowsRuntimeAcrossReconnect(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	mux := aop.NewNamespaceMux()
+	mux := aop.NewNamespaceMux(t.Context())
 	if err := rt.RegisterNamespaces(mux); err != nil {
 		t.Fatal(err)
 	}
 	open := aop.MustWrap("open", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{
 		OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "embedded"},
 	}})
-	first := host.New(context.Background(), mux)
+	first := host.New(mux)
 	var response *aop.Envelope
 	send := func(e *aop.Envelope) error { response = e; return nil }
 	if err := first.Handle(open, send); err != nil {
@@ -67,7 +67,11 @@ func TestInlineHostBorrowsRuntimeAcrossReconnect(t *testing.T) {
 	}
 	// Reconnect to the same application. Closing the communication Host must
 	// neither close its session nor cancel the runtime that owns that session.
-	second := host.New(context.Background(), mux)
+	secondMux := aop.NewNamespaceMux(t.Context())
+	if err := rt.RegisterNamespaces(secondMux); err != nil {
+		t.Fatal(err)
+	}
+	second := host.New(secondMux)
 	defer second.Close()
 	response = nil
 	if err := second.Handle(open, send); err != nil {
@@ -86,11 +90,11 @@ func handleRuntimeMessage(t *testing.T, rt *AgentRuntime, id string, message pro
 	t.Helper()
 	request := aop.MustWrap(id, "", message)
 	var response *aop.Envelope
-	mux := aop.NewNamespaceMux()
+	mux := aop.NewNamespaceMux(t.Context())
 	if err := rt.RegisterNamespaces(mux); err != nil {
 		t.Fatal(err)
 	}
-	h := host.New(context.Background(), mux)
+	h := host.New(mux)
 	defer h.Close()
 	if err := h.Handle(request, func(envelope *aop.Envelope) error { response = envelope; return nil }); err != nil {
 		t.Fatalf("message was not handled: %v", err)

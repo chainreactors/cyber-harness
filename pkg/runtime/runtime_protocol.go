@@ -99,10 +99,10 @@ func (rt *AgentRuntime) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	if rt == nil || mux == nil {
 		return fmt.Errorf("runtime and namespace mux are required")
 	}
-	if err := mux.Register(&aop.ProtocolMessage{}, rt.HandleCoreNamespace); err != nil {
+	if err := mux.Register("runtime", &aop.ProtocolMessage{}, rt.HandleCoreNamespace); err != nil {
 		return err
 	}
-	if err := mux.Register(&types.CommandProtocolMessage{}, rt.HandleCommandNamespace); err != nil {
+	if err := mux.Register("runtime", &types.CommandProtocolMessage{}, rt.HandleCommandNamespace); err != nil {
 		return err
 	}
 	return nil

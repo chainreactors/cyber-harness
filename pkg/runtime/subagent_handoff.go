@@ -46,7 +46,7 @@ func subscribeIOAHandoffContext(ctx context.Context, bus *eventbus.Bus[*aop.Even
 	telemetry.SafeGo("ioa-handoff", func() { r.run(ctx) })
 	return func() {
 		cancel()
-		unsub()
+		unsub.Cancel()
 	}
 }
 

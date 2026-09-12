@@ -107,10 +107,13 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := loadOutputRecorder(t, recorder); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range events {
 		bus.Emit(event)
 	}
-	if err := recorder.Close(); err != nil {
+	if err := recorder.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
