@@ -120,5 +120,5 @@ func (m *Extension) Close(ctx context.Context) error {
 			return errors.Join(extension.ErrCloseIncomplete, err)
 		}
 	}
-	return m.audit.Close(ctx)
+	return m.auditSet.Close(ctx)
 }

@@ -217,7 +217,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 		return err
 	}
 	if err := runtimeSet.Load(ctx); err != nil {
-		_ = runtime.Close(context.Background())
+		_ = runtimeSet.Close(context.Background())
 		return err
 	}
 	defer runtimeSet.Close(context.Background())
