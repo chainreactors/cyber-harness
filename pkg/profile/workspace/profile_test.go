@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	"github.com/chainreactors/aiscan/pkg/files"
 	"github.com/chainreactors/aiscan/pkg/profile/workspace"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
+	"github.com/chainreactors/aiscan/tools/files"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -31,7 +31,7 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("construction opened journal: %v", err)
 	}
-	if _, err := p.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("published before Load: %v", err)
 	}
 	if len(p.Installed()) != 0 {
@@ -62,7 +62,7 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 	if len(p.Installed()) != 0 {
 		t.Fatal("reported closed extensions")
 	}
-	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note"}`); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note"}`); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("retained executor admitted: %v", err)
 	}
 	file, err := os.Open(path)
@@ -124,7 +124,7 @@ func TestProfilesHaveIndependentSelectionAndFailureCleanup(t *testing.T) {
 	if err := bad.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bad.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := bad.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("failed profile published: %v", err)
 	}
 	if got := p.Installed(); !reflect.DeepEqual(got, []string{"files"}) {

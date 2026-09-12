@@ -1,102 +1,58 @@
-# Extending aiscan with a tool
+# Extending AIScan with a tool
 
-Use a native tool when the model needs one structured capability. A tool only
-implements `core/tool.Tool`; it does not need a plugin manager, lifecycle
-container, global hook, or factory.
-
-## Minimal implementation
-
-Create `tools/echo/echo.go`:
+Native tools implement `core/tool.Tool` and are registered explicitly by the
+profile that owns them. A tool does not need an Agent, Runtime, Console, or
+model provider.
 
 ```go
-package echo
+type Args struct { Text string `json:"text"` }
 
-import (
-	"context"
-
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-)
-
-type Args struct {
-	Text string `json:"text" jsonschema:"description=Text to return"`
+type Echo struct{}
+func (Echo) Name() string { return "echo" }
+func (Echo) Description() string { return "Return text unchanged." }
+func (Echo) Definition() *aop.ToolDefinition {
+    return tool.Def("echo", "Return text unchanged.", Args{})
 }
-
-type Tool struct{}
-
-func (Tool) Name() string        { return "echo" }
-func (Tool) Description() string { return "Return text unchanged." }
-func (Tool) Definition() tool.Definition {
-	return tool.Def("echo", "Return text unchanged.", Args{})
-}
-
-func (Tool) Execute(ctx context.Context, arguments string) (tool.Result, error) {
-	args, err := tool.ParseArgs[Args](arguments)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return tool.Result{}, err
-	}
-	return tool.TextResult(args.Text), nil
-}
-
-func Register(reg *commands.CommandRegistry) {
-	reg.RegisterTool(Tool{})
+func (Echo) Execute(ctx context.Context, raw string) (*tool.Result, error) {
+    args, err := tool.ParseArgs[Args](raw)
+    if err != nil { return nil, err }
+    if err := ctx.Err(); err != nil { return nil, err }
+    return tool.TextResult(args.Text), nil
 }
 ```
 
-Call `echo.Register(reg)` from the application composition point that should
-expose the tool. Keep registration explicit when the tool has no Runtime
-dependencies.
-
-## Minimal test
+The profile constructs the owning module; the module registers its tools during Load. For a standalone tool profile use `pkg/toolset/registry`; for the
+minimal file runner use `pkg/profile/files`:
 
 ```go
-package echo
-
-import (
-	"context"
-	"testing"
-
-	"github.com/chainreactors/aiscan/pkg/commands"
-)
-
-func TestEcho(t *testing.T) {
-	reg := commands.NewRegistry()
-	Register(reg)
-
-	result, err := reg.ExecuteTool(context.Background(), "echo", `{"text":"hello"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Text() != "hello" {
-		t.Fatalf("result = %q", result.Text())
-	}
-}
+profile, err := filesprofile.New(files.Config{Directory: workDir})
+if err != nil { return err }
+if err := profile.Load(ctx); err != nil { return err }
+defer profile.Close(context.Background())
+executor, err := profile.Executor()
+if err != nil { return err }
 ```
 
-This test proves schema registration, argument decoding, dispatch, and result
-conversion without starting an Agent or transport.
+`Registry.Register(owner, tools...)` publishes a complete owner group.
+`ExecuteTool` preserves the caller context and Invocation, rejects new calls
+after owner removal, waits for accepted calls during `UnregisterOwner`, and
+returns structured tool results. `Close` is the final registry lifecycle
+operation. Modules unregister their owner before closing resources borrowed by
+their tools.
 
-## Result rules
+Use `tool.TextResult` for normal text, `tool.ErrorResult` for a model-visible
+tool failure, and `Result.Details` for structured domain data. Return a Go
+error when execution itself failed, and honor cancellation and deadlines.
 
-- Use `tool.TextResult` for normal text.
-- Use `tool.ErrorResult` for a tool-level failure the model should observe.
-- Return a Go `error` when execution itself failed.
-- Add `tool.ImageBlock` only when the result contains an image.
-- Put machine-readable domain output in `Result.Details`; do not encode it into
-  an extra transport payload.
-- Honor `ctx` for cancellation and deadlines.
+Tools with scanner, proxy, IOA, or working-directory dependencies receive those
+objects in their constructors. Product profiles own the composition; do not
+add a global registry, factory list, dependency bag, Sink, or DTO to avoid an
+explicit constructor.
 
-## When a factory is justified
+Pseudo-commands exposed through `bash` retain their command-specific
+registration APIs and are documented in [`docs/development.md`](../docs/development.md).
 
-Use `commands.RegisterFactory` only when construction needs shared Runtime
-dependencies such as the scanner engine set, IOA client, provider, data bus, or
-working directory, or when an `init` registration must be activated by several
-binaries. The factory should only construct the tool and call `RegisterTool`.
 
-Do not add a new abstraction until at least two tools need the same behavior.
+## 插件边界
 
-Pseudo-commands exposed through the `bash` tool are documented separately in
-[`docs/development.md`](../docs/development.md).
+`tools` 只提供工具和资源的原始实现。生命周期、工具发布和依赖顺序由 `pkg/exts` 中的适配器交给 `core/extension.Set` 管理。新工具应实现 `tool.Tool`，由对应的 `pkg/exts/<name>` 插件在 Load 时通过 `Context.RegisterTools` 声明。

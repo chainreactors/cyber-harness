@@ -5,14 +5,14 @@ package app
 import (
 	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/tools/record"
+	"github.com/chainreactors/aiscan/pkg/exts/record"
 )
 
 func appendRecorderEntry(entries []extension.Entry, app *App, plan capability.Plan) ([]extension.Entry, error) {
 	if !plan.Has("record") {
 		return entries, nil
 	}
-	recorder, err := record.NewExtension(app.toolRegistry, app.workDir)
+	recorder, err := record.New(app.workDir)
 	if err != nil {
 		return nil, err
 	}

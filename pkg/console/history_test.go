@@ -2,6 +2,8 @@ package console
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,10 +16,8 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	"github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/skills"
 )
 
 func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
@@ -49,14 +49,24 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 
 func newConsoleRuntime(t *testing.T, provider agent.Provider) *runtimepkg.AgentRuntime {
 	t.Helper()
-	a := &apppkg.App{Commands: commands.NewRegistry(), Skills: &skills.Store{}, EventBus: eventbus.New[*aop.Event]()}
+	a := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	aSet := extensiontest.Set(t, extension.Entry{ID: "a", Extension: a})
+	if err := aSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
-	t.Cleanup(a.Close)
-	rt, err := runtimepkg.New(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{ExistingApp: a})
+	t.Cleanup(func() { _ = aSet.Close(context.Background()) })
+	rt, err := runtimepkg.New(a, nil, &cfg.Option{}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(rt.Close)
+
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
 	return rt
 }
 
@@ -75,10 +85,13 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := loadOutputRecorder(t, recorder); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range events {
 		a.Emit(event)
 	}
-	if err := recorder.Close(); err != nil {
+	if err := recorder.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }

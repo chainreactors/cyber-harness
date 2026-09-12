@@ -4,23 +4,7 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	"github.com/chainreactors/aiscan/skills"
-)
-
-var (
-	AppContextKey      = extension.NewServiceKey[*App]("app")
-	ProviderServiceKey = extension.NewServiceKey[agent.Provider]("provider")
-	CommandsServiceKey = extension.NewServiceKey[*commands.Registry]("commands")
-	ToolsServiceKey    = extension.NewServiceKey[tool.Executor]("tools")
-	SkillsServiceKey   = extension.NewServiceKey[*skills.Store]("skills")
-	AuditServiceKey    = extension.NewServiceKey[*fileaudit.Audit]("file-audit")
-	BashServiceKey     = extension.NewServiceKey[*commands.BashTool]("terminal.bash")
-	EnginesServiceKey  = extension.NewServiceKey[any]("scanner.engines")
 )
 
 type Config struct {

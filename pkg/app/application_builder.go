@@ -5,6 +5,7 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/pkg/edition"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -23,6 +24,7 @@ type RuntimeFeatures struct {
 // startup path layers them from cfg.Option via MergeOptionExtras.
 func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeatures, logger telemetry.Logger) Config {
 	return Config{
+		Capabilities: edition.Catalog(),
 		Provider: ApplicationProviderConfig{
 			Enabled:   features.ProviderEnabled,
 			Config:    ProviderConfigFromProto(dc.GetLlm()),
@@ -68,6 +70,7 @@ func MergeOptionExtras(rc Config, option *cfg.Option) Config {
 
 func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Logger) Config {
 	return Config{
+		Capabilities: edition.Catalog(),
 		Provider: ApplicationProviderConfig{
 			Enabled:   features.ProviderEnabled,
 			Config:    ProviderConfig(option),

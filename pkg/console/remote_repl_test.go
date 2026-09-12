@@ -3,21 +3,25 @@ package console
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/agent"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	"github.com/chainreactors/utils/pty"
 )
 
-func newPTYRouter(reg *commands.CommandRegistry) (*terminal.Router, error) {
-	manager := bashManager(reg)
+func newPTYRouter(bash *commands.BashTool) (*terminal.Router, error) {
+	manager := bashManager(bash)
 	if manager == nil || manager.Manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
@@ -29,21 +33,33 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	rt, err := runtimepkg.New(ctx, option, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{
-		ProviderOptional: true,
+	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	applicationSet := extensiontest.Set(t, extension.Entry{ID: "application", Extension: application})
+	if err := applicationSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer applicationSet.Close(context.Background())
+	rt, err := runtimepkg.New(application, nil, option, telemetry.NopLogger(), runtimepkg.RuntimeConfig{
 		PrimarySessionID: MainREPLName,
+		Loop:             agent.StandardLoop{},
 	})
 	if err != nil {
 		t.Fatalf("runtime without provider: %v", err)
 	}
-	defer rt.Close()
+
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rtSet.Close(context.Background())
 
 	repl, err := StartPersistent(rt, option)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repl.Close()
-	mgr := bashManager(rt.App().Commands)
+	mgr := bashManager(rt.App().Bash)
 	if mgr == nil {
 		t.Fatal("pty manager unavailable")
 	}
@@ -63,7 +79,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 
 	messages := make(chan *ptypb.ProtocolMessage, 64)
-	router, err := newPTYRouter(rt.App().Commands)
+	router, err := newPTYRouter(rt.App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +135,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
 		t.Fatalf("router close terminated resident repl: %+v ok=%v", info, ok)
 	}
-	router2, err := newPTYRouter(rt.App().Commands)
+	router2, err := newPTYRouter(rt.App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,16 +183,28 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	rt, err := runtimepkg.New(ctx, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), &runtimepkg.RuntimeConfig{
-		ProviderOptional: true,
+	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	applicationSet := extensiontest.Set(t, extension.Entry{ID: "application", Extension: application})
+	if err := applicationSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer applicationSet.Close(context.Background())
+	rt, err := runtimepkg.New(application, nil, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{
 		PrimarySessionID: MainREPLName,
+		Loop:             agent.StandardLoop{},
 	})
 	if err != nil {
 		t.Fatalf("runtime without provider: %v", err)
 	}
-	defer rt.Close()
 
-	for _, info := range bashManager(rt.App().Commands).List() {
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rtSet.Close(context.Background())
+
+	for _, info := range bashManager(rt.App().Bash).List() {
 		if info.Kind == "repl" && info.Name == MainREPLName {
 			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
 		}

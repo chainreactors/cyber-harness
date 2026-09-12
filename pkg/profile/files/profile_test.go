@@ -8,10 +8,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/files"
 	filesprofile "github.com/chainreactors/aiscan/pkg/profile/files"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
+	"github.com/chainreactors/aiscan/tools/files"
 )
 
 func TestProfileLifecycleAndActualFiles(t *testing.T) {
@@ -23,7 +23,7 @@ func TestProfileLifecycleAndActualFiles(t *testing.T) {
 	if p.Loaded() {
 		t.Fatal("new profile is loaded")
 	}
-	if _, err := p.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("publication before Load: %v", err)
 	}
 	if err := p.Load(t.Context()); err != nil {
@@ -53,10 +53,10 @@ func TestProfileLifecycleAndActualFiles(t *testing.T) {
 	if p.Loaded() {
 		t.Fatal("closed profile reported loaded")
 	}
-	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("execution after Close: %v", err)
 	}
-	if _, err := p.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("publication after Close: %v", err)
 	}
 	if err := p.Load(t.Context()); err == nil {
@@ -94,7 +94,7 @@ func TestFailedLoadDoesNotPublishExecutor(t *testing.T) {
 	if err := p.Load(t.Context()); err == nil {
 		t.Fatal("loaded missing root")
 	}
-	if _, err := p.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("partial profile published executor: %v", err)
 	}
 	if p.Loaded() {
@@ -123,7 +123,7 @@ func TestConcurrentCloseNeverRepublishesProfile(t *testing.T) {
 	if p.Loaded() {
 		t.Fatal("closing profile reported active")
 	}
-	if _, err := p.Executor(); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
 		t.Fatalf("closed profile republished: %v", err)
 	}
 }

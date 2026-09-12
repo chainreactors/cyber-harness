@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"io"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/fileaudit"
 )
 
 // fileAuditStream drives one connection through the handshake, delivers a
@@ -19,7 +22,7 @@ type fileAuditStream struct {
 	helloID string
 	recvs   int
 	sent    chan *aop.Envelope
-	audit   *commands.FileAudit
+	audit   *fileaudit.Audit
 }
 
 func (s *fileAuditStream) Send(envelope *aop.Envelope) error {
@@ -64,8 +67,13 @@ func (s *fileAuditStream) Recv() (*aop.Envelope, error) {
 // state, and every access recorded afterwards reaches the wire addressed to the
 // tool call that produced it.
 func TestFileAuditReachesTheWire(t *testing.T) {
-	audit := commands.NewFileAudit()
-	defer audit.Close()
+	audit := fileaudit.New()
+
+	auditSet := extensiontest.Set(t, extension.Entry{ID: "audit", Extension: audit})
+	if err := auditSet.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = auditSet.Close(context.Background()) }()
 
 	stream := &fileAuditStream{sent: make(chan *aop.Envelope, 32), audit: audit}
 	cc := connectionConfig{
@@ -129,8 +137,13 @@ func TestFileAuditReachesTheWire(t *testing.T) {
 // Without an audit the namespace still answers, so a peer learns that this node
 // reports nothing rather than waiting for a stream that will never start.
 func TestFileConfigureWithoutAnAuditStillAnswers(t *testing.T) {
-	stream := &fileAuditStream{sent: make(chan *aop.Envelope, 32), audit: commands.NewFileAudit()}
-	defer stream.audit.Close()
+	stream := &fileAuditStream{sent: make(chan *aop.Envelope, 32), audit: fileaudit.New()}
+
+	stream_auditSet := extensiontest.Set(t, extension.Entry{ID: "stream.audit", Extension: stream.audit})
+	if err := stream_auditSet.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stream_auditSet.Close(context.Background()) }()
 	cc := connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()}
 
 	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {

@@ -3,6 +3,7 @@ package files_test
 import (
 	"context"
 	"errors"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
@@ -11,18 +12,15 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	"github.com/chainreactors/aiscan/pkg/files"
-	"github.com/chainreactors/aiscan/pkg/toolset/filetools"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
+	"github.com/chainreactors/aiscan/tools/files"
 )
 
 // This composition intentionally lives in an external test: the minimal
 // profile must not import Audit merely to let another composition select it.
-func auditedFiles(t *testing.T) (*extension.Set, *registry.Registry, *files.FS, *fileaudit.Audit) {
+func auditedFiles(t *testing.T) (*extension.Set, tool.Executor, *fileext.Extension, *fileaudit.Audit) {
 	t.Helper()
-	f, err := files.New(files.Config{Directory: t.TempDir()})
+	f, err := fileext.New(files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,20 +28,9 @@ func auditedFiles(t *testing.T) (*extension.Set, *registry.Registry, *files.FS, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := registry.New()
-	definitions, err := filetools.Tools(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := toolgroup.New(r, definitions...)
-	if err != nil {
-		t.Fatal(err)
-	}
 	s, err := extension.New(
 		extension.Entry{ID: "fs", Extension: f},
-		extension.Entry{ID: "registry", Extension: r},
 		extension.Entry{ID: "audit", DependsOn: []string{"fs"}, Extension: a},
-		extension.Entry{ID: "filetools", DependsOn: []string{"fs", "registry", "audit"}, Extension: m},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +40,7 @@ func auditedFiles(t *testing.T) (*extension.Set, *registry.Registry, *files.FS, 
 			t.Error(err)
 		}
 	})
-	return s, r, f, a
+	return s, s.Executor(), f, a
 }
 
 func TestFileAuditSubscribesWithoutToolInjection(t *testing.T) {
@@ -146,7 +133,7 @@ func TestFileAuditCloseTimeoutRetainsFileDependency(t *testing.T) {
 }
 
 func TestRemovingAuditLeavesFileServiceUsable(t *testing.T) {
-	f, err := files.New(files.Config{Directory: t.TempDir()})
+	f, err := fileext.New(files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

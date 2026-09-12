@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,9 +22,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/skills"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -32,6 +33,48 @@ type persistenceProvider struct {
 type lifecycleOutput struct {
 	mu    sync.Mutex
 	kinds []string
+}
+
+func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
+	a := apppkg.New(apppkg.Config{SkipEngines: true}, nil, nil)
+	rt, err := New(a, nil, &cfg.Option{}, telemetry.NopLogger(), RuntimeConfig{Loop: agent.StandardLoop{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.Context() != nil {
+		t.Fatal("New created a runtime lifetime before Load")
+	}
+	if _, err := rt.OpenSession(t.Context(), SessionOptions{ID: "too-early"}); err == nil {
+		t.Fatal("runtime admitted a session before Load")
+	}
+	if err := rt.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
+	rt := &AgentRuntime{
+		loaded: true, closeDone: make(chan struct{}),
+		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
+	}
+	rt.wg.Add(1)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := rt.Close(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Close error = %v, want context cancellation", err)
+	}
+	select {
+	case <-rt.closeDone:
+		t.Fatal("Close released the runtime while owned work remained")
+	default:
+	}
+	rt.wg.Done()
+	if err := rt.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (o *lifecycleOutput) HandleEvent(event *aop.Event) {
@@ -47,24 +90,27 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsBorrowedManager(t *testing.T) {
-	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(t.TempDir(), 1)
-	registry.RegisterTool(bash)
-	app := &apppkg.App{
-		Commands: registry, Skills: &skills.Store{},
-		EventBus: eventbus.New[*aop.Event](),
+	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(app.Close)
+	bash := app.Bash
+	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
-	rt, err := New(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &RuntimeConfig{
-		ExistingApp: app,
-	})
+	rt, err := New(app, nil, &cfg.Option{}, telemetry.NopLogger(), RuntimeConfig{Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(rt.Close)
+
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
 	unsubscribe := rt.Subscribe(output.HandleEvent)
-	defer unsubscribe()
+	defer unsubscribe.Cancel()
 	if _, err := rt.OpenSession(context.Background(), SessionOptions{ID: "owned-session"}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +133,8 @@ func TestRuntimeCloseKeepsBorrowedManager(t *testing.T) {
 		t.Fatal("App work did not start")
 	}
 
-	rt.Close()
-	unsubscribe()
+	_ = rtSet.Close(context.Background())
+	unsubscribe.Cancel()
 	seen := output.snapshot()
 	if len(seen) == 0 || seen[len(seen)-1] != "session.ended" {
 		t.Fatalf("output detached before session end: %v", seen)
@@ -97,13 +143,13 @@ func TestRuntimeCloseKeepsBorrowedManager(t *testing.T) {
 		t.Fatalf("Runtime closed App-owned work: %+v, found=%v", current, ok)
 	}
 
-	rt.Close()
+	_ = rtSet.Close(context.Background())
 	app.EventBus.Emit(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Role: "user"}}})
 	if got := output.snapshot(); len(got) != len(seen) {
 		t.Fatalf("closed Runtime still receives App events: before=%v after=%v", seen, got)
 	}
 
-	app.Close()
+	_ = appSet.Close(context.Background())
 	if current, ok := bash.Manager().Get(info.ID); ok && current.State == tmux.StateRunning {
 		t.Fatalf("App failed to stop owned work: %+v", current)
 	}
@@ -138,8 +184,8 @@ func TestFileFlagPersistsOneCanonicalAOPStream(t *testing.T) {
 	if err := runtime.CloseSession(context.Background(), "task", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Close()
-	app.Close()
+	_ = runtime.Close(context.Background())
+	_ = app.Close(context.Background())
 
 	events, err := output.ReadJSONL(path)
 	if err != nil {
@@ -177,8 +223,8 @@ func TestResumeRestoresAndAppendsAOPStream(t *testing.T) {
 		provider := new(persistenceProvider)
 		app, runtime := newPersistenceRuntime(t, option, provider)
 		runResumedTurn(t, runtime, "continued prompt")
-		runtime.Close()
-		app.Close()
+		_ = runtime.Close(context.Background())
+		_ = app.Close(context.Background())
 
 		if len(provider.requests) != 1 {
 			t.Fatalf("provider requests = %d", len(provider.requests))
@@ -285,8 +331,8 @@ func TestREPLResumeLoadsMainSessionContext(t *testing.T) {
 	if err := runtime.CloseSession(context.Background(), "main-repl", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Close()
-	app.Close()
+	_ = runtime.Close(context.Background())
+	_ = app.Close(context.Background())
 }
 
 func TestClearRotatesToAnEmptyContinuationSession(t *testing.T) {
@@ -313,7 +359,7 @@ func TestClearRotatesToAnEmptyContinuationSession(t *testing.T) {
 	var events []*aop.Event
 	unsub := runtime.Subscribe(func(event *aop.Event) { events = append(events, event) })
 	result, err := session.Command(context.Background(), "/clear")
-	unsub()
+	unsub.Cancel()
 	if err != nil {
 		t.Fatalf("/clear: %v", err)
 	}
@@ -332,8 +378,8 @@ func TestClearRotatesToAnEmptyContinuationSession(t *testing.T) {
 	if err := runtime.CloseSession(context.Background(), "main-repl", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Close()
-	app.Close()
+	_ = runtime.Close(context.Background())
+	_ = app.Close(context.Background())
 	data, err := ReadHistory(path)
 	if err != nil {
 		t.Fatalf("LoadSession after clear: %v", err)
@@ -364,10 +410,10 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	var events []*aop.Event
 	unsub := runtime.Subscribe(func(event *aop.Event) { events = append(events, event) })
 	if _, err := session.Command(context.Background(), "/compact focus on findings"); err != nil {
-		unsub()
+		unsub.Cancel()
 		t.Fatalf("/compact: %v", err)
 	}
-	unsub()
+	unsub.Cancel()
 	newID := session.ID()
 	if newID == oldID {
 		t.Fatal("compact did not rotate the session")
@@ -381,8 +427,8 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	if err := runtime.CloseSession(context.Background(), "main-repl", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Close()
-	app.Close()
+	_ = runtime.Close(context.Background())
+	_ = app.Close(context.Background())
 	data, err := ReadHistory(path)
 	if err != nil {
 		t.Fatal(err)
@@ -430,8 +476,8 @@ func TestInteractiveResumeRotatesAndUsesSelectedContext(t *testing.T) {
 	if err := runtime.CloseSession(context.Background(), "main-repl", SessionCloseCompleted); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Close()
-	app.Close()
+	_ = runtime.Close(context.Background())
+	_ = app.Close(context.Background())
 	data, err := ReadHistory(resumePath)
 	if err != nil {
 		t.Fatal(err)
@@ -483,8 +529,10 @@ func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistencePro
 
 func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *AgentRuntime) {
 	t.Helper()
-	app, err := apppkg.New(context.Background(), apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()})
-	if err != nil {
+	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	app.SetProvider(llm, agent.ProviderConfig{Provider: llm.Name(), Model: "test-model", MaxTokens: 128, ContextWindow: 128000})
@@ -493,14 +541,20 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 		primary = "main-repl"
 		option.SaveSession = true
 	}
-	runtime, err := New(context.Background(), option, telemetry.NopLogger(), &RuntimeConfig{ExistingApp: app, PrimarySessionID: primary})
+	runtime, err := New(app, nil, option, telemetry.NopLogger(), RuntimeConfig{PrimarySessionID: primary, Loop: agent.StandardLoop{}})
 	if err != nil {
-		app.Close()
+		_ = appSet.Close(context.Background())
+		t.Fatal(err)
+	}
+
+	runtimeSet := extensiontest.Set(t, extension.Entry{ID: "runtime", Extension: runtime})
+	if err := runtimeSet.Load(t.Context()); err != nil {
+		_ = appSet.Close(context.Background())
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		runtime.Close()
-		app.Close()
+		_ = runtimeSet.Close(context.Background())
+		_ = appSet.Close(context.Background())
 	})
 	return app, runtime
 }
@@ -542,10 +596,13 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := loadOutputRecorder(t, writer); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range events {
 		bus.Emit(event)
 	}
-	if err := writer.Close(); err != nil {
+	if err := writer.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -566,13 +623,15 @@ func persistenceMessagesText(messages []*aop.Message) string {
 }
 
 func TestRuntimesBorrowOneAppEventSequenceAndRecorder(t *testing.T) {
-	a, err := apppkg.New(context.Background(), apppkg.Config{
+	a := apppkg.New(apppkg.Config{
 		SkipEngines: true, RecordFile: filepath.Join(t.TempDir(), "shared.jsonl"),
-	})
-	if err != nil {
+	}, nil, nil)
+
+	aSet := extensiontest.Set(t, extension.Entry{ID: "a", Extension: a})
+	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
 	unsubscribe := a.EventBus.Subscribe(func(event *aop.Event) {
@@ -580,20 +639,25 @@ func TestRuntimesBorrowOneAppEventSequenceAndRecorder(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, event)
 	})
-	defer unsubscribe()
+	defer unsubscribe.Cancel()
 	var runtimes []*AgentRuntime
 	for range 2 {
-		rt, err := New(context.Background(), &cfg.Option{}, telemetry.NopLogger(), &RuntimeConfig{ExistingApp: a})
+		rt, err := New(a, nil, &cfg.Option{}, telemetry.NopLogger(), RuntimeConfig{Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer rt.Close()
+
+		rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+		if err := rtSet.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		defer rtSet.Close(context.Background())
 		runtimes = append(runtimes, rt)
 		if _, err := rt.OpenSession(context.Background(), SessionOptions{ID: "shared"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	runtimes[0].Close()
+	_ = runtimes[0].Close(context.Background())
 	session, err := runtimes[1].EnsureSession(SessionOptions{ID: "shared"})
 	if err != nil {
 		t.Fatal(err)
@@ -601,7 +665,7 @@ func TestRuntimesBorrowOneAppEventSequenceAndRecorder(t *testing.T) {
 	if _, err := session.Command(context.Background(), "/status"); err != nil {
 		t.Fatalf("closing sibling runtime broke borrowed App: %v", err)
 	}
-	runtimes[1].Close()
+	_ = runtimes[1].Close(context.Background())
 	if a.Recorder == nil {
 		t.Fatal("borrower closed application recorder")
 	}

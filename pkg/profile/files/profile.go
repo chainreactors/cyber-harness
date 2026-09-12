@@ -4,59 +4,42 @@ package files
 import (
 	"context"
 	"fmt"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	filesystem "github.com/chainreactors/aiscan/tools/files"
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
-	filesystem "github.com/chainreactors/aiscan/pkg/files"
-	"github.com/chainreactors/aiscan/pkg/toolset/filetools"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
 const (
-	RegistryID   = "files.tool-registry"
-	FileSystemID = "files.fs"
-	FileToolsID  = "files.tools"
+	FileSystemID = "files"
 )
 
 // Profile is a fixed, preassembled composition. New has no filesystem or
 // goroutine side effects. Runtime instance replacement is intentionally absent;
 // create a new Profile to apply a different composition.
 type Profile struct {
-	registry *registry.Registry
-	set      *extension.Set
-	mu       sync.RWMutex
-	// Public access is enabled only after the entire graph loads. The registry
-	// can be internally active earlier, while its tool registrations are loading.
+	set *extension.Set
+	mu  sync.RWMutex
+	// Public access is enabled only after the entire graph loads.
 	active  bool
 	closing bool
 }
 
-// New passes filesystem policy directly to FS, which validates and owns it.
+// New constructs the files extension and its host.
 func New(config filesystem.Config) (*Profile, error) {
-	fs, err := filesystem.New(config)
-	if err != nil {
-		return nil, err
-	}
-	r := registry.New()
-	definitions, err := filetools.Tools(fs)
-	if err != nil {
-		return nil, err
-	}
-	tools, err := toolgroup.New(r, definitions...)
+	fs, err := fileext.New(config)
 	if err != nil {
 		return nil, err
 	}
 	set, err := extension.New(
-		extension.Entry{ID: RegistryID, Extension: r},
 		extension.Entry{ID: FileSystemID, Extension: fs},
-		extension.Entry{ID: FileToolsID, DependsOn: []string{RegistryID, FileSystemID}, Extension: tools},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Profile{registry: r, set: set}, nil
+	return &Profile{set: set}, nil
 }
 
 func (p *Profile) Load(ctx context.Context) error {
@@ -67,7 +50,7 @@ func (p *Profile) Load(ctx context.Context) error {
 	closing := p.closing
 	p.mu.RUnlock()
 	if closing {
-		return registry.ErrUnavailable
+		return extension.ErrToolsUnavailable
 	}
 	if err := p.set.Load(ctx); err != nil {
 		return err
@@ -80,19 +63,17 @@ func (p *Profile) Load(ctx context.Context) error {
 	return nil
 }
 
-// Executor publishes the real registry only after the whole composition has
-// loaded. A caller retaining it across Close still goes through its admission
-// checks; no forwarding executor or alternate execution path is needed.
+// Executor borrows the host executor after the composition has loaded.
 func (p *Profile) Executor() (tool.Executor, error) {
 	if p == nil {
-		return nil, registry.ErrUnavailable
+		return nil, extension.ErrToolsUnavailable
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if !p.active || p.closing {
-		return nil, registry.ErrUnavailable
+		return nil, extension.ErrToolsUnavailable
 	}
-	return p.registry, nil
+	return p.set.Executor(), nil
 }
 
 func (p *Profile) Close(ctx context.Context) error {

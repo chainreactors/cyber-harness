@@ -2,17 +2,21 @@ package runtime
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/tool"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/skills"
 )
 
 func TestBuildSystemPromptIncludesSkills(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := tool.EmptyExecutor()
 	loaded, diagnostics := skills.LoadEmbedded()
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
@@ -144,13 +148,23 @@ func TestAgentRuntimePreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			rt, err := New(context.Background(), option, telemetry.NopLogger(), &RuntimeConfig{
-				ProviderOptional: true,
-			})
+			application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+
+			applicationSet := extensiontest.Set(t, extension.Entry{ID: "application", Extension: application})
+			if err := applicationSet.Load(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer applicationSet.Close(context.Background())
+			rt, err := New(application, nil, option, telemetry.NopLogger(), RuntimeConfig{Loop: agent.StandardLoop{}})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			defer rt.Close()
+
+			rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+			if err := rtSet.Load(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer rtSet.Close(context.Background())
 
 			if count := strings.Count(rt.systemPrompt, "## Skill: aiscan"); count != 1 {
 				t.Fatalf("base skill count = %d, want 1", count)

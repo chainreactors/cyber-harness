@@ -10,14 +10,19 @@ import (
 
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	toolsext "github.com/chainreactors/aiscan/pkg/exts/tools"
 	"github.com/chainreactors/aiscan/pkg/toolnode"
-	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
-func newRegistry(workDir string) (*toolregistry.Registry, *commands.BashTool, *extension.Set) {
-	tools := toolregistry.New()
-	set, err := extension.New(extension.Entry{ID: "registry", Extension: tools})
+func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
+	bash := commands.NewBashTool(workDir, 300)
+	ext, err := toolsext.New(bash)
+	if err != nil {
+		panic(err)
+	}
+	set, err := extension.New(extension.Entry{ID: "tools", Extension: ext})
 	if err != nil {
 		panic(err)
 	}
@@ -25,13 +30,7 @@ func newRegistry(workDir string) (*toolregistry.Registry, *commands.BashTool, *e
 		_ = set.Close(context.Background())
 		panic(err)
 	}
-	bash := commands.NewBashTool(workDir, 300)
-	if _, err := tools.Register("rmcp", bash); err != nil {
-		_ = set.Close(context.Background())
-		bash.Close()
-		panic(err)
-	}
-	return tools, bash, set
+	return set.Executor(), bash, set
 }
 
 func main() {
