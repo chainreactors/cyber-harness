@@ -22,12 +22,19 @@ type Executor interface {
 	ExecuteTool(ctx context.Context, name, arguments string) (*Result, error)
 }
 
-// Registrar is the narrow extension-facing registration surface. It owns
-// admission and draining semantics for an owner, but it does not expose tool
-// execution or lifecycle operations to consumers.
+// Registration is the lease for one atomically published tool group.
+// Revoke synchronously stops admission and requests cancellation without
+// waiting. Close revokes and waits for accepted calls; an incomplete wait
+// reports extension.ErrCloseIncomplete and may be retried.
+type Registration interface {
+	Revoke()
+	Close(context.Context) error
+}
+
+// Registrar publishes tools without exposing execution or registry lifecycle.
+// Failed registration returns no lease and must not alter existing owners.
 type Registrar interface {
-	Register(owner string, tools ...Tool) error
-	UnregisterOwner(context.Context, string) error
+	Register(owner string, tools ...Tool) (Registration, error)
 }
 
 // EmptyExecutor returns an Executor with no tools.

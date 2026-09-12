@@ -8,18 +8,27 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	node "github.com/chainreactors/aiscan/pkg/node"
+	"github.com/chainreactors/aiscan/pkg/toolnode"
+	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
-func newRegistry(workDir string) *commands.CommandRegistry {
-	registry := commands.NewRegistry()
+func newRegistry(workDir string) (*toolregistry.Registry, *commands.BashTool) {
+	tools := toolregistry.New()
+	set, err := extension.New(extension.Entry{ID: "registry", Extension: tools})
+	if err != nil {
+		panic(err)
+	}
+	if err := set.Load(context.Background()); err != nil {
+		panic(err)
+	}
 	bash := commands.NewBashTool(workDir, 300)
-	bash.SetCommandNames(registry.Names)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
-	return registry
+	if _, err := tools.Register("rmcp", bash); err != nil {
+		panic(err)
+	}
+	return tools, bash
 }
 
 func main() {
@@ -32,7 +41,7 @@ func main() {
 	flag.StringVar(&serverURL, "server", "", "AOP hub URL, e.g. http://host:8080")
 	flag.StringVar(&token, "token", "", "hub access token")
 	flag.StringVar(&nodeID, "id", "", "stable node ID (default: hostname)")
-	flag.StringVar(&wsPath, "ws-path", node.DefaultWSPath, "AOP WebSocket path")
+	flag.StringVar(&wsPath, "ws-path", toolnode.DefaultWSPath, "AOP WebSocket path")
 	flag.Parse()
 	if serverURL == "" {
 		fmt.Fprintln(os.Stderr, "usage: rmcp --server <url> [--token <token>] [--id <node-id>]")
@@ -44,16 +53,17 @@ func main() {
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: os.Stderr})
 
 	workDir, _ := os.Getwd()
-	registry := newRegistry(workDir)
-	registry.SetLogger(logger)
+	tools, bash := newRegistry(workDir)
+	defer tools.Close(context.Background())
+	defer bash.Close()
 
 	logger.Infof("rmcp tools ready: bash (workdir %s)", workDir)
-	if err := node.RunToolNode(ctx, node.ToolNodeConfig{
+	if err := toolnode.Run(ctx, toolnode.Config{
 		ServerURL: serverURL,
 		WSPath:    wsPath,
 		ID:        nodeID,
 		Token:     token,
-		Registry:  registry,
+		Executor:  tools,
 		Logger:    logger,
 		Version:   "rmcp-example",
 	}); err != nil {

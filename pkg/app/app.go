@@ -25,10 +25,11 @@ import (
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/edition"
+	"github.com/chainreactors/aiscan/pkg/extensions/toolgroup"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
 	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 	"github.com/chainreactors/aiscan/pkg/toolset/terminaltools"
-	filetools "github.com/chainreactors/aiscan/pkg/toolset/workspacefiles"
+	workspacefiles "github.com/chainreactors/aiscan/pkg/toolset/workspacefiles"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	arsenaltools "github.com/chainreactors/aiscan/tools/arsenal"
@@ -544,7 +545,11 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 		OptionalTools: rc.Tools.OptionalTools,
 	})
 	if plan.Has("core") {
-		workspace, workspaceErr := filetools.NewWorkspace(a.toolRegistry, "workspace", workDir, a.Skills, a.fileAudit, rc.Tools.RunnerMode)
+		workspaceTools, workspaceErr := workspacefiles.Tools(workDir, a.Skills, a.fileAudit, rc.Tools.RunnerMode)
+		if workspaceErr != nil {
+			return workspaceErr
+		}
+		workspace, workspaceErr := toolgroup.New(a.toolRegistry, workspaceTools...)
 		if workspaceErr != nil {
 			return workspaceErr
 		}
@@ -576,7 +581,7 @@ func (a *App) initCommands(rc Config, logger telemetry.Logger) error {
 				Model:           skill.AgentModel, Background: skill.AgentBackground,
 			}, nil
 		})
-		if err := a.toolRegistry.Register("subagent", subagent); err != nil {
+		if _, err := a.toolRegistry.Register("subagent", subagent); err != nil {
 			return fmt.Errorf("register subagent tool: %w", err)
 		}
 	}

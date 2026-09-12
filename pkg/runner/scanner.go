@@ -6,12 +6,15 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/pidlock"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/console"
+	"github.com/chainreactors/aiscan/pkg/edition"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/scan"
@@ -103,7 +106,7 @@ func ShouldStreamScannerOutput(rest []string) bool {
 }
 
 func isDirectScannerJSONOutput(rest []string) bool {
-	if len(rest) == 0 || !cfg.ScannerCommandAvailable(rest[0]) {
+	if len(rest) == 0 || !edition.Catalog().CLIAvailable(rest[0]) {
 		return false
 	}
 	for _, arg := range rest[1:] {
@@ -196,10 +199,10 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
-	runtime, err := runtimepkg.New(ctx, option, logger, &runtimepkg.RuntimeConfig{
-		ExistingApp: application,
+	runtime, err := runtimepkg.New(application, nil, option, logger, runtimepkg.RuntimeConfig{
+		Loop: agent.StandardLoop{},
 		PromptConfig: &runtimepkg.PromptConfig{
-			Tools:            application.Commands,
+			Tools:            application.Tools,
 			ScannerDocs:      application.Commands.UsageDocs(),
 			Skills:           application.Skills.Skills,
 			ScannerAgentMode: true,
@@ -209,7 +212,15 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	runtimeSet, err := extension.New(extension.Entry{ID: "agent-runtime", Extension: runtime})
+	if err != nil {
+		return err
+	}
+	if err := runtimeSet.Load(ctx); err != nil {
+		_ = runtime.Close(context.Background())
+		return err
+	}
+	defer runtimeSet.Close(context.Background())
 
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
 	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), runtimepkg.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
@@ -217,7 +228,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {
 	var sections []string
-	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && cfg.ScannerCommandAvailable(command) {
+	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && edition.Catalog().CLIAvailable(command) {
 		if body, ok, err := store.ReadVirtualBody(conceptURI); err == nil && ok && body != "" {
 			sections = append(sections, skills.FormatVirtualInvocation(command, conceptURI, body))
 		}

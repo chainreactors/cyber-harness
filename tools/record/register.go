@@ -22,6 +22,7 @@ type Extension struct {
 	workDir    string
 	tool       *Tool
 	registered bool
+	lease      coretool.Registration
 	closed     bool
 }
 
@@ -34,7 +35,8 @@ func NewExtension(registry coretool.Registrar, workDir string) (*Extension, erro
 	return &Extension{registry: registry, workDir: workDir}, nil
 }
 
-func (m *Extension) Load(ctx context.Context) error {
+func (m *Extension) Load(scope *extension.Context) error {
+	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -51,12 +53,17 @@ func (m *Extension) Load(ctx context.Context) error {
 		return fmt.Errorf("record config: %w", err)
 	}
 	recorder := New(m.workDir, coreconfig.DataSubDir("record"), maxConcurrent, newPlatformBackend())
-	if err := m.registry.Register("record", recorder); err != nil {
+	lease, err := m.registry.Register(scope.Owner(), recorder)
+	if err != nil {
 		recorder.Close()
 		return fmt.Errorf("register record tool: %w", err)
 	}
 	m.tool = recorder
 	m.registered = true
+	m.lease = lease
+	if _, err := scope.Track(lease.Revoke); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -67,7 +74,7 @@ func (m *Extension) Close(ctx context.Context) error {
 		return nil
 	}
 	if m.registered {
-		if err := m.registry.UnregisterOwner(ctx, "record"); err != nil {
+		if err := m.lease.Close(ctx); err != nil {
 			return errors.Join(extension.ErrCloseIncomplete, err)
 		}
 		m.registered = false
