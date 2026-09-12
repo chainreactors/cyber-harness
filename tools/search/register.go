@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/chainreactors/aiscan/core/resources"
@@ -19,7 +20,8 @@ func Register(cmdRegistry *commands.Registry, tools coretool.Registrar, search f
 	if proxy != "" {
 		tavily.SetProxy(proxy)
 	}
-	if err := tools.Register("search", NewWebSearchTool(search, tavily)); err != nil {
+	lease, err := tools.Register("search", NewWebSearchTool(search, tavily))
+	if err != nil {
 		return err
 	}
 	fetch := NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
@@ -45,8 +47,7 @@ func Register(cmdRegistry *commands.Registry, tools coretool.Registrar, search f
 		Run:             cyberhub.Run,
 	}
 	if err := cmdRegistry.Register("search", "search", fetchCommand, cyberhubCommand); err != nil {
-		_ = tools.UnregisterOwner(context.Background(), "search")
-		return err
+		return errors.Join(err, lease.Close(context.Background()))
 	}
 	return nil
 }

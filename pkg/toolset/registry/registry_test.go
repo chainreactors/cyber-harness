@@ -61,7 +61,7 @@ func TestExplicitLoadAndContextOwnership(t *testing.T) {
 	if len(r.ToolDefinitions()) != 0 {
 		t.Fatal("new registry publishes definitions")
 	}
-	if err := r.Register("one", newTool("echo")); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := r.Register("one", newTool("echo")); !errors.Is(err, registry.ErrUnavailable) {
 		t.Fatalf("register before load: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -81,7 +81,7 @@ func TestExplicitLoadAndContextOwnership(t *testing.T) {
 		}
 		return tool.TextResult(args), ctx.Err()
 	}
-	if err := r.Register("one", checked); err != nil {
+	if _, err := r.Register("one", checked); err != nil {
 		t.Fatal(err)
 	}
 	callCtx := tool.ContextWithInvocation(t.Context(), tool.Invocation{CallID: "call-1"})
@@ -100,20 +100,17 @@ func TestExplicitLoadAndContextOwnership(t *testing.T) {
 func TestAtomicRegistrationAndDefinitionSnapshots(t *testing.T) {
 	r := activeRegistry(t)
 	first := newTool("first")
-	if err := r.Register("original", first); err != nil {
+	if _, err := r.Register("original", first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register("conflict", newTool("second"), newTool("first")); !errors.Is(err, registry.ErrDuplicate) {
+	if lease, err := r.Register("conflict", newTool("second"), newTool("first")); !errors.Is(err, registry.ErrDuplicate) || lease != nil {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	if err := r.Register("original", newTool("third")); !errors.Is(err, registry.ErrDuplicate) {
+	if _, err := r.Register("original", newTool("third")); !errors.Is(err, registry.ErrDuplicate) {
 		t.Fatalf("duplicate owner: %v", err)
 	}
-	if err := r.Register("batch", newTool("fourth"), newTool("fourth")); !errors.Is(err, registry.ErrDuplicate) {
+	if _, err := r.Register("batch", newTool("fourth"), newTool("fourth")); !errors.Is(err, registry.ErrDuplicate) {
 		t.Fatalf("duplicate in batch: %v", err)
-	}
-	if err := r.UnregisterOwner(t.Context(), "conflict"); !errors.Is(err, registry.ErrUnknown) {
-		t.Fatalf("failed registration acquired ownership: %v", err)
 	}
 	first.def.Description = "changed source"
 	defs := r.ToolDefinitions()
@@ -148,10 +145,11 @@ func TestOwnerTimeoutRetainsAdmissionBarrierAndCanRetry(t *testing.T) {
 			<-release // deliberately needs more time to release its resource
 			return nil, ctx.Err()
 		}
-		if err := r.Register("busy", blocked); err != nil {
+		lease, err := r.Register("busy", blocked)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.Register("other", newTool("echo")); err != nil {
+		if _, err := r.Register("other", newTool("echo")); err != nil {
 			t.Fatal(err)
 		}
 		finished := make(chan error, 1)
@@ -162,7 +160,7 @@ func TestOwnerTimeoutRetainsAdmissionBarrierAndCanRetry(t *testing.T) {
 		<-started
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
-		if err := r.UnregisterOwner(ctx, "busy"); !errors.Is(err, context.DeadlineExceeded) {
+		if err := lease.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("timeout: %v", err)
 		}
 		<-canceled
@@ -175,17 +173,17 @@ func TestOwnerTimeoutRetainsAdmissionBarrierAndCanRetry(t *testing.T) {
 		if _, err := r.ExecuteTool(t.Context(), "echo", ""); err != nil {
 			t.Fatalf("stopped unrelated owner: %v", err)
 		}
-		if err := r.Register("busy", newTool("replacement")); !errors.Is(err, registry.ErrDuplicate) {
+		if _, err := r.Register("busy", newTool("replacement")); !errors.Is(err, registry.ErrDuplicate) {
 			t.Fatalf("reused stopping owner: %v", err)
 		}
 		unblock()
 		if err := <-finished; !errors.Is(err, context.Canceled) {
 			t.Fatalf("inflight cancellation: %v", err)
 		}
-		if err := r.UnregisterOwner(t.Context(), "busy"); err != nil {
+		if err := lease.Close(t.Context()); err != nil {
 			t.Fatalf("retry: %v", err)
 		}
-		if err := r.Register("new-owner", newTool("blocked")); !errors.Is(err, registry.ErrDuplicate) {
+		if _, err := r.Register("new-owner", newTool("blocked")); !errors.Is(err, registry.ErrDuplicate) {
 			t.Fatalf("reused retired name: %v", err)
 		}
 	})
@@ -203,7 +201,7 @@ func TestRequestCancellationDoesNotStopOwner(t *testing.T) {
 		}
 		return tool.TextResult("ready"), nil
 	}
-	if err := r.Register("work", work); err != nil {
+	if _, err := r.Register("work", work); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -227,7 +225,8 @@ func TestPanicReleasesInflightClaim(t *testing.T) {
 	r := activeRegistry(t)
 	broken := newTool("broken")
 	broken.run = func(context.Context, string) (*tool.Result, error) { panic("private data") }
-	if err := r.Register("broken", broken); err != nil {
+	lease, err := r.Register("broken", broken)
+	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := r.ExecuteTool(t.Context(), "broken", "")
@@ -236,14 +235,14 @@ func TestPanicReleasesInflightClaim(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := r.UnregisterOwner(ctx, "broken"); err != nil {
+	if err := lease.Close(ctx); err != nil {
 		t.Fatalf("panic leaked inflight claim: %v", err)
 	}
 }
 
 func TestConcurrentCallsAndClose(t *testing.T) {
 	r := activeRegistry(t)
-	if err := r.Register("echo", newTool("echo")); err != nil {
+	if _, err := r.Register("echo", newTool("echo")); err != nil {
 		t.Fatal(err)
 	}
 	start := make(chan struct{})
@@ -289,7 +288,7 @@ func TestCanceledCloseStopsAdmissionAndRetriesDrain(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	}
-	if err := r.Register("work", work); err != nil {
+	if _, err := r.Register("work", work); err != nil {
 		t.Fatal(err)
 	}
 	finished := make(chan error, 1)
@@ -307,7 +306,7 @@ func TestCanceledCloseStopsAdmissionAndRetriesDrain(t *testing.T) {
 	if _, err := r.ExecuteTool(t.Context(), "work", ""); !errors.Is(err, registry.ErrUnavailable) {
 		t.Fatalf("canceled Close left admission open: %v", err)
 	}
-	if err := r.Register("later", newTool("later")); !errors.Is(err, registry.ErrUnavailable) {
+	if _, err := r.Register("later", newTool("later")); !errors.Is(err, registry.ErrUnavailable) {
 		t.Fatalf("registration after canceled Close: %v", err)
 	}
 	unblock()

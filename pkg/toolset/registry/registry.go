@@ -88,22 +88,22 @@ func (r *Registry) Load(scope *extension.Context) error {
 // Register publishes a complete owner's tool group atomically. A failed group
 // publishes nothing. The caller must pass valid, non-nil tool instances and
 // stop mutating them after publication. Definitions are cloned on registration.
-func (r *Registry) Register(id string, tools ...tool.Tool) error {
+func (r *Registry) Register(id string, tools ...tool.Tool) (tool.Registration, error) {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(id) != id || len(tools) == 0 {
-		return fmt.Errorf("registration requires an owner and at least one tool")
+		return nil, fmt.Errorf("registration requires an owner and at least one tool")
 	}
 	pending := make(map[string]entry, len(tools))
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
-			return fmt.Errorf("owner %s: nil tool", id)
+			return nil, fmt.Errorf("owner %s: nil tool", id)
 		}
 		name, def := t.Name(), t.Definition()
 		if strings.TrimSpace(name) == "" || def == nil || def.Name != name {
-			return fmt.Errorf("owner %s: tool must have a name and matching definition", id)
+			return nil, fmt.Errorf("owner %s: tool must have a name and matching definition", id)
 		}
 		if _, exists := pending[name]; exists {
-			return fmt.Errorf("%w: %s", ErrDuplicate, name)
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, name)
 		}
 		pending[name] = entry{tool: t, definition: proto.Clone(def).(*tool.Definition)}
 		names = append(names, name)
@@ -112,14 +112,14 @@ func (r *Registry) Register(id string, tools ...tool.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state != activeState {
-		return ErrUnavailable
+		return nil, ErrUnavailable
 	}
 	if _, exists := r.owners[id]; exists {
-		return fmt.Errorf("%w: owner %s", ErrDuplicate, id)
+		return nil, fmt.Errorf("%w: owner %s", ErrDuplicate, id)
 	}
 	for _, name := range names {
 		if _, exists := r.entries[name]; exists {
-			return fmt.Errorf("%w: %s", ErrDuplicate, name)
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, name)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -131,7 +131,7 @@ func (r *Registry) Register(id string, tools ...tool.Tool) error {
 		r.entries[name] = e
 	}
 	r.order = append(r.order, names...)
-	return nil
+	return &registration{registry: r, owner: o}, nil
 }
 
 // ToolDefinitions returns independent snapshots, in registration order. Stopped
@@ -200,20 +200,26 @@ func (r *Registry) ExecuteTool(ctx context.Context, name, arguments string) (res
 	return e.tool.Execute(callCtx, arguments)
 }
 
-// UnregisterOwner stops discovery and admission, cancels accepted calls, and
-// waits for them. A deadline does not release the owner's resources or permit
-// ID reuse. Retry with a fresh context. Unknown IDs cannot affect other owners.
-func (r *Registry) UnregisterOwner(ctx context.Context, id string) error {
-	r.mu.Lock()
-	o, ok := r.owners[id]
-	if !ok {
-		r.mu.Unlock()
-		return fmt.Errorf("%w: %s", ErrUnknown, id)
+// registration holds a specific owner, so a failed or stale registration
+// cannot revoke another owner's tools.
+type registration struct {
+	registry *Registry
+	owner    *owner
+}
+
+func (l *registration) Revoke() {
+	l.registry.mu.Lock()
+	stopOwner(l.owner)
+	l.registry.mu.Unlock()
+	l.owner.cancel()
+}
+
+func (l *registration) Close(ctx context.Context) error {
+	l.Revoke()
+	if err := wait(ctx, l.owner.done); err != nil {
+		return errors.Join(extension.ErrCloseIncomplete, err)
 	}
-	stopOwner(o)
-	r.mu.Unlock()
-	o.cancel()
-	return wait(ctx, o.done)
+	return nil
 }
 
 // Close stops all owners and waits for accepted invocations. It initiates

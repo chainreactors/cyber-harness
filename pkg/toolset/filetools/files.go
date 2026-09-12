@@ -1,83 +1,33 @@
-// Package filetools publishes bounded text tools backed by a borrowed files.FS.
-// The instance owns tool registrations; FS owns filesystem policy and resources.
+// Package filetools constructs bounded text tools backed by a borrowed files.FS.
+// Tool registration belongs to extensions/toolgroup; filesystem policy belongs to FS.
 package filetools
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
-	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/files"
-	"github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
-// Extension owns only its registrations, and borrows the Registry and FS.
-// Both must be declared as lifecycle dependencies by its profile.
-type Extension struct {
-	mu         sync.Mutex
-	registry   tool.Registrar
-	files      *files.FS
-	owner      string
-	attempted  bool
-	registered bool
-	closed     bool
-}
-
-var _ extension.Extension = (*Extension)(nil)
-
-func New(r tool.Registrar, filesystem *files.FS, owner string) (*Extension, error) {
-	if r == nil || filesystem == nil || strings.TrimSpace(owner) == "" {
-		return nil, fmt.Errorf("file tools require a registry, file service and owner")
+// Tools constructs bounded file tools without publishing or opening resources.
+// Install the result with extensions/toolgroup and declare the FS as a
+// lifecycle dependency. The caller retains ownership of the filesystem.
+func Tools(filesystem *files.FS) ([]tool.Tool, error) {
+	if filesystem == nil {
+		return nil, fmt.Errorf("file tools require a filesystem")
 	}
-	return &Extension{registry: r, files: filesystem, owner: owner}, nil
-}
-
-func (m *Extension) Load(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed || m.attempted && !m.registered {
-		return registry.ErrUnavailable
+	tools := []tool.Tool{
+		&fileTool{files: filesystem},
+		&listingTool{files: filesystem},
+		&listingTool{files: filesystem, glob: true},
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if !filesystem.ReadOnly() {
+		tools = append(tools, &fileTool{files: filesystem, write: true})
 	}
-	if m.registered {
-		return nil
-	}
-	m.attempted = true
-	if !m.files.Ready() {
-		return files.ErrUnavailable
-	}
-	tools := []tool.Tool{&fileTool{files: m.files}}
-	tools = append(tools, &listingTool{files: m.files}, &listingTool{files: m.files, glob: true})
-	if !m.files.ReadOnly() {
-		tools = append(tools, &fileTool{files: m.files, write: true})
-	}
-	if err := m.registry.Register(m.owner, tools...); err != nil {
-		return err
-	}
-	m.registered = true
-	return nil
-}
-
-func (m *Extension) Close(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		return nil
-	}
-	if m.registered {
-		if err := m.registry.UnregisterOwner(ctx, m.owner); err != nil {
-			return errors.Join(extension.ErrCloseIncomplete, err)
-		}
-	}
-	m.closed = true
-	return nil
+	return tools, nil
 }
 
 type readArgs struct {

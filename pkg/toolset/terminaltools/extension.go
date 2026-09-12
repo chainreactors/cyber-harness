@@ -35,6 +35,7 @@ type Config struct {
 type Extension struct {
 	mu                                    sync.Mutex
 	r                                     tool.Registrar
+	lease                                 tool.Registration
 	commands                              *commands.Registry
 	bash                                  *commands.BashTool
 	tmux                                  commands.Command
@@ -65,7 +66,8 @@ func New(r tool.Registrar, c *commands.Registry, config Config) (*Extension, err
 	return &Extension{r: r, commands: c, bash: bash, tmux: tmux}, nil
 }
 func (m *Extension) Bash() *commands.BashTool { return m.bash }
-func (m *Extension) Load(ctx context.Context) error {
+func (m *Extension) Load(scope *extension.Context) error {
+	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -81,10 +83,15 @@ func (m *Extension) Load(ctx context.Context) error {
 		return err
 	}
 	m.commandRegistered = true
-	if err := m.r.Register("terminal", m.bash); err != nil {
+	lease, err := m.r.Register(scope.Owner(), m.bash)
+	if err != nil {
 		return err
 	}
 	m.registered = true
+	m.lease = lease
+	if _, err := scope.Track(lease.Revoke); err != nil {
+		return err
+	}
 	return nil
 }
 func (m *Extension) Close(ctx context.Context) error {
@@ -94,7 +101,7 @@ func (m *Extension) Close(ctx context.Context) error {
 		return nil
 	}
 	if m.registered {
-		if err := m.r.UnregisterOwner(ctx, "terminal"); err != nil {
+		if err := m.lease.Close(ctx); err != nil {
 			m.mu.Unlock()
 			return errors.Join(extension.ErrCloseIncomplete, err)
 		}
