@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -466,8 +467,9 @@ func TestReadUnknownSubcommand(t *testing.T) {
 
 func TestDefaultSpaceSkipsJoin(t *testing.T) {
 	client := newFakeIOAClient()
-	cmds := NewCommands(client, "tester", nil)
-	findSubCmd(t, cmds, "space").SetDefaultSpace(knownSpaceID)
+	root := &rootCommand{client: client, nodeName: "tester", binding: &spaceBinding{}}
+	root.binding.set(knownSpaceID)
+	cmds := root.commands()
 
 	if err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"--content", `{"content":"hello"}`,
@@ -516,13 +518,12 @@ func TestLLMIOAToolUsage(t *testing.T) {
 
 	registry := commands.NewRegistry()
 	for _, cmd := range cmds {
-		registry.Register(cmd, "ioa")
+		registry.Register("ioa", "ioa", cmd)
 	}
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30)
-	bash.SetCommandResolver(registry.Get)
-	bash.SetCommandNames(registry.Names)
-	registry.RegisterTool(bash)
+	bash.SetCommandRegistry(registry)
+	tools := extensiontest.Tools(t, bash)
 	t.Cleanup(bash.Close)
 
 	systemPrompt := `You are a testing agent. You have IOA tools available as pseudo-commands through the bash tool.
@@ -542,9 +543,9 @@ Execute each step one at a time.`
 
 	t.Logf("System prompt:\n%s", systemPrompt)
 
-	ag := agent.NewAgent(agent.Config{
+	ag := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider: llm,
-		Tools:    registry,
+		Tools:    tools,
 		Model:    model,
 	}.
 		WithSystemPrompt(systemPrompt).
@@ -614,12 +615,6 @@ type testCommand struct{ commands.Command }
 func (c testCommand) Execute(ctx context.Context, args []string) error {
 	_, err := c.Run(ctx, &commands.Execution{Args: args, Stdout: testOutput, Stderr: testOutput})
 	return err
-}
-
-func (c testCommand) SetDefaultSpace(id string) {
-	if c.Command.SetDefaultSpace != nil {
-		c.Command.SetDefaultSpace(id)
-	}
 }
 
 func findCmd(t *testing.T, cmds []commands.Command, name string) testCommand {

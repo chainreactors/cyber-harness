@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
+	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -65,21 +66,21 @@ func CommandCatalog(app *apppkg.App) []*types.CommandSpec {
 
 // RegistryCommandCatalog projects the Bash-internal command registry without
 // adding chat runtime or skill commands. Tool-only nodes use this catalog too.
-func RegistryCommandCatalog(registry *commands.CommandRegistry, store *skills.Store) []*types.CommandSpec {
+func RegistryCommandCatalog(registry *commands.Registry, store *skills.Store) []*types.CommandSpec {
 	if registry == nil {
 		return nil
 	}
 	all := registry.All()
 	specs := make([]*types.CommandSpec, 0, len(all))
 	for _, command := range all {
-		if spec := registryCommandSpec(store, command); spec != nil {
+		if spec := registryCommandSpec(store, command, registry.DescriptionPath(command.Name)); spec != nil {
 			specs = append(specs, spec)
 		}
 	}
 	return specs
 }
 
-func registryCommandSpec(store *skills.Store, command commands.Command) *types.CommandSpec {
+func registryCommandSpec(store *skills.Store, command *types.CommandSpec, descriptionPath string) *types.CommandSpec {
 	name := strings.TrimSpace(command.Name)
 	if name == "" {
 		return nil
@@ -87,7 +88,7 @@ func registryCommandSpec(store *skills.Store, command commands.Command) *types.C
 	return &types.CommandSpec{
 		Name:        "!" + name,
 		Usage:       commandUsage(command.Usage, name),
-		Description: commandDescription(store, command.DescriptionPath),
+		Description: commandDescription(store, descriptionPath),
 	}
 }
 
@@ -137,7 +138,7 @@ func commandDescription(store *skills.Store, location string) string {
 }
 
 // AgentStatus reports the node's provider/model/IOA binding for pool views.
-func AgentStatus(option *cfg.Option, app *apppkg.App) *aop.AgentStatus {
+func AgentStatus(option *cfg.Option, app *apppkg.App, ioa *ioatools.Service) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
 	if option != nil {
 		status.Space = option.Space
@@ -146,7 +147,7 @@ func AgentStatus(option *cfg.Option, app *apppkg.App) *aop.AgentStatus {
 		_, providerConfig := app.ProviderState()
 		status.Provider = providerConfig.Provider
 		status.Model = providerConfig.Model
-		status.Bound = app.IOAClient != nil && app.IOAClient.Bound()
+		status.Bound = ioa != nil && ioa.Client() != nil && ioa.Client().Bound()
 		health := app.LLMHealth()
 		if health.State == apppkg.LLMHealthFailed || (health.State == apppkg.LLMHealthNotConfigured && health.Error != "") {
 			status.ConfigError = statusOneLine(health.Error, 240)

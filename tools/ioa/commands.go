@@ -33,18 +33,21 @@ func (b *spaceBinding) set(id string) {
 
 func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []commands.Command {
 	root := &rootCommand{client: client, binding: &spaceBinding{}, nodeName: nodeName, meta: meta}
+	return root.commands()
+}
+
+func (root *rootCommand) commands() []commands.Command {
 	return []commands.Command{
 		{
 			Name: "ioa", Usage: root.Usage(),
 			DescriptionPath: "aiscan://skills/ioa/SKILL.md",
 			Run:             root.Run,
-			SetDefaultSpace: root.binding.set,
 		},
 	}
 }
 
 // rootCommand dispatches `ioa <space|send|read> ...`. send/read are delegated
-// to the ioa module's client CLI (go-flags based) with the bound space
+// to the ioa instance's client CLI (go-flags based) with the bound space
 // injected; space keeps aiscan's current-space binding semantics.
 type rootCommand struct {
 	client   protocols.ClientAPI
@@ -85,7 +88,7 @@ func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_
 	}
 }
 
-// dispatchCLI runs send/read through the ioa module's client CLI with the
+// dispatchCLI runs send/read through the ioa instance's client CLI with the
 // current space injected as --space.
 func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execution, args []string) error {
 	spaceID := c.binding.get()

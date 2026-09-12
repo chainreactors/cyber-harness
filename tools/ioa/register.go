@@ -1,31 +1,19 @@
 package ioa
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/deps"
+	"fmt"
+
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/ioa/protocols"
 
 	_ "github.com/chainreactors/ioa/protocols/checkpoint"
 	_ "github.com/chainreactors/ioa/protocols/handoff"
 	_ "github.com/chainreactors/ioa/protocols/swarm"
 )
 
-func init() {
-	capability.Register(capability.Descriptor{
-		ID: "ioa", Kind: capability.KindService, Group: "ioa",
-		Requires: []string{"ioa.ClientAPI"},
-	})
-	commands.RegisterFactory(commands.Factory{
-		Capability: "ioa",
-		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
-			client, ok := deps.Get(d.Bag, ClientKey)
-			if !ok || client == nil {
-				d.Skip("ioa", deps.Name(ClientKey))
-				return
-			}
-			for _, cmd := range NewCommands(client, d.NodeName, d.NodeMeta) {
-				reg.Register(cmd, "ioa")
-			}
-		},
-	})
+func Register(reg *commands.Registry, client protocols.ClientAPI, nodeName string, nodeMeta map[string]any) error {
+	if client == nil {
+		return fmt.Errorf("IOA client is required")
+	}
+	return reg.Register("ioa", "ioa", NewCommands(client, nodeName, nodeMeta)...)
 }

@@ -24,7 +24,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	status := AgentStatus(nil, app)
+	status := AgentStatus(nil, app, nil)
 	if status.GetProvider() != "openai" || status.GetModel() != "gpt-test" {
 		t.Fatalf("status provider/model = %+v", status)
 	}
@@ -35,16 +35,16 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 
 func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	registry := commands.NewRegistry()
-	registry.Register(commands.Command{
+	registry.Register("gogo", "scanner", commands.Command{
 		Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
 		DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
 		Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
-	}, "scanner")
-	registry.Register(commands.Command{
+	})
+	registry.Register("core", "core", commands.Command{
 		Name: "tmux", Usage: "Usage: tmux <action>",
 		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/tmux.md",
 		Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
-	}, "core")
+	})
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
 		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
@@ -71,7 +71,7 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 
 func TestCommandCatalogMissingDescriptionPathStaysVisible(t *testing.T) {
 	registry := commands.NewRegistry()
-	registry.Register(commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }}, "custom")
+	registry.Register("custom", "custom", commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
 	catalog := RegistryCommandCatalog(registry, nil)
 	for _, spec := range catalog {
 		if spec.GetName() == "!custom" && spec.GetDescription() != "" {

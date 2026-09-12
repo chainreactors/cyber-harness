@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,10 +14,14 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	coretool "github.com/chainreactors/aiscan/core/tool"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
+	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	ioaclient "github.com/chainreactors/ioa/client"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,6 +29,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type AgentRuntime struct {
+	option             *cfg.Option
+	logger             telemetry.Logger
+	runtimeConfig      RuntimeConfig
 	primarySessionID   string
 	app                *apppkg.App
 	nodeName           string
@@ -41,12 +49,18 @@ type AgentRuntime struct {
 	runs               map[string]*Run
 	requestSeq         uint64
 	closeOnce          sync.Once
+	closeDone          chan struct{}
+	lifecycle          sync.Mutex
+	loaded             bool
+	closing            bool
 	wg                 sync.WaitGroup
 	operations         sync.WaitGroup
 	maxPending         int
-	ownsApp            bool
 	unsubscribeHandoff func()
+	ioa                *ioatools.Service
 }
+
+var _ extension.Extension = (*AgentRuntime)(nil)
 
 func ResolveJSONLRecordPath(option *cfg.Option) string {
 	if option == nil {
@@ -101,41 +115,71 @@ func validateFreshJSONLOutput(option *cfg.Option) error {
 
 type RuntimeConfig struct {
 	PrimarySessionID string
-	ExistingApp      *apppkg.App
-	IOA              *apppkg.IOAConfig
 	PromptConfig     *PromptConfig
-	ProviderOptional bool
 	MaxPending       int
+	Loop             agent.Loop
+}
+
+// IOA returns the optional collaboration module borrowed by this runtime.
+// The profile remains its owner.
+func (rt *AgentRuntime) IOA() *ioatools.Service {
+	if rt == nil {
+		return nil
+	}
+	return rt.ioa
 }
 
 const baseAgentSkillName = "aiscan"
 
-func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *RuntimeConfig) (*AgentRuntime, error) {
-	if ctx == nil {
-		ctx = context.Background()
+// New constructs an inert Agent runtime over an application owned by the
+// caller. Session subscriptions, history IO and command publication begin in
+// Load.
+func New(application *apppkg.App, ioa *ioatools.Service, option *cfg.Option, logger telemetry.Logger, rc RuntimeConfig) (*AgentRuntime, error) {
+	if option == nil {
+		return nil, fmt.Errorf("agent runtime option is required")
+	}
+	if application == nil {
+		return nil, fmt.Errorf("agent runtime application is required")
 	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	runtimeCtx, runtimeCancel := context.WithCancel(ctx)
-	if option == nil {
-		runtimeCancel()
-		return nil, fmt.Errorf("agent runtime option is required")
+	return &AgentRuntime{
+		app: application, ioa: ioa, option: option, logger: logger, runtimeConfig: rc,
+		sessions: make(map[string]*sessionState), runs: make(map[string]*Run), closeDone: make(chan struct{}),
+	}, nil
+}
+
+// Load activates runtime-owned session work. ctx bounds initialization only;
+// Close owns cancellation of the runtime lifetime.
+func (rt *AgentRuntime) Load(scope *extension.Context) error {
+	ctx := scope.Init()
+	if rt == nil {
+		return fmt.Errorf("agent runtime is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rt.lifecycle.Lock()
+	defer rt.lifecycle.Unlock()
+	if rt.loaded {
+		return nil
+	}
+	if rt.closing {
+		return fmt.Errorf("agent runtime is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	application, option := rt.app, rt.option
+	logger, rc := rt.logger, rt.runtimeConfig
 	if err := validateFreshJSONLOutput(option); err != nil {
-		runtimeCancel()
-		return nil, err
+		return err
 	}
-	rt := &AgentRuntime{
-		ctx:      runtimeCtx,
-		cancel:   runtimeCancel,
-		sessions: make(map[string]*sessionState),
-		runs:     make(map[string]*Run),
-	}
-	if rc != nil {
-		rt.primarySessionID = rc.PrimarySessionID
-		rt.maxPending = rc.MaxPending
-	}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	rt.ctx, rt.cancel = runtimeCtx, runtimeCancel
+	rt.primarySessionID = rc.PrimarySessionID
+	rt.maxPending = rc.MaxPending
 	if rt.primarySessionID == "" {
 		rt.primarySessionID = "task"
 	}
@@ -145,41 +189,7 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 		option.OutputFile = recordPath
 		rt.recordPath = recordPath
 	}
-	if rc != nil && rc.ExistingApp != nil {
-		rt.app = rc.ExistingApp
-	} else {
-		providerOptional := rc != nil && (rc.IOA != nil || rc.ProviderOptional)
-		appCfg := apppkg.AppConfig(option, apppkg.RuntimeFeatures{
-			ProviderEnabled:  true,
-			ProviderOptional: providerOptional,
-			ToolsEnabled:     true,
-			AIEnabled:        true,
-		}, logger)
-		if rc != nil && rc.IOA != nil {
-			appCfg.IOA = rc.IOA
-		}
-		application, err := apppkg.New(ctx, appCfg)
-		if err != nil {
-			runtimeCancel()
-			return nil, fmt.Errorf("init app: %w", err)
-		}
-		rt.app = application
-		rt.ownsApp = true
-		_, resolvedConfig := application.ProviderState()
-		apppkg.ApplyResolvedProviderOptions(option, resolvedConfig)
-
-		for _, d := range application.SkillDiagnostics {
-			logger.Warnf("skill %s: %s", d.Path, d.Message)
-		}
-
-		if rc == nil || rc.IOA == nil {
-			if err := registerIOATools(ctx, application, option); err != nil {
-				application.Close()
-				runtimeCancel()
-				return nil, fmt.Errorf("init ioa tools: %w", err)
-			}
-		}
-	}
+	rt.app = application
 	provider, providerConfig := rt.app.ProviderState()
 	if rt.app != nil {
 		rt.app.SetLogger(logger)
@@ -187,13 +197,11 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 	}
 	publicBus := rt.app.EventBus
 	if publicBus == nil {
-		rt.Close()
-		return nil, fmt.Errorf("application event bus is required")
+		return fmt.Errorf("application event bus is required")
 	}
 	if recordPath != "" {
 		if err := rt.app.StartRecording(recordPath); err != nil {
-			rt.Close()
-			return nil, fmt.Errorf("open JSONL recorder: %w", err)
+			return fmt.Errorf("open JSONL recorder: %w", err)
 		}
 		logger.Importantf("recording session JSONL to %s", recordPath)
 	}
@@ -201,8 +209,7 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 	if option.Resume != "" {
 		data, err := ReadHistory(option.Resume)
 		if err != nil {
-			rt.Close()
-			return nil, fmt.Errorf("resume session: %w", err)
+			return fmt.Errorf("resume session: %w", err)
 		}
 		rt.resumeMessages = data.Messages
 		rt.resumeSessionID = data.SessionID
@@ -210,17 +217,21 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), option.Resume)
 	}
 
-	nodeName := ResolveIOANodeName(option)
+	nodeName := ioatools.ResolveNodeName(option.IOANodeName)
 	rt.nodeName = nodeName
+	executor := coretool.EmptyExecutor()
+	if rt.app.Tools != nil {
+		executor = rt.app.Tools
+	}
 
 	pc := &PromptConfig{
-		Tools:       rt.app.Commands,
+		Tools:       executor,
 		ScannerDocs: rt.app.Commands.UsageDocs(),
 		Skills:      rt.app.Skills.Skills,
 		NodeName:    nodeName,
 		Space:       option.Space,
 	}
-	if rc != nil && rc.PromptConfig != nil {
+	if rc.PromptConfig != nil {
 		promptConfig := *rc.PromptConfig
 		promptConfig.LoadedSkills = append([]LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
 		pc = &promptConfig
@@ -248,8 +259,9 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
 	rt.config = agent.Config{
+		Loop:                  rc.Loop,
 		Provider:              provider,
-		Tools:                 rt.app.Commands,
+		Tools:                 executor,
 		Model:                 providerConfig.Model,
 		MaxTokens:             providerConfig.MaxTokens,
 		ContextWindow:         providerConfig.ContextWindow,
@@ -261,54 +273,61 @@ func New(ctx context.Context, option *cfg.Option, logger telemetry.Logger, rc *R
 		MessageCounter:        resumeCounter,
 	}
 
-	subAgentTool := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
-		if rt.app.Skills == nil {
-			return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
-		}
-		s, ok := rt.app.Skills.ByName(name)
-		if !ok {
-			return agent.AgentType{}, fmt.Errorf("agent type %q not found", name)
-		}
-		if !s.Agent {
-			return agent.AgentType{}, fmt.Errorf("skill %q is not configured as an agent type", name)
-		}
-		return agent.AgentType{
-			FormattedPrompt: rt.app.Skills.FormatInvocation(s, ""),
-			Model:           s.AgentModel,
-			Background:      s.AgentBackground,
-		}, nil
-	})
 	ioaSpace := option.Space
-	if ioaSpace == "" && rc != nil && rc.IOA != nil {
-		ioaSpace = rc.IOA.Space
+	var ioaClient *ioaclient.Client
+	var ioaStream ioaclient.StreamAPI
+	if rt.ioa != nil {
+		ioaClient, ioaStream = rt.ioa.Client(), rt.ioa.Stream()
 	}
-	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, publicBus, rt.app.IOAClient, ioaSpace, logger)
-	rt.app.Commands.RegisterTool(subAgentTool)
-	loop := newLoopCommand()
-	rt.app.Commands.Register(cmdpkg.Command{
-		Name: loop.Name(), Usage: loop.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
-		Run:             loop.Run,
-	}, "loop")
-
-	if !isNilIOADependency(rt.app.IOAStreamClient) && option.Space != "" {
-		nodeID := ""
-		if rt.app.IOAClient != nil {
-			nodeID = rt.app.IOAClient.NodeID()
+	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, publicBus, ioaClient, ioaSpace, logger)
+	if !rt.app.Commands.Has("loop") {
+		loop := newLoopCommand()
+		if err := rt.app.Commands.Register("loop", "loop", cmdpkg.Command{
+			Name: loop.Name(), Usage: loop.Usage(),
+			DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
+			Run:             loop.Run,
+		}); err != nil {
+			return fmt.Errorf("register loop command: %w", err)
 		}
-		spaceInfo, err := rt.app.IOAStreamClient.Space(rt.ctx, option.Space, "aiscan agent")
+	}
+	if !isNilIOADependency(ioaStream) && option.Space != "" {
+		nodeID := ""
+		if ioaClient != nil {
+			nodeID = ioaClient.NodeID()
+		}
+		spaceInfo, err := ioaStream.Space(rt.ctx, option.Space, "aiscan agent")
 		if err != nil {
 			logger.Warnf("ioa space resolve: %s", err)
 		} else {
 			rt.wg.Add(1)
 			telemetry.SafeGo("ioa-space-subscription", func() {
 				defer rt.wg.Done()
-				subscribeIOASpace(rt.ctx, rt.app.IOAStreamClient, spaceInfo.ID, nodeID, rt.pushAsync, logger)
+				subscribeIOASpace(rt.ctx, ioaStream, spaceInfo.ID, nodeID, rt.pushAsync, logger)
 			})
 		}
 	}
 
-	return rt, nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rt.loaded = true
+	return nil
+}
+
+// ready rejects business admission until the owning profile has completed
+// Load. Lifecycle wiring such as RegisterNamespaces and Subscribe may happen
+// earlier, but their handlers cannot create sessions or runs through this
+// gate.
+func (rt *AgentRuntime) ready() error {
+	if rt == nil {
+		return fmt.Errorf("agent runtime is not configured")
+	}
+	rt.lifecycle.Lock()
+	defer rt.lifecycle.Unlock()
+	if !rt.loaded || rt.closing {
+		return fmt.Errorf("agent runtime is not active")
+	}
+	return nil
 }
 
 func promptHasLoadedSkill(pc *PromptConfig, name string) bool {
@@ -320,32 +339,58 @@ func promptHasLoadedSkill(pc *PromptConfig, name string) bool {
 	return false
 }
 
-func (rt *AgentRuntime) Close() {
+func (rt *AgentRuntime) Close(ctx context.Context) error {
 	if rt == nil {
-		return
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rt.lifecycle.Lock()
+	if rt.closeDone == nil {
+		rt.closeDone = make(chan struct{})
+	}
+	done := rt.closeDone
+	rt.lifecycle.Unlock()
 	rt.closeOnce.Do(func() {
+		rt.lifecycle.Lock()
+		rt.closing = true
+		rt.lifecycle.Unlock()
 		if rt.cancel != nil {
 			rt.cancel()
 		}
-		rt.mu.RLock()
-		ids := make([]string, 0, len(rt.sessions))
-		for id := range rt.sessions {
-			ids = append(ids, id)
-		}
-		rt.mu.RUnlock()
-		for _, id := range ids {
-			_ = rt.CloseSession(context.Background(), id, SessionCloseRuntime)
-		}
-		rt.wg.Wait()
-		rt.operations.Wait()
-		if rt.unsubscribeHandoff != nil {
-			rt.unsubscribeHandoff()
-		}
-		if rt.ownsApp && rt.app != nil {
-			rt.app.Close()
-		}
+		go func() {
+			defer close(rt.closeDone)
+			rt.mu.RLock()
+			ids := make([]string, 0, len(rt.sessions))
+			for id := range rt.sessions {
+				ids = append(ids, id)
+			}
+			rt.mu.RUnlock()
+			for _, id := range ids {
+				_ = rt.CloseSession(context.Background(), id, SessionCloseRuntime)
+			}
+			rt.wg.Wait()
+			rt.operations.Wait()
+			if rt.unsubscribeHandoff != nil {
+				rt.unsubscribeHandoff()
+			}
+			rt.lifecycle.Lock()
+			rt.loaded = false
+			rt.lifecycle.Unlock()
+		}()
 	})
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+	}
 }
 
 func (rt *AgentRuntime) SetLogger(logger telemetry.Logger) {
@@ -422,5 +467,5 @@ func (rt *AgentRuntime) applyProvider(provider agent.Provider, providerConfig ag
 // App returns the concrete application used by this runtime.
 func (rt *AgentRuntime) App() *apppkg.App { return rt.app }
 
-// Context ends when the runtime shuts down.
+// Context ends when the runtime shuts down. It is nil before Load.
 func (rt *AgentRuntime) Context() context.Context { return rt.ctx }

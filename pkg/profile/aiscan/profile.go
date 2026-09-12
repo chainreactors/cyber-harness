@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa"
 	"github.com/chainreactors/aiscan/pkg/fileaudit"
 	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
@@ -89,17 +90,21 @@ func New(config Config) (*Profile, error) {
 		{ID: ProxyID, Extension: proxyHub},
 		{ID: ApplicationID, DependsOn: []string{FileAuditID, ProxyID, RecorderID}, Extension: application},
 	}
-	var ioa *ioatools.Extension
+	var ioa *ioaext.Extension
 	if config.IOA != nil {
-		ioa = ioatools.New(*config.IOA, application.Commands, config.Logger)
+		ioa = ioaext.New(*config.IOA, application.Commands, config.Logger)
 		entries = append(entries, extension.Entry{
 			ID: IOAID, DependsOn: []string{ApplicationID},
 			Extension: ioa,
 		})
 	}
 	var run *runtimepkg.AgentRuntime
+	var ioaService *ioatools.Service
+	if ioa != nil {
+		ioaService = ioa.Service
+	}
 	if config.Runtime != nil {
-		run, err = runtimepkg.New(application, ioa, config.Option, config.Logger, *config.Runtime)
+		run, err = runtimepkg.New(application, ioaService, config.Option, config.Logger, *config.Runtime)
 		if err != nil {
 			return nil, fmt.Errorf("construct AIScan runtime: %w", err)
 		}

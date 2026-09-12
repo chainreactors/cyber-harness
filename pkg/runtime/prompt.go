@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/skills"
 )
 
 type PromptConfig struct {
-	Tools            *commands.CommandRegistry
+	Tools            tool.Executor
 	ScannerDocs      string
 	CustomPreamble   string
 	Skills           []skills.Skill
@@ -185,12 +185,10 @@ func BuildSystemPrompt(cfg *PromptConfig, agentCfg *agent.Config) string {
 	}
 	tools := cfg.Tools
 	if tools == nil && agentCfg != nil {
-		if reg, ok := agentCfg.Tools.(*commands.CommandRegistry); ok {
-			tools = reg
-		}
+		tools = agentCfg.Tools
 	}
 	if tools == nil {
-		tools = commands.NewRegistry()
+		tools = tool.EmptyExecutor()
 	}
 
 	hostname, _ := os.Hostname()
@@ -208,8 +206,8 @@ func BuildSystemPrompt(cfg *PromptConfig, agentCfg *agent.Config) string {
 		ScannerDocs:      cfg.ScannerDocs,
 	}
 
-	for _, t := range tools.Tools() {
-		data.Tools = append(data.Tools, toolEntry{Name: t.Name(), Description: t.Description()})
+	for _, definition := range tools.ToolDefinitions() {
+		data.Tools = append(data.Tools, toolEntry{Name: definition.Name, Description: definition.Description})
 	}
 
 	for _, s := range cfg.Skills {
